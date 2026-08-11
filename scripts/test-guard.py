@@ -55,14 +55,12 @@ def declared_and_ignored(root: Path) -> tuple[int, list[str]]:
     return declared, unexplained
 
 
-def listed(root: Path) -> int:
+def listed(root: Path, only_ignored: bool = False) -> int:
     """How many tests the runner actually sees."""
-    out = subprocess.run(
-        ["cargo", "test", "--all-targets", "--", "--list"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-    )
+    args = ["cargo", "test", "--all-targets", "--", "--list"]
+    if only_ignored:
+        args.append("--ignored")
+    out = subprocess.run(args, cwd=root, capture_output=True, text=True)
     if out.returncode != 0:
         print(out.stderr.strip(), file=sys.stderr)
         sys.exit("test-guard: `cargo test -- --list` failed; fix the build first")
@@ -79,8 +77,20 @@ def check(root: Path) -> list[str]:
             f"{declared} tests declared in the source, {seen} listed by the "
             f"runner — {declared - seen} never run"
         )
+    # A reason string is written by the same person doing the ignoring, so it
+    # documents an intent rather than proving one. What it must never buy is a
+    # whole suite: parked *every* test and `cargo test` reports `0 passed`,
+    # which is the "passes because it ran nothing" case in the docstring above,
+    # reached through the door the reason check leaves open.
+    parked = listed(root, only_ignored=True) if seen else 0
+    if seen and parked == seen:
+        errors.append(
+            f"all {seen} tests are #[ignore]d — `cargo test` reports 0 passed "
+            f"and exits 0. A reason explains one parked test; it cannot explain "
+            f"a parked suite"
+        )
     if not errors:
-        print(f"test-guard: {declared} declared, {seen} listed — OK")
+        print(f"test-guard: {declared} declared, {seen} listed, {parked} ignored — OK")
     return errors
 
 
