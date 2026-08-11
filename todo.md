@@ -197,7 +197,12 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       --wait=false` leaves a pod Terminating forever behind its finalizer,
       which is the state to capture. `cluster-down` must strip that finalizer
       or the kind cluster will not tear down
-- [ ] `just fixtures`: capture the 9 broken pods + healthy pods + **nodes,
+- [ ] Add `broken-init` to [`scripts/broken.yaml`](scripts/broken.yaml) and to
+      `cluster.sh verify` — an init container that exits non-zero, so the pod
+      sits at `Init:CrashLoopBackOff`. Phase 2 is not frozen yet, which is the
+      only reason this is cheap
+      ([NOTES § D27](NOTES.md#d27--two-findings-the-open-watch-already-paid-for-2026-08-12))
+- [ ] `just fixtures`: capture the 10 broken pods + healthy pods + **nodes,
       deployments, services, PVCs, PDBs** + events + `K8S_VERSION` stamp
 - [x] A multi-node kind config — N-series rules (cordon, skew, pressure) and
       drain safety cannot be captured on a single-node cluster. Three nodes
@@ -243,8 +248,17 @@ this plan is delivery mechanism for what this phase produces.
       renders "just now" — the API server's clock and the laptop's disagree
 - [ ] Pod rules 1–8 and 12 (stuck Terminating). Rule 9 (no limits) is not an
       Alerts rule — it belongs to the Capacity report in Phase 4; rule 8 fires
-      only on the escalated hostPath case. The Events-based 10–11 stay deferred
+      only on the escalated hostPath case. Events-based rule 11 stays deferred
       ([NOTES § D2](NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later))
+- [ ] **Rule 10 — Pending, and why**, from `conditions[PodScheduled]`: reason
+      `Unschedulable` plus that condition's own message, which is the
+      scheduler's sentence. No Events watch, no new stream — the fixture is
+      already captured
+      ([NOTES § D27](NOTES.md#d27--two-findings-the-open-watch-already-paid-for-2026-08-12))
+- [ ] **Rules 1–6 read `initContainerStatuses` too.** A pod at
+      `Init:CrashLoopBackOff` produces no finding otherwise, and the finding
+      has to name the init container — "the app container is fine, the init one
+      is not" is the diagnosis
 - [ ] Node rules N1–N6 (NotReady · cordoned-and-forgotten · pressure ·
       kubelet skew · overcommit · what blocks a Pending pod)
 - [ ] Certificate rule C1 — kubeconfig client certificate expiry, warn at 30
@@ -678,8 +692,8 @@ without asking us anything.
   vector, never a shell string* (a pod named `; rm -rf ~` must be boring —
   test it); temp file mode 0600 in the user's own temp dir, removed on exit
   *and* on panic
-- **v0.5** — Events watch + rules 10–11 (Pending/unschedulable, probe
-  failures) and the noisy-stream handling they require
+- **v0.5** — Events watch + rule 11 (probe failures) and the noisy-stream
+  handling it requires. Rule 10 shipped in M1
 - **Traffic adapter** — Prometheus / Istio / Hubble, endpoint from user config
   only, never auto-discovered
 - **Connectivity mesh** — goldpinger-style, a separate binary and repository,

@@ -789,6 +789,47 @@ failure mode being closed here, not a measurement of it. Mutants answers the
 question coverage only gestures at — *would anyone notice if this line were
 wrong?*
 
+### D27 — two findings the open watch already paid for (2026-08-12)
+
+A pre-code read of the rule set against what an operator hits in a normal
+week. Both items below are computed from the **Pod object that is already
+being watched** — no new stream, no new dependency, no new screen. They were
+missing because of where they were filed, not because they cost anything.
+
+**1. Init containers were invisible.** Every pod rule reads
+`status.containerStatuses`. `status.initContainerStatuses` is a *separate
+array*, and a pod stuck at `Init:CrashLoopBackOff` or `Init:Error` therefore
+produced no finding at all — while `kubectl get pods` shows it plainly. Init
+containers are where migrations, config fetches and wait-for-dependency loops
+live, so this is not an edge case: it is the first thing that breaks in a
+freshly deployed app, and the tool was silent on it. Rules 1–6 read both
+arrays; the finding names which init container, because "the app container is
+fine and the init one is not" is the whole diagnosis.
+
+**2. "Pending, and why" does not need the Events watch.** Rule 10 was deferred
+to v0.5 bundled with rule 11 (probe failures), on the reading that both need
+Events. Rule 11 does. Rule 10 does not — the scheduler writes both the verdict
+*and* the human sentence onto the pod itself:
+
+```
+status.conditions[type=PodScheduled]:
+  status:  "False"
+  reason:  Unschedulable
+  message: "0/3 nodes are available: 3 Insufficient cpu."
+```
+
+That message is the answer to the single most common beginner question, and it
+is sitting in a field the store already holds. The bundle is split: **rule 10
+ships in v1**, rule 11 stays in v0.5 with the Events watch it genuinely needs.
+Confirming the case: `broken-pending` was already one of the nine fixtures
+Phase 2 captures — the data was being collected for a rule that was not going
+to ship. N6 (which taint or nodeSelector is blocking it) already computes the
+node side of the same question, so the two now arrive together instead of four
+releases apart.
+
+Neither item widens scope: no new watch ([invariant 6](CLAUDE.md)), no new
+key, no new view. They are the same Alerts list, with two blind spots removed.
+
 ## Decisions made
 
 ### Product
@@ -938,7 +979,13 @@ all of them testable.
 | 6 | Non-zero exit | `lastState.terminated.exitCode` | Translate the exit code (see below) |
 | 7 | **Pod Running but container not ready** | `containerStatuses[].ready == false` | "Running but not receiving traffic — readiness probe is failing, so it was removed from the Service" |
 | 8 | hostPath mount — **only the escalated case** (`/`, docker.sock, writable) | `spec.volumes[].hostPath` | "Mounts the node's own filesystem, writable" |
+| 10 | **Pending — and why** | `conditions[PodScheduled].reason == Unschedulable` + that condition's own `message` | "No node can accept it" + the scheduler's own sentence (insufficient cpu / nodeSelector / taint) |
 | 12 | **Pod stuck Terminating** | `deletionTimestamp` older than the grace period | "Asked to shut down N minutes ago and still hasn't — a finalizer or the kubelet is holding it" |
+
+**Rules 1–6 read `initContainerStatuses` as well as `containerStatuses`** — a
+pod stuck at `Init:CrashLoopBackOff` is invisible otherwise, and init
+containers are where migrations and wait-for-dependency loops live. The
+finding names the init container ([D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)).
 
 Two rules left this table in the [second-pass review](#design-review--second-pass-2026-08-11):
 **rule 9 (no limits defined)** moved to the Capacity report and the plain
@@ -947,11 +994,12 @@ right now*, and both are numerous enough to bury the ones that are. Rule 12
 took their place because it costs nothing: the Pod watch is already open.
 
 **Rules that need Events** (second watch, `Warning`-filtered — not in v1,
-see the requirements review):
+see the requirements review). Rule 10 used to be listed here and was moved
+into the v1 table above: the scheduler writes its reason onto the pod, so it
+never needed this watch ([D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)):
 
 | # | Finding | Source | What we tell the user |
 |---|---|---|---|
-| 10 | Pending / unschedulable | `conditions[PodScheduled].reason == Unschedulable` + event message | "No node can accept it" + *why* (insufficient cpu / nodeSelector / taint) |
 | 11 | Probe failure | Event `reason == Unhealthy` | "Liveness/readiness probe failing" + how many times |
 
 **Exit code translation** (for rules 6 and 2 — where beginners stumble most):
@@ -1246,8 +1294,9 @@ actually use — the plan is not allowed to have a "useless until the end" phase
    terminal and socket work, and that widen the trust boundary.
 7. **v0.4 — edit + apply** (`$EDITOR`, diff, 409 handling) — last on the write
    ladder on purpose.
-8. **v0.5 — Events-based rules** (10–11) and the noisy-stream handling they
-   require.
+8. **v0.5 — Events-based rule 11** (probe failures) and the noisy-stream
+   handling it requires. Rule 10 shipped in M1 — it reads the pod, not events
+   ([D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)).
 9. **Later — traffic adapter** (Prometheus / Istio / Hubble, endpoint from
    user config only) and, separately, the goldpinger-style connectivity mesh
    as its own binary and repository (see the trust-model note below).
@@ -1352,6 +1401,40 @@ findings that need it and says which permission is missing.
 
 ## Open questions
 - [x] Project name? → **k8rs** (2026-08-10, see naming section)
+- [ ] **A workload whose pods were never created produces no finding — is that
+      worth a watch?** (raised 2026-08-12, needs a decision before `k8s.rs` is
+      written) Every v1 rule reads a Pod. If the pods do not exist — a
+      ResourceQuota denial, an admission webhook rejection, a missing PVC, a
+      bad pull secret at ReplicaSet level — there is nothing to iterate:
+      `kubectl get pods` is empty, the Deployment sits at 0/3, and k8rs says
+      *cluster healthy*. It is the most beginner-hostile failure class there
+      is, and the only one the tool currently cannot see. The signal lives on
+      the workload, not the pod: `ReplicaSet.status.conditions[ReplicaFailure]`
+      carries the quota/webhook message verbatim, and
+      `Deployment.status.conditions[Progressing].reason ==
+      ProgressDeadlineExceeded` marks a rollout that gave up.
+
+      **A second hole closes with the same call.** [D3](#d3--findings-group-by-owner-not-by-pod)
+      groups findings by Deployment/StatefulSet/DaemonSet/Job, but a pod's
+      `ownerReferences` points at its **ReplicaSet**. Nothing in the plan says
+      where `web-7d4f5c6b8` becomes `web`, so as written, M1 groups under the
+      hashed ReplicaSet name — a random string, in the product whose rule is
+      that every visible string is readable by a newcomer.
+
+      **Recommendation:** watch Deployments, StatefulSets and DaemonSets
+      (metadata + status only — desired vs ready, plus the Progressing
+      condition), and fetch a ReplicaSet **on demand**, only when a finding or
+      a group heading needs it, cached by UID. Workload objects are two orders
+      of magnitude fewer than pods and barely churn, so this is not the thing
+      that makes k9s heavy — a repeated `LIST pods -A` is
+      ([§ Architecture](#architecture--where-lightweight-comes-from)). Jobs and
+      CronJobs stay in the v0.2 J-series as already planned.
+
+      **Cost, stated honestly:** it changes [invariant 6](CLAUDE.md) — "only
+      Pods and Nodes are watched permanently" — so it is a decision, not a
+      task, and it must be taken before `k8s.rs` freezes in Phase 5. It also
+      adds the three workload kinds to the 10 000-pod memory measurement
+      ([D25](#d25--what-this-review-did-not-decide)).
 
 ## Build order — why it is what it is
 
@@ -1537,11 +1620,12 @@ in the prose.
 | 1 + 6 | `broken-crashloop` | CrashLoopBackOff, exit 1. Needs minutes to enter backoff |
 | 3 | `broken-image` | ImagePullBackOff — an image on a registry that does not resolve |
 | 4 | `broken-config` | CreateContainerConfigError — `envFrom` a ConfigMap that does not exist |
-| 10 | `broken-pending` | Pending, unschedulable — requests 500 cpu |
+| 10 | `broken-pending` | Pending, unschedulable — requests 500 cpu. The scheduler's own explanation lands in `conditions[PodScheduled].message`, which is what rule 10 reads |
 | 8 | `broken-hostpath` | hostPath mount of `/`, writable → must come out CRITICAL |
 | 7 + 11 | `broken-readiness` | Running but never Ready — the readiness probe always fails |
 | 9 | `broken-nolimits` | No limits set. **Not an alert** — this fixture exists to prove the *Capacity report* row |
 | 12 | `broken-stuck` | Stuck Terminating: a finalizer nothing removes. Applied by the script, put into Terminating by the capture step |
+| 1–6 (init) | `broken-init` | `Init:CrashLoopBackOff` — an init container that exits non-zero while the app container never starts. The pod the old rule set could not see ([D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)) |
 
 `broken-stuck` is why `cluster.sh unbreak` patches the finalizer away before
 deleting — a plain `kubectl delete` on it never returns.
@@ -1557,7 +1641,7 @@ kubectl apply -f broken.yaml
 sanitize='del(.metadata.managedFields, .metadata.annotations)
   | (.spec.containers[]?.env[]? | select(has("value")) | .value) = "REDACTED"'
 kubectl delete pod broken-stuck --wait=false   # rule 12: leaves it Terminating
-for p in oom crashloop image config pending hostpath readiness nolimits stuck; do
+for p in oom crashloop image config pending hostpath readiness nolimits stuck init; do
   kubectl get pod broken-$p -o json | jq "$sanitize" > tests/fixtures/$p.json
 done
 kubectl get events --field-selector type=Warning -o json \

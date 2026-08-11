@@ -142,7 +142,7 @@
   running, show "disconnected, retrying" in the header — never silently
   freeze on stale state.
 - Insufficient RBAC (403) → say which permission is missing; if the Events
-  watch gets 403, only the affected rules (10-11) are disabled, the app
+  watch gets 403, only the affected rule (11) is disabled, the app
   keeps running.
 - **Expired credentials (401) → a third state, not a 403.** Managed clusters
   mint short-lived tokens from a credential plugin and those expire mid-session.
@@ -211,7 +211,9 @@
 - Tests: every rule gets a positive **and** a negative fixture (a healthy
   pod must trigger nothing — false-positive test). Fixtures are deserialized
   as `k8s_openapi::Pod` so the prune code is covered too.
-- **Do not open the Events watch in v1** — rules 10-11 are v2 anyway; the
+- **Do not open the Events watch in v1** — rule 11 is v0.5 anyway (rule 10
+  reads the pod's own `PodScheduled` condition and ships in v1,
+  [NOTES § D27](NOTES.md#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)); the
   "second watch" section in NOTES blurred this. Noisiest stream in the
   cluster + the involvedObject join would be v1's most complex code.
 - Don't write step 4 (learning ratatui) from scratch; start from the ratatui
