@@ -1,0 +1,43 @@
+# The negative side of every rule. A rule with only a positive fixture cannot
+# fail in the one direction that matters: firing on a pod that is fine.
+# Applied together with broken.yaml by `scripts/cluster.sh break`.
+
+# A pod that is genuinely healthy: running, ready, limits set, no host mounts,
+# no restarts, an init container that *succeeds*.
+apiVersion: v1
+kind: Pod
+metadata: { name: healthy, labels: { demo: healthy } }
+spec:
+  initContainers:
+    - name: migrate
+      image: busybox
+      command: ["sh", "-c", "echo migrations done; exit 0"]
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "3600"]
+      readinessProbe:
+        exec: { command: ["true"] }
+        periodSeconds: 5
+      resources:
+        requests: { cpu: "10m", memory: "16Mi" }
+        limits: { cpu: "100m", memory: "64Mi" }
+---
+# A workload that rolled out cleanly — the negative side of W1 and W2: pods
+# exist, the ReplicaSet has no ReplicaFailure, Progressing is not stalled.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: healthy-deploy, labels: { demo: healthy } }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: healthy-deploy } }
+  template:
+    metadata: { labels: { app: healthy-deploy, demo: healthy } }
+    spec:
+      containers:
+        - name: app
+          image: busybox
+          command: ["sleep", "3600"]
+          resources:
+            requests: { cpu: "10m", memory: "16Mi" }
+            limits: { cpu: "100m", memory: "64Mi" }

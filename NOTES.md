@@ -1716,30 +1716,22 @@ in the prose.
 | 9 | `broken-nolimits` | No limits set. **Not an alert** — this fixture exists to prove the *Capacity report* row |
 | 12 | `broken-stuck` | Stuck Terminating: a finalizer nothing removes. Applied by the script, put into Terminating by the capture step |
 | 1–6 (init) | `broken-init` | `Init:CrashLoopBackOff` — an init container that exits non-zero while the app container never starts. The pod the old rule set could not see ([D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)) |
+| W1 | `broken-quota` (namespace `k8rs-quota`) | A Deployment whose ReplicaSet cannot create a single pod — the quota allows zero. `kubectl get pods` is empty and the truth lives only on the ReplicaSet's `ReplicaFailure`. It sits in its own namespace because a `pods: "0"` quota applies namespace-wide and would block every pod above ([D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)) |
 
 `broken-stuck` is why `cluster.sh unbreak` patches the finalizer away before
 deleting — a plain `kubectl delete` on it never returns.
 
-Fixture capture:
+Fixture capture is [`just fixtures`](justfile) — and only there. It runs
+`cluster.sh verify` and the sanitizer test before capturing anything, pipes
+every object through [`scripts/sanitize.jq`](scripts/sanitize.jq) on the way
+out, and stamps `tests/fixtures/K8S_VERSION` with the server version the
+fixtures came from. The command used to be written out here as well; two
+copies of a procedure drift, and the one that drifts is always the one in the
+prose.
 
-```sh
-kubectl apply -f broken.yaml
-# wait a few minutes for states to settle (CrashLoop must enter backoff)
-# Sanitization (REQUIREMENTS.md G-5): drop managedFields + annotations
-# (last-applied-configuration is a full copy of the spec, env values included),
-# redact env values. Raw `kubectl get -o json` is never committed.
-sanitize='del(.metadata.managedFields, .metadata.annotations)
-  | (.spec.containers[]?.env[]? | select(has("value")) | .value) = "REDACTED"'
-kubectl delete pod broken-stuck --wait=false   # rule 12: leaves it Terminating
-for p in oom crashloop image config pending hostpath readiness nolimits stuck init; do
-  kubectl get pod broken-$p -o json | jq "$sanitize" > tests/fixtures/$p.json
-done
-kubectl get events --field-selector type=Warning -o json \
-  | jq 'del(.items[].metadata.managedFields, .items[].metadata.annotations)' \
-  > tests/fixtures/events.json
-# record which k8s version the fixtures were captured from (drift tracking)
-kubectl version -o json | jq -r .serverVersion.gitVersion > tests/fixtures/K8S_VERSION
-```
+The negative side lives in [`scripts/healthy.yaml`](scripts/healthy.yaml) and
+goes up with the broken pods, so both sides are captured from the same cluster
+at the same moment.
 
 # Project name: k8rs ✅ (decided 2026-08-12, replaces r7s)
 

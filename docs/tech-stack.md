@@ -69,7 +69,7 @@ NOTES.md with the reason.
 | **just** | task runner (`check`, `run`, `cluster-up/down`, `fixtures`, `e2e`, `mutants`) — Rust-ecosystem norm, works on Windows |
 | **cargo-mutants** | run over the two pure files, `rules.rs` and `analysis.rs`: a surviving mutant is a diagnosis change no test objected to, i.e. a hole in what the tool claims to detect |
 | **kind** + **kubectl** | test cluster with deliberately broken pods; fixture capture. Driven by [`scripts/cluster.sh`](../scripts/cluster.sh) — `up` · `down` · `reset` · `break` · `verify`. Three nodes, node image pinned to **`kindest/node:v1.36.1`** so fixtures stay reproducible. `K8RS_APISERVER_ADDRESS` points it at another machine; kind writes `127.0.0.1` otherwise and no other host can reach it |
-| **jq** | fixture sanitization in the capture script |
+| **jq** | fixture sanitization — [`scripts/sanitize.jq`](../scripts/sanitize.jq), applied to every object as it is captured. Payloads are destroyed (managedFields, annotations, env values, pull secrets, anything PEM-shaped); references are kept, because a rule reports *which* Secret a pod reads, never what is in it; and an object carrying node identifiers that did not come from the kind cluster is refused outright rather than quietly rewritten. Tested against a poisoned object in CI |
 | **git-cliff** | CHANGELOG from conventional commits (`feat:` / `fix:`) |
 | **cargo-deny** | advisories, license policy, source policy (CI) |
 | **clippy** | `-D warnings` + `disallowed-methods` ban on K8s write calls |

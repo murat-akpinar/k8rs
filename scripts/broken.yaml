@@ -114,3 +114,52 @@ spec:
     - name: app
       image: busybox
       command: ["sleep", "3600"]
+---
+# D27 — an init container that never succeeds. The app container never starts,
+# so `containerStatuses` says nothing useful and every pod rule that reads only
+# that array is blind to this pod. This is the fixture that proves rules 1-6
+# read `initContainerStatuses` as well.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-init, labels: { demo: broken } }
+spec:
+  initContainers:
+    - name: migrate
+      image: busybox
+      command: ["sh", "-c", "echo running migrations; sleep 2; exit 1"]
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "3600"]
+---
+# D28 / W1 — the workload whose pods are never created. The quota allows zero
+# pods, so the ReplicaSet cannot create any: `kubectl get pods` shows nothing,
+# the Deployment sits at 0/1, and the only place the truth exists is the
+# ReplicaSet's ReplicaFailure condition. No pod rule can see this.
+#
+# It lives in its own namespace on purpose: a `pods: "0"` quota applies to the
+# whole namespace, so leaving it beside the others would block every pod above
+# from ever being created again on a re-apply.
+apiVersion: v1
+kind: Namespace
+metadata: { name: k8rs-quota, labels: { demo: broken } }
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata: { name: deny-all-pods, namespace: k8rs-quota, labels: { demo: broken } }
+spec:
+  hard: { pods: "0" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: broken-quota, namespace: k8rs-quota, labels: { demo: broken } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: broken-quota } }
+  template:
+    metadata: { labels: { app: broken-quota, demo: broken } }
+    spec:
+      containers:
+        - name: app
+          image: busybox
+          command: ["sleep", "3600"]
