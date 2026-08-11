@@ -5,6 +5,7 @@
 - *(rules)* See workloads whose pods were never created ([4ea285d](https://github.com/murat-akpinar/k8rs/commit/4ea285d34ca40c06bb2a589ba746561737b2833f))
 - *(ci)* Scaffold the crate and the guards that must be seen red ([d42b5e2](https://github.com/murat-akpinar/k8rs/commit/d42b5e2aaac24eaebd56d39991a5c5611c7950e0)) — cargo init at 0.0.0, clippy.toml, deny.toml, justfile and the CI workflow. Two guards ship with their own proof: test-guard compares declared against listed tests, write-guard derives the write ban from kube's own Api surface.
 - *(fixtures)* Sanitize before capture, and cover the two blind spots ([17d2556](https://github.com/murat-akpinar/k8rs/commit/17d2556c5e1ec36bf16e7792707ff8b583635b6e)) — The sanitizer lands before the first fixture, as required: payloads destroyed, references kept, and an object whose node identifiers are not the kind cluster's is refused rather than quietly rewritten. It is tested against a poisoned object in just check and in CI.
+- *(fixtures)* Add certificate fixtures with pinned dates ([f2ad09d](https://github.com/murat-akpinar/k8rs/commit/f2ad09d455559a0ff3be690afd564ccaa846bf5d)) — Three self-signed client certificates for the C-series rules, generated locally with their keys deleted. The dates are pinned rather than relative: a fixture generated with -days 20 is a test that fails in three weeks, and the usual repair for that is to weaken the test. Snapshot carries now, so the test states the date it asks about.
 
 ### 🐛 Bug Fixes
 
