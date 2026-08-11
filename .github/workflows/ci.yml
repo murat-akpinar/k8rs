@@ -50,6 +50,11 @@ jobs:
       - name: fixture sanitizer
         run: bash scripts/sanitize-test.sh
 
+      # The certificate fixtures claim pinned dates; C1's positive and negative
+      # tests can only fail while that claim stays true (NOTES § D30).
+      - name: certificate fixture dates
+        run: bash scripts/certs-test.sh
+
       - name: docs links and anchors
         run: python3 scripts/check-docs.py
 

@@ -289,7 +289,11 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       `Approved,Issued` ones, so it has to be created deliberately on the
       cluster ([NOTES § Verified](NOTES.md#verified-against-a-real-cluster-2026-08-11))
 - [ ] Eyeball every fixture once: no env values, no annotations, no node IPs,
-      no private keys
+      no private keys. **Three of those four are enforced by `sanitize-test.sh`
+      now rather than by the eyeball** — addresses were the gap, and a real
+      capture proved the sanitizer kept every one of them
+      ([NOTES § D30](NOTES.md#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)).
+      The pass still happens; it is no longer the only thing standing there
 
 **🔒 Security gate:** the sanitizer lands before the first fixture and is
 itself tested — feed it a *poisoned* object (fake token in an annotation, env

@@ -28,6 +28,8 @@ must_be_gone=(
   "BEGIN RSA PRIVATE KEY:a private key in a status message"
   "fieldsV1:managedFields"
   "/api/v1/namespaces:selfLink"
+  "172.18.0.4:a node address"
+  "10.244.2.2:a pod IP"
 )
 must_remain=(
   "db-creds:the secretKeyRef a rule reports"
@@ -105,6 +107,9 @@ pod=$(cat <<'JSON'
     ]
   },
   "status": {
+    "podIP": "10.244.2.2",
+    "podIPs": [{"ip": "10.244.2.2"}],
+    "hostIP": "172.18.0.4",
     "conditions": [{"type": "Ready", "message": "-----BEGIN RSA PRIVATE KEY-----\nMIIEow==\n-----END RSA PRIVATE KEY-----"}]
   }
 }
@@ -124,7 +129,9 @@ list=$(jq -n --argjson pod "$pod" '
         "spec": {"template": {"metadata": $pod.metadata, "spec": $pod.spec}} },
       { "kind": "Node",
         "metadata": {"name": "k8rs-worker", "annotations": {"internal.example.com/oncall": "someone@example.com"}},
-        "status": {"nodeInfo": {"kubeletVersion": "v1.36.1"}} }
+        "status": {"nodeInfo": {"kubeletVersion": "v1.36.1"},
+                   "addresses": [{"type": "InternalIP", "address": "172.18.0.4"},
+                                 {"type": "Hostname", "address": "k8rs-worker"}]} }
     ] }')
 
 assert_clean "single object" <<<"$pod"

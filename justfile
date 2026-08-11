@@ -24,6 +24,7 @@ check:
     python3 scripts/write-guard.py --self-test
     python3 scripts/write-guard.py
     bash scripts/sanitize-test.sh
+    bash scripts/certs-test.sh
     cargo deny check advisories licenses sources bans
 
 # Run the binary with the given arguments

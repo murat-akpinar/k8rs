@@ -977,6 +977,67 @@ and captured it immediately, never asserting the `deletionTimestamp` that rule
 delete, so nothing checked the state actually being captured. The capture now
 asserts it.
 
+### D30 — the guards Phase 2 added, and the freeze they collided with (2026-08-12)
+
+Four findings from finishing the Phase 2 audit, one of which is a plan change
+rather than a fix.
+
+**1. The CI yaml is frozen, and Phase 2 had to touch it anyway.** Phase 1 lists
+the CI workflow among the files that freeze after it. Phase 2 then produced two
+new security tests — `scripts/certs-test.sh` here, `scripts/verify-test.sh`
+alongside it — and a security test that CI does not run is not a security test.
+[CLAUDE.md](CLAUDE.md) now also requires `just check` to be the whole of CI, so
+leaving CI behind would break a rule in the same breath. The freeze is
+therefore broken deliberately, minimally (one `run:` step per test, no
+restructuring) and in writing, which is what the forward-only rule asks for.
+
+**The structural fix was not taken, and is the owner's call.** CI enumerates
+its steps in a second list that has already drifted from `just check` once
+([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)). A
+CI job that installed `just` and ran `just check` would make the drift
+impossible instead of merely fixed, and would end the freeze collision for
+good — every future check would land in one file. It costs one pinned
+third-party action. Recorded, not applied.
+
+**2. Addresses are stripped now, not eyeballed.** Phase 2's checklist asks a
+human to confirm "no node IPs" in the committed fixtures, and a real capture
+showed the sanitizer kept every one of them: `status.addresses[].address` on
+nodes, `podIP` / `podIPs` / `hostIP` on pods. An eyeball step is not a guard —
+it passes whenever the person running it is tired, which at that point in a
+capture is everyone. `sanitize.jq` now redacts any value that is an IP address
+as a whole string, which leaves the `Hostname` entry sitting in the same
+`addresses` array untouched, because that one is the node name the N-series
+joins on. The eyeball item stays; it just no longer carries the weight alone.
+
+**3. `managedFields` can never reach a fixture, so it can never be tested
+there.** `kubectl get -o json` omits them unless asked
+(`--show-managed-fields=true` returns them, the default returns none), and the
+sanitizer deletes them regardless. Both are correct. The consequence is not:
+[docs/architecture.md](docs/architecture.md) claimed *"fixtures deserialize
+through `k8s_openapi::Pod`, so the prune path is covered by the same tests"* —
+it is not, and a test asserting "managedFields were pruned" would pass against
+a fixture that never had any. The prune path is a `k8s.rs` concern and needs a
+Phase 5 test against live watch data, where the field actually arrives. The
+29% measurement in
+[§ Verified against a real cluster](#verified-against-a-real-cluster-2026-08-11)
+still stands — it was taken over the wire, which is where pruning pays.
+
+**4. openssl writes the private key before it validates the dates.** Found
+while verifying that the certificate fixtures carry the pinned dates
+`todo.md` claims — they do, all three, exactly. But a malformed `-not_after`
+makes openssl emit `expiring-client.key.pem` and *then* fail, and `set -e`
+skips the `rm` that was supposed to remove it, leaving key material in the
+fixture directory. A `trap … EXIT` covers the unhappy path now. The same edit
+stopped discarding openssl's stderr: on an openssl older than 3.5 the run fails
+with `Extra (unknown) options: "not_before"`, and hiding that message is what
+would send the next reader reaching for a relative `-days`.
+
+**One thing this produced for Phase 3:** the pinned `notBefore` of the expiring
+and healthy fixtures is *exactly* the reference `now` of 2026-08-12, so C1's
+validity comparison has to be inclusive (`notBefore <= now`). A strict `<`
+classifies both fixtures as not-yet-valid, which is a third C1 case and not the
+one either fixture is for.
+
 ## Decisions made
 
 ### Product

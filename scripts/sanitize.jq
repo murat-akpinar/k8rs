@@ -68,3 +68,19 @@ refuse_foreign_nodes
     then "REDACTED-PEM"
     else .
     end)
+
+# Addresses go too — `status.addresses[].address`, `podIP`, `hostIP`,
+# `clusterIP`. The eyeball step in todo.md Phase 2 asks for "no node IPs", and
+# an eyeball step is not a guard: it passes whenever someone is tired. No rule
+# in the plan reads an address — the N-series joins on node *names*, which is
+# why those are kept and refused rather than rewritten.
+#
+# Matched as a whole string, so a Hostname entry (`k8rs-worker`, sitting in the
+# same `addresses` array as an InternalIP) survives untouched. An address quoted
+# *inside* an English message is not caught; the foreign-capture refusal above
+# is what covers a capture from a cluster that is not kind.
+| walk(
+    if type == "string" and test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$|^[0-9a-fA-F:]*::[0-9a-fA-F:]*$")
+    then "REDACTED-IP"
+    else .
+    end)

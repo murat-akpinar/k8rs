@@ -15,20 +15,35 @@
 #
 # Both are self-signed: C1 reads `notAfter` out of the kubeconfig's
 # `client-certificate-data`, and a chain would prove nothing extra.
+#
+# Pinning is a claim about the committed bytes, so it is asserted there rather
+# than trusted here: `scripts/certs-test.sh` reads the three PEMs and checks
+# these exact dates on every `just check`. Change a date below and the build is
+# red until it changes there too. Needs openssl >= 3.5 for -not_before /
+# -not_after; on anything older the flags are rejected, loudly (see gen).
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 out="$here/../tests/fixtures/certs"
 mkdir -p "$out"
 
+# openssl writes the key before it validates the dates, so a rejected date
+# leaves key material sitting in the fixture directory and `set -e` skips the
+# `rm` below. The repo is the one place it must never survive.
+trap 'rm -f "$out"/*.key.pem' EXIT
+
 gen() {
   local name=$1 cn=$2 not_before=$3 not_after=$4
-  openssl req -x509 -newkey rsa:2048 -nodes \
+  # -quiet drops the key-generation progress dots; stderr is *not* discarded,
+  # because the failures that land there are the ones worth reading — a
+  # malformed date, or an openssl older than 3.5 that has no -not_after and
+  # would send the next reader reaching for the relative -days.
+  openssl req -quiet -x509 -newkey rsa:2048 -nodes \
     -keyout "$out/$name.key.pem" \
     -out "$out/$name.crt.pem" \
     -subj "/CN=$cn/O=k8rs-fixtures" \
     -not_before "$not_before" -not_after "$not_after" \
-    -sha256 2>/dev/null
+    -sha256
   # The private key is written because openssl insists on one; it is not a
   # fixture and nothing reads it, so it does not survive this script.
   rm -f "$out/$name.key.pem"
