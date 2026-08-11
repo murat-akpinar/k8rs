@@ -1,0 +1,42 @@
+# cargo-deny — supply chain policy (REQUIREMENTS § DevSecOps).
+#
+# k8rs itself is GPL-3.0-or-later; this file is about what we *pull in*, which
+# is a different question ([NOTES § D13](NOTES.md)). Dependencies stay
+# permissive: a copyleft dependency would put its terms on top of ours, and
+# every approved crate is MIT/Apache already.
+
+[advisories]
+# Unmaintained and unsound advisories are warnings by default in newer
+# cargo-deny; a security advisory is never a warning here.
+yanked = "deny"
+
+[licenses]
+# Permissive only. Unicode-3.0 is here because it is what `icu`/`zerovec` ship
+# under, and they arrive transitively through the k8s client stack.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+# k8rs itself is GPL-3.0-or-later and cargo-deny checks the root crate along
+# with everything it pulls in — so without this line our own licence fails our
+# own dependency policy. The exception is scoped to this one crate on purpose:
+# the policy above still rejects a copyleft *dependency*, which is the thing it
+# exists to prevent ([NOTES § D13](NOTES.md)).
+exceptions = [{ name = "k8rs", allow = ["GPL-3.0-or-later"] }]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

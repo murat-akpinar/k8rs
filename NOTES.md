@@ -443,15 +443,43 @@ fewer.
 own; the requirement was always that the state is *visible*, never that the
 user drives it. The disconnected banner reports, it does not ask.
 
-### D13 — licence: `MIT OR Apache-2.0`
+### D13 — licence: `GPL-3.0-or-later` (reversed 2026-08-12)
 
-Undecided until the audit, and it blocks step one of the code phase:
-`cargo publish` refuses a crate without a `license` field, so the placeholder
-could not have been claimed. Dual MIT/Apache-2.0 is the Rust ecosystem default
-and the permissive choice a tool people run against production clusters should
-make. Both files land with `cargo init`, and `deny.toml`'s copyleft rejection
-for dependencies stays as it was — that policy is about what we pull in, not
-about what we publish.
+Decided as `MIT OR Apache-2.0` on 2026-08-11 for one reason — it is the Rust
+ecosystem default — and reversed on 2026-08-12 by the author's actual
+requirement: *nobody repackages this as their own closed product.*
+
+**What was not the deciding factor:** attribution. MIT, Apache-2.0 and GPL all
+require the copyright notice to travel with the code, so "my name stays on it"
+was never at risk under any of them.
+
+**What decided it:** under MIT/Apache anyone may take k8rs, modify it, and ship
+a **closed-source** product; the notice survives in a licence file nobody
+reads, the product does not. GPL-3.0 permits selling — it has never forbidden
+that — but a distributor must hand over the source under the same licence, so
+the author's name and the freedom travel with every copy. That is the
+requirement, stated in licence terms.
+
+**What it costs, honestly:** k8rs cannot be embedded as a library inside a
+closed-source tool. For a standalone binary that talks to a kubeconfig, that
+is close to no cost — running it, internally or commercially, is unrestricted
+for everyone. Some organisations do keep GPL policies aimed at *linking*;
+none of them prevent running a CLI.
+
+**Unchanged:** `cargo publish` needs the `license` field either way
+(`GPL-3.0-or-later`, SPDX). `deny.toml`'s copyleft rejection for
+*dependencies* stays exactly as it was — that policy is about what we pull in,
+not about what we publish, and every approved crate is MIT/Apache, which is
+GPL-compatible in this direction.
+
+**Not chosen: AGPL-3.0.** Its extra clause covers use *over a network*, and
+k8rs runs on the user's machine against their own cluster — there is no
+service to close. Revisit only if a hosted version ever exists.
+
+**The name is separate from the licence.** GPL covers the code, not the
+trademark: "k8rs" as a name is not licensed with it, so a fork must rename
+itself rather than ship "k8rs" with someone else's product behind it. That
+sentence belongs in the README when it is written.
 
 ### D14 — three plan corrections
 
@@ -1382,9 +1410,10 @@ The step list for all of this lives in [`todo.md`](todo.md) and only there.
 - ✅ **The browser writes no per-kind code** (2026-08-11) — API discovery plus
   server-side `Table` printing. This is what makes "every kind, CRDs included"
   affordable at all.
-- ✅ **Licence: `MIT OR Apache-2.0`** (2026-08-11) — the Rust default, and
-  `cargo publish` requires the field, so this blocked the very first step of
-  the code phase ([D13](#d13--licence-mit-or-apache-20)).
+- ✅ **Licence: `GPL-3.0-or-later`** (reversed 2026-08-12,
+  [D13](#d13--licence-gpl-30-or-later-reversed-2026-08-12)) — a fork may be
+  sold but not closed. `cargo publish` requires the field either way, so this
+  blocked the very first step of the code phase.
 - ✅ **Second-pass review closed fourteen open contradictions** (2026-08-11) —
   audience, the Alerts/Analysis dividing line, owner grouping, namespace
   scoping, the operation order, and the honesty of invariant 4. Nothing about

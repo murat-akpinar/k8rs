@@ -10,12 +10,17 @@ command it ran every time.
 > [NOTES § Reversal](NOTES.md#reversal--read-only--managed-writes-2026-08-11)
 > before acting on anything that predates it.
 
-## Current phase: DESIGN — no code
+## Current phase: CODE — Phase 1, `feat/scaffold` (opened 2026-08-12)
 
-- **Do not create any code or config files right now**; only documentation
-  files (NOTES.md, REQUIREMENTS.md, todo.md, CLAUDE.md, docs/) are being edited.
-- The code phase does not start until the user says so.
-- First task of the code phase: publish a `k8rs` placeholder to crates.io.
+- The design phase closed on 2026-08-12. Code and config files are now written,
+  in the order [`todo.md`](todo.md) sets and nowhere else: the first unchecked
+  box in the lowest open phase is the next task.
+- Product code is still bottom-up and forward-only: `rules.rs` and
+  `analysis.rs` come first, `main.rs` is wired last, and a file finished in an
+  earlier step is frozen (CLAUDE.md § Architecture workflow).
+- Phase 1 exists to make the guards real *before* there is anything to guard —
+  and every guard must be seen red on a deliberate violation before it counts
+  ([NOTES § D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12)).
 
 ## Source files — what lives where
 
