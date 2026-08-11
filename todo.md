@@ -116,16 +116,20 @@ the design phase is not the same as opening the next one.
 
 Goal: the name is safe and the repo builds, lints and tests empty.
 
-- [ ] `LICENSE-MIT` + `LICENSE-APACHE`, and `license = "MIT OR Apache-2.0"` in
+- [x] `LICENSE` (GPL-3.0) kept, and `license = "GPL-3.0-or-later"` in
       `Cargo.toml`. **First, not last:** `cargo publish` refuses a crate
       without the field, so the placeholder cannot be claimed before this
-      exists ([NOTES § D13](NOTES.md#d13--licence-mit-or-apache-20))
-- [ ] `cargo init` (edition pinned, release profile: lto/strip/codegen-units)
+      exists ([NOTES § D13](NOTES.md#d13--licence-gpl-30-or-later-reversed-2026-08-12))
+- [x] `cargo init` — edition 2024, `rust-version = "1.85"`, release profile
+      `lto`/`strip`/`codegen-units = 1`. **No `panic = "abort"`**: the terminal
+      is restored by a `Drop` guard as well as a panic hook, and `Drop` does
+      not run when a panic aborts instead of unwinding (invariant 8)
 - [ ] Publish `k8rs` placeholder to crates.io (needs `cargo login` — user)
-- [ ] `clippy.toml` — `disallowed-methods` ban on the K8s write calls,
-      crate-wide. The `ops.rs` exemption is not written yet; nothing may call
-      them at this point
-- [ ] `justfile`: `check` · `run` · `cluster-up` · `cluster-down` ·
+- [x] `clippy.toml` — present with an empty `disallowed-methods` list and the
+      reason written in it: entries arrive with kube in Phase 5, and clippy is
+      the *fast local signal*, never the containment guarantee. Nothing calls
+      the API at this point
+- [x] `justfile`: `check` · `run` · `cluster-up` · `cluster-down` ·
       `fixtures` · **`e2e`** · **`mutants`**. Every target is *declared* here,
       `e2e` and `mutants` included, even though Phase 7 and Phase 3 are what
       use them — a target invented later would be a forward-only violation.
@@ -134,24 +138,46 @@ Goal: the name is safe and the repo builds, lints and tests empty.
       ([NOTES § D14](NOTES.md#d14--three-plan-corrections) ·
       [§ D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12))
 - [x] `.gitignore` (`/target`, `/tmp`, `/.agent`, `/.vscode`)
-- [ ] CI: fmt → clippy `-D warnings` → test → `scripts/check-docs.py` ·
+- [x] CI: fmt → clippy `-D warnings` → test → `scripts/check-docs.py` ·
       rust-cache · cargo-deny · `cargo check --target` matrix
-      (musl x86_64/aarch64, darwin)
-- [ ] CI: **the honest-test guards** — fail the build if `cargo test` ran zero
-      tests, and on any `#[ignore]` without a written reason beside it. Both
-      are ways a suite reports success without having run
+      (musl x86_64/aarch64, darwin). Top-level `permissions: contents: read`,
+      every third-party action pinned to a commit SHA, no `pull_request_target`
+- [x] CI: **the honest-test guards** — [`scripts/test-guard.py`](scripts/test-guard.py).
+      It compares tests *declared in the source* against tests *listed by the
+      runner* (zero-versus-zero passes honestly on an empty crate; a test
+      hidden behind a `cfg` gate does not) and rejects any `#[ignore]` without
+      a written reason
       ([NOTES § D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12))
-- [ ] **Prove every guard red before trusting it** — fmt, clippy, check-docs,
-      cargo-deny and the allowlist each get a throwaway commit that violates
-      them, on a branch, and CI is watched going red before the commit is
-      dropped. Record the five red runs here as they happen; an unproven guard
-      counts as absent
-- [ ] CI: the write-containment check, written as an **allowlist** — outside
-      `src/ops.rs` only `get*` / `list*` / `watch*` / `logs` / `log_stream` /
-      `apiserver_version` may appear. A denylist would miss `cordon`,
-      `restart`, `evict`, `exec`, `portforward`, `entry`, `patch_scale` and
-      whatever kube-rs adds next
-- [ ] `deny.toml` (advisories, license allowlist, crates.io-only sources)
+- [x] **Prove every guard red before trusting it.** Ledger, 2026-08-12 — each
+      guard was fed a deliberate violation and watched refuse it:
+
+      | Guard | Violation fed to it | Result |
+      |---|---|---|
+      | `cargo fmt --check` | mangled spacing in `src/main.rs` | **red** |
+      | `cargo clippy -D warnings` | `for i in 0..v.len()` needless range loop | **red** |
+      | `scripts/test-guard.py` | a `#[test]` behind `#[cfg(feature = "never-enabled")]` — declared 1, listed 0 | **red** |
+      | `scripts/check-docs.py` | a link to `NOTES.md#no-such-anchor` | **red** |
+      | `scripts/write-guard.py` | `api.delete()` in `k8s.rs`, the same call in `ops.rs` | **red** on the first, silent on the second (`--self-test`) |
+
+      One correction the exercise produced: the first `fmt` attempt was fed a
+      badly formatted file that no `mod` declaration reached, and it passed —
+      `cargo fmt` never visits a file that is not part of the crate. The proof
+      was invalid, not the guard; re-run against `main.rs` it went red.
+      **Still unproven, honestly:** `cargo deny`, which cannot be made to fail
+      while the crate has zero dependencies. Its red proof belongs to Phase 3,
+      with the first dependency, and it is not counted as proven until then
+- [x] CI: the write-containment check, written as an **allowlist** —
+      [`scripts/write-guard.py`](scripts/write-guard.py). The ban list is not
+      typed by hand: it is *derived* from every `&self` method of `Api<K>` in
+      the kube version in `Cargo.lock`, minus the allowlist (`get*` / `list*` /
+      `watch*` / `logs` / `log_stream` / `apiserver_version`), so `cordon`,
+      `evict`, `entry`, `patch_scale` and whatever kube-rs adds next are
+      covered without anyone remembering to add them. kube is not a dependency
+      yet, so the check reports that instead of passing silently; its logic is
+      proven today by `--self-test`
+- [x] `deny.toml` (advisories, permissive-only licence allowlist,
+      crates.io-only sources, `wildcards = deny`). k8rs is GPL; the *dependency*
+      policy stays permissive-only, which is a different question
 - [x] `cliff.toml` — `filter_unconventional = true`
 
 **🔒 Security gate:** `cargo deny` green · workflows default to

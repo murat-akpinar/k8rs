@@ -8,7 +8,7 @@
 | Decision | Choice | Why |
 |---|---|---|
 | Language | **Rust** | Single static binary with no runtime, low idle footprint, and the ecosystem below. Fits the promise "one binary, nothing installed". |
-| Licence | **`MIT OR Apache-2.0`** | The Rust ecosystem default, and permissive is the right answer for something people run against production clusters. `cargo publish` requires the field, so it exists from the first commit. |
+| Licence | **`GPL-3.0-or-later`** | A fork may be sold, but it cannot be closed: the source, the licence and the author's name travel with every copy. Permissive licences protect attribution too, but they allow a closed-source repackaging — which is the thing being prevented ([NOTES § D13](../NOTES.md#d13--licence-gpl-30-or-later-reversed-2026-08-12)). `cargo publish` requires the field, so it exists from the first commit. Dependency policy is unaffected: `deny.toml` still rejects copyleft *dependencies*. |
 | UI | **ratatui** (+ **crossterm** backend) | The de-facto Rust TUI library; immediate-mode drawing fits "redraw only on change". crossterm gives cross-platform terminal control (raw mode, events, colors). |
 | Kubernetes client | **kube-rs** | Provides `watcher()` / `reflector()` out of the box — the watch-based architecture is the whole performance story. |
 | API types | **k8s-openapi** | Typed Pod/Event structs. Pinned to the **oldest** feature still offered — **`v1_32`** (the window is `v1_32`…`v1_36`); the API is forward compatible, so an old pin talks to newer clusters. Support window = pinned ±2 minor. Upgraded together with kube-rs, never separately. |

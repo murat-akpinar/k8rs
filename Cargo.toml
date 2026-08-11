@@ -1,0 +1,25 @@
+[package]
+name = "k8rs"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+description = "The Kubernetes TUI in Rust — says what is broken in your cluster and why, in plain English."
+repository = "https://github.com/murat-akpinar/k8rs"
+keywords = ["kubernetes", "tui", "k8s", "cluster", "terminal"]
+categories = ["command-line-utilities"]
+exclude = ["screens/", "scripts/", "tmp/", "docs/", "NOTES.md", "REQUIREMENTS.md", "todo.md", "CLAUDE.md"]
+
+[dependencies]
+
+# Dependencies arrive with the step that uses them (invariant 10): serde_json
+# and k8s-openapi in Phase 3, kube in Phase 5, ratatui/crossterm in Phase 11.
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
+# No `panic = "abort"`: the terminal is restored by a Drop guard as well as a
+# panic hook (REQUIREMENTS § Error states), and Drop does not run when a panic
+# aborts instead of unwinding. A corrupted terminal is a worse bug than a
+# slightly larger binary — invariant 8.
