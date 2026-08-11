@@ -10,6 +10,7 @@
 ### 🐛 Bug Fixes
 
 - *(ci)* Let cargo-deny accept our own GPL licence ([2717bd2](https://github.com/murat-akpinar/k8rs/commit/2717bd2b7cfd8cccd785111652ee12f407dfc9fe)) — cargo-deny checks the root crate too, so the permissive-only policy written for dependencies rejected k8rs itself. The exception is scoped to this crate; a copyleft dependency is still refused.
+- *(fixtures)* Sanitize every shape the capture produces, not just one object ([842a767](https://github.com/murat-akpinar/k8rs/commit/842a767f95fac9bc1522a8000c74c9344fdd896b)) — Found by auditing Phase 2 before running the capture — nothing was failing.
 
 ### 📚 Documentation
 
