@@ -55,6 +55,11 @@ jobs:
       - name: certificate fixture dates
         run: bash scripts/certs-test.sh
 
+      # sanitize-test proves the filter; this proves the committed bytes. A
+      # fixture can reach tests/fixtures/ without ever meeting the filter.
+      - name: committed fixtures carry nothing secret
+        run: bash scripts/fixture-audit.sh
+
       - name: docs links and anchors
         run: python3 scripts/check-docs.py
 
