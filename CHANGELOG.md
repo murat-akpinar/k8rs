@@ -3,6 +3,7 @@
 ### 📚 Documentation
 
 - Record the git remote and the history restart ([244f9ce](https://github.com/murat-akpinar/k8rs/commit/244f9cec080ba07a956b703b676f9aba629a616a))
+- Close the four holes that let a green build lie ([3fc8b6d](https://github.com/murat-akpinar/k8rs/commit/3fc8b6dee11cdfa2033e6a2bb66feeb7179ee01f))
 
 ### ⚙️ Miscellaneous Tasks
 
