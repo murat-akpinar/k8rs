@@ -1378,8 +1378,10 @@ all**, which is the whole reason the build order puts the pure layers first:
       tested by actually dropping one. Findings:
       [§ Verified against a real cluster](#verified-against-a-real-cluster-2026-08-11).
 - [x] **just** — packaged (`1.58.0`), install with the rest.
-- [ ] **git init** — not done yet; this directory is not a git repository
-      (branch `main` once initialized)
+- [x] **git** (2026-08-12) — repository initialized on branch `main`, remote
+      `git@github.com:murat-akpinar/k8rs.git`. History starts at `chore: init`:
+      the pre-rename repository was deleted with the `r7s` name, so nothing
+      before the design phase survives.
 - [ ] A truecolor-capable terminal (for the Catppuccin palette)
 
 > **Rules may be started before a cluster exists** — they only need pod JSON.
