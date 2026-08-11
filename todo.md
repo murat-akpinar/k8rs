@@ -268,8 +268,20 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
 - [ ] A cluster-wide snapshot fixture (everything at one instant) for
       `analysis.rs` reports
-- [ ] Certificate fixtures: an expiring client certificate PEM (generated
-      locally, never a real one) and a pending CSR
+- [x] Certificate fixtures — [`scripts/make-certs.sh`](scripts/make-certs.sh)
+      writes three client certificates to `tests/fixtures/certs/`, generated
+      locally, never a real one, and the private keys are deleted as soon as
+      openssl is done with them. **Dates are pinned, not relative**: a cert
+      generated with `-days 20` is a test that passes today and fails in three
+      weeks, and the usual repair for that is to weaken the test. Against a
+      reference `now` of 2026-08-12: expiring (24 days → C1 warns), healthy
+      (365 days → silence), and already-expired (C1 must say "expired", and the
+      renderer must not produce a negative duration). Not wired into
+      `just fixtures`: each run would rewrite the bytes for no reason —
+      re-run it only if the files are lost
+- [ ] A **pending CSR** fixture for C3 — kind produces only
+      `Approved,Issued` ones, so it has to be created deliberately on the
+      cluster ([NOTES § Verified](NOTES.md#verified-against-a-real-cluster-2026-08-11))
 - [ ] Eyeball every fixture once: no env values, no annotations, no node IPs,
       no private keys
 

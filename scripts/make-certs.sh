@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Certificate fixtures for the C-series rules, generated locally — a real
+# cluster's client certificate never enters this repository, and the key
+# material here is throwaway by construction (REQUIREMENTS § DevSecOps).
+#
+# The dates are **pinned, not relative**. A fixture generated with `-days 20`
+# is a test that passes today and fails in three weeks, and the usual repair
+# for that is to weaken the test. `Snapshot` carries `now`
+# (NOTES § D18), so the test states the date it is asking about and the
+# fixture never expires:
+#
+#   reference now  = 2026-08-12
+#   expiring cert  = notAfter 2026-09-05  → 24 days left  → C1 warns (< 30)
+#   healthy cert   = notAfter 2027-08-12  → 365 days left → C1 says nothing
+#
+# Both are self-signed: C1 reads `notAfter` out of the kubeconfig's
+# `client-certificate-data`, and a chain would prove nothing extra.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+out="$here/../tests/fixtures/certs"
+mkdir -p "$out"
+
+gen() {
+  local name=$1 cn=$2 not_before=$3 not_after=$4
+  openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "$out/$name.key.pem" \
+    -out "$out/$name.crt.pem" \
+    -subj "/CN=$cn/O=k8rs-fixtures" \
+    -not_before "$not_before" -not_after "$not_after" \
+    -sha256 2>/dev/null
+  # The private key is written because openssl insists on one; it is not a
+  # fixture and nothing reads it, so it does not survive this script.
+  rm -f "$out/$name.key.pem"
+  printf '  %-18s notAfter %s\n' "$name" "$(openssl x509 -in "$out/$name.crt.pem" -noout -enddate | cut -d= -f2)"
+}
+
+gen expiring-client "kubernetes-admin-expiring" 20260812000000Z 20260905000000Z
+gen healthy-client  "kubernetes-admin"          20260812000000Z 20270812000000Z
+
+# A certificate that is already past its notAfter: C1 must say "expired", not
+# "expires in -3 days", and the renderer must not produce a negative duration.
+gen expired-client  "kubernetes-admin-expired"  20250812000000Z 20260809000000Z
+
+echo "certificate fixtures written to tests/fixtures/certs (dates pinned; they do not expire)"
