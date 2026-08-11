@@ -363,5 +363,29 @@ ticket. The reasoning behind each item lives in
    `chore(changelog): update`
 10. git commit & push (with the rules above) — one push at the end, not two
 
+## Phase close — the ritual at the end of every phase
+
+A phase is not "mostly done". It closes, or it is still open. When the last
+box of a phase in [`todo.md`](todo.md) is about to be checked, run this whole
+list — in order, no skipping:
+
+1. **`just check` green**, and the binary actually run (a fixture, or kind) —
+   green tests are not the same as working software.
+2. **Every box of the phase is checked, and every check is true.** A box
+   checked for work that was written but never *run* is a lie in the one file
+   the plan is read from. If something could not be proven, leave the box open
+   and say why in the item — an honest open box beats a false tick.
+3. **The phase's own security gate** in todo.md, item by item.
+4. **Docs sync:** `docs/`, `README.md`, `README_TR.md` for anything
+   structural. Stale docs are a failed step, not a follow-up.
+5. **CHANGELOG** with git-cliff, committed separately.
+6. **Commit, push, PR, CI green, merge.** Frozen files stay frozen from here.
+7. **Then say, in the reply, that the phase is closed and the context should be
+   cleared** — name the phase, name what the next one starts with. Clearing is
+   the user's command (`/clear`); the agent cannot issue it and must not
+   pretend a fresh context happened on its own. The next phase starts by
+   reading `todo.md`'s first unchecked box, which is exactly why the previous
+   phase's chatter is not needed to continue.
+
 Reference workflows: [titus-ai](https://github.com/ChrisTitusTech/titus-ai),
 [christitus.com/my-ai-workflow](https://christitus.com/my-ai-workflow/)
