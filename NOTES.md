@@ -753,6 +753,42 @@ reasonable resident set once pruned is a question with a real answer that
 nobody has run. It becomes a Phase 5 measurement with a number attached, not a
 design paragraph written from a guess.
 
+### D26 — a green build that proves nothing (2026-08-12)
+
+CLAUDE.md says tests must not lie, and the plan enforced that for the *rules*
+and for one guard. Four holes were left, all of the same shape: a check that
+reports success without having checked anything.
+
+1. **"CI is green on an empty crate" was the Phase 1 done-when.** A green run
+   over zero tests and no product code is the false positive we said we would
+   not accept — it proves the YAML parses, nothing else. Every guard added in
+   Phase 1 is now proven the way the write-allowlist already was: break it on
+   purpose, watch CI go red, then fix it. The red run is recorded per guard
+   (fmt · clippy · check-docs · cargo-deny · the allowlist). A guard nobody
+   has seen fail is not a guard, and that applies to all five, not to the
+   scary one alone.
+2. **`cargo test` exits 0 when it runs no tests**, and `#[ignore]` deletes a
+   test while leaving its name in the file — the two cheapest ways for this
+   project to fool itself. CI asserts a non-zero test count and fails on any
+   `#[ignore]` that does not carry a written reason.
+3. **Mutation testing covered `rules.rs` only.** `analysis.rs` is the same
+   kind of file — pure, fixture-tested, the second diagnosis engine — and a
+   report that silently stops flagging anything looks exactly like a report
+   with nothing to flag. It gets the same `cargo mutants` gate in Phase 4.
+   The two pure files are precisely where a passing test can be worthless,
+   which is why they are also the two that come first
+   ([build order](#build-order--why-it-is-what-it-is)).
+4. **The justfile freezes at the end of Phase 2, but `cargo mutants` is first
+   needed in Phase 3.** Same forward-only violation `e2e` had, same fix: the
+   `mutants` target is declared in Phase 1 with the others, body and all
+   ([D14](#d14--three-plan-corrections)).
+
+What this does not add: no coverage percentage. A coverage number is satisfied
+by tests that execute code without asserting anything about it, which is the
+failure mode being closed here, not a measurement of it. Mutants answers the
+question coverage only gestures at — *would anyone notice if this line were
+wrong?*
+
 ## Decisions made
 
 ### Product

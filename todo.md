@@ -126,15 +126,26 @@ Goal: the name is safe and the repo builds, lints and tests empty.
       crate-wide. The `ops.rs` exemption is not written yet; nothing may call
       them at this point
 - [ ] `justfile`: `check` · `run` · `cluster-up` · `cluster-down` ·
-      `fixtures` · **`e2e`**. Every target is *declared* here, `e2e` included,
-      even though Phase 7 is what uses it — a target invented later would be a
-      forward-only violation. The body of `fixtures` (the jq sanitizer) is
-      written in Phase 2 where the fixtures are, so the justfile freezes there
-      and not here ([NOTES § D14](NOTES.md#d14--three-plan-corrections))
+      `fixtures` · **`e2e`** · **`mutants`**. Every target is *declared* here,
+      `e2e` and `mutants` included, even though Phase 7 and Phase 3 are what
+      use them — a target invented later would be a forward-only violation.
+      The body of `fixtures` (the jq sanitizer) is written in Phase 2 where the
+      fixtures are, so the justfile freezes there and not here
+      ([NOTES § D14](NOTES.md#d14--three-plan-corrections) ·
+      [§ D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12))
 - [x] `.gitignore` (`/target`, `/tmp`, `/.agent`, `/.vscode`)
 - [ ] CI: fmt → clippy `-D warnings` → test → `scripts/check-docs.py` ·
       rust-cache · cargo-deny · `cargo check --target` matrix
       (musl x86_64/aarch64, darwin)
+- [ ] CI: **the honest-test guards** — fail the build if `cargo test` ran zero
+      tests, and on any `#[ignore]` without a written reason beside it. Both
+      are ways a suite reports success without having run
+      ([NOTES § D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12))
+- [ ] **Prove every guard red before trusting it** — fmt, clippy, check-docs,
+      cargo-deny and the allowlist each get a throwaway commit that violates
+      them, on a branch, and CI is watched going red before the commit is
+      dropped. Record the five red runs here as they happen; an unproven guard
+      counts as absent
 - [ ] CI: the write-containment check, written as an **allowlist** — outside
       `src/ops.rs` only `get*` / `list*` / `watch*` / `logs` / `log_stream` /
       `apiserver_version` may appear. A denylist would miss `cordon`,
@@ -149,7 +160,10 @@ no `pull_request_target` · **the allowlist check is proven to fail** by
 committing a throwaway `Api::delete` call on a branch and watching CI go red.
 A guard nobody has seen fail is not a guard.
 
-**Done when:** CI is green on an empty crate; `just check` = CI byte-for-byte.
+**Done when:** every guard has been **seen red** on a deliberate violation and
+green after it is removed; `just check` = CI byte-for-byte. Green on an empty
+crate is not the bar — it only proves the YAML parses
+([NOTES § D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12)).
 **Frozen after:** clippy.toml, deny.toml, cliff.toml, CI yaml, the licence
 files. The justfile freezes one phase later — see the item above.
 
@@ -290,6 +304,10 @@ cluster either.
       (kubeconfig client cert) is shown here, and the sidebar badge — `30d` in
       the sketch — is its alerting mechanism
 - [ ] Positive and negative fixture tests per report, same discipline as rules
+- [ ] `cargo mutants --timeout 90` clean over `analysis.rs` — same gate
+      `rules.rs` gets in Phase 3. A report that quietly stops flagging looks
+      identical to a report with nothing to flag
+      ([NOTES § D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12))
 
 **Done when:** every report is correct against the cluster-wide fixture, and
 the temporary main can print any of them.
