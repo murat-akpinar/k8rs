@@ -1,0 +1,19 @@
+# Rust build output
+/target/
+
+# Upstream library docs pulled in for reading (kube-rs, ratatui, k8s).
+# Never committed — CLAUDE.md § Source files.
+/tmp/
+
+# Agent scratch
+/.agent/
+.claude/settings.local.json
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
