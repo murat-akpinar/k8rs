@@ -59,7 +59,16 @@ refuse_foreign_nodes
 # never what was in it.
 | walk(
     if type == "object" and (.env | type) == "array"
-    then .env |= map(if has("value") then .value = "REDACTED" else . end)
+    # `has` is only defined on objects, and `.env` is not always an array of
+    # them: Argo- and Tekton-shaped CRDs use plain `"NAME=value"` strings. The
+    # type check is not tidiness — without it jq aborts with exit 5, and
+    # `just fixtures` has already truncated the target file by then.
+    then .env |= map(
+      if type == "object" and has("value") then .value = "REDACTED"
+      # The CRD form carries its value in the same string as its name, so the
+      # name is kept up to the first `=` and everything after it goes.
+      elif type == "string" then (split("=")[0] + "=REDACTED")
+      else . end)
     else .
     end)
 
@@ -69,18 +78,56 @@ refuse_foreign_nodes
     else .
     end)
 
+# The same key material, in the encoding it actually arrives in. Every Secret
+# value is base64 in JSON, and base64 contains no `-----BEGIN`, so the rule
+# above reads a `.data["tls.key"]` as ordinary text and hands it straight back.
+#
+# Only the **key** half is redacted. A certificate is the public half by
+# definition, and `.spec.request` on a CSR is typed as a ByteString — C3's own
+# fixture is one, and destroying it would leave the fixture unparseable.
+#
+# Decoding is guarded, not attempted: jq's @base64d is a hard error on a string
+# it cannot decode, which would abort the whole capture. A string only reaches
+# it after matching the encoded PEM header, the base64 alphabet, and a length
+# that divides into whole groups.
+#
+# The replacement is deliberately *not* valid base64. Nothing in this project
+# has a legitimate private key in a fixture, so the only object this can fire on
+# is one that should never have been captured — and it should fail loudly at the
+# next parse rather than deserialize into a tidy placeholder nobody looks at.
+| walk(
+    if type == "string"
+       and test("^LS0tLS1CRUdJ")
+       and test("^[A-Za-z0-9+/]+={0,2}$")
+       and (length % 4) == 0
+       and (@base64d | test("-----BEGIN [A-Z ]*PRIVATE KEY-----"))
+    then "REDACTED-PEM-BASE64"
+    else .
+    end)
+
 # Addresses go too — `status.addresses[].address`, `podIP`, `hostIP`,
 # `clusterIP`. The eyeball step in todo.md Phase 2 asks for "no node IPs", and
 # an eyeball step is not a guard: it passes whenever someone is tired. No rule
 # in the plan reads an address — the N-series joins on node *names*, which is
 # why those are kept and refused rather than rewritten.
 #
-# Matched as a whole string, so a Hostname entry (`k8rs-worker`, sitting in the
-# same `addresses` array as an InternalIP) survives untouched. An address quoted
-# *inside* an English message is not caught; the foreign-capture refusal above
-# is what covers a capture from a cluster that is not kind.
+# IPv4 is replaced *inside* strings, not only when it is the whole one. The two
+# shapes that anchoring missed are both ordinary: `"10.244.0.0/24"` (a podCIDR —
+# an address wearing a suffix) and `"dial tcp 10.0.0.1:6443: connection
+# refused"` (an address quoted in an English message, which is where kubelet
+# puts the one it could not reach). Neither is covered by refusing foreign node
+# names: this cluster's own nodes are called `k8rs-*` no matter what address the
+# apiserver was given, so a capture from a kind cluster reachable on a real LAN
+# passes the refusal and carries that LAN address out in a message.
+#
+# A Hostname entry (`k8rs-worker`, sitting in the same `addresses` array as an
+# InternalIP) is untouched for the reason it always was — it contains no
+# address, so there is nothing here to match.
+#
+# IPv6 stays anchored to the whole string on purpose: unanchored, `::` matches
+# a Rust path, a C++ scope operator and every `key::value` in a log line.
 | walk(
-    if type == "string" and test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$|^[0-9a-fA-F:]*::[0-9a-fA-F:]*$")
-    then "REDACTED-IP"
-    else .
+    if type != "string" then .
+    elif test("^[0-9a-fA-F:]*::[0-9a-fA-F:]*$") then "REDACTED-IP"
+    else gsub("(?<ip>([0-9]{1,3}\\.){3}[0-9]{1,3})"; "REDACTED-IP")
     end)

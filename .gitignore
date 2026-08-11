@@ -5,6 +5,16 @@
 # Never committed — CLAUDE.md § Source files.
 /tmp/
 
+# Key material, in case a generator is killed between writing a key and its
+# own cleanup trap — `kill -9` does not run the trap, and `git add -A` does not
+# ask. scripts/make-certs.sh writes here; the certificates it keeps are
+# *.crt.pem, which stay committed.
+*.key.pem
+*.key
+kubeconfig*.yaml
+
+__pycache__/
+
 # Agent scratch
 /.agent/
 .claude/settings.local.json

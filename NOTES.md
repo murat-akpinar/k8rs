@@ -1038,6 +1038,68 @@ validity comparison has to be inclusive (`notBefore <= now`). A strict `<`
 classifies both fixtures as not-yet-valid, which is a third C1 case and not the
 one either fixture is for.
 
+### D31 — the sanitizer matched the whole string, and secrets are rarely the whole string (2026-08-12)
+
+D29 fixed *where* the filter looked — every depth instead of a fixed path. This
+is the other half: *how much* of a string it looked at. Both gaps were found by
+scanning for the pattern rather than by a failing build, and both were shipped
+with a green `sanitize-test.sh`.
+
+**1. An address is not always the entire value.** The IPv4 rule was anchored
+(`^…$`), so it caught `"10.244.2.2"` and missed both shapes a real capture
+actually contains:
+
+- `"10.244.0.0/24"` — a `podCIDR`, an address wearing a suffix. Six of them sat
+  in the committed `nodes.json`.
+- `"…dial tcp 172.18.0.1:53: no such host"` — an address quoted inside an
+  English message, which is where kubelet puts the one it could not reach. One
+  sat in the committed `image.json`.
+
+`sanitize.jq`'s own comment argued the gap away: *"An address quoted inside an
+English message is not caught; the foreign-capture refusal above is what covers
+a capture from a cluster that is not kind."* That reasoning does not hold. The
+refusal keys on **node names**, and this cluster's nodes are called `k8rs-*` no
+matter what address the apiserver was given. `K8RS_APISERVER_ADDRESS` exists
+precisely so the cluster can live on a real LAN — so a capture from a perfectly
+legitimate kind cluster passes the refusal and carries that LAN address out
+inside a message. The addresses actually found were kind and Docker defaults and
+gave nothing away, which is luck, not a control.
+
+IPv4 is now replaced *inside* strings. IPv6 stays anchored on purpose:
+unanchored, `::` matches a Rust path, a C++ scope operator and every
+`key::value` in a log line.
+
+**2. Key material is never text when it arrives.** Every Secret value is
+base64 in JSON, and base64 contains no `-----BEGIN`, so the PEM rule read a
+`.data["tls.key"]` as ordinary prose and handed it straight back. Demonstrated
+with one object carrying the same private key twice: the plain copy came back
+`REDACTED-PEM`, the encoded copy came back untouched. The same blindness covers
+`certificate-authority-data` in a captured kubeconfig and ServiceAccount token
+Secrets.
+
+Only the **key** half is redacted. A certificate is the public half by
+definition, and `csr-pending.json`'s `.spec.request` is typed as a ByteString —
+redacting it would leave C3's own fixture unparseable. Decoding is guarded
+rather than attempted: jq's `@base64d` is a hard error on input it cannot
+decode, which would abort the whole capture, so a string reaches it only after
+matching the encoded PEM header, the base64 alphabet, and a whole-group length.
+
+The replacement is deliberately not valid base64. Nothing here has a legitimate
+private key in a fixture, so the only object this can fire on is one that should
+never have been captured, and it should fail loudly at the next parse rather
+than deserialize into a tidy placeholder nobody looks at.
+
+**`fixture-audit.sh` had both holes too**, being written from the same two
+regexes — so the guard that exists to catch what the filter misses was blind in
+exactly the same places. It now checks the committed bytes for embedded
+addresses and for base64-wrapped keys, and both checks were watched failing on
+planted input before being trusted.
+
+**The rule this adds to CLAUDE.md's *tests must not lie*:** *a redaction proves
+only the framing it was written for.* D29 asked which shapes the pipeline
+produces. This asks where inside a value the secret can sit — whole string,
+substring, or another encoding of it — and requires one planted case per answer.
+
 ## Decisions made
 
 ### Product

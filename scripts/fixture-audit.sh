@@ -18,9 +18,16 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fixtures="$here/../tests/fixtures"
 command -v jq >/dev/null || { echo "fixture-audit: jq is not installed"; exit 127; }
 
-shopt -s nullglob
-files=("$fixtures"/*.json)
-if [ ${#files[@]} -eq 0 ]; then
+# Recursive, and JSON is only the shape that gets *parsed*. A key does not stop
+# being a key because it was written as `admin.key.pem`, a kubeconfig, or one
+# directory down — and "no key material" was printed over exactly that.
+files=() all_files=()
+while IFS= read -r -d '' f; do
+  all_files+=("$f")
+  case "$f" in *.json) files+=("$f") ;; esac
+done < <(find "$fixtures" -type f -print0 2>/dev/null | sort -z)
+
+if [ ${#all_files[@]} -eq 0 ]; then
   echo "fixture-audit: no fixtures captured yet — nothing to audit. The capture" \
        "lands in Phase 2 (\`just fixtures\`); this guard is what checks it when it does."
   exit 0
@@ -39,8 +46,15 @@ checks=(
   "selfLink|[.. | objects | .selfLink? | select(.)]"
   "imagePullSecrets|[.. | objects | .imagePullSecrets? | select(.)]"
   "env values|[.. | objects | select(.env? | type == \"array\") | .env[] | select(has(\"value\") and .value != \"REDACTED\")]"
-  "IP addresses|[.. | strings | select(test(\"^([0-9]{1,3}\\\\.){3}[0-9]{1,3}$\"))]"
+  # Unanchored on purpose: an address is just as readable with a `/24` after it
+  # or an English sentence around it, and both shapes reached tests/fixtures/
+  # while this check was anchored to the whole string.
+  "IP addresses|[.. | strings | select(test(\"([0-9]{1,3}\\\\.){3}[0-9]{1,3}\"))]"
   "PEM blocks|[.. | strings | select(test(\"-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE)-----\"))]"
+  # The same material base64-wrapped, which is how every Secret value arrives —
+  # the regex above cannot see it, because base64 contains no \`-----BEGIN\`.
+  # Certificates are left alone: they are public, and csr-pending.json is one.
+  "base64 key material|[.. | strings | select(test(\"^LS0tLS1CRUdJ\") and test(\"^[A-Za-z0-9+/]+={0,2}\$\") and (length % 4) == 0 and (@base64d | test(\"-----BEGIN [A-Z ]*PRIVATE KEY-----\")))]"
 )
 
 for file in "${files[@]}"; do
@@ -51,6 +65,30 @@ for file in "${files[@]}"; do
     n=$(jq "$expr | length" "$file")
     [ "$n" -eq 0 ] || note "[$name] carries $n $what — this file never met scripts/sanitize.jq"
   done
+done
+
+# Every file, not only the parsed ones. A private key does not become safe by
+# being written as `admin.key.pem` or tucked inside a kubeconfig, and the JSON
+# loop above cannot see either. certs/ is the one place PEM is expected — it
+# holds deliberately generated throwaway *certificates*, and certs-test.sh
+# proves no key sits beside them.
+for file in "${all_files[@]}"; do
+  rel=${file#"$fixtures"/}
+  case "$rel" in certs/*.crt.pem) continue ;; esac
+  if LC_ALL=C grep -qE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' "$file" 2>/dev/null; then
+    note "[$rel] contains a private key in plain text"
+  fi
+done
+
+# Node identity is in every pod fixture, not only nodes.json — ten of them carry
+# `spec.nodeName`, and none of them used to be checked. Same rule as the
+# sanitizer's: a foreign name is refused, never rewritten.
+for file in "${files[@]}"; do
+  rel=${file#"$fixtures"/}
+  while read -r n; do
+    [ -z "$n" ] && continue
+    case "$n" in k8rs-*) ;; *) note "[$rel] names node '$n', which is not from the kind test cluster" ;; esac
+  done < <(jq -r '[.. | objects | .nodeName? // empty] | .[]' "$file" 2>/dev/null)
 done
 # --- WHAT MUST NOT BE THERE END ---
 

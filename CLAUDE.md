@@ -304,6 +304,14 @@ ticket. The reasoning behind each item lives in
     every `kubectl get -A` List for exactly that reason: the secrets sit one
     level down under `.items[]`, half the capture is that shape, and the green
     log read identically ([NOTES § D29](NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)).
+  - **A redaction proves only the framing it was written for.** The shape
+    question has a second half: not just *which objects* reach the check, but
+    *where inside a value* the secret can sit. The IP rule matched a whole
+    string, so `"10.244.0.0/24"` and `"dial tcp 172.18.0.1:53: no such host"`
+    both walked past it; the PEM rule matched `-----BEGIN`, so the same key
+    base64-wrapped — which is how every Secret value arrives — walked past too.
+    Plant one case per framing: whole value, substring, and re-encoded
+    ([NOTES § D31](NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)).
   - **A derived list asserts it found something.** When a check builds its own
     rules from another source — the ban list from kube's signatures, the test
     count from the runner — "extracted nothing" and "nothing to extract" print
