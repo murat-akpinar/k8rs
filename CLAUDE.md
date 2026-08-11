@@ -143,8 +143,11 @@ to require it, the plan is wrong: fix the plan, record the reversal in
    Same for the `analysis.rs` reports. This is what makes them testable
    against fixtures — and what keeps a fixture from expiring.
 6. **Watch, never poll-list.** LIST once then stream changes, pruned with
-   `managedFields` dropped. Only Pods and Nodes are watched permanently;
-   browser kinds are watched only while their view is open. A periodic
+   `managedFields` dropped. **The Alerts view's own inputs are watched
+   permanently** — Pods, Nodes, and Deployments/StatefulSets/DaemonSets
+   (metadata + status only, [NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12));
+   ReplicaSets are fetched on demand, never watched; browser kinds are watched
+   only while their view is open. A periodic
    `LIST pods -A` is the exact thing that makes k9s heavy —
    [NOTES § Architecture](NOTES.md#architecture--where-lightweight-comes-from).
 7. **No fixed FPS.** Draw on events, coalesce ~100ms during storms, block when

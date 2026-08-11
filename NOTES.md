@@ -830,6 +830,61 @@ releases apart.
 Neither item widens scope: no new watch ([invariant 6](CLAUDE.md)), no new
 key, no new view. They are the same Alerts list, with two blind spots removed.
 
+### D28 — the workload watch, and the blind spot it closes (2026-08-12)
+
+**Decided: Deployments, StatefulSets and DaemonSets join Pods and Nodes in the
+permanent watch set.** This changes [invariant 6](CLAUDE.md), which is why it
+is a decision and not a task.
+
+**The blind spot.** Every v1 rule reads a Pod. When the pods were never
+created — a ResourceQuota denial, an admission webhook rejection, a missing
+PVC, a bad pull secret at ReplicaSet level — there is nothing to iterate over:
+`kubectl get pods` is empty, the Deployment sits at 0/3, and k8rs reports a
+healthy cluster. It is the most beginner-hostile failure class in Kubernetes
+and it was the only one the tool could not see at all. Saying *nothing is
+wrong* when something is, is worse than missing a finding: it is the one
+behaviour that would make the Alerts screen not believable
+([REQUIREMENTS G-6](REQUIREMENTS.md#flagged-by-more-than-one-role-at-once-highest-priority)).
+
+**The second hole, closed by the same objects.**
+[D3](#d3--findings-group-by-owner-not-by-pod) groups findings by
+Deployment/StatefulSet/DaemonSet/Job, but a pod's `ownerReferences` points at
+its *ReplicaSet*. Nothing said where `web-7d4f5c6b8` becomes `web`, so as
+planned, M1 would have grouped under a hashed string — in the product whose
+rule is that every visible string reads without a glossary.
+
+**What is watched, and what is not.** The three workload kinds are watched for
+`metadata` + `status` only (desired vs ready, the `Progressing` condition).
+ReplicaSets are **not** watched: they are fetched on demand, cached by UID,
+when a finding needs the `ReplicaFailure` message or a group heading needs the
+Deployment behind a ReplicaSet. Jobs and CronJobs stay in the v0.2 J-series as
+planned.
+
+**Why this does not contradict what invariant 6 protects.** The invariant
+exists to keep k8rs off the path that makes k9s heavy: a repeated
+`LIST pods -A` ([§ Architecture](#architecture--where-lightweight-comes-from)).
+Workload objects are two orders of magnitude fewer than pods and barely churn
+— three low-traffic streams, not forty. The line the invariant now draws is
+the honest one: *the Alerts view's own inputs are watched; everything the
+browser shows is watched only while it is open.*
+
+**New rules, W-series** (in `rules.rs`, pure, same as every other rule):
+
+| # | Finding | Source |
+|---|---|---|
+| W1 | **The pods were never created** — quota exceeded, admission webhook denied, PVC missing | `ReplicaSet.status.conditions[ReplicaFailure]`, message shown verbatim |
+| W2 | **Rollout gave up** — stuck part-way with no failing pod to explain it | `Deployment.status.conditions[Progressing].reason == ProgressDeadlineExceeded` |
+
+W2 fires **only when no pod-level finding already explains the shortfall** —
+otherwise a crashlooping Deployment produces two findings for one problem, and
+the list stops being believable for the opposite reason.
+
+**Costs, stated:** invariant 6 is rewritten; the 10 000-pod memory measurement
+([D25](#d25--what-this-review-did-not-decide)) now includes the three kinds;
+the read-only `ClusterRole` in [docs/security.md](docs/security.md) needs no
+change — it already grants `get`/`list`/`watch` on all four `apps` resources,
+so the least-privilege claim holds unchanged (checked 2026-08-12).
+
 ## Decisions made
 
 ### Product
@@ -955,12 +1010,16 @@ Concrete load reducers:
   It can't be watched, polling is unavoidable.
 - **No fixed-FPS drawing.** Draw on events, block when idle → 0% CPU at idle.
 
-Added by the browser (2026-08-11): **only two watches run permanently** — Pods
-and Nodes, because the Alerts view depends on them continuously. Every other
-kind in the Resources view is listed when you open it and watched only while
-it is on screen; closing the view drops the watch. Otherwise "browse every
-kind" would mean forty permanent streams, which is a worse version of the
-polling problem this architecture exists to avoid.
+Added by the browser (2026-08-11), widened by
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)
+(2026-08-12): **the Alerts view's own inputs are watched permanently** — Pods,
+Nodes, and Deployments/StatefulSets/DaemonSets (metadata + status only), five
+low-traffic streams. Every other kind in the Resources view is listed when you
+open it and watched only while it is on screen; closing the view drops the
+watch. Otherwise "browse every kind" would mean forty permanent streams, which
+is a worse version of the polling problem this architecture exists to avoid.
+ReplicaSets are deliberately *not* in the set — they are read on demand, for
+the one finding and the one group heading that need them.
 
 ### v1 rule set
 
@@ -1401,9 +1460,11 @@ findings that need it and says which permission is missing.
 
 ## Open questions
 - [x] Project name? → **k8rs** (2026-08-10, see naming section)
-- [ ] **A workload whose pods were never created produces no finding — is that
-      worth a watch?** (raised 2026-08-12, needs a decision before `k8s.rs` is
-      written) Every v1 rule reads a Pod. If the pods do not exist — a
+- [x] **A workload whose pods were never created produces no finding — is that
+      worth a watch?** → **yes**, resolved 2026-08-12 as
+      [D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12):
+      Deployments, StatefulSets and DaemonSets are watched; ReplicaSets are
+      fetched on demand. The reasoning that produced it: Every v1 rule reads a Pod. If the pods do not exist — a
       ResourceQuota denial, an admission webhook rejection, a missing PVC, a
       bad pull secret at ReplicaSet level — there is nothing to iterate:
       `kubectl get pods` is empty, the Deployment sits at 0/3, and k8rs says

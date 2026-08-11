@@ -207,6 +207,11 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
 - [x] A multi-node kind config — N-series rules (cordon, skew, pressure) and
       drain safety cannot be captured on a single-node cluster. Three nodes
       (1 control-plane + 2 workers); `K8RS_WORKERS` changes the count
+- [ ] **A workload with zero pods**: a namespace with a `ResourceQuota` that
+      denies creation, plus a Deployment blocked by it — capture the
+      Deployment *and* its ReplicaSet (`ReplicaFailure` carries the message).
+      The one fixture where the pod list is empty and a finding must still
+      appear ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
 - [ ] A cluster-wide snapshot fixture (everything at one instant) for
       `analysis.rs` reports
 - [ ] Certificate fixtures: an expiring client certificate PEM (generated
@@ -235,8 +240,8 @@ this plan is delivery mechanism for what this phase produces.
       the bare pod when it has no owner. Grouping itself happens in `views.rs`;
       the *identity* it groups by is decided here, in the bottom layer)
 - [ ] The snapshot types live here, in the bottom layer: `PodSnapshot`,
-      `NodeSnapshot`, `ClusterSnapshot`. `k8s.rs` will fill them later; rules
-      define the contract
+      `NodeSnapshot`, `WorkloadSnapshot`, `ClusterSnapshot`. `k8s.rs` will fill
+      them later; rules define the contract
 - [ ] **`Snapshot` carries `now`**, and every fixture pins it. Rule 12 and the
       certificate rules need the time; calling a clock inside a rule would
       break [invariant 5](CLAUDE.md) and would make fixtures expire — a test
@@ -261,6 +266,13 @@ this plan is delivery mechanism for what this phase produces.
       is not" is the diagnosis
 - [ ] Node rules N1–N6 (NotReady · cordoned-and-forgotten · pressure ·
       kubelet skew · overcommit · what blocks a Pending pod)
+- [ ] **Workload rules W1–W2** — W1: the pods were never created
+      (`ReplicaSet.status.conditions[ReplicaFailure]`, quota/webhook/PVC
+      message shown verbatim); W2: the rollout gave up
+      (`Progressing.reason == ProgressDeadlineExceeded`). **W2 fires only when
+      no pod-level finding already explains the shortfall** — two findings for
+      one problem is how the list stops being believable
+      ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
 - [ ] Certificate rule C1 — kubeconfig client certificate expiry, warn at 30
       days. Pure: PEM bytes in, finding out
 - [ ] Exit-code translation table (137/143/1/126/127)
@@ -332,8 +344,16 @@ the temporary main can print any of them.
 Goal: the same findings and reports, from a living cluster — and the first
 public release.
 
-- [ ] `k8s.rs`: kube-rs `watcher` over Pods and Nodes + prune (drop
-      `managedFields`) → snapshot store
+- [ ] `k8s.rs`: kube-rs `watcher` over Pods, Nodes and
+      Deployments/StatefulSets/DaemonSets (the last three: metadata + status
+      only) + prune (drop `managedFields`) → snapshot store
+      ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
+- [ ] **Owner name resolution**: a pod's `ownerReferences` names its
+      *ReplicaSet*, and the group heading has to read `web`, not
+      `web-7d4f5c6b8`. Fetch the ReplicaSet on demand, cache by UID, never
+      watch it — and never strip the hash with a string heuristic, which is
+      the kind of guess that lies. The same cached object supplies W1's
+      `ReplicaFailure` message
 - [ ] `kube::discovery`: enumerate every kind the cluster serves, CRDs
       included. This is what the sidebar is built from — never a hard-coded list
 - [ ] Server-side `Table` fetch for browser kinds — the columns come from the
@@ -361,8 +381,8 @@ public release.
       case on EKS/GKE/AKS — and it names the renewal command from the user's
       own kubeconfig `exec` block rather than guessing a cloud
       ([NOTES § D19](NOTES.md#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program))
-- [ ] **Measure resident memory against 10 000 pods** (kind + a generator) and
-      write the number down. Pruning `managedFields` is agreed; whether the
+- [ ] **Measure resident memory against 10 000 pods** (kind + a generator)
+      **plus the three workload watches**, and write the number down. Pruning `managedFields` is agreed; whether the
       pruned store actually fits is unmeasured, and an unmeasured number is not
       a design ([NOTES § D25](NOTES.md#d25--what-this-review-did-not-decide))
 - [ ] Startup errors (no kubeconfig / bad context) → stderr + non-zero exit

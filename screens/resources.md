@@ -61,8 +61,8 @@ own `Table` printing — the exact columns `kubectl get` would show.
 
 - **Alerts bleed through.** A row whose object has a finding is marked (`●`),
   so the browser never disagrees with the Alerts view.
-- Only Pods and Nodes are watched permanently. Opening this view starts a
-  watch; closing it stops one. Forty permanent streams is the problem this
-  architecture exists to avoid.
+- Only the Alerts view's inputs are watched permanently — Pods, Nodes and the
+  three workload kinds. Opening this view starts a watch; closing it stops one.
+  Forty permanent streams is the problem this architecture exists to avoid.
 - Operations live here, on the selected object — see [dialogs.md](dialogs.md).
   Nothing is ever applied to a selection of more than one object.

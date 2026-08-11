@@ -192,10 +192,12 @@ code and never touch product files.
 
 ## Performance behaviors
 
-- Only Pods and Nodes are watched permanently (the Alerts view needs them
-  continuously). Every other kind is listed when its view opens and watched
-  only while it is on screen — "browse everything" must not mean forty
-  permanent streams.
+- The Alerts view's own inputs are watched permanently: Pods, Nodes, and
+  Deployments/StatefulSets/DaemonSets (metadata + status only — five
+  low-traffic streams; workload objects are far fewer than pods and barely
+  churn). ReplicaSets are fetched on demand and cached, never watched. Every
+  other kind is listed when its view opens and watched only while it is on
+  screen — "browse everything" must not mean forty permanent streams.
 - Drop `metadata.managedFields` at ingest — often a third of the object.
 - Store reduced snapshots, not full `Pod` objects (~10x memory).
 - No global Events watch in v1 — noisiest stream in the cluster; the
