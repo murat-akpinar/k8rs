@@ -86,6 +86,32 @@ spec:
         exec: { command: ["sh", "-c", "exit 1"] }
         periodSeconds: 5
 ---
+# 5 — restarted repeatedly, but Running and ready *now*. Rule 5's whole point is
+# the pod that looks fine at a glance, so a crashlooping fixture does not prove
+# it: the counter has to survive into a healthy state. The emptyDir is what
+# makes that happen — a restarted container gets a fresh filesystem, so a
+# counter kept inside it would reset and the pod would crashloop forever.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-restarts, labels: { demo: broken } }
+spec:
+  containers:
+    - name: flaky
+      image: busybox
+      command: ["sh", "-c"]
+      args:
+        - |
+          n=$(cat /state/n 2>/dev/null || echo 0)
+          n=$((n + 1))
+          echo "$n" > /state/n
+          [ "$n" -le 3 ] && exit 1
+          sleep 3600
+      volumeMounts:
+        - { name: state, mountPath: /state }
+  volumes:
+    - name: state
+      emptyDir: {}
+---
 # 9 — no limits. No longer an alert: this is a Capacity report row, and the
 # fixture exists to prove the Capacity report, not a finding
 apiVersion: v1
@@ -132,10 +158,16 @@ spec:
       image: busybox
       command: ["sleep", "3600"]
 ---
-# D28 / W1 — the workload whose pods are never created. The quota allows zero
-# pods, so the ReplicaSet cannot create any: `kubectl get pods` shows nothing,
-# the Deployment sits at 0/1, and the only place the truth exists is the
+# D28 / W1 + W2 — the workload whose pods are never created. The quota allows
+# zero pods, so the ReplicaSet cannot create any: `kubectl get pods` shows
+# nothing, the Deployment sits at 0/1, and the only place the truth exists is the
 # ReplicaSet's ReplicaFailure condition. No pod rule can see this.
+#
+# The same object is W2's fixture once its rollout deadline passes. That deadline
+# defaults to 600s, which is longer than `cluster.sh verify` will ever wait, so
+# the capture was taken before Progressing could ever flip to
+# ProgressDeadlineExceeded — W2 had a fixture that could not hold its state.
+# 60s puts it inside the window.
 #
 # It lives in its own namespace on purpose: a `pods: "0"` quota applies to the
 # whole namespace, so leaving it beside the others would block every pod above
@@ -155,6 +187,7 @@ kind: Deployment
 metadata: { name: broken-quota, namespace: k8rs-quota, labels: { demo: broken } }
 spec:
   replicas: 1
+  progressDeadlineSeconds: 60
   selector: { matchLabels: { app: broken-quota } }
   template:
     metadata: { labels: { app: broken-quota, demo: broken } }

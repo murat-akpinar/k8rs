@@ -119,7 +119,7 @@ verify() {
     [config]='.status.containerStatuses[0].state.waiting.reason=="CreateContainerConfigError"'
     [pending]='.status.phase=="Pending" and ([.status.conditions[]?|select(.type=="PodScheduled")|.reason]|first)=="Unschedulable"'
     [hostpath]='.status.phase=="Running" and ([.spec.volumes[]?|select(.hostPath!=null)]|length)>0'
-    [readiness]='.status.phase=="Running" and .status.containerStatuses[0].ready==false'
+    [readiness]='.status.phase=="Running" and (.status.containerStatuses[0] | .ready==false and .state.running!=null)'
     [restarts]='.status.phase=="Running" and (.status.containerStatuses[0] | .ready==true and .restartCount>=3)'
     [nolimits]='.status.phase=="Running" and (.spec.containers[0].resources.limits==null)'
     [stuck]='.status.phase=="Running" and ((.metadata.finalizers//[])|length)>0'
