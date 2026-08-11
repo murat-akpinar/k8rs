@@ -239,7 +239,8 @@ minimum terminal 80×24.
 - Every rule has a **positive** fixture (triggers the finding) and a
   **negative** fixture (healthy pod → nothing) — false positives are bugs.
 - Fixtures are real captures from a kind cluster running deliberately broken
-  pods (`tests/manifests/broken.yaml`), sanitized by script, committed, and
+  pods ([`scripts/broken.yaml`](../scripts/broken.yaml), with its healthy
+  counterpart [`scripts/healthy.yaml`](../scripts/healthy.yaml)), sanitized by script, committed, and
   recorded with the k8s version they came from. Hand-written JSON is only a
   bootstrap and must be replaced.
 - Fixtures deserialize through `k8s_openapi::Pod`, so the prune path is

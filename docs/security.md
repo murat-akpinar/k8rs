@@ -230,9 +230,19 @@ about a decade of daily use. A rotator would be more code than the log.
   not be able to corrupt or spoof the terminal.
 - Test fixtures are sanitized before commit: `managedFields`, all
   annotations (including `last-applied-configuration`, which contains a full
-  spec copy with env values), env values, image pull secret names and node
-  identifiers are stripped by the capture script. Raw `kubectl get -o json`
-  output is never committed.
+  spec copy with env values), env values, `selfLink` and image pull secret
+  names are stripped by the capture script. Raw `kubectl get -o json` output is
+  never committed.
+- **Node identifiers are refused, not stripped.** Mangled node names would
+  break the pod↔node joins the node rules are built on, so a capture carrying
+  an identifier from anywhere other than the kind test cluster fails the
+  capture instead of producing something that only looks safe.
+- The filter walks the whole document rather than named paths, because half the
+  capture is the `List` that `kubectl get <kind> -A -o json` returns and the
+  objects inside it sit under `.items[]`. Its test feeds it **both** shapes —
+  a single object and a `List` — since a filter proven on one of the two reads
+  as proven and is not
+  ([NOTES § D29](../NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)).
 
 ## Supply chain
 

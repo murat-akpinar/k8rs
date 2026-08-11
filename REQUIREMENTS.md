@@ -263,9 +263,11 @@
   ~6 targets: `cluster-up` (kind + broken.yaml), `cluster-down`, `fixtures`
   (capture + wait/retry for CrashLoop backoff + sanitization), `check`
   (fmt+clippy+test, byte-identical to CI), `run`.
-- `broken.yaml` must be extracted from NOTES into
-  `tests/manifests/broken.yaml` — YAML in a document drifts, a file gets
-  applied.
+- `broken.yaml` must be extracted from NOTES into a file of its own — YAML in
+  a document drifts, a file gets applied. It landed at
+  [`scripts/broken.yaml`](scripts/broken.yaml), beside the script that applies
+  it, rather than the `tests/manifests/` this line first named: no Rust test
+  reads it.
 - Fixtures are committed (test determinism); `just fixtures` regenerates,
   the diff shows up in PRs. When the k8s-openapi feature is bumped, fixtures
   must be re-captured against a matching kind version — write this as a

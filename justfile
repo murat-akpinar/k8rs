@@ -9,16 +9,22 @@ default:
 
 # --- the loop you run all day ---
 
-# fmt + clippy + tests + the guards. Identical to the CI `check` job.
+# fmt + clippy + tests + the guards. Every step CI runs, and nothing CI skips —
+# the two drifted once already (the self-test below and cargo-deny were CI-only,
+# so `cargo deny` first failed on a push nobody could have caught locally).
+# cargo-deny runs last: it needs `cargo install cargo-deny`, and when it is
+# missing you still want the eight checks above it to have reported.
 check:
     cargo fmt --all -- --check
     cargo clippy --all-targets --all-features -- -D warnings
     cargo test --all-targets
     python3 scripts/check-docs.py
+    python3 scripts/test-guard.py --self-test
     python3 scripts/test-guard.py
     python3 scripts/write-guard.py --self-test
     python3 scripts/write-guard.py
     bash scripts/sanitize-test.sh
+    cargo deny check advisories licenses sources bans
 
 # Run the binary with the given arguments
 run *ARGS:
@@ -62,6 +68,12 @@ fixtures:
     # Rule 12 needs a pod that is Terminating and stays that way: the delete is
     # part of the capture, not of `cluster.sh break`.
     "${kc[@]}" delete pod broken-stuck --wait=false --ignore-not-found
+    # `--wait=false` returns once the API server accepts the DELETE, not once the
+    # object shows it. Rule 12 reads deletionTimestamp, so a capture taken before
+    # it appears is a fixture the rule cannot fire on — assert it, do not hope.
+    "${kc[@]}" get pod broken-stuck -o json \
+      | jq -e '.metadata.deletionTimestamp != null and ((.metadata.finalizers // []) | length > 0)' >/dev/null \
+      || { echo "fixtures: broken-stuck is not Terminating behind a finalizer — rule 12 has no fixture" >&2; exit 1; }
 
     for p in oom crashloop image config pending hostpath readiness nolimits stuck init; do
       "${kc[@]}" get pod "broken-$p" -o json | "${jqs[@]}" > "tests/fixtures/$p.json"

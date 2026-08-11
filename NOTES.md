@@ -913,6 +913,70 @@ the read-only `ClusterRole` in [docs/security.md](docs/security.md) needs no
 change — it already grants `get`/`list`/`watch` on all four `apps` resources,
 so the least-privilege claim holds unchanged (checked 2026-08-12).
 
+### D29 — a guard is proven only for the shapes it was fed (2026-08-12)
+
+Found by auditing Phase 2 before running it, not by a failing build — which is
+the point: nothing was failing.
+
+**What was wrong.** `scripts/sanitize.jq` was written against a single Kubernetes
+object: `del(.metadata.annotations)`, `.spec.containers[]?`, `.spec.nodeName`.
+Half of `just fixtures` is `kubectl get <kind> -A -o json`, which returns a
+**`List`** — the real objects sit under `.items[]`, a workload's containers two
+levels below that under `.spec.template.spec`, and the top-level `.kind` is
+`"List"`, not `"Node"`. Every path clause therefore addressed the wrapper and
+missed the contents. Fed a poisoned List, the filter exited **0** and left
+behind: the `last-applied-configuration` annotation, every env value, the
+imagePullSecret, the selfLink, the node IPs — and it did **not** refuse a
+capture whose node names came from a production cluster, because the refusal
+tested `.kind == "Node" or .spec.nodeName != ""` at the top level only.
+
+Eight of the fixtures `just fixtures` writes are that shape, `nodes.json` —
+the most identity-carrying file in the set — among them.
+
+**Why no test caught it.** `sanitize-test.sh` fed the filter one Pod. The Pod
+path worked, so the test was green, and it would have stayed green through the
+capture. This is the failure mode CLAUDE.md's *tests must not lie* already
+names, arriving through a door it had not: not a test that cannot fail, but a
+test that covers one of the two shapes the pipeline produces.
+
+**The fix, and the shape of it.** The filter no longer contains a path-based
+clause. `del(.. | objects | .annotations?, .managedFields?, …)` and a `walk`
+over anything carrying `.env` reach every depth — List, pod template, bare
+object — in one expression, which is also shorter than what it replaced. Node
+identity is collected with `..` as well, and a Node is recognised by
+`.status.nodeInfo` rather than by `.kind`, because the items of a List do not
+reliably carry one. The refusal is now **any** foreign identifier, not *all*:
+one real node name inside an otherwise-kind capture is the leak.
+
+`sanitize-test.sh` feeds both shapes, plus a mixed List that must not be
+laundered by the kind-shaped name sitting next to the foreign one. Run against
+the old filter it reports eight failures; against the new one, none.
+
+**Two rules came out of this**, both now in [CLAUDE.md](CLAUDE.md) rather than
+left as a lesson learned:
+
+1. **A check is proven only for the input shapes it was fed.** Enumerate what
+   the real pipeline hands it, feed it each one.
+2. **A derived list asserts it found something.** `write-guard.py` builds its
+   ban list by parsing kube's `Api<K>` signatures; a `&self` wrapped onto its
+   own line is not matched, so the method silently never gets banned — and
+   "extracted nothing" prints the same as "nothing to extract". It now asserts
+   `delete`/`patch`/`replace`/`create` are present before trusting the list,
+   and its `--self-test` proves the wrapped-signature hole exists rather than
+   assuming it does not.
+
+**A third finding, same audit:** `just check` was documented as byte-for-byte
+CI and was not. It omitted `test-guard.py --self-test` and the whole
+`cargo deny` job — the reason cargo-deny's licence failure in Phase 1 could
+only surface on a push. Both are in `just check` now, cargo-deny last so a
+machine without it still gets the other nine results.
+
+**And a fourth:** `just fixtures` deleted `broken-stuck` with `--wait=false`
+and captured it immediately, never asserting the `deletionTimestamp` that rule
+12 reads. `cluster.sh verify` checks the finalizer, but it runs *before* the
+delete, so nothing checked the state actually being captured. The capture now
+asserts it.
+
 ## Decisions made
 
 ### Product

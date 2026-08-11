@@ -293,6 +293,22 @@ ticket. The reasoning behind each item lives in
     a failing test means the code or the plan is wrong, fix that instead.
   - Never assert what the implementation happens to return; assert what the
     requirement says it must return.
+  - **Seen red before trusted.** Every new test or guard is run against the
+    code *before* the fix and watched fail, then watched pass after. One that
+    has only ever been green proves as much as an empty file does. This is not
+    a Phase 1 ritual that ended with Phase 1 — it applies to every test added
+    from here on.
+  - **A check is proven only for the input shapes it was fed.** Before
+    trusting one, list every shape the real pipeline hands it and feed it each.
+    The fixture sanitizer was tested on a single Pod and was a near no-op on
+    every `kubectl get -A` List for exactly that reason: the secrets sit one
+    level down under `.items[]`, half the capture is that shape, and the green
+    log read identically ([NOTES § D29](NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)).
+  - **A derived list asserts it found something.** When a check builds its own
+    rules from another source — the ban list from kube's signatures, the test
+    count from the runner — "extracted nothing" and "nothing to extract" print
+    the same line. Assert a known entry is present (`write-guard.py`'s
+    `CANARIES`) or the guard degrades in silence.
 - **Use comments sparingly**, with block markers when needed:
 
   ```
@@ -350,6 +366,12 @@ ticket. The reasoning behind each item lives in
    **Green tests are not the same as working software.** Also run the binary —
    against a fixture, or against kind — and say what you actually saw. Never
    report "done" for something that was not run.
+
+   **`just check` is the whole of CI, or it is a lie.** Anything CI runs that
+   `just check` skips can only ever fail *after* a push — which is precisely
+   how `cargo deny` first went red. A step whose tool is not installed locally
+   is added to `just check` anyway: a missing binary is a loud error, a missing
+   step is an invisible gap.
 5. **Security check (never skip):** run the
    [Security gate](#security-gate--run-this-list-on-every-change-no-exceptions)
    above — every box, every change. "This diff is only UI" is exactly when the

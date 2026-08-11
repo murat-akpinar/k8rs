@@ -33,6 +33,14 @@ OPS = "ops.rs"
 ALLOWED_PREFIXES = ("get", "list", "watch")
 ALLOWED_EXACT = {"logs", "log_stream", "apiserver_version"}
 
+# The ban list is *derived*, so the failure that matters is under-extraction:
+# a signature the parser did not recognise (a `&self` wrapped onto its own line,
+# an impl block behind a cfg) drops a mutation off the list silently, and a
+# guard that under-reports reads exactly like a guard with nothing to report.
+# These four have existed on `Api<K>` for the crate's whole life; if they are
+# missing, the parser broke, not kube-rs.
+CANARIES = {"delete", "patch", "replace", "create"}
+
 IMPL_API = re.compile(r"^\s*impl(?:<[^>]*>)?\s+Api<")
 METHOD = re.compile(r"^\s*pub\s+(?:async\s+)?fn\s+(?P<name>\w+)\s*\(\s*&\s*(?:mut\s+)?self")
 CALL = re.compile(r"\.\s*(?P<name>\w+)\s*\(")
@@ -119,6 +127,22 @@ def self_test() -> None:
         # A constructor is not a method, and another type's methods are not ours
         assert "namespaced" not in banned and "request" not in banned, banned
 
+        # The known limitation, proven rather than assumed: a signature whose
+        # `&self` wraps onto its own line is not matched, so it never reaches
+        # the ban list. That silent hole is exactly what CANARIES turns into a
+        # red build — it is the reason that check exists.
+        (fake / "wrapped.rs").write_text(
+            "impl<K> Api<K> {\n"
+            "    pub async fn replace(\n"
+            "        &self,\n"
+            "        name: &str,\n"
+            "    ) -> Result<K> { todo!() }\n"
+            "}\n"
+        )
+        wrapped = api_methods([fake / "wrapped.rs"])
+        assert "replace" not in wrapped, "the parser now reads wrapped signatures — tighten this test"
+        assert CANARIES - wrapped, "an under-extracted ban list must be visible to the caller"
+
         src = fake / "src"
         src.mkdir()
         (src / "k8s.rs").write_text(
@@ -155,6 +179,11 @@ if __name__ == "__main__":
     if not banned:
         sys.exit("write-guard: found kube but extracted no Api methods — the "
                  "parser broke, and a guard that finds nothing is worse than none")
+    missing = sorted(CANARIES - banned)
+    if missing:
+        sys.exit(f"write-guard: kube parsed, but {missing} are not in the derived "
+                 f"ban list — the signature parser is missing methods, so the "
+                 f"containment is partial. Fix the parser before trusting it.")
     problems = offences(ROOT / "src", banned)
     for line in problems:
         print(f"FAIL {line}", file=sys.stderr)

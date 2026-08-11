@@ -11,40 +11,60 @@
 #
 #   2. Node identifiers are refused, not rewritten. Node names carry real
 #      infrastructure, and a fixture whose node names were mangled would break
-#      the pod↔node joins the N-series rules are built on. So an object that
-#      *carries a node identifier* — a Node, or anything with `spec.nodeName` —
-#      is refused outright unless that identifier came from the kind test
-#      cluster, instead of quietly producing something that looks safe.
-#      Objects with no node identifier (a Deployment, a Service) are sanitized
-#      normally; there is nothing there to refuse.
-#      Fixtures come from kind — that is a decision, not a habit (NOTES § Settled).
+#      the pod↔node joins the N-series rules are built on. So a capture
+#      carrying a node identifier from anywhere other than the kind test
+#      cluster is refused outright, instead of quietly producing something that
+#      looks safe. Fixtures come from kind — that is a decision, not a habit
+#      (NOTES § Settled).
+#
+# **Everything here walks the whole document, never a fixed path.** Half the
+# capture is `kubectl get <kind> -A -o json`, which is a `List`: its objects sit
+# under `.items[]`, their pod templates two levels below that, and a filter
+# written against `.metadata.annotations` scrubs the wrapper and leaves every
+# real object untouched. That is the exact shape a path-based filter passes
+# silently, so there is no path-based clause left in this file.
 
+# Node identity, wherever it hides: `.nodeName` on any pod spec, and the
+# `.metadata.name` of a Node. A Node is recognised by `.status.nodeInfo`, which
+# no other kind has — `.kind` alone is not enough, because the items of a List
+# do not always carry one.
+def node_names:
+  [ .. | objects
+    | (.nodeName? // empty),
+      (select((.kind? == "Node") or (.status?.nodeInfo? != null))
+       | .metadata?.name? // empty) ]
+  | map(select(type == "string"));
+
+# Refused if *any* identifier is foreign, not only if all of them are: one real
+# node name inside an otherwise-kind capture is the leak, and it is also the
+# shape a half-migrated context produces.
 def refuse_foreign_nodes:
-  ( [ .. | objects | (.nodeName? // empty), (.metadata?.name? // empty) ]
-    | map(select(type == "string")) ) as $names
-  | if ($names | any(startswith("k8rs-") | not) and ($names | length) > 0)
-       and (($names | map(select(startswith("k8rs-"))) | length) == 0)
-       and (.kind == "Node" or (.spec?.nodeName? // "") != "")
+  (node_names | map(select(startswith("k8rs-") | not)) | unique) as $foreign
+  | if ($foreign | length) > 0
     then error("sanitize: node identifiers are not from the kind test cluster "
-               + "(expected names starting with k8rs-). Fixtures come from kind; "
-               + "refusing to write one captured somewhere else.")
+               + "(expected names starting with k8rs-, got \($foreign[0:3])). "
+               + "Fixtures come from kind; refusing to write a capture from "
+               + "anywhere else.")
     else .
     end;
 
-def strip_pem:
-  walk(
+refuse_foreign_nodes
+
+# Payloads, at every depth: object metadata, a List's items, a workload's pod
+# template — all the same walk.
+| del(.. | objects | .managedFields?, .annotations?, .selfLink?,
+                     .generateName?, .imagePullSecrets?)
+
+# The env *name* stays, the value goes: a rule reports which variable is unset,
+# never what was in it.
+| walk(
+    if type == "object" and (.env | type) == "array"
+    then .env |= map(if has("value") then .value = "REDACTED" else . end)
+    else .
+    end)
+
+| walk(
     if type == "string" and test("-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE)-----")
     then "REDACTED-PEM"
     else .
-    end
-  );
-
-refuse_foreign_nodes
-| del(.metadata.managedFields, .metadata.annotations)
-| del(.. | objects | .managedFields?)
-| ( .spec.containers[]?, .spec.initContainers[]?, .spec.ephemeralContainers[]?,
-    .spec.template?.spec?.containers[]?, .spec.template?.spec?.initContainers[]? )
-  |= ( if .env then .env |= map(if has("value") then .value = "REDACTED" else . end) else . end )
-| del(.spec.imagePullSecrets, .spec.template?.spec?.imagePullSecrets)
-| del(.metadata.selfLink, .metadata.generateName)
-| strip_pem
+    end)

@@ -216,7 +216,13 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       rewritten — mangled node names would break the pod↔node joins the
       N-series rules need. Tested by
       [`scripts/sanitize-test.sh`](scripts/sanitize-test.sh) in `just check`
-      and in CI
+      and in CI.
+      **Corrected 2026-08-12, before the capture ever ran:** the first version
+      was written against a single object and was a near no-op on the `List`
+      that `kubectl get -A` returns — eight of the fixtures below, `nodes.json`
+      among them, and the foreign-cluster refusal did not fire either. The
+      filter is now path-free and the test feeds both shapes
+      ([NOTES § D29](NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12))
 - [x] [`scripts/broken.yaml`](scripts/broken.yaml) (extracted from NOTES,
       which now points at it — two copies of a manifest drift). Planned for
       `tests/manifests/`; it lives beside the script that applies it instead,
@@ -287,8 +293,11 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
 
 **🔒 Security gate:** the sanitizer lands before the first fixture and is
 itself tested — feed it a *poisoned* object (fake token in an annotation, env
-value, node IP, private key) and assert the output is clean. A sanitizer with
-no test is a hope. Certificates in fixtures are generated locally and expire
+value, node IP, private key) and assert the output is clean, **in every shape
+the capture produces**: a single object *and* the `List` from
+`kubectl get -A`. A sanitizer with no test is a hope; a sanitizer tested on one
+of two shapes is worse, because it reads as proven
+([NOTES § D29](NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)). Certificates in fixtures are generated locally and expire
 quickly; no real cluster material, ever.
 
 **Done when:** `just fixtures` regenerates everything from scratch;
