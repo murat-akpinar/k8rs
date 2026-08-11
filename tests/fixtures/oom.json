@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-11T22:43:24Z",
+    "creationTimestamp": "2026-08-11T23:11:46Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-oom",
     "namespace": "default",
-    "resourceVersion": "1794",
-    "uid": "f9aad94e-81d0-4f79-8477-640791a68e69"
+    "resourceVersion": "4931",
+    "uid": "443d6cf9-6ade-42d7-9b4f-4481f0998407"
   },
   "spec": {
     "containers": [
@@ -42,7 +42,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-zb8bb",
+            "name": "kube-api-access-pb599",
             "readOnly": true
           }
         ]
@@ -75,7 +75,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-zb8bb",
+        "name": "kube-api-access-pb599",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -121,21 +121,21 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:43:25Z",
+        "lastTransitionTime": "2026-08-11T23:11:47Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:43:24Z",
+        "lastTransitionTime": "2026-08-11T23:11:46Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:49:21Z",
+        "lastTransitionTime": "2026-08-11T23:14:52Z",
         "message": "containers with unready status: [hog]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -144,7 +144,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:49:21Z",
+        "lastTransitionTime": "2026-08-11T23:14:52Z",
         "message": "containers with unready status: [hog]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -153,7 +153,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:43:24Z",
+        "lastTransitionTime": "2026-08-11T23:11:46Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -164,16 +164,16 @@
         "allocatedResources": {
           "memory": "64Mi"
         },
-        "containerID": "containerd://466947a1fa2c2c95f566403080770d8010c28d47b12373106dbee58e682e167d",
+        "containerID": "containerd://40aeef248e0e2b53359fbd0e23061eb28eee4ee89f4f3cee460b464217125b4e",
         "image": "docker.io/polinux/stress:latest",
         "imageID": "docker.io/polinux/stress@sha256:b6144f84f9c15dac80deb48d3a646b55c7043ab1d83ea0a697c09097aaad21aa",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://466947a1fa2c2c95f566403080770d8010c28d47b12373106dbee58e682e167d",
+            "containerID": "containerd://40aeef248e0e2b53359fbd0e23061eb28eee4ee89f4f3cee460b464217125b4e",
             "exitCode": 137,
-            "finishedAt": "2026-08-11T22:49:20Z",
+            "finishedAt": "2026-08-11T23:14:52Z",
             "reason": "OOMKilled",
-            "startedAt": "2026-08-11T22:49:20Z"
+            "startedAt": "2026-08-11T23:14:52Z"
           }
         },
         "name": "hog",
@@ -186,11 +186,11 @@
             "memory": "64Mi"
           }
         },
-        "restartCount": 6,
+        "restartCount": 5,
         "started": false,
         "state": {
           "waiting": {
-            "message": "back-off 5m0s restarting failed container=hog pod=broken-oom_default(f9aad94e-81d0-4f79-8477-640791a68e69)",
+            "message": "back-off 2m40s restarting failed container=hog pod=broken-oom_default(443d6cf9-6ade-42d7-9b4f-4481f0998407)",
             "reason": "CrashLoopBackOff"
           }
         },
@@ -216,7 +216,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-zb8bb",
+            "name": "kube-api-access-pb599",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -246,6 +246,6 @@
         "memory": "64Mi"
       }
     },
-    "startTime": "2026-08-11T22:43:24Z"
+    "startTime": "2026-08-11T23:11:46Z"
   }
 }

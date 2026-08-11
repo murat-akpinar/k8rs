@@ -5,42 +5,42 @@
       "apiVersion": "apps/v1",
       "kind": "ReplicaSet",
       "metadata": {
-        "creationTimestamp": "2026-08-11T23:11:46Z",
+        "creationTimestamp": "2026-08-11T23:11:47Z",
         "generation": 1,
         "labels": {
-          "app": "broken-quota",
-          "demo": "broken",
-          "pod-template-hash": "59654c756"
+          "app": "healthy-deploy",
+          "demo": "healthy",
+          "pod-template-hash": "7f84bdfb9b"
         },
-        "name": "broken-quota-59654c756",
-        "namespace": "k8rs-quota",
+        "name": "healthy-deploy-7f84bdfb9b",
+        "namespace": "default",
         "ownerReferences": [
           {
             "apiVersion": "apps/v1",
             "blockOwnerDeletion": true,
             "controller": true,
             "kind": "Deployment",
-            "name": "broken-quota",
-            "uid": "d444116c-2da3-4b2b-8ac7-6e25afbd9b31"
+            "name": "healthy-deploy",
+            "uid": "8e966abf-ac62-43eb-ac30-d876d504367c"
           }
         ],
-        "resourceVersion": "4122",
-        "uid": "f9ffa224-2f2c-4f07-9477-4726d0e1b024"
+        "resourceVersion": "4259",
+        "uid": "2bf009b6-2913-4fbb-bbfc-312c212b89d6"
       },
       "spec": {
-        "replicas": 1,
+        "replicas": 2,
         "selector": {
           "matchLabels": {
-            "app": "broken-quota",
-            "pod-template-hash": "59654c756"
+            "app": "healthy-deploy",
+            "pod-template-hash": "7f84bdfb9b"
           }
         },
         "template": {
           "metadata": {
             "labels": {
-              "app": "broken-quota",
-              "demo": "broken",
-              "pod-template-hash": "59654c756"
+              "app": "healthy-deploy",
+              "demo": "healthy",
+              "pod-template-hash": "7f84bdfb9b"
             }
           },
           "spec": {
@@ -53,7 +53,16 @@
                 "image": "busybox",
                 "imagePullPolicy": "Always",
                 "name": "app",
-                "resources": {},
+                "resources": {
+                  "limits": {
+                    "cpu": "100m",
+                    "memory": "64Mi"
+                  },
+                  "requests": {
+                    "cpu": "10m",
+                    "memory": "16Mi"
+                  }
+                },
                 "terminationMessagePath": "/dev/termination-log",
                 "terminationMessagePolicy": "File"
               }
@@ -67,17 +76,11 @@
         }
       },
       "status": {
-        "conditions": [
-          {
-            "lastTransitionTime": "2026-08-11T23:11:46Z",
-            "message": "pods \"broken-quota-59654c756-w68jf\" is forbidden: exceeded quota: deny-all-pods, requested: pods=1, used: pods=0, limited: pods=0",
-            "reason": "FailedCreate",
-            "status": "True",
-            "type": "ReplicaFailure"
-          }
-        ],
+        "availableReplicas": 2,
+        "fullyLabeledReplicas": 2,
         "observedGeneration": 1,
-        "replicas": 0,
+        "readyReplicas": 2,
+        "replicas": 2,
         "terminatingReplicas": 0
       }
     }

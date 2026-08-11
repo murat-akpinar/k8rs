@@ -7,41 +7,35 @@
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-readiness",
+    "name": "broken-restarts",
     "namespace": "default",
-    "resourceVersion": "4242",
-    "uid": "c2b69e13-28e5-4218-8480-5b135fb9ce77"
+    "resourceVersion": "4425",
+    "uid": "8b8d487a-885a-4905-bf43-c786de184272"
   },
   "spec": {
     "containers": [
       {
+        "args": [
+          "n=$(cat /state/n 2>/dev/null || echo 0)\nn=$((n + 1))\necho \"$n\" > /state/n\n[ \"$n\" -le 3 ] && exit 1\nsleep 3600\n"
+        ],
         "command": [
-          "sleep",
-          "3600"
+          "sh",
+          "-c"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
-        "name": "app",
-        "readinessProbe": {
-          "exec": {
-            "command": [
-              "sh",
-              "-c",
-              "exit 1"
-            ]
-          },
-          "failureThreshold": 3,
-          "periodSeconds": 5,
-          "successThreshold": 1,
-          "timeoutSeconds": 1
-        },
+        "name": "flaky",
         "resources": {},
         "terminationMessagePath": "/dev/termination-log",
         "terminationMessagePolicy": "File",
         "volumeMounts": [
           {
+            "mountPath": "/state",
+            "name": "state"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-qk449",
+            "name": "kube-api-access-lcpqr",
             "readOnly": true
           }
         ]
@@ -49,7 +43,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker",
+    "nodeName": "k8rs-worker2",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -74,7 +68,11 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-qk449",
+        "emptyDir": {},
+        "name": "state"
+      },
+      {
+        "name": "kube-api-access-lcpqr",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -131,20 +129,16 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:46Z",
-        "message": "containers with unready status: [app]",
+        "lastTransitionTime": "2026-08-11T23:12:32Z",
         "observedGeneration": 1,
-        "reason": "ContainersNotReady",
-        "status": "False",
+        "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:46Z",
-        "message": "containers with unready status: [app]",
+        "lastTransitionTime": "2026-08-11T23:12:32Z",
         "observedGeneration": 1,
-        "reason": "ContainersNotReady",
-        "status": "False",
+        "status": "True",
         "type": "ContainersReady"
       },
       {
@@ -157,18 +151,26 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://d73fcc1065c9072c07a4f704611b7e0a42f01bd44dee913d3c5f409274830dcf",
+        "containerID": "containerd://d24e47d04f0a9ea6a1da127550674dc3f5ea3f147061a8de01e69d6bb44b0ad7",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
-        "lastState": {},
-        "name": "app",
-        "ready": false,
+        "lastState": {
+          "terminated": {
+            "containerID": "containerd://42946647bcd40acd235efbf74d5c122136fc85d0dc682a56717599a0df88dfb5",
+            "exitCode": 1,
+            "finishedAt": "2026-08-11T23:12:06Z",
+            "reason": "Error",
+            "startedAt": "2026-08-11T23:12:06Z"
+          }
+        },
+        "name": "flaky",
+        "ready": true,
         "resources": {},
-        "restartCount": 0,
+        "restartCount": 3,
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-11T23:11:52Z"
+            "startedAt": "2026-08-11T23:12:32Z"
           }
         },
         "user": {
@@ -183,8 +185,12 @@
         },
         "volumeMounts": [
           {
+            "mountPath": "/state",
+            "name": "state"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-qk449",
+            "name": "kube-api-access-lcpqr",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }

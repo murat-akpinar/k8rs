@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-11T22:43:24Z",
+    "creationTimestamp": "2026-08-11T23:11:46Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-image",
     "namespace": "default",
-    "resourceVersion": "1698",
-    "uid": "fe6a5a25-fbea-4301-bd1b-cd0dd47c4cbe"
+    "resourceVersion": "4831",
+    "uid": "71086476-d47b-4a63-97e0-28833e30c6d0"
   },
   "spec": {
     "containers": [
@@ -24,7 +24,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-kbbwf",
+            "name": "kube-api-access-z2nj8",
             "readOnly": true
           }
         ]
@@ -57,7 +57,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-kbbwf",
+        "name": "kube-api-access-z2nj8",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -100,21 +100,21 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:43:25Z",
+        "lastTransitionTime": "2026-08-11T23:11:47Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:43:24Z",
+        "lastTransitionTime": "2026-08-11T23:11:46Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:43:24Z",
+        "lastTransitionTime": "2026-08-11T23:11:46Z",
         "message": "containers with unready status: [nope]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -123,7 +123,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:43:24Z",
+        "lastTransitionTime": "2026-08-11T23:11:46Z",
         "message": "containers with unready status: [nope]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -132,7 +132,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:43:24Z",
+        "lastTransitionTime": "2026-08-11T23:11:46Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -149,14 +149,14 @@
         "started": false,
         "state": {
           "waiting": {
-            "message": "Back-off pulling image \"registry.invalid/does-not-exist:v9\": ErrImagePull: failed to pull and unpack image \"registry.invalid/does-not-exist:v9\": failed to resolve reference \"registry.invalid/does-not-exist:v9\": failed to do request: Head \"https://registry.invalid/v2/does-not-exist/manifests/v9\": dial tcp: lookup registry.invalid on 172.18.0.1:53: no such host",
+            "message": "Back-off pulling image \"registry.invalid/does-not-exist:v9\": ErrImagePull: failed to pull and unpack image \"registry.invalid/does-not-exist:v9\": failed to resolve reference \"registry.invalid/does-not-exist:v9\": failed to do request: Head \"https://registry.invalid/v2/does-not-exist/manifests/v9\": dial tcp: lookup registry.invalid on REDACTED-IP:53: no such host",
             "reason": "ImagePullBackOff"
           }
         },
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-kbbwf",
+            "name": "kube-api-access-z2nj8",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -179,6 +179,6 @@
     ],
     "qosClass": "BestEffort",
     "resources": {},
-    "startTime": "2026-08-11T22:43:24Z"
+    "startTime": "2026-08-11T23:11:46Z"
   }
 }

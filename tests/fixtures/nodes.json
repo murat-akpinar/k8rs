@@ -16,13 +16,13 @@
           "node.kubernetes.io/exclude-from-external-load-balancers": ""
         },
         "name": "k8rs-control-plane",
-        "resourceVersion": "1939",
+        "resourceVersion": "4447",
         "uid": "dc9525d6-e89b-4409-81fa-f3e4a57409aa"
       },
       "spec": {
-        "podCIDR": "10.244.0.0/24",
+        "podCIDR": "REDACTED-IP/24",
         "podCIDRs": [
-          "10.244.0.0/24"
+          "REDACTED-IP/24"
         ],
         "providerID": "kind://docker/k8rs/k8rs-control-plane",
         "taints": [
@@ -59,7 +59,7 @@
         },
         "conditions": [
           {
-            "lastHeartbeatTime": "2026-08-11T22:52:14Z",
+            "lastHeartbeatTime": "2026-08-11T23:12:38Z",
             "lastTransitionTime": "2026-08-11T22:42:49Z",
             "message": "kubelet has sufficient memory available",
             "reason": "KubeletHasSufficientMemory",
@@ -67,7 +67,7 @@
             "type": "MemoryPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-11T22:52:14Z",
+            "lastHeartbeatTime": "2026-08-11T23:12:38Z",
             "lastTransitionTime": "2026-08-11T22:42:49Z",
             "message": "kubelet has no disk pressure",
             "reason": "KubeletHasNoDiskPressure",
@@ -75,7 +75,7 @@
             "type": "DiskPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-11T22:52:14Z",
+            "lastHeartbeatTime": "2026-08-11T23:12:38Z",
             "lastTransitionTime": "2026-08-11T22:42:49Z",
             "message": "kubelet has sufficient PID available",
             "reason": "KubeletHasSufficientPID",
@@ -83,7 +83,7 @@
             "type": "PIDPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-11T22:52:14Z",
+            "lastHeartbeatTime": "2026-08-11T23:12:38Z",
             "lastTransitionTime": "2026-08-11T22:43:13Z",
             "message": "kubelet is posting ready status",
             "reason": "KubeletReady",
@@ -228,13 +228,13 @@
           "kubernetes.io/os": "linux"
         },
         "name": "k8rs-worker",
-        "resourceVersion": "1783",
+        "resourceVersion": "4946",
         "uid": "18b4f9d5-6f04-48d1-ae38-07cfbb81142d"
       },
       "spec": {
-        "podCIDR": "10.244.1.0/24",
+        "podCIDR": "REDACTED-IP/24",
         "podCIDRs": [
-          "10.244.1.0/24"
+          "REDACTED-IP/24"
         ],
         "providerID": "kind://docker/k8rs/k8rs-worker"
       },
@@ -265,7 +265,7 @@
         },
         "conditions": [
           {
-            "lastHeartbeatTime": "2026-08-11T22:50:41Z",
+            "lastHeartbeatTime": "2026-08-11T23:16:13Z",
             "lastTransitionTime": "2026-08-11T22:43:03Z",
             "message": "kubelet has sufficient memory available",
             "reason": "KubeletHasSufficientMemory",
@@ -273,7 +273,7 @@
             "type": "MemoryPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-11T22:50:41Z",
+            "lastHeartbeatTime": "2026-08-11T23:16:13Z",
             "lastTransitionTime": "2026-08-11T22:43:03Z",
             "message": "kubelet has no disk pressure",
             "reason": "KubeletHasNoDiskPressure",
@@ -281,7 +281,7 @@
             "type": "DiskPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-11T22:50:41Z",
+            "lastHeartbeatTime": "2026-08-11T23:16:13Z",
             "lastTransitionTime": "2026-08-11T22:43:03Z",
             "message": "kubelet has sufficient PID available",
             "reason": "KubeletHasSufficientPID",
@@ -289,7 +289,7 @@
             "type": "PIDPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-11T22:50:41Z",
+            "lastHeartbeatTime": "2026-08-11T23:16:13Z",
             "lastTransitionTime": "2026-08-11T22:43:23Z",
             "message": "kubelet is posting ready status",
             "reason": "KubeletReady",
@@ -441,13 +441,13 @@
           "kubernetes.io/os": "linux"
         },
         "name": "k8rs-worker2",
-        "resourceVersion": "1428",
+        "resourceVersion": "4513",
         "uid": "5b99fa8f-a76f-4f8d-9050-299df7a949de"
       },
       "spec": {
-        "podCIDR": "10.244.2.0/24",
+        "podCIDR": "REDACTED-IP/24",
         "podCIDRs": [
-          "10.244.2.0/24"
+          "REDACTED-IP/24"
         ],
         "providerID": "kind://docker/k8rs/k8rs-worker2"
       },
@@ -478,7 +478,7 @@
         },
         "conditions": [
           {
-            "lastHeartbeatTime": "2026-08-11T22:47:29Z",
+            "lastHeartbeatTime": "2026-08-11T23:12:59Z",
             "lastTransitionTime": "2026-08-11T22:43:03Z",
             "message": "kubelet has sufficient memory available",
             "reason": "KubeletHasSufficientMemory",
@@ -486,7 +486,7 @@
             "type": "MemoryPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-11T22:47:29Z",
+            "lastHeartbeatTime": "2026-08-11T23:12:59Z",
             "lastTransitionTime": "2026-08-11T22:43:03Z",
             "message": "kubelet has no disk pressure",
             "reason": "KubeletHasNoDiskPressure",
@@ -494,7 +494,7 @@
             "type": "DiskPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-11T22:47:29Z",
+            "lastHeartbeatTime": "2026-08-11T23:12:59Z",
             "lastTransitionTime": "2026-08-11T22:43:03Z",
             "message": "kubelet has sufficient PID available",
             "reason": "KubeletHasSufficientPID",
@@ -502,7 +502,7 @@
             "type": "PIDPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-11T22:47:29Z",
+            "lastHeartbeatTime": "2026-08-11T23:12:59Z",
             "lastTransitionTime": "2026-08-11T22:43:21Z",
             "message": "kubelet is posting ready status",
             "reason": "KubeletReady",

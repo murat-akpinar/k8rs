@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-11T22:43:24Z",
+    "creationTimestamp": "2026-08-11T23:11:46Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-pending",
     "namespace": "default",
-    "resourceVersion": "643",
-    "uid": "2166c4e5-9525-4a53-870b-a3e34713c77d"
+    "resourceVersion": "4086",
+    "uid": "2f6a210d-1ba4-4c3d-b661-09e08a790b43"
   },
   "spec": {
     "containers": [
@@ -32,7 +32,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-xr22k",
+            "name": "kube-api-access-2qpzm",
             "readOnly": true
           }
         ]
@@ -64,7 +64,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-xr22k",
+        "name": "kube-api-access-2qpzm",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -107,7 +107,7 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T22:43:24Z",
+        "lastTransitionTime": "2026-08-11T23:11:46Z",
         "message": "0/3 nodes are available: 1 node(s) had untolerated taint(s), 2 Insufficient cpu. no new claims to deallocate, preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.",
         "observedGeneration": 1,
         "reason": "Unschedulable",
