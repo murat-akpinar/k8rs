@@ -124,7 +124,10 @@ Goal: the name is safe and the repo builds, lints and tests empty.
       `lto`/`strip`/`codegen-units = 1`. **No `panic = "abort"`**: the terminal
       is restored by a `Drop` guard as well as a panic hook, and `Drop` does
       not run when a panic aborts instead of unwinding (invariant 8)
-- [ ] Publish `k8rs` placeholder to crates.io (needs `cargo login` — user)
+- [x] Publish `k8rs` placeholder to crates.io — **`0.0.0`, live 2026-08-12**.
+      The name is claimed; the binary prints "not built yet" and points at the
+      repository. Not a release: no tag, no GitHub release, no binaries. M1
+      ships `0.0.1`, M4 ships `0.1.0`
 - [x] `clippy.toml` — present with an empty `disallowed-methods` list and the
       reason written in it: entries arrive with kube in Phase 5, and clippy is
       the *fast local signal*, never the containment guarantee. Nothing calls
@@ -206,14 +209,26 @@ Goal: real cluster JSON, safe to commit, reproducible with one command.
 Wider than the old plan — the rule set now covers nodes and certificates, and
 `analysis.rs` needs a whole-cluster snapshot, not a handful of pods.
 
-- [ ] Fixture sanitization in the capture script — **lands before any
-      fixture file** (REQUIREMENTS G-5; a leak never leaves git history)
+- [x] Fixture sanitization — [`scripts/sanitize.jq`](scripts/sanitize.jq),
+      **landed before any fixture file** (REQUIREMENTS G-5; a leak never leaves
+      git history). Payloads destroyed, references kept, and an object carrying
+      node identifiers that are not the kind cluster's is *refused* rather than
+      rewritten — mangled node names would break the pod↔node joins the
+      N-series rules need. Tested by
+      [`scripts/sanitize-test.sh`](scripts/sanitize-test.sh) in `just check`
+      and in CI
 - [x] [`scripts/broken.yaml`](scripts/broken.yaml) (extracted from NOTES,
       which now points at it — two copies of a manifest drift). Planned for
       `tests/manifests/`; it lives beside the script that applies it instead,
       because no Rust test reads it
-- [ ] `tests/manifests/healthy.yaml` — the negative side. Every rule needs a
-      healthy counterpart or its false-positive test is fiction
+- [x] [`scripts/healthy.yaml`](scripts/healthy.yaml) — the negative side: a
+      genuinely healthy pod (ready, limits set, an init container that
+      *succeeds*) and a Deployment that rolled out cleanly, the negative side
+      of W1/W2. Every rule needs a healthy counterpart or its false-positive
+      test is fiction. Applied by `cluster.sh break` alongside the broken ones,
+      so both sides are captured from the same cluster at the same moment.
+      Planned for `tests/manifests/`; it lives beside the script that applies
+      it, for the same reason `broken.yaml` does
 - [x] **Pin the kind node image** — `kindest/node:v1.36.1`, pinned in
       [`scripts/cluster.sh`](scripts/cluster.sh). Write the version down — the fixtures are
       captured from it, so an unpinned image means fixtures that change when
@@ -230,21 +245,27 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       --wait=false` leaves a pod Terminating forever behind its finalizer,
       which is the state to capture. `cluster-down` must strip that finalizer
       or the kind cluster will not tear down
-- [ ] Add `broken-init` to [`scripts/broken.yaml`](scripts/broken.yaml) and to
-      `cluster.sh verify` — an init container that exits non-zero, so the pod
-      sits at `Init:CrashLoopBackOff`. Phase 2 is not frozen yet, which is the
-      only reason this is cheap
+- [x] `broken-init` added to [`scripts/broken.yaml`](scripts/broken.yaml) and
+      to `cluster.sh verify`
       ([NOTES § D27](NOTES.md#d27--two-findings-the-open-watch-already-paid-for-2026-08-12))
-- [ ] `just fixtures`: capture the 10 broken pods + healthy pods + **nodes,
-      deployments, services, PVCs, PDBs** + events + `K8S_VERSION` stamp
+- [x] `just fixtures` written: `cluster.sh verify` and the sanitizer test run
+      *first*, then the 10 broken pods + the healthy pair + the quota workload's
+      Deployment and ReplicaSets + **nodes, deployments, statefulsets,
+      daemonsets, services, PVCs, PDBs** + the `K8S_VERSION` stamp. Every
+      object goes through `sanitize.jq` on the way out — never afterwards
+- [ ] **Run it**: `just cluster-up && just cluster-down` on the LAN host, then
+      `just fixtures`, then eyeball the output. Nothing above is proven until
+      the capture has actually run against a cluster
 - [x] A multi-node kind config — N-series rules (cordon, skew, pressure) and
       drain safety cannot be captured on a single-node cluster. Three nodes
       (1 control-plane + 2 workers); `K8RS_WORKERS` changes the count
-- [ ] **A workload with zero pods**: a namespace with a `ResourceQuota` that
-      denies creation, plus a Deployment blocked by it — capture the
-      Deployment *and* its ReplicaSet (`ReplicaFailure` carries the message).
-      The one fixture where the pod list is empty and a finding must still
-      appear ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
+- [x] **A workload with zero pods** — `broken-quota`, in its **own
+      namespace** `k8rs-quota`: a `pods: "0"` quota applies namespace-wide, so
+      leaving it beside the others would have blocked every pod above from ever
+      being created again on a re-apply. `cluster.sh verify` asserts the
+      ReplicaSet's `ReplicaFailure` instead of a pod state, because the whole
+      point is that no pod object exists
+      ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
 - [ ] A cluster-wide snapshot fixture (everything at one instant) for
       `analysis.rs` reports
 - [ ] Certificate fixtures: an expiring client certificate PEM (generated

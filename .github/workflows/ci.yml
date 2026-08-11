@@ -45,6 +45,11 @@ jobs:
           python3 scripts/write-guard.py --self-test
           python3 scripts/write-guard.py
 
+      # The sanitizer is a security control: it is fed a poisoned object and
+      # must hand back nothing secret (todo.md, Phase 2 § Security gate).
+      - name: fixture sanitizer
+        run: bash scripts/sanitize-test.sh
+
       - name: docs links and anchors
         run: python3 scripts/check-docs.py
 

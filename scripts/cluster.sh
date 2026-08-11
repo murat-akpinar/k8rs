@@ -28,6 +28,7 @@ WORKERS="${K8RS_WORKERS:-2}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BROKEN="$HERE/broken.yaml"
+HEALTHY="$HERE/healthy.yaml"
 
 need() { command -v "$1" >/dev/null || { echo "$1 is not installed" >&2; exit 1; }; }
 
@@ -65,6 +66,10 @@ down() {
 break_it() {
   need kubectl
   kubectl --context "kind-$CLUSTER" apply -f "$BROKEN"
+  # The healthy side goes up with the broken one: a rule needs both fixtures,
+  # and capturing them from the same cluster at the same time is what makes
+  # the negative test comparable to the positive one.
+  kubectl --context "kind-$CLUSTER" apply -f "$HEALTHY"
   echo
   echo "States need a few minutes to settle — CrashLoopBackOff has to enter"
   echo "backoff and the OOM kill has to actually happen. Check with: $0 status"
@@ -80,6 +85,10 @@ unbreak() {
   # of the fixture, and it is why a plain delete would hang here forever.
   "${kc[@]}" patch pod broken-stuck -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
   "${kc[@]}" delete pod -l demo=broken --wait=false --ignore-not-found
+  "${kc[@]}" delete pod,deployment -l demo=healthy --wait=false --ignore-not-found
+  # The W1 fixture lives in its own namespace (a pods: "0" quota would
+  # otherwise block every pod above from being recreated).
+  "${kc[@]}" delete namespace k8rs-quota --wait=false --ignore-not-found
 }
 
 # A fixture that never reaches the state its rule is about is a test that
@@ -91,7 +100,7 @@ verify() {
   local kc=(kubectl --context "kind-$CLUSTER")
   local deadline=$(( SECONDS + ${K8RS_VERIFY_TIMEOUT:-420} ))
 
-  local names=(oom crashloop image config pending hostpath readiness nolimits stuck)
+  local names=(oom crashloop image config pending hostpath readiness nolimits stuck init)
   local -A want=(
     [oom]='.status.containerStatuses[0] | (.lastState.terminated // .state.terminated // {}) | .reason=="OOMKilled" and .exitCode==137'
     [crashloop]='.status.containerStatuses[0] | .state.waiting.reason=="CrashLoopBackOff" and .lastState.terminated.exitCode==1'
@@ -102,6 +111,7 @@ verify() {
     [readiness]='.status.phase=="Running" and .status.containerStatuses[0].ready==false'
     [nolimits]='.status.phase=="Running" and (.spec.containers[0].resources.limits==null)'
     [stuck]='.status.phase=="Running" and ((.metadata.finalizers//[])|length)>0'
+    [init]='([.status.initContainerStatuses[]?|select(.state.waiting.reason=="CrashLoopBackOff" or .lastState.terminated.exitCode==1)]|length)>0'
   )
   local -A why=(
     [oom]="rule 2 — killed for exceeding its memory limit"
@@ -113,6 +123,7 @@ verify() {
     [readiness]="rules 7+11 — running, but never ready"
     [nolimits]="rule 9 — no limits (a Capacity row, not an alert)"
     [stuck]="rule 12 — a finalizer nothing removes"
+    [init]="D27 — the init container fails, so the app container never starts"
   )
 
   local pending_list=("${names[@]}") still fail=0
@@ -140,7 +151,20 @@ verify() {
       fail=1
     fi
   done
-  [ $fail -eq 0 ] && echo "  all 9 fixtures reached the state their rule is about"
+  # W1 is not a pod: the whole point is that no pod exists. The truth lives on
+  # the ReplicaSet the Deployment made, and nowhere else.
+  local rf='[.items[].status.conditions[]?|select(.type=="ReplicaFailure" and .status=="True")]|length>0'
+  if "${kc[@]}" get replicasets -n k8rs-quota -o json 2>/dev/null | jq -e "$rf" >/dev/null 2>&1; then
+    printf '  PASS  %-17s %s\n' "broken-quota" "D28/W1 — quota denies every pod, no pod object exists"
+  else
+    printf '  FAIL  %-17s %s\n' "broken-quota" "D28/W1 — expected ReplicaFailure on the ReplicaSet"
+    "${kc[@]}" get replicasets -n k8rs-quota -o json 2>/dev/null \
+      | jq -c '[.items[]|{name:.metadata.name, conditions:.status.conditions}]' \
+      | sed 's/^/          got: /' || echo "          got: no replicasets in k8rs-quota"
+    fail=1
+  fi
+
+  [ $fail -eq 0 ] && echo "  all 11 fixtures reached the state their rule is about"
   return $fail
 }
 # --- FIXTURES END ---
