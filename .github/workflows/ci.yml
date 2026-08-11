@@ -45,6 +45,12 @@ jobs:
           python3 scripts/write-guard.py --self-test
           python3 scripts/write-guard.py
 
+      # Every fixture is trusted because a jq predicate in cluster.sh said it
+      # reached the state its rule is about. Those predicates only ever ran
+      # against a live cluster, where too-loose and too-tight look identical.
+      - name: fixture-state predicates
+        run: bash scripts/verify-test.sh
+
       # The sanitizer is a security control: it is fed a poisoned object and
       # must hand back nothing secret (todo.md, Phase 2 § Security gate).
       - name: fixture sanitizer
@@ -62,6 +68,13 @@ jobs:
 
       - name: docs links and anchors
         run: python3 scripts/check-docs.py
+
+      # The mockups are the spec views.rs has to match, and "fits 80x24" was a
+      # claim nobody had measured. Measured in display columns, not bytes.
+      - name: screen mockups fit 80x24
+        run: |
+          python3 scripts/screens-check.py --self-test
+          python3 scripts/screens-check.py
 
   deny:
     name: cargo-deny
