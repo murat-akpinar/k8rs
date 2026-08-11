@@ -4,6 +4,7 @@
 
 - *(rules)* See workloads whose pods were never created ([4ea285d](https://github.com/murat-akpinar/k8rs/commit/4ea285d34ca40c06bb2a589ba746561737b2833f))
 - *(ci)* Scaffold the crate and the guards that must be seen red ([d42b5e2](https://github.com/murat-akpinar/k8rs/commit/d42b5e2aaac24eaebd56d39991a5c5611c7950e0)) — cargo init at 0.0.0, clippy.toml, deny.toml, justfile and the CI workflow. Two guards ship with their own proof: test-guard compares declared against listed tests, write-guard derives the write ban from kube's own Api surface.
+- *(fixtures)* Sanitize before capture, and cover the two blind spots ([17d2556](https://github.com/murat-akpinar/k8rs/commit/17d2556c5e1ec36bf16e7792707ff8b583635b6e)) — The sanitizer lands before the first fixture, as required: payloads destroyed, references kept, and an object whose node identifiers are not the kind cluster's is refused rather than quietly rewritten. It is tested against a poisoned object in just check and in CI.
 
 ### 🐛 Bug Fixes
 
@@ -14,6 +15,7 @@
 - Record the git remote and the history restart ([244f9ce](https://github.com/murat-akpinar/k8rs/commit/244f9cec080ba07a956b703b676f9aba629a616a))
 - Close the four holes that let a green build lie ([3fc8b6d](https://github.com/murat-akpinar/k8rs/commit/3fc8b6dee11cdfa2033e6a2bb66feeb7179ee01f))
 - Cover init containers and ship rule 10 in v1 ([8add7fb](https://github.com/murat-akpinar/k8rs/commit/8add7fbfee62ca99d6c2230b70f9b523a4cc15a0))
+- Add the phase-close ritual to the workflow ([8333b66](https://github.com/murat-akpinar/k8rs/commit/8333b668eeb3453db3fed0a1398e043fcd0b5bda)) — A phase closes with the todo boxes checked and true, the security gate run, docs and changelog synced, CI green — and a plain statement that the context should be cleared. Clearing is the user's command; nothing here can issue it.
 
 ### ⚙️ Miscellaneous Tasks
 
