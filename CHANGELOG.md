@@ -3,6 +3,11 @@
 ### 🚀 Features
 
 - *(rules)* See workloads whose pods were never created ([4ea285d](https://github.com/murat-akpinar/k8rs/commit/4ea285d34ca40c06bb2a589ba746561737b2833f))
+- *(ci)* Scaffold the crate and the guards that must be seen red ([d42b5e2](https://github.com/murat-akpinar/k8rs/commit/d42b5e2aaac24eaebd56d39991a5c5611c7950e0)) — cargo init at 0.0.0, clippy.toml, deny.toml, justfile and the CI workflow. Two guards ship with their own proof: test-guard compares declared against listed tests, write-guard derives the write ban from kube's own Api surface.
+
+### 🐛 Bug Fixes
+
+- *(ci)* Let cargo-deny accept our own GPL licence ([2717bd2](https://github.com/murat-akpinar/k8rs/commit/2717bd2b7cfd8cccd785111652ee12f407dfc9fe)) — cargo-deny checks the root crate too, so the permissive-only policy written for dependencies rejected k8rs itself. The exception is scoped to this crate; a copyleft dependency is still refused.
 
 ### 📚 Documentation
 
