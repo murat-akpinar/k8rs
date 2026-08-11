@@ -25,6 +25,13 @@ allow = [
 ]
 confidence-threshold = 0.9
 
+# k8rs itself is GPL-3.0-or-later and cargo-deny checks the root crate along
+# with everything it pulls in — so without this line our own licence fails our
+# own dependency policy. The exception is scoped to this one crate on purpose:
+# the policy above still rejects a copyleft *dependency*, which is the thing it
+# exists to prevent ([NOTES § D13](NOTES.md)).
+exceptions = [{ name = "k8rs", allow = ["GPL-3.0-or-later"] }]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

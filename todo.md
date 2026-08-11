@@ -163,9 +163,16 @@ Goal: the name is safe and the repo builds, lints and tests empty.
       badly formatted file that no `mod` declaration reached, and it passed —
       `cargo fmt` never visits a file that is not part of the crate. The proof
       was invalid, not the guard; re-run against `main.rs` it went red.
-      **Still unproven, honestly:** `cargo deny`, which cannot be made to fail
-      while the crate has zero dependencies. Its red proof belongs to Phase 3,
-      with the first dependency, and it is not counted as proven until then
+      | `cargo deny check licenses` | nothing — it failed on its own, on the *first* CI run | **red** |
+
+      `cargo deny` was written off as unprovable until the first dependency
+      existed, and then proved itself: it checks the **root crate** as well as
+      the graph, so k8rs's own `GPL-3.0-or-later` failed the permissive-only
+      policy meant for dependencies. Fixed with an exception scoped to this one
+      crate — the policy still rejects a copyleft *dependency*, which is what
+      it is for. What that run proves is that the licence check runs and can
+      reject; the advisory and copyleft-dependency paths are still unproven and
+      belong to Phase 3, with the first real dependency
 - [x] CI: the write-containment check, written as an **allowlist** —
       [`scripts/write-guard.py`](scripts/write-guard.py). The ban list is not
       typed by hand: it is *derived* from every `&self` method of `Api<K>` in
