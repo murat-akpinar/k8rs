@@ -1,6 +1,10 @@
 # k8rs — documentation
 
-> Status: **design phase, no code yet** · Last updated: 2026-08-11
+> Status: **Phase 2 — test data.** The design is closed; the guards and the
+> fixture-capture pipeline exist, and `tests/fixtures/` holds real captures from
+> a kind cluster you can stand up yourself
+> ([tech-stack § The test cluster](tech-stack.md#the-test-cluster--reproducing-it-yourself)).
+> No product code yet — `rules.rs` opens Phase 3 · Last updated: 2026-08-12
 
 This directory is the **built** state: what is true of the shipped tool, written
 for humans outside this repo. The reasoning behind any of it lives one level up,
