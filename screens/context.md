@@ -16,12 +16,12 @@ that gap closed ([NOTES § D16](../NOTES.md#d16--the-context-switcher)).
 │    │                                                      │        │
 │    │  ▸ prod-eu          (current)                        │        │
 │    │    staging                                           │        │
-│    │    kind-k8rs                                          │        │
+│    │    kind-k8rs                                         │        │
 │    │    dev-cluster      ⚠ TLS not verified               │        │
 │    │                                                      │        │
 │    │  staging  →  https://staging.internal:6443           │        │
 │    │                                                      │        │
-│    │  k8rs does not change your kubeconfig — it just       │        │
+│    │  k8rs does not change your kubeconfig — it just      │        │
 │    │  talks to the cluster you pick here.                 │        │
 │    │                                                      │        │
 │    │         [ ⏎ switch ]     [ esc cancel ]              │        │

@@ -9,13 +9,13 @@ own `Table` printing — the exact columns `kubectl get` would show.
 ┌────────────────────┬───────────────────────────────────────────────┐
 │ ALERTS      3 ● 7 ▲│  deployments          ns: payments            │
 │ RESOURCES          │                                               │
-│▸  workloads        │  NAME       READY  UP-TO-DATE  AVAILABLE  AGE │
-│     deployments  12│  ▸ web      3/5    5           3          12d │
-│     statefulsets  3│    api      6/6    6           6          40d │
-│     daemonsets    5│    worker   2/2    2           2          8d  │
-│     pods         84│    cron-sync 1/1   1           1          3d  │
+│▸  workloads        │    NAME      READY  UP-TO-DATE  AVAILABLE  AGE│
+│     deployments  12│▸ ● web       3/5    5           3          12d│
+│     statefulsets  3│    api       6/6    6           6          40d│
+│     daemonsets    5│    worker    2/2    2           2          8d │
+│     pods         84│    cron-sync 1/1    1           1          3d │
 │     jobs          7│                                               │
-│   network          │  ● web has 3 pods with findings — ⏎ to see    │
+│   network          │  ● web has 3 pods with problems — ⏎ to see    │
 │   storage          │                                               │
 │   config           │                                               │
 │   cluster          │                                               │
@@ -23,7 +23,7 @@ own `Table` printing — the exact columns `kubectl get` would show.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get deployments -n payments                              │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ details  s scale  r restart  ctrl-d delete  / filter    │
+│ ↑↓ move  ⏎ open  s scale  r restart  ctrl-d delete  / filter       │
 └────────────────────────────────────────────────────────────────────┘
 ```
 

@@ -9,7 +9,7 @@ launch**.
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│▸ ALERTS     3 ● 7 ▲│                                               │
+│▸ ALERTS            │                                               │
 │ RESOURCES          │                                               │
 │   workloads        │               ○  nothing is broken            │
 │   network          │                                               │
@@ -39,8 +39,8 @@ now* — a lint report would never be empty.
 ```
  nodes …                        k8rs      ctx: prod-eu · connecting…
 ┌────────────────────┬───────────────────────────────────────────────┐
-│▸ ALERTS     3 ● 7 ▲│                                               │
-│ RESOURCES          │        reading the cluster… 2 140 pods        │
+│▸ ALERTS            │                                               │
+│ RESOURCES          │        reading the cluster… 2,140 pods        │
 │   workloads        │                                               │
 │   network          │        Large clusters take a moment. Findings │
 │   storage          │        appear as they are found — this list   │
@@ -100,8 +100,8 @@ out mid-session ([NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kub
 │ RESOURCES          │  ⚠ Your login expired.                        │
 │   workloads        │                                               │
 │   network          │    The cluster still knows who you are, but   │
-│   storage          │    the token your kubeconfig mints has timed  │
-│   config           │    out.                                       │
+│   storage          │    the login token your kubeconfig creates    │
+│   config           │    has timed out.                             │
 │   cluster          │                                               │
 │ ANALYSIS           │    Renew it, then press X and pick this       │
 │   capacity      1 ▲│    cluster again:                             │
@@ -139,7 +139,7 @@ on the cluster-wide list falls back instead of failing
 ┌────────────────────┬───────────────────────────────────────────────┐
 │▸ ALERTS     3 ● 7 ▲│                                               │
 │ RESOURCES          │  You can't list pods across the whole         │
-│   workloads        │  cluster, so k8rs is showing the namespace     │
+│   workloads        │  cluster, so k8rs is showing the namespace    │
 │   network          │  your kubeconfig points at: payments.         │
 │   storage          │                                               │
 │   config           │  Use  --namespace <name>  for a different     │

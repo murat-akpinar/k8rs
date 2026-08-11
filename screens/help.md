@@ -5,9 +5,7 @@ tool for beginners may not hide its verbs behind memory.
 
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
-┌────────────────────────────────────────────────────────────────────┐
-│  Keys                                                              │
-│                                                                    │
+┌ Keys ──────────────────────────────────────────────────────────────┐
 │  Moving around                                                     │
 │    ↑ ↓ / j k    move            ⏎     open the selected thing      │
 │    tab          next panel      esc   back / close                 │

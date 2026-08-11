@@ -9,28 +9,28 @@ now* ([NOTES § D2](../NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────┬───────────────────────────────────────────────┐
-│ ALERTS      3 ● 7 ▲│  Capacity — where the cluster is lying to     │
-│ RESOURCES          │  itself                                       │
+│ ALERTS      3 ● 7 ▲│  What each node promised, and what it has     │
+│ RESOURCES          │                                               │
 │   workloads        │                                               │
-│   network          │  NODE      REQUESTED  ALLOCATABLE  IN USE     │
+│   network          │  NODE      PROMISED   USABLE       IN USE     │
 │   storage          │  node-1    7.4 cpu    8 cpu        2.1 cpu    │
-│   config           │  node-2    9.1 cpu ●  8 cpu        3.4 cpu    │
+│   config           │  node-2    9.1 cpu ▲  8 cpu        3.4 cpu    │
 │   cluster          │  node-3    1.2 cpu    8 cpu        0.4 cpu    │
 │ ANALYSIS           │                                               │
 │▸  capacity      1 ▲│  node-2 has promised more CPU than it has.    │
-│   certificates  30d│  Nothing new can be scheduled there.          │
+│   certificates  30d│  Nothing new can start there.                 │
 │   drain safety     │                                               │
-│   waste            │  No limits set: 34 workloads — ⏎ to list      │
+│   waste            │  No CPU/memory limit: 34 workloads — ⏎ to list│
 │   versions         │  (needs metrics-server for the IN USE column) │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get nodes -o json                                        │
 │ $ kubectl top nodes                                                │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open the object  esc back  ? all keys                   │
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-`No limits set` is the old rule 9. It is a column here, not an alarm: a
+`No CPU/memory limit` is the old rule 9. It is a row here, not an alarm: a
 cluster has hundreds of them and none of them is broken.
 
 ## Drain safety
@@ -49,7 +49,7 @@ forty minutes in.
 │   config           │             copies and has exactly 5. Draining│
 │   cluster          │             would take one away, so it waits  │
 │ ANALYSIS           │             forever.                          │
-│   capacity      1 ▲│             → raise replicas, or relax the    │
+│   capacity      1 ▲│             → run one more copy, or relax the │
 │   certificates  30d│               disruption budget first         │
 │▸  drain safety     │  node-3   ▲ 2 pods nothing would restart      │
 │   waste            │             (started by hand, no Deployment)  │
@@ -57,7 +57,7 @@ forty minutes in.
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get pdb -A                                               │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open the object  esc back  ? all keys                   │
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,18 +71,18 @@ forty minutes in.
 │   workloads        │  ● shop/api-svc     matches no pod            │
 │   network          │      This Service points at nothing. Anything │
 │   storage          │      calling it gets a 503.                   │
-│   config           │  ▲ data/pgdata-old  bound, unused, 100Gi      │
+│   config           │  ▲ data/pgdata-old  reserved, unused, 100Gi   │
 │   cluster          │  ▲ 47 pods          Evicted / Completed       │
 │ ANALYSIS           │  ○ 12 replicasets   parked at 0 replicas      │
 │   capacity      1 ▲│                                               │
-│   certificates  30d│  Posture (not broken, worth knowing):         │
+│   certificates  30d│  Worth knowing (not broken):                  │
 │   drain safety     │  ○ 9 pods mount a path from the node          │
 │▸  waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get svc,endpointslices -A                                │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open the object  esc back  ? all keys                   │
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -113,7 +113,7 @@ is why k8rs is lighter than k9s
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get csr                                                  │
 ├────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move  ⏎ open the object  esc back  ? all keys                   │
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 

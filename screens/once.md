@@ -24,7 +24,7 @@ prod-eu · 84 pods · 3 nodes
   → check the app's /healthz endpoint
 
 ▲ infra/node-3 · 6 days ago
-  Marked unschedulable and left that way
+  Set to refuse new pods (cordoned)
   → someone's maintenance window never closed
 
 1 critical, 2 warnings
