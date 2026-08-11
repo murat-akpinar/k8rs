@@ -243,9 +243,13 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       compatibility), so this is a reproducibility choice, not a compatibility
       one
 - [x] kind cluster up, states settled (CrashLoop in backoff, OOM kills seen).
-      `cluster.sh verify` asserts all nine reached the state their rule is
-      about — 9/9 pass. A fixture that never reaches its state is a test that
-      cannot fail, and that has to be caught before anything is captured.
+      `cluster.sh verify` asserts each one reached the state its rule is
+      about — **13/13 pass** against the real cluster. A fixture that never
+      reaches its state is a test that cannot fail, and that has to be caught
+      before anything is captured. The predicates that decide it are
+      themselves proven offline by
+      [`scripts/verify-test.sh`](scripts/verify-test.sh), which found one that
+      matched crashlooping pods as readiness failures.
       Original note follows:
       Rule 12 needs one extra move: `kubectl delete pod broken-stuck
       --wait=false` leaves a pod Terminating forever behind its finalizer,
@@ -261,7 +265,15 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       object goes through `sanitize.jq` on the way out — never afterwards
 - [ ] **Run it**: `just cluster-up && just cluster-down` on the LAN host, then
       `just fixtures`, then eyeball the output. Nothing above is proven until
-      the capture has actually run against a cluster
+      the capture has actually run against a cluster.
+      **Half done, and the box stays open for the other half (2026-08-12):**
+      `cluster-up`, `break`, `verify` (13/13) and `just fixtures` (23 fixtures
+      from v1.36.1) have all run for real. **`just cluster-down` has not** —
+      the cluster is deliberately left standing so the repo's own
+      reproduce-it-yourself instructions can be checked against it. The
+      teardown is the one step that strips `broken-stuck`'s finalizer, so it
+      is the one that can still fail; it gets run once no further capture
+      needs the cluster
 - [x] A multi-node kind config — N-series rules (cordon, skew, pressure) and
       drain safety cannot be captured on a single-node cluster. Three nodes
       (1 control-plane + 2 workers); `K8RS_WORKERS` changes the count
@@ -272,8 +284,15 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       ReplicaSet's `ReplicaFailure` instead of a pod state, because the whole
       point is that no pod object exists
       ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
-- [ ] A cluster-wide snapshot fixture (everything at one instant) for
-      `analysis.rs` reports
+- [x] A cluster-wide snapshot fixture (everything at one instant) for
+      `analysis.rs` reports — `nodes`, `deployments`, `statefulsets`,
+      `daemonsets`, `services`, `persistentvolumeclaims`,
+      `poddisruptionbudgets`, all captured `-A` in one run.
+      **Four of them are empty lists**, because nothing in `broken.yaml`
+      produces a StatefulSet, a PVC, a PDB or a dead-selector Service: the
+      Drain-safety and Waste reports therefore have a negative fixture and no
+      positive one. That is a Phase 4 gap, recorded here rather than hidden by
+      the tick — the snapshot itself is captured and reproducible
 - [x] Certificate fixtures — [`scripts/make-certs.sh`](scripts/make-certs.sh)
       writes three client certificates to `tests/fixtures/certs/`, generated
       locally, never a real one, and the private keys are deleted as soon as
@@ -285,15 +304,24 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       renderer must not produce a negative duration). Not wired into
       `just fixtures`: each run would rewrite the bytes for no reason —
       re-run it only if the files are lost
-- [ ] A **pending CSR** fixture for C3 — kind produces only
+- [x] A **pending CSR** fixture for C3 — kind produces only
       `Approved,Issued` ones, so it has to be created deliberately on the
-      cluster ([NOTES § Verified](NOTES.md#verified-against-a-real-cluster-2026-08-11))
-- [ ] Eyeball every fixture once: no env values, no annotations, no node IPs,
-      no private keys. **Three of those four are enforced by `sanitize-test.sh`
-      now rather than by the eyeball** — addresses were the gap, and a real
-      capture proved the sanitizer kept every one of them
-      ([NOTES § D30](NOTES.md#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)).
-      The pass still happens; it is no longer the only thing standing there
+      cluster ([NOTES § Verified](NOTES.md#verified-against-a-real-cluster-2026-08-11)).
+      [`scripts/make-csr.sh`](scripts/make-csr.sh) creates one signed by
+      `kubernetes.io/kube-apiserver-client`, which the built-in approver
+      deliberately ignores — watched sitting Pending for two minutes on a
+      cluster whose own kubelet CSRs are approved within seconds. Not wired
+      into `just fixtures`, for the same reason `make-certs.sh` is not: every
+      run mints a new key and a new `creationTimestamp`
+- [x] Eyeball every fixture once: no env values, no annotations, no node IPs,
+      no private keys. **All four are enforced now** rather than by the
+      eyeball — by `sanitize-test.sh` on the filter and by
+      [`scripts/fixture-audit.sh`](scripts/fixture-audit.sh) on the committed
+      bytes, because a fixture can reach `tests/fixtures/` without ever
+      meeting the filter. The pass happened too, and it is what found the two
+      framing gaps the guards had: an address inside a message and a
+      base64-wrapped key
+      ([NOTES § D31](NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12))
 
 **🔒 Security gate:** the sanitizer lands before the first fixture and is
 itself tested — feed it a *poisoned* object (fake token in an annotation, env
@@ -301,7 +329,12 @@ value, node IP, private key) and assert the output is clean, **in every shape
 the capture produces**: a single object *and* the `List` from
 `kubectl get -A`. A sanitizer with no test is a hope; a sanitizer tested on one
 of two shapes is worse, because it reads as proven
-([NOTES § D29](NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)). Certificates in fixtures are generated locally and expire
+([NOTES § D29](NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)).
+The poisoned object must also carry each secret in **every framing it can
+arrive in** — whole value, embedded in a sentence, and base64-encoded — because
+both of the sanitizer's remaining holes were framings, not shapes
+([NOTES § D31](NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)).
+Certificates in fixtures are generated locally and expire
 quickly; no real cluster material, ever.
 
 **Done when:** `just fixtures` regenerates everything from scratch;

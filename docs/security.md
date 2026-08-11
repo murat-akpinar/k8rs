@@ -243,6 +243,19 @@ about a decade of daily use. A rotator would be more code than the log.
   a single object and a `List` — since a filter proven on one of the two reads
   as proven and is not
   ([NOTES § D29](../NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)).
+- **A secret is removed in every framing it can arrive in**, not only when it
+  is the whole value. Addresses are replaced inside strings, because a podCIDR
+  wears a `/24` suffix and kubelet quotes the address it could not reach inside
+  an English sentence. Key material is also matched base64-encoded, which is
+  how every Secret value arrives and where `-----BEGIN` never appears;
+  certificates are left alone, since a certificate is the public half by
+  definition. Both framings shipped past an anchored filter once
+  ([NOTES § D31](../NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)).
+- The filter is not the last line. `scripts/fixture-audit.sh` re-checks the
+  **committed bytes** of every file under `tests/fixtures/` — not only the
+  JSON, since a key is still a key when it is called `admin.key.pem` — because
+  a fixture can reach the directory hand-edited, copied from a bug report, or
+  captured with an older sanitizer, having never met the filter at all.
 
 ## Supply chain
 
