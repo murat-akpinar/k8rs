@@ -89,7 +89,7 @@ answer.
 The switch is the startup path, run again. It is not a special case, and
 `k8s.rs` therefore exposes connecting as a function that can be called more
 than once rather than as something `main` does at the top
-([todo Phase 5](../todo.md#phase-5--live-reads--branch-featwatch--milestone-m15)).
+([todo Phase 5](../todo.md#phase-5--live-reads--milestone-m15)).
 
 1. Every watch stops; the snapshot store, findings, analysis results, table
    caches and open log streams are dropped. **Nothing from the old cluster

@@ -28,6 +28,12 @@
 No phase is allowed to be "useless until the end". If one becomes that, the
 plan is wrong.
 
+**Branches (2026-08-12):** everything from Phase 3 on is developed on the one
+long-lived `development` branch, merged into `main` at each phase close —
+which is why those headings no longer name a branch
+([NOTES § D32](NOTES.md#d32--one-long-lived-development-branch-not-one-per-phase-2026-08-12)).
+Phases 1 and 2 still name theirs because that is where they actually ran.
+
 ## Phase 0 — Design (current phase)
 
 - [x] Decision record → `NOTES.md`
@@ -342,7 +348,7 @@ fixtures committed.
 **Frozen after:** the data layer (fixtures change only via re-capture, never by
 hand) **and the justfile**, whose last unwritten recipe body lands here.
 
-## Phase 3 — The product: rules · branch `feat/rules` · **milestone M1**
+## Phase 3 — The product: rules · **milestone M1**
 
 Goal: k8rs diagnoses correctly, headless. Still the core — everything else in
 this plan is delivery mechanism for what this phase produces.
@@ -412,7 +418,7 @@ and truncated PEM in a test and must return "no finding", never panic:
 on a fixture prints correct findings. *The product works here.*
 **Frozen after:** `rules.rs`.
 
-## Phase 4 — Analysis reports · branch `feat/analysis`
+## Phase 4 — Analysis reports
 
 Goal: the cluster-wide answers no per-object rule can give. Pure functions
 over a `ClusterSnapshot`, so this phase is as testable as Phase 3 and needs no
@@ -451,7 +457,7 @@ cluster either.
 the temporary main can print any of them.
 **Frozen after:** `analysis.rs`.
 
-## Phase 5 — Live reads · branch `feat/watch` · **milestone M1.5**
+## Phase 5 — Live reads · **milestone M1.5**
 
 Goal: the same findings and reports, from a living cluster — and the first
 public release.
@@ -544,7 +550,7 @@ stranger a working `k8rs --once`.
 **Frozen after:** nothing yet — `k8s.rs` stays the top layer through Phase 6,
 which adds the remaining read paths to the same file. It freezes there.
 
-## Phase 6 — Logs and read-only detail · branch `feat/detail`
+## Phase 6 — Logs and read-only detail
 
 Goal: the whole beginner debugging loop, still headless, still read-only.
 
@@ -572,7 +578,7 @@ it against all four consumers before closing the phase: the Alerts rules, the
 Analysis reports, the browser, and the detail tabs. A read path missed here is
 a frozen-file problem in Phase 11, not a small addition.
 
-## Phase 7 — Operations · branch `feat/ops` · **milestone M2**
+## Phase 7 — Operations · **milestone M2**
 
 Goal: every write works and is safe, **before a single key is bound to one**.
 This is the phase where the reversal actually happens, and it is deliberately
@@ -644,7 +650,7 @@ main, including a rejected dry-run and a 409 conflict, and the audit log
 matches what happened.
 **Frozen after:** `ops.rs`.
 
-## Phase 8 — TUI spike · branch `feat/tui-spike` (throwaway)
+## Phase 8 — TUI spike (throwaway)
 
 Goal: learn the ratatui event loop without touching product files.
 
@@ -659,7 +665,7 @@ Goal: learn the ratatui event loop without touching product files.
 **Done when:** the spike runs and the loop is understood. Code stays in
 `examples/`, never merged into `src/`.
 
-## Phase 9 — Theme · branch `feat/theme`
+## Phase 9 — Theme
 
 - [ ] `theme.rs`: 10 Catppuccin Mocha constants + `COLORTERM` check with a
       16-color fallback
@@ -669,7 +675,7 @@ Goal: learn the ratatui event loop without touching product files.
 looking broken.
 **Frozen after:** `theme.rs`.
 
-## Phase 10 — View state · branch `feat/views`
+## Phase 10 — View state
 
 Goal: `ui.rs` can be a pure function of state, which is the only thing that
 keeps TUI code from rotting.
@@ -693,7 +699,7 @@ keeps TUI code from rotting.
 terminal involved.
 **Frozen after:** `views.rs`.
 
-## Phase 11 — The console · branch `feat/ui`
+## Phase 11 — The console
 
 Goal: the screens in [`screens/`](screens/README.md) — the lazygit-shaped
 product. Nothing on this list is a design decision any more; every layout,
@@ -744,7 +750,7 @@ Secret is redrawn after the reveal is dismissed.
 80×24; every key in the footer works.
 **Frozen after:** `ui.rs`.
 
-## Phase 12 — Final wiring · branch `feat/wire` · **milestone M3**
+## Phase 12 — Final wiring · **milestone M3**
 
 Goal: one binary, live and safe.
 
@@ -775,7 +781,7 @@ on purpose.
 **Done when:** k8rs runs against kind end-to-end and every error state
 behaves as specified.
 
-## Phase 13 — Ship v0.1 · branch `feat/release` · **milestone M4**
+## Phase 13 — Ship v0.1 · **milestone M4**
 
 - [ ] `README.md` (EN): what/why, screenshot or asciinema, install, **both**
       RBAC examples, the `--read-only` flag, "no telemetry" statement, and an

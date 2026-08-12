@@ -2,7 +2,7 @@
 
 Not a TUI screen: `--once` reads the cluster, prints what is broken, and exits.
 It is also **the first thing anyone ever sees from k8rs** — it ships as v0.0.1
-at [milestone M1.5](../todo.md#phase-5--live-reads--branch-featwatch--milestone-m15),
+at [milestone M1.5](../todo.md#phase-5--live-reads--milestone-m15),
 months before the console exists ([NOTES § D10](../NOTES.md#d10--m1-ships-publicly-as-v001)).
 Seven TUI screens were drawn and this one was not; that is the gap this file
 closes ([NOTES § D17](../NOTES.md#d17--the---once-output)).
