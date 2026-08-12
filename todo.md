@@ -572,13 +572,30 @@ The poisoned object must also carry each secret in **every framing it can
 arrive in** — whole value, embedded in a sentence, and base64-encoded — because
 both of the sanitizer's remaining holes were framings, not shapes
 ([NOTES § D31](NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)).
-Certificates in fixtures are generated locally and expire
-quickly; no real cluster material, ever.
+Certificates in fixtures are generated locally; no real cluster material, ever.
+**"and expire quickly" was reversed and this line said so for one phase too
+long (corrected 2026-08-13):** a certificate with a short relative life is a
+test that passes today and fails in three weeks, and the usual repair for that
+is to weaken the test. The dates are **pinned** instead, and the safety the
+original wording was reaching for is delivered by other means —
+[`scripts/make-certs.sh`](scripts/make-certs.sh) generates self-signed
+throwaways locally and deletes the private key it was forced to write, and
+`fixture-audit` fails the build on key material in any framing
+([NOTES § D57](NOTES.md#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)).
 
-**Done when:** `just fixtures` regenerates everything from scratch;
-fixtures committed.
+**Done when:** `just fixtures` regenerates the captured fixtures from scratch
+and they are committed. **It does not regenerate the certificates or the CSR**,
+and that is deliberate rather than an omission: their dates are pinned, so
+there is nothing for a re-capture to refresh, and re-running the generator
+writes private key material into the repo for no gain. `just fixtures` runs
+[`scripts/certs-test.sh`](scripts/certs-test.sh) over the committed ones
+instead, which is the assertion that matters.
 **Frozen after:** the data layer (fixtures change only via re-capture, never by
-hand) **and the justfile**, whose last unwritten recipe body lands here.
+hand) **and the justfile — with one declared exception**: the `e2e` recipe
+carries a placeholder body and the file says so at its declaration, because the
+write path it drives does not exist until Phase 7. Phase 7 writes that body and
+nothing else in the file. Reading the freeze as absolute would leave Phase 7
+unable to do what the justfile itself instructs it to.
 
 ## Phase 3 — The product: rules · **milestone M1**
 
@@ -652,6 +669,22 @@ this plan is delivery mechanism for what this phase produces.
       `.get_minutes()` is `0` over 43 minutes, and the grace subtraction is
       `checked_sub` because a real apiserver accepts a grace that overflows it
       ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12))
+- [ ] **Close the one row where `just check` is not CI** — `tester`'s, not
+      `dev-core`'s, and it touches `justfile` / `.github/workflows/` only, so it
+      runs alongside the rules work rather than ahead of it (disjoint trees).
+      CI cross-compiles the release targets with
+      `cargo check --locked --target <t> --all-targets`; `just check` runs
+      nothing equivalent, so a cross-compile break is discoverable only after a
+      push — the exact failure CLAUDE.md's "`just check` is the whole of CI, or
+      it is a lie" exists to prevent, and the workflow's own comment says why
+      (it breaks at link time, and late). **The decision is which cost to pay**,
+      and it is `tester`'s to make: requiring the targets makes the gate red on
+      any machine that has not run `rustup target add`, and a gate red by
+      default is one everyone learns to wave through, while a skip when the
+      target is missing is only acceptable if the skip is loud enough to survive
+      a green run. Found by Phase 2's closing second pass in a Phase 1 artifact,
+      which is why it is a box here and not a reopening there
+      ([NOTES § D66](NOTES.md#d66--just-check-is-not-quite-the-whole-of-ci-and-the-gap-is-the-one-ci-was-built-to-watch-2026-08-13))
 - [ ] `Finding` carries **timestamps, not phrases**. "4 min ago" is formatted
       by the renderer, so `ui.rs` and the `--once` printer share one source and
       a test asserts a duration instead of parsing English. A non-positive age

@@ -3289,6 +3289,34 @@ passed seconds later. Disjoint file trees make two agents safe to run in
 parallel; a guard that reads across the boundary is the exception, and a lone
 cross-file red is suspect until the writer puts the pen down.
 
+### D66 — `just check` is not quite the whole of CI, and the gap is the one CI was built to watch (2026-08-13)
+
+Found by Phase 2's closing second pass, against
+[CLAUDE.md § Running it](CLAUDE.md): *"`just check` is the whole of CI, or it is
+a lie."* Comparing the two step lists, they agree everywhere except one row.
+`cargo deny` is not the exception it looks like — `just check` runs the binary
+and CI runs the pinned `cargo-deny-action`, which is the same check by a
+different vehicle. The real one is the **cross-compilation matrix**: CI runs
+`cargo check --locked --target <t> --all-targets` across the release targets
+and `just check` runs nothing equivalent, so a cross-compile break can only be
+discovered after a push. The workflow's own comment says why that matters —
+"cross-compilation breaks at link time and it breaks late" — which makes this
+the precise failure the rule exists to prevent.
+
+**It is recorded rather than fixed, and that is a judgement, not an oversight.**
+The obvious repair — add the targets to `just check` — makes the gate red on
+every machine that has not run `rustup target add`, including the one closing
+this phase, and a gate that is red by default is one everybody learns to wave
+through. The alternative, a skip when the target is missing, is the "loud
+error" the rule prefers only if the loudness survives; a green run with a
+skipped step in it is what the rule calls an invisible gap. Choosing between
+them is a `tester` decision with a real cost either way, and it belongs to
+whoever owns the CI box, not to a phase close that found it in passing.
+
+**What is not deferred:** the claim. Until it is closed, "`just check` is the
+whole of CI" is true of eleven steps out of twelve, and anybody relying on it
+for a cross-target change should run the matrix by hand.
+
 ## Decisions made
 
 ### Product
