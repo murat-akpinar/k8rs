@@ -355,12 +355,49 @@ ticket. The reasoning behind each item lives in
 - **Before pushing**, update the CHANGELOG with
   [git-cliff](https://github.com/orhun/git-cliff).
 
+## Second pass — nothing is delivered on its first draft
+
+**Everything produced here is reviewed a second time before it is handed
+over** — code, a doc section, a plan, a rule, a commit message, an answer.
+Not "if it feels risky": always, and by default, without being asked.
+
+The second pass is not a re-read from memory. **Open the artifact as written**
+and go through it as its first reader would — someone who was not in the room
+while it was being made, and who will follow it literally.
+
+What the second pass is actually hunting, in this order:
+
+1. **Does it contradict itself?** Two sentences that cannot both be obeyed.
+   This is the most common defect in anything longer than a page and the
+   hardest to see while writing, because both halves felt right in isolation.
+2. **Can every rule in it actually be complied with?** A gate nobody can pass,
+   a step that needs a file that does not exist yet, a check that needs a
+   machine nobody has. An impassable rule does not get followed carefully —
+   it teaches everyone that rules here are decorative.
+3. **Does everything in it have an owner?** Every file, every step, every
+   decision. "Someone will do it" means two people do it in the same turn, or
+   nobody does.
+4. **The unhappy path.** Empty, missing, denied, too large, already exists,
+   the human is not available. First drafts describe the case that works.
+5. **What does it silently assume?** The assumption that was obvious while
+   writing is invisible to the reader, and it is where the bug lives.
+
+**A second pass produces findings or it names what it checked.** "Looks good"
+is not a second pass — it is the first pass claiming to be the second. If it
+genuinely found nothing, say what was examined and what would have failed it;
+an empty review that lists nothing it looked at proves nothing, exactly like a
+test that has only ever been green.
+
+Findings from the second pass are fixed **before** delivery, in the same turn,
+not filed as follow-ups. Then say what the second pass changed — the user sees
+the review, not just its output.
+
 ## Workflow (per feature)
 
 1. Write code
-2. **Review it yourself** — re-read the diff before running anything: does it
-   break a hard invariant above, does it add a dependency, is there an
-   `unwrap()` on a path that can fail at runtime
+2. **Review it yourself** — the [second pass](#second-pass--nothing-is-delivered-on-its-first-draft)
+   above, applied to the diff: does it break a hard invariant, does it add a
+   dependency, is there an `unwrap()` on a path that can fail at runtime
 3. Build
 4. Test (honest tests only — see code phase rules)
 
@@ -393,24 +430,190 @@ ticket. The reasoning behind each item lives in
    `chore(changelog): update`
 10. git commit & push (with the rules above) — one push at the end, not two
 
+## Agent workflow — who runs each step, and who is accountable
+
+Five subagents live in `.claude/agents/`, committed — the sections below
+describe people who have to be in the room, and a clone that lost them is a
+clone that cannot follow this file. **The main session is the project
+manager.** Agents do not
+talk to each other, do not commit, do not push, and do not check a box in
+`todo.md`. Every handoff goes through the PM, so there is exactly one place a
+lie can be caught.
+
+### Ownership — and the file each one may write
+
+Every path in the repo appears in exactly one **Writes** cell. A file with no
+owner is written by whoever happens to be holding the pen, which is how two
+agents end up editing it in the same turn.
+
+| Agent | Writes | Never writes |
+|---|---|---|
+| `dev-core` | `rules.rs` `analysis.rs` `k8s.rs` `ops.rs` | anything that draws |
+| `dev-ui` | `theme.rs` `views.rs` `ui.rs` `main.rs`, `examples/` (the Phase 8 spike) | the four lower files |
+| `tui-designer` | `screens/` | any `.rs` |
+| `tester` | `tests/` `scripts/` `justfile` `clippy.toml` `deny.toml` `.github/workflows/` | product code in `src/` |
+| `k8s-admin` | nothing — reads everything, reports | every file |
+| **PM** (main session) | `todo.md` `NOTES.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.claude/agents/`, branches, commits, PRs | `src/` (delegate it) |
+
+Phase map, from [`todo.md`](todo.md): **2** → `tester` · **3–7** → `dev-core` ·
+**8–12** → `dev-ui` · **13** → PM. `tui-designer` and `k8s-admin` have no
+phases of their own; they are gates on other people's.
+
+`Cargo.toml` sits with the PM on purpose: a dependency is a recorded decision
+(invariant 10), and the agent that wants the crate is the last one who should
+be able to add it.
+
+### The boxes no agent can run — say so, do not fake them
+
+Some boxes need a machine, a credential or an account the agents do not have:
+the kind cluster on the LAN host (`just cluster-up`, `just fixtures`, `just
+e2e`), the crates.io publish, GitHub repo settings, anything behind a login.
+The PM does **not** improvise around these and does not check the box. It
+prints the exact command for the user to run and waits for the real output.
+A box whose evidence is "this would work" is an unchecked box.
+
+### The one hard rule of concurrency
+
+**One writer per file tree at a time.** Two agents editing the same tree in the
+same worktree corrupts both diffs and neither notices.
+
+This costs less than it sounds, because the pyramid already serialises it: the
+lower four files are phases 3–7 and the upper four are 8–12, so `dev-core` and
+`dev-ui` are *never* both writing product code. If a task appears to need both
+at once, that is a plan error (forward-only rule), not a throughput problem —
+stop, fix the order, record it in `NOTES.md`.
+
+What may genuinely run at the same time — always at most one writer per row:
+
+| Safe together | Because |
+|---|---|
+| one dev writing `src/` · `tester` writing `tests/`, `scripts/` | disjoint trees |
+| one dev writing · `tui-designer` on a **later** phase's screen | `screens/` is not code |
+| two reviewers (`k8s-admin` + `tui-designer`) on the same diff | neither writes |
+| one dev writing · `k8s-admin` auditing an **already merged** phase | the audit lands as findings, not as an edit |
+
+Anything not in that table runs one at a time. Worktree isolation
+(`isolation: "worktree"`) exists if two writers are ever genuinely unavoidable
+— but reach for the plan fix first.
+
+**Review is not one of the parallel slots.** `k8s-admin` reviews the box that
+is in front of it and nothing is built on top until it reports: work stacked on
+an unreviewed box turns a rejection into a rebase, and a rebase under time
+pressure is how a finding gets quietly dropped. The dev idles during review.
+That idle is the price of the gate meaning something.
+
+### The cycle — one `todo.md` box is one turn of it
+
+The box is the unit of work, never a phase and never "the next few boxes".
+
+| # | Step | Who | Gate to pass |
+|---|---|---|---|
+| 1 | Read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking |
+| 2 | Screen spec, **only if a screen changes** | `tui-designer` | the mockup covers every state, not just the happy one |
+| 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
+| 4 | Witness red, then green | `tester` | **reverts the implementation and re-runs** — see below |
+| 5 | Full run | `tester` | `just check` green **and** the code exercised for real — see below |
+| 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting |
+| 7 | Second pass on the diff, security gate, docs sync, check the box, git-cliff, commit, push | PM | every box of the [Security gate](#security-gate--run-this-list-on-every-change-no-exceptions), and the [second pass](#second-pass--nothing-is-delivered-on-its-first-draft) named what it checked |
+
+Steps 4–6 loop back to 3 on any failure. Nothing is negotiated down to get past
+a gate — that is the whole reason the gates are held by someone other than the
+author.
+
+**"Run it" means something different before `main.rs` exists.** `main.rs` is
+wired last, so demanding a binary run in Phase 3 sets a gate nobody can pass,
+and an impassable gate teaches everyone to wave gates through. Until Phase 5
+wires the binary, the real run is the test binary over a captured fixture,
+printed and read: `cargo test -- --nocapture`, and the finding text quoted in
+the report. From Phase 5 on it is the actual binary, against a fixture or kind.
+Either way something ran and its output is in the report — that part never
+relaxes.
+
+**When the reviewer and the author disagree, the PM decides, in writing.** A
+finding is closed one of two ways: fixed, or rejected with the reason recorded
+in `NOTES.md`. "The dev said it is fine" is not a resolution — an unrecorded
+rejection is a finding that will be rediscovered in six months with no memory
+of why it was allowed.
+
+**Branches: the PM cuts one per phase**, with the name `todo.md` already gives
+it (`feat/rules`, `feat/analysis`, …), at the phase's first box. Every box
+commits onto it; the PR opens at phase close, not per box. Agents never create,
+switch, merge or delete a branch — they write files on whatever branch they
+are handed.
+
+### Step 4 is the anti-leak mechanism, so it is mechanical
+
+"I saw it fail" is a claim. `tester` does not accept it, it reproduces it:
+stash or comment out the implementation body, run the test, watch it fail,
+restore, watch it pass — and pastes **both** outputs. A test that stays green
+with the implementation removed tests nothing, and that is exactly the failure
+[NOTES § D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12) is
+about. This applies to guards in `scripts/` the same way.
+
+### The brief the PM hands out, and the report it gets back
+
+The brief, five lines, no more: the box verbatim · the files you may write ·
+what "done" means for this box · which `NOTES.md` section decides the
+behaviour · what is explicitly out of scope this turn.
+
+The report, or the work is not received: what changed and where · the exact
+commands run and their real output · the red run and the green run · what could
+not be proven and why · anything the agent wanted to touch outside its
+ownership · **every choice it had to make that the brief did not decide** ·
+what its own [second pass](#second-pass--nothing-is-delivered-on-its-first-draft)
+found and changed. **No output pasted, no completion.** An agent reporting
+"done, tests pass" without the terminal text is sent back, not trusted, and so
+is one whose second pass found nothing and cannot say what it looked at.
+
+That last item is the one that goes missing. An agent that picked a threshold,
+named a field, or settled a behaviour the docs did not settle has made a
+decision, and this project records decisions in `NOTES.md` or it does not have
+them. The PM writes it there before committing — not the agent, so the wording
+stays in one voice, and not "later", because later is a decision nobody can
+reconstruct.
+
+### Where a leak would actually happen — the PM checks these by hand
+
+- A box checked for work that was written but never *run* (phase-close item 2).
+- A test that has only ever been green — step 4 skipped because the change
+  "obviously works".
+- The security gate skipped because "this diff is only UI" — which is precisely
+  when the untrusted-input items get missed.
+- An agent editing outside its ownership row, quietly. The diff is the
+  evidence: PM reads it before committing, every time.
+- Docs left stale after a structural change — a failed step, not a follow-up.
+- The second pass skipped because the change was small — small changes are
+  where it is cheapest to run and where nobody is watching.
+
 ## Phase close — the ritual at the end of every phase
 
 A phase is not "mostly done". It closes, or it is still open. When the last
 box of a phase in [`todo.md`](todo.md) is about to be checked, run this whole
 list — in order, no skipping:
 
-1. **`just check` green**, and the binary actually run (a fixture, or kind) —
-   green tests are not the same as working software.
+1. **`just check` green**, and the code actually exercised — the binary against
+   a fixture or kind once Phase 5 has wired one, the test binary read with
+   `--nocapture` before that ([the cycle](#the-cycle--one-todomd-box-is-one-turn-of-it),
+   step 5). Green tests are not the same as working software, and a gate that
+   cannot be passed yet is not one either.
 2. **Every box of the phase is checked, and every check is true.** A box
    checked for work that was written but never *run* is a lie in the one file
    the plan is read from. If something could not be proven, leave the box open
    and say why in the item — an honest open box beats a false tick.
 3. **The phase's own security gate** in todo.md, item by item.
-4. **Docs sync:** `docs/`, `README.md`, `README_TR.md` for anything
+4. **[Second pass](#second-pass--nothing-is-delivered-on-its-first-draft) over
+   the whole phase, not box by box.** The per-box passes each saw one diff;
+   this one reads the phase as a stranger would read it end to end, which is
+   the only place the cross-box defects live: two boxes that solved the same
+   problem differently, a decision made in box 3 that box 9 quietly violated, a
+   gate that stopped being passable halfway through, an assumption nobody
+   wrote down. Findings are fixed before the phase closes — a phase does not
+   close with a known gap in it.
+5. **Docs sync:** `docs/`, `README.md`, `README_TR.md` for anything
    structural. Stale docs are a failed step, not a follow-up.
-5. **CHANGELOG** with git-cliff, committed separately.
-6. **Commit, push, PR, CI green, merge.** Frozen files stay frozen from here.
-7. **Then say, in the reply, that the phase is closed and the context should be
+6. **CHANGELOG** with git-cliff, committed separately.
+7. **Commit, push, PR, CI green, merge.** Frozen files stay frozen from here.
+8. **Then say, in the reply, that the phase is closed and the context should be
    cleared** — name the phase, name what the next one starts with. Clearing is
    the user's command (`/clear`); the agent cannot issue it and must not
    pretend a fresh context happened on its own. The next phase starts by
