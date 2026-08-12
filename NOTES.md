@@ -2830,6 +2830,74 @@ they justify do not become arbitrary:**
 justification costs a `D`-number here. If that file passes ~4,000 words again,
 what grew is prose, not rules — check before adding.
 
+### D61 — a verify predicate must hold across the whole window, not at one instant (2026-08-12)
+
+`cluster.sh verify` certifies that a fixture reached the state its rule is
+about, and `just fixtures` captures that object seconds later. A predicate that
+names **one instant of a cycle** therefore certifies a moment that may already
+be over by the time the bytes are written.
+
+`[crashloop]` demanded `state.waiting.reason=="CrashLoopBackOff"`. Sampled on
+the live cluster, the container was in `state.terminated` 39 times out of 70,
+in `waiting: CrashLoopBackOff` 29 and `running` twice — the predicate named the
+**minority** half of its own loop. It failed open twice over: `verify` retries
+in a wait loop until the flap happens to land right, and its report pass
+re-fetches, so a green line proved the state existed at *some* instant, not
+that a capture would find it. What actually holds across the loop is *it has
+already restarted after an exit 1, and it is not up right now*, and that is
+what it now asserts. The ~2s window where it **is** up stays excluded on
+purpose: certifying a Running pod as crashlooping is the lie the function
+exists to prevent.
+
+**The sweep found one, not two.** The first report named `[init]` as well; that
+was asserted from family resemblance rather than read, and `[init]` was already
+an `or` over both halves. Recorded because a review that names a defect it did
+not read is the same failure as a test that has only ever been green — this one
+happened to be wrong in the harmless direction.
+
+**The report/wait asymmetry stays, deliberately.** `verify` waits on one read
+and reports on a re-fetch, and that asymmetry is the only reason this class was
+visible at all: had it reported the verdict it waited on, a flapping predicate
+would have printed PASS every time and stayed invisible until a fixture landed
+in a state no rule could fire on. It is also the last read before the capture's
+own `kubectl get`, so it is the closest available proxy for the bytes that will
+land.
+
+**Two limits accepted rather than engineered away:**
+
+- Every `sleep 3600` fixture exits and restarts an hour after `break`, and
+  `[restarts]` asserts `ready==true`, which is false for a moment then. The fix
+  is a constraint on the trip, not on the code — `break → verify → fixtures`
+  runs well inside the hour — because `ready==true` is the whole point of
+  rule 5's fixture.
+- `[init]` is loose in the *other* direction: it matches an init container that
+  crashed and then succeeded, since it never asks whether the container is down
+  now. No fixture in the set can produce that shape, so tightening it would
+  change a passing predicate with nothing to prove the difference.
+
+**`broken-owned` is a third workload shape, not a second W2.** Its Deployment
+reports `Progressing=True / NewReplicaSetAvailable` with `Available=False /
+MinimumReplicasUnavailable` — the replica set rolled out fine and the pods
+inside it are dying, which is not
+[W2](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)'s
+`ProgressDeadlineExceeded`. Both will be in `deployments.json`; they are
+different findings.
+
+**D39's claim is now asserted somewhere.** That kubelet writes an
+`ownerReference` of kind `Node` onto every static pod was documented upstream
+and checked by nobody here; `verify-test.sh`'s corpus carries a real mirror pod
+as the negative `[owned]` must refuse. This does **not** close the mirror-pod
+box — that one wants the fixture, for N2's `mirror: true` count and rule 8's
+only negative.
+
+**Deferred, with the reason.** `verify` certifies the live object; nothing
+asserts that the **written** fixture still satisfies the predicate that
+certified it — the one check that would catch "verify passed, the capture
+landed two seconds later in another state". It belongs in `fixture-audit.sh`,
+it is ~12 lines, and it waits until after the capture: writing it now means
+proving it against 23 files that the capture is about to replace, two of which
+do not exist yet.
+
 ## Decisions made
 
 ### Product

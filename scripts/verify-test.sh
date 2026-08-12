@@ -34,6 +34,15 @@
 #     manifests that produce them are new, and progressDeadlineSeconds defaults
 #     to 600s — longer than verify()'s own timeout — so W2 had never fired when
 #     the snapshot was taken. Re-check these two against the next real capture.
+#   - the owned pod (in both halves of its crash loop), the mirror pod and the
+#     coredns pod are `kubectl get -o json` captures taken from the same kind
+#     cluster on 2026-08-12, through the same sanitizer, trimmed the same way.
+#     Both halves, because a predicate proven in one of them is a predicate that
+#     passes `verify` and then watches the capture land in the other. The six
+#     objects below them are composed
+#     out of those captures — never written by hand — and each names the fields
+#     it moved and why the cluster does not hold that state still long enough to
+#     be captured.
 #   - field names and nesting cross-checked against the Kubernetes API reference
 #     (PodStatus / ContainerStatus / ContainerState / PodCondition) and the
 #     k8s-openapi v1_36 generated types.
@@ -51,14 +60,14 @@ eval "$(sed -n '/^  local -A want=(/,/^  )$/p' "$here/cluster.sh" | sed '1s/loca
 # "extracted nothing" and "nothing to extract" print the same line, so name what
 # has to be there (CLAUDE.md § A derived list asserts it found something).
 for canary in oom crashloop image config pending hostpath readiness restarts \
-              nolimits stuck init quota w2; do
+              nolimits stuck init quota w2 owned; do
   [ -n "${want[$canary]:-}" ] || {
     echo "verify-test: cluster.sh verify() has no predicate '$canary' — the extraction broke, not the predicate"
     exit 1
   }
 done
-[ ${#want[@]} -eq 13 ] || {
-  echo "verify-test: cluster.sh verify() has ${#want[@]} predicates, this file covers 13."
+[ ${#want[@]} -eq 14 ] || {
+  echo "verify-test: cluster.sh verify() has ${#want[@]} predicates, this file covers 14."
   echo "             A new one needs a positive and a negative case here before it can be trusted."
   exit 1
 }
@@ -1129,6 +1138,416 @@ obj[healthy_deploy]=$(cat <<'JSON'
 JSON
 )
 
+# broken-owned's pod: the one broken pod in the repo that has an owner. A
+# Deployment's pod has a generated name, so verify() fetches it by label and a
+# List is what comes back — the shape, not just the object, is what differs.
+obj[owned_pods]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "broken-owned-6576fd8bc8-n8p4m",
+        "namespace": "default",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "name": "broken-owned-6576fd8bc8",
+            "uid": "55e9015b-6e28-424d-8602-f63d23ff5601",
+            "controller": true,
+            "blockOwnerDeletion": true
+          }
+        ]
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "quitter",
+            "resources": {}
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "conditions": [
+          {
+            "type": "PodReadyToStartContainers",
+            "status": "True"
+          },
+          {
+            "type": "Initialized",
+            "status": "True"
+          },
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "ContainersNotReady",
+            "message": "containers with unready status: [quitter]"
+          },
+          {
+            "type": "ContainersReady",
+            "status": "False",
+            "reason": "ContainersNotReady",
+            "message": "containers with unready status: [quitter]"
+          },
+          {
+            "type": "PodScheduled",
+            "status": "True"
+          }
+        ],
+        "containerStatuses": [
+          {
+            "name": "quitter",
+            "ready": false,
+            "started": false,
+            "restartCount": 4,
+            "state": {
+              "waiting": {
+                "message": "back-off 1m20s restarting failed container=quitter pod=broken-owned-6576fd8bc8-n8p4m_default(ea503697-d728-4ea1-b566-dbce76015f88)",
+                "reason": "CrashLoopBackOff"
+              }
+            },
+            "lastState": {
+              "terminated": {
+                "containerID": "containerd://582901e141be10e6116fef33a73a76071bc450fac352ecac7fa4bdf28121364c",
+                "exitCode": 1,
+                "finishedAt": "2026-08-12T15:35:12Z",
+                "reason": "Error",
+                "startedAt": "2026-08-12T15:35:10Z"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+JSON
+)
+
+# the same pod, in the other half of the same loop: the container has died and
+# the kubelet has not put it back in backoff yet, so `state` is `terminated` and
+# `waiting` is gone. Captured live rather than composed, because the loop spends
+# most of its time here — the state both [crashloop] and [owned] used to be
+# unable to see. It stands in for broken-crashloop too: identical image, identical
+# command, and neither predicate reads anything above `.status`.
+obj[crashloop_terminated]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "broken-owned-6576fd8bc8-n8p4m",
+    "namespace": "default",
+    "ownerReferences": [
+      {
+        "apiVersion": "apps/v1",
+        "kind": "ReplicaSet",
+        "name": "broken-owned-6576fd8bc8",
+        "uid": "55e9015b-6e28-424d-8602-f63d23ff5601",
+        "controller": true,
+        "blockOwnerDeletion": true
+      }
+    ]
+  },
+  "spec": {
+    "containers": [
+      {
+        "name": "quitter",
+        "resources": {}
+      }
+    ]
+  },
+  "status": {
+    "phase": "Running",
+    "conditions": [
+      {
+        "type": "PodReadyToStartContainers",
+        "status": "True"
+      },
+      {
+        "type": "Initialized",
+        "status": "True"
+      },
+      {
+        "type": "Ready",
+        "status": "False",
+        "reason": "ContainersNotReady",
+        "message": "containers with unready status: [quitter]"
+      },
+      {
+        "type": "ContainersReady",
+        "status": "False",
+        "reason": "ContainersNotReady",
+        "message": "containers with unready status: [quitter]"
+      },
+      {
+        "type": "PodScheduled",
+        "status": "True"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "quitter",
+        "ready": false,
+        "started": false,
+        "restartCount": 9,
+        "state": {
+          "terminated": {
+            "containerID": "containerd://778ad0f803176694b6a0ec9452727c15ac318ec8a804dfb91521e50867e6f4f1",
+            "exitCode": 1,
+            "finishedAt": "2026-08-12T15:54:57Z",
+            "reason": "Error",
+            "startedAt": "2026-08-12T15:54:55Z"
+          }
+        },
+        "lastState": {
+          "terminated": {
+            "containerID": "containerd://beef448bebd05872f795dcfaccfa843c4861dc3dcf9210f1a38cbd354cd9b447",
+            "exitCode": 1,
+            "finishedAt": "2026-08-12T15:49:45Z",
+            "reason": "Error",
+            "startedAt": "2026-08-12T15:49:43Z"
+          }
+        }
+      }
+    ]
+  }
+}
+JSON
+)
+
+# a mirror pod, straight off the kind cluster. kubelet writes an
+# ownerReference of kind Node onto every static pod, which is the claim D39
+# rests on and which nothing in this repo asserted until this object.
+obj[mirror]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "etcd-k8rs-control-plane",
+    "namespace": "kube-system",
+    "ownerReferences": [
+      {
+        "apiVersion": "v1",
+        "kind": "Node",
+        "name": "k8rs-control-plane",
+        "uid": "21ed7616-9a00-4cbf-829c-778435cda3fd",
+        "controller": true
+      }
+    ]
+  },
+  "spec": {
+    "containers": [
+      {
+        "name": "etcd",
+        "resources": {
+          "requests": {
+            "cpu": "100m",
+            "memory": "100Mi"
+          }
+        }
+      }
+    ]
+  },
+  "status": {
+    "phase": "Running",
+    "conditions": [
+      {
+        "type": "PodReadyToStartContainers",
+        "status": "True"
+      },
+      {
+        "type": "Initialized",
+        "status": "True"
+      },
+      {
+        "type": "Ready",
+        "status": "True"
+      },
+      {
+        "type": "ContainersReady",
+        "status": "True"
+      },
+      {
+        "type": "PodScheduled",
+        "status": "True"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "etcd",
+        "ready": true,
+        "started": true,
+        "restartCount": 0,
+        "state": {
+          "running": {
+            "startedAt": "2026-08-12T13:26:37Z"
+          }
+        },
+        "lastState": {}
+      }
+    ]
+  }
+}
+JSON
+)
+
+# a healthy pod owned by a ReplicaSet: the owner half of [owned] without the
+# crash half. Also a List, because that is how the fetch returns it.
+obj[coredns_pods]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "coredns-589f44dc88-bm7hq",
+        "namespace": "kube-system",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "name": "coredns-589f44dc88",
+            "uid": "a1160877-d412-4668-86a6-34d490d175af",
+            "controller": true,
+            "blockOwnerDeletion": true
+          }
+        ]
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "coredns",
+            "resources": {
+              "limits": {
+                "memory": "170Mi"
+              },
+              "requests": {
+                "cpu": "100m",
+                "memory": "70Mi"
+              }
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "conditions": [
+          {
+            "type": "PodReadyToStartContainers",
+            "status": "True"
+          },
+          {
+            "type": "Initialized",
+            "status": "True"
+          },
+          {
+            "type": "Ready",
+            "status": "True"
+          },
+          {
+            "type": "ContainersReady",
+            "status": "True"
+          },
+          {
+            "type": "PodScheduled",
+            "status": "True"
+          }
+        ],
+        "containerStatuses": [
+          {
+            "name": "coredns",
+            "ready": true,
+            "started": true,
+            "restartCount": 0,
+            "state": {
+              "running": {
+                "startedAt": "2026-08-12T13:26:59Z"
+              }
+            },
+            "lastState": {}
+          }
+        ]
+      }
+    }
+  ]
+}
+JSON
+)
+
+# --- COMPOSED, EACH FROM CAPTURES IN THIS FILE ---
+# Six objects the cluster will not hand over as they are: one state it holds for
+# about two seconds at a time, two shapes that only arrive under a different
+# fetch, and three it does not produce at all here. None is written by hand: each
+# is built out of the captures above, changes one coherent group of fields, and
+# stays an object the API demonstrably emits (NOTES.md D40, on a shell corpus).
+
+# the bare crashlooper in the List shape [owned] fetches. Shape only — not one
+# field of the capture is touched.
+obj[crashloop_list]=$(jq -n --argjson p "${obj[crashloop]}" \
+  '{apiVersion:"v1", kind:"List", items:[$p]}')
+
+# and the terminated half of the loop in that same List shape, so [owned] is
+# proven in both halves rather than in the one it was written against. Shape
+# only, again.
+obj[crashloop_terminated_list]=$(jq -n --argjson p "${obj[crashloop_terminated]}" \
+  '{apiVersion:"v1", kind:"List", items:[$p]}')
+
+# The next two graft one capture's whole status onto another capture's
+# identity, and both need the same two corrections or the result is half an
+# object rather than one the API emits. The **whole** status moves, never the
+# containerStatuses alone: the first draft grafted only that array and left the
+# donor pod's conditions saying Ready=True above a container in
+# CrashLoopBackOff. The container name follows the pod it now belongs to, and
+# the free text is deleted rather than rewritten, because a backoff message
+# naming the pod it was captured from is exactly the half-real object D40
+# refuses — and a message is optional in the API, where every field the
+# predicates read is not.
+graft='def graft($status; $container):
+   .status = ( $status
+               | .containerStatuses |= map( .name = $container
+                                            | del(.state.waiting.message)
+                                            | del(.state.terminated.message)
+                                            | del(.lastState.terminated.message) )
+               | .conditions |= map(del(.message)) );'
+
+# a *static* pod in that same crash loop — an etcd that keeps dying after a
+# laptop suspend, which is D39's own example. The real mirror pod's identity,
+# the real crashlooper's status.
+obj[mirror_crashloop]=$(jq -n --argjson m "${obj[mirror]}" --argjson c "${obj[crashloop]}" \
+  "$graft"'{apiVersion:"v1", kind:"List", items:[ $m | graft($c.status; "etcd") ]}')
+
+# broken-owned's pod living rule 5's life: three restarts behind it, up and
+# ready now. The owner and the crash history without being down, which is the
+# difference between "in a crash loop" and "has crashed before". Grafted onto
+# the owned pod rather than the other way round — a pod called broken-restarts
+# owned by ReplicaSet broken-owned-6576fd8bc8 is a name no ReplicaSet generates,
+# and that first draft made it past every assertion in this file.
+obj[restarts_owned]=$(jq -n --argjson o "${obj[owned_pods]}" --argjson p "${obj[restarts]}" \
+  "$graft"'$o | .items |= map(graft($p.status; "quitter"))')
+
+# the same pod under an ownerReference that owns without controlling. Legal on
+# any object and written by plenty of operators, but not a shape broken.yaml can
+# produce without becoming a manifest no real workload matches (NOTES.md D40) —
+# so it is composed here, where the `controller == true` half of the predicate
+# is otherwise a clause nothing can refuse.
+obj[owned_not_controlled]=$(jq '.items |= map(.metadata.ownerReferences |= map(.controller = false))' \
+  <<<"${obj[owned_pods]}")
+
+# broken-owned at its very first exit: the container has died once and has not
+# been restarted yet, so restartCount is still 0 and lastState is still empty.
+# This is the object [owned] reads lastState in order to refuse — one exit is
+# not yet a loop, and the fixture this box is for is a settled one.
+obj[owned_first_exit]=$(jq '.items |= map(.status.containerStatuses |= map(
+     .restartCount = 0 | .state = {terminated: .lastState.terminated} | .lastState = {}))' \
+  <<<"${obj[owned_pods]}")
+
 # --- CORPUS END ---
 
 # --- ASSERTIONS START ---
@@ -1156,11 +1575,15 @@ check oom       match oom       "broken-oom, settled"
 check oom       miss  healthy   "the healthy pod"
 check oom       miss  crashloop "a pod in the same CrashLoopBackOff, killed by exit 1 instead"
 
-# Rules 1+6. Same waiting reason as the OOM pod, different exit code.
-check crashloop match crashloop "broken-crashloop, settled"
+# Rules 1+6. Same waiting reason as the OOM pod, different exit code — and two
+# positives, because a crash loop is two states and this predicate used to name
+# only one of them. The capture can land in either.
+check crashloop match crashloop "broken-crashloop, in backoff"
+check crashloop match crashloop_terminated "the same crash between backoffs — dead, not yet waiting"
 check crashloop miss  healthy   "the healthy pod"
 check crashloop miss  oom       "a pod in the same CrashLoopBackOff, killed by the kernel instead"
 check crashloop miss  init      "broken-init, whose app container waits at PodInitializing"
+check crashloop miss  restarts  "a pod with the same crash history that is up and ready now — rule 5's pod"
 
 # Rule 3. Both spellings count: the first pull failure is ErrImagePull and every
 # one after it is ImagePullBackOff, so a predicate with only one of them passes
@@ -1227,6 +1650,21 @@ check quota     miss  empty_rs  "an empty namespace — 'no ReplicaSet' is not '
 # rollout is merely slow it is True/ReplicaSetUpdated, which must not count.
 check w2        match w2_deploy "the Deployment that gave up"
 check w2        miss  healthy_deploy "a Deployment that finished rolling out"
+
+# D36. The one broken pod that has an owner, and this predicate has four clauses
+# rather than the usual two — so it gets one negative per clause, each an object
+# that differs from the positive in exactly that clause. Every case is a List:
+# the pod's name is generated, so the fetch is by label, and a bare Pod object
+# would make jq error out instead of answer.
+check owned     match owned_pods "broken-owned's pod, in backoff behind its ReplicaSet"
+check owned     match crashloop_terminated_list "the same pod between backoffs, which is where the loop spends most of its time"
+check owned     miss  crashloop_list "the same crash with no owner at all"
+check owned     miss  coredns_pods "a healthy pod owned by a ReplicaSet — the owner without the crash"
+check owned     miss  mirror_crashloop "the same crash under an owner of kind Node, which is a mirror pod and not a workload"
+check owned     miss  owned_not_controlled "an ownerReference that owns without controlling"
+check owned     miss  restarts_owned "an owned pod that crashed three times and is up now — history is not a loop"
+check owned     miss  owned_first_exit "the same pod at its first exit, before any restart"
+check owned     miss  empty_rs "an empty List — 'no pod' is not 'a crashlooping pod'"
 
 if [ $fail -eq 0 ]; then
   echo "verify-test: ${#want[@]} predicates, each matched in its own state and refused in a neighbouring one"

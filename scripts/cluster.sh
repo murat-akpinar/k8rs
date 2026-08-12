@@ -84,7 +84,9 @@ unbreak() {
   # broken-stuck carries a finalizer nothing ever removes — that is the point
   # of the fixture, and it is why a plain delete would hang here forever.
   "${kc[@]}" patch pod broken-stuck -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
-  "${kc[@]}" delete pod -l demo=broken --wait=false --ignore-not-found
+  # Deployment as well as Pod since broken-owned: deleting only the pod of an
+  # owned fixture deletes nothing — the ReplicaSet puts it straight back.
+  "${kc[@]}" delete pod,deployment -l demo=broken --wait=false --ignore-not-found
   "${kc[@]}" delete pod,deployment -l demo=healthy --wait=false --ignore-not-found
   # The W1 fixture lives in its own namespace (a pods: "0" quota would
   # otherwise block every pod above from being recreated).
@@ -107,14 +109,21 @@ verify() {
     case "$1" in
       quota) "${kc[@]}" get replicasets -n k8rs-quota -o json ;;
       w2)    "${kc[@]}" get deployment broken-quota -n k8rs-quota -o json ;;
+      # A Deployment's pod has a generated name, so this one is fetched by
+      # label and arrives as a List — the shape, not just the object, is the
+      # difference from every line above.
+      owned) "${kc[@]}" get pods -l app=broken-owned -o json ;;
       *)     "${kc[@]}" get pod "broken-$1" -o json ;;
     esac 2>/dev/null
   }
 
-  local names=(oom crashloop image config pending hostpath readiness restarts nolimits stuck init quota w2)
+  local names=(oom crashloop image config pending hostpath readiness restarts nolimits stuck init quota w2 owned)
   local -A want=(
     [oom]='.status.containerStatuses[0] | (.lastState.terminated // .state.terminated // {}) | .reason=="OOMKilled" and .exitCode==137'
-    [crashloop]='.status.containerStatuses[0] | .state.waiting.reason=="CrashLoopBackOff" and .lastState.terminated.exitCode==1'
+    # The `or` is the same fix, and for the same measured reason, as [owned]
+    # below: a crash loop is not one state, and this predicate used to name only
+    # the half of it that was on screen when it was written.
+    [crashloop]='.status.containerStatuses[0] | .lastState.terminated.exitCode==1 and (.state.waiting.reason=="CrashLoopBackOff" or .state.terminated.exitCode==1)'
     [image]='.status.containerStatuses[0].state.waiting.reason | .=="ImagePullBackOff" or . =="ErrImagePull"'
     [config]='.status.containerStatuses[0].state.waiting.reason=="CreateContainerConfigError"'
     [pending]='.status.phase=="Pending" and ([.status.conditions[]?|select(.type=="PodScheduled")|.reason]|first)=="Unschedulable"'
@@ -126,6 +135,18 @@ verify() {
     [init]='([.status.initContainerStatuses[]?|select(.state.waiting.reason=="CrashLoopBackOff" or .lastState.terminated.exitCode==1)]|length)>0'
     [quota]='[.items[].status.conditions[]?|select(.type=="ReplicaFailure" and .status=="True")]|length>0'
     [w2]='[.status.conditions[]?|select(.type=="Progressing" and .status=="False" and .reason=="ProgressDeadlineExceeded")]|length>0'
+    # Spelled differently from [crashloop] on purpose, and the difference was
+    # measured, not guessed: sampled 70 times on this cluster the container was
+    # in `state.terminated` 39 times, in `waiting: CrashLoopBackOff` 29 and
+    # `running` twice — and while the backoff was still short, in 1 sample of
+    # 30. Demanding the waiting reason therefore fails a pod that is
+    # crashlooping correctly, the too-tight half of what verify-test.sh exists
+    # to catch. What holds across the whole loop: it has already restarted
+    # after an exit 1, and it is not up right now (in backoff, or just died).
+    # The ~2s window where it *is* up stays excluded: a capture taken then is a
+    # Running pod, and certifying that as crashlooping is the lie this function
+    # exists to prevent.
+    [owned]='[.items[]?|select((.status.containerStatuses[0]|.lastState.terminated.exitCode==1 and (.state.waiting.reason=="CrashLoopBackOff" or .state.terminated.exitCode==1)) and ([.metadata.ownerReferences[]?|select(.controller==true and .kind=="ReplicaSet")]|length)>0)]|length>0'
   )
   local -A why=(
     [oom]="rule 2 — killed for exceeding its memory limit"
@@ -141,6 +162,7 @@ verify() {
     [init]="D27 — the init container fails, so the app container never starts"
     [quota]="D28/W1 — quota denies every pod, no pod object exists"
     [w2]="D28/W2 — the rollout gave up (ProgressDeadlineExceeded)"
+    [owned]="D36 — a crashlooping pod owned by a ReplicaSet (the grouping key's workload branch)"
   )
 
   # What it actually is, in one line, for the FAIL case. Covers a single object
@@ -153,6 +175,8 @@ verify() {
                 init:       (.status.initContainerStatuses // [])[0].state,
                 conditions: [ (.status.conditions // [])[] | {type,status,reason} ],
                 items:      [ (.items // [])[] | { name: .metadata.name,
+                                owner:      [ (.metadata.ownerReferences // [])[] | {kind,controller} ],
+                                state:      (.status.containerStatuses // [])[0].state,
                                 conditions: [ (.status.conditions // [])[] | {type,status,reason} ] } ] }
               | with_entries(select(.value != null and .value != []))'
 

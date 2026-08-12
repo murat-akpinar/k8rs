@@ -109,6 +109,23 @@ fixtures:
       "${kc[@]}" get pod "broken-$p" -o json | "${jqs[@]}" > "tests/fixtures/$p.json"
     done
 
+    # D36: the one broken pod that has an owner — every other pod capture above
+    # is a bare pod, so the grouping key's workload branches have no positive
+    # fixture at all. A Deployment's pod has a generated name, so this one is
+    # fetched by label and lands as a List; the ReplicaSet beside it is what
+    # carries the second half of the chain, the ownerReference naming the
+    # Deployment (the Deployment itself is already in deployments.json).
+    "${kc[@]}" get pods -l app=broken-owned -o json | "${jqs[@]}"        > tests/fixtures/owned-pods.json
+    "${kc[@]}" get replicasets -l app=broken-owned -o json | "${jqs[@]}" > tests/fixtures/owned-replicasets.json
+    # A label that matches nothing writes `{"items":[]}` and says nothing about
+    # it — "extracted nothing" and "nothing to extract" print the same line, and
+    # the owner is the whole reason these two files exist.
+    for f in owned-pods owned-replicasets; do
+      jq -e '[.items[]? | select(([.metadata.ownerReferences[]? | select(.controller==true)] | length) > 0)] | length > 0' \
+        "tests/fixtures/$f.json" >/dev/null \
+        || { echo "fixtures: $f.json carries no controlling ownerReference — the owner is what this capture is for" >&2; exit 1; }
+    done
+
     # The negative side. Every rule needs a healthy counterpart or its
     # false-positive test is fiction.
     "${kc[@]}" get pod healthy -o json | "${jqs[@]}" > tests/fixtures/healthy.json

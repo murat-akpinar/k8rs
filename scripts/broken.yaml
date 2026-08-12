@@ -196,3 +196,29 @@ spec:
         - name: app
           image: busybox
           command: ["sleep", "3600"]
+---
+# D36 — a broken pod that *has an owner*. Every other pod in this file is bare,
+# so the grouping key would ship tested only in its no-owner case and nothing
+# would exercise the workload branches. One Deployment covers two of them at
+# once: the pod carries an ownerReference naming its ReplicaSet, and the
+# ReplicaSet one naming the Deployment.
+#
+# The crash is deliberately the same one as broken-crashloop: the pod state is
+# not what this fixture is for, the chain above it is, and a second failure mode
+# here would only make the two captures harder to compare.
+#
+# It stays out of k8rs-quota — a `pods: "0"` quota there would mean no pod is
+# ever created, which is the one thing this fixture must produce.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: broken-owned, labels: { demo: broken } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: broken-owned } }
+  template:
+    metadata: { labels: { app: broken-owned, demo: broken } }
+    spec:
+      containers:
+        - name: quitter
+          image: busybox
+          command: ["sh", "-c", "echo starting; sleep 2; exit 1"]

@@ -258,8 +258,10 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       one
 - [x] kind cluster up, states settled (CrashLoop in backoff, OOM kills seen).
       `cluster.sh verify` asserts each one reached the state its rule is
-      about — **13/13 pass** against the real cluster. A fixture that never
-      reaches its state is a test that cannot fail, and that has to be caught
+      about — **13/13 pass** against the real cluster *(14 predicates since
+      `owned` landed; the count moves whenever a fixture does)*. A fixture that
+      never reaches its state is a test that cannot fail, and that has to be
+      caught
       before anything is captured. The predicates that decide it are
       themselves proven offline by
       [`scripts/verify-test.sh`](scripts/verify-test.sh), which found one that
@@ -276,7 +278,11 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       *first*, then the 10 broken pods + the healthy pair + the quota workload's
       Deployment and ReplicaSets + **nodes, deployments, statefulsets,
       daemonsets, services, PVCs, PDBs** + the `K8S_VERSION` stamp. Every
-      object goes through `sanitize.jq` on the way out — never afterwards
+      object goes through `sanitize.jq` on the way out — never afterwards.
+      *(The list grows with the boxes below: `owned-pods` and
+      `owned-replicasets` were added with the owned-pod fixture. This item
+      describes the recipe existing, not a frozen inventory — the recipe
+      itself is the inventory.)*
 - [ ] **Run it**: `just cluster-up && just cluster-down` wherever docker is, then
       `just fixtures`, then eyeball the output. Nothing above is proven until
       the capture has actually run against a cluster.
@@ -309,7 +315,14 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       no-owner case, and mutation testing cannot object to a branch nothing
       exercises. A Deployment with a crashlooping pod covers
       Deployment/ReplicaSet in one object
-      ([NOTES § D36](NOTES.md#d36--the-finding-shape-the-review-sent-back-2026-08-12))
+      ([NOTES § D36](NOTES.md#d36--the-finding-shape-the-review-sent-back-2026-08-12)).
+      **The manifest and the verification have landed** — `broken-owned` in
+      `broken.yaml`, the `[owned]` predicate and its seven negatives in
+      `cluster.sh verify`, both halves of the crash loop in `verify-test.sh`'s
+      corpus, and the two `owned-*.json` lines in `just fixtures` with a guard
+      that refuses a capture carrying no controlling `ownerReference`. The box
+      stays open for the capture itself, which three boxes share and which
+      happens once, after all three have their manifests
 - [ ] **A mirror pod**, captured on the same trip: `kubectl get pods -n
       kube-system -o json` from the kind cluster. kubelet writes an
       `ownerReference` of kind `Node` onto every static pod, which is the one

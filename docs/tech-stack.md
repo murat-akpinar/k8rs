@@ -92,7 +92,14 @@ just cluster-down              # tear it down
 `verify` is the step worth understanding: it is what stands between the project
 and a fixture that never reached its state, which is a test that cannot fail. It
 waits, then prints one line per fixture naming the rule each one exists for, and
-refuses to let the capture run until all of them pass.
+refuses to let the capture run until all of them pass. Each predicate asserts
+something true across the *whole* window the capture could land in, not at one
+instant of it — a crash loop is several states, and naming one of them
+certifies a moment that is over by the time the bytes are written
+([NOTES § D61](../NOTES.md#d61--a-verify-predicate-must-hold-across-the-whole-window-not-at-one-instant-2026-08-12)).
+Run `break → verify → fixtures` in one sitting: the healthy-side pods sleep for
+an hour and then restart, and a capture taken after that catches one of them
+briefly not ready.
 
 Knobs, all optional:
 
