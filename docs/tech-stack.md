@@ -81,13 +81,24 @@ Every fixture in `tests/fixtures/` was captured from a cluster you can stand up
 in one command. Nothing here is specific to the machine it was first run on.
 
 ```
-just cluster-up                # three nodes, kindest/node:v1.36.1
+just cluster-up                # four nodes, kindest/node:v1.36.1
 scripts/cluster.sh break       # apply the deliberately broken pods + the healthy pair
 scripts/cluster.sh status      # watch the states settle — a few minutes
 scripts/cluster.sh verify      # assert each one reached the state its rule is about
 just fixtures                  # capture, sanitized on the way out
+scripts/cluster.sh unbreak     # remove the demo pods and put the three nodes back
 just cluster-down              # tear it down
 ```
+
+`just fixtures` breaks the **nodes** itself, at the end: it captures every pod
+and workload first, then calls `scripts/cluster.sh break-nodes` — which cordons
+one worker, taints a second and stops the kubelet on a third — and captures
+`nodes.json` last. That order is the design, not a detail: a cordon changes
+where a pod would go, a `NoExecute` taint evicts what is already there, and a
+stopped kubelet turns every pod on that node `Unknown` within a minute, so any
+of the three landing before the pod captures would write a state no manifest
+asked for. It also means the cluster is left broken on purpose when the capture
+finishes — `unbreak` is what puts it back.
 
 `verify` is the step worth understanding: it is what stands between the project
 and a fixture that never reached its state, which is a test that cannot fail. It
@@ -107,7 +118,7 @@ Knobs, all optional:
 |---|---|---|
 | `K8RS_APISERVER_ADDRESS` | `127.0.0.1` | The cluster is on another machine. kind writes `127.0.0.1` into the kubeconfig otherwise, and no other host can reach it |
 | `K8RS_APISERVER_PORT` | `6443` | Port already taken |
-| `K8RS_WORKERS` | `2` | Node rules and drain safety need more than one worker; fewer if the box is small |
+| `K8RS_WORKERS` | `3` | One worker per node state `break-nodes` produces — cordoned, tainted, kubelet stopped — so no node fixture has two causes at once. Everything except `break-nodes` works on fewer, and `break-nodes` refuses out loud rather than doubling two states onto one node |
 | `K8RS_CLUSTER` | `k8rs` | Running more than one. Note the sanitizer refuses captures whose node names do not start with `k8rs-`, so a renamed cluster cannot produce fixtures |
 | `K8RS_NODE_IMAGE` | `kindest/node:v1.36.1` | Pinned on purpose — fixtures are only comparable against a known version, and the capture stamps it into `tests/fixtures/K8S_VERSION` |
 | `K8RS_VERIFY_TIMEOUT` | `420` | How long `verify` waits for states to settle. CrashLoopBackOff has to enter backoff and an OOM kill has to actually happen |

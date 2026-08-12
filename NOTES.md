@@ -2965,6 +2965,111 @@ an oversight.
   forbids. The name is `kube-system-pods.json` and not `kube-system.json`
   because it is pods only.
 
+### D63 — the field kubectl never writes, and a substitution test that could not see a clause (2026-08-12)
+
+The last Phase 2 manifest box added thirteen shapes the first capture could not
+produce. Two operator reviews, run independently on the same diff, converged on
+one blocker — and it was not in a manifest, it was in the predicate meant to
+certify one.
+
+**`kubectl taint` writes no `timeAdded`, for any effect.** The predicate for the
+`dedicated=gpu:NoExecute` fixture demanded one, on the strength of the API
+type's own sentence — *"it is only written for NoExecute taints"* — which reads
+as a promise and is not one. The only writer in the tree is the node
+lifecycle controller's `SwapNodeControllerTaint`, for the taints it adds
+itself; k/k [#113044](https://github.com/kubernetes/kubernetes/issues/113044)
+asks for the flag that would change that and has not got it, and
+[#131644](https://github.com/kubernetes/kubernetes/pull/131644) deleted the
+sentence from the type as inaccurate in the other direction too — the
+controller stamps `NoSchedule` taints as well.
+
+What that would have cost is the part worth recording. `break-nodes` applies
+the taint *first* and asserts *after*, so the eviction lands, the poll loop
+then spends its whole 420s on a taint that was applied perfectly, `set -euo
+pipefail` ends `just fixtures` at its last line, and `nodes.json` — the one
+capture the whole subcommand exists for — is never written. Every other
+fixture is already on disk by then, and the bare pods the `NoExecute` taint
+evicted are gone for good, so the retry is not "run it again": it is `unbreak`,
+`break`, and a fresh ten-minute settle. **A predicate that cannot pass is more
+expensive than a rule that is wrong**, because it fails at the end of the most
+expensive step, and it fails looking exactly like a cluster that did not
+cooperate.
+
+**The timestamp is recovered from the taint nobody types.** Stopping a kubelet
+makes the controller add `node.kubernetes.io/unreachable:NoExecute` through the
+one function that stamps a time, so `[notready]` asserts the timestamp and
+`[tainted]` asserts only what `kubectl` actually writes — key, value, effect.
+The cordon's own `node.kubernetes.io/unschedulable:NoSchedule` taint is
+asserted to *exist* and not to carry a time: whether a `NoSchedule` taint keeps
+its stamp is the half nobody could settle from the source, and asserting it
+would have rebuilt the trap one clause over.
+
+**Two files outside this box now rest on the deleted sentence**, and neither is
+touched here — recorded so the trip's own `nodes.json` is read as the answer to
+both:
+
+- `rules.rs`'s taint test names `kubectl taint … dedicated=gpu:NoExecute` as
+  the object that will retire its synthesis. It will not; the controller's
+  unreachable taint will. `dev-core` re-points it when the capture lands.
+- [`screens/alerts.md`](screens/alerts.md)'s cordon card argues that a cordon
+  has no age *because* `timeAdded` is NoExecute-only — the sentence that was
+  deleted. If the unschedulable taint carries a stamp, a cordon time is
+  readable and [D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)'s
+  premise moves. `[cordoned]` now requires that taint to be in the capture, so
+  the trip settles it either way. Nothing is built on it before then.
+
+**A substitution test proves a predicate has two halves; it cannot prove a
+clause does any work.** Replacing each predicate with `true` and with `false`
+and demanding both go red — the discipline
+[D26](#d26--a-green-build-that-proves-nothing-2026-08-12) installed — was run
+over all twenty-six and passed, while `[pending]`'s new toleration clause was
+dead: every corpus object that had to refuse the predicate already failed on
+the *nodeSelector* clause first, so the toleration could be deleted with the
+file staying green. The fix is to delete each clause on its own and demand a
+red, which needs an object that differs in exactly that clause — and building
+those is what turned up the second false premise in the same box: the manifest
+justified its respin by saying no captured pod carried `tolerations`, when the
+`DefaultTolerationSeconds` admission plugin puts two on every pod in every
+capture. What the respin genuinely adds is a toleration with a *value*.
+
+**The reviews' other seven findings, and what each one was.** A second `break`
+could not run at all, because a resized pod's `spec.resources` may not be
+changed by an `apply` and nothing put it back (fixed by resetting through the
+`resize` subresource first — and a cluster holding an *earlier generation* of
+these manifests still cannot be applied over, which is now written where it
+happens instead of claimed away). `100Gi` was infeasible only on small
+machines, since a kind node reports the host's memory — `1Pi` is infeasible
+everywhere. Nothing asserted that the cordoned worker still carried a pod a
+drain would move, i.e. that N2's positive fixture was not N2's negative wearing
+its name; the node is now *chosen* by what is on it and the choice is asserted
+against the committed bytes. The `why` line claimed an N3 positive that a
+stopped kubelet does not produce — pressure conditions need an eviction
+threshold crossed, which is a cluster change, so **N3 joins the permanently
+synthesized list**. The one step that can fail on permissions ran third, after
+two destructive ones, on a machine where docker access is per-login; it is
+preflighted now, and `unbreak` reports what it undid instead of swallowing a
+denial that looks identical to nothing-to-undo. A guard asserted a termination
+message was non-null when `REDACTED-IP` is also non-null. And a comment claimed
+`verify-test.sh` guarded the usage text's line range, which it never did —
+**an invented guard is worse than none, because the next editor trusts it**; the
+range is gone rather than the claim.
+
+**Decided in passing, none of it forced by the box:** three workers by default
+(one per node state, so no node fixture has two causes; `break-nodes` refuses
+on fewer rather than doubling up) · `break-nodes` is its own subcommand called
+last by `just fixtures`, never part of `break`, because every one of its three
+actions changes a pod state that is still settling · the resize is a capture
+step like rule 12's delete, since a pod that is not running has no enacted
+resources to disagree with · `broken-sts` carries two replicas so it can be
+*partially* ready, which is the only shape that separates `ready` from
+`desired` · `broken-rollout` gets an hour's progress deadline so it cannot
+become a second W2 fixture mid-trip · the three healthy shapes are separate
+pods, because the `healthy` pod is every rule's negative at once and a host
+mount on it would leave rule 8 with two positives and no negative · the
+toleration moved to `NoExecute` to match the taint rather than the other way
+round, since with `timeAdded` gone the effect is the only thing separating
+`[tainted]` from its negative.
+
 ## Decisions made
 
 ### Product

@@ -68,7 +68,8 @@ mutants:
 
 # --- the test cluster (scripts/cluster.sh does the work) ---
 
-# Bring up the three-node kind test cluster
+# Bring up the four-node kind test cluster (1 control-plane + 3 workers: one
+# worker per node state `break-nodes` produces, so no fixture has two causes)
 cluster-up:
     scripts/cluster.sh up
 
@@ -95,6 +96,18 @@ fixtures:
     scripts/cluster.sh verify
     bash scripts/sanitize-test.sh
 
+    # Every capture below is followed by an assertion about the bytes that
+    # landed, and this is the one place to write one. It runs *after*
+    # sanitize.jq, so it covers both halves of the same failure: a cluster that
+    # never produced the shape, and a filter that learned to destroy it. Naming
+    # the field rather than the file is the whole point — a capture of the wrong
+    # object writes perfectly valid JSON, and "found none" reads exactly like
+    # "there were none" (CLAUDE.md § A derived list asserts it found something).
+    guard() { # $1 file  $2 what has to be in it  $3 the jq that finds it
+      jq -e "$3" "tests/fixtures/$1" >/dev/null \
+        || { echo "fixtures: $1 carries no $2 — that is what this capture is for" >&2; exit 1; }
+    }
+
     # Rule 12 needs a pod that is Terminating and stays that way: the delete is
     # part of the capture, not of `cluster.sh break`.
     "${kc[@]}" delete pod broken-stuck --wait=false --ignore-not-found
@@ -105,9 +118,36 @@ fixtures:
       | jq -e '.metadata.deletionTimestamp != null and ((.metadata.finalizers // []) | length > 0)' >/dev/null \
       || { echo "fixtures: broken-stuck is not Terminating behind a finalizer — rule 12 has no fixture" >&2; exit 1; }
 
-    for p in oom crashloop image config pending hostpath readiness restarts nolimits stuck init; do
+    for p in oom crashloop image config pending hostpath readiness restarts nolimits stuck init \
+             resize podlimit; do
       "${kc[@]}" get pod "broken-$p" -o json | "${jqs[@]}" > "tests/fixtures/$p.json"
     done
+
+    # The fields the first capture could not produce. Each one is a decode that
+    # today reads correctly whatever it does, because every committed object
+    # leaves the field absent — so each is asserted here by name, and a capture
+    # taken from the manifests as they were before this box fails loudly instead
+    # of quietly retiring a synthesis with an object that does not carry it.
+    # The noun phrase is what gets printed after "carries no", so it may not
+    # contain a negation of its own: this one read "carries no nodeSelector, and
+    # no toleration written beside it" and told the reader the opposite of what
+    # the failure was. The toleration clause names the key and value on purpose —
+    # every pod carries the two tolerations the DefaultTolerationSeconds
+    # admission plugin adds, so "has tolerations" is true of all of them.
+    guard pending.json  "nodeSelector with an operator's own toleration beside it (N6's pod side)" \
+      '((.spec.nodeSelector // {}) | length) > 0 and ([.spec.tolerations[]? | select(.key == "dedicated" and .value == "gpu")] | length) > 0'
+    guard hostpath.json "pair of mounts of one hostPath volume, one narrowed by a subPath and one read-only (D46)" \
+      '[.spec.volumes[]? | select(.hostPath) | .name] as $hp | [.spec.containers[].volumeMounts[]? | select(.name as $n | $hp | index($n))] | length == 2 and any(.subPath != null) and any(.readOnly == true) and any(.readOnly != true)'
+    # The string, not its existence: `"REDACTED-IP"` is also non-null, and it is
+    # exactly what a sanitizer that treated this line as an address would leave
+    # behind. The manifest prints a hostname for that reason — so the assertion
+    # has to be the one thing a filter could destroy without emptying the field.
+    guard crashloop.json "log tail in a termination, which is what terminationMessagePolicy FallbackToLogsOnError makes the kubelet write (D51)" \
+      '[.status.containerStatuses[]? | (.lastState.terminated.message // .state.terminated.message) | select(type == "string" and contains("db.payments.svc:5432"))] | length > 0'
+    guard resize.json   "limit the spec asks for and the kubelet did not enact (D51)" \
+      '.status.containerStatuses[0].resources.limits.memory != .spec.containers[0].resources.limits.memory and (.status.containerStatuses[0].resources.limits.memory | . != null)'
+    guard podlimit.json "memory limit in the container status that its spec never declared (D53)" \
+      '((.spec.containers[0].resources.limits // {}) | has("memory") | not) and ((.status.containerStatuses[0].resources.limits // {}) | has("memory"))'
 
     # D36: the one broken pod that has an owner — every other pod capture above
     # is a bare pod, so the grouping key's workload branches have no positive
@@ -121,10 +161,19 @@ fixtures:
     # it — "extracted nothing" and "nothing to extract" print the same line, and
     # the owner is the whole reason these two files exist.
     for f in owned-pods owned-replicasets; do
-      jq -e '[.items[]? | select(([.metadata.ownerReferences[]? | select(.controller==true)] | length) > 0)] | length > 0' \
-        "tests/fixtures/$f.json" >/dev/null \
-        || { echo "fixtures: $f.json carries no controlling ownerReference — the owner is what this capture is for" >&2; exit 1; }
+      guard "$f.json" "controlling ownerReference" \
+        '[.items[]? | select(([.metadata.ownerReferences[]? | select(.controller==true)] | length) > 0)] | length > 0'
     done
+
+    # D40: the Deployment whose second revision cannot start. One object gives
+    # both halves — a workload that is *partially* ready, which is the only
+    # state that separates `desired` from `ready` from the three counters beside
+    # them, and two ReplicaSets under one Deployment, which is the shape a
+    # rollout actually has. Every workload captured before this was either
+    # entirely ready or entirely absent.
+    "${kc[@]}" get replicasets -l app=broken-rollout -o json | "${jqs[@]}" > tests/fixtures/rollout-replicasets.json
+    guard rollout-replicasets.json "pair of revisions, one serving and one that never started (D40)" \
+      '[.items[]? | select([.metadata.ownerReferences[]? | select(.controller == true and .kind == "Deployment")] | length > 0)] | length == 2 and any((.status.readyReplicas // 0) > 0) and any((.status.readyReplicas // 0) == 0)'
 
     # D39/D46: the one namespace nothing in broken.yaml can imitate. kubelet
     # writes an ownerReference of kind Node onto every static pod — the only
@@ -146,19 +195,33 @@ fixtures:
     # link and says nothing about who writes the pod, so a Node reference that
     # does not control does not exempt the pod from N2's count (D46). Asserting
     # the looser claim would pass a capture that yields zero mirror pods.
-    ks_wants=(
-      'pod owned by a controlling Node (the static-pod shape D39 rules on, and N2 reads as mirror)|[.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Node" and .controller == true))] | length > 0'
-      'pod owned by a controlling DaemonSet with a writable hostPath (rule 8 false-positive class)|[.items[] | select(any(.metadata.ownerReferences[]?; .kind == "DaemonSet" and .controller == true)) | [.spec.volumes[]? | select(.hostPath) | .name] as $hp | .spec.containers[].volumeMounts[]? | select(.readOnly != true) | select(.name as $n | $hp | index($n))] | length > 0'
-      'read-only hostPath mount (the half of rule 8 that stays out of Alerts)|[.items[] | [.spec.volumes[]? | select(.hostPath) | .name] as $hp | .spec.containers[].volumeMounts[]? | select(.readOnly == true) | select(.name as $n | $hp | index($n))] | length > 0'
-    )
-    for want in "${ks_wants[@]}"; do
-      jq -e "${want#*|}" tests/fixtures/kube-system-pods.json >/dev/null \
-        || { echo "fixtures: kube-system-pods.json carries no ${want%%|*} — that is what this capture is for" >&2; exit 1; }
-    done
+    guard kube-system-pods.json "pod owned by a controlling Node (the static-pod shape D39 rules on, and N2 reads as mirror)" \
+      '[.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Node" and .controller == true))] | length > 0'
+    guard kube-system-pods.json "pod owned by a controlling DaemonSet with a writable hostPath (rule 8 false-positive class)" \
+      '[.items[] | select(any(.metadata.ownerReferences[]?; .kind == "DaemonSet" and .controller == true)) | [.spec.volumes[]? | select(.hostPath) | .name] as $hp | .spec.containers[].volumeMounts[]? | select(.readOnly != true) | select(.name as $n | $hp | index($n))] | length > 0'
+    guard kube-system-pods.json "read-only hostPath mount (the half of rule 8 that stays out of Alerts)" \
+      '[.items[] | [.spec.volumes[]? | select(.hostPath) | .name] as $hp | .spec.containers[].volumeMounts[]? | select(.readOnly == true) | select(.name as $n | $hp | index($n))] | length > 0'
 
     # The negative side. Every rule needs a healthy counterpart or its
-    # false-positive test is fiction.
-    "${kc[@]}" get pod healthy -o json | "${jqs[@]}" > tests/fixtures/healthy.json
+    # false-positive test is fiction — and three of these four exist because the
+    # shape they carry is one no *broken* pod can carry: rule 8 fires on a
+    # writable host mount, so the read-only one is a healthy object; a sidecar
+    # that keeps running is not a failure; and a pod-level request is ordinary
+    # capacity accounting. They are separate pods rather than fields on
+    # `healthy`, which is the negative fixture for every rule at once: a host
+    # mount on it would leave rule 8 with two positives and no negative, and an
+    # init container that restarts forever would end its "never restarted".
+    for h in healthy healthy-hostpath healthy-sidecar healthy-podlevel; do
+      "${kc[@]}" get pod "$h" -o json | "${jqs[@]}" > "tests/fixtures/$h.json"
+    done
+    guard healthy.json "resources on its init container — the list the spec lookup would otherwise never read (D40)" \
+      '.spec.initContainers[0].resources.limits.memory != null'
+    guard healthy-hostpath.json "read-only hostPath mount, which is the half of rule 8 that must not fire (D46)" \
+      '[.spec.volumes[]? | select(.hostPath) | .name] as $hp | [.spec.containers[].volumeMounts[]? | select(.name as $n | $hp | index($n))] | length > 0 and all(.readOnly == true)'
+    guard healthy-sidecar.json "init container with restartPolicy Always — the native sidecar (D46)" \
+      '[.spec.initContainers[]? | select(.restartPolicy == "Always")] | length > 0'
+    guard healthy-podlevel.json "pod-level request beside the container's own (KEP-2837, D51)" \
+      '.spec.resources.requests.cpu != null and .spec.containers[0].resources.requests.cpu != null'
     # W1 and W2 read a ReplicaSet, so their negative has to be one too — the
     # healthy Deployment in deployments.json cannot show the absence of a
     # ReplicaFailure condition that only ever appears on the ReplicaSet.
@@ -168,13 +231,69 @@ fixtures:
     "${kc[@]}" get deployment broken-quota -n k8rs-quota -o json | "${jqs[@]}"       > tests/fixtures/quota-deployment.json
     "${kc[@]}" get replicasets -n k8rs-quota -o json | "${jqs[@]}"       > tests/fixtures/quota-replicasets.json
 
-    # The cluster-wide snapshot analysis.rs reports are computed from.
-    for kind in nodes deployments statefulsets daemonsets services persistentvolumeclaims poddisruptionbudgets; do
+    # The cluster-wide snapshot analysis.rs reports are computed from. `nodes` is
+    # not in this loop: it is captured last, after the nodes have been broken.
+    for kind in deployments statefulsets daemonsets services persistentvolumeclaims poddisruptionbudgets; do
       "${kc[@]}" get "$kind" -A -o json | "${jqs[@]}" > "tests/fixtures/$kind.json"
     done
+    # The three workload kinds, each in the state that separates `desired` from
+    # `ready` from the counters next to them. `statefulsets.json` was an empty
+    # list until this box, which is the one hole no synthesis could fill — an
+    # empty list is also what a capture from the wrong context writes, so the
+    # assertion names the object rather than counting items.
+    guard statefulsets.json "partially ready StatefulSet — the kind From<StatefulSet> had no object for at all (D40)" \
+      '[.items[]? | select(.metadata.name == "broken-sts" and .spec.replicas == 2 and .status.readyReplicas == 1)] | length == 1'
+    guard deployments.json "Deployment mid-rollout, its five replica counters holding five different values (D40)" \
+      '[.items[]? | select(.metadata.name == "broken-rollout" and .spec.replicas == 2 and .status.replicas == 3 and .status.readyReplicas == 2 and .status.updatedReplicas == 1 and .status.unavailableReplicas == 1)] | length == 1'
+    guard daemonsets.json "DaemonSet whose pods cannot start — desired is per node, and nothing captured had it disagree with ready (D40)" \
+      '[.items[]? | select(.metadata.name == "broken-ds" and .status.desiredNumberScheduled > 0 and .status.numberReady == 0)] | length == 1'
+
+    # --- THE NODES, LAST ---
+    # Everything above is on disk before a single node is touched, and that
+    # ordering is the whole design: a cordon changes where a pod would go, a
+    # NoExecute taint evicts what is already there, and a stopped kubelet turns
+    # every pod on that node Unknown within a minute. Any of those lands in a
+    # pod capture as a state no manifest asked for. `break-nodes` asserts all
+    # three states itself (it shares cluster.sh's predicate table), so what is
+    # left here is the same assertion made against the sanitized bytes — plus
+    # the two claims that can only be made once the bytes exist: the `timeAdded`
+    # the sanitizer could quietly drop, and the join with the pod captures, which
+    # is the only place both halves of N2 are on disk at the same time.
+    scripts/cluster.sh break-nodes
+    "${kc[@]}" get nodes -A -o json | "${jqs[@]}" > tests/fixtures/nodes.json
+    guard nodes.json "cordoned worker that is otherwise healthy, carrying the taint the controller adds beside the field kubectl sets (N2)" \
+      '[.items[] | select(.spec.unschedulable == true and ([.status.conditions[] | select(.type == "Ready") | .status] | first) == "True" and ([.spec.taints[]? | select(.key == "node.kubernetes.io/unschedulable" and .effect == "NoSchedule")] | length) > 0)] | length > 0'
+    guard nodes.json "worker tainted dedicated=gpu:NoExecute — key, value and effect, which is all kubectl taint writes (N6)" \
+      '[.items[] | select([.spec.taints[]? | select(.key == "dedicated" and .value == "gpu" and .effect == "NoExecute")] | length > 0)] | length > 0'
+    # The timestamp, and it is read off a taint *nobody typed*: `kubectl taint`
+    # writes no timeAdded (k/k #113044), the node controller stamps one on every
+    # taint it adds for itself, and this is the only decode of that field a
+    # capture can hold honestly.
+    guard nodes.json "taint carrying a timeAdded — the node controller stamps one, kubectl stamps none" \
+      '[.items[] | select([.spec.taints[]? | select(.key == "node.kubernetes.io/unreachable" and .effect == "NoExecute" and .timeAdded != null)] | length > 0)] | length > 0'
+    guard nodes.json "node whose kubelet stopped posting (N1)" \
+      '[.items[] | select([.status.conditions[] | select(.type == "Ready" and .status == "Unknown")] | length > 0)] | length > 0'
+
+    # N2's positive is a join, and this is the only place both halves of it are
+    # on disk. "Cordoned" alone is N2's *negative* when the only pods left are a
+    # DaemonSet's — so the cordoned node has to be one a committed pod capture is
+    # actually running on, or the snapshot a rule test builds proves the opposite
+    # of what its name says (NOTES § N-series, D46). `break-nodes` picks such a
+    # node; this is the same claim made against the bytes, after the sanitizer,
+    # and it is what fails if the pick ever drifts from the capture.
+    #
+    # Fed every fixture: `.spec.nodeName` is null on the List captures and on the
+    # unschedulable pod, so what is left is exactly the single-pod captures, all
+    # of which are bare or ReplicaSet-owned — pods a drain moves.
+    jq -e -n --slurpfile nodes tests/fixtures/nodes.json \
+      '[$nodes[0].items[] | select(.spec.unschedulable == true) | .metadata.name] as $cordoned
+       | any(inputs | .spec.nodeName? // empty; IN($cordoned[]))' \
+      tests/fixtures/*.json >/dev/null \
+      || { echo "fixtures: no captured pod is running on the cordoned node — the joined snapshot is N2's negative under N2's name" >&2; exit 1; }
 
     "${kc[@]}" version -o json | jq -r .serverVersion.gitVersion > tests/fixtures/K8S_VERSION
     echo "captured $(ls tests/fixtures | wc -l) fixtures from $(cat tests/fixtures/K8S_VERSION)"
+    echo "the cluster is left broken on purpose — scripts/cluster.sh unbreak puts the nodes back"
 
 # Body lands in Phase 7, the target is declared now.
 #

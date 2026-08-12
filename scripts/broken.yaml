@@ -16,6 +16,17 @@ spec:
         limits: { memory: "64Mi" }
 ---
 # 1 + 6 — CrashLoopBackOff, exit 1
+#
+# `terminationMessagePolicy: FallbackToLogsOnError` is D51's field: with it the
+# kubelet copies the tail of the container's log into
+# `lastState.terminated.message`, which turns rule 6's action from "check the
+# logs" into the log line itself. The default policy (`File`) reads
+# /dev/termination-log, which nothing here writes, so the field is absent from
+# every capture taken so far and a decode that dropped it read as correct.
+# The last line the container prints is what lands there — a connection refused
+# against a hostname, not an address: the sanitizer rewrites anything
+# address-shaped to REDACTED-IP, and a fixture whose one interesting string is a
+# placeholder proves less than one that survives the filter intact.
 apiVersion: v1
 kind: Pod
 metadata: { name: broken-crashloop, labels: { demo: broken } }
@@ -23,7 +34,14 @@ spec:
   containers:
     - name: quitter
       image: busybox
-      command: ["sh", "-c", "echo starting; sleep 2; exit 1"]
+      terminationMessagePolicy: FallbackToLogsOnError
+      command: ["sh", "-c"]
+      args:
+        - |
+          echo starting
+          sleep 2
+          echo 'panic: dial tcp db.payments.svc:5432: connect: connection refused' >&2
+          exit 1
 ---
 # 3 — ImagePullBackOff
 apiVersion: v1
@@ -46,19 +64,71 @@ spec:
       envFrom:
         - configMapRef: { name: this-configmap-does-not-exist }
 ---
-# 10 — Pending, unschedulable (insufficient cpu)
+# 10 + N6 — Pending, unschedulable: it asks for a class of node this cluster does
+# not have. A 500-cpu request produced the same phase and the same condition, but
+# nothing on the pod said *which* constraint was keeping it off every node, and
+# that is N6's entire subject (D40).
+#
+# The two fields are not in the same position, and the difference matters:
+#
+#   - `nodeSelector` was genuinely absent from every captured pod, so its decode
+#     had no object at all.
+#   - `tolerations` never was. The `DefaultTolerationSeconds` admission plugin
+#     adds `node.kubernetes.io/not-ready` and `node.kubernetes.io/unreachable`
+#     to every pod that does not already carry them, so
+#     `tests/fixtures/pending.json` holds two of them today and a check written
+#     as "this pod has tolerations" is satisfied by every pod in the cluster.
+#     What this manifest adds is the one no plugin writes: an operator's own —
+#     a `key` with a `value` and `operator: Equal`, which is the shape N6 has to
+#     read and match against a taint.
+#
+# They are written together because they belong together: a selector aimed at a
+# node class that is tainted is useless without the toleration for it, and it is
+# the pair `kubectl` users actually write. Its effect is `NoExecute` to match the
+# taint `cluster.sh break-nodes` puts on a worker — a toleration matching no
+# taint beside a taint nothing tolerates would make the joined snapshot say
+# nothing about either. `disktype` rather than `kubernetes.io/hostname`: the
+# sanitizer treats a hostname label as a node identifier wherever it appears, and
+# pinning to a node by name would make this manifest produce a capture the filter
+# has to reason about (it would pass — the name is a k8rs- one — but a fixture
+# whose selector says "this exact machine" is a worse example of the finding than
+# one that says "an SSD node").
 apiVersion: v1
 kind: Pod
 metadata: { name: broken-pending, labels: { demo: broken } }
 spec:
+  # Two entries, and the second matches every node here: `disktype` is what
+  # keeps the pod off all of them, and `kubernetes.io/os` is what a real
+  # manifest carries beside it — a one-key map would leave the decode of a
+  # second key untested, and N6 has to name the one that is actually to blame.
+  nodeSelector: { disktype: ssd, kubernetes.io/os: linux }
+  tolerations:
+    - { key: dedicated, operator: Equal, value: gpu, effect: NoExecute }
   containers:
-    - name: greedy
+    - name: app
       image: busybox
       command: ["sleep", "3600"]
-      resources:
-        requests: { cpu: "500" }
 ---
 # 8 — hostPath, moreover / and writable → must be CRITICAL
+#
+# Two containers mount the one volume, and D46 is why neither half is decoration:
+#
+#   - `subPath` is what the volume's own path does not say. The volume records
+#     `/`; what `nosy` is actually handed is the node's containerd runtime
+#     directory, and a container holding that socket is root on the node however
+#     the volume is spelled. Rule 8's docker.sock escalator reads the joined
+#     path, and a decode that dropped `subPath` would hand it `/` and never see
+#     the socket. A directory rather than the socket file itself: the kubelet
+#     bind-mounts a subPath that already exists and creates one that does not,
+#     and `run/containerd` exists on every kind node while `var/run/docker.sock`
+#     exists on none of them — a manifest that makes the kubelet invent the path
+#     it is supposed to be exposing is not the shape the rule is about.
+#   - `shipper` mounts the same volume read-only, which is the ordinary shape (a
+#     node agent writing, a log shipper reading) and the one that makes the two
+#     mounts tell apart. With one entry per *volume* the pair collapses into a
+#     single row and rule 8 either misses the writable mount or names the
+#     read-only one; without the container name the finding cannot say which
+#     container holds the node's root, while `kubectl describe pod` can.
 apiVersion: v1
 kind: Pod
 metadata: { name: broken-hostpath, labels: { demo: broken } }
@@ -68,7 +138,12 @@ spec:
       image: busybox
       command: ["sleep", "3600"]
       volumeMounts:
-        - { name: root, mountPath: /host }
+        - { name: root, mountPath: /host/containerd, subPath: run/containerd }
+    - name: shipper
+      image: busybox
+      command: ["sleep", "3600"]
+      volumeMounts:
+        - { name: root, mountPath: /host, readOnly: true }
   volumes:
     - name: root
       hostPath: { path: / }
@@ -221,4 +296,170 @@ spec:
       containers:
         - name: quitter
           image: busybox
-          command: ["sh", "-c", "echo starting; sleep 2; exit 1"]
+          terminationMessagePolicy: FallbackToLogsOnError
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo starting
+              sleep 2
+              echo 'panic: dial tcp db.payments.svc:5432: connect: connection refused' >&2
+              exit 1
+---
+# D40 — the third workload kind, and the one hole synthesis cannot fill.
+# `tests/fixtures/statefulsets.json` is an empty list, so `From<StatefulSet>` has
+# no test at all and none can be written: there is no committed object to change
+# one field of, and writing a whole StatefulSet into a test is the hand-written
+# JSON CLAUDE.md forbids with extra steps.
+#
+# Two replicas and not one, because "exists" is the low bar. A StatefulSet
+# updates from the highest ordinal down and waits for each replacement to be
+# Ready, so a second revision that cannot start parks it permanently at
+# `readyReplicas: 1` of `replicas: 2` — the partially-ready shape that separates
+# `desired` from `ready` from the three neighbouring counters. Fully ready or
+# entirely absent, which is all any captured workload has been so far, cannot.
+# `scripts/cluster.sh break` applies the bad second revision once the first one
+# is up; the manifest itself is deliberately the *good* revision.
+#
+# The headless Service is not optional decoration: `serviceName` is required and
+# has to name a Service, and a StatefulSet without one is rejected at admission.
+apiVersion: v1
+kind: Service
+metadata: { name: broken-sts, labels: { demo: broken } }
+spec:
+  clusterIP: None
+  selector: { app: broken-sts }
+  ports: [{ name: http, port: 80 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: broken-sts, labels: { demo: broken } }
+spec:
+  serviceName: broken-sts
+  replicas: 2
+  selector: { matchLabels: { app: broken-sts } }
+  template:
+    metadata: { labels: { app: broken-sts, demo: broken } }
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: app
+          image: busybox
+          command: ["sleep", "3600"]
+---
+# D40 — a Deployment caught mid-rollout, which is one object carrying two things
+# nothing captured so far has: a workload that is *partially* ready, and a second
+# ReplicaSet under a Deployment that is not the one serving traffic.
+#
+# `maxUnavailable: 0` with `maxSurge: 1` is what makes the state stand still: the
+# two original pods keep serving, one surge pod is created on the bad revision
+# and never becomes ready, and nothing is ever taken down to make room for it. So
+# `spec.replicas` 2, `status.replicas` 3, `ready` 2, `updated` 1, `unavailable`
+# 1 — five counters, five values, which is the discrimination `desired` and
+# `ready` are read against. With the default 25%/25% one healthy pod would be
+# taken down first and the numbers would move while the capture ran.
+#
+# The deadline is an hour rather than the default ten minutes so that the state
+# is the same however long the trip takes. Past it, Progressing flips to
+# ProgressDeadlineExceeded and this becomes a second W2 fixture — `broken-quota`
+# is W2's, deliberately, and two objects in the same state make neither of them
+# the answer to "what is W2's fixture".
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: broken-rollout, labels: { demo: broken } }
+spec:
+  replicas: 2
+  progressDeadlineSeconds: 3600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector: { matchLabels: { app: broken-rollout } }
+  template:
+    metadata: { labels: { app: broken-rollout, demo: broken } }
+    spec:
+      containers:
+        - name: app
+          image: busybox
+          command: ["sleep", "3600"]
+---
+# D40 — the third workload kind's own counters. A DaemonSet does not have
+# `spec.replicas` at all: what it wants is `status.desiredNumberScheduled`, one
+# per matching node, and `currentNumberScheduled` is how many exist rather than
+# how many are wanted. The only DaemonSets in the capture are kind's own, all
+# fully ready, so every one of those fields could be read from a neighbour and
+# stay green. A broken image gives `numberReady: 0` against a desired count the
+# cluster decides for itself.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: { name: broken-ds, labels: { demo: broken } }
+spec:
+  selector: { matchLabels: { app: broken-ds } }
+  template:
+    metadata: { labels: { app: broken-ds, demo: broken } }
+    spec:
+      containers:
+        - name: app
+          image: registry.invalid/does-not-exist:v9
+---
+# D51 — the pod whose limit was patched onto a node that cannot fit it.
+# `ContainerStatus.resources` is "the limits that have been successfully enacted
+# on the running container", and rule 2 must name that number and not the one the
+# spec asked for: an in-place resize that the kubelet refuses leaves the two
+# genuinely disagreeing, and a finding reading the spec would say "exceeded its
+# 1Pi limit · exit 137" about a container that was never given it.
+#
+# The manifest is only the *before*. `cluster.sh break` performs the resize once
+# the pod is running (`kubectl patch --subresource resize`), because a pod that is
+# not running yet has no enacted resources to disagree with — the same shape as
+# rule 12, whose delete is also a capture step and not a manifest.
+#
+# The request moves with the limit on purpose: feasibility is judged on the
+# request, so a resize that raises only the limit is one the kubelet enacts
+# happily and the two never diverge. Both stay equal to each other, so the pod's
+# QoS class does not change — a resize that would change it is rejected outright.
+#
+# The size the patch asks for is 1Pi and lives in `cluster.sh`, not here: a kind
+# node reports the host's memory as its allocatable, so a number chosen to be
+# "obviously too large" is only infeasible on machines smaller than the one it
+# was chosen on.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-resize, labels: { demo: broken } }
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "3600"]
+      resources:
+        requests: { memory: "64Mi" }
+        limits: { memory: "64Mi" }
+---
+# D53 — the shape that was written up as "nobody could produce this" and turned
+# out to be one manifest away. `effective()` falls back to the spec per *key*
+# rather than per side, and a version that only ever read `status.resources` for
+# keys the spec also declares is indistinguishable from it — unless the kubelet
+# enacts a key the spec never asked for.
+#
+# It does exactly that here. With a pod-level memory limit and a container that
+# declares some limit but not a memory one, `getMemoryLimit` writes the *pod's*
+# memory limit into that container's status, and the branch has no key-existence
+# guard the way the cpu ones beside it do. So `status.resources.limits` carries
+# `memory` while `spec.containers[0].resources.limits` does not, and the value it
+# carries is the one the container is actually killed at.
+#
+# `spec.resources` (KEP-2837) is beta and default-on from 1.34 and the cluster is
+# pinned at v1.36.1. On a server where the gate is off this manifest is rejected
+# rather than silently ignored, which is the direction to fail in.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-podlimit, labels: { demo: broken } }
+spec:
+  resources:
+    requests: { memory: "128Mi" }
+    limits: { memory: "128Mi" }
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "3600"]
+      resources:
+        requests: { cpu: "10m" }
+        limits: { cpu: "100m" }

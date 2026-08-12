@@ -43,6 +43,17 @@
 #     out of those captures — never written by hand — and each names the fields
 #     it moved and why the cluster does not hold that state still long enough to
 #     be captured.
+#   - the five objects added for the manifests this box changes — the healthy
+#     pod's *spec*, broken-hostpath's volumes with their mounts, broken-oom cut
+#     for its declared and enacted resources, kindnet's DaemonSet counters, and
+#     the three nodes — are cut straight out of `tests/fixtures/*.json`, which
+#     are captures. They are pasted rather than read at runtime on purpose: the
+#     trip that follows this box rewrites those files, and a negative case that
+#     is "the cluster before the manifest changed" stops being one the moment
+#     the file it was read from is recaptured.
+#   - and the shapes those manifests will produce are composed from them, each
+#     naming the object the capture owes. Those are the entries with no capture
+#     behind them *yet*; re-cut them from the real fixture once it lands.
 #   - field names and nesting cross-checked against the Kubernetes API reference
 #     (PodStatus / ContainerStatus / ContainerState / PodCondition) and the
 #     k8s-openapi v1_36 generated types.
@@ -55,22 +66,25 @@ command -v jq >/dev/null || { echo "verify-test: jq is not installed"; exit 127;
 # Read out of cluster.sh rather than copied into this file: a copy would prove
 # the copy, and the two would drift without a word.
 declare -A want=()
-eval "$(sed -n '/^  local -A want=(/,/^  )$/p' "$here/cluster.sh" | sed '1s/local -A/declare -A/')"
+eval "$(sed -n '/^declare -A want=(/,/^)$/p' "$here/cluster.sh")"
 
 # "extracted nothing" and "nothing to extract" print the same line, so name what
-# has to be there (CLAUDE.md § A derived list asserts it found something).
+# has to be there (CLAUDE.md § A derived list asserts it found something). Every
+# key, not a sample of them: a table that arrives half-read is the failure this
+# is for, and a sample cannot tell that from a table that is genuinely shorter.
 for canary in oom crashloop image config pending hostpath readiness restarts \
-              nolimits stuck init quota w2 owned; do
+              nolimits stuck init quota w2 owned resize podlimit sts rollout ds \
+              healthy_init healthy_sidecar healthy_hostpath healthy_podlevel \
+              cordoned tainted notready; do
   [ -n "${want[$canary]:-}" ] || {
-    echo "verify-test: cluster.sh verify() has no predicate '$canary' — the extraction broke, not the predicate"
+    echo "verify-test: cluster.sh has no predicate '$canary' — the extraction broke, not the predicate"
     exit 1
   }
 done
-[ ${#want[@]} -eq 14 ] || {
-  echo "verify-test: cluster.sh verify() has ${#want[@]} predicates, this file covers 14."
-  echo "             A new one needs a positive and a negative case here before it can be trusted."
-  exit 1
-}
+# No count check beside that list any more: the assertions at the foot of this
+# file walk `want` itself and demand that every key in it has been both matched
+# and refused here, which is what the count was standing in for and is not
+# satisfied by adding a case that only ever passes.
 # --- PREDICATES END ---
 
 # --- CORPUS START ---
@@ -359,7 +373,15 @@ obj[config]=$(cat <<'JSON'
 JSON
 )
 
-# broken-pending — never scheduled, so there is no containerStatuses array at all
+# broken-pending — never scheduled, so there is no containerStatuses array at all.
+#
+# The two tolerations are in the capture and were trimmed out of this copy, which
+# made the negative weaker than the object it stands for: **no pod ever has an
+# empty `tolerations`**. The `DefaultTolerationSeconds` admission plugin adds
+# these two to every pod that does not already carry them, so a check written as
+# "this pod has tolerations" is satisfied by every pod in the cluster, and a
+# negative without them cannot catch one. Pasted back from
+# tests/fixtures/pending.json.
 obj[pending]=$(cat <<'JSON'
 {
   "apiVersion": "v1",
@@ -377,6 +399,20 @@ obj[pending]=$(cat <<'JSON'
             "cpu": "500"
           }
         }
+      }
+    ],
+    "tolerations": [
+      {
+        "effect": "NoExecute",
+        "key": "node.kubernetes.io/not-ready",
+        "operator": "Exists",
+        "tolerationSeconds": 300
+      },
+      {
+        "effect": "NoExecute",
+        "key": "node.kubernetes.io/unreachable",
+        "operator": "Exists",
+        "tolerationSeconds": 300
       }
     ]
   },
@@ -1481,6 +1517,414 @@ obj[coredns_pods]=$(cat <<'JSON'
 JSON
 )
 
+
+# --- THE OBJECTS THE NEW MANIFESTS ARE FOR ---
+# Four more cuts out of committed captures, and every one of them is also the
+# object a *changed* manifest replaces. They are here for the negative half: a
+# predicate tightened to demand a field nothing has produced yet must refuse the
+# capture as it stands today, or the trip can bring back a fixture without the
+# field and every guard stays green.
+
+# the healthy pod again, and this time its `spec` — the copy above was trimmed
+# to what the predicates then read, which did not include `initContainers`. The
+# init container declares `resources: {}` exactly as captured: no init container
+# in this repo has ever declared any.
+obj[healthy_spec]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "healthy",
+    "namespace": "default"
+  },
+  "spec": {
+    "initContainers": [
+      {
+        "name": "migrate",
+        "resources": {}
+      }
+    ],
+    "containers": [
+      {
+        "name": "app",
+        "resources": {
+          "limits": {
+            "cpu": "100m",
+            "memory": "64Mi"
+          },
+          "requests": {
+            "cpu": "10m",
+            "memory": "16Mi"
+          }
+        }
+      }
+    ]
+  },
+  "status": {
+    "phase": "Running",
+    "conditions": [
+      {
+        "type": "PodReadyToStartContainers",
+        "status": "True"
+      },
+      {
+        "type": "Initialized",
+        "status": "True"
+      },
+      {
+        "type": "Ready",
+        "status": "True"
+      },
+      {
+        "type": "ContainersReady",
+        "status": "True"
+      },
+      {
+        "type": "PodScheduled",
+        "status": "True"
+      }
+    ],
+    "initContainerStatuses": [
+      {
+        "name": "migrate",
+        "ready": true,
+        "started": false,
+        "restartCount": 0
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "app",
+        "ready": true,
+        "started": true,
+        "restartCount": 0
+      }
+    ]
+  }
+}
+JSON
+)
+
+# broken-oom, cut for its resources rather than for its kill: the only committed
+# object carrying both what the spec asked for and what the kubelet enacted,
+# which is the pair D51's resize is about. broken-resize does not exist yet —
+# this is the shape it starts in, and the composition below is what the patch
+# turns it into.
+obj[resize_base]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "broken-oom",
+    "namespace": "default"
+  },
+  "spec": {
+    "containers": [
+      {
+        "name": "hog",
+        "resources": {
+          "limits": {
+            "memory": "64Mi"
+          },
+          "requests": {
+            "memory": "64Mi"
+          }
+        }
+      }
+    ]
+  },
+  "status": {
+    "phase": "Running",
+    "conditions": [
+      {
+        "type": "PodReadyToStartContainers",
+        "status": "True"
+      },
+      {
+        "type": "Initialized",
+        "status": "True"
+      },
+      {
+        "type": "Ready",
+        "status": "False"
+      },
+      {
+        "type": "ContainersReady",
+        "status": "False"
+      },
+      {
+        "type": "PodScheduled",
+        "status": "True"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "hog",
+        "ready": false,
+        "started": false,
+        "restartCount": 5,
+        "resources": {
+          "limits": {
+            "memory": "64Mi"
+          },
+          "requests": {
+            "memory": "64Mi"
+          }
+        }
+      }
+    ]
+  }
+}
+JSON
+)
+
+# kindnet, whose DaemonSet counters are the only real ones in the repo — and all
+# five of them agree with each other, which is why `desired` and `ready` could
+# be read from any of the others and stay green.
+obj[ds_healthy]=$(cat <<'JSON'
+{
+  "apiVersion": "apps/v1",
+  "kind": "DaemonSet",
+  "metadata": {
+    "name": "kindnet",
+    "namespace": "kube-system"
+  },
+  "status": {
+    "currentNumberScheduled": 3,
+    "desiredNumberScheduled": 3,
+    "numberAvailable": 3,
+    "numberMisscheduled": 0,
+    "numberReady": 3,
+    "observedGeneration": 1,
+    "updatedNumberScheduled": 3
+  }
+}
+JSON
+)
+
+# the three nodes as they were captured: none cordoned, none carrying any taint
+# but the control-plane's own valueless NoSchedule, all Ready. The whole of what
+# N1, N2, N3 and N6 have to work with today, and the negative for all three node
+# predicates at once.
+obj[nodes_healthy]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Node",
+      "metadata": {
+        "name": "k8rs-control-plane"
+      },
+      "spec": {
+        "taints": [
+          {
+            "effect": "NoSchedule",
+            "key": "node-role.kubernetes.io/control-plane"
+          }
+        ]
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "MemoryPressure",
+            "status": "False",
+            "reason": "KubeletHasSufficientMemory",
+            "lastTransitionTime": "2026-08-11T22:42:49Z"
+          },
+          {
+            "type": "DiskPressure",
+            "status": "False",
+            "reason": "KubeletHasNoDiskPressure",
+            "lastTransitionTime": "2026-08-11T22:42:49Z"
+          },
+          {
+            "type": "PIDPressure",
+            "status": "False",
+            "reason": "KubeletHasSufficientPID",
+            "lastTransitionTime": "2026-08-11T22:42:49Z"
+          },
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "KubeletReady",
+            "lastTransitionTime": "2026-08-11T22:43:13Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Node",
+      "metadata": {
+        "name": "k8rs-worker"
+      },
+      "spec": {},
+      "status": {
+        "conditions": [
+          {
+            "type": "MemoryPressure",
+            "status": "False",
+            "reason": "KubeletHasSufficientMemory",
+            "lastTransitionTime": "2026-08-11T22:43:03Z"
+          },
+          {
+            "type": "DiskPressure",
+            "status": "False",
+            "reason": "KubeletHasNoDiskPressure",
+            "lastTransitionTime": "2026-08-11T22:43:03Z"
+          },
+          {
+            "type": "PIDPressure",
+            "status": "False",
+            "reason": "KubeletHasSufficientPID",
+            "lastTransitionTime": "2026-08-11T22:43:03Z"
+          },
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "KubeletReady",
+            "lastTransitionTime": "2026-08-11T22:43:23Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Node",
+      "metadata": {
+        "name": "k8rs-worker2"
+      },
+      "spec": {},
+      "status": {
+        "conditions": [
+          {
+            "type": "MemoryPressure",
+            "status": "False",
+            "reason": "KubeletHasSufficientMemory",
+            "lastTransitionTime": "2026-08-11T22:43:03Z"
+          },
+          {
+            "type": "DiskPressure",
+            "status": "False",
+            "reason": "KubeletHasNoDiskPressure",
+            "lastTransitionTime": "2026-08-11T22:43:03Z"
+          },
+          {
+            "type": "PIDPressure",
+            "status": "False",
+            "reason": "KubeletHasSufficientPID",
+            "lastTransitionTime": "2026-08-11T22:43:03Z"
+          },
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "KubeletReady",
+            "lastTransitionTime": "2026-08-11T22:43:21Z"
+          }
+        ]
+      }
+    }
+  ]
+}
+JSON
+)
+
+# broken-hostpath a third time, and this one keeps `spec.volumes` and the
+# `volumeMounts` beside them — the copy above was trimmed to the volumes alone,
+# which was everything the predicate read before this box. The projected
+# service-account mount is left in on purpose: it is `readOnly: true` on every
+# pod in Kubernetes, so a predicate that looks for a read-only mount without
+# first asking which volume it is on passes on every pod there is.
+obj[hostpath_spec]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "broken-hostpath",
+    "namespace": "default"
+  },
+  "spec": {
+    "containers": [
+      {
+        "name": "nosy",
+        "volumeMounts": [
+          {
+            "mountPath": "/host",
+            "name": "root"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-xkdq7",
+            "readOnly": true
+          }
+        ]
+      }
+    ],
+    "volumes": [
+      {
+        "hostPath": {
+          "path": "/",
+          "type": ""
+        },
+        "name": "root"
+      },
+      {
+        "name": "kube-api-access-xkdq7",
+        "projected": {
+          "defaultMode": 420,
+          "sources": [
+            {
+              "serviceAccountToken": {
+                "expirationSeconds": 3607,
+                "path": "token"
+              }
+            },
+            {
+              "configMap": {
+                "items": [
+                  {
+                    "key": "ca.crt",
+                    "path": "ca.crt"
+                  }
+                ],
+                "name": "kube-root-ca.crt"
+              }
+            },
+            {
+              "downwardAPI": {
+                "items": [
+                  {
+                    "fieldRef": {
+                      "apiVersion": "v1",
+                      "fieldPath": "metadata.namespace"
+                    },
+                    "path": "namespace"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "status": {
+    "phase": "Running",
+    "containerStatuses": [
+      {
+        "name": "nosy",
+        "ready": true,
+        "started": true,
+        "restartCount": 0
+      }
+    ]
+  }
+}
+JSON
+)
+
 # --- COMPOSED, EACH FROM CAPTURES IN THIS FILE ---
 # Six objects the cluster will not hand over as they are: one state it holds for
 # about two seconds at a time, two shapes that only arrive under a different
@@ -1548,13 +1992,324 @@ obj[owned_first_exit]=$(jq '.items |= map(.status.containerStatuses |= map(
      .restartCount = 0 | .state = {terminated: .lastState.terminated} | .lastState = {}))' \
   <<<"${obj[owned_pods]}")
 
+# --- COMPOSED, FOR THE MANIFESTS THIS BOX CHANGES ---
+# The other side of the four cuts above: what those objects look like once the
+# manifests produce the shape they are being changed to produce. Same rules as
+# the six compositions above — built from a capture, one coherent group of
+# fields moved, and the result still an object the API emits — with one
+# difference worth saying out loud: these have no capture *yet* by definition.
+# The trip that follows this box is what replaces them, and until it lands they
+# are the only positive case each of these predicates has.
+
+# broken-crashloop with the log tail. `terminationMessagePolicy:
+# FallbackToLogsOnError` makes the kubelet copy the container's last lines into
+# the termination, and the manifest now sets it; the string here is what the
+# container prints. Both halves of the loop, and the message deliberately in a
+# different place in each — `lastState` while it is in backoff, `state` in the
+# seconds it is down — because the predicate reads one or the other and a single
+# case would prove only the half it happened to be written against.
+obj[crashloop_msg]=$(jq '.status.containerStatuses |= map(.lastState.terminated.message =
+     "starting\npanic: dial tcp db.payments.svc:5432: connect: connection refused\n")' \
+  <<<"${obj[crashloop]}")
+
+obj[crashloop_terminated_msg]=$(jq '.status.containerStatuses |= map(.state.terminated.message =
+     "starting\npanic: dial tcp db.payments.svc:5432: connect: connection refused\n")' \
+  <<<"${obj[crashloop_terminated]}")
+
+# broken-pending as the respun manifest declares it: the same unschedulable pod,
+# kept off every node by a selector nothing matches instead of by a cpu request
+# nothing can satisfy. The scheduler's message goes rather than being rewritten —
+# it names the old cause ("Insufficient cpu"), no predicate reads it, and a
+# message the API never wrote is the half-real object D40 refuses.
+#
+# The operator's toleration is *prepended* to the two the admission plugin
+# writes, not swapped for them: a pod carrying only one toleration is not a shape
+# the API emits, and the difference between this object and the one above is
+# precisely the one N6 reads — a key with a value, against two that only say
+# `Exists`. `NoExecute` matches the taint `break-nodes` applies, effect included.
+obj[pending_selector]=$(jq '.spec.nodeSelector = {"disktype":"ssd","kubernetes.io/os":"linux"}
+   | .spec.tolerations = [{"key":"dedicated","operator":"Equal","value":"gpu","effect":"NoExecute"}]
+       + .spec.tolerations
+   | del(.spec.containers[0].resources)
+   | .status.conditions |= map(del(.message))' <<<"${obj[pending]}")
+
+# the same pod with the selector and *only* the two tolerations the admission
+# plugin writes — a pod pinned to a node class and not tolerating anything, which
+# is the most ordinary manifest there is. It is the object the toleration clause
+# is proven against: without it the clause could be deleted and every case in
+# this file would still land the same way, because the pod that has no toleration
+# also has no selector and fails on the first clause. (Found by deleting the
+# clause and watching nothing go red — the negative was missing, not the clause.)
+obj[pending_selector_only]=$(jq '.spec.tolerations |= map(select(.key != "dedicated"))' \
+  <<<"${obj[pending_selector]}")
+
+# broken-hostpath with the subPath and the second container. `shipper` is the
+# captured container cloned and renamed — the same technique the Rust decode
+# test uses for the same shape and for the same reason: every field but the name
+# and the two under test came off the cluster. Its status entry comes along,
+# because a pod whose spec has two containers and whose status has one is not an
+# object any kubelet emits.
+obj[hostpath_two]=$(jq '.spec.containers[0].volumeMounts =
+       [ {"name":"root","mountPath":"/host/containerd","subPath":"run/containerd"},
+         (.spec.containers[0].volumeMounts[] | select(.name != "root")) ]
+   | .spec.containers += [ (.spec.containers[0]
+       | .name = "shipper"
+       | .volumeMounts = [ {"name":"root","mountPath":"/host","readOnly":true},
+                           (.volumeMounts[] | select(.name != "root")) ]) ]
+   | .status.containerStatuses += [ (.status.containerStatuses[0] | .name = "shipper") ]' \
+  <<<"${obj[hostpath_spec]}")
+
+# broken-resize after `kubectl patch --subresource resize`: the spec now asks
+# for 1Pi and `status.resources` still holds the 64Mi the kubelet enacted,
+# because no node has 1Pi to give. The condition is the kubelet's own
+# ("Infeasible" is its word for a resize it will never be able to make); it is
+# added rather than moved, because the pod that would carry it does not exist
+# yet and this is the object that says why it must.
+#
+# 1Pi and not 100Gi: a kind node reports the host's memory as its allocatable,
+# so 100Gi is infeasible on a laptop and *enacted* on a large workstation — a
+# fixture that depends on whose machine ran the trip. A quantity has no upper
+# bound, and this one is past every machine there is.
+obj[resize_pending]=$(jq '.metadata.name = "broken-resize"
+   | .spec.containers[0].resources = {"limits":{"memory":"1Pi"},"requests":{"memory":"1Pi"}}
+   | .status.conditions += [ {"type":"PodResizePending","status":"True","reason":"Infeasible"} ]' \
+  <<<"${obj[resize_base]}")
+
+# the kubelet's *other* reason for not enacting a resize, and it is a different
+# fixture: `Deferred` is "not right now" — the node could fit it once something
+# else leaves — so it resolves itself, and a capture taken on it is a fixture
+# that expires. Everything else about this object is the pending one, which is
+# what makes it the case that holds the reason clause honest.
+obj[resize_deferred]=$(jq '.status.conditions |= map(if .type == "PodResizePending"
+     then .reason = "Deferred" else . end)' <<<"${obj[resize_pending]}")
+
+# and a resize the node *could* fit, enacted: 128Mi rather than the impossible
+# number, because a node that enacted 1Pi is not a machine. Spec and status
+# agree again, which is the object that would make a predicate reading only the
+# spec pass — a fixture captured a second too late, after the resize landed, is
+# not the fixture rule 2 needs.
+obj[resize_enacted]=$(jq '.metadata.name = "broken-resize"
+   | .spec.containers[0].resources = {"limits":{"memory":"128Mi"},"requests":{"memory":"128Mi"}}
+   | .status.containerStatuses[0].resources = {"limits":{"memory":"128Mi"},"requests":{"memory":"128Mi"}}' \
+  <<<"${obj[resize_base]}")
+
+# D53's shape, on the same capture: a pod-level memory limit, a container that
+# declares only a cpu limit, and a container *status* carrying the memory limit
+# the kubelet copied down from the pod. The status keeps the pod's 128Mi because
+# that is what `getMemoryLimit` writes when the container has no memory limit of
+# its own — the one key an enacted map can hold that the spec never declared.
+obj[podlimit_pod]=$(jq '.metadata.name = "broken-podlimit"
+   | .spec.resources = {"limits":{"memory":"128Mi"},"requests":{"memory":"128Mi"}}
+   | .spec.containers[0].resources = {"limits":{"cpu":"100m"},"requests":{"cpu":"10m"}}
+   | .status.containerStatuses[0].resources = {"limits":{"cpu":"100m","memory":"128Mi"},"requests":{"cpu":"10m"}}' \
+  <<<"${obj[resize_base]}")
+
+# **The one object in this file that is not cut from or composed out of a
+# capture, and it is here because that is exactly what the box it belongs to is
+# about:** `tests/fixtures/statefulsets.json` is an empty list, no StatefulSet
+# has ever been captured from this cluster, and there is therefore nothing to
+# compose from. The four fields the predicate reads are spelled identically on a
+# Deployment, so the healthy Deployment capture is the nearest real object and
+# its identity is what this keeps; the counters are a StatefulSet stuck halfway
+# through replacing its highest ordinal. It is replaced by a real cut on the
+# first capture that has one, and nothing else in this file may follow its
+# example.
+obj[sts_partial]=$(jq '{apiVersion: "apps/v1", kind: "StatefulSet",
+     metadata: (.metadata | .name = "broken-sts"),
+     spec: {replicas: 2, serviceName: "broken-sts"},
+     status: {observedGeneration: 2, replicas: 2, readyReplicas: 1,
+              currentReplicas: 1, updatedReplicas: 1, availableReplicas: 1}}' \
+  <<<"${obj[healthy_deploy]}")
+
+# and the same StatefulSet once its second revision works — every counter equal,
+# which is the state every workload in the capture is already in.
+obj[sts_ready]=$(jq '.status = {"observedGeneration":2, "replicas":2, "readyReplicas":2,
+     "currentReplicas":2, "updatedReplicas":2, "availableReplicas":2}' <<<"${obj[sts_partial]}")
+
+# the healthy Deployment caught mid-rollout: two pods still serving the old
+# revision, one surge pod on a revision that cannot start, and nothing taken
+# down to make room for it (maxUnavailable: 0). Five counters, five values —
+# which is the point, because with all five equal `desired` and `ready` can be
+# read from any of the others. The conditions' messages name the ReplicaSet the
+# donor rolled out from, so they go rather than being rewritten.
+obj[rollout_deploy]=$(jq '.metadata.name = "broken-rollout"
+   | .status.replicas = 3 | .status.readyReplicas = 2 | .status.availableReplicas = 2
+   | .status.updatedReplicas = 1 | .status.unavailableReplicas = 1
+   | .status.conditions |= map(del(.message))' <<<"${obj[healthy_deploy]}")
+
+# kindnet's counters with a broken image underneath them: the pods are scheduled
+# — one per node, which is what `desiredNumberScheduled` means and where a
+# DaemonSet differs from everything else — and not one of them is ready.
+obj[ds_broken]=$(jq '.metadata.name = "broken-ds" | .metadata.namespace = "default"
+   | .status.numberReady = 0 | .status.numberAvailable = 0
+   | .status.updatedNumberScheduled = .status.desiredNumberScheduled' <<<"${obj[ds_healthy]}")
+
+# The healthy side. Each is the captured healthy pod with the one field the
+# manifest now adds, and the capture itself is the negative for all three.
+obj[healthy_init_limits]=$(jq '.spec.initContainers[0].resources =
+     {"limits":{"memory":"128Mi"},"requests":{"cpu":"50m","memory":"16Mi"}}' <<<"${obj[healthy_spec]}")
+
+# the native sidecar. `restartPolicy: Always` on an init container is the whole
+# of it — the container is otherwise the captured one, and the manifest gives it
+# a name of its own because a sidecar that runs beside the workload is not a
+# migration that finished.
+obj[healthy_sidecar_pod]=$(jq '.spec.initContainers[0] |= (.name = "proxy" | .restartPolicy = "Always")
+   | .status.initContainerStatuses[0] |= (.name = "proxy" | .started = true)' <<<"${obj[healthy_spec]}")
+
+# and the same pod thirty seconds earlier: the sidecar is up, the workload
+# container has not passed its first readiness probe. A fixture captured here is
+# a pod that is not healthy yet, and certifying it as the healthy side of every
+# rule is the lie this predicate's ready clause exists to stop.
+obj[healthy_sidecar_boot]=$(jq '.status.containerStatuses |= map(.ready = false)' \
+  <<<"${obj[healthy_sidecar_pod]}")
+
+# the read-only host mount, which is the shape rule 8 must *not* fire on. The
+# volume and the mount are the captured broken pod's, with `readOnly` set — the
+# same field the Rust decode test sets on the same object, and the reason the
+# posture case belongs on the healthy side is that rule 8 fires on the writable
+# one.
+obj[healthy_hostpath_pod]=$(jq --argjson hp "${obj[hostpath_spec]}" '
+     .metadata.name = "healthy-hostpath"
+   | .spec.volumes = $hp.spec.volumes
+   | .spec.containers[0].volumeMounts =
+       [ ($hp.spec.containers[0].volumeMounts[] | if .name == "root" then .readOnly = true else . end) ]' \
+  <<<"${obj[healthy_spec]}")
+
+# the pod that declares its own request (KEP-2837). Both numbers survive on
+# purpose: N5 replaces the container sum with the pod-level value rather than
+# adding to it, and it needs to be able to see both to do that.
+obj[healthy_podlevel_pod]=$(jq '.metadata.name = "healthy-podlevel"
+   | .spec.resources = {"requests":{"cpu":"100m","memory":"64Mi"}}' <<<"${obj[healthy_spec]}")
+
+# the same pod with the containers' own requests taken away — a shape the API
+# accepts and N5 cannot read a container sum out of. It is the negative that
+# holds the second half of the predicate honest.
+obj[healthy_podlevel_only]=$(jq 'del(.spec.containers[0].resources.requests)' \
+  <<<"${obj[healthy_podlevel_pod]}")
+
+# The nodes, after `cluster.sh break-nodes`. One cordoned, one carrying the taint
+# an operator typed, and a third whose kubelet has stopped posting — for which
+# the node controller writes Unknown across *every* condition, not only Ready,
+# which is why they all move together here. The third node is the captured worker
+# under the name kind gives the third one; the cluster this was cut from had two.
+#
+# **The taints nobody typed are half of this object**, and leaving them out is
+# what made the first draft of it a shape the API does not emit. `kubectl cordon`
+# writes `spec.unschedulable`; the node controller answers by adding
+# `node.kubernetes.io/unschedulable:NoSchedule`. A Ready condition of `Unknown`
+# is answered the same way, with `node.kubernetes.io/unreachable` at both
+# effects. And `SwapNodeControllerTaint` — the one function in the tree that
+# writes `timeAdded` — stamps every taint it adds, which is why the timestamps
+# below are on the controller's taints and **not** on `dedicated=gpu`:
+# `kubectl taint` writes none at all (k/k #113044).
+#
+# Only one of those timestamps is *asserted*, and it is the one on a `NoExecute`
+# taint, where no reading of upstream disagrees. The stamp on the cordon's
+# `NoSchedule` taint is written here because that is what the controller does,
+# and no predicate reads it — so if the next capture shows the API server
+# dropping it, this line is the one to correct and nothing else moves.
+obj[nodes_broken]=$(jq '.items |= (
+     map(if .metadata.name == "k8rs-worker"
+         then .spec.unschedulable = true
+            | .spec.taints = [ {"key":"node.kubernetes.io/unschedulable","effect":"NoSchedule",
+                                "timeAdded":"2026-08-11T23:09:41Z"} ]
+         elif .metadata.name == "k8rs-worker2"
+         then .spec.taints = [ {"key":"dedicated","value":"gpu","effect":"NoExecute"} ]
+         else . end)
+     + [ (.[] | select(.metadata.name == "k8rs-worker")
+          | .metadata.name = "k8rs-worker3"
+          | .status.conditions |= map(.status = "Unknown" | .reason = "NodeStatusUnknown"
+                                      | .lastTransitionTime = "2026-08-11T23:11:00Z")
+          | .spec.taints = [ {"key":"node.kubernetes.io/unreachable","effect":"NoSchedule",
+                              "timeAdded":"2026-08-11T23:11:40Z"},
+                             {"key":"node.kubernetes.io/unreachable","effect":"NoExecute",
+                              "timeAdded":"2026-08-11T23:11:40Z"} ]) ])' \
+  <<<"${obj[nodes_healthy]}")
+
+# a node that is cordoned *because* it is dead, which is N1's finding wearing
+# N2's field: draining a node that stopped answering is what an operator does
+# next, and the cordoned fixture has to be the one that is otherwise fine. It
+# carries the controller's taints for both facts, so the only clause it fails is
+# the Ready one — a negative that failed for two reasons at once would prove
+# neither.
+obj[nodes_cordoned_dead]=$(jq '.items |= map(if .metadata.name == "k8rs-worker"
+     then .spec.unschedulable = true
+        | .spec.taints = [ {"key":"node.kubernetes.io/unschedulable","effect":"NoSchedule",
+                            "timeAdded":"2026-08-11T23:09:41Z"},
+                           {"key":"node.kubernetes.io/unreachable","effect":"NoSchedule",
+                            "timeAdded":"2026-08-11T23:11:40Z"},
+                           {"key":"node.kubernetes.io/unreachable","effect":"NoExecute",
+                            "timeAdded":"2026-08-11T23:11:40Z"} ]
+        | .status.conditions |= map(if .type == "Ready"
+            then .status = "Unknown" | .reason = "NodeStatusUnknown" else . end)
+     else . end)' <<<"${obj[nodes_healthy]}")
+
+# the cordon in the second before the controller answers it: the field is set and
+# the taint is not there yet. It is a real state and a short one, and it is what
+# a capture taken too early holds — so it is the case that keeps the taint clause
+# from being decoration.
+obj[nodes_cordon_untainted]=$(jq '.items |= map(if .metadata.name == "k8rs-worker"
+     then .spec.unschedulable = true else . end)' <<<"${obj[nodes_healthy]}")
+
+# the same taint with the effect `kubectl taint` gives you by habit. Same key,
+# same value, `NoSchedule` — which schedules nothing new onto the node and
+# evicts nothing already on it, so it is not the taint N6's pod is being kept
+# off a node by.
+obj[nodes_taint_noschedule]=$(jq '.items |= map(if .metadata.name == "k8rs-worker2"
+     then .spec.taints = [ {"key":"dedicated","value":"gpu","effect":"NoSchedule"} ]
+     else . end)' <<<"${obj[nodes_healthy]}")
+
+# and the same key at the same effect with no value at all — `kubectl taint node
+# w dedicated:NoExecute`, which is a taint an operator really does write. N6 has
+# to name the taint that is blocking the pod, and `dedicated` alone does not say
+# which class of node this is; the value clause is what carries that, so the
+# value clause needs a case that fails on it and on nothing else.
+obj[nodes_taint_novalue]=$(jq '.items |= map(if .metadata.name == "k8rs-worker2"
+     then .spec.taints = [ {"key":"dedicated","effect":"NoExecute"} ]
+     else . end)' <<<"${obj[nodes_healthy]}")
+
+# a kubelet that is alive and saying no. `False` with a reason of its own is a
+# node the kubelet is still reporting on — a CNI that has not come up, a disk
+# that filled — and it is not the "stopped posting" state N1 is about. The
+# controller taints this one too, at the key it uses for `False`, so the object
+# differs from the positive in the condition and not in whether it was tainted.
+obj[nodes_ready_false]=$(jq '.items |= map(if .metadata.name == "k8rs-worker"
+     then .status.conditions |= map(if .type == "Ready"
+            then .status = "False" | .reason = "KubeletNotReady" else . end)
+        | .spec.taints = [ {"key":"node.kubernetes.io/not-ready","effect":"NoSchedule",
+                            "timeAdded":"2026-08-11T23:11:40Z"},
+                           {"key":"node.kubernetes.io/not-ready","effect":"NoExecute",
+                            "timeAdded":"2026-08-11T23:11:40Z"} ]
+     else . end)' <<<"${obj[nodes_healthy]}")
+
+# the kubelet has stopped posting and the controller has not answered yet: every
+# condition is Unknown and no taint has been added. Forty seconds of every real
+# outage look like this, and a capture taken in them holds no `timeAdded` at all
+# — which is the whole reason the timestamp is read off the controller's taint
+# and not off the operator's.
+obj[nodes_unreachable_untainted]=$(jq '.items |= map(if .metadata.name == "k8rs-worker"
+     then .status.conditions |= map(.status = "Unknown" | .reason = "NodeStatusUnknown")
+     else . end)' <<<"${obj[nodes_healthy]}")
+
+# and the same node with the unreachable taint typed in by hand. `kubectl taint`
+# writes no `timeAdded` — that is k/k #113044, and it is the bug that made the
+# taint predicate wait out the full 420s and then fail a taint that had been
+# applied correctly. It is here so that the clause which replaced it is held down
+# by the exact object that broke the one before.
+obj[nodes_unreachable_hand_tainted]=$(jq '.items |= map(if .metadata.name == "k8rs-worker"
+     then .spec.taints = [ {"key":"node.kubernetes.io/unreachable","effect":"NoExecute"} ]
+     else . end)' <<<"${obj[nodes_unreachable_untainted]}")
+
 # --- CORPUS END ---
 
 # --- ASSERTIONS START ---
 fail=0
+declare -A covered=()
 
 check() { # $1 predicate  $2 match|miss  $3 object  $4 what that object is
   local key=$1 expect=$2 doc=$3 label=$4 rc=0
+  covered[$key]="${covered[$key]:-} $expect"
+  [ -n "${obj[$doc]:-}" ] || { echo "FAIL  [$key] there is no corpus object called '$doc'"; fail=1; return; }
   jq -e "${want[$key]}" >/dev/null 2>&1 <<<"${obj[$doc]}" || rc=$?
   case "$expect:$rc" in
     match:0|miss:1) ;;
@@ -1578,8 +2333,10 @@ check oom       miss  crashloop "a pod in the same CrashLoopBackOff, killed by e
 # Rules 1+6. Same waiting reason as the OOM pod, different exit code — and two
 # positives, because a crash loop is two states and this predicate used to name
 # only one of them. The capture can land in either.
-check crashloop match crashloop "broken-crashloop, in backoff"
-check crashloop match crashloop_terminated "the same crash between backoffs — dead, not yet waiting"
+check crashloop match crashloop_msg "broken-crashloop, in backoff, with the log tail in lastState"
+check crashloop match crashloop_terminated_msg "the same crash between backoffs — dead, not yet waiting, and the tail is in state"
+check crashloop miss  crashloop "broken-crashloop exactly as it is captured today: no message anywhere, which is what a trip that forgot terminationMessagePolicy brings back"
+check crashloop miss  crashloop_terminated "…and the same omission in the other half of the loop"
 check crashloop miss  healthy   "the healthy pod"
 check crashloop miss  oom       "a pod in the same CrashLoopBackOff, killed by the kernel instead"
 check crashloop miss  init      "broken-init, whose app container waits at PodInitializing"
@@ -1599,14 +2356,18 @@ check config    miss  image     "a container waiting for a different reason"
 
 # Rule 10. Reads a condition, not a container: an unschedulable pod has no
 # containerStatuses array at all.
-check pending   match pending   "broken-pending"
+check pending   match pending_selector "broken-pending as the respun manifest declares it — a selector nothing matches"
+check pending   miss  pending   "broken-pending as it is captured today: Pending for a cpu request, with nothing on the pod to say so"
+check pending   miss  pending_selector_only "the same pod carrying only the two tolerations every pod gets — a selector is not a toleration"
 check pending   miss  healthy   "the healthy pod"
 check pending   miss  init      "broken-init — also phase Pending, but scheduled and running"
 
 # Rule 8. The negative is not a pod without volumes: every pod has the projected
 # service-account volume, so the predicate has to pick hostPath out of a list
 # that is never empty.
-check hostpath  match hostpath  "broken-hostpath"
+check hostpath  match hostpath_two "broken-hostpath with the subPath and the second container"
+check hostpath  miss  hostpath_spec "broken-hostpath as it is captured today — one writable mount, no subPath, one container"
+check hostpath  miss  hostpath  "the copy this file first cut, whose mounts were trimmed away entirely"
 check hostpath  miss  healthy   "the healthy pod, which still has a projected token volume"
 
 # Rule 7 — running, and failing its readiness probe. A crashlooping container is
@@ -1665,6 +2426,93 @@ check owned     miss  owned_not_controlled "an ownerReference that owns without 
 check owned     miss  restarts_owned "an owned pod that crashed three times and is up now — history is not a loop"
 check owned     miss  owned_first_exit "the same pod at its first exit, before any restart"
 check owned     miss  empty_rs "an empty List — 'no pod' is not 'a crashlooping pod'"
+
+# D51's resize. Both sides are asserted because either alone passes on a pod
+# nobody ever resized: the kubelet is still holding what it enacted, and the
+# spec has moved off it. The third clause names *why* it was not enacted, so it
+# gets the kubelet's other reason as its negative.
+check resize    match resize_pending "broken-resize with the 1Pi patch the node refused"
+check resize    miss  resize_base    "the same pod before the patch — spec and status agree"
+check resize    miss  resize_enacted "a resize the node *could* fit, so there is nothing left to disagree about"
+check resize    miss  resize_deferred "the same resize parked as Deferred — not enacted *yet*, which is a state that resolves itself"
+check resize    miss  oom            "a pod nobody resized, captured before status.resources was read at all"
+
+# D53's copy-down: a memory limit in the container status that its own spec
+# never declared. The negative is the ordinary pod, where the status is only
+# repeating what the container asked for.
+check podlimit  match podlimit_pod   "broken-podlimit — pod-level memory, container-level cpu"
+check podlimit  miss  resize_base    "a container that declares its own memory limit"
+check podlimit  miss  healthy        "a pod with no pod-level resources at all"
+
+# D40, the three workload kinds. Each negative is the same kind fully rolled
+# out, because "ready is fewer than desired" is the only thing that separates
+# these fixtures from every workload already captured.
+check sts       match sts_partial    "broken-sts stuck replacing its highest ordinal"
+check sts       miss  sts_ready      "the same StatefulSet once the second revision works"
+check sts       miss  healthy_deploy "a fully rolled-out workload with the same field names"
+
+check rollout   match rollout_deploy "broken-rollout mid-rollout: 2 wanted, 3 existing, 2 ready, 1 updated, 1 unavailable"
+check rollout   miss  healthy_deploy "the same Deployment before the second revision"
+check rollout   miss  w2_deploy      "a rollout that gave up with nothing ready — not the same thing as partially ready"
+
+check ds        match ds_broken      "broken-ds: scheduled everywhere, ready nowhere"
+check ds        miss  ds_healthy     "kindnet, whose pods all started"
+
+# The healthy side, which had no predicate at all before this box. The captured
+# healthy pod is the negative for all four: it is what a trip that forgot the
+# manifest change brings back.
+check healthy_init     match healthy_init_limits "the healthy pod with resources on its init container"
+check healthy_init     miss  healthy_spec        "the same pod as captured, whose init container declares an empty resources block"
+check healthy_init     miss  healthy             "the copy this file first cut, with no initContainers in the spec at all"
+
+check healthy_sidecar  match healthy_sidecar_pod  "healthy-sidecar: an init container that keeps running"
+check healthy_sidecar  miss  healthy_spec         "an init container that runs to completion, which is not a sidecar"
+check healthy_sidecar  miss  healthy_sidecar_boot "the same pod before its workload container is ready — not yet the healthy fixture"
+
+check healthy_hostpath match healthy_hostpath_pod "healthy-hostpath: the node's log directory, read-only"
+check healthy_hostpath miss  hostpath_spec        "the writable mount of the same volume — the pod rule 8 fires on"
+check healthy_hostpath miss  healthy_spec         "a pod with no host mount at all: nothing to find is not read-only"
+
+check healthy_podlevel match healthy_podlevel_pod  "healthy-podlevel: a request on the pod and on its container"
+check healthy_podlevel miss  healthy_spec          "a pod that declares no request of its own"
+check healthy_podlevel miss  healthy_podlevel_only "the pod-level request with no container request left to replace"
+
+# The three node states, each read out of the List `kubectl get nodes` returns —
+# which is also the shape nodes.json is captured in. The captured cluster is the
+# negative for all three at once, and each has a second one that differs in
+# exactly the clause it turns on.
+check cordoned  match nodes_broken       "the worker that kubectl cordon was pointed at"
+check cordoned  miss  nodes_healthy      "the cluster as captured — nothing cordoned"
+check cordoned  miss  nodes_cordoned_dead "a node cordoned because it is dead, which is N1 wearing N2's field"
+check cordoned  miss  nodes_cordon_untainted "the same cordon a second earlier, before the controller added its taint"
+
+check tainted   match nodes_broken       "dedicated=gpu:NoExecute — and no timeAdded, because kubectl taint writes none"
+check tainted   miss  nodes_healthy      "the control-plane's own taint: a different key, no value, and NoSchedule"
+check tainted   miss  nodes_taint_noschedule "the same key and value at NoSchedule — which evicts nothing and blocks nothing already running"
+check tainted   miss  nodes_taint_novalue "the same key and effect with no value at all — the key alone does not say which class of node"
+
+check notready  match nodes_broken       "the worker whose kubelet was stopped, with the taint the controller stamped a time on"
+check notready  miss  nodes_healthy      "three kubelets all still posting"
+check notready  miss  nodes_ready_false  "a kubelet that is alive and saying no — a different finding"
+check notready  miss  nodes_unreachable_untainted "the first forty seconds of the same outage: Unknown everywhere, not yet tainted"
+check notready  miss  nodes_unreachable_hand_tainted "the same taint typed in by hand, carrying no timeAdded — the object that made the old predicate hang"
+
+# Every predicate cluster.sh runs against the cluster has to be exercised in
+# both directions here, and the two loops below are what say so. A count would
+# only notice that a predicate had been added; this notices that one was added
+# and given a positive case and nothing that must refuse it — which is the
+# state a predicate spends its life in when nobody is watching, and it is
+# indistinguishable from a working one until a fixture drifts.
+for key in "${!want[@]}"; do
+  case " ${covered[$key]:-} " in
+    *" match "*) ;;
+    *) echo "FAIL  [$key] has no case it must match — this predicate has never been seen to pass"; fail=1 ;;
+  esac
+  case " ${covered[$key]:-} " in
+    *" miss "*) ;;
+    *) echo "FAIL  [$key] has no case it must refuse — a predicate that only ever matched proves nothing"; fail=1 ;;
+  esac
+done
 
 if [ $fail -eq 0 ]; then
   echo "verify-test: ${#want[@]} predicates, each matched in its own state and refused in a neighbouring one"

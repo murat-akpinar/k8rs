@@ -386,17 +386,62 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
         none, which is the one shape that proves `effective()` does not drop a
         key the spec never declared
         ([NOTES § D51](NOTES.md#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12))
-      - [`scripts/cluster.sh`](scripts/cluster.sh) `break`: one worker
+      - [`scripts/cluster.sh`](scripts/cluster.sh) `break-nodes`: one worker
         **cordoned**, one **tainted**, and one with its **kubelet stopped**
-        before capture — real N1 and N3 positives
+        before the node capture — real N1 and N6 positives. **Not N3:** a
+        stopped kubelet makes every condition `Unknown`, which is N1; pressure
+        conditions need an eviction threshold crossed, which is a cluster
+        change and not a workload
       - **Not on the trip, synthesized permanently**: a node whose
         `allocatable` differs from its `capacity` (needs `--kube-reserved` on
-        the kubelet, a cluster change and not a workload) and a
-        non-controlling `ownerReference` (producing one means contorting
-        `broken.yaml` into a shape no real workload has)
+        the kubelet, a cluster change and not a workload), a non-controlling
+        `ownerReference` (producing one means contorting `broken.yaml` into a
+        shape no real workload has), and **N3's pressure conditions**, for the
+        reason above
+      - **The manifests, the predicates and the guards have landed
+        (2026-08-12); the box stays open for the capture**, which it shares
+        with the three boxes above it. What landed: thirteen shapes in the two
+        manifests, `break-nodes` as its own subcommand, the predicate table
+        grown 14 → 26 with the healthy side and the three node states covered
+        for the first time, and twelve `just fixtures` guards that name the
+        field each consumer needs. Two operator reviews sent it back once, over
+        a predicate that could never pass and six smaller defects
+        ([NOTES § D63](NOTES.md#d63--the-field-kubectl-never-writes-and-a-substitution-test-that-could-not-see-a-clause-2026-08-12))
+      - **What the trip is told to do when a node predicate fails.** Two of the
+        three read a taint the *node controller* writes, not one `kubectl`
+        does, and that could only be read from the source. If `[cordoned]` or
+        `[notready]` FAILs after its 420s, the cluster is not the problem: drop
+        the clause naming that taint, and the decode it was retiring stays a
+        synthesis. Do not hand-edit the capture
+        ([D53](NOTES.md#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)).
+        A failure *after* `break-nodes` has tainted costs `unbreak` + `break` +
+        a fresh settle, because the `NoExecute` taint evicts bare pods and
+        nothing recreates them
+      - **One design question the capture answers, and the PM owns reading
+        it.** [`screens/alerts.md`](screens/alerts.md)'s cordon card argues a
+        cordon has no age because `timeAdded` is written for NoExecute taints
+        only — the sentence upstream deleted as inaccurate. `[cordoned]`
+        requires the controller's `node.kubernetes.io/unschedulable:NoSchedule`
+        taint to be in `nodes.json`, so the capture shows whether it carries a
+        stamp. If it does, a cordon time *is* readable and
+        [D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)
+        gets revisited with `tui-designer`; if it does not, D43 stands on a
+        fact instead of a deleted sentence. Either way it is answered, not
+        assumed ([NOTES § D63](NOTES.md#d63--the-field-kubectl-never-writes-and-a-substitution-test-that-could-not-see-a-clause-2026-08-12))
+      - **`just check` goes red the moment the capture lands, and that is the
+        synthesis retiring, not breakage.** `rules.rs`'s two hostPath tests
+        assert a one-mount pod; the recaptured `hostpath.json` has two. The
+        pinned scheduler message in the Pending test changes with the respin
+        and with the fourth node. `dev-core` owns those edits, at capture time,
+        not before
 - [x] A multi-node kind config — N-series rules (cordon, skew, pressure) and
       drain safety cannot be captured on a single-node cluster. Three nodes
-      (1 control-plane + 2 workers); `K8RS_WORKERS` changes the count
+      (1 control-plane + 2 workers); `K8RS_WORKERS` changes the count.
+      **Four since the `break-nodes` box below (2026-08-12):** the default is
+      three workers, one per node state — cordoned, tainted, kubelet stopped —
+      because a node carrying two of them is not the object either rule is
+      about. `K8RS_WORKERS=2` still runs everything except `break-nodes`, which
+      refuses rather than doubling up
 - [x] **A workload with zero pods** — `broken-quota`, in its **own
       namespace** `k8rs-quota`: a `pods: "0"` quota applies namespace-wide, so
       leaving it beside the others would have blocked every pod above from ever
