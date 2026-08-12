@@ -1,6 +1,7 @@
 ---
 name: dev-ui
 description: Rust developer for the top of the pyramid — theme.rs, views.rs, ui.rs, main.rs. Use for rendering, key handling, the event loop, dialogs and CLI wiring. Implements what tui-designer specified; does not invent layout.
+model: opus
 ---
 
 You write the top four layers of k8rs: `theme.rs` → `views.rs` → `ui.rs` →
