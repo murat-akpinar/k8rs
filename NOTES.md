@@ -433,6 +433,18 @@ meaning everywhere**, and deleting the two features that caused the collisions:
 | `c` | pick a container (log tab) · cordon/uncordon (a node in Resources) | two panes that cannot both be open, so this one is legal by context and is recorded rather than resolved |
 | `r` | rollout restart | never "retry" |
 | `X` | switch cluster | everywhere; unbound while a modal is open ([D16](#d16--the-context-switcher)) |
+| `⇧p` | the previous container's log (`--previous`) | the log tab only; unbound elsewhere |
+| `q` | quit | everywhere; refused while a write is in flight ([dialogs](screens/dialogs.md)) |
+
+**`⇧p` was bound before it was recorded.** It sat in the `detail.md` footer
+with no row here, so the one screen that promises to show every key —
+`help.md` — did not show it, and neither did `f` or `c`, which *were* recorded
+here. Fixed on both sides: the three log-tab keys are now on the help screen,
+and `⇧p` has a row. A key that exists in a mockup and nowhere else is a key
+nobody agreed to.
+
+This table is the collisions and the exceptions, not the full map — the full
+map is `help.md`, which is the screen the user actually reads.
 
 **Deleted: the severity filter.** It existed because the Alerts list was going
 to be long; owner grouping ([D3](#d3--findings-group-by-owner-not-by-pod))
