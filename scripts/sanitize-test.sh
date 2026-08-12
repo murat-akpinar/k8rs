@@ -42,7 +42,28 @@ must_be_gone=(
   "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t|a base64-wrapped private key"
   # IPv6 written out in full carries no `::` to anchor on.
   "2001:0db8:0000:0000:0000:ff00:0042:8329|a fully expanded IPv6 address"
+  # The framing `-n kube-system` introduced: a flag, which is neither a field
+  # nor an English sentence. A kubeadm control plane carries sixty-odd of them
+  # — `--advertise-address=`, `--advertise-client-urls=`, `--etcd-servers=`,
+  # `--cluster-cidr=` — and each holds the address of the machine it runs on.
+  # On kind that address is the docker bridge and gives nothing away, which is
+  # luck and not a control; the refusal above is what stops a foreign capture,
+  # and this is what stops it *twice*.
+  "198.51.100.9|an address inside a command-line flag"
+  # Same flag, the URL form of an IPv6 address. The anchored rule cannot see it
+  # (it is not the whole string) and the IPv4 rule does not match it.
+  "fd00:10:96::1|a bracketed IPv6 address inside a URL"
+  # kubelet stamps this on every static pod, and it is why NOTES § D46 takes
+  # `mirror: true` off the ownerReference instead: the annotation does not
+  # survive the filter, so a bit read from it would decode false in every
+  # fixture and could never be tested. Asserted rather than assumed.
+  "mirror-hash-a1b2c3|the kubernetes.io/config.mirror annotation"
 )
+# References, by contrast, are per shape: what has to survive is what that shape
+# actually carries, and a kubeadm control-plane pod has no `db-creds` in it. A
+# single shared list would only be satisfiable by planting a `secretKeyRef` in
+# the `kube-system` object that no such pod has — and that object is worth
+# feeding to the filter precisely because its field shapes are real.
 must_remain=(
   # A certificate is the public half by definition, and C3's own fixture is a
   # base64 CSR — destroying it would leave `.spec.request` unparseable as the
@@ -55,8 +76,9 @@ must_remain=(
 )
 
 # --- ASSERTIONS START ---
-assert_clean() { # $1 = shape name, stdin = the object
+assert_clean() { # $1 = shape name, $2 = name of this shape's must-remain array, stdin = the object
   local shape=$1 clean entry needle what
+  local -n remain=$2
   if ! clean=$(jq -f "$filter"); then
     echo "FAIL  [$shape] the sanitizer refused an object captured from kind"
     fail=1
@@ -70,7 +92,7 @@ assert_clean() { # $1 = shape name, stdin = the object
     fi
   done
   # References must survive: a rule needs to say *which* Secret a pod reads.
-  for entry in "${must_remain[@]}"; do
+  for entry in "${remain[@]}"; do
     needle=${entry%%|*}; what=${entry#*|}
     if ! grep -qF -- "$needle" <<<"$clean"; then
       echo "FAIL  [$shape] $what was destroyed — the fixture is now useless"
@@ -188,8 +210,8 @@ list=$(jq -n --argjson pod "$pod" '
                                  {"type": "Hostname", "address": "k8rs-worker"}]} }
     ] }')
 
-assert_clean "single object" <<<"$pod"
-assert_clean "List"          <<<"$list"
+assert_clean "single object" must_remain <<<"$pod"
+assert_clean "List"          must_remain <<<"$list"
 
 # And a capture that did not come from the kind test cluster must be refused,
 # rather than quietly producing something that only looks sanitized — in both
@@ -231,6 +253,128 @@ assert_refused "mixed List" <<<'
 {"kind":"List","items":[
   {"kind":"Pod","metadata":{"name":"a"},"spec":{"nodeName":"k8rs-worker"}},
   {"kind":"Pod","metadata":{"name":"b"},"spec":{"nodeName":"ip-10-3-44-201.eu-west-1.compute.internal"}}]}'
+
+# --- SHAPE: `kubectl get pods -n kube-system -o json` START ---
+# The third shape: a kubeadm control plane, which is the first thing the filter
+# meets that this repo did not write. It is a List like the one above, but
+# nothing else in the capture set carries what it carries — a Node
+# `ownerReference` (NOTES § D39), addresses inside command-line flags rather
+# than in fields or messages, and hostPath mounts that are writable and
+# *legitimate*, which is rule 8's entire false-positive class (NOTES § D46).
+#
+# Every key here was read off `kubectl get pods -n kube-system -o json` on the
+# kind cluster — the annotation names, the ownerReference shape, the flag names,
+# the volume and mount names, which mounts carry `readOnly` and which do not.
+# It is a subset of that object, not a copy of it: the IPv4 addresses are
+# swapped for the RFC 5737 documentation range and the secrets are planted,
+# because this file is public and a poisoned object does not come off a cluster
+# anyway. The IPv6 one is a ULA rather than a documentation prefix on purpose —
+# `fd00:10:96::/112` is what a dual-stack kind cluster actually gives its
+# Services, and it is the shape this framing has to cope with.
+# Some of what is here is what the fixture exists to carry and some is what the
+# sanitizer exists to destroy, so both directions are asserted below.
+kube_system=$(cat <<'JSON'
+{
+  "kind": "List",
+  "items": [
+    { "kind": "Pod",
+      "metadata": {
+        "name": "etcd-k8rs-control-plane",
+        "namespace": "kube-system",
+        "annotations": {
+          "kubeadm.kubernetes.io/etcd.advertise-client-urls": "https://198.51.100.9:2379",
+          "kubernetes.io/config.mirror": "mirror-hash-a1b2c3",
+          "kubernetes.io/config.seen": "2026-08-12T13:26:37Z"
+        },
+        "ownerReferences": [
+          {"apiVersion": "v1", "kind": "Node", "name": "k8rs-control-plane",
+           "uid": "d7c1", "controller": true}
+        ]
+      },
+      "spec": {
+        "nodeName": "k8rs-control-plane",
+        "containers": [
+          { "name": "etcd",
+            "command": ["etcd",
+                        "--advertise-client-urls=https://198.51.100.9:2379",
+                        "--listen-peer-urls=https://[fd00:10:96::1]:2380",
+                        "--name=k8rs-control-plane",
+                        "--data-dir=/var/lib/etcd"],
+            "volumeMounts": [
+              {"name": "etcd-data", "mountPath": "/var/lib/etcd"},
+              {"name": "etcd-certs", "mountPath": "/etc/kubernetes/pki/etcd", "readOnly": true}
+            ] }
+        ],
+        "volumes": [
+          {"name": "etcd-data", "hostPath": {"path": "/var/lib/etcd", "type": "DirectoryOrCreate"}},
+          {"name": "etcd-certs", "hostPath": {"path": "/etc/kubernetes/pki/etcd", "type": "DirectoryOrCreate"}}
+        ]
+      },
+      "status": {"hostIP": "198.51.100.9", "podIP": "198.51.100.9"} },
+    { "kind": "Pod",
+      "metadata": {
+        "name": "kindnet-hhbg9",
+        "namespace": "kube-system",
+        "ownerReferences": [
+          {"apiVersion": "apps/v1", "kind": "DaemonSet", "name": "kindnet",
+           "uid": "3a90", "controller": true}
+        ]
+      },
+      "spec": {
+        "nodeName": "k8rs-worker",
+        "containers": [
+          { "name": "kindnet-cni",
+            "env": [{"name": "POD_SUBNET", "value": "198.51.100.0/24"},
+                    {"name": "NODE_NAME", "valueFrom": {"fieldRef": {"fieldPath": "spec.nodeName"}}}],
+            "volumeMounts": [
+              {"name": "cni-cfg", "mountPath": "/etc/cni/net.d"},
+              {"name": "lib-modules", "mountPath": "/lib/modules", "readOnly": true},
+              {"name": "xtables-lock", "mountPath": "/run/xtables.lock"}
+            ] }
+        ],
+        "volumes": [
+          {"name": "cni-cfg", "hostPath": {"path": "/etc/cni/net.d"}},
+          {"name": "lib-modules", "hostPath": {"path": "/lib/modules"}},
+          {"name": "xtables-lock", "hostPath": {"path": "/run/xtables.lock", "type": "FileOrCreate"}}
+        ]
+      } }
+  ]
+}
+JSON
+)
+
+# The node name is the one reference every shape carries, and here it arrives
+# twice — in `.spec.nodeName` and again inside the ownerReference.
+ks_must_remain=("k8rs-control-plane|the node name the N-series rules join on")
+assert_clean "kube-system List" ks_must_remain <<<"$kube_system"
+
+# The other direction, and the one a needle list cannot express: the things this
+# capture is *for* have to come out the far side of the filter, and "writable"
+# is the absence of a key rather than a string to grep for. A sanitizer that
+# empties the fixture is not safe, it is useless — and it fails silently,
+# because every rule then reports nothing (fixture-audit.sh makes the same
+# claim about the committed bytes).
+kube_system_keeps=(
+  "the Node ownerReference|[.items[] | select(any(.metadata.ownerReferences[]?; .kind == \"Node\"))] | length == 1"
+  "the hostPath a rule 8 finding has to name|[.. | objects | .hostPath? | select(.) | .path] | index(\"/var/lib/etcd\") != null"
+  "the writable mount rule 8 escalates on|[.items[] | .spec.containers[].volumeMounts[]? | select(.name == \"etcd-data\" and (.readOnly | not))] | length == 1"
+  "the read-only mount rule 8 must not escalate on|[.items[] | .spec.containers[].volumeMounts[]? | select(.name == \"lib-modules\" and .readOnly == true)] | length == 1"
+)
+ks_clean=$(jq -f "$filter" <<<"$kube_system") || { echo "FAIL  [kube-system List] refused a capture kind produces"; fail=1; }
+for entry in "${kube_system_keeps[@]}"; do
+  what=${entry%%|*}; expr=${entry#*|}
+  jq -e "$expr" <<<"$ks_clean" >/dev/null ||
+    { echo "FAIL  [kube-system List] $what did not survive sanitization — the fixture is now useless"; fail=1; }
+done
+
+# The fifth place a node name lives, and the only one that arrives *because* of
+# this capture: an `ownerReference` of kind Node. `.nodeName` sits beside it on
+# any real static pod, so this is asserted on its own — the same way the other
+# four are — or a partial fix passes on the strength of its neighbour.
+assert_refused "Node ownerReference" <<<'
+{"kind":"Pod","metadata":{"name":"etcd-prod-master-01",
+ "ownerReferences":[{"apiVersion":"v1","kind":"Node","name":"prod-master-01","controller":true}]}}'
+# --- SHAPE: `kubectl get pods -n kube-system -o json` END ---
 
 # --- CSR REQUESTER IDENTITY START ---
 # A CertificateSigningRequest names who asked for the certificate, in
@@ -448,6 +592,6 @@ assert_accepted "a node name with a dot, in both rules at once" <<<'
 # --- CSR REQUESTER IDENTITY END ---
 
 if [ $fail -eq 0 ]; then
-  echo "sanitize-test: single object and List — every planted secret removed, every reference kept, foreign capture and foreign requester identity refused"
+  echo "sanitize-test: single object, List and kube-system List — every planted secret removed (field, message, flag and URL framings), every reference kept, foreign capture, foreign Node owner and foreign requester identity refused"
 fi
 exit $fail

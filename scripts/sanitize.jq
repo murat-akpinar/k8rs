@@ -45,7 +45,13 @@ def node_names:
       (.["kubernetes.io/hostname"]? // empty),
       (select(.key? == "kubernetes.io/hostname") | (.values? // [])[]),
       (select((.kind? == "Node") or (.status?.nodeInfo? != null))
-       | .metadata?.name? // empty) ]
+       | .metadata?.name? // empty),
+      # The fifth place, and the one `-n kube-system` puts in every capture:
+      # kubelet writes an `ownerReference` of kind `Node` onto every static pod,
+      # so `{kind: Node, name: prod-master-01}` names a machine exactly as well
+      # as `.nodeName` does. A full Node object also has `.kind == "Node"` and
+      # no top-level `.name`, which is what `// empty` is for.
+      (select(.kind? == "Node") | .name? // empty) ]
   | map(select(type == "string"));
 
 # Refused if *any* identifier is foreign, not only if all of them are: one real
@@ -238,12 +244,19 @@ refuse_foreign_nodes
 # address, so there is nothing here to match.
 #
 # IPv6 stays anchored to the whole string on purpose: unanchored, `::` matches
-# a Rust path, a C++ scope operator and every `key::value` in a log line.
+# a Rust path, a C++ scope operator and every `key::value` in a log line. The one
+# exception is the URL form, `[fd00::1]`, because the brackets are what removes
+# that ambiguity — no Rust path and no `key::value` is bracketed. It is the same
+# two forms as the anchored rule, in the framing `-n kube-system` introduced:
+# etcd and the apiserver carry their addresses inside `--listen-client-urls=`
+# and friends, and on a dual-stack cluster those are bracketed IPv6.
 | walk(
     if type != "string" then .
     # Two IPv6 forms: compressed (the `::` run) and written out in full, which
     # carries no `::` at all and so matched neither branch.
     elif test("^[0-9a-fA-F:]*::[0-9a-fA-F:]*$")
       or test("^[0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){7}$") then "REDACTED-IP"
-    else gsub("(?<ip>([0-9]{1,3}\\.){3}[0-9]{1,3})"; "REDACTED-IP")
+    else gsub("\\[(?<v6>[0-9a-fA-F:]*::[0-9a-fA-F:]*"
+              + "|[0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){7})\\]"; "[REDACTED-IP]")
+         | gsub("(?<ip>([0-9]{1,3}\\.){3}[0-9]{1,3})"; "REDACTED-IP")
     end)

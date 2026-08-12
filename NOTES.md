@@ -2898,6 +2898,73 @@ it is ~12 lines, and it waits until after the capture: writing it now means
 proving it against 23 files that the capture is about to replace, two of which
 do not exist yet.
 
+### D62 — the fifth place a node name lives, and a guard that asked less than its consumer (2026-08-12)
+
+`kube-system` is the one namespace `broken.yaml` cannot imitate, and preparing
+to capture it opened two holes in a sanitizer that had only ever been fed pods
+built from that file.
+
+**A node name lives in five places, not four.**
+[D31 § 3](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)
+enumerated four fields beyond `.spec.nodeName`; the fifth is the
+`ownerReference` of kind `Node` that kubelet writes onto every static pod —
+`{kind: Node, name: prod-master-01}` names a machine exactly as well as
+`.nodeName` does. Before the fix, a pod named `etcd-prod-master-01` owned by a
+foreign `prod-master-01` and carrying no `.nodeName` was **sanitized and
+written** rather than refused. The enumeration was not careless: it was
+complete for the shapes it had been fed, which is
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) again
+on the field axis instead of the object axis. Note the same clause must return
+nothing for a *full* Node object, which carries `.kind == "Node"` and its name
+under `.metadata.name` — hence the `// empty`.
+
+**IPv6 gets one exemption from its anchor: the bracketed URL form.** D31
+anchored IPv6 to the whole string on purpose, because unanchored `::` matches a
+Rust path, a C++ scope operator and every `key::value` in a log line. `[fd00::1]`
+is exempt because the brackets are what remove that ambiguity — nothing in
+prose is bracketed like an address. It is the same two forms as the anchored
+rule, in the framing `-n kube-system` introduced: etcd and the apiserver carry
+their addresses inside `--listen-client-urls=` and friends. Proven against
+planted input only — `cluster.sh` writes no `ipFamily`, so the test cluster is
+IPv4 and the real capture contains no IPv6 at all.
+
+**A guard may not ask a weaker question than the thing it guards.** Both new
+owner predicates first tested `ownerReferences[].kind == "Node"` with no
+`.controller == true`, while D46's ruling above and `rules.rs` both resolve the
+*controlling* reference — and the `owned` guard written one box earlier, twelve
+lines up in the same recipe, does check it. Three poisoned captures that would
+produce **zero** mirror pods for N2 passed green. Not a live leak, since kubelet
+always writes `controller: true`; the defect is that a guard certifying a
+fixture for a consumer must ask the consumer's question, or it certifies
+something the consumer cannot use. Two questions about one field in one file,
+two boxes apart, is the cross-box drift the phase-close pass exists to catch.
+
+**`kubernetes.io/config.mirror` is deliberately not among the guards.** The
+filter destroys every annotation, which is exactly why D46 takes the mirror bit
+off the ownerReference instead. Recorded so its absence does not later read as
+an oversight.
+
+**Accepted rather than fixed, each with its reason:**
+
+- **No `kube-system-pods.json` entry in `fixture-audit.sh`'s must-still-be-there
+  list.** It would be a third copy of a predicate that already has two homes,
+  and [D52](#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12)
+  is explicit that the audit and the sanitizer went blind in the same places
+  *because* each kept its own copy. The audit's copy-free backstop — re-run the
+  filter, demand byte-identity — covers the sanitizer-drift case and now
+  reports a foreign Node ownerReference as a refusal.
+- **A node name inside a command-line flag is not refused.**
+  `--name=k8rs-control-plane` and `--initial-cluster=<node>=https://…` carry the
+  identity as a substring, and `node_names` reads fields, not prose. `.spec.nodeName`
+  sits on every one of those pods, so the refusal fires on the neighbouring
+  field; a substring refusal over arbitrary hostnames cannot be written without
+  false-positiving on `--cluster-name=k8rs` and `registry.k8s.io/…`.
+- **The capture is taken whole** (~115 KB, the largest fixture in the set).
+  Trimming it is hand-editing, which
+  [D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
+  forbids. The name is `kube-system-pods.json` and not `kube-system.json`
+  because it is pods only.
+
 ## Decisions made
 
 ### Product

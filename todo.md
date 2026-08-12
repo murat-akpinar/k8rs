@@ -336,7 +336,15 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       negative fixture rule 8 has: every CNI/CSI/node agent in `kube-system`
       mounts a writable hostPath legitimately, so without it rule 8 ships with
       its false-positive class never run
-      ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12))
+      ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
+      **The capture line and its guards have landed** — `kube-system-pods.json`
+      in `just fixtures`, guarded after the filter for all three consumers (a
+      pod owned by a *controlling* Node, a controlling-DaemonSet pod with a
+      writable hostPath, and a read-only hostPath mount). Preparing for this
+      shape closed two sanitizer holes it exposed — the Node `ownerReference`
+      as the fifth place a node name lives, and bracketed IPv6 in a URL
+      ([NOTES § D62](NOTES.md#d62--the-fifth-place-a-node-name-lives-and-a-guard-that-asked-less-than-its-consumer-2026-08-12)).
+      The box stays open for the capture itself
 - [ ] **The shapes the first capture could not produce**, all on the same trip.
       Field-level mutation of the Phase 3 decode found 32 fields that could be
       corrupted with the whole suite staying green, and the cause was the

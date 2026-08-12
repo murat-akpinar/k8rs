@@ -126,6 +126,36 @@ fixtures:
         || { echo "fixtures: $f.json carries no controlling ownerReference — the owner is what this capture is for" >&2; exit 1; }
     done
 
+    # D39/D46: the one namespace nothing in broken.yaml can imitate. kubelet
+    # writes an ownerReference of kind Node onto every static pod — the only
+    # shape in Kubernetes that makes a Node an owner, and where N2's
+    # `mirror: true` comes from — and every CNI/CSI/node agent beside them
+    # mounts a writable hostPath perfectly legitimately, which is rule 8's
+    # entire false-positive class. Captured whole rather than trimmed: a
+    # hand-edited fixture is not a capture.
+    "${kc[@]}" get pods -n kube-system -o json | "${jqs[@]}" > tests/fixtures/kube-system-pods.json
+    # Asserted after the filter has run, so this covers both halves: a capture
+    # of the wrong namespace, and a sanitizer that learned to destroy one of
+    # the three things the file exists for. Either writes perfectly valid JSON
+    # that proves nothing, and "found none" reads exactly like "there were
+    # none". (`kubernetes.io/config.mirror` is deliberately not among these —
+    # the filter destroys every annotation, which is why D46 takes the mirror
+    # bit off the ownerReference instead.)
+    # `.controller == true` on both owner clauses, for the reason the owned-*
+    # guard above has it: a non-controlling reference is a garbage-collection
+    # link and says nothing about who writes the pod, so a Node reference that
+    # does not control does not exempt the pod from N2's count (D46). Asserting
+    # the looser claim would pass a capture that yields zero mirror pods.
+    ks_wants=(
+      'pod owned by a controlling Node (the static-pod shape D39 rules on, and N2 reads as mirror)|[.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Node" and .controller == true))] | length > 0'
+      'pod owned by a controlling DaemonSet with a writable hostPath (rule 8 false-positive class)|[.items[] | select(any(.metadata.ownerReferences[]?; .kind == "DaemonSet" and .controller == true)) | [.spec.volumes[]? | select(.hostPath) | .name] as $hp | .spec.containers[].volumeMounts[]? | select(.readOnly != true) | select(.name as $n | $hp | index($n))] | length > 0'
+      'read-only hostPath mount (the half of rule 8 that stays out of Alerts)|[.items[] | [.spec.volumes[]? | select(.hostPath) | .name] as $hp | .spec.containers[].volumeMounts[]? | select(.readOnly == true) | select(.name as $n | $hp | index($n))] | length > 0'
+    )
+    for want in "${ks_wants[@]}"; do
+      jq -e "${want#*|}" tests/fixtures/kube-system-pods.json >/dev/null \
+        || { echo "fixtures: kube-system-pods.json carries no ${want%%|*} — that is what this capture is for" >&2; exit 1; }
+    done
+
     # The negative side. Every rule needs a healthy counterpart or its
     # false-positive test is fiction.
     "${kc[@]}" get pod healthy -o json | "${jqs[@]}" > tests/fixtures/healthy.json
