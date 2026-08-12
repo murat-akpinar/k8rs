@@ -791,11 +791,77 @@ pub struct WorkloadSnapshot {
 /// Everything a rule may read, at one instant.
 ///
 /// Assembled by `k8s.rs` from the watch streams (Phase 5), never decoded from a single
-/// API object — there is none. **Deliberately no `Default`:** the next box puts `now` in
-/// here, and a derived `Default` would hand every rule the epoch as the current time,
-/// which is the exact failure invariant 5 exists to prevent.
+/// API object — there is none. **Deliberately no `Default`, and since
+/// [`now`](ClusterSnapshot::now) landed the type enforces that rather than asking for
+/// discipline:** `Time` has no `Default` impl upstream, so `#[derive(Default)]` here no
+/// longer compiles, and a hand-written one would have to invent a moment — the epoch,
+/// handed to every rule as the current time, which is the exact failure invariant 5
+/// exists to prevent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClusterSnapshot {
+    /// **What time it is — the one clock a rule may read, and it reads it as a field.**
+    /// Rule 12 compares it against a
+    /// [`deletion_timestamp`](PodSnapshot::deletion_timestamp): it fires on
+    /// `now − deletionTimestamp > max(30s, grace)` (NOTES § D55), and the age it reports
+    /// is `now − (deletionTimestamp − grace)` — measured from the moment the user asked,
+    /// because the deadline is one grace period later than that and an age taken from it
+    /// is short by exactly that much, forever (NOTES § D46). C1 compares it against a
+    /// certificate's `notAfter`; the "4 min ago" on the Alerts screen is the *renderer*
+    /// subtracting a timestamp the finding carried **from it** — that way round, or the
+    /// age is negative on a healthy cluster (D18's second
+    /// consequence, and the next box's). None of them calls a clock, because
+    /// `analyze(&Snapshot) -> Vec<Finding>` is a pure function (invariant 5) and a clock
+    /// call is the impurity that hides: it takes no argument, returns no error, and reads
+    /// as arithmetic (NOTES § D18).
+    ///
+    /// **Captured once per analysis pass**, by `k8s.rs` (Phase 5) — never once per rule.
+    /// Rules asking separately disagree by however long the pass took, and they disagree
+    /// about one object: rule 12 saying a pod was asked to shut down 4 minutes ago, beside
+    /// a finding the renderer ages at 5, is one screen contradicting itself over a single
+    /// pod.
+    ///
+    /// **The failure this prevents is a rotting test.** A rule that called a clock would
+    /// need its fixtures re-captured every time a certificate inside one expired, and the
+    /// cheap repair for a test that starts failing on a Tuesday for no reason is to
+    /// weaken it. With the moment in the input, `tests/fixtures/certs` pins its `notAfter`
+    /// dates and `scripts/certs-test.sh` asserts "24 days left" as something still true
+    /// in 2029.
+    ///
+    /// **`Time`, not a bare `jiff::Timestamp`.** `meta::v1::Time` is
+    /// `pub struct Time(pub jiff::Timestamp)` and k8s-openapi re-exports the library, so
+    /// this is the same type every decoded API timestamp already is: a comparison is two
+    /// values of one type, with no `.0` at each site and no conversion layer to get
+    /// wrong. It derives `Ord`, so the comparison is `<=`.
+    ///
+    /// **The arithmetic gets none of that, and it has three traps** (NOTES § D54,
+    /// § D56). Every *duration* site needs `.0` on both sides — the newtype carries no
+    /// operators of its own. `a - b` on two timestamps yields a **seconds-only `Span`**,
+    /// so `.get_minutes()` over a 43-minute gap returns `0` and the screen reads "stuck
+    /// 0 minutes ago"; the call that behaves is `Timestamp::duration_since`, which
+    /// cannot panic and answers with a `SignedDuration`. And taking a grace period back
+    /// off a deadline is `checked_sub`, never `-`: v1.36.1 accepted
+    /// `terminationGracePeriodSeconds: 9223372036854775807` in a server-side dry-run
+    /// against the live kind cluster, and the plain subtraction panics on it — anyone
+    /// with `create` and `delete` on pods could otherwise kill the TUI through a pure
+    /// function invariant 5 says cannot fail.
+    ///
+    /// **Not an `Option`.** A snapshot always has a moment. An `Option` would push a
+    /// "what if there is no time" branch into every rule that reads one, and the only
+    /// answer available there is the value the caller already had.
+    ///
+    /// **Clock skew is real, and its two halves are not symmetric** (NOTES § D55). The
+    /// timestamps around it come from the API server and this one from the user's
+    /// laptop. A laptop **behind** the cluster makes ages *negative* — rule 12 goes
+    /// silent and D18's renderer draws "just now" — and that half is detectable from the
+    /// snapshot alone, because any timestamp in it later than `now` says so, which is
+    /// what `the_pinned_now_is_not_before_the_captures_it_is_read_against` asserts and
+    /// what the header will eventually say in plain language. A laptop **ahead** of it
+    /// inflates every age instead, and that is the half that manufactures findings on a
+    /// healthy cluster — a correctly-progressing rollout read as overdue pods. **No
+    /// object timestamp can reveal it**; the honest source is the API server's own
+    /// `Date` response header, a Phase 5 `k8s.rs` question. Neither half is clamped
+    /// here, where clamping would hide a wrong clock rather than survive one.
+    pub now: Time,
     pub pods: Vec<PodSnapshot>,
     pub nodes: Vec<NodeSnapshot>,
     pub workloads: Vec<WorkloadSnapshot>,
@@ -1228,7 +1294,8 @@ mod tests {
     use super::*;
     use k8s_openapi::api::core::v1::{Taint as ApiTaint, Toleration as ApiToleration};
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
-    use std::collections::HashSet;
+    use k8s_openapi::jiff::SignedDuration;
+    use std::collections::{BTreeSet, HashSet};
 
     /// The Alerts list is sorted by severity, and that order is nothing but the order
     /// the variants are declared in — so it is asserted, not assumed.
@@ -1380,6 +1447,27 @@ mod tests {
             s.parse()
                 .unwrap_or_else(|e| panic!("{s} is not a time: {e}")),
         )
+    }
+
+    /// **The moment every snapshot in this file is read at.** One helper rather than a
+    /// literal at each construction site: the pin is a single fact about the committed
+    /// captures, and a copy of a fact is a copy that drifts.
+    ///
+    /// **The value is not free.** `scripts/certs-test.sh` already hardcodes
+    /// `2026-08-12 00:00:00Z` as "the reference `now` C1's tests ask about" and asserts
+    /// the committed certificates against it on every `just check` — `expiring-client` is
+    /// 24 days from expiry there, inside C1's 30-day window, and `expired-client` is 3
+    /// days past. A different literal here and C1's arithmetic is computed from two
+    /// instants, only one of which the build checks.
+    ///
+    /// It also lands after every `Time` the snapshot types *expose* — the newest is
+    /// `stuck.json`'s deletion timestamp at `2026-08-11T23:16:54Z`, 43 minutes earlier.
+    /// That is not a coincidence left to trust; it is what
+    /// `the_pinned_now_is_not_before_the_captures_it_is_read_against` asserts. The
+    /// captures carry four more kinds of timestamp that these types drop at ingest, and
+    /// that guard's doc lists them — it is a guard over the contract, not over the JSON.
+    fn now() -> Time {
+        time("2026-08-12T00:00:00Z")
     }
 
     fn container<'a>(pod: &'a PodSnapshot, name: &str) -> &'a ContainerSnapshot {
@@ -2193,27 +2281,30 @@ mod tests {
         );
     }
 
-    /// The snapshot is what a rule is handed, and N5 and N6 are joins across it — so the
-    /// join has to close. `scripts/sanitize.jq` refuses to rewrite node names for exactly
-    /// this reason, and this is the assertion that would notice if it ever did.
-    #[test]
-    fn a_cluster_snapshot_joins_its_pods_to_the_nodes_they_run_on() {
-        let names = [
-            "crashloop",
-            "oom",
-            "image",
-            "config",
-            "pending",
-            "hostpath",
-            "readiness",
-            "restarts",
-            "nolimits",
-            "stuck",
-            "init",
-            "healthy",
-        ];
-        let snapshot = ClusterSnapshot {
-            pods: names.iter().map(|n| pod(n)).collect(),
+    /// Every pod capture in the repository. Named once because two tests read the same
+    /// set — the join below and the pin guard — and a second copy is a second list to
+    /// keep in step with `tests/fixtures`.
+    const CAPTURED_PODS: [&str; 12] = [
+        "crashloop",
+        "oom",
+        "image",
+        "config",
+        "pending",
+        "hostpath",
+        "readiness",
+        "restarts",
+        "nolimits",
+        "stuck",
+        "init",
+        "healthy",
+    ];
+
+    /// The snapshot a rule would be handed if it ran over the whole committed capture at
+    /// once: every pod, every node, the Deployments, and the pinned [`now`](now).
+    fn fixture_snapshot() -> ClusterSnapshot {
+        ClusterSnapshot {
+            now: now(),
+            pods: CAPTURED_PODS.iter().map(|n| pod(n)).collect(),
             nodes: items::<Node>("nodes").into_iter().map(Into::into).collect(),
             workloads: items::<Deployment>("deployments")
                 .into_iter()
@@ -2233,7 +2324,15 @@ mod tests {
             // `just fixtures` captures `-A`, so this snapshot covers the whole cluster
             // and N2 and N5 are allowed to run over it.
             namespace_scope: None,
-        };
+        }
+    }
+
+    /// The snapshot is what a rule is handed, and N5 and N6 are joins across it — so the
+    /// join has to close. `scripts/sanitize.jq` refuses to rewrite node names for exactly
+    /// this reason, and this is the assertion that would notice if it ever did.
+    #[test]
+    fn a_cluster_snapshot_joins_its_pods_to_the_nodes_they_run_on() {
+        let snapshot = fixture_snapshot();
         println!(
             "{} pods, {} nodes, {} workloads, server {:?}",
             snapshot.pods.len(),
@@ -2242,7 +2341,7 @@ mod tests {
             snapshot.server_version
         );
 
-        assert_eq!(snapshot.pods.len(), names.len());
+        assert_eq!(snapshot.pods.len(), CAPTURED_PODS.len());
         assert_eq!(
             snapshot.server_version.as_deref(),
             Some("v1.36.1"),
@@ -2261,9 +2360,235 @@ mod tests {
         }
         assert_eq!(
             scheduled,
-            names.len() - 1,
+            CAPTURED_PODS.len() - 1,
             "every captured pod but broken-pending was scheduled onto a node"
         );
+    }
+
+    /// One swept timestamp: the field it came from, the value, and the grace that has to
+    /// come back off it before it names a moment.
+    ///
+    /// **The grace is `Some` for exactly one field, and that is the whole point of the
+    /// third slot.** Eight of the nine labels the captures fill are moments that have
+    /// already happened, so the value *is* the moment.
+    /// [`PodSnapshot::deletion_timestamp`] is a **deadline** —
+    /// the apiserver writes request time *plus* grace — so it legitimately points at the
+    /// future for every pod inside its grace period, which is rule 12's negative fixture,
+    /// the "shutting down normally, do not alert" case. Comparing the deadline itself
+    /// against `now` rejects that pod and blames the user's clock.
+    type Swept<'a> = (&'static str, &'a Time, Option<i64>);
+
+    /// One entry per `Some`, labelled with the field it came from, and no grace — every
+    /// caller of this is a field whose value is already a moment. A `None` contributes
+    /// nothing at all, which is exactly why the labels are asserted separately below.
+    fn labelled<'a>(out: &mut Vec<Swept<'a>>, label: &'static str, t: Option<&'a Time>) {
+        out.extend(t.map(|t| (label, t, None)));
+    }
+
+    /// `Terminated` hangs in two places — a container's current state, and the run before
+    /// this one — and **the label pair comes from the caller so those two walks are named
+    /// apart**. Sharing one pair made either walk satisfy the set on its own: deleting the
+    /// `ContainerState::Terminated` arm lost 2 timestamps and deleting the
+    /// `last_terminated` walk lost 8, both silently green, because the other walk kept
+    /// filling the same two labels.
+    fn terminated_times<'a>(
+        out: &mut Vec<Swept<'a>>,
+        started: &'static str,
+        finished: &'static str,
+        t: &'a Terminated,
+    ) {
+        labelled(out, started, t.started_at.as_ref());
+        labelled(out, finished, t.finished_at.as_ref());
+    }
+
+    /// Every `Time` a [`ClusterSnapshot`] exposes, each carrying the name of the field it
+    /// was read out of.
+    fn snapshot_times(s: &ClusterSnapshot) -> Vec<Swept<'_>> {
+        let mut out = Vec::new();
+        for p in &s.pods {
+            // Both or neither. The apiserver writes `deletionTimestamp` and the grace it
+            // granted in the same accepted delete, so a deadline with no grace beside it
+            // is not a shape it produces — and if one ever arrives, the label goes
+            // unreached and the coverage assertion names it, which is louder than
+            // guessing a grace of zero and asserting the deadline itself.
+            if let (Some(dt), Some(grace)) = (&p.deletion_timestamp, p.grace_period_seconds) {
+                out.push(("pod.deletion_timestamp", dt, Some(grace)));
+            }
+            for c in [&p.scheduled, &p.ready].into_iter().flatten() {
+                labelled(
+                    &mut out,
+                    "pod.condition.last_transition",
+                    c.last_transition.as_ref(),
+                );
+            }
+            for c in &p.containers {
+                match &c.state {
+                    ContainerState::Running { started_at } => labelled(
+                        &mut out,
+                        "container.state.running.started_at",
+                        started_at.as_ref(),
+                    ),
+                    ContainerState::Terminated(t) => terminated_times(
+                        &mut out,
+                        "container.state.terminated.started_at",
+                        "container.state.terminated.finished_at",
+                        t,
+                    ),
+                    // A waiting container has no time of its own: it is not running, and
+                    // the run that ended is `last_terminated` below.
+                    ContainerState::Waiting { .. } => {}
+                }
+                if let Some(t) = &c.last_terminated {
+                    terminated_times(
+                        &mut out,
+                        "container.last_terminated.started_at",
+                        "container.last_terminated.finished_at",
+                        t,
+                    );
+                }
+            }
+        }
+        for n in &s.nodes {
+            for c in &n.conditions {
+                labelled(
+                    &mut out,
+                    "node.condition.last_transition",
+                    c.last_transition.as_ref(),
+                );
+            }
+            for t in &n.taints {
+                labelled(&mut out, "node.taint.added_at", t.added_at.as_ref());
+            }
+        }
+        for w in &s.workloads {
+            for c in &w.conditions {
+                labelled(
+                    &mut out,
+                    "workload.condition.last_transition",
+                    c.last_transition.as_ref(),
+                );
+            }
+        }
+        out
+    }
+
+    /// **A pin behind the timestamps the snapshot exposes makes every duration in the
+    /// suite run backwards, and nothing else here would notice.** `now` is the user's
+    /// laptop and the fixture timestamps are the API server's, so a pin earlier than
+    /// they are is D55's *slow* half — the laptop behind the cluster — entered by
+    /// construction and permanently: rule 12 would compute
+    /// "asked to shut down in 43 minutes", C1 "expires in -3 days", and the renderer would
+    /// draw the whole suite as "just now" — the branch that exists for a machine with a
+    /// wrong clock. Every other assertion in this file reads a field; not one of them
+    /// subtracts two times, so this is the only place the pin can be wrong out loud.
+    ///
+    /// **The sweep is labelled, not counted.** "61 timestamps, all fine" cannot tell nine
+    /// fields walked from one field walked sixty-one times, and a sweep that reached
+    /// nothing prints the same green line as one with nothing to reach (CLAUDE.md — a
+    /// derived list asserts it found something). So the labels reached are asserted to
+    /// cover the ones the captures fill, and each walk is named separately: deleting any
+    /// one of them turns this red.
+    ///
+    /// **What that does *not* buy is a guard against a new field, and the distinction is
+    /// the whole of what this test is worth.** A new *variant* is caught by the compiler,
+    /// not by the assertion: the sweep's `match &c.state` is exhaustive, so adding
+    /// `Paused { paused_at }` to [`ContainerState`] fails there and nowhere else — one
+    /// error, ``error[E0004]: non-exhaustive patterns: `&rules::ContainerState::Paused
+    /// { .. }` not covered``.
+    /// A new **field** is caught by nothing. Adding `creation_timestamp: Option<Time>` to
+    /// [`PodSnapshot`] and decoding it in `From<Pod>` leaves this test green on the same
+    /// nine labels, with a `Time` in the snapshot that no assertion has ever compared
+    /// against `now`. That is the likely case, not the exotic one: all nine fields D46
+    /// added and all six D51 corrected arrived exactly that way. **A box that adds a
+    /// `Time` to these types adds its walk here in the same change**, and no mechanism
+    /// will remind it.
+    ///
+    /// **This is a guard over the contract, not over the captures, and the gap between
+    /// those two is four fields.** The JSON carries timestamps these types drop at
+    /// ingest, so the pin is asserted against none of them: `metadata.creationTimestamp`
+    /// on every object (`ObjectId` is kind, namespace, name and uid, and no v1 rule
+    /// reads an object's age), a pod's `status.startTime`, and the two [`Condition`]
+    /// keeps no room for — `NodeCondition.lastHeartbeatTime`, `23:16:13Z` in
+    /// `nodes.json` and the likeliest of the four to arrive, since N1's "how long has
+    /// this node been unreachable" is what it answers, and
+    /// `DeploymentCondition.lastUpdateTime`. All four sit before the pin today; nothing
+    /// asserts that they do, and NOTES § D42 lets Phase 4 add any of them — **the
+    /// walk arrives in the same change as the field**, which is the rule stated above
+    /// with the four names it applies to first.
+    ///
+    /// One field *is* swept and finds nothing: **`Taint::added_at`** — upstream writes it
+    /// only for `NoExecute` taints and the capture's single taint is
+    /// the control plane's `NoSchedule` one, which is why
+    /// `a_taint_keeps_its_value_and_the_time_it_was_added` has to synthesize one.
+    #[test]
+    fn the_pinned_now_is_not_before_the_captures_it_is_read_against() {
+        let snapshot = fixture_snapshot();
+        let times = snapshot_times(&snapshot);
+        let reached: BTreeSet<&str> = times.iter().map(|&(label, _, _)| label).collect();
+        println!(
+            "now {:?}\n  {} timestamps, newest {:?}\n  fields reached: {reached:?}",
+            snapshot.now,
+            times.len(),
+            times.iter().map(|&(_, t, _)| t).max(),
+        );
+
+        // A superset, not an equality: reaching *more* than this is a new walk over a
+        // field the captures started filling, which is right and must not be a red build.
+        // A `NoExecute` taint on one node — what `just fixtures` brings back the moment it
+        // captures a drained or unreachable one, which N6's fixture work wants — fills
+        // `node.taint.added_at` and failed an exact-set assertion with nothing wrong.
+        // Reaching *less* is the defect, and that is all this asks about.
+        let expected = BTreeSet::from([
+            "container.last_terminated.finished_at",
+            "container.last_terminated.started_at",
+            "container.state.running.started_at",
+            "container.state.terminated.finished_at",
+            "container.state.terminated.started_at",
+            "node.condition.last_transition",
+            "pod.condition.last_transition",
+            "pod.deletion_timestamp",
+            "workload.condition.last_transition",
+        ]);
+        assert!(
+            reached.is_superset(&expected),
+            "the sweep no longer reaches {:?} — every Time field the captures fill has to \
+             be walked, because a sweep that reached nothing prints the same green line as \
+             one with nothing to reach, and the loop below is just as quiet either way",
+            expected.difference(&reached).collect::<Vec<_>>()
+        );
+
+        for &(label, t, grace) in &times {
+            // What has to be in the past is the moment the thing *happened*. For eight of
+            // the nine labels that is the value; for the deadline it is the value minus
+            // the grace it was granted — D46's `asked_at`.
+            let moment = match grace {
+                None => t.0,
+                // Checked, and the failure is named rather than skipped: a grace this
+                // subtraction cannot represent is reachable from the cluster, not
+                // theoretical — v1.36.1 accepted `terminationGracePeriodSeconds:
+                // 9223372036854775807` in a server-side dry-run (NOTES § D56).
+                Some(g) => {
+                    t.0.checked_sub(SignedDuration::from_secs(g))
+                        .unwrap_or_else(|e| {
+                            panic!(
+                                "{label} is {t:?} with a grace of {g}s, and taking the grace \
+                             back off it cannot be represented: {e}\n  \
+                             `grep -rl {g} tests/fixtures` names the capture, if one carries it."
+                            )
+                        })
+                }
+            };
+            assert!(
+                moment <= snapshot.now.0,
+                "{label} puts its moment at {moment}, after the pinned now {:?}.\n  \
+                 If `just fixtures` was just re-run, the pin moved out from under this \
+                 and the captures are simply newer than it — repin `fn now()` (see the \
+                 note there for what moves with it).\n  \
+                 Otherwise it is what it looks like: a clock behind the cluster's, whose \
+                 negative ages D18 renders as \"just now\".",
+                snapshot.now
+            );
+        }
     }
 
     /// **The two snapshots that decode identically and mean opposite things.** N2 and N5
@@ -2285,6 +2610,7 @@ mod tests {
 
         // Same pods, same nodes; every other field of the two snapshots is equal.
         let whole_cluster = ClusterSnapshot {
+            now: now(),
             pods: one_namespace.clone(),
             nodes: nodes.clone(),
             workloads: Vec::new(),
@@ -2332,6 +2658,7 @@ mod tests {
     #[test]
     fn the_snapshot_carries_c1s_certificate_and_the_context_name_it_files_under() {
         let snapshot = ClusterSnapshot {
+            now: now(),
             pods: Vec::new(),
             nodes: Vec::new(),
             workloads: Vec::new(),

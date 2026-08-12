@@ -292,7 +292,16 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       fixtures that cluster could not produce yet, and both visits happen in
       one trip. The host it stood on is gone, so that trip is a `cluster-up`
       rebuild from the pinned image, run at the Phase 3 close
-      ([NOTES § D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12))
+      ([NOTES § D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12)).
+      **The rebuild happened on 2026-08-12, on the development machine** —
+      `just cluster-up` from `kindest/node:v1.36.1`, clean, nothing applied to
+      it yet. Docker access there is per-login: the user is in the `docker`
+      group but a stale session is not, so cluster commands run as
+      `echo '<cmd>' | newgrp docker` until the next login. **The re-capture
+      moves the pinned `now`** in `src/rules.rs`'s `fn now()`,
+      `scripts/certs-test.sh` and `scripts/make-certs.sh` together — they
+      describe one afternoon or none
+      ([NOTES § D57](NOTES.md#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12))
 - [ ] **A broken pod that has an owner** — added to
       [`scripts/broken.yaml`](scripts/broken.yaml) and captured on the same
       trip. Every pod fixture in the repo has `ownerReferences: null`, so the
@@ -429,7 +438,13 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       reference, not a payload, and an allowlist of acceptable usernames would
       be a judgement call re-made on every capture. This is Phase 2's because
       Phase 2 owns capture, and it lands *before* the trip, not after
-      ([NOTES § D52](NOTES.md#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12))
+      ([NOTES § D52](NOTES.md#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12)).
+      **It was passed over once and is the first box of the returning trip.**
+      An audit on 2026-08-12 found it still open — nothing blocked it, it needs
+      no cluster — while Phase 3 ran ahead; the four boxes above it are the only
+      ones carrying a deferral. Order for the trip: this box, then the manifests,
+      then the capture, then the teardown
+      ([NOTES § D58](NOTES.md#d58--a-phase-2-box-was-passed-over-and-the-order-it-comes-back-in-2026-08-12))
 
 **🔒 Security gate:** the sanitizer lands before the first fixture and is
 itself tested — feed it a *poisoned* object (fake token in an annotation, env
@@ -491,11 +506,35 @@ this plan is delivery mechanism for what this phase produces.
       and C1's input — the kubeconfig context name and client certificate,
       never the key
       ([NOTES § D51](NOTES.md#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12))
-- [ ] **`Snapshot` carries `now`**, and every fixture pins it. Rule 12 and the
+- [x] **`Snapshot` carries `now`**, and every fixture pins it. Rule 12 and the
       certificate rules need the time; calling a clock inside a rule would
       break [invariant 5](CLAUDE.md) and would make fixtures expire — a test
       that rots is a test that gets weakened
-      ([NOTES § D18](NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact))
+      ([NOTES § D18](NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact)).
+      **The field is `Time`, not a bare `jiff::Timestamp`** — the same newtype
+      every decoded API timestamp already wears, so the comparison every rule
+      makes is two values of one type
+      ([NOTES § D54](NOTES.md#d54--now-is-metav1time-not-a-bare-jifftimestamp-2026-08-12)).
+      **The pin is `2026-08-12T00:00:00Z` and it was not chosen freely:**
+      `scripts/certs-test.sh` already asserted the certificate fixtures against
+      that instant, and it now extracts the Rust pin and refuses to disagree
+      with it — the one edge of that coupling nothing was guarding. The pin
+      moves with the capture, in four places, and its cost is that **nothing in
+      the fixture set can be "recent"**
+      ([NOTES § D57](NOTES.md#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)).
+      **Three corrections the reviews forced, none of them cosmetic:** the
+      guard first asserted every snapshot timestamp `<= now`, which is false of
+      `deletionTimestamp` — the apiserver writes *request time + grace*, so a
+      pod inside its grace period, i.e. rule 12's own negative fixture, was
+      rejected and the user's clock blamed; it asserts `deletionTimestamp −
+      grace <= now` instead. D18's clock-skew sentence had the direction
+      backwards and had been copied into the code
+      ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12)).
+      And the arithmetic the next box will write has three traps, now named on
+      the field: `.0` on both sides, `a - b` is a seconds-only `Span` whose
+      `.get_minutes()` is `0` over 43 minutes, and the grace subtraction is
+      `checked_sub` because a real apiserver accepts a grace that overflows it
+      ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12))
 - [ ] `Finding` carries **timestamps, not phrases**. "4 min ago" is formatted
       by the renderer, so `ui.rs` and the `--once` printer share one source and
       a test asserts a duration instead of parsing English. A non-positive age
@@ -592,17 +631,32 @@ this plan is delivery mechanism for what this phase produces.
       `Some("")` reachable, and `group_key` treats it as a namespace named
       empty rather than as cluster-scoped. If this box does it anyway, it owes
       the test for that shape
-      ([NOTES § D38](NOTES.md#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12))
+      ([NOTES § D38](NOTES.md#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)).
+      **A certificate that never expires produces no finding, and that is the
+      only shape available:** RFC 5280 spells "no well-defined expiry" as
+      `99991231235959Z`, which is past the end of jiff's `Timestamp` range, so
+      the conversion returns an `Err` a pure rule may not propagate. The reflex
+      shape is `.unwrap()`, the input is a kubeconfig, and a corporate PKI is
+      exactly where a non-expiring CA turns up — the panic would land on
+      startup
+      ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12))
 - [ ] Exit-code translation table (137/143/1/126/127)
 - [ ] hostPath: `rules.rs` fires **only** on `/`, docker.sock or a writable
       host mount. There is no lower severity to escalate from any more — the
       ordinary read-only mount is a Phase 4 posture row, computed there
-- [ ] Rule 5 thresholds (≥3 WARN, ≥10 CRITICAL). **Rule 12 has no threshold to
-      add** — the apiserver already wrote *request time + grace* into
-      `deletionTimestamp`, so the test is simply that it is in the past, and
-      the grace beside it is read for the age (`asked_at = deletionTimestamp −
-      grace`), never to push the deadline out a second time
-      ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12))
+- [ ] Rule 5 thresholds (≥3 WARN, ≥10 CRITICAL). **Rule 12 does not add a
+      second grace period** — the apiserver already wrote *request time +
+      grace* into `deletionTimestamp`, and the grace beside it is read for the
+      age (`asked_at = deletionTimestamp − grace`, with `checked_sub`), never
+      to push the deadline out again
+      ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
+      **It does get a skew margin**, which is a different thing and was missing:
+      the trigger is `now − deletionTimestamp > max(30s, grace)`, not `> 0`. At
+      `> 0` a laptop ten minutes fast files a finding for every pod a
+      correctly-progressing rollout has just asked to terminate, and even a
+      perfect clock has a pod briefly overdue between its deadline and the
+      kubelet's SIGKILL landing
+      ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12))
 - [ ] Plain-language pass over every string a user will read — the jargon test
       is "would someone in their first month understand this sentence?"
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test

@@ -637,9 +637,14 @@ Two consequences that the implementation cannot skip:
   emitted. Two renderers, one source, and the same rule is readable in a test
   without parsing English.
 - **Clock skew is real and shows.** The timestamps come from the API server;
-  `now` comes from the user's laptop. A machine a few minutes fast produces a
-  negative age, and *"in -3 minutes"* on the first screen a beginner sees is
-  worse than useless. A non-positive age renders as **"just now"**.
+  `now` comes from the user's laptop. A machine a few minutes *behind* the
+  cluster produces a negative age, and *"in -3 minutes"* on the first screen a
+  beginner sees is worse than useless. A non-positive age renders as
+  **"just now"**. *(This sentence said "fast" until 2026-08-12 and had the
+  direction backwards — a fast laptop inflates ages, it does not negate them,
+  and it is the half that manufactures findings. What the clamp actually
+  protects, and what the fast half needs instead, is
+  [D55](#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12).)*
 
 **The type is `jiff::Timestamp`, and it is already in the tree** — verified
 against `k8s-openapi 0.28.0` rather than assumed, because the assumption was
@@ -2561,6 +2566,144 @@ still express:
   types get until Phase 4 close ([D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)),
   and `now` is the one field [invariant 5](CLAUDE.md) names by itself. It does
   not get to drift into that extra phase's slack.
+
+### D54 — `now` is `meta::v1::Time`, not a bare `jiff::Timestamp` (2026-08-12)
+
+[D18](#d18--the-clock-is-an-input-not-an-ambient-fact) settled which crate the
+time type comes from and wrote the answer as `jiff::Timestamp`. The field that
+landed is `meta::v1::Time`, which *is* that type — `pub struct Time(pub
+jiff::Timestamp)` — wearing the same newtype every decoded API timestamp in
+`rules.rs` already wears.
+
+The reason is the comparison, which is the only thing this field is for: rule 12
+compares `now` against a `deletion_timestamp: Option<Time>`, C1 against a
+certificate date, the renderer against a finding's timestamp. One type on both
+sides is `<=`; two types is `.0` at every site, and `.0` at every site is one
+forgotten `.0` away from comparing a laptop instant against something that only
+looks like one. The crate coupling D18 recorded is unchanged — `Time` is
+k8s-openapi's, and k8s-openapi's jiff is what moves.
+
+It buys nothing for the *arithmetic*, and that half is written down where the
+next box will read it rather than here: `.0` is needed on both sides of every
+subtraction, `a - b` yields a seconds-only `Span` whose `.get_minutes()` is `0`
+for a 43-minute gap, and the call that behaves is `Timestamp::duration_since`.
+
+**Not an `Option`.** A snapshot always has a moment. An `Option` would push a
+"what if there is no time" branch into every rule that reads one, and the only
+answer available in that branch is the value the caller already had.
+
+### D55 — the clock was written backwards, and the clamp protects the harmless half (2026-08-12)
+
+D18 said a laptop running **fast** produces a negative age. It does not, and the
+error had been copied into `rules.rs` before the operator review caught it.
+
+Age is `now − event`:
+
+| laptop | pod deleted 11:59:50 | what the screen does |
+|---|---|---|
+| 10 min **fast** | age **+10m05s** | rule 12 **fires**: "asked to shut down 10 minutes ago and still hasn't" |
+| 10 min **slow** | age **−9m55s** | rule 12 silent; the renderer says "just now" |
+
+So the "just now" clamp guards the *slow* case — the one that under-reports and
+harms nobody — and does nothing at all about the *fast* case, which is the one
+that manufactures findings on a healthy cluster. Three consequences, all
+binding on later boxes:
+
+- **Rule 12's trigger gets a margin.** The recorded threshold was
+  `deletionTimestamp` in the past, full stop. With a laptop ten minutes fast —
+  an NTP-less machine, a VM resumed from suspend, a WSL2 host after sleep —
+  every pod asked to terminate in the last ten minutes is "overdue", and a
+  correctly-progressing 50-replica rollout fills the one screen whose promise
+  is *only what is broken*. Even on a perfect clock a pod is briefly overdue
+  between its deadline and the kubelet's SIGKILL landing. Rule 12 fires on
+  `now − deletionTimestamp > max(30s, grace)`. Nothing is lost: a pod held by a
+  finalizer is stuck for minutes or forever.
+- **The slow half is detectable, so it is said out loud.** Any snapshot
+  timestamp more than a few seconds after `now` means the laptop is behind the
+  cluster. That is data k8rs already holds, and it belongs in the header in
+  plain language — *"your computer's clock is 11 minutes behind the cluster —
+  the times on this screen are wrong"* — not only in a test assertion.
+- **The fast half is not detectable from object timestamps**, and pretending
+  "just now" covers it is how the wrong belief survived this long. The honest
+  source is the API server's `Date` response header, which is a Phase 5
+  `k8s.rs` question and is recorded as one.
+
+D18's sentence is corrected in place rather than left standing with a
+correction pinned to it, because the next box to read that paragraph is the
+renderer that implements the clamp.
+
+### D56 — C1 cannot represent "never expires", and a rule may not return a `Result` (2026-08-12)
+
+RFC 5280 §4.1.2.5 gives certificates with no well-defined expiry the literal
+`99991231235959Z`. jiff's `Timestamp` stops before it — the range ends at Unix
+second `253402207200` (`9999-12-30T22:00:00Z`) — so `Timestamp::from_second`
+returns `Err` for exactly that value, and [invariant 5](CLAUDE.md) forbids C1
+from propagating it.
+
+The mapping that is both correct and permitted is **no finding**: a certificate
+that does not expire has no expiry to warn about. Recorded before C1 is written
+because the shape that gets typed by reflex is `.unwrap()`, and the input is a
+kubeconfig — a corporate PKI is precisely where a non-expiring CA turns up, and
+a panic at startup is what the user would get.
+
+The same range is why the grace-period subtraction is `checked_sub`: v1.36.1
+accepted `terminationGracePeriodSeconds: 9223372036854775807` in a server-side
+dry-run against the live kind cluster, and `deletionTimestamp − that` overflows.
+Anyone with `create` and `delete` on pods could otherwise kill the TUI through
+a pure function that cannot fail.
+
+### D57 — the pinned `now` is part of the fixture contract, and it makes "recent" unrepresentable (2026-08-12)
+
+The tests pin `now` at `2026-08-12T00:00:00Z`. The value was not chosen freely:
+`scripts/certs-test.sh` already asserted the committed certificates against that
+instant (24 days / 365 days / −3 days), so any other literal would compute C1's
+arithmetic from two moments only one of which the build checks. `certs-test.sh`
+now extracts the Rust pin and refuses to disagree with it — the one edge of that
+coupling nothing had been guarding.
+
+**It moves with the capture, in four places.** A re-run of `just fixtures`
+stamps every object after the pin and the guard goes red — correctly, but for a
+reason that is not a wrong clock. The instant lives in `src/rules.rs`'s
+`fn now()`, `scripts/certs-test.sh`'s `now` and its `pinned[]` rows, and
+`scripts/make-certs.sh`'s dates; they move together or the fixtures and the
+certificates stop describing the same afternoon. That obligation belongs to the
+capture box in Phase 2, which is where the trip is, and it survives
+`rules.rs` freezing at Phase 3 close: a re-capture may touch `fn now()` and
+nothing else in that file — the pin is fixture data that happens to be spelled
+in Rust, not code.
+
+**What the pin costs, which is the part nobody had written down.** It sits 43
+minutes after the newest captured timestamp, so **nothing in the fixture set can
+be "recent"**. Every below-threshold case — rule 7's rolling-update pod, N1's
+node that went NotReady thirty seconds ago, rule 12's pod inside its grace
+period — is unreachable by capture and has to be synthesised in memory under
+[D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12).
+That is a real cost, accepted for the certificates' sake, and naming it is what
+stops the next author from reading the fixture set as "no such case exists".
+
+### D58 — a Phase 2 box was passed over, and the order it comes back in (2026-08-12)
+
+Phase 2 has five open boxes. Four are the kind cluster trip and their deferral
+is recorded ([D47](#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12),
+[D33](#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12)).
+The fifth — `sanitize.jq` refusing a CSR's `.spec.username` and `.spec.groups`
+([D52](#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12))
+— needs no cluster, no hardware and nobody's permission, and was passed over
+anyway. Its own text says it lands *before* the trip; an audit of both phases on
+2026-08-12 found it still open with `csr-pending.json` still carrying
+`kubernetes-admin` and `kubeadm:cluster-admins` through the sanitizer unchanged.
+
+Nothing excuses it: the cycle's rule is the first unchecked box in the lowest
+open phase, and the four trip boxes are the *only* ones carrying an exemption.
+It is recorded because the same audit found no other silent skip — every other
+open box in Phases 2 and 3 is genuinely unstarted, and a phase that has been
+audited once should say so, or the next audit starts from zero.
+
+**The order it returns in**, decided when the kind cluster came back up on the
+development machine: the sanitizer refusal lands **first**, then the manifests
+for the shapes the first capture could not produce, then the capture, then the
+teardown that closes the trip. A sanitizer fix landing after a capture is a
+sanitizer that never ran on the bytes it was written for.
 
 ## Decisions made
 
