@@ -428,7 +428,7 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       material"* and exited 0. The one directory where key material is actually
       generated was the one the check exempted
       ([NOTES § D52](NOTES.md#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12))
-- [ ] **`sanitize.jq` must refuse a CSR's `.spec.username` and `.spec.groups`
+- [x] **`sanitize.jq` must refuse a CSR's `.spec.username` and `.spec.groups`
       before the next capture runs.** `csr-pending.json` carries
       `kubernetes-admin` and `kubeadm:cluster-admins` — kind defaults, so
       nothing leaked, and that is luck rather than the guard. A CSR captured
@@ -444,7 +444,22 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       no cluster — while Phase 3 ran ahead; the four boxes above it are the only
       ones carrying a deferral. Order for the trip: this box, then the manifests,
       then the capture, then the teardown
-      ([NOTES § D58](NOTES.md#d58--a-phase-2-box-was-passed-over-and-the-order-it-comes-back-in-2026-08-12))
+      ([NOTES § D58](NOTES.md#d58--a-phase-2-box-was-passed-over-and-the-order-it-comes-back-in-2026-08-12)).
+      **Wider than the box, and one blocker found on the way
+      ([NOTES § D59](NOTES.md#d59--the-sanitizer-refuses-a-requester-and-an-exit-status-guard-cannot-see-a-deletion-2026-08-12)):**
+      the allowed identity set is *derived* from the live pinned cluster, not
+      curated, and anchored at both ends; `.spec.extra` and `.spec.uid` take
+      the payload treatment instead, scoped to the object carrying the marker;
+      the marker is `signerName` **or** `issuerRef`, because cert-manager's
+      `CertificateRequest` carries the identical fields and went through
+      unmodified with an OIDC email in it. **The blocker:**
+      `fixture-audit.sh`'s new backstop asked whether the filter would *refuse*
+      a committed fixture, and a deletion is invisible to an exit-status check
+      — `csr-pending.json` predated the `.spec.extra` clause and both guards
+      printed green over it. The question is now whether the filter would
+      *change* the file; the fixture was re-captured, not edited. And
+      `make-csr.sh` sanitized with `> "$out"` onto the committed fixture, so a
+      refusal truncated the file it exists to produce
 
 **🔒 Security gate:** the sanitizer lands before the first fixture and is
 itself tested — feed it a *poisoned* object (fake token in an annotation, env

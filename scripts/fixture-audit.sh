@@ -79,10 +79,26 @@ if [ "${1:-}" = "--self-test" ]; then
   expect 1 "inside JSON: the shape every Secret value arrives in"
   rm "$d/secret.json"
 
+  # The backstop below keeps no copy of what the sanitizer refuses, so this
+  # proves it is actually asking the filter rather than passing by default.
+  echo '{"kind":"CertificateSigningRequest","spec":{"signerName":"kubernetes.io/kube-apiserver-client","username":"system:serviceaccount:prod/deployer","groups":["system:authenticated"]}}' > "$d/csr.json"
+  expect 1 "a committed file scripts/sanitize.jq itself would refuse — here, a real requester identity"
+  rm "$d/csr.json"
+
+  # The other half, and the one an exit-status check cannot see: the filter
+  # accepts the file and *changes* it. That is what a fixture captured before a
+  # rule existed looks like, and csr-pending.json was exactly this for one
+  # commit — accepted, and still carrying the `.spec.extra` the filter now
+  # deletes.
+  echo '{"kind":"CertificateSigningRequest","spec":{"signerName":"kubernetes.io/kube-apiserver-client","username":"kubernetes-admin","groups":["system:authenticated"],"extra":{"authentication.kubernetes.io/credential-id":["X509SHA256=deadbeef"]}}}' > "$d/csr.json"
+  expect 1 "a committed file the filter accepts but does not leave alone — captured before a rule existed"
+  rm "$d/csr.json"
+
   if [ $sfail -eq 0 ]; then
     echo "fixture-audit: self-test passed — a private key is refused armoured," \
-         "base64-wrapped, DER, mislabeled, whole-file base64 and inside JSON;" \
-         "a real certificate is not"
+         "base64-wrapped, DER, mislabeled, whole-file base64 and inside JSON," \
+         "and so is a file scripts/sanitize.jq would refuse or would still" \
+         "change; a real certificate is not"
   fi
   exit $sfail
 fi
@@ -232,6 +248,36 @@ for file in "${files[@]}"; do
     case "$n" in k8rs-*) ;; *) note "[$rel] names node '$n', which is not from the kind test cluster" ;; esac
   done < <(jq -r '[.. | objects | .nodeName? // empty] | .[]' "$file" 2>/dev/null)
 done
+
+# And the backstop: ask the filter itself what it makes of these bytes today.
+# Everything above keeps its own copy of a rule, which is why the audit and the
+# sanitizer were blind in the same places twice (NOTES § D52); this keeps no
+# copy of anything, so it covers node names, requester identities and whatever
+# the filter learns next without being edited again. The blocks above stay: they
+# name the node or the key they found, and this one can only say the filter
+# objects.
+#
+# **Compared, not just run.** A refusal is an exit status, but a *deletion* is
+# not — and the filter's whole first half is deletions, so an exit-status check
+# is blind to precisely the case that a committed fixture predates a rule.
+# csr-pending.json was captured before `.spec.extra` was deleted and sailed
+# through the status check carrying a credential thumbprint. `jq .` on both
+# sides so the comparison is about content and not about whitespace.
+#
+# Crash and refusal are told apart for the reason sanitize-test.sh tells them
+# apart: a jq type error is also a non-zero exit, and reporting it as "refused"
+# sends the reader looking for a leak that is not there.
+for file in "${files[@]}"; do
+  rel=${file#"$fixtures"/}
+  if err=$(jq -f "$here/sanitize.jq" "$file" 2>&1 >"$tmpd/sanitized"); then
+    jq . "$file" 2>/dev/null | diff -q - "$tmpd/sanitized" >/dev/null ||
+      note "[$rel] scripts/sanitize.jq would still change these bytes — this file was captured before the filter learned something, and needs re-capturing"
+  elif grep -q '^jq: error.*sanitize: ' <<<"$err"; then
+    note "[$rel] scripts/sanitize.jq refuses these bytes today — ${err#*sanitize: }"
+  else
+    note "[$rel] scripts/sanitize.jq fails on these bytes rather than refusing them — $err"
+  fi
+done
 # --- WHAT MUST NOT BE THERE END ---
 
 # --- WHAT MUST STILL BE THERE START ---
@@ -260,6 +306,7 @@ if [ $fail -eq 0 ]; then
   # the scan never entered.
   echo "fixture-audit: ${#all_files[@]} committed fixtures (${#files[@]} parsed as JSON) —" \
        "no annotations, no env values, no addresses; no key material in any framing" \
-       "(armoured, base64-wrapped, DER, mislabeled); node names intact"
+       "(armoured, base64-wrapped, DER, mislabeled); node names intact;" \
+       "and scripts/sanitize.jq leaves every one of them byte-identical"
 fi
 exit $fail

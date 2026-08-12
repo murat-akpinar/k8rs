@@ -2705,6 +2705,78 @@ for the shapes the first capture could not produce, then the capture, then the
 teardown that closes the trip. A sanitizer fix landing after a capture is a
 sanitizer that never ran on the bytes it was written for.
 
+### D59 — the sanitizer refuses a requester, and an exit-status guard cannot see a deletion (2026-08-12)
+
+[D52](#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12)
+left one gap open on purpose: a CertificateSigningRequest's `.spec.username` and
+`.spec.groups`. Closing it produced four rulings and one lesson that is bigger
+than the box.
+
+**The allowed set is derived, not curated.** "Refused, not rewritten" was
+already settled; what counted as *foreign* was not. The answer is the node-name
+shape — refuse anything the pinned kind cluster does not itself issue — and the
+set was **read off the live cluster** rather than recalled: the two kubelet
+identities with their groups, and kubeadm's admin from the kubeconfig client
+certificate's subject. It is a fact about kind, not a policy about which real
+identities are tolerable, which is the allowlist D52 rejected. The regex is
+anchored at both ends, unlike the `k8rs-` node prefix: a node name is a family
+kind generates, an identity is not, and unanchored,
+`kubernetes-admin@corp.example.com` launders itself into kind's own admin.
+
+**`.spec.extra` and `.spec.uid` are payload, deleted rather than refused, and
+scoped to the object that carries the marker.** `extra` is where a real cluster
+puts its OIDC claims and it cannot take the refusal — the `credential-id` the
+apiserver stamps is a fresh hash every time, so there is nothing to allowlist.
+The scoping is not fussiness: a bare `del(.. | objects | .uid?)` empties
+`metadata.uid` on all 23 fixtures — the identity the rule engine is built on —
+while still passing every test written about a CSR.
+
+**The marker is `signerName` *or* `issuerRef`, and the first ruling was
+reversed.** `signerName` alone was accepted as a deliberate narrowing with
+cert-manager's `CertificateRequest` recorded as a known miss; the operator
+review then put that kind through the filter and it came out **unmodified**
+carrying `alice@corp.example.com` and an OIDC claim. A known miss with a live
+proof is not a narrowing, it is the leak. Keyed on the marker rather than on
+`has("request") and has("username")`, which reads better and fails open exactly
+when it matters: an object carrying `groups` and `extra` without a `username`
+is then never examined, and those are two of the four fields being protected.
+
+**An accepted limit, recorded rather than engineered around.** A requester
+identity sits in three places on a CSR — `.spec.username`, the DN inside the
+base64 `.spec.request`, and the DN inside `.status.certificate` — and jq cannot
+decode a DER subject, so the guard reads one of three. A production kubeadm CSR
+carrying `CN=alice@corp.example.com` in its request passes, because
+`CN=kubernetes-admin, O=kubeadm:cluster-admins` is what **every** kubeadm
+cluster calls its admin — that half of the allowed set is not kind-specific at
+all, and the comment claiming it was has been corrected. Closing it needs
+openssl in `fixture-audit.sh`, which is where it would live if it is ever
+worth it.
+
+**The lesson, which outlived the box: a guard that asks for an exit status
+cannot see a deletion.** `fixture-audit.sh` gained a backstop asking
+`sanitize.jq` whether it would *refuse* each committed fixture — and
+`csr-pending.json`, captured before the `del(.extra, .uid)` clause existed,
+still carried the credential hash. The filter accepted it, so the backstop
+passed, and the audit's green line was byte-identical to a clean run. The
+question worth asking is not "would the filter refuse this" but **"would the
+filter change this"** — idempotence. Twenty-two of the twenty-three JSON
+fixtures were already byte-identical under the filter; the twenty-third was the
+one that had never met it. Nothing leaked — the value was a thumbprint of a
+throwaway kind admin certificate — but the guarantee that
+[G-5](REQUIREMENTS.md#devsecops-requirements) rests on had quietly stopped
+holding, which is the same failure as
+[D26](#d26--a-green-build-that-proves-nothing-2026-08-12) wearing different
+clothes.
+
+**And the guard's own failure mode was worse than the leak it caught.**
+`make-csr.sh` sanitized with `jq -f sanitize.jq … > "$out"` where `$out` *is*
+the committed fixture: the shell truncates before jq runs, so a refusal — the
+one thing the filter exists to do — destroyed the file the script exists to
+produce, and `set -euo pipefail` then skipped the cleanup and left a CSR on the
+cluster. It writes to a working copy and moves on success, and the delete moved
+into the `EXIT` trap. *"The cluster is left as it was found"* was true of the
+happy path and nothing else.
+
 ## Decisions made
 
 ### Product
