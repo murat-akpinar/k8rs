@@ -351,7 +351,11 @@ ticket. The reasoning behind each item lives in
   fix(k8s): distinguish 403 from a dead API server on startup
   test(rules): add the healthy-pod negative fixture for rule 5
   ```
-- One branch per feature: `feat/<name>`, `fix/<name>` → merge into main.
+- One branch per unit of work, named `<type>/<name>` with a type from the list
+  above (`feat/rules`, `fix/sanitize-shapes`, `docs/agent-workflow`). It is
+  merged into main by the ritual in
+  [phase close, item 7](#phase-close--the-ritual-at-the-end-of-every-phase) —
+  described there and nowhere else.
 - **Before pushing**, update the CHANGELOG with
   [git-cliff](https://github.com/orhun/git-cliff).
 
@@ -537,9 +541,15 @@ of why it was allowed.
 
 **Branches: the PM cuts one per phase**, with the name `todo.md` already gives
 it (`feat/rules`, `feat/analysis`, …), at the phase's first box. Every box
-commits onto it; the PR opens at phase close, not per box. Agents never create,
-switch, merge or delete a branch — they write files on whatever branch they
-are handed.
+commits onto it; the PR opens **and is merged** at phase close, not per box —
+the ritual is [phase close, item 7](#phase-close--the-ritual-at-the-end-of-every-phase),
+and it lives there only, so there is one description of it to keep true.
+Agents never create, switch, merge or delete a branch — they write files on
+whatever branch they are handed.
+
+Work that is not a phase — a fix, a docs change, this file — takes its own
+branch and runs the same item 7 the moment its own work is done, without
+waiting for a phase to close.
 
 ### Step 4 is the anti-leak mechanism, so it is mechanical
 
@@ -612,7 +622,19 @@ list — in order, no skipping:
 5. **Docs sync:** `docs/`, `README.md`, `README_TR.md` for anything
    structural. Stale docs are a failed step, not a follow-up.
 6. **CHANGELOG** with git-cliff, committed separately.
-7. **Commit, push, PR, CI green, merge.** Frozen files stay frozen from here.
+7. **Commit, push, PR, and merge it — the PM does this, it is not handed
+   back.** Standing authorisation: nobody is asked before a green PR of the
+   current phase is merged. In order: push · open the PR · wait until **every**
+   check has *reported* (a pending check is not a green one) · merge with a
+   merge commit, so the phase stays one readable block in `git log` · delete
+   the branch, local and remote · return to `main` and pull, because the next
+   phase branches from what was actually merged, not from what was pushed.
+   Never on red, never mid-run, never force past a conflict — a conflict means
+   `main` moved while the phase was open, so re-read it and rebase. If the
+   tooling refuses one of these steps, print the exact command for the user
+   ([§ the boxes no agent can run](#the-boxes-no-agent-can-run--say-so-do-not-fake-them))
+   rather than leaving a merged branch lying around. Frozen files stay frozen
+   from here.
 8. **Then say, in the reply, that the phase is closed and the context should be
    cleared** — name the phase, name what the next one starts with. Clearing is
    the user's command (`/clear`); the agent cannot issue it and must not
