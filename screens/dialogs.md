@@ -84,7 +84,7 @@ A rejected write is a first-class state, not a toast that vanishes.
 ├────────────────────────────────────────────────────────────────────┤
 │ $ kubectl scale deployment/web --replicas=9 -n payments  → rejected│
 ├────────────────────────────────────────────────────────────────────┤
-│ esc dismiss   ⏎ open the object                                    │
+│ esc dismiss   ⏎ open                                               │
 └────────────────────────────────────────────────────────────────────┘
 ```
 

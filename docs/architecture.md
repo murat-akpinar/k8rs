@@ -239,11 +239,18 @@ minimum terminal 80×24.
 - Every rule has a **positive** fixture (triggers the finding) and a
   **negative** fixture (healthy pod → nothing) — false positives are bugs.
 - Fixtures are real captures from a kind cluster running deliberately broken
-  pods (`tests/manifests/broken.yaml`), sanitized by script, committed, and
+  pods ([`scripts/broken.yaml`](../scripts/broken.yaml), with its healthy
+  counterpart [`scripts/healthy.yaml`](../scripts/healthy.yaml)), sanitized by script, committed, and
   recorded with the k8s version they came from. Hand-written JSON is only a
   bootstrap and must be replaced.
-- Fixtures deserialize through `k8s_openapi::Pod`, so the prune path is
-  covered by the same tests.
+- Fixtures deserialize through `k8s_openapi::Pod`, so the *decode* path is
+  covered by the same tests. **The prune path is not**, and cannot be: `kubectl
+  get -o json` omits `managedFields` unless explicitly asked, and the sanitizer
+  deletes them regardless — so a fixture never carries the field pruning is
+  about, and a test asserting it was pruned would pass over an object that
+  never had it. Pruning is verified against live watch data in the client
+  layer, where the field actually arrives
+  ([NOTES § D30](../NOTES.md#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)).
 
 ## Version compatibility
 

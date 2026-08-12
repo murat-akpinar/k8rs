@@ -46,3 +46,6 @@ feel complex is its panel layering; the discipline here is lazygit's.
    in one panel.
 4. **Symbol *and* colour.** `● ▲ ○` carry the severity on their own; colour
    only reinforces it. Copy-pasteable, and readable when colour is not.
+   `⚠` is the fourth symbol and it is not a severity: it marks a connection or
+   trust problem — disconnected, login expired, TLS not verified — and appears
+   in the header row or a banner, never on a finding.

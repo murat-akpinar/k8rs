@@ -18,7 +18,7 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 │   drain safety     │    → check the app's /healthz endpoint        │
 │   waste            │                                               │
 │   versions         │  ▲ infra/node-3                     6 days ago│
-│                    │    Marked unschedulable and left that way     │
+│                    │    Set to refuse new pods (cordoned)          │
 │                    │    → someone's maintenance window never closed│
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get pods -A --watch                                      │

@@ -69,11 +69,47 @@ NOTES.md with the reason.
 | **just** | task runner (`check`, `run`, `cluster-up/down`, `fixtures`, `e2e`, `mutants`) — Rust-ecosystem norm, works on Windows |
 | **cargo-mutants** | run over the two pure files, `rules.rs` and `analysis.rs`: a surviving mutant is a diagnosis change no test objected to, i.e. a hole in what the tool claims to detect |
 | **kind** + **kubectl** | test cluster with deliberately broken pods; fixture capture. Driven by [`scripts/cluster.sh`](../scripts/cluster.sh) — `up` · `down` · `reset` · `break` · `verify`. Three nodes, node image pinned to **`kindest/node:v1.36.1`** so fixtures stay reproducible. `K8RS_APISERVER_ADDRESS` points it at another machine; kind writes `127.0.0.1` otherwise and no other host can reach it |
-| **jq** | fixture sanitization — [`scripts/sanitize.jq`](../scripts/sanitize.jq), applied to every object as it is captured. Payloads are destroyed (managedFields, annotations, env values, pull secrets, anything PEM-shaped); references are kept, because a rule reports *which* Secret a pod reads, never what is in it; and an object carrying node identifiers that did not come from the kind cluster is refused outright rather than quietly rewritten. Tested against a poisoned object in CI |
+| **jq** | fixture sanitization — [`scripts/sanitize.jq`](../scripts/sanitize.jq), applied to every object as it is captured. Payloads are destroyed (managedFields, annotations, env values, pull secrets, anything PEM-shaped); references are kept, because a rule reports *which* Secret a pod reads, never what is in it; and a capture carrying node identifiers that did not come from the kind cluster is refused outright rather than quietly rewritten. The filter walks the whole document instead of naming paths, because half the capture is the `List` that `kubectl get -A` returns. Tested in CI against a poisoned object **in both shapes** — a single object and a `List` ([NOTES § D29](../NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)) — carrying each secret in every framing it can arrive in: whole value, quoted inside a sentence, and base64-encoded ([NOTES § D31](../NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)) |
 | **git-cliff** | CHANGELOG from conventional commits (`feat:` / `fix:`) |
 | **cargo-deny** | advisories, license policy, source policy (CI) |
 | **clippy** | `-D warnings` + `disallowed-methods` ban on K8s write calls |
 | **GitHub Actions** | fmt/clippy/test + cross-compile check matrix; release on `v*` tags. Also the honest-test guards: a run with zero tests, or an unexplained `#[ignore]`, fails the build |
+
+## The test cluster — reproducing it yourself
+
+Every fixture in `tests/fixtures/` was captured from a cluster you can stand up
+in one command. Nothing here is specific to the machine it was first run on.
+
+```
+just cluster-up                # three nodes, kindest/node:v1.36.1
+scripts/cluster.sh break       # apply the deliberately broken pods + the healthy pair
+scripts/cluster.sh status      # watch the states settle — a few minutes
+scripts/cluster.sh verify      # assert each one reached the state its rule is about
+just fixtures                  # capture, sanitized on the way out
+just cluster-down              # tear it down
+```
+
+`verify` is the step worth understanding: it is what stands between the project
+and a fixture that never reached its state, which is a test that cannot fail. It
+waits, then prints one line per fixture naming the rule each one exists for, and
+refuses to let the capture run until all of them pass.
+
+Knobs, all optional:
+
+| Variable | Default | Why you would set it |
+|---|---|---|
+| `K8RS_APISERVER_ADDRESS` | `127.0.0.1` | The cluster is on another machine. kind writes `127.0.0.1` into the kubeconfig otherwise, and no other host can reach it |
+| `K8RS_APISERVER_PORT` | `6443` | Port already taken |
+| `K8RS_WORKERS` | `2` | Node rules and drain safety need more than one worker; fewer if the box is small |
+| `K8RS_CLUSTER` | `k8rs` | Running more than one. Note the sanitizer refuses captures whose node names do not start with `k8rs-`, so a renamed cluster cannot produce fixtures |
+| `K8RS_NODE_IMAGE` | `kindest/node:v1.36.1` | Pinned on purpose — fixtures are only comparable against a known version, and the capture stamps it into `tests/fixtures/K8S_VERSION` |
+| `K8RS_VERIFY_TIMEOUT` | `420` | How long `verify` waits for states to settle. CrashLoopBackOff has to enter backoff and an OOM kill has to actually happen |
+
+**Running it against a cluster that is not kind is refused, not sanitized.**
+Node names carry real infrastructure, and rewriting them would break the pod↔node
+joins the node rules are built on — so
+[`scripts/sanitize.jq`](../scripts/sanitize.jq) errors out instead of producing
+something that only looks safe.
 
 ## Targets & platforms
 

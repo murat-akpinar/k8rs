@@ -9,15 +9,15 @@ whole debugging loop without a typed command.
 │▸ ALERTS     3 ● 7 ▲│  payments/web-7d9f4                           │
 │ RESOURCES          │  ‹ logs › describe   yaml   events            │
 │   workloads        │  ───────                                      │
-│   network          │  container: app ▾            ⇧ previous: on   │
+│   network          │  container: app ▾          previous log: on   │
 │   storage          │                                               │
 │   config           │  14:21:58  starting worker pool               │
 │   cluster          │  14:22:01  connected to postgres              │
 │ ANALYSIS           │  14:22:06  allocating 240MB cache             │
 │   capacity      1 ▲│  14:22:07  --- killed here ---                │
 │   certificates  30d│                                               │
-│   drain safety     │  This is the log from **before** the last     │
-│   waste            │  crash, which is usually the one you want.    │
+│   drain safety     │  This is the log from before the last crash,  │
+│   waste            │  which is usually the one you want.           │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app --previous             │
