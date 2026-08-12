@@ -180,6 +180,15 @@ indicator. Counts, not a spinner — a changing number is information
 └────────────────────────────────────────────────────────────────────┘
 ```
 
+- **`4 of 11` counts the pods this drain will move, and nothing else.** Not
+  every pod on the node: `kubectl drain` never evicts a DaemonSet pod or a
+  static pod whatever flags it is given, so a total that counted them would
+  stall at `9 of 11` forever on a drain that had in fact finished. It is the
+  same count, computed the same way, as the one on N2's cordon card
+  ([alerts.md § every count](alerts.md#every-count-this-card-can-have) ·
+  [NOTES § D46](../NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
+  Two screens showing the same node must not disagree about how many pods are
+  on it.
 - **Blockers are named while they block**, not reported after a hang. This is
   the whole reason drain is in the tool
   ([REQUIREMENTS](../REQUIREMENTS.md#write-operations-new--the-reversal)).

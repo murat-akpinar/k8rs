@@ -56,6 +56,14 @@ binary can mutate anything, and the result comes back through the same watch
 stream as any other change — there is no optimistic local mutation of the
 store.
 
+**Two things in the store did not come from a watch**, and the diagram would
+otherwise imply they did: the API server's version, read once at startup for
+N4's skew comparison, and — for certificate rule C1 — the kubeconfig context
+name and the client **certificate**, which never came from the cluster at all.
+Rules are pure functions over the snapshot, so an input that is not an API
+object still has to arrive on it. The private key is not carried; see
+[Token hygiene](security.md#token-hygiene).
+
 Why watch instead of polling: every `LIST pods -A` forces the API server to
 read and serialize every pod from etcd, degrading linearly with cluster
 size (this is what makes interval-polling tools feel heavy). A watch pays
@@ -250,7 +258,17 @@ minimum terminal 80×24.
   whole Alerts view — so it falls back to the kubeconfig context's namespace
   (then `default`) instead of failing, and the header states the scope in
   effect. `--namespace` sets it explicitly. Access to two namespaces must
-  produce a working tool.
+  produce a working tool. **The rules that join *every* pod on a node switch
+  off under that scope and say so** — N2 (cordoned with a drain left
+  unfinished) and N5 (overcommit). A partial view turns the first into a
+  finding that silently never fires and the second into an understated sum, and
+  a wrong number that looks confident is worse than a feature that names what
+  it is missing
+  ([NOTES § D43](../NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)).
+  The scope is a **field on the snapshot**, not something a rule can ask about:
+  rules are pure functions with no globals, so without it a small cluster and a
+  partial view of a large one look identical from inside a rule
+  ([NOTES § D46](../NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
 - A rejected write (admission webhook, validation, conflict) shows the API
   server's own message verbatim and stays until dismissed. A `409 Conflict` on
   apply means the object changed underneath the edit; the user is offered a
@@ -275,6 +293,18 @@ minimum terminal 80×24.
   never had it. Pruning is verified against live watch data in the client
   layer, where the field actually arrives
   ([NOTES § D30](../NOTES.md#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)).
+- **A decode test may set one field on a real capture** — the cluster the
+  fixtures came from had no cordoned node, no partially-ready workload and no
+  pod with an owner, and a branch whose input the capture cannot contain is a
+  branch no test can reach. It starts from a committed capture, changes one
+  field to a value the API demonstrably produces, says why the capture lacks
+  it, and names the object the next capture trip should bring back to replace
+  it. A **rule's** positive fixture is still a real capture — this never
+  becomes the way a rule gets proven
+  ([NOTES § D40](../NOTES.md#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)).
+- The decode itself is proven by **field-level mutation done by hand**, not by
+  `cargo mutants`, which does not mutate struct-literal field assignments
+  ([NOTES § D41](../NOTES.md#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12)).
 
 ## Version compatibility
 

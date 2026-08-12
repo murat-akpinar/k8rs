@@ -38,6 +38,7 @@ check:
     bash scripts/verify-test.sh
     bash scripts/sanitize-test.sh
     bash scripts/certs-test.sh
+    bash scripts/fixture-audit.sh --self-test
     bash scripts/fixture-audit.sh
     cargo deny check advisories licenses sources bans
 

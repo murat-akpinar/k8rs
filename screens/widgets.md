@@ -83,11 +83,24 @@ body → Layout::horizontal([
   numbers stay in the report, where there is room to say whether they mean
   *promised* or *used* — a bare `78%` in the header would be read as usage and
   would be a lie ([invariant 14](../CLAUDE.md)).
-- **A vital that cannot be read is blank, never guessed.** A namespace-scoped
-  user cannot list nodes, so the left zone is empty on that screen and the
-  badge is absent; while connecting, the count reads `nodes …`. Stale vitals
-  stay visible and say how old they are (`nodes 3/3 (40s ago)`), the same rule
-  the body obeys ([states.md](states.md)).
+- **A vital that cannot be read is blank, never guessed.** While connecting, the
+  count reads `nodes …`; a user who cannot list nodes gets an empty left zone.
+  Stale vitals stay visible and say how old they are (`nodes 3/3 (40s ago)`),
+  the same rule the body obeys ([states.md](states.md)).
+- **Namespace scope and node access are two different permissions, and the
+  header must not conflate them.** Being scoped to one namespace for *pods* says
+  nothing about *nodes*: the common namespace-scoped screen keeps `nodes 3/3`
+  and loses the `capacity` badge, because the badge needs every pod on a node
+  and the node count does not
+  ([states.md](states.md#you-can-only-see-some-namespaces)). Two flags, two
+  behaviours — an earlier draft of this section had one, and it drew a blank
+  vital for the wrong reason.
+- **A blank badge is only honest because the screen behind it speaks.** `capacity`
+  with nothing beside it cannot distinguish *no overcommitted nodes* from *not
+  checked*; the badge has room for a number, not for a sentence, so the report
+  itself carries the reason ([analysis.md](analysis.md#capacity-when-you-can-only-see-one-namespace)).
+  A fourth symbol meaning "not checked" is not the answer — it needs a legend,
+  and the three severity symbols are the whole vocabulary.
 - Terminal setup is `ratatui::init()` / `ratatui::restore()`. `init()` already
   installs a panic hook that restores the terminal — but
   [invariant 8](../CLAUDE.md) needs a second guarantee, that no credential
@@ -113,7 +126,7 @@ body → Layout::horizontal([
 | Dialogs, help, container picker | `Clear` → `Block::bordered()` → content | `Modal` enum in the view state | §5 |
 | Typed-name input (delete / drain) | `Paragraph` + `Frame::set_cursor_position` | `String` + byte cursor | no input widget exists in ratatui and one line does not need one |
 | Empty · loading · disconnected | centered `Paragraph` | — | same frame, different content pane — never a different screen |
-| Disconnected banner | two `Line`s above the normal list | — | the list stays visible; the banner says it is stale ([states.md](states.md)) |
+| Banner above a list (disconnected · namespace scope) | two to eight `Line`s above the normal list | — | one slot, two occupants: the list stays visible and the banner says what is wrong with it — stale data, or a check that could not run ([states.md](states.md)). Disconnected **while** scoped drops the scope explanation (the header still says `ns: payments`) and keeps the *"one node check is off"* line, which is the half a reader cannot infer from anywhere else |
 
 Nothing here is a custom widget. If a screen seems to need one, the screen is
 wrong before the widget set is.

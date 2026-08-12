@@ -195,6 +195,24 @@ resource.
   embedded in an error message. The config type's `Debug` output is wrapped.
 - This includes the panic path: a backtrace dumped to stderr must not
   contain credentials.
+- **One thing off the kubeconfig does enter our own structs, and it is the
+  public half only.** Certificate rule C1 warns when the client certificate is
+  about to expire, so `ClusterSnapshot` carries the **certificate** bytes and
+  the context name — never the private key, never the token, never anything
+  else. This is deliberate and narrow: rules are pure functions over the
+  snapshot ([invariant 5](../CLAUDE.md)), so C1's input has to arrive the same
+  way every other rule's does, and the alternative — a second entry point
+  taking PEM bytes directly — would have meant amending a hard invariant
+  ([NOTES § D51](../NOTES.md#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)).
+  A certificate is not a secret; the key beside it on disk is, and the field's
+  own doc says so because a reader will reasonably ask why a kubeconfig is
+  anywhere near that struct. A test fails if an **armoured** private key appears
+  in the fixture that field is tested with — which is a check on the fixture,
+  not a constraint on `k8s.rs`: the test builds the value itself, so nothing
+  yet stops Phase 5 putting something else there. Closing that is Phase 5's
+  ingest gate, and a base64-wrapped key — the framing a kubeconfig actually
+  uses for `client-key-data` — walks past the current check
+  ([NOTES § D31](../NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)).
 
 ## The audit log
 

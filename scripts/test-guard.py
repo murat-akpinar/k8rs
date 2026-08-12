@@ -20,6 +20,7 @@ Usage:
 """
 
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,15 +35,22 @@ IGNORED = re.compile(r"#\[\s*ignore\s*(?:\]|=\s*\"(?P<reason>[^\"]*)\")")
 
 
 def sources(root: Path) -> list[Path]:
-    # Skipped paths are matched *relative to the root* — an absolute path under
-    # /tmp is not a `tmp/` directory of ours, and treating it as one made this
-    # function silently return nothing.
-    skip = {"target", "tmp"}
+    """Every .rs file cargo actually compiles — an allowlist of roots.
+
+    This used to walk the whole tree minus `target/` and `tmp/`, which counts
+    every copy of the source anyone leaves lying around. `just mutants` leaves
+    exactly that: `cargo mutants` writes a full working copy under
+    `mutants.out/`, so a run of it doubled the declared count and `just check`
+    reported "45 tests never run" — a red build with nothing wrong, and the kind
+    that gets repaired by weakening the guard. The blocklist would need a new
+    entry per tool; these four directories plus build.rs are the whole of what
+    the compiler reads, and they are the same roots write-guard.py scans.
+    """
     return sorted(
         p
-        for p in root.rglob("*.rs")
-        if not skip & set(p.relative_to(root).parts)
-    )
+        for r in ("src", "tests", "examples", "benches")
+        for p in (root / r).rglob("*.rs")
+    ) + [p for p in [root / "build.rs"] if p.is_file()]
 
 
 def declared_and_ignored(root: Path) -> tuple[int, list[str]]:
@@ -144,6 +152,19 @@ def self_test() -> None:
         assert declared == 2, f"expected 2 declared tests, counted {declared}"
         assert not unexplained, f"false positive on an explained ignore: {unexplained}"
 
+        # A second copy of the source tree, which is what `just mutants` leaves
+        # in the repo root on every run. Counting it doubles `declared`, and the
+        # guard then reports every real test as "never run".
+        copy = root / "mutants.out" / "scratch" / "src"
+        copy.mkdir(parents=True)
+        (copy / "lib.rs").write_text((root / "src" / "lib.rs").read_text())
+        declared, _ = declared_and_ignored(root)
+        assert declared == 2, (
+            f"a copy of the source under mutants.out/ was counted: {declared} declared, "
+            f"expected 2"
+        )
+        shutil.rmtree(root / "mutants.out")
+
         # The empty suite. Source exists, no test in it — the shape left behind
         # by deleting the last test, which every count-comparison in `check()`
         # reports as OK because they all agree at zero.
@@ -172,7 +193,8 @@ def self_test() -> None:
         (root / "src" / "lib.rs").write_text("#[test]\nfn real() {}\n")
         errors = check(root)
         assert not errors, f"false positive — one real test is not an empty suite: {errors}"
-    print("test-guard: self-test passed — it fails on hidden, parked and absent tests")
+    print("test-guard: self-test passed — it fails on hidden, parked and absent "
+          "tests, and does not count a copy of the tree under mutants.out/")
 
 
 if __name__ == "__main__":

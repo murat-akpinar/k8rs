@@ -161,8 +161,21 @@ def offences(roots: list[Path], banned: set[str]) -> list[str]:
     `examples/`. Invariant 1 does not stop at the library.
     """
     hits = []
-    for path in sorted({p for root in roots if root.is_dir() for p in root.rglob("*.rs")}):
-        if path.name == OPS:
+    # A root may be a file — `build.rs` is compiled and *executed* at build
+    # time, which makes it the most privileged file in the crate, and it sits
+    # under none of the directories above.
+    exempt = (ROOT / "src" / OPS).resolve()
+    candidates = {
+        p
+        for root in roots
+        for p in ([root] if root.is_file() else root.rglob("*.rs") if root.is_dir() else [])
+    }
+    for path in sorted(candidates):
+        # `src/ops.rs`, by path — not "any file called ops.rs". The name test
+        # exempted `tests/ops.rs`, `examples/ops.rs` and `benches/ops.rs` too,
+        # and `tests/ops.rs` is precisely what Phase 7's write-path integration
+        # test would be called: the one file that must not be able to opt out.
+        if path.resolve() == exempt:
             continue
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for m in CALL.finditer(strip_line_comment(line)):
@@ -250,11 +263,34 @@ def self_test() -> None:
             )
             sneaky = [h for h in offences([src], banned) if "sneaky.rs" in h]
             assert len(sneaky) == 3, sneaky
+
+            # --- the exemption is a path, not a name START ---
+            # `src/ops.rs` is the containment. Every other file that happens to
+            # be *called* ops.rs walked free, and `tests/ops.rs` is the obvious
+            # name for Phase 7's write-path integration test — the one file that
+            # must not be able to opt out of the invariant it is testing.
+            write = 'async fn f(api: Api<Pod>) { api.delete("web").await; }\n'
+            for rel in ("tests/ops.rs", "examples/ops.rs", "benches/ops.rs"):
+                p = fake / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(write)
+            (fake / "build.rs").write_text(write)
+            elsewhere = offences(
+                [fake / d for d in ("tests", "examples", "benches")] + [fake / "build.rs"],
+                banned,
+            )
+            assert len(elsewhere) == 4, f"a write named ops.rs escaped containment: {elsewhere}"
+
+            # …and the negative half: the real one is still exempt, or the fix
+            # above is just a guard that fails on everything.
+            assert not offences([src / OPS], banned), "src/ops.rs is the containment, not a violation"
+            # --- the exemption is a path, not a name END ---
         finally:
             ROOT = keep
         assert len(hits) == 1 and "delete" in hits[0], hits
-    print("write-guard: self-test passed — a write outside ops.rs is caught, "
-          "the same call inside ops.rs is not")
+    print("write-guard: self-test passed — a write outside src/ops.rs is caught, "
+          "including in a file merely named ops.rs and in build.rs; the same "
+          "call inside src/ops.rs is not")
 
 
 if __name__ == "__main__":
@@ -278,7 +314,10 @@ if __name__ == "__main__":
         sys.exit(f"write-guard: kube parsed, but {missing} are not in the derived "
                  f"ban list — the signature parser is missing methods, so the "
                  f"containment is partial. Fix the parser before trusting it.")
-    problems = offences([ROOT / d for d in ("src", "tests", "examples", "benches")], banned)
+    problems = offences(
+        [ROOT / d for d in ("src", "tests", "examples", "benches")] + [ROOT / "build.rs"],
+        banned,
+    )
     for line in problems:
         print(f"FAIL {line}", file=sys.stderr)
     if problems:

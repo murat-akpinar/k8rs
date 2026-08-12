@@ -458,7 +458,7 @@ agents end up editing it in the same turn.
 | `dev-core` | `rules.rs` `analysis.rs` `k8s.rs` `ops.rs`, **and `main.rs` while it is the temporary driver (Phases 3–7)** | anything that draws |
 | `dev-ui` | `theme.rs` `views.rs` `ui.rs`, `main.rs` **from Phase 12**, `examples/` (the Phase 8 spike) | the four lower files |
 | `tui-designer` | `screens/` | any `.rs` |
-| `tester` | `tests/` `scripts/` `justfile` `clippy.toml` `deny.toml` `.github/workflows/` | product code in `src/` |
+| `tester` | `tests/` `scripts/` `justfile` `clippy.toml` `deny.toml` `.github/workflows/` | product code in `src/` — **including the rule tests**, see below |
 | `k8s-admin` | nothing — reads everything, reports | every file |
 | **PM** (main session) | `todo.md` `NOTES.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `.claude/agents/`, branches, commits, PRs | `src/` (delegate it) |
 
@@ -475,6 +475,17 @@ reaches it cannot be two people
 (invariant 10), and the agent that wants the crate is the last one who should
 be able to add it.
 
+**`tests/` is fixtures and, from Phase 7, end-to-end tests — it is not where
+the rule tests live.** The crate has one `bin` target and no `lib`, so nothing
+under `tests/` can `use` a product type, and adding a `lib.rs` to change that
+would be a ninth file bought with pure plumbing
+([NOTES § D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
+Rule tests therefore live in `#[cfg(test)] mod tests` inside the file they
+test, written by the dev who wrote it — which is what [the cycle](#the-cycle--one-todomd-box-is-one-turn-of-it)
+step 3 already says. `tester`'s job on those is step 4: attack them. On the
+snapshot-types box that found two holes the author's own sweep had missed,
+which is worth more than owning the directory would have been.
+
 ### The boxes no agent can run — say so, do not fake them
 
 Some boxes need a machine, a credential or an account the agents do not have:
@@ -488,6 +499,18 @@ A box whose evidence is "this would work" is an unchecked box.
 
 **One writer per file tree at a time.** Two agents editing the same tree in the
 same worktree corrupts both diffs and neither notices.
+
+**The scratchpad is a shared tree too, and it is the one nobody guards.** Two
+agents running at once write into the same session scratchpad, so a script or
+a saved copy left there is not necessarily still yours when you come back to it.
+This has already happened: `tester`'s mutation driver was overwritten between
+rounds by a file it never wrote, and running it would have re-run **the
+author's own sweep** and reported it as independent verification — a plausible,
+well-formatted, entirely worthless result, and the exact closed loop step 4
+exists to break. So: **each agent works in its own subdirectory of the
+scratchpad, named after itself**, and anything it will rely on later is
+re-verified before use rather than assumed — a hash, a line count, or a string
+that could only have come from the version it was saved from.
 
 This costs less than it sounds, because the pyramid already serialises it: the
 lower four files are phases 3–7 and the upper four are 8–12, so `dev-core` and

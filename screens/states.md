@@ -135,19 +135,99 @@ on the cluster-wide list falls back instead of failing
 ([NOTES § D5](../NOTES.md#d5--namespace-scoping-is-a-v1-requirement-not-a-filter)).
 
 ```
-                              ctx: prod-eu · ns: payments · read-only
+ nodes 3/3                    ctx: prod-eu · ns: payments · read-only
 ┌────────────────────┬───────────────────────────────────────────────┐
-│▸ ALERTS     3 ● 7 ▲│                                               │
-│ RESOURCES          │  You can't list pods across the whole         │
-│   workloads        │  cluster, so k8rs is showing the namespace    │
-│   network          │  your kubeconfig points at: payments.         │
-│   storage          │                                               │
-│   config           │  Use  --namespace <name>  for a different     │
-│   cluster          │  one, or ask for cluster-wide read access.    │
-│ ANALYSIS           │                                               │
-│   capacity         │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│▸ ALERTS     3 ● 7 ▲│  You can't list pods across the whole         │
+│ RESOURCES          │  cluster, so k8rs is showing the namespace    │
+│   workloads        │  your kubeconfig points at: payments.         │
+│   network          │  Use  --namespace <name>  for a different     │
+│   storage          │  one, or ask for cluster-wide read access.    │
+│   config           │                                               │
+│   cluster          │  One node check is off: spotting a node       │
+│ ANALYSIS           │  someone started emptying and did not finish  │
+│   capacity         │  needs every pod in the cluster.              │
 │   certificates  30d│                                               │
-│   drain safety     │                                               │
+│   drain safety     │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   waste            │    Containers exceeded their memory limit and │
+│   versions         │    were killed by the kernel (OOMKilled)      │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -n payments --watch                             │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  ? all keys  q quit                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### The second paragraph is the point of this screen
+
+A check that is switched off and says nothing looks exactly like a check that
+passed. Two of them are switched off here, because both add up **every** pod on
+a node and this view has a fraction of them
+([NOTES § D43](../NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)):
+
+| Off | Would have appeared | Said where |
+|---|---|---|
+| The half-finished drain — a node taken out of service with pods still to move | as a `node-3` card in **Alerts** ([alerts.md](alerts.md#under-namespace-scope-there-is-no-card-and-the-screen-says-so)) | the banner above, in the words drawn there |
+| Overcommitted nodes — promised more than they have | as a row in the **Capacity report**, and as the `capacity  1 ▲` badge beside it in the sidebar | on that report when it is opened ([analysis.md](analysis.md#capacity-when-you-can-only-see-one-namespace)) |
+
+- **Each screen names the check it would have run.** Alerts says the Alerts one;
+  Capacity says the Capacity one. Nothing collects them into a single global
+  notice, so adding a third disabled check later grows one screen by a sentence
+  instead of growing this banner by a list.
+- **The sidebar badge stays blank, and that is why the report has to speak.**
+  `capacity  1 ▲` has room for a number, not for a sentence, and a fourth symbol
+  meaning *not checked* would need a legend nobody has read yet — so the badge
+  obeys the existing rule (a vital that cannot be read is blank, never guessed,
+  [widgets.md § 1a](widgets.md#1a-the-header-row)) and the screen behind it
+  carries the explanation.
+- **This is a degradation, not a new mechanism.** It is what
+  [docs/architecture § Error handling](../docs/architecture.md#error-handling)
+  already specifies for a 403 on a secondary stream: the feature switches off
+  and names what it needed.
+- **The banner is above the list, not below it.** A reader who scrolls to the
+  bottom of the findings to learn the list was incomplete has already believed
+  it.
+
+### The same screen, three ways it can differ
+
+- **Two causes, one scope.** `--namespace payments` and a 403 on the
+  cluster-wide pod list produce the identical state — `ClusterSnapshot` carries
+  one `namespace_scope` for both ([NOTES § D46](../NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
+  Only the first paragraph differs: the flag case reads *"Showing only the
+  payments namespace, because `--namespace` asked for it"* and keeps the second
+  paragraph unchanged, because the checks are off for the same reason either way.
+- **Nodes may still be listable, and here they are.** Being scoped to a
+  namespace for *pods* says nothing about *nodes* — the header keeps
+  `nodes 3/3`, and N1 (a node that is not ready) and N3 (a node running out of
+  disk or memory) still fire, because they read the node's own conditions and
+  join nothing.
+- **If nodes are not listable either**, the header's left zone is blank
+  ([widgets.md § 1a](widgets.md#1a-the-header-row)) and the second paragraph
+  says that instead, in the same slot: *"Nodes are not checked at all — your
+  user can't list them. Missing permission: list nodes."* Same banner, same
+  rule, different cause. It names the verb and the resource because that is the
+  string the reader has to hand to whoever owns the cluster, which is the rule
+  every other 403 on this page already follows.
+
+### Nothing broken, and something not checked
+
+The dangerous combination, and the reason the banner exists: *"nothing is
+broken"* is the strongest claim k8rs makes, and under a partial view it is
+making it while one check is switched off.
+
+```
+ nodes 3/3                    ctx: prod-eu · ns: payments · read-only
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │                                               │
+│ RESOURCES          │               ○  nothing is broken            │
+│   workloads        │                                               │
+│   network          │        12 pods in payments and 3 nodes        │
+│   storage          │        checked, none of them is in trouble    │
+│   config           │        right now.                             │
+│   cluster          │                                               │
+│ ANALYSIS           │        One node check is off: spotting a      │
+│   capacity         │        node someone started emptying and      │
+│   certificates  30d│        did not finish needs every pod in      │
+│   drain safety     │        the cluster.                           │
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
@@ -156,6 +236,20 @@ on the cluster-wide list falls back instead of failing
 │ ↑↓ move  ⏎ open  ? all keys  q quit                                │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+- **The claim is scoped to what was actually read.** `84 pods and 3 nodes` on
+  the cluster-wide screen becomes `12 pods in payments and 3 nodes` — the
+  sentence counts what k8rs looked at, never what the cluster has.
+- **"3 nodes checked" and "one node check is off" are both true**, and reading
+  them together is the whole point: the nodes were checked, but not for
+  everything. Either sentence alone would mislead.
+- **`Worth a look anyway → ANALYSIS → capacity` is gone from this variant**, and
+  its absence is not a layout decision. Under this scope the Capacity report has
+  nothing to say either; sending the reader there would be a tour of a second
+  switched-off check.
+- The wording of the missing check is **the same sentence** as the banner above,
+  re-wrapped for a narrower block. One string, three renderers — the third is
+  `--once` ([once.md](once.md#when-a-check-could-not-run)).
 
 ## Before the TUI ever starts
 
@@ -202,3 +296,7 @@ k8rs: your user is not allowed to list pods in this cluster.
   first thing a newcomer ever sees from k8rs is one of these.
 - A 403 degrades exactly the feature that needed the permission and names the
   missing verb and resource. It never crashes and never retries in a loop.
+- **A check that could not run says so, on the screen where its findings would
+  have appeared.** Silence is the one thing it may not do: an alert list with a
+  disabled rule behind it looks identical to an alert list that found nothing,
+  and the second is the claim the whole product rests on.
