@@ -23,8 +23,8 @@ prod-eu · 84 pods · 3 nodes
   Running, but not receiving traffic — the readiness check is failing
   → check the app's /healthz endpoint
 
-▲ infra/node-3 · 6 days ago
-  Set to refuse new pods (cordoned)
+▲ node-3 · 6 days ago
+  This node refuses new pods (cordoned)
   → someone's maintenance window never closed
 
 1 critical, 2 warnings

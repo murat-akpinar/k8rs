@@ -455,16 +455,21 @@ agents end up editing it in the same turn.
 
 | Agent | Writes | Never writes |
 |---|---|---|
-| `dev-core` | `rules.rs` `analysis.rs` `k8s.rs` `ops.rs` | anything that draws |
-| `dev-ui` | `theme.rs` `views.rs` `ui.rs` `main.rs`, `examples/` (the Phase 8 spike) | the four lower files |
+| `dev-core` | `rules.rs` `analysis.rs` `k8s.rs` `ops.rs`, **and `main.rs` while it is the temporary driver (Phases 3–7)** | anything that draws |
+| `dev-ui` | `theme.rs` `views.rs` `ui.rs`, `main.rs` **from Phase 12**, `examples/` (the Phase 8 spike) | the four lower files |
 | `tui-designer` | `screens/` | any `.rs` |
 | `tester` | `tests/` `scripts/` `justfile` `clippy.toml` `deny.toml` `.github/workflows/` | product code in `src/` |
 | `k8s-admin` | nothing — reads everything, reports | every file |
-| **PM** (main session) | `todo.md` `NOTES.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.claude/agents/`, branches, commits, PRs | `src/` (delegate it) |
+| **PM** (main session) | `todo.md` `NOTES.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `.claude/agents/`, branches, commits, PRs | `src/` (delegate it) |
 
 Phase map, from [`todo.md`](todo.md): **2** → `tester` · **3–7** → `dev-core` ·
 **8–12** → `dev-ui` · **13** → PM. `tui-designer` and `k8s-admin` have no
-phases of their own; they are gates on other people's.
+phases of their own; they are gates on other people's. `main.rs` is the one
+file whose owner changes: it is `dev-core`'s temporary driver through Phase 7
+and becomes `dev-ui`'s at Phase 12 — a module that no `mod` line reaches is not
+in the crate at all, so the writer of a module and the writer of the line that
+reaches it cannot be two people
+([NOTES § D34](NOTES.md#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)).
 
 `Cargo.toml` sits with the PM on purpose: a dependency is a recorded decision
 (invariant 10), and the agent that wants the crate is the last one who should

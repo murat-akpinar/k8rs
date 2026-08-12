@@ -1,6 +1,12 @@
 # Rust build output
 /target/
 
+# cargo-mutants writes its working copy and its report here on every `just
+# mutants` run, in the repo root. Phase 3 is where that target starts being
+# used, so the entry lands before the first run that would leave it untracked.
+/mutants.out/
+/mutants.out.old/
+
 # Upstream library docs pulled in for reading (kube-rs, ratatui, k8s).
 # Never committed — CLAUDE.md § Source files.
 /tmp/

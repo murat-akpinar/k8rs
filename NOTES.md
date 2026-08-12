@@ -1181,6 +1181,431 @@ Phases 1 and 2 ran on `feat/scaffold` and `feat/fixtures` and their headings
 still say so — that is what happened, and rewriting it would make the plan
 file lie about its own history.
 
+### D33 — Phase 3 opens with one Phase 2 box still open, on purpose (2026-08-12)
+
+Phase 2's last box — `just cluster-down` on the LAN host — is unchecked and
+stays that way while Phase 3 runs. Phase 3 starts anyway. That is a plan
+change, so it is written here rather than applied by quietly ticking the box.
+
+**Why the box cannot be closed yet.** The box's own condition is "run it once
+no further capture needs the cluster", and a capture still does: Phase 4's
+Drain-safety and Waste reports have a negative fixture and no positive one,
+because nothing in `broken.yaml` produces a StatefulSet, a PVC, a PDB or a
+dead-selector Service. Tearing the cluster down now buys nothing and costs a
+rebuild.
+
+**Why Phase 3 does not have to wait for it.** Phase 3 is pure functions over
+fixtures that are already captured, sanitized, audited and committed — 23 of
+them, from `v1.36.1`. It needs no cluster, no network and no terminal
+([invariant 5](CLAUDE.md)). The open box blocks nothing in it.
+
+**Amended the same day: the host went down in a power cut and is unreachable,
+so whether that cluster is still standing is now unknown.** It changes nothing
+here, and that is the point of the pinned node image: `just cluster-up`
+rebuilds the same `v1.36.1` cluster from `scripts/cluster.sh`, so the visit
+that closes this box is a re-create if it has to be. Nothing was lost either
+way — the fixtures live in git, not on the host. What the outage does prove is
+that leaving a box open against a machine you do not control is the correct
+record: had it been ticked on "the teardown is basically done", the plan would
+now be claiming a step nobody can show ran.
+
+**Where the trip now happens, and how it leaves nothing behind (2026-08-12).**
+With the host gone, the rebuild runs on the developer's own machine at the
+Phase 3 close — one visit that captures Phase 4's four missing fixtures and
+then tears the cluster down, closing this box. It is set up to evaporate: the
+docker socket is granted for the session with
+`sudo setfacl -m u:$USER:rw /var/run/docker.sock`, which a docker restart
+undoes, **not** by adding the user to the `docker` group — that group is
+root-equivalent and would be a permanent privilege grant bought for a
+half-hour capture. `KUBECONFIG` points at a scratch path so kind never writes
+`~/.kube/config`, and `just cluster-down` removes the containers. Nothing
+about the capture depends on this: `scripts/cluster.sh` pins the node image,
+so the cluster is the same `v1.36.1` wherever it is built.
+
+**What this is not.** It is not permission to start a phase on top of unfinished
+work in general. The exception is narrow and holds only because the open box
+and everything in Phase 3 are disjoint: no Phase 3 box reads anything the
+teardown would change. Phase 2 remains formally open until the teardown runs
+and Phase 4's missing fixtures are captured in the same visit to the cluster —
+an honest open box, which [CLAUDE.md § phase close](CLAUDE.md) item 2 prefers
+to a false tick.
+
+### D34 — the temporary `main.rs` belongs to `dev-core` until Phase 12 (2026-08-12)
+
+[CLAUDE.md § Ownership](CLAUDE.md#ownership--and-the-file-each-one-may-write) gave
+`main.rs` to `dev-ui`, and the phase map in the same section gave Phases 3–7 to
+`dev-core` — while Phase 3, Phase 5 and Phase 7 each write a box into `main.rs`
+(the fixture-printing shell, the `--once` output, the headless ops driver). Two
+sentences that cannot both be obeyed, found the first time a box needed the
+file. The table is corrected rather than worked around.
+
+**`main.rs` is `dev-core`'s while it is the temporary driver — Phases 3 to 7 —
+and passes to `dev-ui` at Phase 12, where it is wired for real.** Nothing about
+it draws before then: it parses `args`, loads a fixture or a client, and prints.
+The file is the one place the ownership rule has a handover, and the handover is
+a phase boundary, which is exactly where the plan already stops.
+
+**The mechanical reason it cannot simply be skipped.** A file that no `mod`
+declaration reaches is not part of the crate, and `cargo fmt` never visits it —
+the correction Phase 1's guard ledger already paid for once. So `src/rules.rs`
+does not exist as far as fmt, clippy or the test runner are concerned until
+`mod rules;` is in `main.rs`. Writing the module and the line that reaches it are
+one change, not two, and they cannot belong to two different agents.
+
+### D35 — `just mutants` is a check that cannot fail, and the justfile unfreezes for one line (2026-08-12)
+
+Three findings came back from the test gate on Phase 3's first box. They are
+closed here, because a finding closed in conversation is a finding nobody can
+find again.
+
+**Accepted, applied one box later.** `cargo mutants --file src/rules.rs --file
+src/analysis.rs` prints `Found 0 mutants to test` and **exits 0** — and it does
+exactly the same for `--file src/does-not-exist.rs`, which was tried. That is
+the derived-list failure [CLAUDE.md § Code phase rules](CLAUDE.md) names: a
+path typo and a clean run print the same line. It needs a floor assertion on
+the mutant count. It is **not** applied in this box, because today the zero is
+honest — `rules.rs` holds types and no functions — so a floor now would be a
+red gate nobody could pass, and an impassable gate is the thing that teaches
+everyone gates are decorative. It lands in the box that first puts a function
+in `rules.rs`, written by `tester`. **The `justfile` froze at the Phase 2
+close; it unfreezes for that one line and nothing else** — recorded here rather
+than done quietly, which is what the forward-only rule asks for.
+
+**Fixed now.** `.gitignore` had no `mutants.out` entry, so every `just mutants`
+run left `mutants.out/` and `mutants.out.old/` untracked in the repo root.
+
+**Rejected, with the reason.** A variant inserted *above* `Critical` leaves the
+severity-order test green. That is correct behaviour, not a hole: the test's
+claim is "declaration order is severity order", and inserting a variant keeps
+it true. A test pinned to the variant set instead would go red on a legitimate
+addition — which is a different lie, and a more expensive one, because the
+person who adds a severity would learn to edit the test to get past it.
+
+### D36 — the `Finding` shape the review sent back (2026-08-12)
+
+Phase 3's first box was written exactly to the shape
+[docs/architecture.md § The shared contract](docs/architecture.md#the-shared-contract)
+specified, and the operator review blocked it on three counts. The code was
+faithful; **the documented contract was the thing that was wrong**, which is
+why this is a decision and not a bug fix. The box exists to decide the identity
+every later rule files under, and `rules.rs` freezes at the end of this phase —
+so the shape is settled here, before there is anything to migrate.
+
+**What was missing, and the concrete case that proves each.**
+
+- **The pod the finding is about.** One crashlooping pod fires rules 1, 5, 6 and
+  7 — checked against this repo's own `tests/fixtures/crashloop.json`, which is
+  ready=false, 5 restarts, `CrashLoopBackOff`, exit 1. A `views.rs` holding only
+  `Vec<Finding>` can count findings, not pods, so the card renders **"4 of 5
+  pods" for a single broken pod** — the blast radius, wrong by 4× on the most
+  common failure in the rule set. `Finding` now carries `object` beside `owner`:
+  the numerator is the count of distinct `object`s. It is also the only possible
+  data source for [detail.md](screens/detail.md)'s "⏎ lists which pods of the
+  group are affected", which had none.
+- **A Node.** N1–N6 are boxes in this same phase and a Node is cluster-scoped.
+  The old shape could only say `{Pod, "", "k8rs-worker2"}`, which renders
+  `/k8rs-worker2`, offers `logs` and a container picker for a machine, and
+  builds `kubectl describe pod k8rs-worker2 -n ""` — invariant 4 lying in the
+  one record that may not. `OwnerKind::Node` exists and `namespace` is
+  `Option<String>`, `None` meaning cluster-scoped.
+- **Owners that are not one of five kinds.** A CronJob's pods are owned by a
+  Job whose name changes every run, so filing under `Job` grows a fresh card
+  every schedule tick — the flood [D3](#d3--findings-group-by-owner-not-by-pod)
+  exists to prevent. `--cascade=orphan` leaves pods whose chain stops at a
+  ReplicaSet, and under Argo Rollouts or any database operator the
+  ownerReference kind is a CRD. `CronJob`, `ReplicaSet` and `Other(String)`
+  cover all three; `Other` prints the kind it actually got instead of asserting
+  a false one. Resolving ReplicaSet → Deployment stays `k8s.rs`'s job
+  ([D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)) —
+  this type only has to hold either answer.
+
+**Two `String`s became `Option`s for the same reason.** `kubectl_cmd` was
+empty-as-absent, so "no such command exists" (rule C1 reads a local file) and
+"the rule author forgot" were the same value, indistinguishable by any test.
+`uid` was absent entirely, and [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)
+requires the confirm dialog to hold one: in the Alerts view the selected object
+*is* a `Finding`, so without it a card drawn before an Argo re-sync can scale
+the object that replaced the one the operator inspected. The struct already
+made this argument in its own doc comment — `Option<Owner>` would be "the arm
+every call site forgets" — and then took the opposite side one field down.
+
+**Rejected: `resourceVersion` does not go on `Finding`.** D22 names it beside
+the uid, but it belongs to the moment the dialog opens, not the moment the rule
+ran; a rule-time value would be stale by construction and would invite a
+comparison that means nothing. The uid answers "is this still the same object",
+which is the question a stale card actually poses. Recorded because the field's
+absence otherwise reads as an oversight.
+
+**The gap this opened, which no code change closes.** Every pod fixture in the
+repo has `ownerReferences: null` — all twelve, checked one by one; only the two
+ReplicaSet captures carry an owner at all. `scripts/broken.yaml` creates bare
+pods, so **every positive test in Phase 3 files under `OwnerKind::Pod` and the
+four workload branches ship with no positive fixture** — and `cargo mutants`
+would not object, because nothing exercises them. A grouping key tested only in
+its no-owner case is [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)
+again, one layer up. `broken.yaml` needs a Deployment-owned broken pod, which
+needs the cluster — so it is a new open box in Phase 2, captured on the same
+trip as [D33](#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12)'s
+teardown, not a note in a review nobody reads again.
+
+### D37 — a controller's message is a status field, not a payload (2026-08-12)
+
+Two recorded rules collided the moment `Finding.evidence` was written down.
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) says W1
+shows the controller's message **verbatim** — "exceeded quota: pods, used 0,
+limited 0" is the whole diagnosis, and paraphrasing it is how a tool becomes
+useless. The `evidence` field's own rule says a finding names **fields, never
+payloads**. A validating webhook that echoes the submitted object back into its
+denial message — several in the wild do — puts an env value inside a controller
+message, and now both rules apply to one string.
+
+**Verbatim wins, and the payload rule is narrowed to say what it always meant.**
+The rule governs what *k8rs goes and fetches*: it never reads Secret data, never
+renders an env value, never puts either in evidence — that is absolute and it is
+the [security gate](CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions)'s
+"environment variable values are never displayed". A message a controller wrote
+into a status the user can already `kubectl describe` is a different thing: k8rs
+did not go looking for it, it is not privileged relative to the reader, and
+hiding it would leave the user staring at "the pods were never created" with the
+reason blanked out. Refusing to show what `kubectl` shows is not a security
+control, it is a tool that lies by omission.
+
+**What that costs, and what pays for it.** The message is untrusted free text,
+so it takes the same treatment every other API string takes: control characters
+stripped at the render boundary ([invariant 9](CLAUDE.md)) and length bounded at
+ingest, which Phase 5 already owes for the 50MB-annotation case. The one thing
+that changes is a warning where it belongs: `--once` output is what gets
+redirected into CI logs and pasted into tickets, so it is the place a webhook's
+echo reaches an audience wider than the person at the terminal. That is a
+documentation line for the `--once` box, not a reason to blank the field.
+
+**Addendum to [D36](#d36--the-finding-shape-the-review-sent-back-2026-08-12) —
+how a cluster-scoped finding renders.** Fixing the type left the mockups
+asserting the opposite, so `screens/` moved with it: the identity line is
+`namespace/name` for a namespaced object and a bare `name` for a cluster-scoped
+one, stated once in [screens/README.md](screens/README.md) rather than fixed in
+the one place it was caught. Three consequences were settled there, all worth
+keeping: dropping `infra/` also drops the only clue that `node-3` is a machine,
+so **the kind moved into the sentence under the name** (N2 now reads "This node
+refuses new pods (cordoned)"); it is `node-3`, **not** `node/node-3`, because a
+`kind/name` prefix puts a slash back on the very line whose slash the reader was
+just taught means a namespace; and **N6's card is a workload card, not a node
+card** — a Pending pod that cannot be placed is about the pod, with the node
+named in the evidence, so only N1–N3 produce a node card at all. The drain
+dialog was the proof that this was never cosmetic: its title said
+`Draining infra/node-3` while the command log under it said
+`kubectl drain node-3`, and the fake namespace was what hid the disagreement.
+
+### D38 — the grouping key was a derive, and a derive cannot be told what to ignore (2026-08-12)
+
+The shape [D36](#d36--the-finding-shape-the-review-sent-back-2026-08-12) settled
+carried one defect no compiler could catch. `ObjectId` derived `Hash` and `Eq`
+over all four fields, `uid` among them, and `views.rs` groups by `owner` — so
+these are two different grouping keys:
+
+```
+ObjectId { kind: Deployment, namespace: Some("payments"), name: "web", uid: Some("9f2c-aaaa") }
+ObjectId { kind: Deployment, namespace: Some("payments"), name: "web", uid: Some("9f2c-bbbb") }
+```
+
+Two cards for one Deployment: the flood [D3](#d3--findings-group-by-owner-not-by-pod)
+exists to prevent, arriving through the field added to prevent a *different*
+bug. It compiles, the suite passes, and it would surface in Phase 9, months
+after `rules.rs` froze.
+
+**The mechanism above is the second one written here; the first was wrong and
+the correction is the useful part.** This entry originally said the two uids
+were `Some` and `None` — a rule that resolved ReplicaSet → Deployment without
+the on-demand fetch having the name but no uid. The operator review killed it:
+`uid` is a *required* field of `metav1.OwnerReference`, non-`Option` in
+`k8s-openapi` and present in this repo's own `quota-replicasets.json`, and
+without the fetch there is no Deployment **name** either, because `web` is not
+derivable from `web-7d4f5c6b8`. The pair was hand-built for a test and then
+asserted as though it came off a cluster. The reachable case is a **Deployment
+deleted and recreated under the same name**: old-generation pods still
+terminating under uid-A while new pods run under uid-B, which is what any Argo
+prune-and-recreate produces. Same fix, honest reason — and the difference is
+not academic, because the old wording told the `k8s.rs` author that a workload
+owner with `uid: None` was normal, and `uid: None` is the one value that
+silently disables [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms).
+**A workload owner always carries a uid; C1's kubeconfig certificate is the
+only `None` in the product.**
+
+**`Hash` is dropped from `ObjectId` and the identity becomes a method** —
+`group_key() -> (&ObjectKind, Option<&str>, &str)`. Not a doc comment asking
+callers to be careful: the wrong key stops compiling, so it is unrepresentable
+rather than discouraged. Two details, both found by probing rather than by
+reading: the wall is not the declaration — `HashMap<ObjectId, _>` *declares*
+fine, because the `Hash` bound sits on `insert`/`get`/`entry`, not on
+`HashMap::new` — and when it does fire, rustc says
+`help: consider annotating ObjectId with #[derive(Hash)]`, offering the
+two-cards bug as the fix in the text a future developer reads before any doc
+comment. The comment in `rules.rs` pre-empts that advice by name. It also makes the
+box's own sentence mechanical — the identity is decided in the bottom layer
+instead of re-derived in `views.rs`, where a second definition would drift.
+
+**`Eq` stays derived over all four fields, on purpose.** It answers
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s question — is
+the object about to be mutated still the one the operator inspected — and an
+`Eq` that quietly ignored the uid would answer *that* wrong, which is worse than
+the bug being fixed. Two questions, two mechanisms: the derive for identity of
+the object, the method for identity of the card.
+
+**The gate that found it was itself broken, which is the more expensive half.**
+Hunting this, `tester` deleted every test from `rules.rs` and ran the guard:
+`test-guard: 0 declared, 0 listed, 0 ignored — OK`, `cargo test` green,
+`just check` green. **The whole suite could be deleted and CI would applaud.**
+Every rule in the guard was a comparison between two counts, and comparisons all
+hold at zero — [D26](#d26--a-green-build-that-proves-nothing-2026-08-12) item 2
+said "CI asserts a non-zero test count" and nothing ever did, in `just check` or
+in the workflow. The floor is in, with a positive and a negative self-test, and
+it is passable today, which is what separates it from the `just mutants` floor
+[D35](#d35--just-mutants-is-a-check-that-cannot-fail-and-the-justfile-unfreezes-for-one-line-2026-08-12)
+deferred. A guard whose rules are all relative is the derived-list failure in a
+new costume: with nothing to compare, everything agrees.
+
+**One assertion in the new tests has never been red, and that is recorded
+rather than hidden.** The negative test's fourth case — cluster-scoped versus
+namespaced — cannot fail in any way its "different namespace" case does not
+fail first, and it survived the one mutation aimed at it (`group_key`
+flattening `None` to `Some("")`). It stays, because it states intent for a
+shape the rest of the suite does not name, but by this project's own rule it
+proves nothing yet. What would make it real is written into the C1 box in
+[todo.md](todo.md): `Some("")` is unreachable only while an `ObjectId`'s
+namespace comes from an object's own `metadata.namespace` — measured, not
+assumed, against all 23 captures, `sanitize.jq`, and the DNS-1123 label rule
+that forbids an empty namespace name. A C1 that builds its identity from the
+*effective scope* instead would make it reachable, because `--namespace` is
+parsed from `args` with no validation.
+
+**Accepted as a known ceiling, not fixed:** `#![expect(dead_code)]` at the top of
+`rules.rs` is module-wide, so an item written *after* it can be dead and
+invisible — a never-called function was appended and clippy stayed green.
+Narrowing it to per-item would cost a line of noise on every type, so it stays
+module-wide.
+
+**Its exit was also mis-stated, and the correction is a pre-authorisation.**
+This entry first called the attribute self-limiting, "because the file freezes
+with everything constructed". Nothing guarantees that: `Severity::Info` has no
+producer in `rules.rs` today, `analysis.rs` gets one in Phase 4, and whether
+N4's version skew adds one here is N4's own box. While *any* item stays
+unconstructed the expectation is still fulfilled and the line cannot be
+removed — removing it makes `dead_code` fire and the build go red. It becomes
+**unfulfilled** only when the last item is constructed, which may be phases
+later, and `-D warnings` then turns `just check` red pointing at
+`src/rules.rs:11` — possibly a file frozen a phase earlier. `clippy
+--all-targets` evaluates it per target, and the two targets already disagree:
+with the attribute removed, the bin reports five dead items and the test target
+two, so they can flip at different boxes. **Whichever box constructs the last
+item in this file deletes that one line. The deletion is authorised here, in
+advance: it is not a freeze violation and it does not need a new decision** —
+which is the point of writing it down while the red build is still hypothetical
+and nobody is under pressure to explain it.
+
+### D39 — a Node owns pods, and three more things the shape could not say (2026-08-12)
+
+The second operator review of the same box. The shape held; what did not hold
+were the sentences written around it, each falsified by a cluster this repo
+builds or a fixture it has already committed.
+
+**A mirror pod is owned by a Node, so "a Node is nobody's owner" was false on
+`just cluster-up`'s own cluster.** kubelet writes an `ownerReference` of kind
+`Node` onto every static pod, which on kind and on any kubeadm cluster means
+`kube-apiserver-*`, `etcd-*`, `kube-scheduler-*` and `kube-controller-manager-*`
+all have one. Left alone, an `etcd` that restarts four times after a laptop
+suspend files under `{ kind: Node, namespace: None, name: "k8rs-control-plane" }`
+— `kube-system` gone from the card a beginner needs in order to find the pod
+again, four control-plane pods collapsed onto one card, and, since `views.rs`
+picks the card shape from `owner.kind`, a machine-shaped card drawn for a
+crashing pod. **An `ownerReference` of kind `Node` is discarded: the pod files
+under itself, so `owner.kind` is `Pod` and `owner == object`.** A mirror pod
+has no controller that can be scaled, restarted or rolled, and the card stays
+`kube-system/etcd-k8rs-control-plane`. `ObjectKind::Node` appears in `owner`
+only when the finding is *about* the node — N1–N3. Stated that mechanically on
+purpose: the first wording said "a `Node` in the owner role is the no-owner
+case", which reads as an instruction to *keep* the Node, and an implementer
+obeying it arrives at the exact card this ruling forbids. The upstream behaviour is documented but asserted by nobody here, so
+the same trip that captures the owned pod captures `-n kube-system` too.
+
+**The numerator rule printed "1 of 0 pods".** `object`'s doc defined the
+numerator as distinct `object.name`s in the group, which holds only while every
+object in it is a pod. W1's object is a **ReplicaSet** — `quota-replicasets.json`
+is `broken-quota-59654c756`, `ReplicaFailure`, `status.replicas: 0` — so the
+group renders 1 of 0, on the failure class
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) added
+the workload watch to stop the tool lying about; W2 breaks it the other way and
+counts a Deployment as one of its own pods. **The numerator counts distinct
+objects whose kind is `Pod`, and a group with none of them has no `n of m` at
+all** — the shape a node card already uses. **Distinct by the whole `object`,
+not by `group_key()`**, which is the half that had to be said out loud:
+`ObjectId` has no `Hash`, the type's own doc answers that compile error with
+"use `group_key()`", and a reader following that advice while *counting* writes
+the wrong thing. Not a bug being prevented — for objects of kind `Pod` the two
+are provably identical on any snapshot, since `group_key` is
+`(kind, namespace, name)` and two pods differ in it exactly when their names
+differ. An intent being stated: `group_key()` answers *which card*, the whole
+identity answers *what is counted on it*, and code that says the first while
+meaning the second stops being right the moment something other than a pod is
+counted.
+
+**The first draft of that paragraph justified it with a scenario that cannot
+happen** — a terminating `web-0` counted beside the `web-0` that replaced it.
+Two pods cannot share a name in one namespace: the name is the etcd key, the
+second create is rejected `AlreadyExists`, and a StatefulSet will not recreate
+an ordinal until the terminating pod is gone from the API. It is the defect
+[D38](#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)
+recorded one round earlier — a pair built by hand for an argument and then told
+as though it came off a cluster — repeated one field down by the same author,
+in the same week, having just written the correction. Worth keeping visible for
+that reason: the owner-uid divergence one field up *is* real, and the two look
+identical on the page. What separates them is that the two Deployment
+generations have different uids and their pods have different **names**, which
+is exactly why those pods coexist and two pods called `web-0` never do.
+[D4](#d4--the-flagship-example-promised-a-number-that-cannot-exist) is the
+precedent: a number that cannot exist is not a rendering detail.
+
+**`CronJob` was unreachable under this project's own least-privilege role.** A
+pod names its Job and says nothing about the CronJob above it, so the grouping
+needs a GET on the Job — and `k8rs-readonly` granted `""`, `apps`, `policy` and
+`metrics.k8s.io`, with no `batch`. Under the role the docs tell people to use,
+every tick would file under its own Job name: the churn the variant was added
+to prevent, delivered to the user least equipped to explain it.
+[docs/security.md](docs/security.md#rbac) now grants `batch: jobs` read verbs,
+and the 403 degrades by name — the finding files under the Job and says the
+CronJob could not be read. `cronjobs` is deliberately not granted: the Job's
+ownerReference already carries the CronJob's kind, name and uid, so nothing
+reads the object, and a role whose entire argument is least privilege does not
+get to carry a resource it never GETs. Auditing that block found two more of
+the same class, both fixed in the same edit — `certificates.k8s.io` for rule C3
+and `discovery.k8s.io/endpointslices` for the waste report, each a Phase 5 box
+with its fixture already committed, each a 403 waiting for the user who
+followed the documentation. `cert-manager.io` stays out and is written into the
+block as a commented-out opt-in, because C4 only exists where cert-manager is.
+The lesson is the same one
+[D36](#d36--the-finding-shape-the-review-sent-back-2026-08-12) learned about
+docs: this rework synced `docs/architecture.md` and `REQUIREMENTS.md` for the
+shape and forgot the file that says what permissions the shape needs.
+
+**Two smaller rulings, both written into `rules.rs` because it freezes first.**
+The members of a group must agree on the uid; where they disagree — the
+recreate case again — the confirm dialog refuses and offers a re-read rather
+than picking one, because the natural implementation is `.first()` and
+`.first()` is whichever finding happened to sort first, which turns D22 into a
+coin flip that reports "already gone" for a Deployment that is running. And
+C1's identity is settled: `kind: Other("kubeconfig")`, `namespace: None`,
+`name` = the kubeconfig **context name**, `uid: None` — otherwise its author
+must either invent a kind the API never reported or put a sentence in a field
+that kubectl lines are built from.
+
+**The file was also two-thirds prose, restating these entries in slightly
+different words.** CLAUDE.md keeps the *why* in NOTES and asks for comments
+sparingly; a second copy in another wording is a drift generator, and this file
+freezes with both copies in it. The comments that stay are the ones the
+compiler cannot say — chiefly that rustc answers the missing `Hash` with
+`help: consider annotating ObjectId with #[derive(Hash)]`, offering the
+two-cards bug as the fix — plus the rulings a later box must obey, each
+pointing here instead of re-arguing.
+
 ## Decisions made
 
 ### Product

@@ -115,18 +115,42 @@ The first thing written in the code phase, because three files meet on it:
 
 ```rust
 struct Finding {
-    severity:    Severity,   // Critical | Warn | Info
-    title:       String,     // what happened (plain language)
-    evidence:    String,     // the numbers/fields that prove it
-    action:      String,     // what to do about it
-    kubectl_cmd: String,     // the command that shows the same thing
-    owner:       ObjectRef,  // the grouping key: Deployment/DaemonSet/…,
-                             // or the pod itself when it has no owner
+    severity:    Severity,       // Critical | Warn | Info
+    title:       String,         // what happened (plain language)
+    evidence:    String,         // the numbers/fields that prove it
+    action:      String,         // what to do about it
+    kubectl_cmd: Option<String>, // the command that shows the same thing;
+                                 // None when no such command exists
+    owner:       ObjectId,       // the grouping key: Deployment/DaemonSet/…,
+                                 // or the pod itself when it has no owner
+    object:      ObjectId,       // what the finding is about — the pod, the node
+}
+
+struct ObjectId {
+    kind:      ObjectKind,      // …/CronJob/ReplicaSet/Node/Pod/Other(String)
+    namespace: Option<String>,  // None = cluster-scoped, e.g. a Node
+    name:      String,
+    uid:       Option<String>,  // None only when it is not an API object
 }
 ```
 
 `rules.rs` decides the identity; `views.rs` does the grouping. The bottom
 layer stays pure and the presentation layer stays replaceable.
+
+`ObjectId::group_key()` — kind, namespace, name, without the uid — is what
+`views.rs` groups by; `ObjectId` itself derives no `Hash`, so grouping by the
+whole thing stops compiling at the first map insert. That grouping would split
+one Deployment into two cards when it is deleted and recreated under the same
+name — old-generation pods still terminating under one uid while the new ones
+run under another, which is what any Argo prune-and-recreate produces
+([NOTES § D38](../NOTES.md#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)).
+
+`owner` and `object` are both here because one broken pod produces several
+findings — a crashlooping pod fires four of the v1 rules at once — so a card
+counting *findings* would say "4 of 5 pods" about a single pod. The numerator
+is the count of distinct `object`s; the denominator comes from the snapshot.
+The reasons behind the rest of the shape are
+[NOTES § D36](../NOTES.md#d36--the-finding-shape-the-review-sent-back-2026-08-12).
 
 ### Rules are pure functions
 

@@ -103,11 +103,38 @@ rules:
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
     verbs: ["get", "list", "watch"]
+  # a CronJob's pods are owned by a Job, and only the Job names the CronJob.
+  # `cronjobs` itself is deliberately absent: the Job's ownerReference already
+  # carries the CronJob's kind, name and uid, so nothing reads the object
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+  # rule C3 — the pending certificate signing requests nobody approved
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["certificatesigningrequests"]
+    verbs: ["get", "list", "watch"]
+  # the waste report — a Service whose selector matches nothing
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
   # only needed for the capacity report
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]
+  # only needed for rule C4, and only where cert-manager is installed —
+  # omitted deliberately, add it if you want the certificate rows it feeds:
+  #   - apiGroups: ["cert-manager.io"]
+  #     resources: ["certificates"]
+  #     verbs: ["get", "list", "watch"]
 ```
+
+`batch` is here because of what a pod carries and what it does not. A CronJob's
+pod names its Job in `ownerReferences` and says nothing about the CronJob above
+it, so grouping the pods of a five-minute schedule onto one card requires a GET
+on the Job. Without the verb that GET is a 403, every tick files under its own
+Job name, and the card churn lands on the user running the least-privileged
+role — the one least equipped to explain it. The degradation is named, not
+silent: the finding files under the Job and says the CronJob could not be read.
 
 Admin — the above plus the operations:
 

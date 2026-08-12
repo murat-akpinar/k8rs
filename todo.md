@@ -269,7 +269,7 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       Deployment and ReplicaSets + **nodes, deployments, statefulsets,
       daemonsets, services, PVCs, PDBs** + the `K8S_VERSION` stamp. Every
       object goes through `sanitize.jq` on the way out — never afterwards
-- [ ] **Run it**: `just cluster-up && just cluster-down` on the LAN host, then
+- [ ] **Run it**: `just cluster-up && just cluster-down` wherever docker is, then
       `just fixtures`, then eyeball the output. Nothing above is proven until
       the capture has actually run against a cluster.
       **Half done, and the box stays open for the other half (2026-08-12):**
@@ -279,7 +279,28 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       reproduce-it-yourself instructions can be checked against it. The
       teardown is the one step that strips `broken-stuck`'s finalizer, so it
       is the one that can still fail; it gets run once no further capture
-      needs the cluster
+      needs the cluster — and one still does, so **Phase 3 opens with this box
+      open**: Phase 4's Drain-safety and Waste reports need four positive
+      fixtures that cluster could not produce yet, and both visits happen in
+      one trip. The host it stood on is gone, so that trip is a `cluster-up`
+      rebuild from the pinned image, run at the Phase 3 close
+      ([NOTES § D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12))
+- [ ] **A broken pod that has an owner** — added to
+      [`scripts/broken.yaml`](scripts/broken.yaml) and captured on the same
+      trip. Every pod fixture in the repo has `ownerReferences: null`, so the
+      grouping key's four workload branches would ship tested only in their
+      no-owner case, and mutation testing cannot object to a branch nothing
+      exercises. A Deployment with a crashlooping pod covers
+      Deployment/ReplicaSet in one object
+      ([NOTES § D36](NOTES.md#d36--the-finding-shape-the-review-sent-back-2026-08-12))
+- [ ] **A mirror pod**, captured on the same trip: `kubectl get pods -n
+      kube-system -o json` from the kind cluster. kubelet writes an
+      `ownerReference` of kind `Node` onto every static pod, which is the one
+      shape that makes a Node an owner — and it is the claim behind the ruling
+      that a Node in the owner role is the no-owner case. Right now that
+      behaviour is documented upstream and asserted by nobody here; a capture
+      turns it into a fixture the rule can be tested against
+      ([NOTES § D39](NOTES.md#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12))
 - [x] A multi-node kind config — N-series rules (cordon, skew, pressure) and
       drain safety cannot be captured on a single-node cluster. Three nodes
       (1 control-plane + 2 workers); `K8RS_WORKERS` changes the count
@@ -353,10 +374,19 @@ hand) **and the justfile**, whose last unwritten recipe body lands here.
 Goal: k8rs diagnoses correctly, headless. Still the core — everything else in
 this plan is delivery mechanism for what this phase produces.
 
-- [ ] `Finding` struct (severity · title · evidence · action · kubectl_cmd ·
+- [x] `Finding` struct (severity · title · evidence · action · kubectl_cmd ·
       **owner** — the grouping key: Deployment/StatefulSet/DaemonSet/Job, or
       the bare pod when it has no owner. Grouping itself happens in `views.rs`;
-      the *identity* it groups by is decided here, in the bottom layer)
+      the *identity* it groups by is decided here, in the bottom layer).
+      **Wider than the box asked, after two operator reviews sent it back:**
+      `Finding` also carries `object` — what the finding is *about* — because
+      one crashlooping pod fires four rules and a card counting findings says
+      "4 of 5 pods" about one pod. `kubectl_cmd` and `uid` are `Option`,
+      `ObjectId` drops `Hash` so the uid cannot leak into the grouping key,
+      and `ObjectKind` gained `CronJob` `ReplicaSet` `Node` `Other(String)`
+      ([NOTES § D36](NOTES.md#d36--the-finding-shape-the-review-sent-back-2026-08-12)
+      · [§ D38](NOTES.md#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)
+      · [§ D39](NOTES.md#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12))
 - [ ] The snapshot types live here, in the bottom layer: `PodSnapshot`,
       `NodeSnapshot`, `WorkloadSnapshot`, `ClusterSnapshot`. `k8s.rs` will fill
       them later; rules define the contract
@@ -392,7 +422,19 @@ this plan is delivery mechanism for what this phase produces.
       one problem is how the list stops being believable
       ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
 - [ ] Certificate rule C1 — kubeconfig client certificate expiry, warn at 30
-      days. Pure: PEM bytes in, finding out
+      days. Pure: PEM bytes in, finding out. **It is the one finding with no
+      API object behind it**: its `ObjectId` is `kind: Other("kubeconfig")`,
+      `namespace: None`, `name` = the kubeconfig **context name** — the
+      identifier the user recognises — and `uid: None`, which is the only
+      `None` uid in the product. Its `ObjectId` takes its
+      namespace from an object's own `metadata.namespace` like every other, or
+      from nothing at all. Do not give it the *effective scope*: `--namespace`
+      is parsed from `args` with no validation and the kubeconfig context's
+      namespace is representable as `""`, so a scope-derived identity makes
+      `Some("")` reachable, and `group_key` treats it as a namespace named
+      empty rather than as cluster-scoped. If this box does it anyway, it owes
+      the test for that shape
+      ([NOTES § D38](NOTES.md#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12))
 - [ ] Exit-code translation table (137/143/1/126/127)
 - [ ] hostPath: `rules.rs` fires **only** on `/`, docker.sock or a writable
       host mount. There is no lower severity to escalate from any more — the
@@ -527,6 +569,13 @@ public release.
       nothing more. It ships with the first release because it is what a
       stranger needs in order to run the thing at all; the admin role follows
       in Phase 7 with the writes it exists for
+- [ ] **Say in the docs where `--once` output ends up.** Findings carry
+      controller messages verbatim, and a validating webhook can echo the
+      object it rejected — env values included — into one. On the terminal
+      that is no worse than `kubectl describe`; redirected into a CI log or
+      pasted into a ticket it reaches a wider audience. One documented line,
+      not a blanked field
+      ([NOTES § D37](NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12))
 - [ ] **Release v0.0.1 to crates.io** — `k8rs --once`, exactly as
       [screens/once.md](screens/once.md) draws it: findings on stdout, the
       commands and errors on stderr, `● ▲ ○` carrying severity without colour,
@@ -705,6 +754,11 @@ Goal: the screens in [`screens/`](screens/README.md) — the lazygit-shaped
 product. Nothing on this list is a design decision any more; every layout,
 string and key was settled in the design phase, so this phase is drawing.
 
+- [ ] **First, `tui-designer` settles the ragged right edge on the Alerts
+      cards** — `4 min ago` stops two columns short of the border and
+      `6 days ago` sits flush against it, so the mockup does not say whether
+      the timestamp is right-aligned or trailing the title. Pre-existing, and
+      an ambiguous mockup transcribes into an arbitrary renderer
 - [ ] Layout: sidebar · content pane · command log strip · key footer
 - [ ] **Alerts view** (the default on startup): findings list, severity symbol,
       title bright / evidence dim, blank line between findings
@@ -812,7 +866,15 @@ without asking us anything.
   Plus **`rollout undo`**, which is *not* cheap — it is not an API verb;
   kubectl reads the previous ReplicaSet's template and patches it back
   client-side, and k8rs has to do the same
-  ([NOTES § D7](NOTES.md#d7--rollout-undo-joins-the-operation-set))
+  ([NOTES § D7](NOTES.md#d7--rollout-undo-joins-the-operation-set)).
+  **The drain command line in [dialogs.md](screens/dialogs.md) has to be
+  settled when this lands:** it reads `kubectl drain node-3
+  --ignore-daemonsets`, and on any node holding a pod with an `emptyDir` —
+  which is most real nodes — that command *stops* with "cannot delete Pods
+  with local storage". k8rs drains through the Eviction API, which has no such
+  client-side guard, so as written the tool would proceed where its own
+  printed command refuses, and [invariant 4](CLAUDE.md) says the shown command
+  is the one the user would have typed
 - **v0.2 rule set** — J1/J2 (failed Job, suspended or overdue CronJob),
   H1 (HPA pinned at max or unable to compute metrics), Q1 (ResourceQuota
   exhausted). Each needs a watch the two-permanent-watch budget has no room

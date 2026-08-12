@@ -157,9 +157,9 @@ indicator. Counts, not a spinner — a changing number is information
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│    ┌ Draining infra/node-3 ───────────────────────────────┐        │
+│    ┌ Draining node-3 ─────────────────────────────────────┐        │
 │    │                                                      │        │
-│    │  Moving pods off infra/node-3 so it can be           │        │
+│    │  Moving pods off node-3 so it can be                 │        │
 │    │  worked on. The node stops accepting new ones.       │        │
 │    │                                                      │        │
 │    │    moved      4 of 11                                │        │
@@ -190,8 +190,10 @@ indicator. Counts, not a spinner — a changing number is information
 
 ## Rules for every dialog on this page
 
-1. The **object identity** is in the title bar. A stale selection can never be
-   confirmed blindly.
+1. The **object identity** is in the title bar — `payments/web` for something
+   in a namespace, the bare `node-3` for something that belongs to the whole
+   cluster ([README § the five rules](README.md#the-five-rules-every-screen-obeys)).
+   A stale selection can never be confirmed blindly.
 2. The consequence is plain language and counts things the user can picture
    ("1 more copy"), not API vocabulary.
 3. The dry-run verdict is shown *before* the button is live, wherever the API

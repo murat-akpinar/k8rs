@@ -61,6 +61,15 @@ own `Table` printing — the exact columns `kubectl get` would show.
 
 - **Alerts bleed through.** A row whose object has a finding is marked (`●`),
   so the browser never disagrees with the Alerts view.
+- **The `ns:` label follows the kind and disappears for the cluster-wide
+  ones.** The pane title reads `deployments` with `ns: payments` beside it for
+  a kind that lives in namespaces. For nodes, persistent volumes and
+  certificate requests the label is **absent** — not blank, not `ns: -` — and
+  the title is just the kind. Whether to draw it comes from discovery's own
+  `namespaced` flag, which is one condition rather than a list of kinds
+  ([invariant 12](../CLAUDE.md)). Same rule as the identity line
+  ([README § the five rules](README.md#the-five-rules-every-screen-obeys)): no
+  namespace is shown where there is no namespace.
 - Only the Alerts view's inputs are watched permanently — Pods, Nodes and the
   three workload kinds. Opening this view starts a watch; closing it stops one.
   Forty permanent streams is the problem this architecture exists to avoid.

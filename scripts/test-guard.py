@@ -8,8 +8,11 @@ Two ways that happens, both cheap to check and both invisible in a green log:
    that left the file orphaned. The suite passes because it ran nothing.
 2. `#[ignore]` disables a test while leaving its name in the file, so the
    count still looks right to a human reading the diff.
+3. There is no test at all. Deleting the last one leaves nothing to compare,
+   so every count above agrees at zero and the guard reports OK — which is
+   what it did until the floor in `check()` existed.
 
-Neither is caught by `cargo test`, which exits 0 over zero tests.
+None of the three is caught by `cargo test`, which exits 0 over zero tests.
 
 Usage:
     test-guard.py            # check this repository
@@ -71,6 +74,18 @@ def check(root: Path) -> list[str]:
     declared, unexplained = declared_and_ignored(root)
     errors = [f"{loc}  #[ignore] with no reason — say why, or delete the test"
               for loc in unexplained]
+    # The floor D26 asks for, and the one check here that is not a comparison.
+    # Every other rule below relates two counts, and every one of them holds at
+    # zero: delete the last test and `0 declared, 0 listed, 0 ignored` reads OK
+    # — measured, that is exactly what this guard printed before this line.
+    # It returns rather than appends because with no test declared the counts
+    # below describe nothing, and a second derived complaint would only bury
+    # the one fact that matters.
+    if declared == 0:
+        return errors + [
+            "no test is declared anywhere in the source — `cargo test` reports "
+            "`0 passed` and exits 0 (NOTES § D26)"
+        ]
     seen = listed(root)
     if seen < declared:
         errors.append(
@@ -128,7 +143,36 @@ def self_test() -> None:
         declared, unexplained = declared_and_ignored(root)
         assert declared == 2, f"expected 2 declared tests, counted {declared}"
         assert not unexplained, f"false positive on an explained ignore: {unexplained}"
-    print("test-guard: self-test passed — it fails on hidden and parked tests")
+
+        # The empty suite. Source exists, no test in it — the shape left behind
+        # by deleting the last test, which every count-comparison in `check()`
+        # reports as OK because they all agree at zero.
+        #
+        # This case makes the temp directory a real crate, and that is not
+        # decoration. Without a Cargo.toml, deleting the floor makes `check()`
+        # fall through to `listed()`, which dies on "could not find Cargo.toml"
+        # — the run goes red, but for a reason that has nothing to do with the
+        # floor, so it proves nothing about the assertion below. With a crate
+        # here, removing the floor makes `check()` return no errors at all and
+        # the assertion is what fails. Red for the right reason, or it is not a
+        # witness (NOTES § D26).
+        (root / "Cargo.toml").write_text(
+            '[package]\nname = "guard-self-test"\nversion = "0.0.0"\n'
+            'edition = "2021"\n\n[lib]\npath = "src/lib.rs"\n'
+        )
+        (root / "src" / "lib.rs").write_text("pub fn nothing() {}\n")
+        errors = check(root)
+        assert any("no test is declared" in e for e in errors), (
+            f"an empty test suite reported OK: {errors}"
+        )
+
+        # …and the negative, in the same crate: one real test must NOT trip the
+        # floor. Without it the floor could return unconditionally and the
+        # positive above would still pass.
+        (root / "src" / "lib.rs").write_text("#[test]\nfn real() {}\n")
+        errors = check(root)
+        assert not errors, f"false positive — one real test is not an empty suite: {errors}"
+    print("test-guard: self-test passed — it fails on hidden, parked and absent tests")
 
 
 if __name__ == "__main__":

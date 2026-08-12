@@ -17,8 +17,8 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 │   certificates  30d│    readiness check is failing                 │
 │   drain safety     │    → check the app's /healthz endpoint        │
 │   waste            │                                               │
-│   versions         │  ▲ infra/node-3                     6 days ago│
-│                    │    Set to refuse new pods (cordoned)          │
+│   versions         │  ▲ node-3                           6 days ago│
+│                    │    This node refuses new pods (cordoned)      │
 │                    │    → someone's maintenance window never closed│
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get pods -A --watch                                      │
@@ -43,6 +43,22 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 - **One card per owner, never per pod.** `payments/web · 3 of 5 pods`, not
   three cards. A DaemonSet on forty nodes is still one card
   ([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)).
+- **That rule is about workloads; a card whose subject is a node is shaped
+  differently.** A Node has no owner to group by and no namespace to print, so
+  the card is `node-3` — one card, one node, and **never** `infra/node-3`
+  ([README § the five rules](README.md#the-five-rules-every-screen-obeys)).
+  There is no `n of m` either: that count counts pods, and this card is about
+  one machine. The word *node* moves into the sentence underneath, which is
+  where the card says what kind of thing it is.
+- **"Node rule" is not the same as "node card".** Of the six N-series rules
+  ([NOTES § Node rules](../NOTES.md#node-rules-n-series)) only N1, N2 and N3
+  put a node on this screen. N4 and N5 are reports, not outages, and are drawn
+  in Versions and Capacity ([analysis.md](analysis.md)). **N6 is the one to
+  watch**: its subject is a Pending pod that cannot be placed, not the node
+  doing the blocking — so it is an ordinary workload card, `payments/web`, and
+  the node's name belongs in the evidence line. Choosing the identity by which
+  rule fired rather than by what the finding is *about* is how a pod finding
+  ends up losing its namespace.
 - **Only what is broken right now.** No "this pod has no limits", no read-only
   hostPath list — those are Analysis rows
   ([NOTES § D2](../NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)).
