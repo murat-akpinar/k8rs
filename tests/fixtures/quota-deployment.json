@@ -2,15 +2,15 @@
   "apiVersion": "apps/v1",
   "kind": "Deployment",
   "metadata": {
-    "creationTimestamp": "2026-08-11T23:11:46Z",
+    "creationTimestamp": "2026-08-12T20:45:53Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-quota",
     "namespace": "k8rs-quota",
-    "resourceVersion": "4481",
-    "uid": "d444116c-2da3-4b2b-8ac7-6e25afbd9b31"
+    "resourceVersion": "1382",
+    "uid": "81c3660a-deb1-41ec-830e-ee8ea448e338"
   },
   "spec": {
     "progressDeadlineSeconds": 60,
@@ -61,24 +61,24 @@
   "status": {
     "conditions": [
       {
-        "lastTransitionTime": "2026-08-11T23:11:46Z",
-        "lastUpdateTime": "2026-08-11T23:11:46Z",
+        "lastTransitionTime": "2026-08-12T20:45:53Z",
+        "lastUpdateTime": "2026-08-12T20:45:53Z",
         "message": "Deployment does not have minimum availability.",
         "reason": "MinimumReplicasUnavailable",
         "status": "False",
         "type": "Available"
       },
       {
-        "lastTransitionTime": "2026-08-11T23:11:46Z",
-        "lastUpdateTime": "2026-08-11T23:11:46Z",
-        "message": "pods \"broken-quota-59654c756-w68jf\" is forbidden: exceeded quota: deny-all-pods, requested: pods=1, used: pods=0, limited: pods=0",
+        "lastTransitionTime": "2026-08-12T20:45:53Z",
+        "lastUpdateTime": "2026-08-12T20:45:53Z",
+        "message": "pods \"broken-quota-59654c756-2fvgv\" is forbidden: exceeded quota: deny-all-pods, requested: pods=1, used: pods=0, limited: pods=0",
         "reason": "FailedCreate",
         "status": "True",
         "type": "ReplicaFailure"
       },
       {
-        "lastTransitionTime": "2026-08-11T23:12:47Z",
-        "lastUpdateTime": "2026-08-11T23:12:47Z",
+        "lastTransitionTime": "2026-08-12T20:46:54Z",
+        "lastUpdateTime": "2026-08-12T20:46:54Z",
         "message": "ReplicaSet \"broken-quota-59654c756\" has timed out progressing.",
         "reason": "ProgressDeadlineExceeded",
         "status": "False",

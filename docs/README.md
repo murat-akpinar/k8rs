@@ -1,10 +1,12 @@
 # k8rs — documentation
 
-> Status: **Phase 2 — test data.** The design is closed; the guards and the
+> Status: **Phase 3 — the rules.** The design is closed; the guards and the
 > fixture-capture pipeline exist, and `tests/fixtures/` holds real captures from
 > a kind cluster you can stand up yourself
 > ([tech-stack § The test cluster](tech-stack.md#the-test-cluster--reproducing-it-yourself)).
-> No product code yet — `rules.rs` opens Phase 3 · Last updated: 2026-08-12
+> `rules.rs` carries the finding shape, the snapshot types and the clock;
+> the diagnoses themselves are being written. Nothing runs yet — `main.rs` is
+> wired last · Last updated: 2026-08-12
 
 This directory is the **built** state: what is true of the shipped tool, written
 for humans outside this repo. The reasoning behind any of it lives one level up,
@@ -17,6 +19,7 @@ in [NOTES.md](../NOTES.md).
 | [architecture.md](architecture.md) | The three views, data flow, the eight components, the write path, async model, error handling, what is out of scope |
 | [security.md](security.md) | Trust model, the write safety model, RBAC for both modes, the audit log, token hygiene, supply chain |
 | [tech-stack.md](tech-stack.md) | Crates and versions, toolchain, build targets, visual identity, what is deliberately absent |
+| [maps.md](maps.md) | **Every path in the repository** — what it answers, who may write it, and which file to touch for a given change |
 
 ## Where things live
 

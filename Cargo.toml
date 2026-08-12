@@ -10,10 +10,24 @@ keywords = ["kubernetes", "tui", "k8s", "cluster", "terminal"]
 categories = ["command-line-utilities"]
 exclude = ["screens/", "scripts/", "tmp/", "docs/", "NOTES.md", "REQUIREMENTS.md", "todo.md", "CLAUDE.md"]
 
-[dependencies]
+# Dependencies arrive with the step that uses them (invariant 10): k8s-openapi
+# in Phase 3, kube in Phase 5, ratatui/crossterm in Phase 11.
 
-# Dependencies arrive with the step that uses them (invariant 10): serde_json
-# and k8s-openapi in Phase 3, kube in Phase 5, ratatui/crossterm in Phase 11.
+[dependencies]
+# The API types the rule engine reads fields off, and — through its own
+# re-export — the `jiff::Timestamp` that `Snapshot::now` is
+# ([NOTES § D18](NOTES.md)). Pinned to the *oldest* supported version feature:
+# the API is forward compatible, so v1_32 talks to the v1.36 kind cluster the
+# fixtures came from (docs/tech-stack.md). Upgraded together with kube-rs,
+# never separately.
+k8s-openapi = { version = "0.28.0", features = ["v1_32"] }
+
+[dev-dependencies]
+# Only the fixture tests parse JSON in Phase 3 — the decode they exercise is
+# `serde` into `k8s_openapi::api::core::v1::Pod`. It moves up to a real
+# dependency in Phase 5, where `k8s.rs` builds the browser's Table request by
+# hand and decodes the answer with it.
+serde_json = "1"
 
 [profile.release]
 lto = true

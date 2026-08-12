@@ -5,15 +5,56 @@
       "apiVersion": "v1",
       "kind": "Service",
       "metadata": {
-        "creationTimestamp": "2026-08-11T22:42:50Z",
+        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "labels": {
+          "demo": "broken"
+        },
+        "name": "broken-sts",
+        "namespace": "default",
+        "resourceVersion": "698",
+        "uid": "3b66eea6-11e3-48a4-8daa-288e3d0d63d4"
+      },
+      "spec": {
+        "clusterIP": "None",
+        "clusterIPs": [
+          "None"
+        ],
+        "internalTrafficPolicy": "Cluster",
+        "ipFamilies": [
+          "IPv4"
+        ],
+        "ipFamilyPolicy": "SingleStack",
+        "ports": [
+          {
+            "name": "http",
+            "port": 80,
+            "protocol": "TCP",
+            "targetPort": 80
+          }
+        ],
+        "selector": {
+          "app": "broken-sts"
+        },
+        "sessionAffinity": "None",
+        "type": "ClusterIP"
+      },
+      "status": {
+        "loadBalancer": {}
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "creationTimestamp": "2026-08-12T20:45:26Z",
         "labels": {
           "component": "apiserver",
           "provider": "kubernetes"
         },
         "name": "kubernetes",
         "namespace": "default",
-        "resourceVersion": "209",
-        "uid": "3ec7db38-adaf-4077-bb6a-319dd1b9070b"
+        "resourceVersion": "204",
+        "uid": "8ee9d417-27e1-479d-ad39-ed5e64655ba0"
       },
       "spec": {
         "clusterIP": "REDACTED-IP",
@@ -44,7 +85,7 @@
       "apiVersion": "v1",
       "kind": "Service",
       "metadata": {
-        "creationTimestamp": "2026-08-11T22:42:52Z",
+        "creationTimestamp": "2026-08-12T20:45:27Z",
         "labels": {
           "k8s-app": "kube-dns",
           "kubernetes.io/cluster-service": "true",
@@ -52,8 +93,8 @@
         },
         "name": "kube-dns",
         "namespace": "kube-system",
-        "resourceVersion": "282",
-        "uid": "caed6546-5f6e-4270-8b16-5dbb119fe589"
+        "resourceVersion": "249",
+        "uid": "24cd0f91-c4d6-4b69-b8cc-a67ae6f65573"
       },
       "spec": {
         "clusterIP": "REDACTED-IP",

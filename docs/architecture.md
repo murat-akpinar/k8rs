@@ -56,6 +56,14 @@ binary can mutate anything, and the result comes back through the same watch
 stream as any other change — there is no optimistic local mutation of the
 store.
 
+**Two things in the store did not come from a watch**, and the diagram would
+otherwise imply they did: the API server's version, read once at startup for
+N4's skew comparison, and — for certificate rule C1 — the kubeconfig context
+name and the client **certificate**, which never came from the cluster at all.
+Rules are pure functions over the snapshot, so an input that is not an API
+object still has to arrive on it. The private key is not carried; see
+[Token hygiene](security.md#token-hygiene).
+
 Why watch instead of polling: every `LIST pods -A` forces the API server to
 read and serialize every pod from etcd, degrading linearly with cluster
 size (this is what makes interval-polling tools feel heavy). A watch pays
@@ -115,18 +123,42 @@ The first thing written in the code phase, because three files meet on it:
 
 ```rust
 struct Finding {
-    severity:    Severity,   // Critical | Warn | Info
-    title:       String,     // what happened (plain language)
-    evidence:    String,     // the numbers/fields that prove it
-    action:      String,     // what to do about it
-    kubectl_cmd: String,     // the command that shows the same thing
-    owner:       ObjectRef,  // the grouping key: Deployment/DaemonSet/…,
-                             // or the pod itself when it has no owner
+    severity:    Severity,       // Critical | Warn | Info
+    title:       String,         // what happened (plain language)
+    evidence:    String,         // the numbers/fields that prove it
+    action:      String,         // what to do about it
+    kubectl_cmd: Option<String>, // the command that shows the same thing;
+                                 // None when no such command exists
+    owner:       ObjectId,       // the grouping key: Deployment/DaemonSet/…,
+                                 // or the pod itself when it has no owner
+    object:      ObjectId,       // what the finding is about — the pod, the node
+}
+
+struct ObjectId {
+    kind:      ObjectKind,      // …/CronJob/ReplicaSet/Node/Pod/Other(String)
+    namespace: Option<String>,  // None = cluster-scoped, e.g. a Node
+    name:      String,
+    uid:       Option<String>,  // None only when it is not an API object
 }
 ```
 
 `rules.rs` decides the identity; `views.rs` does the grouping. The bottom
 layer stays pure and the presentation layer stays replaceable.
+
+`ObjectId::group_key()` — kind, namespace, name, without the uid — is what
+`views.rs` groups by; `ObjectId` itself derives no `Hash`, so grouping by the
+whole thing stops compiling at the first map insert. That grouping would split
+one Deployment into two cards when it is deleted and recreated under the same
+name — old-generation pods still terminating under one uid while the new ones
+run under another, which is what any Argo prune-and-recreate produces
+([NOTES § D38](../NOTES.md#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)).
+
+`owner` and `object` are both here because one broken pod produces several
+findings — a crashlooping pod fires four of the v1 rules at once — so a card
+counting *findings* would say "4 of 5 pods" about a single pod. The numerator
+is the count of distinct `object`s; the denominator comes from the snapshot.
+The reasons behind the rest of the shape are
+[NOTES § D36](../NOTES.md#d36--the-finding-shape-the-review-sent-back-2026-08-12).
 
 ### Rules are pure functions
 
@@ -226,7 +258,17 @@ minimum terminal 80×24.
   whole Alerts view — so it falls back to the kubeconfig context's namespace
   (then `default`) instead of failing, and the header states the scope in
   effect. `--namespace` sets it explicitly. Access to two namespaces must
-  produce a working tool.
+  produce a working tool. **The rules that join *every* pod on a node switch
+  off under that scope and say so** — N2 (cordoned with a drain left
+  unfinished) and N5 (overcommit). A partial view turns the first into a
+  finding that silently never fires and the second into an understated sum, and
+  a wrong number that looks confident is worse than a feature that names what
+  it is missing
+  ([NOTES § D43](../NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)).
+  The scope is a **field on the snapshot**, not something a rule can ask about:
+  rules are pure functions with no globals, so without it a small cluster and a
+  partial view of a large one look identical from inside a rule
+  ([NOTES § D46](../NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
 - A rejected write (admission webhook, validation, conflict) shows the API
   server's own message verbatim and stays until dismissed. A `409 Conflict` on
   apply means the object changed underneath the edit; the user is offered a
@@ -251,6 +293,18 @@ minimum terminal 80×24.
   never had it. Pruning is verified against live watch data in the client
   layer, where the field actually arrives
   ([NOTES § D30](../NOTES.md#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)).
+- **A decode test may set one field on a real capture** — the cluster the
+  fixtures came from had no cordoned node, no partially-ready workload and no
+  pod with an owner, and a branch whose input the capture cannot contain is a
+  branch no test can reach. It starts from a committed capture, changes one
+  field to a value the API demonstrably produces, says why the capture lacks
+  it, and names the object the next capture trip should bring back to replace
+  it. A **rule's** positive fixture is still a real capture — this never
+  becomes the way a rule gets proven
+  ([NOTES § D40](../NOTES.md#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)).
+- The decode itself is proven by **field-level mutation done by hand**, not by
+  `cargo mutants`, which does not mutate struct-literal field assignments
+  ([NOTES § D41](../NOTES.md#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12)).
 
 ## Version compatibility
 

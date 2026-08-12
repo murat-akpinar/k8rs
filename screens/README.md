@@ -35,7 +35,7 @@ Two panes, never more — navigation on the left, one content pane on the right,
 plus the header row, the command log strip and the key footer. What makes k9s
 feel complex is its panel layering; the discipline here is lazygit's.
 
-## The four rules every screen obeys
+## The five rules every screen obeys
 
 1. **Plain language.** Every visible string is written for someone who does not
    yet know the jargon. `CrashLoopBackOff` gets explained, not printed.
@@ -49,3 +49,13 @@ feel complex is its panel layering; the discipline here is lazygit's.
    `⚠` is the fourth symbol and it is not a severity: it marks a connection or
    trust problem — disconnected, login expired, TLS not verified — and appears
    in the header row or a banner, never on a finding.
+5. **A namespace is shown only where there is one.** The line that names an
+   object is `namespace/name` — `payments/web` — for anything that lives
+   inside a namespace, and the bare `name` — `node-3` — for the things that
+   belong to the whole cluster instead: nodes now, certificate requests and
+   persistent volumes later. `infra/node-3` is a screen no cluster can
+   produce, and a newcomer who reads it learns a wrong fact about Kubernetes.
+   The slash therefore means one thing everywhere, so its absence says
+   "cluster-wide" with no caption needed — and the *sentence* under the name
+   is what tells the reader which kind of thing it is (*"This node refuses new
+   pods"*), because the identity line is a name, not a description.

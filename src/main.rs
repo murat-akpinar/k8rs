@@ -5,6 +5,11 @@
 //! cluster or a terminal, and `main.rs` is the last file to be wired. Until
 //! then this binary exists so the crate builds, lints and publishes.
 
+// A module no `mod` line reaches is not in the crate: `cargo fmt` skips it and
+// clippy never sees it. `rules.rs` is declared the moment it exists, not when
+// something calls it.
+mod rules;
+
 fn main() {
     println!("k8rs {} — not built yet.", env!("CARGO_PKG_VERSION"));
     println!("Progress: https://github.com/murat-akpinar/k8rs");

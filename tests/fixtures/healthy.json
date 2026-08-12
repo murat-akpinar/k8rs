@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-11T23:11:47Z",
+    "creationTimestamp": "2026-08-12T20:45:54Z",
     "generation": 1,
     "labels": {
       "demo": "healthy"
     },
     "name": "healthy",
     "namespace": "default",
-    "resourceVersion": "4306",
-    "uid": "46eeae14-14f2-48fa-ba2c-c0c7c1a71c4e"
+    "resourceVersion": "1142",
+    "uid": "00823e0e-95ab-42b5-9198-1b8a9a2c6826"
   },
   "spec": {
     "containers": [
@@ -48,7 +48,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-64zl2",
+            "name": "kube-api-access-shtvp",
             "readOnly": true
           }
         ]
@@ -66,19 +66,27 @@
         "image": "busybox",
         "imagePullPolicy": "Always",
         "name": "migrate",
-        "resources": {},
+        "resources": {
+          "limits": {
+            "memory": "128Mi"
+          },
+          "requests": {
+            "cpu": "50m",
+            "memory": "16Mi"
+          }
+        },
         "terminationMessagePath": "/dev/termination-log",
         "terminationMessagePolicy": "File",
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-64zl2",
+            "name": "kube-api-access-shtvp",
             "readOnly": true
           }
         ]
       }
     ],
-    "nodeName": "k8rs-worker2",
+    "nodeName": "k8rs-worker3",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -103,7 +111,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-64zl2",
+        "name": "kube-api-access-shtvp",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -144,41 +152,41 @@
   },
   "status": {
     "allocatedResources": {
-      "cpu": "10m",
+      "cpu": "50m",
       "memory": "16Mi"
     },
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:47Z",
+        "lastTransitionTime": "2026-08-12T20:45:54Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:53Z",
+        "lastTransitionTime": "2026-08-12T20:46:10Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:56Z",
+        "lastTransitionTime": "2026-08-12T20:46:13Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:56Z",
+        "lastTransitionTime": "2026-08-12T20:46:13Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:47Z",
+        "lastTransitionTime": "2026-08-12T20:45:54Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -190,7 +198,7 @@
           "cpu": "10m",
           "memory": "16Mi"
         },
-        "containerID": "containerd://9953ee4ed959909537f64f75fc968f18592615a6fcda489a2e04466d0c4e0922",
+        "containerID": "containerd://8af84411068b542d6e8d090cea420e7242a4bffb11a252818a0eb9f1ccda51fc",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {},
@@ -210,7 +218,7 @@
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-11T23:11:56Z"
+            "startedAt": "2026-08-12T20:46:13Z"
           }
         },
         "user": {
@@ -226,7 +234,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-64zl2",
+            "name": "kube-api-access-shtvp",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -241,22 +249,34 @@
     ],
     "initContainerStatuses": [
       {
-        "containerID": "containerd://eae9d407ded5517eff0041fba0578b451103c74627229aac996dd5c42d32408b",
+        "allocatedResources": {
+          "cpu": "50m",
+          "memory": "16Mi"
+        },
+        "containerID": "containerd://465a5f74f3aa2413d883ae030b07b57a246193cbfe868645288b579ac2c012d8",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {},
         "name": "migrate",
         "ready": true,
-        "resources": {},
+        "resources": {
+          "limits": {
+            "memory": "128Mi"
+          },
+          "requests": {
+            "cpu": "50m",
+            "memory": "16Mi"
+          }
+        },
         "restartCount": 0,
         "started": false,
         "state": {
           "terminated": {
-            "containerID": "containerd://eae9d407ded5517eff0041fba0578b451103c74627229aac996dd5c42d32408b",
+            "containerID": "containerd://465a5f74f3aa2413d883ae030b07b57a246193cbfe868645288b579ac2c012d8",
             "exitCode": 0,
-            "finishedAt": "2026-08-11T23:11:52Z",
+            "finishedAt": "2026-08-12T20:46:09Z",
             "reason": "Completed",
-            "startedAt": "2026-08-11T23:11:52Z"
+            "startedAt": "2026-08-12T20:46:09Z"
           }
         },
         "user": {
@@ -272,7 +292,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-64zl2",
+            "name": "kube-api-access-shtvp",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -291,12 +311,13 @@
     "resources": {
       "limits": {
         "cpu": "100m",
-        "memory": "64Mi"
+        "memory": "128Mi"
       },
       "requests": {
+        "cpu": "28m",
         "memory": "16Mi"
       }
     },
-    "startTime": "2026-08-11T23:11:47Z"
+    "startTime": "2026-08-12T20:45:54Z"
   }
 }

@@ -67,7 +67,9 @@ jobs:
       # sanitize-test proves the filter; this proves the committed bytes. A
       # fixture can reach tests/fixtures/ without ever meeting the filter.
       - name: committed fixtures carry nothing secret
-        run: bash scripts/fixture-audit.sh
+        run: |
+          bash scripts/fixture-audit.sh --self-test
+          bash scripts/fixture-audit.sh
 
       - name: docs links and anchors
         run: |

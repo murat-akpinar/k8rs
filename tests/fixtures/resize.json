@@ -3,14 +3,14 @@
   "kind": "Pod",
   "metadata": {
     "creationTimestamp": "2026-08-12T20:45:53Z",
-    "generation": 1,
+    "generation": 4,
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-hostpath",
+    "name": "broken-resize",
     "namespace": "default",
-    "resourceVersion": "1118",
-    "uid": "e2000f5d-19f2-4fa5-9d61-82bf078751b7"
+    "resourceVersion": "8240",
+    "uid": "7eb0c459-3f6b-4031-bf17-b654a5c68332"
   },
   "spec": {
     "containers": [
@@ -21,43 +21,21 @@
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
-        "name": "nosy",
-        "resources": {},
-        "terminationMessagePath": "/dev/termination-log",
-        "terminationMessagePolicy": "File",
-        "volumeMounts": [
-          {
-            "mountPath": "/host/containerd",
-            "name": "root",
-            "subPath": "run/containerd"
+        "name": "app",
+        "resources": {
+          "limits": {
+            "memory": "24277408Ki"
           },
-          {
-            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-h8zwm",
-            "readOnly": true
+          "requests": {
+            "memory": "24277408Ki"
           }
-        ]
-      },
-      {
-        "command": [
-          "sleep",
-          "3600"
-        ],
-        "image": "busybox",
-        "imagePullPolicy": "Always",
-        "name": "shipper",
-        "resources": {},
+        },
         "terminationMessagePath": "/dev/termination-log",
         "terminationMessagePolicy": "File",
         "volumeMounts": [
           {
-            "mountPath": "/host",
-            "name": "root",
-            "readOnly": true
-          },
-          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-h8zwm",
+            "name": "kube-api-access-wd4j2",
             "readOnly": true
           }
         ]
@@ -90,14 +68,7 @@
     ],
     "volumes": [
       {
-        "hostPath": {
-          "path": "/",
-          "type": ""
-        },
-        "name": "root"
-      },
-      {
-        "name": "kube-api-access-h8zwm",
+        "name": "kube-api-access-wd4j2",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -137,57 +108,79 @@
     ]
   },
   "status": {
+    "allocatedResources": {
+      "memory": "64Mi"
+    },
     "conditions": [
+      {
+        "lastProbeTime": "2026-08-12T21:42:34Z",
+        "lastTransitionTime": "2026-08-12T21:42:34Z",
+        "message": "Node didn't have enough resource: memory, requested: 24860065792, used: 136314880, capacity: 24860065792",
+        "observedGeneration": 4,
+        "reason": "Deferred",
+        "status": "True",
+        "type": "PodResizePending"
+      },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-12T20:45:54Z",
-        "observedGeneration": 1,
+        "observedGeneration": 4,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-12T20:45:53Z",
-        "observedGeneration": 1,
+        "observedGeneration": 4,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:46:12Z",
-        "observedGeneration": 1,
+        "lastTransitionTime": "2026-08-12T20:46:08Z",
+        "observedGeneration": 4,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:46:12Z",
-        "observedGeneration": 1,
+        "lastTransitionTime": "2026-08-12T20:46:08Z",
+        "observedGeneration": 4,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-12T20:45:53Z",
-        "observedGeneration": 1,
+        "observedGeneration": 4,
         "status": "True",
         "type": "PodScheduled"
       }
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://af45fb37c73c61a9ab8f611c9810d3cc15cab2a56a16fd3c62abcb2f17723f6c",
+        "allocatedResources": {
+          "memory": "64Mi"
+        },
+        "containerID": "containerd://46db07cef8acb8f9a8253d2d0ed0deb76c4f1ed3d09561a7035a286914dbbc09",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {},
-        "name": "nosy",
+        "name": "app",
         "ready": true,
-        "resources": {},
+        "resources": {
+          "limits": {
+            "memory": "64Mi"
+          },
+          "requests": {
+            "memory": "64Mi"
+          }
+        },
         "restartCount": 0,
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-12T20:46:06Z"
+            "startedAt": "2026-08-12T20:46:08Z"
           }
         },
         "user": {
@@ -202,52 +195,8 @@
         },
         "volumeMounts": [
           {
-            "mountPath": "/host/containerd",
-            "name": "root"
-          },
-          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-h8zwm",
-            "readOnly": true,
-            "recursiveReadOnly": "Disabled"
-          }
-        ]
-      },
-      {
-        "containerID": "containerd://b5272132d8889c6ba7174accdb8af00b7558211142b5371a6dd56478ce9314cb",
-        "image": "docker.io/library/busybox:latest",
-        "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
-        "lastState": {},
-        "name": "shipper",
-        "ready": true,
-        "resources": {},
-        "restartCount": 0,
-        "started": true,
-        "state": {
-          "running": {
-            "startedAt": "2026-08-12T20:46:12Z"
-          }
-        },
-        "user": {
-          "linux": {
-            "gid": 0,
-            "supplementalGroups": [
-              0,
-              10
-            ],
-            "uid": 0
-          }
-        },
-        "volumeMounts": [
-          {
-            "mountPath": "/host",
-            "name": "root",
-            "readOnly": true,
-            "recursiveReadOnly": "Disabled"
-          },
-          {
-            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-h8zwm",
+            "name": "kube-api-access-wd4j2",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -260,7 +209,7 @@
         "ip": "REDACTED-IP"
       }
     ],
-    "observedGeneration": 1,
+    "observedGeneration": 4,
     "phase": "Running",
     "podIP": "REDACTED-IP",
     "podIPs": [
@@ -268,8 +217,15 @@
         "ip": "REDACTED-IP"
       }
     ],
-    "qosClass": "BestEffort",
-    "resources": {},
+    "qosClass": "Burstable",
+    "resources": {
+      "limits": {
+        "memory": "64Mi"
+      },
+      "requests": {
+        "memory": "64Mi"
+      }
+    },
     "startTime": "2026-08-12T20:45:53Z"
   }
 }

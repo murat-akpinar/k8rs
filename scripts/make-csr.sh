@@ -44,7 +44,12 @@ if [ -n "${K8RS_SSH:-}" ]; then ssh_prefix=(ssh -o BatchMode=yes "$K8RS_SSH"); f
 kc() { "${ssh_prefix[@]}" kubectl --context "$ctx" "$@"; }
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+# The CSR goes away on every exit path, not only the happy one. A failure
+# between the create and the delete below left `k8rs-pending-fixture` sitting on
+# the cluster, and the only thing that would ever have noticed is the next run
+# deleting it — so "the cluster is left as it was found", four lines up, was
+# true of the happy path and nothing else.
+trap 'rm -rf "$work"; kc delete csr "$name" --ignore-not-found >/dev/null 2>&1 || true' EXIT
 
 # --- THROWAWAY REQUEST START ---
 # CN/O are fixture identities, not a cluster's. `kubernetes.io/kube-apiserver-client`
@@ -91,7 +96,15 @@ fi
 
 # Through scripts/sanitize.jq, exactly like `just fixtures` — a fixture that has
 # not met the filter is not a fixture (REQUIREMENTS § DevSecOps, G-5).
-jq -f "$here/sanitize.jq" "$work/csr.json" > "$out"
+#
+# Sanitized into the working directory and moved into place only once the filter
+# has accepted it. `jq … > "$out"` had the shell truncate the committed fixture
+# to zero bytes *before* jq ran, so a refusal — the one thing the filter exists
+# to do — destroyed the file this script exists to produce, and `set -e` then
+# skipped the delete below and left the CSR on the cluster as well. The failure
+# mode of a guard firing must not be worse than the leak it caught.
+jq -f "$here/sanitize.jq" "$work/csr.json" > "$work/clean.json"
+mv "$work/clean.json" "$out"
 
 kc delete csr "$name" --ignore-not-found >/dev/null
 

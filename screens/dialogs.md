@@ -157,9 +157,9 @@ indicator. Counts, not a spinner — a changing number is information
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│    ┌ Draining infra/node-3 ───────────────────────────────┐        │
+│    ┌ Draining node-3 ─────────────────────────────────────┐        │
 │    │                                                      │        │
-│    │  Moving pods off infra/node-3 so it can be           │        │
+│    │  Moving pods off node-3 so it can be                 │        │
 │    │  worked on. The node stops accepting new ones.       │        │
 │    │                                                      │        │
 │    │    moved      4 of 11                                │        │
@@ -180,6 +180,15 @@ indicator. Counts, not a spinner — a changing number is information
 └────────────────────────────────────────────────────────────────────┘
 ```
 
+- **`4 of 11` counts the pods this drain will move, and nothing else.** Not
+  every pod on the node: `kubectl drain` never evicts a DaemonSet pod or a
+  static pod whatever flags it is given, so a total that counted them would
+  stall at `9 of 11` forever on a drain that had in fact finished. It is the
+  same count, computed the same way, as the one on N2's cordon card
+  ([alerts.md § every count](alerts.md#every-count-this-card-can-have) ·
+  [NOTES § D46](../NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
+  Two screens showing the same node must not disagree about how many pods are
+  on it.
 - **Blockers are named while they block**, not reported after a hang. This is
   the whole reason drain is in the tool
   ([REQUIREMENTS](../REQUIREMENTS.md#write-operations-new--the-reversal)).
@@ -190,8 +199,10 @@ indicator. Counts, not a spinner — a changing number is information
 
 ## Rules for every dialog on this page
 
-1. The **object identity** is in the title bar. A stale selection can never be
-   confirmed blindly.
+1. The **object identity** is in the title bar — `payments/web` for something
+   in a namespace, the bare `node-3` for something that belongs to the whole
+   cluster ([README § the five rules](README.md#the-five-rules-every-screen-obeys)).
+   A stale selection can never be confirmed blindly.
 2. The consequence is plain language and counts things the user can picture
    ("1 more copy"), not API vocabulary.
 3. The dry-run verdict is shown *before* the button is live, wherever the API

@@ -12,11 +12,99 @@
 #
 # So this asks the committed bytes directly. It is the last line before a leak
 # is in git history for good (REQUIREMENTS G-5).
+#
+# Usage:
+#     fixture-audit.sh             # audit tests/fixtures/
+#     fixture-audit.sh <dir>       # audit some other tree (the self-test uses this)
+#     fixture-audit.sh --self-test # prove the guard fails when it should
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fixtures="$here/../tests/fixtures"
 command -v jq >/dev/null || { echo "fixture-audit: jq is not installed"; exit 127; }
+command -v openssl >/dev/null || { echo "fixture-audit: openssl is not installed"; exit 127; }
+tmpd=$(mktemp -d); trap 'rm -rf "$tmpd"' EXIT
+
+# --- SELF-TEST START ---
+# A guard nobody has seen fail is not a guard (todo.md, Phase 1) — and this one
+# was green over a real private key for the whole of Phase 2, in a line
+# byte-identical to a clean run. So the six framings are planted here, one at a
+# time, and the script is re-run over them: the thing under test is this file
+# itself, not a copy of its logic.
+if [ "${1:-}" = "--self-test" ]; then
+  d=$tmpd/f; mkdir -p "$d/certs"
+  # An EC key on purpose: it is the *smallest* private key anything real
+  # produces, so the length thresholds below are exercised at their edge
+  # instead of by a comfortably large RSA one.
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$tmpd/k.pem" 2>/dev/null
+  openssl pkey -in "$tmpd/k.pem" -outform DER -out "$tmpd/k.der"
+  openssl req -x509 -key "$tmpd/k.pem" -subj /CN=selftest -days 1 -out "$d/certs/c.crt.pem" 2>/dev/null
+  echo '{"kind":"Pod","metadata":{"name":"a"},"spec":{"nodeName":"k8rs-worker"}}' > "$d/p.json"
+  echo "v1.36.1" > "$d/K8S_VERSION"
+  b64=$(base64 -w0 "$tmpd/k.pem")
+
+  sfail=0
+  expect() { # $1 = the exit status this tree must produce, $2 = what it is
+    local out rc=0
+    out=$(bash "$0" "$d" 2>&1) || rc=$?
+    if [ "$rc" -ne "$1" ]; then
+      echo "FAIL  self-test: $2 — expected exit $1, got $rc"
+      printf '%s\n' "$out" | sed 's/^/      /'
+      sfail=1
+    fi
+  }
+
+  expect 0 "a clean tree: a real certificate in certs/ is public and must pass"
+
+  cat "$d/certs/c.crt.pem" "$tmpd/k.pem" > "$d/certs/x.crt.pem"
+  expect 1 "armoured: a key appended to a certificate, in the directory this check used to skip"
+  rm "$d/certs/x.crt.pem"
+
+  { cat "$d/certs/c.crt.pem"; echo "# client-key-data: $b64"; } > "$d/certs/x.crt.pem"
+  expect 1 "base64-wrapped: how a kubeconfig carries client-key-data"
+  rm "$d/certs/x.crt.pem"
+
+  cp "$tmpd/k.der" "$d/certs/x.der"
+  expect 1 "DER: no armour at all, so there is nothing to grep for"
+  rm "$d/certs/x.der"
+
+  { echo "-----BEGIN CERTIFICATE-----"; sed -e 1d -e '$d' "$tmpd/k.pem"; echo "-----END CERTIFICATE-----"; } > "$d/certs/x.crt.pem"
+  expect 1 "mislabeled: key bytes under a CERTIFICATE header"
+  rm "$d/certs/x.crt.pem"
+
+  base64 "$tmpd/k.pem" > "$d/wrapped.txt"
+  expect 1 "whole-file base64: wrapped at 76 columns, so no single line decodes"
+  rm "$d/wrapped.txt"
+
+  jq -n --arg k "$b64" '{kind:"Secret",data:{"tls.key":$k}}' > "$d/secret.json"
+  expect 1 "inside JSON: the shape every Secret value arrives in"
+  rm "$d/secret.json"
+
+  # The backstop below keeps no copy of what the sanitizer refuses, so this
+  # proves it is actually asking the filter rather than passing by default.
+  echo '{"kind":"CertificateSigningRequest","spec":{"signerName":"kubernetes.io/kube-apiserver-client","username":"system:serviceaccount:prod/deployer","groups":["system:authenticated"]}}' > "$d/csr.json"
+  expect 1 "a committed file scripts/sanitize.jq itself would refuse — here, a real requester identity"
+  rm "$d/csr.json"
+
+  # The other half, and the one an exit-status check cannot see: the filter
+  # accepts the file and *changes* it. That is what a fixture captured before a
+  # rule existed looks like, and csr-pending.json was exactly this for one
+  # commit — accepted, and still carrying the `.spec.extra` the filter now
+  # deletes.
+  echo '{"kind":"CertificateSigningRequest","spec":{"signerName":"kubernetes.io/kube-apiserver-client","username":"kubernetes-admin","groups":["system:authenticated"],"extra":{"authentication.kubernetes.io/credential-id":["X509SHA256=deadbeef"]}}}' > "$d/csr.json"
+  expect 1 "a committed file the filter accepts but does not leave alone — captured before a rule existed"
+  rm "$d/csr.json"
+
+  if [ $sfail -eq 0 ]; then
+    echo "fixture-audit: self-test passed — a private key is refused armoured," \
+         "base64-wrapped, DER, mislabeled, whole-file base64 and inside JSON," \
+         "and so is a file scripts/sanitize.jq would refuse or would still" \
+         "change; a real certificate is not"
+  fi
+  exit $sfail
+fi
+# --- SELF-TEST END ---
+
+fixtures="${1:-$here/../tests/fixtures}"
 
 # Recursive, and JSON is only the shape that gets *parsed*. A key does not stop
 # being a key because it was written as `admin.key.pem`, a kubeconfig, or one
@@ -35,6 +123,78 @@ fi
 
 fail=0
 note() { echo "FAIL  $*"; fail=1; }
+
+# --- KEY MATERIAL, IN EVERY FRAMING IT ARRIVES IN START ---
+# A regex proves only the framing it was written for (NOTES § D31), and a
+# private key arrives in four:
+#
+#   armoured     -----BEGIN PRIVATE KEY-----        a grep sees this one
+#   base64       LS0tLS1CRUdJTi…                    a kubeconfig's
+#                                                   client-key-data, and every
+#                                                   Secret value
+#   DER          raw bytes, no armour at all        nothing to grep for
+#   mislabeled   key bytes under a CERTIFICATE      the header lies
+#                header
+#
+# Only the first was checked, and certs/ — the one directory where key material
+# is actually generated — was exempted even from that, because certs/ holds
+# *certificates* and those are public. The exemption covered the private key
+# sitting next to one just as well: a key appended to expiring-client.crt.pem
+# read as "no key material", in a line byte-identical to a clean run.
+#
+# So openssl decides, not a regex. It is already required by certs-test.sh and
+# make-certs.sh, so this adds no dependency. `-passin pass:` is not optional: an
+# encrypted key would otherwise prompt on the terminal and hang `just check`.
+armour='-----BEGIN [A-Z ]*PRIVATE KEY-----'
+
+is_key() { # $1 = file of raw bytes; prints the framing, 0 when it holds a key
+  LC_ALL=C grep -qaE -- "$armour" "$1" && { echo "armoured"; return 0; }
+  # DER is asked first because `-in` without `-inform` auto-detects both, so a
+  # DER key answered to the PEM branch and got reported as "PEM". A framing
+  # named wrongly is a small lie in the one line someone will read at 3am.
+  openssl pkey -in "$1" -inform DER -passin pass: -noout >/dev/null 2>&1 && { echo "DER"; return 0; }
+  openssl pkey -in "$1" -passin pass: -noout >/dev/null 2>&1 && { echo "PEM"; return 0; }
+  return 1
+}
+
+decoded_is_key() { # $1 = base64 text
+  printf '%s' "$1" | base64 -d > "$tmpd/decoded" 2>/dev/null || return 1
+  is_key "$tmpd/decoded" >/dev/null
+}
+
+any_is_key() { # stdin = one base64 candidate per line
+  local body
+  while IFS= read -r body; do
+    if [ ${#body} -ge 64 ] && decoded_is_key "$body"; then return 0; fi
+  done
+  return 1
+}
+
+has_key() { # $1 = file; prints the framing it was found in, 0 when found
+  local f=$1 what
+  what=$(is_key "$f") && { echo "$what"; return 0; }
+  # Every PEM body, whatever its header claims to be — openssl reads the label,
+  # the label is the part whoever wrote the file controls, and the bytes are the
+  # part that is secret. Anything reaching here already failed the armour grep,
+  # so a body that decodes to a key is by definition under the wrong header.
+  if any_is_key < <(awk '/-----BEGIN /{c=1;b="";next} /-----END /{if(c)print b; c=0; next} c{b=b $0}' "$f" 2>/dev/null); then
+    echo "under a PEM header that does not say PRIVATE KEY"; return 0
+  fi
+  # Every long base64 run: one `client-key-data:` line, one Secret value, one
+  # JSON string.
+  if any_is_key < <(LC_ALL=C grep -oaE '[A-Za-z0-9+/]{100,}={0,2}' "$f" 2>/dev/null); then
+    echo "base64-wrapped"; return 0
+  fi
+  # A file that is *entirely* base64, wrapped at 64 or 76 columns — what
+  # `base64 key.pem > f` leaves behind. Each line on its own decodes to noise,
+  # so the runs above cannot see it; only the file joined back up can.
+  if ! LC_ALL=C grep -qav '^[A-Za-z0-9+/=]*$' "$f" &&
+     decoded_is_key "$(LC_ALL=C tr -d '[:space:]' < "$f")"; then
+    echo "base64-wrapped, whole file"; return 0
+  fi
+  return 1
+}
+# --- KEY MATERIAL, IN EVERY FRAMING IT ARRIVES IN END ---
 
 # --- WHAT MUST NOT BE THERE START ---
 # Each entry: label | jq expression returning the offending values, over the
@@ -67,16 +227,14 @@ for file in "${files[@]}"; do
   done
 done
 
-# Every file, not only the parsed ones. A private key does not become safe by
-# being written as `admin.key.pem` or tucked inside a kubeconfig, and the JSON
-# loop above cannot see either. certs/ is the one place PEM is expected — it
-# holds deliberately generated throwaway *certificates*, and certs-test.sh
-# proves no key sits beside them.
+# Every file, in every framing, with nothing exempted. A private key does not
+# become safe by being written as `admin.key.pem`, tucked inside a kubeconfig,
+# base64-wrapped, stripped of its armour, or appended to a certificate in the
+# one directory this check used to skip.
 for file in "${all_files[@]}"; do
   rel=${file#"$fixtures"/}
-  case "$rel" in certs/*.crt.pem) continue ;; esac
-  if LC_ALL=C grep -qE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' "$file" 2>/dev/null; then
-    note "[$rel] contains a private key in plain text"
+  if framing=$(has_key "$file"); then
+    note "[$rel] contains a private key ($framing) — key material never leaves the machine that made it"
   fi
 done
 
@@ -89,6 +247,36 @@ for file in "${files[@]}"; do
     [ -z "$n" ] && continue
     case "$n" in k8rs-*) ;; *) note "[$rel] names node '$n', which is not from the kind test cluster" ;; esac
   done < <(jq -r '[.. | objects | .nodeName? // empty] | .[]' "$file" 2>/dev/null)
+done
+
+# And the backstop: ask the filter itself what it makes of these bytes today.
+# Everything above keeps its own copy of a rule, which is why the audit and the
+# sanitizer were blind in the same places twice (NOTES § D52); this keeps no
+# copy of anything, so it covers node names, requester identities and whatever
+# the filter learns next without being edited again. The blocks above stay: they
+# name the node or the key they found, and this one can only say the filter
+# objects.
+#
+# **Compared, not just run.** A refusal is an exit status, but a *deletion* is
+# not — and the filter's whole first half is deletions, so an exit-status check
+# is blind to precisely the case that a committed fixture predates a rule.
+# csr-pending.json was captured before `.spec.extra` was deleted and sailed
+# through the status check carrying a credential thumbprint. `jq .` on both
+# sides so the comparison is about content and not about whitespace.
+#
+# Crash and refusal are told apart for the reason sanitize-test.sh tells them
+# apart: a jq type error is also a non-zero exit, and reporting it as "refused"
+# sends the reader looking for a leak that is not there.
+for file in "${files[@]}"; do
+  rel=${file#"$fixtures"/}
+  if err=$(jq -f "$here/sanitize.jq" "$file" 2>&1 >"$tmpd/sanitized"); then
+    jq . "$file" 2>/dev/null | diff -q - "$tmpd/sanitized" >/dev/null ||
+      note "[$rel] scripts/sanitize.jq would still change these bytes — this file was captured before the filter learned something, and needs re-capturing"
+  elif grep -q '^jq: error.*sanitize: ' <<<"$err"; then
+    note "[$rel] scripts/sanitize.jq refuses these bytes today — ${err#*sanitize: }"
+  else
+    note "[$rel] scripts/sanitize.jq fails on these bytes rather than refusing them — $err"
+  fi
 done
 # --- WHAT MUST NOT BE THERE END ---
 
@@ -112,7 +300,13 @@ fi
 # --- WHAT MUST STILL BE THERE END ---
 
 if [ $fail -eq 0 ]; then
-  echo "fixture-audit: ${#files[@]} committed fixtures — no annotations, no env values," \
-       "no addresses, no key material; node names intact"
+  # Both counts, because they are different claims: the JSON checks reach
+  # ${#files[@]} files and the key-material check reaches all of them. One
+  # number covering both is how "no key material" got printed over a directory
+  # the scan never entered.
+  echo "fixture-audit: ${#all_files[@]} committed fixtures (${#files[@]} parsed as JSON) —" \
+       "no annotations, no env values, no addresses; no key material in any framing" \
+       "(armoured, base64-wrapped, DER, mislabeled); node names intact;" \
+       "and scripts/sanitize.jq leaves every one of them byte-identical"
 fi
 exit $fail

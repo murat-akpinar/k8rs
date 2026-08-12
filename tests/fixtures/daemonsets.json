@@ -5,7 +5,71 @@
       "apiVersion": "apps/v1",
       "kind": "DaemonSet",
       "metadata": {
-        "creationTimestamp": "2026-08-11T22:42:53Z",
+        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "generation": 1,
+        "labels": {
+          "demo": "broken"
+        },
+        "name": "broken-ds",
+        "namespace": "default",
+        "resourceVersion": "759",
+        "uid": "ce441cf6-d1d2-4544-be9b-764cbd1b1ee6"
+      },
+      "spec": {
+        "revisionHistoryLimit": 10,
+        "selector": {
+          "matchLabels": {
+            "app": "broken-ds"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "broken-ds",
+              "demo": "broken"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "image": "registry.invalid/does-not-exist:v9",
+                "imagePullPolicy": "IfNotPresent",
+                "name": "app",
+                "resources": {},
+                "terminationMessagePath": "/dev/termination-log",
+                "terminationMessagePolicy": "File"
+              }
+            ],
+            "dnsPolicy": "ClusterFirst",
+            "restartPolicy": "Always",
+            "schedulerName": "default-scheduler",
+            "securityContext": {},
+            "terminationGracePeriodSeconds": 30
+          }
+        },
+        "updateStrategy": {
+          "rollingUpdate": {
+            "maxSurge": 0,
+            "maxUnavailable": 1
+          },
+          "type": "RollingUpdate"
+        }
+      },
+      "status": {
+        "currentNumberScheduled": 3,
+        "desiredNumberScheduled": 3,
+        "numberMisscheduled": 0,
+        "numberReady": 0,
+        "numberUnavailable": 3,
+        "observedGeneration": 1,
+        "updatedNumberScheduled": 3
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "DaemonSet",
+      "metadata": {
+        "creationTimestamp": "2026-08-12T20:45:28Z",
         "generation": 1,
         "labels": {
           "app": "kindnet",
@@ -14,8 +78,8 @@
         },
         "name": "kindnet",
         "namespace": "kube-system",
-        "resourceVersion": "565",
-        "uid": "a5b12ec1-7cca-40cf-bff6-16d97f4a064d"
+        "resourceVersion": "543",
+        "uid": "f499cc6b-3252-4a1e-8dcf-1fe794dabcda"
       },
       "spec": {
         "revisionHistoryLimit": 10,
@@ -166,28 +230,28 @@
         }
       },
       "status": {
-        "currentNumberScheduled": 3,
-        "desiredNumberScheduled": 3,
-        "numberAvailable": 3,
+        "currentNumberScheduled": 4,
+        "desiredNumberScheduled": 4,
+        "numberAvailable": 4,
         "numberMisscheduled": 0,
-        "numberReady": 3,
+        "numberReady": 4,
         "observedGeneration": 1,
-        "updatedNumberScheduled": 3
+        "updatedNumberScheduled": 4
       }
     },
     {
       "apiVersion": "apps/v1",
       "kind": "DaemonSet",
       "metadata": {
-        "creationTimestamp": "2026-08-11T22:42:52Z",
+        "creationTimestamp": "2026-08-12T20:45:27Z",
         "generation": 1,
         "labels": {
           "k8s-app": "kube-proxy"
         },
         "name": "kube-proxy",
         "namespace": "kube-system",
-        "resourceVersion": "549",
-        "uid": "b70b75f8-11eb-4dd8-a7b3-dc86a065a8f0"
+        "resourceVersion": "528",
+        "uid": "4c6bccdf-ad8f-49ff-9ed8-cf30ab5711b6"
       },
       "spec": {
         "revisionHistoryLimit": 10,
@@ -298,13 +362,13 @@
         }
       },
       "status": {
-        "currentNumberScheduled": 3,
-        "desiredNumberScheduled": 3,
-        "numberAvailable": 3,
+        "currentNumberScheduled": 4,
+        "desiredNumberScheduled": 4,
+        "numberAvailable": 4,
         "numberMisscheduled": 0,
-        "numberReady": 3,
+        "numberReady": 4,
         "observedGeneration": 1,
-        "updatedNumberScheduled": 3
+        "updatedNumberScheduled": 4
       }
     }
   ],

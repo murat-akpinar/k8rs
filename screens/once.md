@@ -23,9 +23,10 @@ prod-eu · 84 pods · 3 nodes
   Running, but not receiving traffic — the readiness check is failing
   → check the app's /healthz endpoint
 
-▲ infra/node-3 · 6 days ago
-  Set to refuse new pods (cordoned)
-  → someone's maintenance window never closed
+▲ node-3
+  This node refuses new pods (cordoned)
+  2 pods here would still have to move
+  → allow new pods once the work is done
 
 1 critical, 2 warnings
 ```
@@ -35,6 +36,16 @@ language, same grouping by owner, same order** (severity, then recency). One
 `rules.rs`, one set of strings, two renderers — if `--once` and the Alerts
 screen could ever disagree, one of them is lying
 ([alerts.md](alerts.md)).
+
+That includes the ages, which is where the two nearly did disagree. `· 4 min
+ago` is a suffix on the title line here rather than a right-aligned column, but
+it holds the same fact and obeys the same rule: **it is present only when a
+field says when the event happened.** The cordon finding has no such field, so
+`node-3` gets a bare title line in both renderers
+([alerts.md § the cordon card](alerts.md#the-cordon-card-and-what-replaced-its-clock)).
+Without the frame there is no column for a blank to sit in, which makes the
+absence invisible here — one more reason the count moved into the card body
+where both renderers show it.
 
 ## When nothing is broken
 
@@ -48,6 +59,41 @@ prod-eu · 84 pods · 3 nodes
 Three lines, and it has to be true — the same claim the empty Alerts screen
 makes ([states.md](states.md)). A tool that prints "0 issues" while holding a
 lint list would not survive the first person who checked.
+
+## When a check could not run
+
+```
+$ k8rs --once --namespace payments
+prod-eu · ns: payments · 12 pods · 3 nodes
+
+○ nothing is broken
+
+One node check is off: spotting a node someone started emptying and
+did not finish needs every pod in the cluster.
+```
+
+The console says this in a banner above the list
+([states.md](states.md#you-can-only-see-some-namespaces)); here there is no
+banner, so it goes **last** — after `1 critical, 2 warnings` when there are
+findings, after `○ nothing is broken` when there are none. That is the place a
+reader is already looking to decide whether the report is complete, and the
+last thing left on screen when the output is longer than the terminal. It
+prints in both cases: a report with findings is no more complete than an empty
+one when the same check was switched off.
+
+- **On stdout, with the findings.** Every other line k8rs writes about itself
+  goes to stderr, but this one is part of the answer: `k8rs --once >
+  findings.txt` that drops it produces a file claiming a clean cluster with no
+  note that a check was switched off, which is the failure the line exists to
+  prevent.
+- **It is the same sentence the console draws**, re-wrapped. One string, two
+  renderers — the rule this whole file is built on.
+- **`--namespace` and a 403 fallback print it identically**, because the scope
+  is identical; the header line names which namespace, and that is the only
+  place the cause shows.
+- The header line gains `ns: payments` for the same reason the TUI header does:
+  a report that does not say what it covered cannot be trusted after it is
+  pasted into a ticket.
 
 ## stdout and stderr are split on purpose
 
@@ -91,8 +137,8 @@ the tool failed. `1` is left unused so that a future `--exit-code` flag, if one
 is ever actually asked for, has somewhere to go without moving what `0` means.
 
 Failures print the same plain-language stderr messages the TUI prints before it
-ever enters raw mode — one text, both paths ([states.md § Before the TUI ever
-starts](states.md#before-the-tui-ever-starts)).
+ever enters raw mode — one text, both paths
+([states.md](states.md#before-the-tui-ever-starts)).
 
 ## What `--once` does not do
 

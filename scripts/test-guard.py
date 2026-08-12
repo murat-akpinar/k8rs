@@ -8,8 +8,11 @@ Two ways that happens, both cheap to check and both invisible in a green log:
    that left the file orphaned. The suite passes because it ran nothing.
 2. `#[ignore]` disables a test while leaving its name in the file, so the
    count still looks right to a human reading the diff.
+3. There is no test at all. Deleting the last one leaves nothing to compare,
+   so every count above agrees at zero and the guard reports OK — which is
+   what it did until the floor in `check()` existed.
 
-Neither is caught by `cargo test`, which exits 0 over zero tests.
+None of the three is caught by `cargo test`, which exits 0 over zero tests.
 
 Usage:
     test-guard.py            # check this repository
@@ -17,6 +20,7 @@ Usage:
 """
 
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,15 +35,22 @@ IGNORED = re.compile(r"#\[\s*ignore\s*(?:\]|=\s*\"(?P<reason>[^\"]*)\")")
 
 
 def sources(root: Path) -> list[Path]:
-    # Skipped paths are matched *relative to the root* — an absolute path under
-    # /tmp is not a `tmp/` directory of ours, and treating it as one made this
-    # function silently return nothing.
-    skip = {"target", "tmp"}
+    """Every .rs file cargo actually compiles — an allowlist of roots.
+
+    This used to walk the whole tree minus `target/` and `tmp/`, which counts
+    every copy of the source anyone leaves lying around. `just mutants` leaves
+    exactly that: `cargo mutants` writes a full working copy under
+    `mutants.out/`, so a run of it doubled the declared count and `just check`
+    reported "45 tests never run" — a red build with nothing wrong, and the kind
+    that gets repaired by weakening the guard. The blocklist would need a new
+    entry per tool; these four directories plus build.rs are the whole of what
+    the compiler reads, and they are the same roots write-guard.py scans.
+    """
     return sorted(
         p
-        for p in root.rglob("*.rs")
-        if not skip & set(p.relative_to(root).parts)
-    )
+        for r in ("src", "tests", "examples", "benches")
+        for p in (root / r).rglob("*.rs")
+    ) + [p for p in [root / "build.rs"] if p.is_file()]
 
 
 def declared_and_ignored(root: Path) -> tuple[int, list[str]]:
@@ -71,6 +82,18 @@ def check(root: Path) -> list[str]:
     declared, unexplained = declared_and_ignored(root)
     errors = [f"{loc}  #[ignore] with no reason — say why, or delete the test"
               for loc in unexplained]
+    # The floor D26 asks for, and the one check here that is not a comparison.
+    # Every other rule below relates two counts, and every one of them holds at
+    # zero: delete the last test and `0 declared, 0 listed, 0 ignored` reads OK
+    # — measured, that is exactly what this guard printed before this line.
+    # It returns rather than appends because with no test declared the counts
+    # below describe nothing, and a second derived complaint would only bury
+    # the one fact that matters.
+    if declared == 0:
+        return errors + [
+            "no test is declared anywhere in the source — `cargo test` reports "
+            "`0 passed` and exits 0 (NOTES § D26)"
+        ]
     seen = listed(root)
     if seen < declared:
         errors.append(
@@ -128,7 +151,50 @@ def self_test() -> None:
         declared, unexplained = declared_and_ignored(root)
         assert declared == 2, f"expected 2 declared tests, counted {declared}"
         assert not unexplained, f"false positive on an explained ignore: {unexplained}"
-    print("test-guard: self-test passed — it fails on hidden and parked tests")
+
+        # A second copy of the source tree, which is what `just mutants` leaves
+        # in the repo root on every run. Counting it doubles `declared`, and the
+        # guard then reports every real test as "never run".
+        copy = root / "mutants.out" / "scratch" / "src"
+        copy.mkdir(parents=True)
+        (copy / "lib.rs").write_text((root / "src" / "lib.rs").read_text())
+        declared, _ = declared_and_ignored(root)
+        assert declared == 2, (
+            f"a copy of the source under mutants.out/ was counted: {declared} declared, "
+            f"expected 2"
+        )
+        shutil.rmtree(root / "mutants.out")
+
+        # The empty suite. Source exists, no test in it — the shape left behind
+        # by deleting the last test, which every count-comparison in `check()`
+        # reports as OK because they all agree at zero.
+        #
+        # This case makes the temp directory a real crate, and that is not
+        # decoration. Without a Cargo.toml, deleting the floor makes `check()`
+        # fall through to `listed()`, which dies on "could not find Cargo.toml"
+        # — the run goes red, but for a reason that has nothing to do with the
+        # floor, so it proves nothing about the assertion below. With a crate
+        # here, removing the floor makes `check()` return no errors at all and
+        # the assertion is what fails. Red for the right reason, or it is not a
+        # witness (NOTES § D26).
+        (root / "Cargo.toml").write_text(
+            '[package]\nname = "guard-self-test"\nversion = "0.0.0"\n'
+            'edition = "2021"\n\n[lib]\npath = "src/lib.rs"\n'
+        )
+        (root / "src" / "lib.rs").write_text("pub fn nothing() {}\n")
+        errors = check(root)
+        assert any("no test is declared" in e for e in errors), (
+            f"an empty test suite reported OK: {errors}"
+        )
+
+        # …and the negative, in the same crate: one real test must NOT trip the
+        # floor. Without it the floor could return unconditionally and the
+        # positive above would still pass.
+        (root / "src" / "lib.rs").write_text("#[test]\nfn real() {}\n")
+        errors = check(root)
+        assert not errors, f"false positive — one real test is not an empty suite: {errors}"
+    print("test-guard: self-test passed — it fails on hidden, parked and absent "
+          "tests, and does not count a copy of the tree under mutants.out/")
 
 
 if __name__ == "__main__":

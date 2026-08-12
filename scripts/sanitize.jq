@@ -5,17 +5,21 @@
 #
 #   1. Payloads are destroyed. managedFields, every annotation (especially
 #      last-applied-configuration, which is a full copy of the spec with env
-#      values in it), env[].value, imagePullSecrets, and anything shaped like a
-#      PEM block. References are kept — a rule needs to know that a pod reads
-#      the Secret `db-creds`, never what is inside it.
+#      values in it), env[].value, imagePullSecrets, anything shaped like a PEM
+#      block, and a certificate request's `.spec.extra` and `.spec.uid` — the
+#      claims an identity provider attached to whoever asked. References are
+#      kept — a rule needs to know that a pod reads the Secret `db-creds`,
+#      never what is inside it.
 #
-#   2. Node identifiers are refused, not rewritten. Node names carry real
-#      infrastructure, and a fixture whose node names were mangled would break
-#      the pod↔node joins the N-series rules are built on. So a capture
-#      carrying a node identifier from anywhere other than the kind test
-#      cluster is refused outright, instead of quietly producing something that
-#      looks safe. Fixtures come from kind — that is a decision, not a habit
-#      (NOTES § Settled).
+#   2. Identifiers are refused, not rewritten — node names, and the requester a
+#      CertificateSigningRequest names in `.spec.username` and `.spec.groups`.
+#      Both are references rather than payloads: a fixture whose node names were
+#      mangled would break the pod↔node joins the N-series rules are built on,
+#      and a mangled requester would say a real person asked for a certificate
+#      under a name nobody can trace. So a capture carrying either from anywhere
+#      other than the kind test cluster is refused outright, instead of quietly
+#      producing something that looks safe. Fixtures come from kind — that is a
+#      decision, not a habit (NOTES § Settled).
 #
 # **Everything here walks the whole document, never a fixed path.** Half the
 # capture is `kubectl get <kind> -A -o json`, which is a `List`: its objects sit
@@ -41,7 +45,13 @@ def node_names:
       (.["kubernetes.io/hostname"]? // empty),
       (select(.key? == "kubernetes.io/hostname") | (.values? // [])[]),
       (select((.kind? == "Node") or (.status?.nodeInfo? != null))
-       | .metadata?.name? // empty) ]
+       | .metadata?.name? // empty),
+      # The fifth place, and the one `-n kube-system` puts in every capture:
+      # kubelet writes an `ownerReference` of kind `Node` onto every static pod,
+      # so `{kind: Node, name: prod-master-01}` names a machine exactly as well
+      # as `.nodeName` does. A full Node object also has `.kind == "Node"` and
+      # no top-level `.name`, which is what `// empty` is for.
+      (select(.kind? == "Node") | .name? // empty) ]
   | map(select(type == "string"));
 
 # Refused if *any* identifier is foreign, not only if all of them are: one real
@@ -57,12 +67,112 @@ def refuse_foreign_nodes:
     else .
     end;
 
+# The other reference a capture carries: who asked for a certificate. It is
+# recorded in `.spec.username` and `.spec.groups`, and on a real cluster that is
+# an OIDC email or `system:serviceaccount:prod/deployer`.
+#
+# **Two kinds carry it, not one.** Kubernetes' own CertificateSigningRequest has
+# `.spec.signerName`; cert-manager's CertificateRequest has `.spec.issuerRef`
+# instead and the identical `username` / `groups` / `uid` / `extra` beside it —
+# and it is on the roadmap, because C4 is a cert-manager rule. Keyed on either
+# marker rather than on `.kind`, which is unreliable inside a List for the same
+# reason node_names does not read it.
+#
+# Keyed on the marker and not on the payload: `has("request") and
+# has("username")` reads like the better test — it needs no list of kinds — but
+# it fails open exactly when it matters, because an object that carries `groups`
+# and `extra` without a `username` is then not examined at all. The field that
+# says *what this object is* is present whether or not the field being protected
+# is.
+#
+# Every string *under* those two fields, rather than the array `.groups` is
+# typed as: iterating it with `[]` is a hard jq error on anything else, while
+# checking only `arrays` would let an unexpected shape past in silence, which is
+# the worse half of the same choice. `..` has neither problem and is shorter
+# than either. (A CSR never arrives through `just fixtures`, which captures no
+# such kind — its one consumer is scripts/make-csr.sh, and that sanitizes into a
+# temp file and moves it, so an abort here destroys nothing.)
+def requester_identities:
+  [ .. | objects | select(has("signerName") or has("issuerRef"))
+    | (.username?, .groups?) | .. | strings ];
+
+# Refused, not rewritten, for the reason node names are: an identity is a
+# reference, and a rewritten one would say a real person asked for a
+# certificate under a name nobody can trace.
+#
+# What passes is not a policy about which real identities are acceptable — that
+# would be a judgement call re-made on every capture. It is what the cluster
+# issues by itself, read off the pinned kind cluster rather than recalled: the
+# two kubelet identities with their groups, and kubeadm's admin from the
+# kubeconfig client certificate, `CN=kubernetes-admin, O=kubeadm:cluster-admins`,
+# which is who scripts/make-csr.sh runs as.
+#
+# **Two limits, both real, neither engineered around.**
+#
+#   1. Only the `system:node:k8rs-…` entry is specific to *this* cluster.
+#      `kubernetes-admin` in `kubeadm:cluster-admins` is what **every** kubeadm
+#      cluster calls its admin, production included — so this list does not
+#      prove a capture came from kind the way the `k8rs-` node prefix does. It
+#      turns away somebody's *named* account, which is the leak worth turning
+#      away, and admits an anonymous kubeadm admin.
+#   2. A requester identity sits in three places on a CSR: these two fields, the
+#      subject DN inside the base64 `.spec.request`, and the DN inside
+#      `.status.certificate`. jq cannot decode a DER subject, so this reads one
+#      of the three — a production CSR whose `.spec.request` carries
+#      `CN=alice@corp.example.com` is accepted. Reading the other two needs
+#      openssl, which means it belongs in fixture-audit.sh, not in a jq filter.
+#
+# Anchored at both ends, unlike the `k8rs-` node prefix. `k8rs-` is a family of
+# names kind generates; an identity is not, and an unanchored match would let
+# `kubernetes-admin@corp.example.com` through as kind's own admin.
+def refuse_foreign_identities:
+  (requester_identities
+   | map(select(test("^(kubernetes-admin"
+                     + "|kubeadm:cluster-admins"
+                     + "|system:authenticated"
+                     + "|system:nodes"
+                     # A DNS subdomain, dots and all: `refuse_foreign_nodes`
+                     # accepts `k8rs-worker.lan`, and the two rules reading the
+                     # same document must not disagree about what a node is.
+                     + "|system:node:k8rs-[a-z0-9.-]+"
+                     + "|system:bootstrappers"
+                     + "|system:bootstrappers:kubeadm:default-node-token"
+                     # kind's kubeadm patch pins the bootstrap token, so the id
+                     # is always `abcdef`. This is a fact about kind, not about
+                     # kubeadm: a `kubeadm token create` id such as `9a08jv` is
+                     # refused, and correctly so — it did not come from here.
+                     + "|system:bootstrap:abcdef)$") | not))
+   | unique) as $foreign
+  | if ($foreign | length) > 0
+    then error("sanitize: a certificate request names a requester the kind test "
+               + "cluster does not issue (expected kubeadm's own admin, a "
+               + "kubelet or a bootstrapper, got \($foreign[0:3])). That is a "
+               + "real user or group; refusing to write a capture that names "
+               + "one.")
+    else .
+    end;
+
 refuse_foreign_nodes
+| refuse_foreign_identities
 
 # Payloads, at every depth: object metadata, a List's items, a workload's pod
 # template — all the same walk.
 | del(.. | objects | .managedFields?, .annotations?, .selfLink?,
                      .generateName?, .imagePullSecrets?)
+
+# The rest of a CSR's requester, which is payload rather than reference and so
+# is destroyed instead of refused: `.spec.extra` is where a real cluster puts
+# its OIDC claims, `.spec.uid` is the auth provider's identifier for a real
+# person, and no rule reads either. Neither could take the refusal above anyway
+# — the `credential-id` the apiserver stamps on every request is a fresh hash
+# each time, so there is nothing to allowlist.
+#
+# Scoped to the object that carries the marker, deliberately: `metadata.uid` is
+# on every object in Kubernetes and the rule engine's identity is built on it,
+# so a `del(.. | objects | .uid?)` would empty all 23 fixtures at once while
+# still passing every test written about a CSR.
+| walk(if type == "object" and (has("signerName") or has("issuerRef"))
+       then del(.extra, .uid) else . end)
 
 # The env *name* stays, the value goes: a rule reports which variable is unset,
 # never what was in it.
@@ -134,12 +244,19 @@ refuse_foreign_nodes
 # address, so there is nothing here to match.
 #
 # IPv6 stays anchored to the whole string on purpose: unanchored, `::` matches
-# a Rust path, a C++ scope operator and every `key::value` in a log line.
+# a Rust path, a C++ scope operator and every `key::value` in a log line. The one
+# exception is the URL form, `[fd00::1]`, because the brackets are what removes
+# that ambiguity — no Rust path and no `key::value` is bracketed. It is the same
+# two forms as the anchored rule, in the framing `-n kube-system` introduced:
+# etcd and the apiserver carry their addresses inside `--listen-client-urls=`
+# and friends, and on a dual-stack cluster those are bracketed IPv6.
 | walk(
     if type != "string" then .
     # Two IPv6 forms: compressed (the `::` run) and written out in full, which
     # carries no `::` at all and so matched neither branch.
     elif test("^[0-9a-fA-F:]*::[0-9a-fA-F:]*$")
       or test("^[0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){7}$") then "REDACTED-IP"
-    else gsub("(?<ip>([0-9]{1,3}\\.){3}[0-9]{1,3})"; "REDACTED-IP")
+    else gsub("\\[(?<v6>[0-9a-fA-F:]*::[0-9a-fA-F:]*"
+              + "|[0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){7})\\]"; "[REDACTED-IP]")
+         | gsub("(?<ip>([0-9]{1,3}\\.){3}[0-9]{1,3})"; "REDACTED-IP")
     end)

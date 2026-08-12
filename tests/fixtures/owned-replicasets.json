@@ -8,54 +8,57 @@
         "creationTimestamp": "2026-08-12T20:45:53Z",
         "generation": 1,
         "labels": {
-          "app": "broken-quota",
+          "app": "broken-owned",
           "demo": "broken",
-          "pod-template-hash": "59654c756"
+          "pod-template-hash": "7bdb7645c8"
         },
-        "name": "broken-quota-59654c756",
-        "namespace": "k8rs-quota",
+        "name": "broken-owned-7bdb7645c8",
+        "namespace": "default",
         "ownerReferences": [
           {
             "apiVersion": "apps/v1",
             "blockOwnerDeletion": true,
             "controller": true,
             "kind": "Deployment",
-            "name": "broken-quota",
-            "uid": "81c3660a-deb1-41ec-830e-ee8ea448e338"
+            "name": "broken-owned",
+            "uid": "b5f27104-8990-4e9c-8640-490652d56bc7"
           }
         ],
-        "resourceVersion": "695",
-        "uid": "18d04433-11ec-4922-bee7-9258c34fc73e"
+        "resourceVersion": "7805",
+        "uid": "e9ae676c-4825-407e-b6ea-6beae01d1db6"
       },
       "spec": {
         "replicas": 1,
         "selector": {
           "matchLabels": {
-            "app": "broken-quota",
-            "pod-template-hash": "59654c756"
+            "app": "broken-owned",
+            "pod-template-hash": "7bdb7645c8"
           }
         },
         "template": {
           "metadata": {
             "labels": {
-              "app": "broken-quota",
+              "app": "broken-owned",
               "demo": "broken",
-              "pod-template-hash": "59654c756"
+              "pod-template-hash": "7bdb7645c8"
             }
           },
           "spec": {
             "containers": [
               {
+                "args": [
+                  "echo starting\nsleep 2\necho 'panic: dial tcp db.payments.svc:5432: connect: connection refused' >&2\nexit 1\n"
+                ],
                 "command": [
-                  "sleep",
-                  "3600"
+                  "sh",
+                  "-c"
                 ],
                 "image": "busybox",
                 "imagePullPolicy": "Always",
-                "name": "app",
+                "name": "quitter",
                 "resources": {},
                 "terminationMessagePath": "/dev/termination-log",
-                "terminationMessagePolicy": "File"
+                "terminationMessagePolicy": "FallbackToLogsOnError"
               }
             ],
             "dnsPolicy": "ClusterFirst",
@@ -67,17 +70,9 @@
         }
       },
       "status": {
-        "conditions": [
-          {
-            "lastTransitionTime": "2026-08-12T20:45:53Z",
-            "message": "pods \"broken-quota-59654c756-2fvgv\" is forbidden: exceeded quota: deny-all-pods, requested: pods=1, used: pods=0, limited: pods=0",
-            "reason": "FailedCreate",
-            "status": "True",
-            "type": "ReplicaFailure"
-          }
-        ],
+        "fullyLabeledReplicas": 1,
         "observedGeneration": 1,
-        "replicas": 0,
+        "replicas": 1,
         "terminatingReplicas": 0
       }
     }

@@ -371,8 +371,8 @@ result. Invariant 4 in CLAUDE.md is reworded accordingly.
 The review turned up five genuinely common failures the rule set missed. Only
 one is free with the watches already running:
 
-- **Rule 12 — pod stuck Terminating.** A `deletionTimestamp` older than the
-  grace period means a finalizer or a wedged kubelet is holding it. Costs
+- **Rule 12 — pod stuck Terminating.** A `deletionTimestamp` already in the
+  past means a finalizer or a wedged kubelet is holding it. Costs
   nothing (the Pod watch is already open), happens constantly, and `kubectl
   get` never explains it. **In v1.**
 
@@ -637,9 +637,14 @@ Two consequences that the implementation cannot skip:
   emitted. Two renderers, one source, and the same rule is readable in a test
   without parsing English.
 - **Clock skew is real and shows.** The timestamps come from the API server;
-  `now` comes from the user's laptop. A machine a few minutes fast produces a
-  negative age, and *"in -3 minutes"* on the first screen a beginner sees is
-  worse than useless. A non-positive age renders as **"just now"**.
+  `now` comes from the user's laptop. A machine a few minutes *behind* the
+  cluster produces a negative age, and *"in -3 minutes"* on the first screen a
+  beginner sees is worse than useless. A non-positive age renders as
+  **"just now"**. *(This sentence said "fast" until 2026-08-12 and had the
+  direction backwards — a fast laptop inflates ages, it does not negate them,
+  and it is the half that manufactures findings. What the clamp actually
+  protects, and what the fast half needs instead, is
+  [D55](#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12).)*
 
 **The type is `jiff::Timestamp`, and it is already in the tree** — verified
 against `k8s-openapi 0.28.0` rather than assumed, because the assumption was
@@ -1181,6 +1186,2137 @@ Phases 1 and 2 ran on `feat/scaffold` and `feat/fixtures` and their headings
 still say so — that is what happened, and rewriting it would make the plan
 file lie about its own history.
 
+### D33 — Phase 3 opens with one Phase 2 box still open, on purpose (2026-08-12)
+
+Phase 2's last box — `just cluster-down` on the LAN host — is unchecked and
+stays that way while Phase 3 runs. Phase 3 starts anyway. That is a plan
+change, so it is written here rather than applied by quietly ticking the box.
+
+**Why the box cannot be closed yet.** The box's own condition is "run it once
+no further capture needs the cluster", and a capture still does: Phase 4's
+Drain-safety and Waste reports have a negative fixture and no positive one,
+because nothing in `broken.yaml` produces a StatefulSet, a PVC, a PDB or a
+dead-selector Service. Tearing the cluster down now buys nothing and costs a
+rebuild.
+
+**Why Phase 3 does not have to wait for it.** Phase 3 is pure functions over
+fixtures that are already captured, sanitized, audited and committed — 23 of
+them, from `v1.36.1`. It needs no cluster, no network and no terminal
+([invariant 5](CLAUDE.md)). The open box blocks nothing in it.
+
+**Amended the same day: the host went down in a power cut and is unreachable,
+so whether that cluster is still standing is now unknown.** It changes nothing
+here, and that is the point of the pinned node image: `just cluster-up`
+rebuilds the same `v1.36.1` cluster from `scripts/cluster.sh`, so the visit
+that closes this box is a re-create if it has to be. Nothing was lost either
+way — the fixtures live in git, not on the host. What the outage does prove is
+that leaving a box open against a machine you do not control is the correct
+record: had it been ticked on "the teardown is basically done", the plan would
+now be claiming a step nobody can show ran.
+
+**Where the trip now happens, and how it leaves nothing behind (2026-08-12).**
+With the host gone, the rebuild runs on the developer's own machine at the
+Phase 3 close — one visit that captures Phase 4's four missing fixtures and
+then tears the cluster down, closing this box. It is set up to evaporate: the
+docker socket is granted for the session with
+`sudo setfacl -m u:$USER:rw /var/run/docker.sock`, which a docker restart
+undoes, **not** by adding the user to the `docker` group — that group is
+root-equivalent and would be a permanent privilege grant bought for a
+half-hour capture. `KUBECONFIG` points at a scratch path so kind never writes
+`~/.kube/config`, and `just cluster-down` removes the containers. Nothing
+about the capture depends on this: `scripts/cluster.sh` pins the node image,
+so the cluster is the same `v1.36.1` wherever it is built.
+
+**What this is not.** It is not permission to start a phase on top of unfinished
+work in general. The exception is narrow and holds only because the open box
+and everything in Phase 3 are disjoint: no Phase 3 box reads anything the
+teardown would change. Phase 2 remains formally open until the teardown runs
+and Phase 4's missing fixtures are captured in the same visit to the cluster —
+an honest open box, which [CLAUDE.md § phase close](CLAUDE.md) item 2 prefers
+to a false tick.
+
+### D34 — the temporary `main.rs` belongs to `dev-core` until Phase 12 (2026-08-12)
+
+[CLAUDE.md § Ownership](CLAUDE.md#ownership--and-the-file-each-one-may-write) gave
+`main.rs` to `dev-ui`, and the phase map in the same section gave Phases 3–7 to
+`dev-core` — while Phase 3, Phase 5 and Phase 7 each write a box into `main.rs`
+(the fixture-printing shell, the `--once` output, the headless ops driver). Two
+sentences that cannot both be obeyed, found the first time a box needed the
+file. The table is corrected rather than worked around.
+
+**`main.rs` is `dev-core`'s while it is the temporary driver — Phases 3 to 7 —
+and passes to `dev-ui` at Phase 12, where it is wired for real.** Nothing about
+it draws before then: it parses `args`, loads a fixture or a client, and prints.
+The file is the one place the ownership rule has a handover, and the handover is
+a phase boundary, which is exactly where the plan already stops.
+
+**The mechanical reason it cannot simply be skipped.** A file that no `mod`
+declaration reaches is not part of the crate, and `cargo fmt` never visits it —
+the correction Phase 1's guard ledger already paid for once. So `src/rules.rs`
+does not exist as far as fmt, clippy or the test runner are concerned until
+`mod rules;` is in `main.rs`. Writing the module and the line that reaches it are
+one change, not two, and they cannot belong to two different agents.
+
+### D35 — `just mutants` is a check that cannot fail, and the justfile unfreezes for one line (2026-08-12)
+
+Three findings came back from the test gate on Phase 3's first box. They are
+closed here, because a finding closed in conversation is a finding nobody can
+find again.
+
+**Accepted, applied one box later.** `cargo mutants --file src/rules.rs --file
+src/analysis.rs` prints `Found 0 mutants to test` and **exits 0** — and it does
+exactly the same for `--file src/does-not-exist.rs`, which was tried. That is
+the derived-list failure [CLAUDE.md § Code phase rules](CLAUDE.md) names: a
+path typo and a clean run print the same line. It needs a floor assertion on
+the mutant count. It is **not** applied in this box, because today the zero is
+honest — `rules.rs` holds types and no functions — so a floor now would be a
+red gate nobody could pass, and an impassable gate is the thing that teaches
+everyone gates are decorative. It lands in the box that first puts a function
+in `rules.rs`, written by `tester`. **The `justfile` froze at the Phase 2
+close; it unfreezes for that one line and nothing else** — recorded here rather
+than done quietly, which is what the forward-only rule asks for.
+
+**Fixed now.** `.gitignore` had no `mutants.out` entry, so every `just mutants`
+run left `mutants.out/` and `mutants.out.old/` untracked in the repo root.
+
+**Rejected, with the reason.** A variant inserted *above* `Critical` leaves the
+severity-order test green. That is correct behaviour, not a hole: the test's
+claim is "declaration order is severity order", and inserting a variant keeps
+it true. A test pinned to the variant set instead would go red on a legitimate
+addition — which is a different lie, and a more expensive one, because the
+person who adds a severity would learn to edit the test to get past it.
+
+### D36 — the `Finding` shape the review sent back (2026-08-12)
+
+Phase 3's first box was written exactly to the shape
+[docs/architecture.md § The shared contract](docs/architecture.md#the-shared-contract)
+specified, and the operator review blocked it on three counts. The code was
+faithful; **the documented contract was the thing that was wrong**, which is
+why this is a decision and not a bug fix. The box exists to decide the identity
+every later rule files under, and `rules.rs` freezes at the end of this phase —
+so the shape is settled here, before there is anything to migrate.
+
+**What was missing, and the concrete case that proves each.**
+
+- **The pod the finding is about.** One crashlooping pod fires rules 1, 5, 6 and
+  7 — checked against this repo's own `tests/fixtures/crashloop.json`, which is
+  ready=false, 5 restarts, `CrashLoopBackOff`, exit 1. A `views.rs` holding only
+  `Vec<Finding>` can count findings, not pods, so the card renders **"4 of 5
+  pods" for a single broken pod** — the blast radius, wrong by 4× on the most
+  common failure in the rule set. `Finding` now carries `object` beside `owner`:
+  the numerator is the count of distinct `object`s. It is also the only possible
+  data source for [detail.md](screens/detail.md)'s "⏎ lists which pods of the
+  group are affected", which had none.
+- **A Node.** N1–N6 are boxes in this same phase and a Node is cluster-scoped.
+  The old shape could only say `{Pod, "", "k8rs-worker2"}`, which renders
+  `/k8rs-worker2`, offers `logs` and a container picker for a machine, and
+  builds `kubectl describe pod k8rs-worker2 -n ""` — invariant 4 lying in the
+  one record that may not. `OwnerKind::Node` exists and `namespace` is
+  `Option<String>`, `None` meaning cluster-scoped.
+- **Owners that are not one of five kinds.** A CronJob's pods are owned by a
+  Job whose name changes every run, so filing under `Job` grows a fresh card
+  every schedule tick — the flood [D3](#d3--findings-group-by-owner-not-by-pod)
+  exists to prevent. `--cascade=orphan` leaves pods whose chain stops at a
+  ReplicaSet, and under Argo Rollouts or any database operator the
+  ownerReference kind is a CRD. `CronJob`, `ReplicaSet` and `Other(String)`
+  cover all three; `Other` prints the kind it actually got instead of asserting
+  a false one. Resolving ReplicaSet → Deployment stays `k8s.rs`'s job
+  ([D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)) —
+  this type only has to hold either answer.
+
+**Two `String`s became `Option`s for the same reason.** `kubectl_cmd` was
+empty-as-absent, so "no such command exists" (rule C1 reads a local file) and
+"the rule author forgot" were the same value, indistinguishable by any test.
+`uid` was absent entirely, and [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)
+requires the confirm dialog to hold one: in the Alerts view the selected object
+*is* a `Finding`, so without it a card drawn before an Argo re-sync can scale
+the object that replaced the one the operator inspected. The struct already
+made this argument in its own doc comment — `Option<Owner>` would be "the arm
+every call site forgets" — and then took the opposite side one field down.
+
+**Rejected: `resourceVersion` does not go on `Finding`.** D22 names it beside
+the uid, but it belongs to the moment the dialog opens, not the moment the rule
+ran; a rule-time value would be stale by construction and would invite a
+comparison that means nothing. The uid answers "is this still the same object",
+which is the question a stale card actually poses. Recorded because the field's
+absence otherwise reads as an oversight.
+
+**The gap this opened, which no code change closes.** Every pod fixture in the
+repo has `ownerReferences: null` — all twelve, checked one by one; only the two
+ReplicaSet captures carry an owner at all. `scripts/broken.yaml` creates bare
+pods, so **every positive test in Phase 3 files under `OwnerKind::Pod` and the
+four workload branches ship with no positive fixture** — and `cargo mutants`
+would not object, because nothing exercises them. A grouping key tested only in
+its no-owner case is [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)
+again, one layer up. `broken.yaml` needs a Deployment-owned broken pod, which
+needs the cluster — so it is a new open box in Phase 2, captured on the same
+trip as [D33](#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12)'s
+teardown, not a note in a review nobody reads again.
+
+### D37 — a controller's message is a status field, not a payload (2026-08-12)
+
+Two recorded rules collided the moment `Finding.evidence` was written down.
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) says W1
+shows the controller's message **verbatim** — "exceeded quota: pods, used 0,
+limited 0" is the whole diagnosis, and paraphrasing it is how a tool becomes
+useless. The `evidence` field's own rule says a finding names **fields, never
+payloads**. A validating webhook that echoes the submitted object back into its
+denial message — several in the wild do — puts an env value inside a controller
+message, and now both rules apply to one string.
+
+**Verbatim wins, and the payload rule is narrowed to say what it always meant.**
+The rule governs what *k8rs goes and fetches*: it never reads Secret data, never
+renders an env value, never puts either in evidence — that is absolute and it is
+the [security gate](CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions)'s
+"environment variable values are never displayed". A message a controller wrote
+into a status the user can already `kubectl describe` is a different thing: k8rs
+did not go looking for it, it is not privileged relative to the reader, and
+hiding it would leave the user staring at "the pods were never created" with the
+reason blanked out. Refusing to show what `kubectl` shows is not a security
+control, it is a tool that lies by omission.
+
+**What that costs, and what pays for it.** The message is untrusted free text,
+so it takes the same treatment every other API string takes: control characters
+stripped at the render boundary ([invariant 9](CLAUDE.md)) and length bounded at
+ingest, which Phase 5 already owes for the 50MB-annotation case. The one thing
+that changes is a warning where it belongs: `--once` output is what gets
+redirected into CI logs and pasted into tickets, so it is the place a webhook's
+echo reaches an audience wider than the person at the terminal. That is a
+documentation line for the `--once` box, not a reason to blank the field.
+
+**Addendum to [D36](#d36--the-finding-shape-the-review-sent-back-2026-08-12) —
+how a cluster-scoped finding renders.** Fixing the type left the mockups
+asserting the opposite, so `screens/` moved with it: the identity line is
+`namespace/name` for a namespaced object and a bare `name` for a cluster-scoped
+one, stated once in [screens/README.md](screens/README.md) rather than fixed in
+the one place it was caught. Three consequences were settled there, all worth
+keeping: dropping `infra/` also drops the only clue that `node-3` is a machine,
+so **the kind moved into the sentence under the name** (N2 now reads "This node
+refuses new pods (cordoned)"); it is `node-3`, **not** `node/node-3`, because a
+`kind/name` prefix puts a slash back on the very line whose slash the reader was
+just taught means a namespace; and **N6's card is a workload card, not a node
+card** — a Pending pod that cannot be placed is about the pod, with the node
+named in the evidence, so only N1–N3 produce a node card at all. The drain
+dialog was the proof that this was never cosmetic: its title said
+`Draining infra/node-3` while the command log under it said
+`kubectl drain node-3`, and the fake namespace was what hid the disagreement.
+
+### D38 — the grouping key was a derive, and a derive cannot be told what to ignore (2026-08-12)
+
+The shape [D36](#d36--the-finding-shape-the-review-sent-back-2026-08-12) settled
+carried one defect no compiler could catch. `ObjectId` derived `Hash` and `Eq`
+over all four fields, `uid` among them, and `views.rs` groups by `owner` — so
+these are two different grouping keys:
+
+```
+ObjectId { kind: Deployment, namespace: Some("payments"), name: "web", uid: Some("9f2c-aaaa") }
+ObjectId { kind: Deployment, namespace: Some("payments"), name: "web", uid: Some("9f2c-bbbb") }
+```
+
+Two cards for one Deployment: the flood [D3](#d3--findings-group-by-owner-not-by-pod)
+exists to prevent, arriving through the field added to prevent a *different*
+bug. It compiles, the suite passes, and it would surface in Phase 9, months
+after `rules.rs` froze.
+
+**The mechanism above is the second one written here; the first was wrong and
+the correction is the useful part.** This entry originally said the two uids
+were `Some` and `None` — a rule that resolved ReplicaSet → Deployment without
+the on-demand fetch having the name but no uid. The operator review killed it:
+`uid` is a *required* field of `metav1.OwnerReference`, non-`Option` in
+`k8s-openapi` and present in this repo's own `quota-replicasets.json`, and
+without the fetch there is no Deployment **name** either, because `web` is not
+derivable from `web-7d4f5c6b8`. The pair was hand-built for a test and then
+asserted as though it came off a cluster. The reachable case is a **Deployment
+deleted and recreated under the same name**: old-generation pods still
+terminating under uid-A while new pods run under uid-B, which is what any Argo
+prune-and-recreate produces. Same fix, honest reason — and the difference is
+not academic, because the old wording told the `k8s.rs` author that a workload
+owner with `uid: None` was normal, and `uid: None` is the one value that
+silently disables [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms).
+**A workload owner always carries a uid; C1's kubeconfig certificate is the
+only `None` in the product.**
+
+**`Hash` is dropped from `ObjectId` and the identity becomes a method** —
+`group_key() -> (&ObjectKind, Option<&str>, &str)`. Not a doc comment asking
+callers to be careful: the wrong key stops compiling, so it is unrepresentable
+rather than discouraged. Two details, both found by probing rather than by
+reading: the wall is not the declaration — `HashMap<ObjectId, _>` *declares*
+fine, because the `Hash` bound sits on `insert`/`get`/`entry`, not on
+`HashMap::new` — and when it does fire, rustc says
+`help: consider annotating ObjectId with #[derive(Hash)]`, offering the
+two-cards bug as the fix in the text a future developer reads before any doc
+comment. The comment in `rules.rs` pre-empts that advice by name. It also makes the
+box's own sentence mechanical — the identity is decided in the bottom layer
+instead of re-derived in `views.rs`, where a second definition would drift.
+
+**`Eq` stays derived over all four fields, on purpose.** It answers
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s question — is
+the object about to be mutated still the one the operator inspected — and an
+`Eq` that quietly ignored the uid would answer *that* wrong, which is worse than
+the bug being fixed. Two questions, two mechanisms: the derive for identity of
+the object, the method for identity of the card.
+
+**The gate that found it was itself broken, which is the more expensive half.**
+Hunting this, `tester` deleted every test from `rules.rs` and ran the guard:
+`test-guard: 0 declared, 0 listed, 0 ignored — OK`, `cargo test` green,
+`just check` green. **The whole suite could be deleted and CI would applaud.**
+Every rule in the guard was a comparison between two counts, and comparisons all
+hold at zero — [D26](#d26--a-green-build-that-proves-nothing-2026-08-12) item 2
+said "CI asserts a non-zero test count" and nothing ever did, in `just check` or
+in the workflow. The floor is in, with a positive and a negative self-test, and
+it is passable today, which is what separates it from the `just mutants` floor
+[D35](#d35--just-mutants-is-a-check-that-cannot-fail-and-the-justfile-unfreezes-for-one-line-2026-08-12)
+deferred. A guard whose rules are all relative is the derived-list failure in a
+new costume: with nothing to compare, everything agrees.
+
+**One assertion in the new tests has never been red, and that is recorded
+rather than hidden.** The negative test's fourth case — cluster-scoped versus
+namespaced — cannot fail in any way its "different namespace" case does not
+fail first, and it survived the one mutation aimed at it (`group_key`
+flattening `None` to `Some("")`). It stays, because it states intent for a
+shape the rest of the suite does not name, but by this project's own rule it
+proves nothing yet. What would make it real is written into the C1 box in
+[todo.md](todo.md): `Some("")` is unreachable only while an `ObjectId`'s
+namespace comes from an object's own `metadata.namespace` — measured, not
+assumed, against all 23 captures, `sanitize.jq`, and the DNS-1123 label rule
+that forbids an empty namespace name. A C1 that builds its identity from the
+*effective scope* instead would make it reachable, because `--namespace` is
+parsed from `args` with no validation.
+
+**Accepted as a known ceiling, not fixed:** `#![expect(dead_code)]` at the top of
+`rules.rs` is module-wide, so an item written *after* it can be dead and
+invisible — a never-called function was appended and clippy stayed green.
+Narrowing it to per-item would cost a line of noise on every type, so it stays
+module-wide.
+
+**Its exit was also mis-stated, and the correction is a pre-authorisation.**
+This entry first called the attribute self-limiting, "because the file freezes
+with everything constructed". Nothing guarantees that: `Severity::Info` has no
+producer in `rules.rs` today, `analysis.rs` gets one in Phase 4, and whether
+N4's version skew adds one here is N4's own box. While *any* item stays
+unconstructed the expectation is still fulfilled and the line cannot be
+removed — removing it makes `dead_code` fire and the build go red. It becomes
+**unfulfilled** only when the last item is constructed, which may be phases
+later, and `-D warnings` then turns `just check` red pointing at
+`src/rules.rs:11` — possibly a file frozen a phase earlier. `clippy
+--all-targets` evaluates it per target, and the two targets already disagree:
+with the attribute removed, the bin reports five dead items and the test target
+two, so they can flip at different boxes. **Whichever box constructs the last
+item in this file deletes that one line. The deletion is authorised here, in
+advance: it is not a freeze violation and it does not need a new decision** —
+which is the point of writing it down while the red build is still hypothetical
+and nobody is under pressure to explain it.
+
+### D39 — a Node owns pods, and three more things the shape could not say (2026-08-12)
+
+The second operator review of the same box. The shape held; what did not hold
+were the sentences written around it, each falsified by a cluster this repo
+builds or a fixture it has already committed.
+
+**A mirror pod is owned by a Node, so "a Node is nobody's owner" was false on
+`just cluster-up`'s own cluster.** kubelet writes an `ownerReference` of kind
+`Node` onto every static pod, which on kind and on any kubeadm cluster means
+`kube-apiserver-*`, `etcd-*`, `kube-scheduler-*` and `kube-controller-manager-*`
+all have one. Left alone, an `etcd` that restarts four times after a laptop
+suspend files under `{ kind: Node, namespace: None, name: "k8rs-control-plane" }`
+— `kube-system` gone from the card a beginner needs in order to find the pod
+again, four control-plane pods collapsed onto one card, and, since `views.rs`
+picks the card shape from `owner.kind`, a machine-shaped card drawn for a
+crashing pod. **An `ownerReference` of kind `Node` is discarded: the pod files
+under itself, so `owner.kind` is `Pod` and `owner == object`.** A mirror pod
+has no controller that can be scaled, restarted or rolled, and the card stays
+`kube-system/etcd-k8rs-control-plane`. `ObjectKind::Node` appears in `owner`
+only when the finding is *about* the node — N1–N3. Stated that mechanically on
+purpose: the first wording said "a `Node` in the owner role is the no-owner
+case", which reads as an instruction to *keep* the Node, and an implementer
+obeying it arrives at the exact card this ruling forbids. The upstream behaviour is documented but asserted by nobody here, so
+the same trip that captures the owned pod captures `-n kube-system` too.
+
+**The numerator rule printed "1 of 0 pods".** `object`'s doc defined the
+numerator as distinct `object.name`s in the group, which holds only while every
+object in it is a pod. W1's object is a **ReplicaSet** — `quota-replicasets.json`
+is `broken-quota-59654c756`, `ReplicaFailure`, `status.replicas: 0` — so the
+group renders 1 of 0, on the failure class
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) added
+the workload watch to stop the tool lying about; W2 breaks it the other way and
+counts a Deployment as one of its own pods. **The numerator counts distinct
+objects whose kind is `Pod`, and a group with none of them has no `n of m` at
+all** — the shape a node card already uses. **Distinct by the whole `object`,
+not by `group_key()`**, which is the half that had to be said out loud:
+`ObjectId` has no `Hash`, the type's own doc answers that compile error with
+"use `group_key()`", and a reader following that advice while *counting* writes
+the wrong thing. Not a bug being prevented — for objects of kind `Pod` the two
+are provably identical on any snapshot, since `group_key` is
+`(kind, namespace, name)` and two pods differ in it exactly when their names
+differ. An intent being stated: `group_key()` answers *which card*, the whole
+identity answers *what is counted on it*, and code that says the first while
+meaning the second stops being right the moment something other than a pod is
+counted.
+
+**The first draft of that paragraph justified it with a scenario that cannot
+happen** — a terminating `web-0` counted beside the `web-0` that replaced it.
+Two pods cannot share a name in one namespace: the name is the etcd key, the
+second create is rejected `AlreadyExists`, and a StatefulSet will not recreate
+an ordinal until the terminating pod is gone from the API. It is the defect
+[D38](#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)
+recorded one round earlier — a pair built by hand for an argument and then told
+as though it came off a cluster — repeated one field down by the same author,
+in the same week, having just written the correction. Worth keeping visible for
+that reason: the owner-uid divergence one field up *is* real, and the two look
+identical on the page. What separates them is that the two Deployment
+generations have different uids and their pods have different **names**, which
+is exactly why those pods coexist and two pods called `web-0` never do.
+[D4](#d4--the-flagship-example-promised-a-number-that-cannot-exist) is the
+precedent: a number that cannot exist is not a rendering detail.
+
+**`CronJob` was unreachable under this project's own least-privilege role.** A
+pod names its Job and says nothing about the CronJob above it, so the grouping
+needs a GET on the Job — and `k8rs-readonly` granted `""`, `apps`, `policy` and
+`metrics.k8s.io`, with no `batch`. Under the role the docs tell people to use,
+every tick would file under its own Job name: the churn the variant was added
+to prevent, delivered to the user least equipped to explain it.
+[docs/security.md](docs/security.md#rbac) now grants `batch: jobs` read verbs,
+and the 403 degrades by name — the finding files under the Job and says the
+CronJob could not be read. `cronjobs` is deliberately not granted: the Job's
+ownerReference already carries the CronJob's kind, name and uid, so nothing
+reads the object, and a role whose entire argument is least privilege does not
+get to carry a resource it never GETs. Auditing that block found two more of
+the same class, both fixed in the same edit — `certificates.k8s.io` for rule C3
+and `discovery.k8s.io/endpointslices` for the waste report, each a Phase 5 box
+with its fixture already committed, each a 403 waiting for the user who
+followed the documentation. `cert-manager.io` stays out and is written into the
+block as a commented-out opt-in, because C4 only exists where cert-manager is.
+The lesson is the same one
+[D36](#d36--the-finding-shape-the-review-sent-back-2026-08-12) learned about
+docs: this rework synced `docs/architecture.md` and `REQUIREMENTS.md` for the
+shape and forgot the file that says what permissions the shape needs.
+
+**Two smaller rulings, both written into `rules.rs` because it freezes first.**
+The members of a group must agree on the uid; where they disagree — the
+recreate case again — the confirm dialog refuses and offers a re-read rather
+than picking one, because the natural implementation is `.first()` and
+`.first()` is whichever finding happened to sort first, which turns D22 into a
+coin flip that reports "already gone" for a Deployment that is running. And
+C1's identity is settled: `kind: Other("kubeconfig")`, `namespace: None`,
+`name` = the kubeconfig **context name**, `uid: None` — otherwise its author
+must either invent a kind the API never reported or put a sentence in a field
+that kubectl lines are built from.
+
+**The file was also two-thirds prose, restating these entries in slightly
+different words.** CLAUDE.md keeps the *why* in NOTES and asks for comments
+sparingly; a second copy in another wording is a drift generator, and this file
+freezes with both copies in it. The comments that stay are the ones the
+compiler cannot say — chiefly that rustc answers the missing `Hash` with
+`help: consider annotating ObjectId with #[derive(Hash)]`, offering the
+two-cards bug as the fix — plus the rulings a later box must obey, each
+pointing here instead of re-arguing.
+
+### D40 — the capture could not produce the shape, so the test sets one field (2026-08-12)
+
+Phase 3's second box decoded the twelve committed pod captures into
+`PodSnapshot` and every test passed. `tester` then corrupted the decode one
+field at a time — 94 mutations, each applied to a pristine copy, compiled, run
+and reverted against a hash — and **32 fields could be broken with the whole
+suite staying green**. `PodSnapshot.owner` replaced by `id.clone()`:
+`19 passed; 0 failed`. [D3](#d3--findings-group-by-owner-not-by-pod)'s one card per owner, the
+premise the entire Alerts view is built on, was proven on a ReplicaSet and
+never once on a pod.
+
+**The cause is not the tests, it is the cluster.** Not one captured pod carries
+an `ownerReferences` at all; no node in `nodes.json` is NotReady, cordoned or
+under pressure; every workload fixture is either fully ready or all-null, so
+`desired`/`ready` could be read from five different wrong status fields
+undetected; the single hostPath mount carries no `readOnly` key, and rule 8
+fires *on* writable, so a decode hardwiring "writable" is a false-positive
+generator that passes; `allocatable` equalled `capacity` on all three kind
+nodes, and the gap between them is the whole of N5. A branch whose input the
+capture cannot contain is a branch no test can reach — and the obvious fix is
+the one CLAUDE.md forbids, because hand-written JSON resembles reality and is
+not it.
+
+**Ruling: a decode test may start from a committed capture and set one field.**
+The precedent was already in the box's own diff —
+`a_forced_delete_beats_the_grace_period_the_spec_asked_for` takes the real
+`stuck.json` and sets the grace period a `--grace-period=0` would have set. Made
+general, with the bounds that are the difference between this and the thing it
+resembles:
+
+- it starts from a **committed capture**, never a literal object;
+- **one field, or one coherent group of fields, per test**, and the comment says
+  what value, why the API produces it, and why today's capture does not;
+- **a third case the first draft of this ruling did not name**: a test proving
+  *which* field is read must set the neighbours too, and the count is then not a
+  measure of anything. `desired_and_ready_are_read_from_their_own_fields_and_not_a_neighbour`
+  sets sixteen fields across three objects, because setting only
+  `readyReplicas` cannot show that `ready` is not read from `availableReplicas`
+  — five sibling counters, five **distinct** values, and every one of the four
+  wrong-field decodes dies on it. That is not a coherence group, it is the
+  discrimination mechanism, and it is the shape the rule wants most;
+- the whole synthesized object must still be one **the API could emit**. The
+  NotReady node synthesis set `DiskPressure` to `True` with the reason
+  `KubeletHasDiskPressure` and left the captured message reading *"kubelet has
+  no disk pressure"* — nothing asserted it, so nothing was red, but the licence
+  for this entire technique is "a value the API demonstrably produces" and half
+  an object is not one;
+- it is a **decode** test. A *rule's* positive fixture stays a real capture —
+  this never becomes the way a rule gets proven, which is the whole reason the
+  Phase 2 capture trip exists;
+- each such test **names the object the capture trip should bring back** to
+  replace it, so the list of what the cluster still owes is in the tests rather
+  than in someone's memory.
+
+`From<StatefulSet>` is the one hole this cannot close — `statefulsets.json` is
+an empty list, and synthesising a whole StatefulSet is hand-written JSON with
+extra steps. It stays untested, says so in the code, and goes on the trip.
+
+**Two syntheses are permanent, and saying so is part of the ruling** — a
+"replace me later" that can never be replaced is the kind of note that decays
+into furniture. A node whose `allocatable` differs from its `capacity` requires
+`--kube-reserved` on the kubelet: kind reserves nothing, so that is a cluster
+configuration change rather than a workload the capture trip can apply, and N5's
+whole subject is the gap between the two numbers. A non-controlling
+`ownerReference` is the other: producing one means contorting `broken.yaml` into
+a shape no real workload has, which buys a fixture at the cost of the manifest
+being an honest description of a broken cluster.
+
+One coupling accepted knowingly: rule 3's image-pull message is pinned by
+equality, and that message contains the sanitizer's `REDACTED-IP` placeholder,
+so the decode test is coupled to the sanitizer's output. It stays — but **not
+for the reason it was first written down here.** Restoring the real addresses
+in `image.json` was tried, and `scripts/fixture-audit.sh` fails first and far
+more legibly (*"[image.json] carries 5 IP addresses — this file never met
+scripts/sanitize.jq"*) while the equality assert produces a 400-character
+string diff inside a *decode* test. The audit is the first line of that
+defence; the assert is redundancy, and describing it as the thing that prevents
+silent acceptance would have been an overclaim that outlived the person who
+made it.
+
+### D41 — `cargo mutants` cannot see the defect it was put there to catch (2026-08-12)
+
+Phase 3 ends on a box reading "`cargo mutants --timeout 90` clean over
+`rules.rs` — a MISSED mutant is a rule change no test objected to". Run against
+the decode above, it reports **1 missed of 34**; `tester`'s hand-written
+mutations found **32**. The tool mutates return values and match guards, and 30
+of the 32 holes live in **struct-literal field assignments** — `restarts:
+c.restart_count` becoming `restarts: 0` is not a mutation it generates.
+
+The one it did find is worth naming, because it is the same one a human found
+independently: `replace match guard o.kind != "Node" with true in owner_of` —
+[D39](#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)'s
+mirror-pod discard, unreachable because no fixture carries a Node
+`ownerReference`.
+
+**So the box stays, and stops being read as a proof of the decode.** A green
+`cargo mutants` over `rules.rs` means the rules' *logic* survived mutation; it
+says nothing about whether the fields those rules read were decoded from the
+right place. That second question is answered by field-level mutation done by
+hand, and the box now says so. This is
+[D26](#d26--a-green-build-that-proves-nothing-2026-08-12) one level up: there,
+a guard that had only ever been green; here, a gate that is green because it
+never looked.
+
+**A `scripts/` harness to make the hand sweep permanent was offered and
+declined.** The process already carries it: step 4 of the cycle is `tester`'s on
+every box, and this entry is what tells that step to go field by field on a
+decode. A second mechanism enforcing what a named person is already accountable
+for is machinery that has to be maintained and can itself rot green. If a later
+box ever gets its decode changed without a sweep, the process failed and the
+harness becomes worth building — that is the trigger, recorded so the decision
+is revisited on evidence rather than on taste.
+
+### D42 — the snapshot types freeze one phase after the file they live in (2026-08-12)
+
+todo.md says **Frozen after: `rules.rs`** at the end of Phase 3, and its own
+Phase 5 box says "*Phase 4* defined `ClusterSnapshot`". Both cannot be true,
+and the second is the honest one about what Phase 4 needs: the Capacity report
+wants `cpu_limit`, Waste wants `status.reason` for Evicted pileups, and
+Drain-safety wants Services, PVCs, PDBs and EndpointSlices on the snapshot —
+none of which any Phase 3 rule reads, so Phase 3 correctly refuses to invent
+them (a field with no rule behind it is a guess, and `cargo mutants` cannot
+object to a branch nothing exercises).
+
+Moving `ClusterSnapshot` up to `analysis.rs` would invert the pyramid —
+`rules.rs` is below it and takes the snapshot as its input. So the freeze is
+made per-concern instead of per-file: **`rules.rs` freezes at Phase 3 close
+except for the snapshot types and their decode, which freeze at Phase 4
+close.** Phase 4 may add fields to them and nothing else in the file: not a
+rule, not `Finding`, not `ObjectId`, not `analyze`. The forward-only rule is
+intact — nobody reaches back into finished *logic*; a shared contract simply
+has two consumers and gains its second one a phase later.
+
+### D43 — N2 has no clock, and that makes a finding's age optional (2026-08-12)
+
+> **Superseded in its premise on 2026-08-13 — read
+> [D64](#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13)
+> first.** A cordon *does* leave a timestamp: the node lifecycle controller
+> stamps `timeAdded` on the taint it mirrors from `spec.unschedulable`,
+> regardless of effect, so **N2 may say "cordoned 2 hours ago" after all** —
+> [D65](#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13)
+> records that as a capability the rule may use, not one it must. The rest of
+> this entry — the autoscaler cases, and N2 staying quiet during a scale-down —
+> still holds, and so does the conclusion the title draws: an age stays
+> **optional**, because the hand-applied taint carries no stamp.
+
+N2 was written as **"unschedulable for 6 days"** and `screens/alerts.md` drew
+the card with `6 days ago` in the age column. There is no source for that
+number. `spec.unschedulable` is a bare boolean; no node condition transitions
+on a cordon, `Ready` stays `True`; and the taint `kubectl cordon` adds is
+`NoSchedule`, while `k8s-openapi 0.28.0`'s own `Taint::time_added` says
+verbatim *"It is only written for NoExecute taints"* — read out of the crate
+source, not inferred. (That sentence is **gone from the v1_34+ generated docs**
+in the same crate, which say only "the time at which the taint was added". The
+behaviour is unchanged; the citation stops being reproducible if the feature
+pin moves up, so it is quoted here with its version.)
+
+**That is a statement about `kubectl cordon`, and not about every cordon.**
+The two controllers that cordon most nodes in the wild do stamp the time:
+cluster-autoscaler's `ToBeDeletedByClusterAutoscaler` taint carries *the unix
+second the scale-down began* as its **value** (`utils/taints/taints.go`:
+`Value: fmt.Sprint(time.Now().Unix())`, added by the same call that cordons),
+added by the same call that cordons). **Karpenter is *not* its equivalent, and
+an earlier version of this entry said it was** — `karpenter.sh/disrupted` is
+declared with a key and an effect and no `Value` field at all
+(`kubernetes-sigs/karpenter/pkg/apis/v1/taints.go`), and it is `NoSchedule`, so
+`Taint::time_added` is empty too. On a Karpenter cluster there is no clock
+anywhere in the node object. The claim was corrected on the same day it was
+written, by an operator review that went to the source instead of accepting the
+symmetry.
+
+Neither case needs a contract change — `NodeSnapshot.taints` already carries
+key, value and effect — but both change N2: during a scale-down the node is
+cordoned *with pods on it* for the whole eviction window, so N2 would fire,
+repeatedly, on a cluster doing exactly what it was configured to do. **N2 stays
+quiet when a scale-down taint is present.** A node an autoscaler is
+deliberately removing is not a half-finished operation; it is an operation in
+progress.
+
+**But silence forever is a different claim from silence during the window, and
+only the second one is defensible.** A scale-down that a PodDisruptionBudget
+blocks indefinitely — node cordoned, tainted, workload still on it, the
+autoscaler retrying — is a real loss of capacity, it is the most common way a
+scale-down goes wrong, and under the rule above nothing on any screen shows it.
+That case belongs to the **Drain safety report** (Phase 4: *for every node,
+what a drain would do and what would block it*), which is where "a disruption
+that is not finishing" is exactly the question being asked, and it keeps Alerts
+free of a card about an operation that is merely slow. Recording it matters
+more than which screen wins: before this, a stuck scale-down was silent and
+nobody had written down that it was.
+
+`metadata.managedFields` does carry the timestamp of whoever set the field, and
+it is rejected: it is pruned at ingest by design, the sanitizer deletes it so
+no fixture could ever test the path
+([D30](#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)),
+and a field manager's name is not an API contract.
+
+**So N2 reports no duration**, and the action line loses the inference the
+duration was carrying — "someone's maintenance window never closed" is a claim
+about elapsed time the tool cannot make. The consequence reaches two boxes
+ahead: **a `Finding`'s timestamp is an `Option`**, because some findings have
+no moment to point at, and the renderer needs an answer for that column rather
+than a zero that draws as 1970.
+[D4](#d4--the-flagship-example-promised-a-number-that-cannot-exist) is the
+precedent and this is its third occurrence — a number that cannot exist is not
+a rendering detail, and a mockup is where it hides longest.
+
+**Losing the clock cost N2 the thing that made it a finding, so the rule is
+narrowed rather than left noisy.** Without a duration, a node cordoned forty
+seconds ago for routine maintenance draws exactly the card a node cordoned six
+months ago draws — an alert raised on every routine maintenance window, and a false
+positive is a bug here, not a tuning question. The discrimination the duration
+was carrying is available from a field that exists: **N2 fires only on a
+cordoned node that still has pods on it** — a drain someone started and did not
+finish, which is both actionable and true at any age. **Corrected the same day
+by [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12):
+"still has pods on it" as written is true of every correctly drained node,
+because a drain never evicts DaemonSet or static pods. The count is only of
+pods a drain would actually move.** A cordoned node with
+nothing on it is a *parked* node: correct, deliberate, and money burning
+quietly, which is a **Capacity report row**, not an alert. That is
+[D2](#d2--the-dividing-line-broken-now-vs-risky-later)'s own line applied
+honestly — broken now stays in Alerts, risky later goes to a report — and it is
+what the card shows: `9 pods still run here` is the evidence, and the zero case
+does not reach this screen at all.
+
+The count survives the trap that killed `managedFields` as a source: the
+sanitizer *refuses* a capture carrying foreign node identifiers rather than
+rewriting them ([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)),
+so both halves of the `spec.nodeName` join stay intact in a fixture and the
+number is testable.
+
+**Narrowing the rule moved the blindness from the evidence line to the trigger,
+and that is a different bug.** The first version of this ruling said the count
+is suppressed under namespace scope — fine when the count was decoration. Now
+it decides whether the card exists at all: a user running `--namespace
+payments`, or one whose cluster-wide pod LIST 403'd into the fallback, sees
+zero pods on a node that has forty, and N2 silently does not fire. A wrong
+number was replaced by a missing finding, which is worse because nothing on the
+screen shows it happened.
+
+**So a rule that needs every pod on a node is disabled under namespace scope
+and says so, rather than computing a partial answer.** That is not a new
+mechanism — it is the degradation
+[docs/architecture § Error handling](docs/architecture.md#error-handling)
+already specifies for a 403 on a secondary stream: the feature switches off and
+names what is missing. **N2 and N5 both take it** — overcommit is the same
+cluster-wide join, and a partial sum of requests understates every node it is
+asked about. N6 is unaffected: it reads node taints and the Pending pod's own
+spec, both of which are in scope by definition.
+
+### D44 — five more mockups promising numbers nothing produces (2026-08-12)
+
+Fixing N2's card came with a sweep of the other 30 mockups, because a defect
+found by an implementer three phases early means nothing had been checking. The
+sweep is the entry; the fixes belong to the boxes that build these screens, and
+each is named here so it is inherited rather than rediscovered.
+
+- **`screens/resources.md` — `jobs 7` in the sidebar.** Jobs are not in the
+  permanent watch set ([D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)
+  puts the J-series in v0.2) and browser kinds are watched only while their view
+  is open, so that count either buys a stream
+  [invariant 6](CLAUDE.md) forbids or materialises out of nowhere after the
+  first visit. The pod and workload counts above it are free; this one is not.
+- **`screens/states.md` — `reading the cluster… 2,140 pods`.** Mid-LIST there is
+  no total. Paginated, the API offers `remainingItemCount`, which its own
+  documentation calls a hint.
+- **`screens/analysis.md` — `API server certificate 210 days`.** C2, drawn as a
+  row while kube-rs does not expose the peer certificate and the second
+  connection it needs is undecided. A row with no data path is a promise made in
+  a picture.
+- **`screens/dialogs.md` — `replaced by web-2c81a 3 seconds ago`.** The
+  timestamp is real (`creationTimestamp`); *"replaced by"* is an inference from
+  a shared ownerReference and names the wrong pod whenever the ReplicaSet scaled
+  for any other reason.
+- **Rules 3, 4 and 8 have no event time.** `state.waiting` carries no timestamp
+  and rule 8 is a fact about a spec, not an event. The general rule, binding on
+  the box that puts timestamps on `Finding`: **a card's age is the time of the
+  event it describes, or it is blank** — creation time is not a substitute,
+  because a pod created nine days ago that started failing to pull four minutes
+  ago is nine days old and four minutes wrong.
+
+### D45 — the decode invented a container state the API says is `Waiting` (2026-08-12)
+
+`ContainerState` was given a fourth variant, `Unknown`, for "the kubelet
+reported a state with nothing set in it". k8s-openapi 0.28.0's generated doc,
+straight from the OpenAPI definition, says otherwise: *"Only one of its members
+may be specified. **If none of them is specified, the default one is
+ContainerStateWaiting.**"* No fixture reaches the branch, so nothing was red —
+the file's contract and the API's contract simply disagreed, quietly, in the
+one file that freezes first.
+
+**The API wins: the empty case decodes as `Waiting { reason: None, message:
+None }` and `Unknown` is deleted.** Behaviour is unchanged — rules 1, 3 and 4
+match on a *named* reason, so a `Waiting` with none fires nothing, exactly as
+`Unknown` fired nothing — and one variant that nothing constructs goes away
+with it. The alternative was keeping a state whose only justification was a
+guess about the kubelet, in a type Phase 5 hands live watch data to.
+
+Found by mutation testing, not by a rule: the survivor list was empty, so the
+sweep went to the *source* to check the one claim it could not falsify — that
+the three-way precedence is unobservable because upstream sets exactly one
+member. The first sentence confirmed it and the second one broke something
+else. A verification that only looks where it was pointed finds only what it
+was pointed at.
+
+### D46 — nine fields the contract dropped, and the drain that does not drain (2026-08-12)
+
+The operator review of the snapshot types found eleven things. Three of them
+were blockers, and the middle one killed a ruling written the same day. All of
+them are the same defect class: **a field the API sends and the contract drops
+at ingest** — invisible to a green suite, because a test can only assert on
+what the struct kept, and unrecoverable afterwards, because these types freeze
+one phase later ([D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+
+**Rule 7 would have fired on every deploy.** The rule is "Running and
+`ready: false`", and so is every container between start and its first
+successful readiness probe. Three fields answer *since when* and all three were
+discarded: `ContainerStateRunning.started_at` (the `Running` variant was a unit
+variant), `ContainerStatus.started` — **corrected below; it is far weaker than
+this entry first claimed** — and
+`conditions[Ready].lastTransitionTime`, the only place in the whole object that
+records when the pod left the Service endpoints; a container status has no such
+field anywhere. A Deployment with `initialDelaySeconds: 30`, a node reboot, a
+scale-up: each would paint the screen whose entire promise is *only what is
+broken*. The comment claiming the other four pod conditions "repeat what the
+containers already say" was the assumption underneath it, and it was wrong.
+
+**A pure function cannot know its own view is partial.**
+[D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)
+disables N2 and N5 under namespace scope, and `todo.md` and
+[docs/architecture § Error handling](docs/architecture.md#error-handling) both
+say so — but `ClusterSnapshot` had no field distinguishing *"this cluster has
+three pods"* from *"I can see three of this cluster's four thousand"*, and
+[invariant 5](CLAUDE.md) forbids a rule asking anything outside the snapshot. A
+small cluster and a namespace-scoped view of a large one decoded identically,
+so the ruling was unimplementable by construction: `node-3` cordoned with forty
+pods on it, none in `payments`, and N2 files nothing. `namespace_scope:
+Option<String>` on `ClusterSnapshot` closes it — one field, both causes
+(`--namespace` and the 403 fallback), and it gives the "not checked" message
+its noun.
+
+**`kubectl drain` never drains a node empty, so "still has pods on it" is true
+of every node an operator drained correctly.** `kubectl/pkg/drain/filters.go`
+returns skip for DaemonSet pods and for mirror pods *regardless of flags* — so
+a properly drained kind worker still runs kindnet and kube-proxy, a drained EKS
+node still runs `aws-node`, `kube-proxy` and `ebs-csi-node`, and a
+control-plane node cordoned for an upgrade still runs four static pods no drain
+can move. D43 narrowed N2 to kill exactly this false positive and the narrowing
+did not narrow. **N2 counts only pods a drain would actually move**: not
+`Succeeded`/`Failed` (`phase`, carried), not DaemonSet-owned (`owner.kind`,
+carried), not mirror — and the third was the one the contract could not
+express, because [D39](#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)
+discards the Node `ownerReference` that identifies a static pod. It is kept as
+one bit, `PodSnapshot.mirror`, and the identity stays discarded: D39 is about
+which card a finding files under, and that answer does not change. The bit
+comes from the ownerReference and **not** from the `kubernetes.io/config.mirror`
+annotation kubectl itself keys on — the sanitizer destroys annotations, so an
+annotation-sourced bit would decode `false` in every fixture and could never be
+tested ([D31](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)
+is the same lesson from the other side).
+
+**Six more fields, each one a rule that would otherwise say less than
+`kubectl describe`:**
+
+- **A native sidecar is not an init container, in the arithmetic or in
+  English.** `restartPolicy: Always` on an init container has been GA since
+  1.29 and is how Istio, Linkerd and Vault agent run. The scheduler's effective
+  request is `max( max over init prefix , sum(regular) + sum(restartable-init) )`
+  — a sidecar is *additive*. One `init: bool` forces N5 to either overstate a
+  2Gi migration container or drop 100m per pod on every meshed node, which on
+  sixty pods is six CPUs invisible to the rule whose whole job is "the cluster
+  is lying to itself about capacity". And "the init container `istio-proxy` is
+  crashlooping" is not plain language, it is false — so rules 1–6 need the
+  three-way distinction too, not just N5. `init: bool` becomes a three-way role
+  with the invalid state unrepresentable.
+- **`finalizers`.** Rule 12 promises "a finalizer *or* the kubelet is holding
+  it" — a coin flip between two causes whose fixes are unrelated. The list is
+  the answer, `describe` does not print it at all, and the positive fixture has
+  carried `k8rs.test/never-removed` since Phase 2.
+- **`subPath` on a hostPath mount, and the container that mounts it.**
+  `hostPath: /var/run` + `subPath: docker.sock` recorded `/var/run`, and rule
+  8's docker.sock escalator never saw it — a read-only bind-mounted socket is
+  still full root on the node. Without the container name the finding cannot
+  say *which* container mounts the node root, and two containers mounting one
+  volume produced two entries the rule could not tell apart.
+- **`ContainerStatus.image`.** Rule 3's action is "check the image name/tag or
+  the pull secret", and the name reached the user only inside the runtime's own
+  sentence — `image.json`'s message is containerd-worded and CRI-O phrases it
+  differently.
+
+**And `deletionTimestamp` is a deadline, not a moment.** The apiserver sets it
+to *request time + grace period* (`registry/rest/delete.go`:
+`metav1Now().Add(GracePeriodSeconds)`), which `stuck.json` has been proving all
+along: `23:16:54` with a 5-second grace, so the delete landed at `23:16:49`. A
+rule written to the comment that said otherwise would double its own threshold
+— flagging a default pod at 60 seconds, not 30 — and report an age short by
+exactly one grace period, forever. Both fields were already carried, so
+`asked_at = deletionTimestamp − grace` is computable; what was wrong was
+written down, in the file and in the rule-12 row here.
+
+Two more went to Phase 4 rather than here, which D42 permits: `spec.overhead`
+(RuntimeClass) and `status.allocatedResources` — the latter is what the node
+actually reserved during an in-place pod resize, and it diverges from `spec` on
+exactly the 1.33+ clusters this project targets. Both belong to the Capacity
+report, and they are recorded on its box so they are inherited rather than
+rediscovered.
+
+**Smaller rulings the fix itself forced**, recorded because a decision nobody
+wrote down is one that gets rediscovered with no memory of why:
+
+- **`owner_of` returns the identity and the mirror bit together**, not a second
+  `is_mirror(meta)` beside it. One traversal, so the bit and the discarded
+  reference cannot come to disagree — the failure mode of every "derive it
+  again over there".
+- **Only a *controlling* Node reference makes a pod a mirror pod.** A
+  non-controlling one is a garbage-collection link and means nothing about who
+  writes the pod. It is one `controller == Some(true)` and it is load-bearing:
+  a Node reference that does not control does not exempt the pod from N2's
+  count.
+- **A container the status names but the spec does not declare decodes as
+  `Init`, never `Sidecar`.** The kubelet only reports declared containers, so
+  the case does not arise; the point of choosing is that the safe answer keeps
+  the finding's English right if it ever does.
+- **The sidecar role is read off the init list only.** The tempting
+  justification — "upstream allows `restartPolicy` nowhere else" — is already
+  expiring: 1.34 began relaxing the field on regular containers. The real
+  reason is that a regular container answers `Regular` either way, which is a
+  statement about our own behaviour rather than a bet on upstream's. Same
+  reason no test synthesizes that object: under [D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+  a synthesis is licensed only while every field of it is a value the *pinned*
+  API emits, and `v1_32` does not emit this one.
+- **`PodSnapshot.ready` and `ContainerSnapshot.ready` keep the same name with
+  different types**, which was raised as a collision worth renaming before the
+  freeze. Kept: `PodSnapshot` already carries `scheduled: Option<Condition>`,
+  so `ready` beside it is the consistent name and renaming one of a matched
+  pair is the worse trade. The two never appear without their receiver.
+- **`subPath` is stored raw and the join is the rule's.** `HostPathMount` holds
+  the fact; rule 8 decides whether `/` joined with `var/run/docker.sock` is the
+  escalated case. Storing the joined path would be storing a verdict, which is
+  the same line the type already draws by holding `read_only` instead of
+  "dangerous".
+- **The order of `PodSnapshot.containers` is explicitly *not* a contract.** It
+  is init-first today and nothing may rely on that: containers are read by
+  name, and a screen that wants them grouped sorts by `role`. The tempting
+  alternative — declaring init-first *as* the contract — would have been the
+  same defect this box was sent back to fix, a stated requirement with no
+  assertion behind it. `ContainerRole` deliberately derives no `Ord`, because
+  which role sorts first is a display decision and this file does not make
+  those. The claim was verified rather than asserted: reversing the chain
+  breaks no assertion in the file, which is exactly why the rule has to be
+  written down instead of discovered later by `views.rs`.
+- **A container the status names but the spec does not declare stays untested,
+  by ruling and now in writing.** Both container lists are immutable after
+  create, so the kubelet cannot report on an undeclared container and
+  [D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+  does not license synthesizing one. The reason now lives in the code, so the
+  absence of a test reads as a decision rather than an oversight — which is the
+  whole difference between the two.
+- **`restartPolicy: Always` on a *regular* container is KEP-5307 (alpha in
+  1.34), and the ruling deliberately does not depend on that.** Whether a given
+  1.36 server admits the field turns on a feature gate nobody here could
+  verify, so the requirement is written to be independent of the answer:
+  `Regular` is the role whatever the restart policy says and whoever admitted
+  it. A synthesis that leaned on "a v1.36.1 server produces this" would have
+  been an unverifiable version claim dressed as a fact — the failure mode
+  [D45](#d45--the-decode-invented-a-container-state-the-api-says-is-waiting-2026-08-12)
+  is about, arriving from the opposite direction.
+
+The review that found all of this ran against a file whose 32 tests were green
+and whose every mutation had been killed. That is the argument for the gate
+being held by someone who runs clusters rather than by the suite: a test
+asserts what the struct kept, and none of these was in the struct.
+
+### D47 — Phase 3 is running ahead of an open Phase 2, and what that buys and owes (2026-08-12)
+
+Phase 2 has four boxes left and they are all the same box: **the kind cluster
+trip.** Stand the cluster up, apply `broken.yaml` and `healthy.yaml`, wait for
+the states to settle, capture, tear it down. Phase 3 has been built past it on
+an explicit instruction — *"continue Phase 3, we do the trip at close"* — and
+that is allowed. It was also **already recorded** before this phase began —
+[D33](#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12)
+is that ruling, and the box in `todo.md` states in its own text which half has
+run and which has not.
+
+**What has changed since D33 is the size of what is open.** D33 deferred *one*
+box, `just cluster-down`, waiting on Phase 4's four missing report fixtures.
+Phase 3 has since added three more, and every one was discovered by building
+the layer above: a broken pod that has an owner
+([D36](#d36--the-finding-shape-the-review-sent-back-2026-08-12)), a mirror pod
+([D39](#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)),
+and the list of shapes the first capture could not produce
+([D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)),
+which itself grew three items during this phase alone
+([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
+That growth is not drift, it is the pyramid working — a capture list written
+before the layer above it exists is a guess, and each of these came from a rule
+that could not honestly be tested without it. But four open boxes is a
+different fact from one, so the accounting goes in the record rather than in
+someone's head.
+
+**Why deferring is the right call anyway.** The trip is one physical
+operation — a cluster stood up, broken on purpose, waited on, captured, torn
+down — and running it four times to close four boxes buys nothing over running
+it once. It also needs a machine: docker on this host, and a login session that
+postdates the `docker` group grant, which is a condition the agents cannot
+create for themselves ([the boxes no agent can run](CLAUDE.md)). One trip, at
+the point where the list of what it owes has stopped growing.
+
+**What it costs, measured rather than asserted.** `rules.rs` carries 16
+synthesis sites. Four are permanent — an API state no cluster can be asked to
+emit ([D45](#d45--the-decode-invented-a-container-state-the-api-says-is-waiting-2026-08-12)),
+a node whose `allocatable` differs from its `capacity` (a kubelet flag, not a
+workload), a non-controlling `ownerReference`, a second Node reference. **The
+other twelve are a loan**: a test standing on a hand-set field instead of a
+capture, each naming the object that retires it.
+[D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+licenses that, and it licenses it *as a loan* — the synthesis is bounded by
+"every field of it is a value the API actually produces", which is a rule that
+holds only as long as someone keeps checking. It has already failed once in
+each direction: a synthesized node condition that contradicted its own message,
+and a decode that invented a state the API defines as something else. Both were
+caught by going to the source, not by the suite, and neither would have existed
+if the object had come off a cluster.
+
+**So the boundary is hard: Phase 3 does not close until Phase 2 does.** Not
+"the trip happens around then" — twelve of Phase 3's tests are unfinished until
+it runs, and [phase close, item 2](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+says a box checked for work that was written but never run is a lie in the one
+file the plan is read from. The trip's checklist is not a memory: every
+synthesis names its object, and Phase 2's own boxes list them by the file that
+has to change.
+
+### D48 — a check that is switched off is named on the screen that would have shown it (2026-08-12)
+
+[D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)
+turned N2 and N5 off under namespace scope and said they should "say so". It
+did not say **where**, and `screens/alerts.md` had kept the superseded half of
+the ruling — a card with its evidence line dropped, which is a card asserting a
+node is broken on evidence it does not have. The screen and the decision record
+disagreed, and `screens/` is what the code has to match, so Phase 9 would have
+built the wrong one.
+
+**The line goes in the banner above the list, on the screen that would have
+shown the findings** — Alerts names N2's absence, the Capacity report names
+N5's. Rejected: the header (it carries the cause, `ns: payments`, and has no
+room for a sentence), the help screen (keys only), a greyed-out card (there is
+no card), and one global notice (which grows into a list as more checks switch
+off, on every screen, including the ones unaffected). The banner is the widget
+the disconnected state already uses, so this is placement, not a new mechanism.
+
+Three rulings follow from drawing it, and the second is the one that was
+actually wrong before:
+
+- **Node listability is a separate permission from namespace scope.**
+  `widgets.md` justified a blank header vital with "a namespace-scoped user
+  cannot list nodes", which is false — and D43's entire premise is a user who
+  *can* list nodes but cannot list every pod. Decoupled: it now drives the
+  header vitals, the `capacity` badge and which node rules run, independently.
+- **The `of 5` denominator is a second permission too.** It comes from the
+  workload watch, not the pod watch, so a user allowed `pods` but not
+  `deployments` has the numerator alone. The card reads `3 pods`, grouping
+  falls back to the pod's own name rather than the hashed ReplicaSet, and
+  W1/W2 are named as off — [D3](#d3--findings-group-by-owner-not-by-pod)'s *no
+  owner* fallback extended to *owner unreadable*.
+- **Three more checks join N2 and N5**: drain safety, the pending-CSR row and
+  Versions. D43 named two because two were in front of it. The line that
+  generalises them: **a sum breaks silently under a partial view, a list just
+  gets shorter** — so Waste, whose rows are per-object facts, runs unchanged,
+  and greying out the whole Analysis screen would have hidden three true
+  answers. Drain safety is the sharpest of them: *"node-1 ok, 18 pods move"*
+  computed from a partial view is a green light for an operation that then
+  hangs.
+
+**N2's evidence line changed with its trigger**, which is the part that would
+have rotted quietly. `9 pods still run here` described an inventory — the
+reader checks it with `kubectl get pods -o wide` and finds a different number,
+because [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)
+stopped counting DaemonSet, static and finished pods. **`2 pods here would
+still have to move`** describes the computation `kubectl drain` itself performs,
+so the card and the command it teaches agree. A two-number form (`2 to move · 7
+stay`) was rejected: the second number needs its own fixture and invites exactly
+the arithmetic-checking the first wording lost to.
+
+**One thing found in passing and ruled here rather than deferred:**
+`screens/dialogs.md`'s drain dialog prints *"PodDisruptionBudget won't allow
+fewer than 3 copies"* — raw jargon, while `analysis.md` explains the identical
+fact in plain English. It was raised as "a v0.2 screen, your call".
+[Invariant 14](CLAUDE.md) has no version exemption: a string a user can read is
+written for someone who does not know the term, whichever release it ships in.
+The rewrite belongs to the box that builds that screen, and this is the record
+that it is owed rather than optional.
+
+### D49 — the link checker skipped every link that wrapped, and had been green all along (2026-08-12)
+
+`scripts/check-docs.py` scans **line by line**, so a Markdown link whose
+`[label]` wraps across a newline matches no regex and is skipped **entirely** —
+not just its anchor, its target file too. Three such links were in the repo.
+Reproduced here before believing it: a deliberately broken wrapped link
+(`NOTES.md#no-such-anchor-at-all`, label split over two lines) appended to
+`docs/tech-stack.md` produced *"checked 24 markdown files / OK — all relative
+links resolve"*; the identical link on one line produced *"FAIL … 1 broken
+link(s)"*. The hole is the wrap, exactly.
+
+This is [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)
+and [D31](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)
+a third time, and the recurrence is the point. Both of those were about the
+*sanitizer* — which objects reach the check, and where inside a value a secret
+can sit. This is the same defect in a different guard: **the shapes a guard was
+fed were all the shapes its author happened to write**, and this project wraps
+its prose at 79 columns, so the untested shape is the one the house style
+produces most. Every guard in `scripts/` is now suspect in the same way, not
+because any specific hole is known, but because none of them was fed input in
+the shape the *repo* generates rather than the shape the test wrote.
+
+The fix is one line — read the file whole with `re.S` instead of iterating
+lines — and it is `tester`'s, along with the wrapped-link case as a permanent
+`--self-test`. Found by `tui-designer` while checking its own work, which is
+the only reason it was found at all: nothing in `just check` could report it,
+because the guard reporting green *was* the bug.
+
+### D50 — the rule tests live in `rules.rs`, and no lib target is added to change that (2026-08-12)
+
+`cargo metadata` reports exactly one target — `k8rs`, kind `bin`, root
+`main.rs` — so a file under `tests/` cannot `use k8rs::rules::PodSnapshot`.
+Every rule test therefore lives inside `src/rules.rs`, which is `dev-core`'s
+file, and `tests/` holds only `fixtures/`. Raised because it makes `tester`'s
+ownership row unusable for rule coverage across the whole of Phase 3, and the
+remaining boxes would each hit the same wall.
+
+**No lib target is added.** The fix would be a `src/lib.rs` carrying the `mod`
+lines with `main.rs` consuming it — a ninth file, and
+[invariant 11](CLAUDE.md) wants the same kind of boundary argument the eighth
+had. "So that integration tests can reach the code" is not that argument when
+unit tests already reach it: `#[cfg(test)] mod tests` in the same file is
+Rust's normal idiom, 38 of them are already there, and they run under
+`cargo test` exactly like anything in `tests/` would. Adding a file of pure
+plumbing to relocate tests that already work is the trade this project keeps
+refusing.
+
+**What actually needed saying is who does what, and the model already had it
+right.** [The cycle](CLAUDE.md#the-cycle--one-todomd-box-is-one-turn-of-it)
+step 3 is "write the code **and its tests together**" and names the dev; step 4
+is `tester` witnessing red then green. So on rules, `tester`'s job was never to
+author the tests — it is to *attack* them, and on this box it reproduced the
+author's fourteen mutations with its own driver and then found two the author
+had missed: a `started: None` branch no capture exercises, and a regular
+container with `restartPolicy: Always` decoding as `Sidecar` against the file's
+own stated requirement. Both went back to the author. That is the gate working
+as designed, and it is worth more than a directory boundary would have been.
+
+`tester`'s `tests/` row keeps its meaning for what will actually live there:
+the fixtures, and the Phase 7 end-to-end tests that drive the binary rather
+than call into it.
+
+### D51 — the third review of the same contract, and the sentence that would have rebuilt the bug it closed (2026-08-12)
+
+The snapshot types went through three operator reviews. The first found nine
+missing fields ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)),
+`tester` then found two holes the author's own mutation sweep had missed, and
+the third — reading the file *after* all of it was fixed and independently
+attacked — found a blocker and five more. That progression is the argument for
+the gate, so it is worth stating what the blocker actually was: **not a field,
+a sentence.**
+
+**`ContainerStatus.started` does not mean what D46 said it meant.** This record
+called it "the startup-probe bit, which is precisely 'still booting' versus
+'was serving and stopped'". The crate's own generated doc finishes the
+thought — *"**Is always true when no startupProbe is defined** and container is
+running and has passed the postStart lifecycle hook"* — and **no container in
+any committed fixture declares a `startupProbe`**. For the overwhelming
+majority of real workloads the field flips true the instant the container runs
+and discriminates nothing at all. A rule 7 written from that prose —
+`Running && !ready && started` — fires CRITICAL on every pod of every rolling
+update, every node reboot and every scale-up: precisely the blocker this
+contract was sent back to fix, rebuilt out of the sentence written to close it.
+`healthy.json` would not have caught it either, because there is no mid-rollout
+pod in the capture.
+
+The field stays; it does discriminate where a `startupProbe` *is* declared. But
+the "since when" rule 7 rests on is `ready.last_transition` and nothing else,
+and that is now said where a rule author will read it. The lesson is narrower
+and worse than "check upstream": the *first half* of that doc sentence was
+quoted correctly, and the half that mattered was two clauses later. A quotation
+that stops where the point was already proven is not a verification.
+
+**Four more fields, each a rule that would otherwise be confidently wrong:**
+
+- **Pod-level requests** (`PodSpec.resources`, KEP-2837). *Two version facts
+  that look like a contradiction and are not:* the pinned `v1_32` generated doc
+  says *"This is an alpha field and requires enabling the PodLevelResources
+  feature gate"*, while the field went beta and default-on in **1.34** and the
+  fixtures are **v1.36.1**. Both are true at their own version, and the field
+  is present in the pinned crate either way, which is all a decode needs — it
+  is written here so the next reader who opens `v1_32/api/core/v1/pod_spec.rs`
+  does not conclude the field was carried on a guess. A pod declaring
+  `spec.resources.requests: {cpu: "4"}` with no
+  per-container requests decodes as all-`None`, so N5 sums **zero** and calls
+  the node healthy while four committed CPUs sit invisible. This is
+  `namespace_scope`'s shape a second time — a pure function looking at zeros
+  with no way to tell "requests nothing" from "requests something I did not
+  look at". When the pod-level value is set it *replaces* the container sum.
+- **The enacted memory limit, not the requested one.** `ContainerStatus.resources`
+  is *"the limits that have been successfully enacted on the running
+  container"*, and it is already populated in every committed capture. Rule 2
+  reads `spec`. Patch a crashing pod 128Mi → 512Mi, have the in-place resize
+  sit `Deferred` because the node cannot fit it, and the evidence line reads
+  *"exceeded its 512Mi limit · exit 137"* about a container never given 512Mi —
+  an operator sent hunting a leak in an application that never had the memory.
+  Status first, spec as fallback.
+- **`ObjectKind` must read the API group, not the kind string alone.**
+  OpenKruise is deliberately drop-in: its Advanced StatefulSet is
+  `apps.kruise.io/v1beta1, Kind: StatefulSet`. `owner_of` holds the whole
+  `OwnerReference` and was passing only `kind`, so those pods decoded as the
+  core variant. The card lying is the small half; the large half is Phase 7
+  aiming `scale` at `apps/v1 statefulsets/<name>` — a 404, or a *different*
+  object that happens to share the name. A write path pointed at the wrong
+  object is not a display bug. Argo Rollouts was safe only by the accident of a
+  unique kind string.
+- **`Terminated` carries `started_at` and `message`.** "Restarted 5 times" is
+  the same sentence for two unrelated incidents. *"Runs for about 2 seconds,
+  then exits 1"* versus *"ran for 40 minutes, then exited 1"* is the first fork
+  of every crashloop triage — bad config on one side, a leak or a downstream
+  timeout on the other — and `describe` makes you subtract the timestamps
+  yourself at 3am. Every capture has both. `message` is the same argument: with
+  `terminationMessagePolicy: FallbackToLogsOnError` the kubelet writes the log
+  tail there, which turns rule 6's action from "check the logs" into the log
+  line. `Waiting` already carried `message`; `Terminated` not carrying it was
+  an asymmetry with no reason behind it.
+
+**And C1's input goes into `ClusterSnapshot`, settled now rather than at its
+own box.** `todo.md` had described C1 as "PEM bytes in, finding out" — a second
+entry point that [invariant 5](CLAUDE.md)'s stated signature does not describe,
+which makes it an invariant amendment, which is a stop rather than a
+convenience. So the snapshot carries the kubeconfig **context name** and the
+client **certificate**; it is already documented as assembled by `k8s.rs` and
+never decoded from one API object, so this is what it is for. The certificate
+only — never the private key, never the token, never anything else off the
+kubeconfig, and the field says so, because the next reader will rightly wonder
+why a kubeconfig is anywhere near this struct. Deciding it here costs two
+fields; deciding it at the C1 box would have meant deciding it with the file
+one box from frozen.
+
+**Rulings the fix forced, and one it uncovered.** The author's own second pass
+found a **fourth** site of the blocker that this review had not named:
+`ContainerState::Running`'s doc claimed `started_at` was *"the only 'since
+when' a running container has"* and that rule 7 needed it — the same wrong
+claim one field over, and it flatly contradicted `PodSnapshot::ready`'s doc on
+the same page. A rule 7 written from *that* sentence rebuilds the false
+positive by a second route. `started_at` is the current run's uptime, which is
+rules 1/5/6 evidence — *"it came back up forty seconds later"* — and nothing
+else. Three sentences were fixed by instruction and the fourth by someone
+reading the file as a stranger would; that ratio is the argument for the second
+pass being mandatory rather than conditional.
+
+- **The group identifies a type; the version is serialisation.** `apps/v1beta1
+  StatefulSet` still decodes `StatefulSet`, and `Other`'s format is kubectl's
+  own notation, `Kind.group` — a core-group unknown kind stays bare
+  (`Other("ReplicationController")`, no trailing dot), and `Other("kubeconfig")`
+  for C1 is untouched.
+- **The mirror-pod discard moved onto the *resolved* kind**, not the raw
+  string, so a CRD named `Node` in someone else's group is an ordinary owner
+  rather than a static pod. That is the same bug as the OpenKruise one
+  approached from the other side, and it was not in the brief — it has a test.
+- **`effective()` falls back per key, not per side.** A server too old to
+  populate `status.resources` is inside the support window, so a key missing
+  there falls through to `spec` rather than the whole side reading as "nothing
+  enacted". The cost is stated where the helper lives: a resize that *adds* a
+  limit names the not-yet-enacted value until it lands, which degrades to
+  exactly today's behaviour — the safe direction.
+- **`status.allocatedResources` is deliberately not read.** It repeats
+  `status.resources.requests` and would add a third precedence step for no new
+  fact. This narrows what D46 sent to Phase 4: the *requests* half is covered
+  by `effective()` already, and what Capacity may still want is `spec.overhead`.
+- **`context` is `Option<String>`** — a kubeconfig can name no current context,
+  and `None` there means C1 has no name to file under, which is a real state
+  rather than a defensive one.
+
+### D52 — the guards were fed the shapes their authors wrote, not the shapes the repo produces (2026-08-12)
+
+Fourth occurrence of one defect. [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)
+was the sanitizer seeing a single Pod and not the `List` half the captures
+arrive in. [D31](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)
+was the same guard matching whole values while secrets sit inside sentences and
+inside base64. [D49](#d49--the-link-checker-skipped-every-link-that-wrapped-and-had-been-green-all-along-2026-08-12)
+was the link checker scanning line by line in a repo that wraps at 79 columns.
+And now `fixture-audit.sh`, which owns the correct base64 predicate and applies
+it to `*.json` only, skipping `certs/*.crt.pem` outright — so a real
+certificate with a private key base64-wrapped and appended printed **"no key
+material"** and exited 0, in both that guard and `certs-test.sh`. The green log
+was byte-identical to a clean run.
+
+**The directory it exempted is the only one where key material is actually
+generated**, and it is about to matter more: `ClusterSnapshot` now carries a
+client certificate for rule C1 ([D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)),
+a kubeconfig fixture is on the roadmap for that rule, and a kubeconfig carries
+`client-key-data` **base64-encoded** — the exact framing the check skipped.
+
+So the rule stops being "test the guard" and becomes specific enough to act on:
+**feed every guard the shapes the repo produces, not the shapes its test
+writes.** The two are systematically different, and the difference is invisible
+because a guard that misses a case reports success in the same words as a guard
+that found nothing wrong. Every guard in `scripts/` is being swept on that
+basis — not because a further hole is known, but because none of them was ever
+fed repo-shaped input, and four for four is no longer a coincidence.
+
+Each fix carries the shape into its own `--self-test`, or it regresses the
+first time someone refactors it. That is what makes this different from
+patching four bugs.
+
+**The sweep found holes in five guards, not the one it was sent for.** Two were
+known going in; three were not, and one of them is a hard invariant:
+
+- **`write-guard.py` exempted any file *named* `ops.rs`, not `src/ops.rs`.**
+  Fed six files each containing `api.delete("web")`, it reported two and
+  silently exempted `tests/ops.rs`, `examples/ops.rs`, `benches/ops.rs` — and
+  `build.rs`, which is **compiled and executed at build time** and sat under
+  none of the four scanned roots at all. `tests/ops.rs` is the obvious name for
+  Phase 7's write-path integration test: the one file that must not be able to
+  opt out of the invariant it exists to test. [Invariant 1](CLAUDE.md) is
+  enforced "mechanically and stays that way", and for the whole of Phases 1–3
+  the mechanism had a name-shaped hole in it. Now exempt by resolved path, with
+  `build.rs` scanned.
+- **`test-guard.py` would have turned `just check` red the first time anyone
+  ran `just mutants`.** `cargo mutants` writes a full copy of the source tree
+  to `mutants.out/`, which the blocklist did not cover, so the guard counted
+  every test twice: *"90 declared, 45 listed — 45 never run"*. A fabricated red
+  build, and precisely the kind that gets repaired by weakening the guard
+  rather than by fixing it — in the phase where `just mutants` starts being
+  used. The blocklist became the same roots allowlist `write-guard.py` uses,
+  because a blocklist needs a new entry per tool and an allowlist excludes
+  every stray copy by construction.
+- **`screens-check.py` printed green over a 201-column frame** in four shapes,
+  including a mockup inside a `~~~` fence — which `check-docs.py` had already
+  decided *is* a fence, so two guards in the same repo disagreed about what a
+  code block is. A fence nobody closed silently dropped the block; a mockup one
+  directory down was never looked at (`glob`, not `rglob`); and an empty
+  `screens/` reported *"0 mockups fit 80x24 — OK"*, which is D26's own lesson
+  about a count of zero reading as success.
+
+**One gap is left open on purpose, because closing it is a policy choice rather
+than a bug fix.** `sanitize.jq` does not cover a CertificateSigningRequest's
+`.spec.username` and `.spec.groups`. The committed `csr-pending.json` carries
+`kubernetes-admin` and `kubeadm:cluster-admins`, which are kind defaults — so
+nothing has leaked, and that is luck rather than the guard. A CSR captured from
+a real cluster carries an OIDC email or `system:serviceaccount:prod/deployer`
+there.
+
+**It takes the node-name treatment: refused, not rewritten.** A requester
+identity is a *reference*, not a payload — the same category as a node name,
+and the sanitizer already refuses a capture whose node names did not come from
+the kind cluster rather than quietly mangling them
+([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)).
+Extending that one refusal to one more field needs no new mechanism and no new
+policy shape, which is exactly why it is the right answer: an allowlist of
+acceptable usernames would be a judgement call re-made on every capture. **This
+lands before the next capture trip, not after** — it is a Phase 2 box, and
+Phase 2 owns fixture capture.
+
+Decisions the sweep forced, worth keeping: `openssl` is the key oracle rather
+than a regex (already required by two scripts, so not a new dependency), and it
+is called with `-passin pass:` — without it an encrypted key prompts on the
+terminal and **hangs `just check`**, which is a guard that fails by hanging
+rather than by failing. Thresholds are 100 base64 characters and 64 PEM-body
+characters: an EC P-256 key is ~184 base64 characters, so the *smallest* key
+anything real produces still clears both, and the self-test generates exactly
+that key rather than a comfortably large RSA one.
+
+### D53 — a committed capture is never edited to make a test pass (2026-08-12)
+
+`effective()`'s per-key fallback needed a shape no capture has: a `requests`
+map the kubelet enacted *without* `cpu` in it, so that `spec` is the only
+source for that one key. The proposal was to add `cpu: 250m` to `oom.json`'s
+spec requests.
+
+**Right shape, wrong method, and the distinction is the whole of why fixtures
+are trusted here.** `tests/fixtures/*.json` are real captures — that is the
+property [the honest-test rules](CLAUDE.md#code-phase-rules-apply-once-it-starts)
+buy by refusing hand-written JSON, and it is a property of the *file*, not of
+any one test. Editing a committed capture so a test goes green spends that
+property for every other fixture in the directory at once, and it spends it
+invisibly: nothing in the file says which bytes came off a cluster and which
+were typed. [D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+already licenses the honest version — deserialize the capture, set the one
+field in memory, assert, and name the object the capture trip owes. The synthesis
+is visible in the test that does it; an edited fixture is visible nowhere.
+
+**A surviving mutant that was written up honestly rather than closed.**
+`effective()` reading `status.resources` *only* for keys `spec` also declares is
+indistinguishable from the real code unless the kubelet enacts a key the spec
+never asked for. All 23 fixtures were scanned — zero such shape — and no way to
+make a cluster emit one was found, since an enacted value is enacted *from* a
+declared one. The first draft of that comment stated it as fact ("both lists
+are defaulted at admission, so an enacted key has a declared key behind it");
+the author's own second pass caught that as [D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)'s
+exact failure — a sentence claimed harder than its evidence — reappearing
+inside the comment written to close D51. It now reads **"a shape nobody could
+produce, not one ruled out"**, and names the surviving mutant out loud. That is
+the right register: the same standard already applied to the unmatched container
+status and to `From<StatefulSet>`, and it costs nothing to say which of the two
+things you know.
+
+**And the caution paid off within the hour — the shape is reachable.** The
+operator review found it in upstream: with pod-level resources, a container that
+declares *some* limit but no memory limit gets the **pod's** memory limit
+written into its own status (`kuberuntime_container_linux.go`'s `getMemoryLimit`:
+*"When container-level memory limit is not set, the pod-level limit is used"*),
+and `convertContainerStatusResources`'s memory branch has no key-existence
+guard, unlike the CPU branches beside it. So `status.resources.limits` carries
+`memory` while `spec.containers[].resources.limits` does not — exactly the key
+the mutant would drop, and the value the container is actually killed at. One
+manifest produces it, and it is now on the capture trip.
+
+Had the first draft's *"both lists are defaulted at admission"* been left in,
+this record would today be asserting a falsehood with upstream code contradicting
+it. The honest framing was not merely more modest — it was the one that stayed
+true.
+
+**`effective()` keeps its per-key fallback, and the argument against it lost on
+the source rather than on preference.** The review's case for per-object rested
+on a container's status resources being a copy of its *spec*; upstream copies
+the **allocated** map (`convertContainerStatusResources` takes
+`allocatedContainer.Resources.DeepCopy()`), and allocated and spec diverge in
+key set exactly while a key-adding resize is pending, which validation permits.
+Upstream's own arithmetic is a per-key union — `maxResourceList` takes a key
+present on *either* side — and the scheduler reads it with
+`UseStatusResources: true`, so per-object would charge N5 nothing for a request
+the scheduler is actively counting. `PodRequests` even carries the comment
+*"the computation is part of the API and must be reviewed as an API change"*.
+
+The real split is not requests-versus-limits, it is normal-versus-**Infeasible**:
+when a resize is rejected as infeasible, upstream drops the spec entirely. That
+one case k8rs reads wrongly, **knowingly** — reading it right needs
+`PodResizePending` on `PodSnapshot`, no v1 rule reads that condition, and the
+file freezes before Phase 4, so adding it would be a plan change rather than a
+code one. It is written down here instead of being discovered as a bug.
+
+**One more thing the fix turned up, and it is the kind that only reading the Go
+types finds: `desired` and `ready` are both `Option<i32>` and their `None`s mean
+opposite things.** `ReadyReplicas` is a plain `int32` with `omitempty`, so it is
+absent **exactly when it is zero** — `ready.unwrap_or(0)` is correct, and a W2
+written as `if let (Some(d), Some(r))` would go silent on precisely the total
+outage it exists to report. `Replicas` is a `*int32`, so `replicas: 0`
+serialises fine and `None` means *absent*, which the API then defaults to
+**one** — so `desired.unwrap_or(0)` would say "wants nothing" where the API says
+"wants one". Two identical-looking `Option`s, two opposite readings, and the
+field docs had been transposed on top of that. DaemonSet's counters carry no
+`omitempty` at all and are always `Some`.
+
+Two smaller things settled in the same pass, both about what the contract can
+still express:
+
+- **N2 does not need to see `emptyDir`.** `kubectl drain` also refuses on
+  local-storage pods without `--delete-emptydir-data`, and the snapshot carries
+  only `hostPath` volumes — so N2 cannot tell that a drain would *block* on
+  such a pod. It does not need to: N2's sentence is *"N pods here would still
+  have to move"*, and a pod with an `emptyDir` does still have to move. What
+  would be wrong is the sentence *"N pods a drain would move"*, which promises
+  the drain succeeds. Blockers are the **Drain safety** report's question, and
+  it is the second place today that a half-finished disruption has been sent
+  ([D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)).
+- **`ClusterSnapshot` still has no `now`**, correctly — it is the next box. But
+  `ObjectKind` and `ContainerRole` freeze at Phase 3 close while the snapshot
+  types get until Phase 4 close ([D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)),
+  and `now` is the one field [invariant 5](CLAUDE.md) names by itself. It does
+  not get to drift into that extra phase's slack.
+
+### D54 — `now` is `meta::v1::Time`, not a bare `jiff::Timestamp` (2026-08-12)
+
+[D18](#d18--the-clock-is-an-input-not-an-ambient-fact) settled which crate the
+time type comes from and wrote the answer as `jiff::Timestamp`. The field that
+landed is `meta::v1::Time`, which *is* that type — `pub struct Time(pub
+jiff::Timestamp)` — wearing the same newtype every decoded API timestamp in
+`rules.rs` already wears.
+
+The reason is the comparison, which is the only thing this field is for: rule 12
+compares `now` against a `deletion_timestamp: Option<Time>`, C1 against a
+certificate date, the renderer against a finding's timestamp. One type on both
+sides is `<=`; two types is `.0` at every site, and `.0` at every site is one
+forgotten `.0` away from comparing a laptop instant against something that only
+looks like one. The crate coupling D18 recorded is unchanged — `Time` is
+k8s-openapi's, and k8s-openapi's jiff is what moves.
+
+It buys nothing for the *arithmetic*, and that half is written down where the
+next box will read it rather than here: `.0` is needed on both sides of every
+subtraction, `a - b` yields a seconds-only `Span` whose `.get_minutes()` is `0`
+for a 43-minute gap, and the call that behaves is `Timestamp::duration_since`.
+
+**Not an `Option`.** A snapshot always has a moment. An `Option` would push a
+"what if there is no time" branch into every rule that reads one, and the only
+answer available in that branch is the value the caller already had.
+
+### D55 — the clock was written backwards, and the clamp protects the harmless half (2026-08-12)
+
+D18 said a laptop running **fast** produces a negative age. It does not, and the
+error had been copied into `rules.rs` before the operator review caught it.
+
+Age is `now − event`:
+
+| laptop | pod deleted 11:59:50 | what the screen does |
+|---|---|---|
+| 10 min **fast** | age **+10m05s** | rule 12 **fires**: "asked to shut down 10 minutes ago and still hasn't" |
+| 10 min **slow** | age **−9m55s** | rule 12 silent; the renderer says "just now" |
+
+So the "just now" clamp guards the *slow* case — the one that under-reports and
+harms nobody — and does nothing at all about the *fast* case, which is the one
+that manufactures findings on a healthy cluster. Three consequences, all
+binding on later boxes:
+
+- **Rule 12's trigger gets a margin.** The recorded threshold was
+  `deletionTimestamp` in the past, full stop. With a laptop ten minutes fast —
+  an NTP-less machine, a VM resumed from suspend, a WSL2 host after sleep —
+  every pod asked to terminate in the last ten minutes is "overdue", and a
+  correctly-progressing 50-replica rollout fills the one screen whose promise
+  is *only what is broken*. Even on a perfect clock a pod is briefly overdue
+  between its deadline and the kubelet's SIGKILL landing. Rule 12 fires on
+  `now − deletionTimestamp > max(30s, grace)`. Nothing is lost: a pod held by a
+  finalizer is stuck for minutes or forever.
+- **The slow half is detectable, so it is said out loud.** Any snapshot
+  timestamp more than a few seconds after `now` means the laptop is behind the
+  cluster. That is data k8rs already holds, and it belongs in the header in
+  plain language — *"your computer's clock is 11 minutes behind the cluster —
+  the times on this screen are wrong"* — not only in a test assertion.
+- **The fast half is not detectable from object timestamps**, and pretending
+  "just now" covers it is how the wrong belief survived this long. The honest
+  source is the API server's `Date` response header, which is a Phase 5
+  `k8s.rs` question and is recorded as one.
+
+D18's sentence is corrected in place rather than left standing with a
+correction pinned to it, because the next box to read that paragraph is the
+renderer that implements the clamp.
+
+### D56 — C1 cannot represent "never expires", and a rule may not return a `Result` (2026-08-12)
+
+RFC 5280 §4.1.2.5 gives certificates with no well-defined expiry the literal
+`99991231235959Z`. jiff's `Timestamp` stops before it — the range ends at Unix
+second `253402207200` (`9999-12-30T22:00:00Z`) — so `Timestamp::from_second`
+returns `Err` for exactly that value, and [invariant 5](CLAUDE.md) forbids C1
+from propagating it.
+
+The mapping that is both correct and permitted is **no finding**: a certificate
+that does not expire has no expiry to warn about. Recorded before C1 is written
+because the shape that gets typed by reflex is `.unwrap()`, and the input is a
+kubeconfig — a corporate PKI is precisely where a non-expiring CA turns up, and
+a panic at startup is what the user would get.
+
+The same range is why the grace-period subtraction is `checked_sub`: v1.36.1
+accepted `terminationGracePeriodSeconds: 9223372036854775807` in a server-side
+dry-run against the live kind cluster, and `deletionTimestamp − that` overflows.
+Anyone with `create` and `delete` on pods could otherwise kill the TUI through
+a pure function that cannot fail.
+
+### D57 — the pinned `now` is part of the fixture contract, and it makes "recent" unrepresentable (2026-08-12)
+
+> **The value below is superseded: the pin is `2026-08-13T00:00:00Z` since
+> 2026-08-13.** The mechanism this entry describes is unchanged — read it, then
+> the update at the end for what moved and what deliberately did not.
+
+The tests pin `now` at `2026-08-12T00:00:00Z`. The value was not chosen freely:
+`scripts/certs-test.sh` already asserted the committed certificates against that
+instant (24 days / 365 days / −3 days), so any other literal would compute C1's
+arithmetic from two moments only one of which the build checks. `certs-test.sh`
+now extracts the Rust pin and refuses to disagree with it — the one edge of that
+coupling nothing had been guarding.
+
+**It moves with the capture, in four places.** A re-run of `just fixtures`
+stamps every object after the pin and the guard goes red — correctly, but for a
+reason that is not a wrong clock. The instant lives in `src/rules.rs`'s
+`fn now()`, `scripts/certs-test.sh`'s `now` and its `pinned[]` rows, and
+`scripts/make-certs.sh`'s dates; they move together or the fixtures and the
+certificates stop describing the same afternoon. That obligation belongs to the
+capture box in Phase 2, which is where the trip is, and it survives
+`rules.rs` freezing at Phase 3 close: a re-capture may touch `fn now()` and
+nothing else in that file — the pin is fixture data that happens to be spelled
+in Rust, not code.
+
+> **The pin moved on 2026-08-13 to `2026-08-13T00:00:00Z`**, with the second
+> capture trip, and this entry's `2026-08-12` is the superseded value — the
+> mechanism above is unchanged, only the instant. All four places moved
+> together. The certificates were **not** regenerated: their `notBefore` and
+> `notAfter` bytes are untouched, so the day counts shifted instead — 23 / 364
+> / −4 where this entry says 24 / 365 / −3. Each fixture still exercises the
+> case it exists for (inside C1's 30-day window, far outside it, already
+> expired), and regenerating would have written fresh key material into the
+> repo to buy nothing. One relationship changed quietly with it and is worth
+> knowing: `now` used to equal the certificates' `notBefore` exactly, and now
+> sits one day after it. Nothing asserts that equality in either direction, so
+> no guard would have caught it had it mattered
+> ([D64](#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13)).
+
+**What the pin costs, which is the part nobody had written down.** It sits 43
+minutes after the newest captured timestamp, so **nothing in the fixture set can
+be "recent"**. Every below-threshold case — rule 7's rolling-update pod, N1's
+node that went NotReady thirty seconds ago, rule 12's pod inside its grace
+period — is unreachable by capture and has to be synthesised in memory under
+[D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12).
+That is a real cost, accepted for the certificates' sake, and naming it is what
+stops the next author from reading the fixture set as "no such case exists".
+
+### D58 — a Phase 2 box was passed over, and the order it comes back in (2026-08-12)
+
+Phase 2 has five open boxes. Four are the kind cluster trip and their deferral
+is recorded ([D47](#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12),
+[D33](#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12)).
+The fifth — `sanitize.jq` refusing a CSR's `.spec.username` and `.spec.groups`
+([D52](#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12))
+— needs no cluster, no hardware and nobody's permission, and was passed over
+anyway. Its own text says it lands *before* the trip; an audit of both phases on
+2026-08-12 found it still open with `csr-pending.json` still carrying
+`kubernetes-admin` and `kubeadm:cluster-admins` through the sanitizer unchanged.
+
+Nothing excuses it: the cycle's rule is the first unchecked box in the lowest
+open phase, and the four trip boxes are the *only* ones carrying an exemption.
+It is recorded because the same audit found no other silent skip — every other
+open box in Phases 2 and 3 is genuinely unstarted, and a phase that has been
+audited once should say so, or the next audit starts from zero.
+
+**The order it returns in**, decided when the kind cluster came back up on the
+development machine: the sanitizer refusal lands **first**, then the manifests
+for the shapes the first capture could not produce, then the capture, then the
+teardown that closes the trip. A sanitizer fix landing after a capture is a
+sanitizer that never ran on the bytes it was written for.
+
+### D59 — the sanitizer refuses a requester, and an exit-status guard cannot see a deletion (2026-08-12)
+
+[D52](#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12)
+left one gap open on purpose: a CertificateSigningRequest's `.spec.username` and
+`.spec.groups`. Closing it produced four rulings and one lesson that is bigger
+than the box.
+
+**The allowed set is derived, not curated.** "Refused, not rewritten" was
+already settled; what counted as *foreign* was not. The answer is the node-name
+shape — refuse anything the pinned kind cluster does not itself issue — and the
+set was **read off the live cluster** rather than recalled: the two kubelet
+identities with their groups, and kubeadm's admin from the kubeconfig client
+certificate's subject. It is a fact about kind, not a policy about which real
+identities are tolerable, which is the allowlist D52 rejected. The regex is
+anchored at both ends, unlike the `k8rs-` node prefix: a node name is a family
+kind generates, an identity is not, and unanchored,
+`kubernetes-admin@corp.example.com` launders itself into kind's own admin.
+
+**`.spec.extra` and `.spec.uid` are payload, deleted rather than refused, and
+scoped to the object that carries the marker.** `extra` is where a real cluster
+puts its OIDC claims and it cannot take the refusal — the `credential-id` the
+apiserver stamps is a fresh hash every time, so there is nothing to allowlist.
+The scoping is not fussiness: a bare `del(.. | objects | .uid?)` empties
+`metadata.uid` on all 23 fixtures — the identity the rule engine is built on —
+while still passing every test written about a CSR.
+
+**The marker is `signerName` *or* `issuerRef`, and the first ruling was
+reversed.** `signerName` alone was accepted as a deliberate narrowing with
+cert-manager's `CertificateRequest` recorded as a known miss; the operator
+review then put that kind through the filter and it came out **unmodified**
+carrying `alice@corp.example.com` and an OIDC claim. A known miss with a live
+proof is not a narrowing, it is the leak. Keyed on the marker rather than on
+`has("request") and has("username")`, which reads better and fails open exactly
+when it matters: an object carrying `groups` and `extra` without a `username`
+is then never examined, and those are two of the four fields being protected.
+
+**An accepted limit, recorded rather than engineered around.** A requester
+identity sits in three places on a CSR — `.spec.username`, the DN inside the
+base64 `.spec.request`, and the DN inside `.status.certificate` — and jq cannot
+decode a DER subject, so the guard reads one of three. A production kubeadm CSR
+carrying `CN=alice@corp.example.com` in its request passes, because
+`CN=kubernetes-admin, O=kubeadm:cluster-admins` is what **every** kubeadm
+cluster calls its admin — that half of the allowed set is not kind-specific at
+all, and the comment claiming it was has been corrected. Closing it needs
+openssl in `fixture-audit.sh`, which is where it would live if it is ever
+worth it.
+
+**The lesson, which outlived the box: a guard that asks for an exit status
+cannot see a deletion.** `fixture-audit.sh` gained a backstop asking
+`sanitize.jq` whether it would *refuse* each committed fixture — and
+`csr-pending.json`, captured before the `del(.extra, .uid)` clause existed,
+still carried the credential hash. The filter accepted it, so the backstop
+passed, and the audit's green line was byte-identical to a clean run. The
+question worth asking is not "would the filter refuse this" but **"would the
+filter change this"** — idempotence. Twenty-two of the twenty-three JSON
+fixtures were already byte-identical under the filter; the twenty-third was the
+one that had never met it. Nothing leaked — the value was a thumbprint of a
+throwaway kind admin certificate — but the guarantee that
+[G-5](REQUIREMENTS.md#devsecops-requirements) rests on had quietly stopped
+holding, which is the same failure as
+[D26](#d26--a-green-build-that-proves-nothing-2026-08-12) wearing different
+clothes.
+
+**And the guard's own failure mode was worse than the leak it caught.**
+`make-csr.sh` sanitized with `jq -f sanitize.jq … > "$out"` where `$out` *is*
+the committed fixture: the shell truncates before jq runs, so a refusal — the
+one thing the filter exists to do — destroyed the file the script exists to
+produce, and `set -euo pipefail` then skipped the cleanup and left a CSR on the
+cluster. It writes to a working copy and moves on success, and the delete moved
+into the `EXIT` trap. *"The cluster is left as it was found"* was true of the
+happy path and nothing else.
+
+### D60 — CLAUDE.md was compressed, and four stories moved here (2026-08-12)
+
+`CLAUDE.md` is loaded in full at the start of every session and again after
+every compaction, before a single line of work has been read. Measured, it was
+682 lines and 6,548 words — roughly 9,500 tokens of standing cost, of which
+§ Agent workflow alone was 30%. It is now ~3,000.
+
+**The rule applied: every rule stays in `CLAUDE.md`, the story behind it moves
+here.** That is not a new split, it is the one
+[docs/maps.md](docs/maps.md) already states — *why* is this file, *how must I
+work* is `CLAUDE.md` — and `CLAUDE.md` was the file breaking it, carrying
+paragraphs of justification for rules that already link to a `D`-number. No
+invariant, no security-gate box, no ownership row and no cycle step was
+dropped; what went is prose that argued for them a second time.
+
+**Two defects the pass found, both invisible while writing.** The header read
+*"Current phase: CODE — Phase 1, `feat/scaffold`"* while the same file's git
+rules said all work is on one long-lived `development` branch
+([D32](#d32--one-long-lived-development-branch-not-one-per-phase-2026-08-12)) —
+a hand-maintained status line that rots the moment a phase closes. It is gone
+rather than corrected: the *rule* for finding the next box is stable, the phase
+number is not, and `todo.md` already answers it. And § Workflow (per feature)
+described the same seven steps as § The cycle, having drifted apart in the
+middle — one ordered docs-sync after the `todo.md` tick, the other before.
+There is one description now, in the cycle, and its step 7 spells the order.
+
+**Four things existed only in `CLAUDE.md` and are recorded here so the rules
+they justify do not become arbitrary:**
+
+1. **The scratchpad is a shared tree.** `tester`'s mutation driver was
+   overwritten between rounds by a file it never wrote; running it would have
+   re-run **the author's own sweep** and reported it as independent
+   verification — a plausible, well-formatted, entirely worthless result, and
+   the exact closed loop step 4 exists to break. Hence one subdirectory per
+   agent, and a hash or line count before anything saved earlier is reused.
+2. **Review is not a parallel slot.** Work stacked on an unreviewed box turns a
+   rejection into a rebase, and a rebase under time pressure is how a finding
+   gets quietly dropped. The dev idles during review; that idle is the price of
+   the gate meaning something.
+3. **`just check` is the whole of CI, or it is a lie.** `cargo deny` first went
+   red *after* a push, because CI ran a step `just check` did not. A step whose
+   tool is not installed locally is added anyway — a missing binary is a loud
+   error, a missing step is an invisible gap.
+4. **"Run it" means something different before `main.rs` exists.** Demanding a
+   binary run in Phase 3 would set a gate nobody can pass, and an impassable
+   gate teaches everyone to wave gates through — which is
+   [the second pass's own item 2](CLAUDE.md#second-pass--nothing-is-delivered-on-its-first-draft)
+   turned on the file that states it.
+
+**The limit going forward.** A new rule costs its own line in `CLAUDE.md`; its
+justification costs a `D`-number here. If that file passes ~4,000 words again,
+what grew is prose, not rules — check before adding.
+
+### D61 — a verify predicate must hold across the whole window, not at one instant (2026-08-12)
+
+`cluster.sh verify` certifies that a fixture reached the state its rule is
+about, and `just fixtures` captures that object seconds later. A predicate that
+names **one instant of a cycle** therefore certifies a moment that may already
+be over by the time the bytes are written.
+
+`[crashloop]` demanded `state.waiting.reason=="CrashLoopBackOff"`. Sampled on
+the live cluster, the container was in `state.terminated` 39 times out of 70,
+in `waiting: CrashLoopBackOff` 29 and `running` twice — the predicate named the
+**minority** half of its own loop. It failed open twice over: `verify` retries
+in a wait loop until the flap happens to land right, and its report pass
+re-fetches, so a green line proved the state existed at *some* instant, not
+that a capture would find it. What actually holds across the loop is *it has
+already restarted after an exit 1, and it is not up right now*, and that is
+what it now asserts. The ~2s window where it **is** up stays excluded on
+purpose: certifying a Running pod as crashlooping is the lie the function
+exists to prevent.
+
+**The sweep found one, not two.** The first report named `[init]` as well; that
+was asserted from family resemblance rather than read, and `[init]` was already
+an `or` over both halves. Recorded because a review that names a defect it did
+not read is the same failure as a test that has only ever been green — this one
+happened to be wrong in the harmless direction.
+
+**The report/wait asymmetry stays, deliberately.** `verify` waits on one read
+and reports on a re-fetch, and that asymmetry is the only reason this class was
+visible at all: had it reported the verdict it waited on, a flapping predicate
+would have printed PASS every time and stayed invisible until a fixture landed
+in a state no rule could fire on. It is also the last read before the capture's
+own `kubectl get`, so it is the closest available proxy for the bytes that will
+land.
+
+**Two limits accepted rather than engineered away:**
+
+- Every `sleep 3600` fixture exits and restarts an hour after `break`, and
+  `[restarts]` asserts `ready==true`, which is false for a moment then. The fix
+  is a constraint on the trip, not on the code — `break → verify → fixtures`
+  runs well inside the hour — because `ready==true` is the whole point of
+  rule 5's fixture.
+- `[init]` is loose in the *other* direction: it matches an init container that
+  crashed and then succeeded, since it never asks whether the container is down
+  now. No fixture in the set can produce that shape, so tightening it would
+  change a passing predicate with nothing to prove the difference.
+
+**`broken-owned` is a third workload shape, not a second W2.** Its Deployment
+reports `Progressing=True / NewReplicaSetAvailable` with `Available=False /
+MinimumReplicasUnavailable` — the replica set rolled out fine and the pods
+inside it are dying, which is not
+[W2](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)'s
+`ProgressDeadlineExceeded`. Both will be in `deployments.json`; they are
+different findings.
+
+**D39's claim is now asserted somewhere.** That kubelet writes an
+`ownerReference` of kind `Node` onto every static pod was documented upstream
+and checked by nobody here; `verify-test.sh`'s corpus carries a real mirror pod
+as the negative `[owned]` must refuse. This does **not** close the mirror-pod
+box — that one wants the fixture, for N2's `mirror: true` count and rule 8's
+only negative.
+
+**Deferred, with the reason.** `verify` certifies the live object; nothing
+asserts that the **written** fixture still satisfies the predicate that
+certified it — the one check that would catch "verify passed, the capture
+landed two seconds later in another state". It belongs in `fixture-audit.sh`,
+it is ~12 lines, and it waits until after the capture: writing it now means
+proving it against 23 files that the capture is about to replace, two of which
+do not exist yet.
+
+### D62 — the fifth place a node name lives, and a guard that asked less than its consumer (2026-08-12)
+
+`kube-system` is the one namespace `broken.yaml` cannot imitate, and preparing
+to capture it opened two holes in a sanitizer that had only ever been fed pods
+built from that file.
+
+**A node name lives in five places, not four.**
+[D31 § 3](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)
+enumerated four fields beyond `.spec.nodeName`; the fifth is the
+`ownerReference` of kind `Node` that kubelet writes onto every static pod —
+`{kind: Node, name: prod-master-01}` names a machine exactly as well as
+`.nodeName` does. Before the fix, a pod named `etcd-prod-master-01` owned by a
+foreign `prod-master-01` and carrying no `.nodeName` was **sanitized and
+written** rather than refused. The enumeration was not careless: it was
+complete for the shapes it had been fed, which is
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) again
+on the field axis instead of the object axis. Note the same clause must return
+nothing for a *full* Node object, which carries `.kind == "Node"` and its name
+under `.metadata.name` — hence the `// empty`.
+
+**IPv6 gets one exemption from its anchor: the bracketed URL form.** D31
+anchored IPv6 to the whole string on purpose, because unanchored `::` matches a
+Rust path, a C++ scope operator and every `key::value` in a log line. `[fd00::1]`
+is exempt because the brackets are what remove that ambiguity — nothing in
+prose is bracketed like an address. It is the same two forms as the anchored
+rule, in the framing `-n kube-system` introduced: etcd and the apiserver carry
+their addresses inside `--listen-client-urls=` and friends. Proven against
+planted input only — `cluster.sh` writes no `ipFamily`, so the test cluster is
+IPv4 and the real capture contains no IPv6 at all.
+
+**A guard may not ask a weaker question than the thing it guards.** Both new
+owner predicates first tested `ownerReferences[].kind == "Node"` with no
+`.controller == true`, while D46's ruling above and `rules.rs` both resolve the
+*controlling* reference — and the `owned` guard written one box earlier, twelve
+lines up in the same recipe, does check it. Three poisoned captures that would
+produce **zero** mirror pods for N2 passed green. Not a live leak, since kubelet
+always writes `controller: true`; the defect is that a guard certifying a
+fixture for a consumer must ask the consumer's question, or it certifies
+something the consumer cannot use. Two questions about one field in one file,
+two boxes apart, is the cross-box drift the phase-close pass exists to catch.
+
+**`kubernetes.io/config.mirror` is deliberately not among the guards.** The
+filter destroys every annotation, which is exactly why D46 takes the mirror bit
+off the ownerReference instead. Recorded so its absence does not later read as
+an oversight.
+
+**Accepted rather than fixed, each with its reason:**
+
+- **No `kube-system-pods.json` entry in `fixture-audit.sh`'s must-still-be-there
+  list.** It would be a third copy of a predicate that already has two homes,
+  and [D52](#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12)
+  is explicit that the audit and the sanitizer went blind in the same places
+  *because* each kept its own copy. The audit's copy-free backstop — re-run the
+  filter, demand byte-identity — covers the sanitizer-drift case and now
+  reports a foreign Node ownerReference as a refusal.
+- **A node name inside a command-line flag is not refused.**
+  `--name=k8rs-control-plane` and `--initial-cluster=<node>=https://…` carry the
+  identity as a substring, and `node_names` reads fields, not prose. `.spec.nodeName`
+  sits on every one of those pods, so the refusal fires on the neighbouring
+  field; a substring refusal over arbitrary hostnames cannot be written without
+  false-positiving on `--cluster-name=k8rs` and `registry.k8s.io/…`.
+- **The capture is taken whole** (~115 KB, the largest fixture in the set).
+  Trimming it is hand-editing, which
+  [D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
+  forbids. The name is `kube-system-pods.json` and not `kube-system.json`
+  because it is pods only.
+
+### D63 — the field kubectl never writes, and a substitution test that could not see a clause (2026-08-12)
+
+The last Phase 2 manifest box added thirteen shapes the first capture could not
+produce. Two operator reviews, run independently on the same diff, converged on
+one blocker — and it was not in a manifest, it was in the predicate meant to
+certify one.
+
+**`kubectl taint` writes no `timeAdded`, for any effect.** The predicate for the
+`dedicated=gpu:NoExecute` fixture demanded one, on the strength of the API
+type's own sentence — *"it is only written for NoExecute taints"* — which reads
+as a promise and is not one. The only writer in the tree is the node
+lifecycle controller's `SwapNodeControllerTaint`, for the taints it adds
+itself; k/k [#113044](https://github.com/kubernetes/kubernetes/issues/113044)
+asks for the flag that would change that and has not got it, and
+[#131644](https://github.com/kubernetes/kubernetes/pull/131644) deleted the
+sentence from the type as inaccurate in the other direction too — the
+controller stamps `NoSchedule` taints as well.
+
+What that would have cost is the part worth recording. `break-nodes` applies
+the taint *first* and asserts *after*, so the eviction lands, the poll loop
+then spends its whole 420s on a taint that was applied perfectly, `set -euo
+pipefail` ends `just fixtures` at its last line, and `nodes.json` — the one
+capture the whole subcommand exists for — is never written. Every other
+fixture is already on disk by then, and the bare pods the `NoExecute` taint
+evicted are gone for good, so the retry is not "run it again": it is `unbreak`,
+`break`, and a fresh ten-minute settle. **A predicate that cannot pass is more
+expensive than a rule that is wrong**, because it fails at the end of the most
+expensive step, and it fails looking exactly like a cluster that did not
+cooperate.
+
+**The timestamp is recovered from the taint nobody types.** Stopping a kubelet
+makes the controller add `node.kubernetes.io/unreachable:NoExecute` through the
+one function that stamps a time, so `[notready]` asserts the timestamp and
+`[tainted]` asserts only what `kubectl` actually writes — key, value, effect.
+The cordon's own `node.kubernetes.io/unschedulable:NoSchedule` taint is
+asserted to *exist* and not to carry a time: whether a `NoSchedule` taint keeps
+its stamp is the half nobody could settle from the source, and asserting it
+would have rebuilt the trap one clause over.
+
+**Two files outside this box now rest on the deleted sentence**, and neither is
+touched here — recorded so the trip's own `nodes.json` is read as the answer to
+both:
+
+- `rules.rs`'s taint test names `kubectl taint … dedicated=gpu:NoExecute` as
+  the object that will retire its synthesis. It will not; the controller's
+  unreachable taint will. `dev-core` re-points it when the capture lands.
+- [`screens/alerts.md`](screens/alerts.md)'s cordon card argues that a cordon
+  has no age *because* `timeAdded` is NoExecute-only — the sentence that was
+  deleted. If the unschedulable taint carries a stamp, a cordon time is
+  readable and [D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)'s
+  premise moves. `[cordoned]` now requires that taint to be in the capture, so
+  the trip settles it either way. Nothing is built on it before then.
+
+**A substitution test proves a predicate has two halves; it cannot prove a
+clause does any work.** Replacing each predicate with `true` and with `false`
+and demanding both go red — the discipline
+[D26](#d26--a-green-build-that-proves-nothing-2026-08-12) installed — was run
+over all twenty-six and passed, while `[pending]`'s new toleration clause was
+dead: every corpus object that had to refuse the predicate already failed on
+the *nodeSelector* clause first, so the toleration could be deleted with the
+file staying green. The fix is to delete each clause on its own and demand a
+red, which needs an object that differs in exactly that clause — and building
+those is what turned up the second false premise in the same box: the manifest
+justified its respin by saying no captured pod carried `tolerations`, when the
+`DefaultTolerationSeconds` admission plugin puts two on every pod in every
+capture. What the respin genuinely adds is a toleration with a *value*.
+
+**The reviews' other seven findings, and what each one was.** A second `break`
+could not run at all, because a resized pod's `spec.resources` may not be
+changed by an `apply` and nothing put it back (fixed by resetting through the
+`resize` subresource first — and a cluster holding an *earlier generation* of
+these manifests still cannot be applied over, which is now written where it
+happens instead of claimed away). `100Gi` was infeasible only on small
+machines, since a kind node reports the host's memory — `1Pi` is infeasible
+everywhere, **and the cluster then falsified the conclusion drawn from that**:
+a request above the node's allocatable is refused at *admission*, so it never
+reaches the kubelet and parks nothing. Being infeasible everywhere is exactly
+what stops `1Pi` from producing this fixture. Nothing asserted that the cordoned worker still carried a pod a
+drain would move, i.e. that N2's positive fixture was not N2's negative wearing
+its name; the node is now *chosen* by what is on it and the choice is asserted
+against the committed bytes. The `why` line claimed an N3 positive that a
+stopped kubelet does not produce — pressure conditions need an eviction
+threshold crossed, which is a cluster change, so **N3 joins the permanently
+synthesized list**. The one step that can fail on permissions ran third, after
+two destructive ones, on a machine where docker access is per-login; it is
+preflighted now, and `unbreak` reports what it undid instead of swallowing a
+denial that looks identical to nothing-to-undo. A guard asserted a termination
+message was non-null when `REDACTED-IP` is also non-null. And a comment claimed
+`verify-test.sh` guarded the usage text's line range, which it never did —
+**an invented guard is worse than none, because the next editor trusts it**; the
+range is gone rather than the claim.
+
+**Decided in passing, none of it forced by the box:** three workers by default
+(one per node state, so no node fixture has two causes; `break-nodes` refuses
+on fewer rather than doubling up) · `break-nodes` is its own subcommand called
+last by `just fixtures`, never part of `break`, because every one of its three
+actions changes a pod state that is still settling · the resize is a capture
+step like rule 12's delete, since a pod that is not running has no enacted
+resources to disagree with · `broken-sts` carries two replicas so it can be
+*partially* ready, which is the only shape that separates `ready` from
+`desired` · `broken-rollout` gets an hour's progress deadline so it cannot
+become a second W2 fixture mid-trip · the three healthy shapes are separate
+pods, because the `healthy` pod is every rule's negative at once and a host
+mount on it would leave rule 8 with two positives and no negative · the
+toleration moved to `NoExecute` to match the taint rather than the other way
+round, since with `timeAdded` gone the effect is the only thing separating
+`[tainted]` from its negative.
+
+### D64 — the capture trip: what the cluster settled, and the approval it reversed (2026-08-13)
+
+The capture Phase 2 was built for was finally taken, against a four-node kind
+cluster on `v1.36.1`: **23 of 23 pod predicates and 3 of 3 node predicates
+passed, and 34 fixtures landed.** Everything below is something no amount of
+reading upstream could have produced, which is the argument for the trip.
+
+**The resize fixture cannot use a constant, and the reason inverts the one this
+repo had written down.** `100Gi` was rejected as machine-dependent and replaced
+with `1Pi` on the grounds that it is infeasible everywhere — which is true, and
+is exactly why it produces nothing. A request above the node's allocatable is
+refused at *admission*:
+
+```
+Error from server (Forbidden): pods "broken-resize" is forbidden: node didn't
+have enough allocatable resources: memory, requested: 1125899906842624,
+allocatable: 24860065792
+```
+
+It never reaches the kubelet, so there is no parked resize and no divergence to
+capture. The window that is admitted-and-unenactable is `(available,
+allocatable]`, and its top edge is the only point in it that does not depend on
+what the other pods on that node happen to be holding — so `break` now reads the
+allocatable of whichever node the pod landed on and asks for exactly that. The
+number is written down nowhere.
+
+**And the reason is `Deferred`, not `Infeasible` — an approval I gave was
+falsified by the cluster.** The review asked for the predicate to demand
+`Infeasible`, on the argument that `Deferred` is "not right now" and resolves
+itself; I approved it. Anything that would be `Infeasible` dies at admission, so
+that tightening made the predicate unsatisfiable by the only path `break` has.
+The lesson is not about resize: **a reviewer's argument and my agreement with it
+are still both claims**, and the two of them agreeing is not evidence. The
+predicate now accepts both spellings and holds the line with a reason *enum*
+rather than a single value, so an in-flight `PodResizeInProgress` still fails it.
+
+**`break` was half-idempotent, which is worse than not being idempotent at
+all.** The second run hung: `rollout status statefulset/broken-sts` never
+returns once an earlier `break` has left a pod on the bad revision, because
+under `OrderedReady` the StatefulSet controller will not touch an unready pod,
+so `broken-sts-1` stays on a revision the object no longer has — permanently,
+not slowly. The guard meant to prevent exactly this had been dead since it was
+written: it read the workload's *template* to ask "is this already broken", and
+it ran after the `apply` that puts the good template back, so it could only ever
+answer no. **A comment described the design; the code did not implement it, and
+nothing failed until a second run happened.** The fix reads the **pods'** images
+instead — the one fact the apply cannot rewrite — with each workload's selector
+taken off the workload itself rather than spelled as a convention shared with
+`broken.yaml`. The Deployment survives the same starting state by structure and
+not by luck: its replicas have no identity, and with `maxUnavailable: 0` the
+unready pod is a surge pod above the desired count, so deleting it costs no
+availability.
+
+**The premise under
+[D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)
+is false: a plain `kubectl cordon` does leave a timestamp.** The capture shows
+`node.kubernetes.io/unschedulable:NoSchedule` carrying
+`timeAdded: 2026-08-12T21:43:02Z`, while the hand-applied
+`dedicated=gpu:NoExecute` — the *more* privileged effect — carries none. The
+dividing line is not the effect at all, it is **who wrote the taint**. `kubectl`
+is a client: `cordon` sets the bare `spec.unschedulable` boolean and stamps
+nothing, and `kubectl taint` writes the taint the user typed and nothing more.
+The node lifecycle controller then mirrors that boolean into a taint, and every
+taint it adds goes through `SwapNodeControllerTaint`, which does
+`taintToAdd.TimeAdded = &now` for each one **before looking at its effect** —
+the NoSchedule pass that adds the unschedulable taint calls the identical
+function as the NoExecute pass. Read in upstream source and not only in the
+capture, because a fixture only ever proves what one version did.
+
+D43 was careful about the citation and wrong about the inference. It quoted
+`k8s-openapi 0.28.0`'s `Taint::time_added` — *"It is only written for NoExecute
+taints"* — noted that the sentence is **gone from the v1_34+ generated docs**,
+and concluded "the behaviour is unchanged". The behaviour was never what that
+sentence said: upstream's own comment today is *"TimeAdded represents the time
+at which the taint was added"*, `+optional`, with no mention of effects. Reading
+the *doc* of a field rather than the *writer* of it is what cost the entry, and
+the writer was two function calls away.
+
+What survives D43 untouched is everything downstream of that premise — the
+autoscaler and Karpenter split, and N2 staying quiet while a scale-down taint is
+present. What falls is only "there is no source for that number". What follows
+for `screens/alerts.md`, which drew the card without an age on D43's authority,
+is `tui-designer`'s and is not settled here.
+
+**What the trip proved that could not be proven offline**, all of it previously
+carried as an assumption: the kubelet does copy a pod-level memory limit into a
+container status whose own spec declares only cpu ([D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12));
+a Deployment mid-rollout with `maxSurge: 1 / maxUnavailable: 0` reports exactly
+the five counter values the fixture was designed around; a StatefulSet's
+`updatedReplicas` counts a created-but-not-ready pod; and the kubelet keeps a
+log tail in the termination message under `FallbackToLogsOnError`.
+
+**Decided in passing, none of it forced by the box:** the resize predicate keeps
+its unreachable `.status.resize` string branch — the pin is `v1_32` and the
+support window is pinned ±2, so a server that spells it that way is inside the
+window even though the pinned node image is not, and a predicate naming only the
+reachable half is one nobody can read a year from now · `scan_second_revisions`
+and the break loop are fed by one array, because a workload in the second list
+and not the first walks back into the wait it cannot survive · an unreadable
+selector falls back to *waiting*, never to skipping, since `-l ""` matches every
+pod in the namespace and `broken-image` carries the same bad image · the trip's
+teardown reads the capture **before** `unbreak`, so a missing shape is caught
+while the cluster that could still produce it exists.
+
+**One hazard is known and deliberately left open:** `break` waits on
+`pod/broken-resize` becoming Ready, and on a cluster where `break-nodes` has
+already run that pod can sit on the kubelet-less node or be evicted by the
+`NoExecute` taint — the wait then burns its 300s and ends the run at the same
+place the StatefulSet used to. That is a `break-nodes` leftover rather than a
+`break` one, and what `break` should do about a cluster `break-nodes` damaged is
+a plan decision; `unbreak` is the documented answer until it is made.
+
+### D65 — the repin: N2 gains a clock, and what two agents decided that no brief did (2026-08-13)
+
+The capture stamps every object after the old pin, so the pin moves with it:
+**`2026-08-13T00:00:00Z`**, midnight after the capture day, 2h16m after the
+newest moment in the new fixtures. The value was decided by the PM and taken
+away from both agents on purpose. D57 puts the same instant in four places
+across two ownership rows, and `certs-test.sh` reads the Rust pin and refuses to
+disagree with it — so two agents each choosing a defensible value produces a red
+build whose cause reads like a clock bug. A fact written in four places is not
+four decisions.
+
+**N2 gains a clock, and that is a rule capability change, not a test detail.**
+`Taint::added_at`'s doc said upstream writes `timeAdded` for `NoExecute` taints
+only, therefore N2 could never say how long a node had been cordoned. The
+capture shows the split is *who wrote the taint*, not which effect: the node
+lifecycle controller stamps `timeAdded` on every taint it adds — including the
+`NoSchedule` one it mirrors from `spec.unschedulable` — and `kubectl taint`,
+being client-side, stamps none. So the cordon **does** carry a time and N2 can
+say "cordoned 2 hours ago"; the `Option` survives, for the hand-applied taint
+rather than for the cordon. This is the last standing consequence of the premise
+[D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)
+was built on, and it lands as a capability the rule may now use — not one it
+must. `screens/alerts.md`'s cordon card is `tui-designer`'s round.
+
+**The certificates were not regenerated.** Their `notBefore`/`notAfter` bytes
+are committed evidence; moving `now` past them changes only what the arithmetic
+says — 23 / 364 / −4 where it used to say 24 / 365 / −3. Each fixture still
+exercises the case it exists for, and regeneration would have written fresh key
+material into the repo to buy nothing. One relationship ended quietly with it:
+`now` used to equal the certificates' `notBefore` exactly and now sits a day
+after. Nothing asserted that equality in either direction, so it was free to
+break — which is the point worth keeping, not the day.
+
+**What re-deriving the seventeen tests actually bought.** They were fitted to
+literals — a uid, `restarts == 5`, a scheduler sentence — so a bigger cluster
+reddened them and the cheap repair is to paste in the new literal, which is
+fitting the test to the answer. They now read the capture's own JSON *at the
+path the field must have come from*, which is not a tautology: the decode is not
+what it is read from, so a field dropped, filled from its neighbour or rewritten
+still fails. Each pairs the derivation with the property the fixture must keep —
+`restartCount` **and** `≥3`, because CrashLoopBackOff implies several deaths —
+so a fixture that goes soft is still caught. Two things the old shape hid
+surfaced: one hostPath synthesis had gone **degenerate**, cloning a container
+into a collision with the real one, and `nodes.json`'s "nothing is wrong
+anywhere" loop was **false by construction** against a deliberately broken
+cluster.
+
+**The choices the briefs did not make, recorded because nobody could
+reconstruct them later.** From `dev-core`: `image.json` decodes `ErrImagePull`
+and not `ImagePullBackOff`, because the kubelet alternates between the two for
+one broken image and nothing in `just fixtures` waits for either — the test
+derives the reason from the capture and asserts it is one of the two, and this
+was the single failure where "the world changed" and "the requirement changed"
+were genuinely hard to separate; the three hostPath syntheses are **retired**
+rather than kept beside the capture, which is what their own notes said landing
+meant; `restarts.json` asserts the band `(3..10)` as a deliberate tripwire, so a
+pod that drifts past ten reddens the build for having stopped being rule 5's
+*WARN* fixture; kindnet's `desired` is **not** coupled to the node count, which
+is honest today and a false red the day a node stops tolerating it; and N4 gains
+a cross-check that the control plane's kubelet version equals
+`tests/fixtures/K8S_VERSION`, so a fixture that acquires a skew is announced
+rather than discovered. From `tester`: the repin was **staged in two steps** to
+force a real red on the day-count assertions, because the free red only
+exercised the cross-file check and those three would have gone green to green
+unseen; and two comments outside the lines the brief named were corrected, since
+a file whose header narrates a count its own guard no longer produces
+contradicts itself.
+
+**A concurrency hazard worth knowing before it costs an hour.** `certs-test.sh`
+`sed`-reads the pin out of `src/rules.rs`. Run while a dev holds that pen, it
+read a half-written file and reported a **false red** — five consecutive runs
+passed seconds later. Disjoint file trees make two agents safe to run in
+parallel; a guard that reads across the boundary is the exception, and a lone
+cross-file red is suspect until the writer puts the pen down.
+
+### D66 — `just check` is not quite the whole of CI, and the gap is the one CI was built to watch (2026-08-13)
+
+Found by Phase 2's closing second pass, against
+[CLAUDE.md § Running it](CLAUDE.md): *"`just check` is the whole of CI, or it is
+a lie."* Comparing the two step lists, they agree everywhere except one row.
+`cargo deny` is not the exception it looks like — `just check` runs the binary
+and CI runs the pinned `cargo-deny-action`, which is the same check by a
+different vehicle. The real one is the **cross-compilation matrix**: CI runs
+`cargo check --locked --target <t> --all-targets` across the release targets
+and `just check` runs nothing equivalent, so a cross-compile break can only be
+discovered after a push. The workflow's own comment says why that matters —
+"cross-compilation breaks at link time and it breaks late" — which makes this
+the precise failure the rule exists to prevent.
+
+**It is recorded rather than fixed, and that is a judgement, not an oversight.**
+The obvious repair — add the targets to `just check` — makes the gate red on
+every machine that has not run `rustup target add`, including the one closing
+this phase, and a gate that is red by default is one everybody learns to wave
+through. The alternative, a skip when the target is missing, is the "loud
+error" the rule prefers only if the loudness survives; a green run with a
+skipped step in it is what the rule calls an invisible gap. Choosing between
+them is a `tester` decision with a real cost either way, and it belongs to
+whoever owns the CI box, not to a phase close that found it in passing.
+
+**What is not deferred:** the claim. Until it is closed, "`just check` is the
+whole of CI" is true of eleven steps out of twelve, and anybody relying on it
+for a cross-target change should run the matrix by hand.
+
 ## Decisions made
 
 ### Product
@@ -1332,10 +3468,10 @@ all of them testable.
 | 4 | CreateContainerConfigError | `state.waiting.reason` + `.message` | "Referenced a ConfigMap/Secret that doesn't exist" |
 | 5 | High restart count (even if Running) | `restartCount` | "Restarted N times — looks healthy now, but something is wrong" |
 | 6 | Non-zero exit | `lastState.terminated.exitCode` | Translate the exit code (see below) |
-| 7 | **Pod Running but container not ready** | `containerStatuses[].ready == false` | "Running but not receiving traffic — readiness probe is failing, so it was removed from the Service" |
+| 7 | **Pod Running but container not ready** | `containerStatuses[].ready == false`, **plus how long** — `conditions[Ready].lastTransitionTime` and `containerStatuses[].started`, or the rule fires on every rolling update ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | "Running but not receiving traffic — readiness probe is failing, so it was removed from the Service" |
 | 8 | hostPath mount — **only the escalated case** (`/`, docker.sock, writable) | `spec.volumes[].hostPath` | "Mounts the node's own filesystem, writable" |
 | 10 | **Pending — and why** | `conditions[PodScheduled].reason == Unschedulable` + that condition's own `message` | "No node can accept it" + the scheduler's own sentence (insufficient cpu / nodeSelector / taint) |
-| 12 | **Pod stuck Terminating** | `deletionTimestamp` older than the grace period | "Asked to shut down N minutes ago and still hasn't — a finalizer or the kubelet is holding it" |
+| 12 | **Pod stuck Terminating** | `deletionTimestamp` already in the past — the apiserver sets it to *request time + grace*, so it is the deadline, not the moment ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | "Asked to shut down N minutes ago and still hasn't — held by *(the finalizer, named)* / the kubelet" |
 
 **Rules 1–6 read `initContainerStatuses` as well as `containerStatuses`** — a
 pod stuck at `Init:CrashLoopBackOff` is invisible otherwise, and init
@@ -1378,10 +3514,10 @@ an admin actually reacts to:
 | # | Finding | Source field |
 |---|---|---|
 | N1 | Node NotReady for more than 5 min — the pods on it are dead weight | `status.conditions[Ready]` + `lastTransitionTime` |
-| N2 | **Cordoned and forgotten** — "unschedulable for 6 days" is a maintenance window nobody closed | `spec.unschedulable` |
+| N2 | **Cordoned with pods a drain would still move** — a drain someone started and did not finish. **No duration** (`kubectl cordon` records no time) and **no finding when nothing movable is left** — that is a parked node and a Capacity row. Not counted: `Succeeded`/`Failed` pods, DaemonSet pods and static pods, none of which a drain ever evicts; and the rule is silent on a node carrying an autoscaler scale-down taint ([D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12) · [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | `spec.unschedulable` + the pod↔node join |
 | N3 | DiskPressure / MemoryPressure / PIDPressure — evictions are coming | `status.conditions` |
 | N4 | kubelet version skew > 2 minor from the control plane = unsupported | `status.nodeInfo.kubeletVersion` |
-| N5 | Overcommitted: sum of pod requests exceeds allocatable | node + pod join |
+| N5 | Overcommitted: sum of pod requests exceeds allocatable. A native sidecar (`restartPolicy: Always` on an init container) is **added**, not maxed — the scheduler charges `max( max over init prefix , sum(regular) + sum(restartable-init) )` ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | node + pod join |
 | N6 | Which taint / nodeSelector is blocking a Pending pod | node taints + pod spec |
 
 N4 is computed here but **shown in the Versions report, not in Alerts** — a

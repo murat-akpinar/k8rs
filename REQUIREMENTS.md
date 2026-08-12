@@ -196,10 +196,12 @@
 
 - The flat layout is right, don't touch it — eight files after the reversal,
   still no `mod.rs` pyramid. First thing to write:
-  `Finding { severity, title, evidence, action, kubectl_cmd, owner }` — the
-  shared contract where three files meet. `owner` is the grouping key: the
-  Deployment/StatefulSet/DaemonSet/Job behind the object, or the object itself
-  when there is none.
+  `Finding { severity, title, evidence, action, kubectl_cmd, owner, object }` —
+  the shared contract where three files meet. `owner` is the grouping key: the
+  controller behind the object, or the object itself when there is none;
+  `object` is what the finding is actually about, because one broken pod fires
+  several rules and a card counting findings would overstate how many pods are
+  affected ([NOTES § D36](NOTES.md#d36--the-finding-shape-the-review-sent-back-2026-08-12)).
 - **Browser views carry no per-kind code:** `kube::discovery` enumerates what
   the cluster serves, server-side `Table` printing supplies the columns. CRDs
   must work without a line of code written for them.

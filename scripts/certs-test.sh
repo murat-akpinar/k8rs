@@ -20,7 +20,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 certs="$here/../tests/fixtures/certs"
 
-now="2026-08-12 00:00:00Z"   # the reference `now` C1's tests ask about
+now="2026-08-13 00:00:00Z"   # the reference `now` C1's tests ask about
 warn_days=30                 # C1's threshold
 now_s=$(date -u -d "$now" +%s)
 
@@ -28,11 +28,29 @@ fail=0
 note() { echo "FAIL  $*"; fail=1; }
 declare -A left              # fixture name -> days of validity at `now`
 
+# --- ONE INSTANT, TWO FILES START ---
+# `now` above and `fn now()` in src/rules.rs are the same fact written twice —
+# the dates below are asserted against this one, and C1's `Snapshot` is built
+# with that one. Nothing else compares them, so a drift is silent: both files
+# keep passing while "23 days left" and "expires in" are computed from
+# different instants. Compared as seconds, because the two spell the same
+# moment differently (`... 00:00:00Z` here, RFC 3339 `...T00:00:00Z` there).
+#
+# An extraction that finds nothing must fail loudly, not pass quietly
+# (CLAUDE.md — a derived list asserts it found something).
+rust_pin=$(sed -n '/fn now() -> Time {/,/^    }/s/^ *time("\([^"]*\)").*/\1/p' "$here/../src/rules.rs")
+if [ -z "$rust_pin" ]; then
+  note "no pin found in src/rules.rs — this check expects one time(\"...\") inside fn now(), and without it compares nothing"
+elif [ "$(date -u -d "$rust_pin" +%s 2>/dev/null || echo unparseable)" != "$now_s" ]; then
+  note "src/rules.rs pins now at '$rust_pin', this file at '$now' — C1's certificates are asserted against one instant and its Snapshot built from the other"
+fi
+# --- ONE INSTANT, TWO FILES END ---
+
 # name | notBefore | notAfter | days left at the reference `now`
 pinned=(
-  "expiring-client|2026-08-12 00:00:00Z|2026-09-05 00:00:00Z|24"
-  "healthy-client |2026-08-12 00:00:00Z|2027-08-12 00:00:00Z|365"
-  "expired-client |2025-08-12 00:00:00Z|2026-08-09 00:00:00Z|-3"
+  "expiring-client|2026-08-12 00:00:00Z|2026-09-05 00:00:00Z|23"
+  "healthy-client |2026-08-12 00:00:00Z|2027-08-12 00:00:00Z|364"
+  "expired-client |2025-08-12 00:00:00Z|2026-08-09 00:00:00Z|-4"
 )
 
 # --- PINNED DATES START ---
@@ -104,6 +122,6 @@ if grep -rlE -- "-----BEGIN [A-Z ]*PRIVATE KEY-----" "$certs" 2>/dev/null | grep
 fi
 
 if [ $fail -eq 0 ]; then
-  echo "certs-test: dates pinned at $now — expiring $e days (C1 warns), healthy $h days (C1 silent), expired $x days (C1 says expired); no key material"
+  echo "certs-test: dates pinned at $now (src/rules.rs pins the same instant) — expiring $e days (C1 warns), healthy $h days (C1 silent), expired $x days (C1 says expired); no key material"
 fi
 exit $fail

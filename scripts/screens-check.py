@@ -29,7 +29,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 MAX_COLS = 80
 MAX_ROWS = 24
-FENCE = re.compile(r"^\s*```")
+# Both markers, like check-docs.py. Matching only ``` meant a mockup written
+# inside a ~~~ block was not a mockup here — and ~~~ is exactly what someone
+# reaches for when the drawing itself contains a ``` line. Measured: a
+# 201-column frame inside a ~~~ fence produced "0 mockups ... OK".
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 BORDER = "│┌┐└┘├┤┬┴"
 
 
@@ -45,26 +49,45 @@ def width(text: str) -> int:
     )
 
 
-def blocks(path: Path) -> list[tuple[int, list[str]]]:
-    """Every fenced block as (line number of its first content line, lines)."""
-    found: list[tuple[int, list[str]]] = []
-    inside, start, buf = False, 0, []
+def blocks(path: Path) -> list[tuple[int, list[str], bool]]:
+    """Every fenced block as (first content line, lines, was it ever closed).
+
+    The opening marker is remembered rather than toggled, so a ``` inside a ~~~
+    block does not end it. A block nobody closed is still returned, and flagged:
+    dropping it is how a mockup stops being measured without anyone noticing.
+    """
+    found: list[tuple[int, list[str], bool]] = []
+    opener, start, buf = None, 0, []
     for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if FENCE.match(line):
-            if inside:
-                found.append((start, buf))
-            inside, start, buf = not inside, n + 1, []
-        elif inside:
+        m = FENCE.match(line)
+        if m:
+            tok = m.group(1)[0]
+            if opener is None:
+                opener, start, buf = tok, n + 1, []
+            elif opener == tok:
+                found.append((start, buf, True))
+                opener = None
+            continue
+        if opener is not None:
             buf.append(line)
+    if opener is not None:
+        found.append((start, buf, False))
     return found
 
 
 def check(root: Path) -> tuple[int, list[str]]:
     errors, counted = [], 0
-    for path in sorted((root / "screens").glob("*.md")):
+    # rglob: a mockup one directory down is still a mockup, and `glob` walked
+    # straight past it.
+    for path in sorted((root / "screens").rglob("*.md")):
         rel = path.relative_to(root)
-        for start, lines in blocks(path):
+        for start, lines, closed in blocks(path):
             counted += 1
+            if not closed:
+                errors.append(
+                    f"{rel}:{start - 1} opens a fence that is never closed — "
+                    f"the rest of the file is one runaway mockup"
+                )
             for i, line in enumerate(lines):
                 cols = width(line)
                 if cols > MAX_COLS:
@@ -88,6 +111,16 @@ def check(root: Path) -> tuple[int, list[str]]:
                     for n, cols in framed
                     if cols != frame
                 ]
+    # The floor. Every check above relates a mockup to a limit, and every one of
+    # them holds over an empty list: rename the directory, rename the files off
+    # `.md`, or leave every fence unmatched, and this printed
+    # "0 mockups fit 80x24 — OK". Measuring nothing is not measuring zero
+    # defects (CLAUDE.md § a derived list asserts it found something).
+    if not counted:
+        errors.append(
+            "no mockup found under screens/ — this guard measured nothing and "
+            "reported OK, which is what it does when the directory has moved"
+        )
     return counted, errors
 
 
@@ -128,7 +161,50 @@ def self_test() -> None:
         )
         _, errors = check(root)
         assert not errors, f"false positive on a well-formed mockup: {errors}"
-    print("screens-check: self-test passed — it fails on wide, tall and ragged mockups")
+
+        # --- the shapes that used to print "0 mockups ... OK" START ---
+        # Each one was measured green over a 201-column frame — a width no
+        # screen could ever be — because nothing here counted as a mockup.
+        overflowing = "│" + "─" * 199 + "│"
+
+        # A ~~~ fence. Nothing in screens/ uses one today, which is exactly when
+        # to nail it down: the reason to reach for ~~~ is a drawing containing
+        # a ``` line, and that is a mockup like any other.
+        (root / "screens" / "bad.md").write_text("~~~\n" + overflowing + "\n~~~\n")
+        _, errors = check(root)
+        assert any("201 columns" in e for e in errors), f"a ~~~ mockup was not measured: {errors}"
+
+        # …and a ``` inside a ~~~ block must not close it, or the second half of
+        # the drawing stops being measured.
+        (root / "screens" / "bad.md").write_text(
+            "~~~\n```\n" + overflowing + "\n~~~\n"
+        )
+        _, errors = check(root)
+        assert any("201 columns" in e for e in errors), f"the inner ``` closed the ~~~ block: {errors}"
+
+        # A fence nobody closed. The block was dropped on the floor, so the
+        # drawing inside it was never measured.
+        (root / "screens" / "bad.md").write_text("```\n" + overflowing + "\n")
+        _, errors = check(root)
+        assert any("never closed" in e for e in errors), f"an unterminated fence went unreported: {errors}"
+
+        # A mockup one directory down.
+        (root / "screens" / "bad.md").unlink()
+        (root / "screens" / "sub").mkdir()
+        (root / "screens" / "sub" / "deep.md").write_text("```\n" + overflowing + "\n```\n")
+        _, errors = check(root)
+        assert any("201 columns" in e for e in errors), f"a nested mockup was skipped: {errors}"
+
+        # And the floor: nothing to measure is not a pass.
+        (root / "screens" / "sub" / "deep.md").unlink()
+        counted, errors = check(root)
+        assert counted == 0 and any("measured nothing" in e for e in errors), (
+            f"an empty screens/ reported OK: {counted}, {errors}"
+        )
+        # --- the shapes that used to print "0 mockups ... OK" END ---
+    print("screens-check: self-test passed — it fails on wide, tall and ragged "
+          "mockups, on either fence marker, on a fence left open, on a nested "
+          "file, and on finding nothing to measure at all")
 
 
 if __name__ == "__main__":
