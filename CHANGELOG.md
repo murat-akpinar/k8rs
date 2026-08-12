@@ -44,6 +44,7 @@
 - Add the repository map, one row per path with its owner ([83c5fb7](https://github.com/murat-akpinar/k8rs/commit/83c5fb71bf254ba3e86de4c101b46aa55753266a)) — Where a file lives, what it answers, and who may write it — plus an "I want to ..." table routing a change to the file it belongs in. The ownership column is copied from CLAUDE.md, which stays authoritative; this is the routing view, not a second source of truth.
 - *(docs)* Compress CLAUDE.md and move its stories into NOTES ([6c0e89b](https://github.com/murat-akpinar/k8rs/commit/6c0e89bc03e90b45cf0b2fd24c34106a3d14a173)) — The file is loaded in full every session and after every compaction: 682 lines and 6,548 words of standing cost before any work is read. Every invariant, security-gate box, ownership row and cycle step is kept; the prose that argued for them a second time is now D60.
 - *(docs)* Close phase 2, and record the three claims its closing pass falsified ([95f2263](https://github.com/murat-akpinar/k8rs/commit/95f2263b124942deb39fcd4fc18fe89ecd77f2dc)) — The phase's own security gate passes on every item, and by more than it asks: the sanitizer is fed three shapes rather than two (single object, List, and the kube-system List the mirror-pod capture added) and four framings rather than three.
+- *(docs)* Put the rules work first in phase 3, and the ci row beside it ([418565e](https://github.com/murat-akpinar/k8rs/commit/418565e74133421bb8ce732d02d692e100641256))
 
 ### 🧪 Testing
 
