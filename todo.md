@@ -669,9 +669,20 @@ this plan is delivery mechanism for what this phase produces.
       `.get_minutes()` is `0` over 43 minutes, and the grace subtraction is
       `checked_sub` because a real apiserver accepts a grace that overflows it
       ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12))
+- [ ] `Finding` carries **timestamps, not phrases**. "4 min ago" is formatted
+      by the renderer, so `ui.rs` and the `--once` printer share one source and
+      a test asserts a duration instead of parsing English. A non-positive age
+      renders "just now" — the API server's clock and the laptop's disagree.
+      **The timestamp is an `Option`**: N2 has no moment to point at, and a
+      zero there draws as 1970
+      ([NOTES § D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12))
 - [ ] **Close the one row where `just check` is not CI** — `tester`'s, not
       `dev-core`'s, and it touches `justfile` / `.github/workflows/` only, so it
       runs alongside the rules work rather than ahead of it (disjoint trees).
+      **It is deliberately not first**: it gates nothing, and the rules work is
+      the phase (2026-08-13, the user's call). Dispatch it in parallel with
+      whichever rules box is running — the trees are disjoint — rather than
+      waiting for a slot.
       CI cross-compiles the release targets with
       `cargo check --locked --target <t> --all-targets`; `just check` runs
       nothing equivalent, so a cross-compile break is discoverable only after a
@@ -685,13 +696,6 @@ this plan is delivery mechanism for what this phase produces.
       a green run. Found by Phase 2's closing second pass in a Phase 1 artifact,
       which is why it is a box here and not a reopening there
       ([NOTES § D66](NOTES.md#d66--just-check-is-not-quite-the-whole-of-ci-and-the-gap-is-the-one-ci-was-built-to-watch-2026-08-13))
-- [ ] `Finding` carries **timestamps, not phrases**. "4 min ago" is formatted
-      by the renderer, so `ui.rs` and the `--once` printer share one source and
-      a test asserts a duration instead of parsing English. A non-positive age
-      renders "just now" — the API server's clock and the laptop's disagree.
-      **The timestamp is an `Option`**: N2 has no moment to point at, and a
-      zero there draws as 1970
-      ([NOTES § D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12))
 - [ ] Pod rules 1–8 and 12 (stuck Terminating). Rule 9 (no limits) is not an
       Alerts rule — it belongs to the Capacity report in Phase 4; rule 8 fires
       only on the escalated hostPath case. Events-based rule 11 stays deferred.
