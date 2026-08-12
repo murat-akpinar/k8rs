@@ -31,6 +31,15 @@
 def node_names:
   [ .. | objects
     | (.nodeName? // empty),
+      # Where the scheduler parks a name it has not committed to yet.
+      (.nominatedNodeName? // empty),
+      # `kubernetes.io/hostname` is the node's name under another key, and it
+      # turns up in three unrelated places: a pod's `nodeSelector`, any
+      # object's `labels`, and the `values[]` of a nodeAffinity
+      # `matchExpressions` entry. All three identify a node exactly as well as
+      # `.nodeName` does, and none of them used to be looked at.
+      (.["kubernetes.io/hostname"]? // empty),
+      (select(.key? == "kubernetes.io/hostname") | (.values? // [])[]),
       (select((.kind? == "Node") or (.status?.nodeInfo? != null))
        | .metadata?.name? // empty) ]
   | map(select(type == "string"));
@@ -128,6 +137,9 @@ refuse_foreign_nodes
 # a Rust path, a C++ scope operator and every `key::value` in a log line.
 | walk(
     if type != "string" then .
-    elif test("^[0-9a-fA-F:]*::[0-9a-fA-F:]*$") then "REDACTED-IP"
+    # Two IPv6 forms: compressed (the `::` run) and written out in full, which
+    # carries no `::` at all and so matched neither branch.
+    elif test("^[0-9a-fA-F:]*::[0-9a-fA-F:]*$")
+      or test("^[0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){7}$") then "REDACTED-IP"
     else gsub("(?<ip>([0-9]{1,3}\\.){3}[0-9]{1,3})"; "REDACTED-IP")
     end)

@@ -73,6 +73,12 @@ def allowed(name: str) -> bool:
     return name in ALLOWED_EXACT or name.startswith(ALLOWED_PREFIXES)
 
 
+# The allowlist is three bare prefixes, so any future kube method whose name
+# begins with one is exempted the day it appears, silently and forever. Nothing
+# in kube today trips it — which is exactly when to write the assertion.
+assert not [c for c in CANARIES if allowed(c)], "the allowlist exempts a known mutation"
+
+
 def strip_line_comment(line: str) -> str:
     """Drop `// …`, but only when the slashes are not inside a string.
 

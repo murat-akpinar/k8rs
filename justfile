@@ -26,6 +26,7 @@ check:
     cargo fmt --all -- --check
     cargo clippy --all-targets --all-features -- -D warnings
     cargo test --all-targets
+    python3 scripts/check-docs.py --self-test
     python3 scripts/check-docs.py
     python3 scripts/screens-check.py --self-test
     python3 scripts/screens-check.py

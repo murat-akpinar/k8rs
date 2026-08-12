@@ -20,36 +20,38 @@ fail=0
 # name:description pairs, shared by every shape — the same secrets are planted
 # in each, so a shape that quietly skips the filter shows up immediately.
 must_be_gone=(
-  "hunter2-in-an-annotation:the last-applied-configuration annotation"
-  "someone@example.com:a private annotation"
-  "sk-live-0123456789abcdef:an env value"
-  "tok_live_initcontainer:an init container env value"
-  "corp-registry-pull-token:an imagePullSecret"
-  "BEGIN RSA PRIVATE KEY:a private key in a status message"
-  "fieldsV1:managedFields"
-  "/api/v1/namespaces:selfLink"
-  "172.18.0.4:a node address"
-  "10.244.2.2:a pod IP"
+  "hunter2-in-an-annotation|the last-applied-configuration annotation"
+  "someone@example.com|a private annotation"
+  "sk-live-0123456789abcdef|an env value"
+  "tok_live_initcontainer|an init container env value"
+  "corp-registry-pull-token|an imagePullSecret"
+  "BEGIN RSA PRIVATE KEY|a private key in a status message"
+  "fieldsV1|managedFields"
+  "/api/v1/namespaces|selfLink"
+  "172.18.0.4|a node address"
+  "10.244.2.2|a pod IP"
   # Both of these used to survive: the filter anchored its match to the whole
   # string, and neither of these *is* the whole string. Documentation ranges
   # (RFC 5737) on purpose — this file is public, so it must not carry a real one.
-  "203.0.113.7:an address quoted inside an English message"
-  "198.51.100.0:an address carrying a CIDR suffix"
+  "203.0.113.7|an address quoted inside an English message"
+  "198.51.100.0|an address carrying a CIDR suffix"
   # A private key that never appears as text. Kubernetes stores every Secret
   # value base64-encoded, so `.data["tls.key"]` is the shape a real key arrives
   # in — and the PEM rule above looks for `-----BEGIN`, which base64 does not
   # contain. Needle is the encoded header, so a decode is not needed to spot it.
-  "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t:a base64-wrapped private key"
+  "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t|a base64-wrapped private key"
+  # IPv6 written out in full carries no `::` to anchor on.
+  "2001:0db8:0000:0000:0000:ff00:0042:8329|a fully expanded IPv6 address"
 )
 must_remain=(
   # A certificate is the public half by definition, and C3's own fixture is a
   # base64 CSR — destroying it would leave `.spec.request` unparseable as the
   # ByteString it is typed as. Only the key half is secret.
-  "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t:a base64-wrapped certificate (public, and the CSR fixture is made of one)"
-  "db-creds:the secretKeyRef a rule reports"
-  "ingress-tls:the Secret volume name"
-  "API_TOKEN:the env variable name (the value is what is secret, not the name)"
-  "k8rs-worker:the node name the N-series rules join on"
+  "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t|a base64-wrapped certificate (public, and the CSR fixture is made of one)"
+  "db-creds|the secretKeyRef a rule reports"
+  "ingress-tls|the Secret volume name"
+  "API_TOKEN|the env variable name (the value is what is secret, not the name)"
+  "k8rs-worker|the node name the N-series rules join on"
 )
 
 # --- ASSERTIONS START ---
@@ -61,7 +63,7 @@ assert_clean() { # $1 = shape name, stdin = the object
     return
   fi
   for entry in "${must_be_gone[@]}"; do
-    needle=${entry%%:*}; what=${entry#*:}
+    needle=${entry%%|*}; what=${entry#*|}
     if grep -qF -- "$needle" <<<"$clean"; then
       echo "FAIL  [$shape] $what survived sanitization"
       fail=1
@@ -69,7 +71,7 @@ assert_clean() { # $1 = shape name, stdin = the object
   done
   # References must survive: a rule needs to say *which* Secret a pod reads.
   for entry in "${must_remain[@]}"; do
-    needle=${entry%%:*}; what=${entry#*:}
+    needle=${entry%%|*}; what=${entry#*|}
     if ! grep -qF -- "$needle" <<<"$clean"; then
       echo "FAIL  [$shape] $what was destroyed — the fixture is now useless"
       fail=1
@@ -130,7 +132,7 @@ pod=$(cat <<'JSON'
   },
   "status": {
     "podIP": "10.244.2.2",
-    "podIPs": [{"ip": "10.244.2.2"}],
+    "podIPs": [{"ip": "10.244.2.2"}, {"ip": "2001:0db8:0000:0000:0000:ff00:0042:8329"}],
     "hostIP": "172.18.0.4",
     "conditions": [
       {"type": "Ready", "message": "-----BEGIN RSA PRIVATE KEY-----\nMIIEow==\n-----END RSA PRIVATE KEY-----"},
@@ -178,6 +180,29 @@ assert_refused "List" <<<'
 {"kind":"List","items":[
   {"kind":"Node","metadata":{"name":"ip-10-3-44-201.eu-west-1.compute.internal"},
    "status":{"nodeInfo":{"kubeletVersion":"v1.36.1"}}}]}'
+
+# The other four places a node name lives. `.nodeName` is where it is obvious;
+# these are where it hides, and a capture is just as identifying through any of
+# them. Each is asserted on its own so a partial fix cannot pass.
+assert_refused "nominatedNodeName" <<<'
+{"kind":"Pod","metadata":{"name":"prod-api-7d4"},
+ "status":{"nominatedNodeName":"ip-10-3-44-203.eu-west-1.compute.internal"}}'
+
+assert_refused "nodeSelector hostname" <<<'
+{"kind":"Pod","metadata":{"name":"prod-api-7d4"},
+ "spec":{"nodeSelector":{"kubernetes.io/hostname":"ip-10-3-44-201.eu-west-1.compute.internal"}}}'
+
+assert_refused "hostname label" <<<'
+{"kind":"List","items":[
+  {"kind":"Pod","metadata":{"name":"prod-api-7d4",
+   "labels":{"kubernetes.io/hostname":"ip-10-3-44-204.eu-west-1.compute.internal"}}}]}'
+
+assert_refused "nodeAffinity matchExpressions" <<<'
+{"kind":"Pod","metadata":{"name":"prod-api-7d4"},
+ "spec":{"affinity":{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":
+   {"nodeSelectorTerms":[{"matchExpressions":[
+     {"key":"kubernetes.io/hostname","operator":"In",
+      "values":["ip-10-3-44-202.eu-west-1.compute.internal"]}]}]}}}}}'
 
 # A kind node name buried in an otherwise-foreign capture must not launder it.
 assert_refused "mixed List" <<<'

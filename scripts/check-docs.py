@@ -8,7 +8,31 @@ ROOT = Path(__file__).resolve().parent.parent
 # changelog is generated — none of them are ours to keep link-clean.
 SKIP = ("tmp", "target", "CHANGELOG.md", "tests/fixtures")
 LINK = re.compile(r'\[([^\]]*)\]\(([^)\s]+)\)')
-FENCE = re.compile(r'^\s*```')
+# Both fence markers. Matching only ``` meant a heading inside a ~~~ block
+# became an anchor here and did not on GitHub — the one way this script could
+# call a genuinely broken link green.
+FENCE = re.compile(r'^\s*(`{3,}|~{3,})')
+
+
+def outside_fences(text):
+    """(line number, line) for every line that is not inside a code fence.
+
+    The opening marker is remembered rather than toggled, so a ``` written
+    inside a ~~~ block does not close it — which is the whole reason someone
+    reaches for the other marker.
+    """
+    opener = None
+    for n, line in enumerate(text.splitlines(), 1):
+        m = FENCE.match(line)
+        if m:
+            tok = m.group(1)[0]
+            if opener is None:
+                opener = tok
+            elif opener == tok:
+                opener = None
+            continue
+        if opener is None:
+            yield n, line
 
 def slug(text):
     t = text.strip().lower()
@@ -26,17 +50,42 @@ def slug(text):
     return re.sub(r'\s', '-', ''.join(out).strip())
 
 def anchors(path):
-    found, in_fence = set(), False
-    for line in path.read_text(encoding='utf-8').splitlines():
-        if FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
+    found = set()
+    for _, line in outside_fences(path.read_text(encoding='utf-8')):
         m = re.match(r'^(#{1,6})\s+(.*)$', line)
         if m:
             found.add(slug(m.group(2)))
     return found
+
+
+def self_test():
+    """A guard nobody has seen fail is not a guard (todo.md, Phase 1)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        p = Path(tmp) / "d.md"
+        p.write_text(
+            "# Real Heading\n"
+            "~~~\n"
+            "# Not A Heading\n"
+            "~~~\n"
+            "```\n"
+            "# Also Not A Heading\n"
+            "```\n"
+        )
+        got = anchors(p)
+        assert got == {"real-heading"}, got
+
+        # A ``` inside a ~~~ block must not end it, or everything after the
+        # inner marker is read as prose.
+        p.write_text("~~~\n```\n# Hidden\n~~~\n# Visible\n")
+        got = anchors(p)
+        assert got == {"visible"}, got
+    print("check-docs: self-test passed — headings inside either fence are not anchors")
+
+if "--self-test" in sys.argv:
+    self_test()
+    sys.exit(0)
 
 files = sorted(
     p for p in ROOT.rglob('*.md')
@@ -47,13 +96,7 @@ anchor_cache = {p: anchors(p) for p in files}
 errors = []
 
 for path in files:
-    in_fence = False
-    for n, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
-        if FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
+    for n, line in outside_fences(path.read_text(encoding='utf-8')):
         for label, target in LINK.findall(line):
             if target.startswith(('http://', 'https://', 'mailto:')):
                 continue

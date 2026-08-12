@@ -1100,6 +1100,37 @@ only the framing it was written for.* D29 asked which shapes the pipeline
 produces. This asks where inside a value the secret can sit — whole string,
 substring, or another encoding of it — and requires one planted case per answer.
 
+**3. The same question, asked of the refusal (2026-08-12, second pass).** The
+foreign-cluster refusal read exactly two fields: `.nodeName`, and a Node's own
+`.metadata.name`. A node name identifies infrastructure in four more places,
+all of them ordinary:
+
+- `.status.nominatedNodeName` — where the scheduler parks a name before it
+  commits to it
+- `.spec.nodeSelector["kubernetes.io/hostname"]`
+- `.metadata.labels["kubernetes.io/hostname"]` — which the committed
+  `nodes.json` carries for all three nodes, so this is not a hypothetical field
+- `matchExpressions[] | select(.key == "kubernetes.io/hostname") | .values[]`
+
+A production capture reaching the sanitizer through any of them was sanitized
+and written instead of refused. All four are now collected, each with its own
+assertion so a partial fix cannot pass. What was **not** done is Agent-suggested
+and deliberately rejected: making the refusal positive — "refuse when no node
+identifier is found but a hostname-shaped string exists" — would refuse
+`deployments.json` and `services.json`, which legitimately contain no node
+field at all.
+
+**4. IPv6 written out in full** (`2001:0db8:0000:…:8329`) carries no `::`, so
+it matched neither branch. Added as a second anchored alternative; unanchored
+IPv6 is still refused as a matter of policy, because `::` alone matches a Rust
+path and every `key::value` in a log line.
+
+**5. `check-docs.py` fenced on ``` only.** A heading inside a `~~~` block became
+an anchor here and does not on GitHub — the one way that script could call a
+genuinely broken link green. It now remembers which marker opened the fence
+rather than toggling a boolean, so a ``` inside a `~~~` block does not close it,
+and it gained the `--self-test` the other three guards already had.
+
 ## Decisions made
 
 ### Product

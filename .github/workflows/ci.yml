@@ -67,7 +67,9 @@ jobs:
         run: bash scripts/fixture-audit.sh
 
       - name: docs links and anchors
-        run: python3 scripts/check-docs.py
+        run: |
+          python3 scripts/check-docs.py --self-test
+          python3 scripts/check-docs.py
 
       # The mockups are the spec views.rs has to match, and "fits 80x24" was a
       # claim nobody had measured. Measured in display columns, not bytes.
