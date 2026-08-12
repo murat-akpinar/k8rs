@@ -403,9 +403,9 @@ spec:
 # D51 — the pod whose limit was patched onto a node that cannot fit it.
 # `ContainerStatus.resources` is "the limits that have been successfully enacted
 # on the running container", and rule 2 must name that number and not the one the
-# spec asked for: an in-place resize that the kubelet refuses leaves the two
-# genuinely disagreeing, and a finding reading the spec would say "exceeded its
-# 1Pi limit · exit 137" about a container that was never given it.
+# spec asked for: an in-place resize the kubelet cannot enact leaves the two
+# genuinely disagreeing, and a finding reading the spec would announce a limit
+# the size of the whole node about a container that was never given it.
 #
 # The manifest is only the *before*. `cluster.sh break` performs the resize once
 # the pod is running (`kubectl patch --subresource resize`), because a pod that is
@@ -417,10 +417,16 @@ spec:
 # happily and the two never diverge. Both stay equal to each other, so the pod's
 # QoS class does not change — a resize that would change it is rejected outright.
 #
-# The size the patch asks for is 1Pi and lives in `cluster.sh`, not here: a kind
-# node reports the host's memory as its allocatable, so a number chosen to be
-# "obviously too large" is only infeasible on machines smaller than the one it
-# was chosen on.
+# The size the patch asks for is not written down anywhere: `cluster.sh` reads
+# the allocatable memory of whichever node this pod landed on and asks for
+# exactly that. No constant can do the job. Measured on v1.36.1, a request above
+# the node's allocatable is refused at admission — "node didn't have enough
+# allocatable resources: memory, requested: 1125899906842624, allocatable:
+# 24860065792" — so it never reaches the kubelet and there is nothing to park;
+# a request below the node's *free* memory is enacted, and then nothing
+# disagrees. Only `(available, allocatable]` is admitted-and-unenactable, and a
+# kind node reports the host's memory, so every edge of that window is the
+# host's number and not one this file could carry.
 apiVersion: v1
 kind: Pod
 metadata: { name: broken-resize, labels: { demo: broken } }

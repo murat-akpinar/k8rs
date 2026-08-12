@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-11T23:11:46Z",
+    "creationTimestamp": "2026-08-12T20:45:53Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-restarts",
     "namespace": "default",
-    "resourceVersion": "4425",
-    "uid": "8b8d487a-885a-4905-bf43-c786de184272"
+    "resourceVersion": "1314",
+    "uid": "53f8dc44-369e-45e8-a824-bdc981facfa3"
   },
   "spec": {
     "containers": [
@@ -35,7 +35,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-lcpqr",
+            "name": "kube-api-access-84h42",
             "readOnly": true
           }
         ]
@@ -43,7 +43,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker2",
+    "nodeName": "k8rs-worker",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -72,7 +72,7 @@
         "name": "state"
       },
       {
-        "name": "kube-api-access-lcpqr",
+        "name": "kube-api-access-84h42",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -115,35 +115,35 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:47Z",
+        "lastTransitionTime": "2026-08-12T20:45:54Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:46Z",
+        "lastTransitionTime": "2026-08-12T20:45:53Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:12:32Z",
+        "lastTransitionTime": "2026-08-12T20:46:43Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:12:32Z",
+        "lastTransitionTime": "2026-08-12T20:46:43Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-11T23:11:46Z",
+        "lastTransitionTime": "2026-08-12T20:45:53Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -151,16 +151,16 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://d24e47d04f0a9ea6a1da127550674dc3f5ea3f147061a8de01e69d6bb44b0ad7",
+        "containerID": "containerd://fcf510abb379705bd7e100cfe5e3e852da95fd85f2b4fabcc58cc5eb58e155f1",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://42946647bcd40acd235efbf74d5c122136fc85d0dc682a56717599a0df88dfb5",
+            "containerID": "containerd://325114fc9608f5b6f455c98fcd5ba58eb105a807ba3b7c0893b4d8e88bc6abfd",
             "exitCode": 1,
-            "finishedAt": "2026-08-11T23:12:06Z",
+            "finishedAt": "2026-08-12T20:46:20Z",
             "reason": "Error",
-            "startedAt": "2026-08-11T23:12:06Z"
+            "startedAt": "2026-08-12T20:46:20Z"
           }
         },
         "name": "flaky",
@@ -170,7 +170,7 @@
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-11T23:12:32Z"
+            "startedAt": "2026-08-12T20:46:43Z"
           }
         },
         "user": {
@@ -190,7 +190,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-lcpqr",
+            "name": "kube-api-access-84h42",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -213,6 +213,6 @@
     ],
     "qosClass": "BestEffort",
     "resources": {},
-    "startTime": "2026-08-11T23:11:46Z"
+    "startTime": "2026-08-12T20:45:53Z"
   }
 }

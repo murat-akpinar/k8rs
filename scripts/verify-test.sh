@@ -2059,35 +2059,81 @@ obj[hostpath_two]=$(jq '.spec.containers[0].volumeMounts =
    | .status.containerStatuses += [ (.status.containerStatuses[0] | .name = "shipper") ]' \
   <<<"${obj[hostpath_spec]}")
 
-# broken-resize after `kubectl patch --subresource resize`: the spec now asks
-# for 1Pi and `status.resources` still holds the 64Mi the kubelet enacted,
-# because no node has 1Pi to give. The condition is the kubelet's own
-# ("Infeasible" is its word for a resize it will never be able to make); it is
-# added rather than moved, because the pod that would carry it does not exist
-# yet and this is the object that says why it must.
+# broken-resize after `kubectl patch --subresource resize`, and this is the one
+# object here that was *read off the cluster by hand* rather than reasoned to:
+# the spec asks for the whole allocatable memory of the node the pod landed on
+# (`k8rs-worker3`, `24277408Ki`) and `status.resources` still holds the 64Mi the
+# kubelet enacted, because the node cannot free that much. Values, condition and
+# message are the ones a v1.36.1 kubelet wrote on 2026-08-12; the condition is
+# added rather than moved, because the pod that carries it does not exist in the
+# committed capture yet and this is the object that says what it must hold.
 #
-# 1Pi and not 100Gi: a kind node reports the host's memory as its allocatable,
-# so 100Gi is infeasible on a laptop and *enacted* on a large workstation — a
-# fixture that depends on whose machine ran the trip. A quantity has no upper
-# bound, and this one is past every machine there is.
+# `Deferred` and not `Infeasible`: a request larger than the node's allocatable
+# — the 1Pi this file used to carry — is refused at admission and never reaches
+# the kubelet, so the *infeasible* condition is not reachable through `break` at
+# all. Measured, not assumed: `pods "broken-resize" is forbidden: node didn't
+# have enough allocatable resources: memory, requested: 1125899906842624,
+# allocatable: 24860065792`.
 obj[resize_pending]=$(jq '.metadata.name = "broken-resize"
-   | .spec.containers[0].resources = {"limits":{"memory":"1Pi"},"requests":{"memory":"1Pi"}}
-   | .status.conditions += [ {"type":"PodResizePending","status":"True","reason":"Infeasible"} ]' \
+   | .spec.containers[0].resources = {"limits":{"memory":"24277408Ki"},"requests":{"memory":"24277408Ki"}}
+   | .status.conditions += [ {"type":"PodResizePending","status":"True","reason":"Deferred",
+       "message":"Node didn'"'"'t have enough resource: memory, requested: 24860065792, used: 136314880, capacity: 24860065792"} ]' \
   <<<"${obj[resize_base]}")
 
-# the kubelet's *other* reason for not enacting a resize, and it is a different
-# fixture: `Deferred` is "not right now" — the node could fit it once something
-# else leaves — so it resolves itself, and a capture taken on it is a fixture
-# that expires. Everything else about this object is the pending one, which is
-# what makes it the case that holds the reason clause honest.
-obj[resize_deferred]=$(jq '.status.conditions |= map(if .type == "PodResizePending"
-     then .reason = "Deferred" else . end)' <<<"${obj[resize_pending]}")
+# the kubelet's *other* reason for the same parking, which the predicate still
+# accepts and this cluster can no longer produce: a node whose allocatable
+# shrinks under a pod that was already resized reaches it, `break` does not.
+# Everything else about this object is the one above, so it is exactly the
+# second spelling and nothing else.
+obj[resize_infeasible]=$(jq '.status.conditions |= map(if .type == "PodResizePending"
+     then .reason = "Infeasible" else . end)' <<<"${obj[resize_pending]}")
 
-# and a resize the node *could* fit, enacted: 128Mi rather than the impossible
-# number, because a node that enacted 1Pi is not a machine. Spec and status
-# agree again, which is the object that would make a predicate reading only the
-# spec pass — a fixture captured a second too late, after the resize landed, is
-# not the fixture rule 2 needs.
+# the same divergence with nothing saying the kubelet parked it: `spec` has moved
+# and `status.resources` has not, and no condition explains why. That is what a
+# resize looks like in the seconds *before* the kubelet answers, and it is also
+# what a capture of a pod mid-enactment looks like — neither is the fixture,
+# because both resolve into agreement.
+obj[resize_unparked]=$(jq '.status.conditions |= map(select(.type != "PodResizePending"))' \
+  <<<"${obj[resize_pending]}")
+
+# and the parked resize whose condition arrived without a reason. A PodCondition
+# may legally carry none, and without it the object cannot say which parking
+# this is — "not right now" and "in flight" read identically, and one of those
+# two is a fixture that has already stopped being true by the time it is read.
+obj[resize_no_reason]=$(jq '.status.conditions |= map(if .type == "PodResizePending"
+     then del(.reason) else . end)' <<<"${obj[resize_pending]}")
+
+# the pod that was resized *twice*: once to a size the node could fit, which the
+# kubelet enacted, and then to the allocatable, which it parked. Spec and status
+# disagree here too — but the enacted number is 128Mi, and broken.yaml declares
+# 64Mi and `break` patches once. A capture in this state is a pod something else
+# has been done to, and the rule test that reads it would be told the container
+# is held at a limit no manifest in this repo asked for.
+obj[resize_twice]=$(jq '.status.containerStatuses[0].resources =
+     {"limits":{"memory":"128Mi"},"requests":{"memory":"128Mi"}}' <<<"${obj[resize_pending]}")
+
+# the resize put back, which is the first thing a second `break` does: the spec
+# returns to the 64Mi broken.yaml declares while the condition the kubelet wrote
+# is still on the object. Nothing disagrees any more — a capture taken in this
+# window is `broken-resize` before its patch wearing the evidence of the last
+# run's.
+obj[resize_reverted]=$(jq '.spec.containers[0].resources =
+     {"limits":{"memory":"64Mi"},"requests":{"memory":"64Mi"}}' <<<"${obj[resize_pending]}")
+
+# and the one object that reaches the spec clause with nothing in it: D53's
+# shape, parked. The container declares only cpu, the pod declares the memory
+# limit, and the kubelet copies that limit down into the container's status — so
+# the enacted memory is 64Mi with no memory in the container's spec to compare it
+# against. `null != "64Mi"` is true in jq, so without its null test this
+# predicate certifies broken-podlimit as broken-resize.
+obj[resize_podlevel_only]=$(jq '.spec.resources = {"limits":{"memory":"64Mi"},"requests":{"memory":"64Mi"}}
+   | .spec.containers[0].resources = {"limits":{"cpu":"2"},"requests":{"cpu":"2"}}
+   | .status.containerStatuses[0].resources.limits.cpu = "100m"' <<<"${obj[resize_pending]}")
+
+# and a resize the node *could* fit, enacted: 128Mi, which is small enough that
+# the kubelet simply gives it. Spec and status agree again, which is the object
+# that would make a predicate reading only the spec pass — a fixture captured a
+# second too late, after the resize landed, is not the fixture rule 2 needs.
 obj[resize_enacted]=$(jq '.metadata.name = "broken-resize"
    | .spec.containers[0].resources = {"limits":{"memory":"128Mi"},"requests":{"memory":"128Mi"}}
    | .status.containerStatuses[0].resources = {"limits":{"memory":"128Mi"},"requests":{"memory":"128Mi"}}' \
@@ -2427,14 +2473,20 @@ check owned     miss  restarts_owned "an owned pod that crashed three times and 
 check owned     miss  owned_first_exit "the same pod at its first exit, before any restart"
 check owned     miss  empty_rs "an empty List — 'no pod' is not 'a crashlooping pod'"
 
-# D51's resize. Both sides are asserted because either alone passes on a pod
-# nobody ever resized: the kubelet is still holding what it enacted, and the
-# spec has moved off it. The third clause names *why* it was not enacted, so it
-# gets the kubelet's other reason as its negative.
-check resize    match resize_pending "broken-resize with the 1Pi patch the node refused"
+# D51's resize. Both sides of the divergence are asserted because either alone
+# passes on a pod nobody ever resized: the kubelet is still holding what it
+# enacted, and the spec has moved off it. The third clause is *why* it was not
+# enacted, and its negatives are the two objects that carry the divergence
+# without an answer — no condition at all, and a condition with no reason on it.
+check resize    match resize_pending "broken-resize parked as Deferred, which is what the cluster actually produces"
+check resize    match resize_infeasible "the same parking spelled Infeasible — reachable on a node that shrank, not through break"
 check resize    miss  resize_base    "the same pod before the patch — spec and status agree"
 check resize    miss  resize_enacted "a resize the node *could* fit, so there is nothing left to disagree about"
-check resize    miss  resize_deferred "the same resize parked as Deferred — not enacted *yet*, which is a state that resolves itself"
+check resize    miss  resize_unparked "the same divergence with no resize condition at all — a resize nobody has answered yet"
+check resize    miss  resize_no_reason "the condition with its reason missing, which cannot say parked from in flight"
+check resize    miss  resize_twice   "a pod resized twice — the divergence is there, but the kubelet is holding 128Mi and no manifest here asks for that"
+check resize    miss  resize_reverted "the spec put back to 64Mi with the old condition still on it, which is what a second break leaves for a moment"
+check resize    miss  resize_podlevel_only "D53's pod: a memory limit enacted from the pod level that the container's own spec never declared"
 check resize    miss  oom            "a pod nobody resized, captured before status.resources was read at all"
 
 # D53's copy-down: a memory limit in the container status that its own spec

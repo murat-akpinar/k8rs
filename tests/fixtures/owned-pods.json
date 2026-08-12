@@ -1,0 +1,233 @@
+{
+  "apiVersion": "v1",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "generation": 1,
+        "labels": {
+          "app": "broken-owned",
+          "demo": "broken",
+          "pod-template-hash": "7bdb7645c8"
+        },
+        "name": "broken-owned-7bdb7645c8-vhwcp",
+        "namespace": "default",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "broken-owned-7bdb7645c8",
+            "uid": "e9ae676c-4825-407e-b6ea-6beae01d1db6"
+          }
+        ],
+        "resourceVersion": "7949",
+        "uid": "78827053-69f8-4a12-9b85-471181a3f392"
+      },
+      "spec": {
+        "containers": [
+          {
+            "args": [
+              "echo starting\nsleep 2\necho 'panic: dial tcp db.payments.svc:5432: connect: connection refused' >&2\nexit 1\n"
+            ],
+            "command": [
+              "sh",
+              "-c"
+            ],
+            "image": "busybox",
+            "imagePullPolicy": "Always",
+            "name": "quitter",
+            "resources": {},
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "FallbackToLogsOnError",
+            "volumeMounts": [
+              {
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "name": "kube-api-access-6qmtx",
+                "readOnly": true
+              }
+            ]
+          }
+        ],
+        "dnsPolicy": "ClusterFirst",
+        "enableServiceLinks": true,
+        "nodeName": "k8rs-worker2",
+        "preemptionPolicy": "PreemptLowerPriority",
+        "priority": 0,
+        "restartPolicy": "Always",
+        "schedulerName": "default-scheduler",
+        "securityContext": {},
+        "serviceAccount": "default",
+        "serviceAccountName": "default",
+        "terminationGracePeriodSeconds": 30,
+        "tolerations": [
+          {
+            "effect": "NoExecute",
+            "key": "node.kubernetes.io/not-ready",
+            "operator": "Exists",
+            "tolerationSeconds": 300
+          },
+          {
+            "effect": "NoExecute",
+            "key": "node.kubernetes.io/unreachable",
+            "operator": "Exists",
+            "tolerationSeconds": 300
+          }
+        ],
+        "volumes": [
+          {
+            "name": "kube-api-access-6qmtx",
+            "projected": {
+              "defaultMode": 420,
+              "sources": [
+                {
+                  "serviceAccountToken": {
+                    "expirationSeconds": 3607,
+                    "path": "token"
+                  }
+                },
+                {
+                  "configMap": {
+                    "items": [
+                      {
+                        "key": "ca.crt",
+                        "path": "ca.crt"
+                      }
+                    ],
+                    "name": "kube-root-ca.crt"
+                  }
+                },
+                {
+                  "downwardAPI": {
+                    "items": [
+                      {
+                        "fieldRef": {
+                          "apiVersion": "v1",
+                          "fieldPath": "metadata.namespace"
+                        },
+                        "path": "namespace"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "status": {
+        "conditions": [
+          {
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-08-12T20:45:54Z",
+            "observedGeneration": 1,
+            "status": "True",
+            "type": "PodReadyToStartContainers"
+          },
+          {
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-08-12T20:45:53Z",
+            "observedGeneration": 1,
+            "status": "True",
+            "type": "Initialized"
+          },
+          {
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-08-12T21:38:57Z",
+            "message": "containers with unready status: [quitter]",
+            "observedGeneration": 1,
+            "reason": "ContainersNotReady",
+            "status": "False",
+            "type": "Ready"
+          },
+          {
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-08-12T21:38:57Z",
+            "message": "containers with unready status: [quitter]",
+            "observedGeneration": 1,
+            "reason": "ContainersNotReady",
+            "status": "False",
+            "type": "ContainersReady"
+          },
+          {
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-08-12T20:45:53Z",
+            "observedGeneration": 1,
+            "status": "True",
+            "type": "PodScheduled"
+          }
+        ],
+        "containerStatuses": [
+          {
+            "containerID": "containerd://9686d3a1faf274f7043961aade4e9f05f61e81029720de41e20579396806abef",
+            "image": "docker.io/library/busybox:latest",
+            "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
+            "lastState": {
+              "terminated": {
+                "containerID": "containerd://9686d3a1faf274f7043961aade4e9f05f61e81029720de41e20579396806abef",
+                "exitCode": 1,
+                "finishedAt": "2026-08-12T21:38:56Z",
+                "message": "starting\npanic: dial tcp db.payments.svc:5432: connect: connection refused\n",
+                "reason": "Error",
+                "startedAt": "2026-08-12T21:38:54Z"
+              }
+            },
+            "name": "quitter",
+            "ready": false,
+            "resources": {},
+            "restartCount": 15,
+            "started": false,
+            "state": {
+              "waiting": {
+                "message": "back-off 5m0s restarting failed container=quitter pod=broken-owned-7bdb7645c8-vhwcp_default(78827053-69f8-4a12-9b85-471181a3f392)",
+                "reason": "CrashLoopBackOff"
+              }
+            },
+            "user": {
+              "linux": {
+                "gid": 0,
+                "supplementalGroups": [
+                  0,
+                  10
+                ],
+                "uid": 0
+              }
+            },
+            "volumeMounts": [
+              {
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "name": "kube-api-access-6qmtx",
+                "readOnly": true,
+                "recursiveReadOnly": "Disabled"
+              }
+            ]
+          }
+        ],
+        "hostIP": "REDACTED-IP",
+        "hostIPs": [
+          {
+            "ip": "REDACTED-IP"
+          }
+        ],
+        "observedGeneration": 1,
+        "phase": "Running",
+        "podIP": "REDACTED-IP",
+        "podIPs": [
+          {
+            "ip": "REDACTED-IP"
+          }
+        ],
+        "qosClass": "BestEffort",
+        "resources": {},
+        "startTime": "2026-08-12T20:45:53Z"
+      }
+    }
+  ],
+  "kind": "List",
+  "metadata": {
+    "resourceVersion": ""
+  }
+}

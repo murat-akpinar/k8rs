@@ -258,8 +258,10 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       one
 - [x] kind cluster up, states settled (CrashLoop in backoff, OOM kills seen).
       `cluster.sh verify` asserts each one reached the state its rule is
-      about — **13/13 pass** against the real cluster *(14 predicates since
-      `owned` landed; the count moves whenever a fixture does)*. A fixture that
+      about — **23/23 pass** against the real cluster on the second trip
+      (2026-08-13), plus the three node predicates `break-nodes` adds after the
+      pod capture: 26 in all *(the count moves whenever a fixture does — it was
+      13 on the first trip)*. A fixture that
       never reaches its state is a test that cannot fail, and that has to be
       caught
       before anything is captured. The predicates that decide it are
@@ -283,7 +285,7 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       `owned-replicasets` were added with the owned-pod fixture. This item
       describes the recipe existing, not a frozen inventory — the recipe
       itself is the inventory.)*
-- [ ] **Run it**: `just cluster-up && just cluster-down` wherever docker is, then
+- [x] **Run it**: `just cluster-up && just cluster-down` wherever docker is, then
       `just fixtures`, then eyeball the output. Nothing above is proven until
       the capture has actually run against a cluster.
       **Half done, and the box stays open for the other half (2026-08-12):**
@@ -307,8 +309,16 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       moves the pinned `now`** in `src/rules.rs`'s `fn now()`,
       `scripts/certs-test.sh` and `scripts/make-certs.sh` together — they
       describe one afternoon or none
-      ([NOTES § D57](NOTES.md#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12))
-- [ ] **A broken pod that has an owner** — added to
+      ([NOTES § D57](NOTES.md#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)).
+      **Closed 2026-08-13, the other half run:** `break` → `verify` (23/23) →
+      `just fixtures` (34 fixtures from v1.36.1, the sanitizer test green, then
+      `break-nodes` and 3/3 node predicates) → the capture read *before*
+      teardown, so a missing shape could still have been re-captured against a
+      live cluster → `unbreak` (three node changes undone) → `just
+      cluster-down`. The teardown stripped `broken-stuck`'s finalizer and the
+      cluster is gone, which is what this box was waiting to see
+      ([NOTES § D64](NOTES.md#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13))
+- [x] **A broken pod that has an owner** — added to
       [`scripts/broken.yaml`](scripts/broken.yaml) and captured on the same
       trip. Every pod fixture in the repo has `ownerReferences: null`, so the
       grouping key's four workload branches would ship tested only in their
@@ -322,8 +332,13 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       corpus, and the two `owned-*.json` lines in `just fixtures` with a guard
       that refuses a capture carrying no controlling `ownerReference`. The box
       stays open for the capture itself, which three boxes share and which
-      happens once, after all three have their manifests
-- [ ] **A mirror pod**, captured on the same trip: `kubectl get pods -n
+      happens once, after all three have their manifests.
+      **Captured 2026-08-13:** `owned-pods.json` carries
+      `broken-owned-7bdb7645c8-vhwcp` under a controlling
+      `ReplicaSet/broken-owned-7bdb7645c8`, with `owned-replicasets.json`
+      beside it, so the grouping key's Deployment/ReplicaSet branch has a real
+      object instead of a `null`
+- [x] **A mirror pod**, captured on the same trip: `kubectl get pods -n
       kube-system -o json` from the kind cluster. kubelet writes an
       `ownerReference` of kind `Node` onto every static pod, which is the one
       shape that makes a Node an owner — and it is the claim behind the ruling
@@ -344,8 +359,13 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       shape closed two sanitizer holes it exposed — the Node `ownerReference`
       as the fifth place a node name lives, and bracketed IPv6 in a URL
       ([NOTES § D62](NOTES.md#d62--the-fifth-place-a-node-name-lives-and-a-guard-that-asked-less-than-its-consumer-2026-08-12)).
-      The box stays open for the capture itself
-- [ ] **The shapes the first capture could not produce**, all on the same trip.
+      **Captured 2026-08-13:** `kube-system-pods.json` holds the four static
+      pods — etcd, kube-apiserver, kube-controller-manager, kube-scheduler —
+      each with the `Node` `ownerReference` the kubelet writes. The upstream
+      behaviour behind the no-owner ruling is now a fixture, and N2's
+      drain-aware count and rule 8's false-positive class have the negative
+      they were shipping without
+- [x] **The shapes the first capture could not produce**, all on the same trip.
       Field-level mutation of the Phase 3 decode found 32 fields that could be
       corrupted with the whole suite staying green, and the cause was the
       cluster, not the tests
@@ -434,6 +454,20 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
         pinned scheduler message in the Pending test changes with the respin
         and with the fourth node. `dev-core` owns those edits, at capture time,
         not before
+      - **The trip ran on 2026-08-13 and the box closes with it.** 34 fixtures
+        from `kindest/node:v1.36.1`; `verify` 23/23 and the node predicates
+        3/3; every one of the thirteen shapes on disk. Three things the trip
+        settled that reading could not: the resize fixture **cannot** be
+        written against a constant — a request above the node's allocatable is
+        refused at *admission* and parks nothing, so the target is read off the
+        node at break time and the reachable parking is `Deferred`, not the
+        `Infeasible` a review had approved. `break` was **not idempotent** over
+        a cluster it had already broken, and the probe meant to catch that read
+        a template the apply had just restored. And the cordon question above
+        is answered **yes**: `nodes.json` carries `timeAdded` on the mirrored
+        `unschedulable` taint, so D43's premise fell and the card is
+        `tui-designer`'s round
+        ([NOTES § D64](NOTES.md#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13))
 - [x] A multi-node kind config — N-series rules (cordon, skew, pressure) and
       drain safety cannot be captured on a single-node cluster. Three nodes
       (1 control-plane + 2 workers); `K8RS_WORKERS` changes the count.
@@ -596,7 +630,9 @@ this plan is delivery mechanism for what this phase produces.
       every decoded API timestamp already wears, so the comparison every rule
       makes is two values of one type
       ([NOTES § D54](NOTES.md#d54--now-is-metav1time-not-a-bare-jifftimestamp-2026-08-12)).
-      **The pin is `2026-08-12T00:00:00Z` and it was not chosen freely:**
+      **The pin is `2026-08-13T00:00:00Z` since the second capture trip
+      (2026-08-13); it was `2026-08-12T00:00:00Z` when this box was written,
+      and it was not chosen freely either time:**
       `scripts/certs-test.sh` already asserted the certificate fixtures against
       that instant, and it now extracts the Rust pin and refuses to disagree
       with it — the one edge of that coupling nothing was guarding. The pin

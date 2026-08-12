@@ -23,6 +23,11 @@ __pycache__/
 
 # Agent scratch
 /.agent/
+# The session handoff note — where the last turn stopped and what the next one
+# picks up. Written in Turkish, which no committed file may be (CLAUDE.md §
+# Language), and true only until the next session reads it. Ignored so
+# `git add -A` cannot sweep it in.
+/last.md
 .claude/settings.local.json
 # .claude/agents/ is deliberately NOT ignored: the five subagent definitions
 # are part of how this project is built (CLAUDE.md § Agent workflow), and a

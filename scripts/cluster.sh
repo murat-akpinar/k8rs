@@ -85,31 +85,120 @@ down() {
 # not politeness, it is the fixture: `set image` before those pods are up
 # replaces a revision nobody was ever serving from.
 #
-# Asking which image is on it first is what keeps a second `break` from hanging.
-# Waiting unconditionally is worse than useless on an already-broken workload:
-# `rollout status` on a rollout that can never finish blocks for the whole
-# timeout and then fails the script, which would leave `break` working only on a
-# cluster nobody had broken yet.
+# Waiting unconditionally is worse than useless on a workload an earlier `break`
+# already broke: `rollout status` on a rollout that can never finish blocks for
+# the whole timeout and then ends the script, which is how `break` came to work
+# only on a cluster nobody had broken yet. What "already broke" can be read off,
+# and when, is the whole of `scan_second_revisions` below.
+#
+# The wait stays a `rollout status` and does not become a `kubectl wait` on a
+# counter: what it has to assert is "every replica is up on the current
+# revision", which is what that one command already means, while the counter is
+# named differently per kind (`readyReplicas`, `numberReady`) and would have to
+# be spelled out three times. It was never this command's meaning that failed —
+# only asking it where the answer could never be yes.
 #
 # The image is the same one `broken-image` and `broken-ds` use, spelled again
 # because a manifest cannot read a shell variable — a registry that does not
 # resolve, so the failure is the pull and never something on the network.
 BAD_IMAGE=registry.invalid/does-not-exist:v9
 
+# The workloads whose second revision is a *change* to a running object, in one
+# list because the scan and the break must never name different sets: a workload
+# added to the second and not the first walks straight back into the wait it
+# cannot survive.
+SECOND_REVISION=(deployment/broken-rollout statefulset/broken-sts)
+ALREADY_BROKEN=""
+
+# --- WHAT A SECOND `break` CANNOT LEARN AFTER THE APPLY ---
+# `kubectl apply` puts the *good* template back on both of these workloads —
+# broken.yaml is deliberately the first revision — so after it the image always
+# reads busybox, and a guard that asks the template whether this workload is
+# already on its second revision can only ever answer no. That guard was here,
+# one line below the apply, and it was dead code: every second `break` walked
+# into the wait it existed to skip. So this runs first, and carries its answer
+# past the apply in $ALREADY_BROKEN.
+#
+# It reads the *pods* rather than the template, because the template is not what
+# blocks. Measured on the run that took this script down: the apply had already
+# put busybox back on `broken-sts` — `updateRevision` and `currentRevision` both
+# naming the busybox revision — while `broken-sts-1` was still on the previous
+# run's bad revision, not Ready, and the set no longer had that revision at all.
+# Under `OrderedReady` the controller will not step past an unhealthy pod, so it
+# never deletes pod-1, so pod-1 never comes back on a revision that could start:
+# the newest event `describe` had was the create half an hour earlier, and the
+# apply was followed by none at all. That is not slow convergence, and `rollout
+# status` waits out its whole timeout on it every time.
+# A template read cannot see that cluster at all — the template is good and the
+# pod is not.
+#
+# `broken-rollout` cannot reach that state, and it is structure rather than luck.
+# Measured on the same run: two lines before the StatefulSet hung, the Deployment
+# printed "successfully rolled out" from the identical starting position. The
+# reason is that a Deployment's replicas have no identity — the old revision's
+# unready pod is deleted as soon as the new one has room, and it has room here,
+# because `maxUnavailable: 0` holds the two busybox pods in place while the
+# unready one is a surge pod *above* the desired count, so removing it costs no
+# availability. `broken-ds` is never given a second revision at all: it is born
+# on $BAD_IMAGE in the manifest and nothing here waits on it. Both are scanned
+# anyway, because a guard that is only correct for the kind that happened to
+# break is one nobody can trust with the third.
+#
+# Breaking it again is not a repair of the leftover pod, it is the same edit as
+# the first time: the template returns to exactly what it was, so its revision
+# hash does too, and the pod the earlier run left is already on it. What comes
+# back is the state a first run leaves — one ready replica on the first revision,
+# one that cannot start on the second — which is what `verify` has to agree with.
+# That last step is where the ceiling of this guard is, and it is deliberate: if
+# broken.yaml's template has changed since the run that left the pod, the hash no
+# longer matches and the StatefulSet stays stuck. `break` then finishes anyway
+# and `verify` says `FAIL sts` with the object printed under it, which is the
+# same "unbreak first" answer the apply gives one screen up — loud and named,
+# rather than five minutes of a wait that was never going to end.
+#
+# The selector is read off the workload instead of being spelled here, so it
+# cannot drift from broken.yaml, and an empty one is skipped rather than handed
+# to `-l`, where it would match every pod in the namespace — `broken-image` is
+# one of them and it carries $BAD_IMAGE, so a *first* run would then skip the
+# wait that is the whole reason there is a first revision to break.
+scan_second_revisions() {
+  local kc=(kubectl --context "kind-$CLUSTER") w sel img
+  for w in "$@"; do
+    # Silent only where silence is correct: no such workload yet is a first run.
+    # Anything else that could fail these two reads — a dead API server, a
+    # kubeconfig without the verb — is loud one command later, at the apply.
+    sel=$("${kc[@]}" get "$w" -o json 2>/dev/null \
+          | jq -r '(.spec.selector.matchLabels // {}) | to_entries
+                   | map("\(.key)=\(.value)") | join(",")') || sel=
+    [ -n "$sel" ] || continue
+    # Every container, not `containers[0]`: which slot the app sits in is
+    # broken.yaml's business, and a probe that only reads the first one is a
+    # guard that stops working the day a sidecar is added above it.
+    img=$("${kc[@]}" get pods -l "$sel" \
+            -o jsonpath='{.items[*].spec.containers[*].image}' 2>/dev/null) || img=
+    case " $img " in *" $BAD_IMAGE "*) ALREADY_BROKEN="$ALREADY_BROKEN $w " ;; esac
+  done
+}
+
 second_revision() { # $1 kind/name — its container is called `app`
   local kc=(kubectl --context "kind-$CLUSTER")
-  if [ "$("${kc[@]}" get "$1" -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$BAD_IMAGE" ]; then
-    echo "  $1 is already on its second revision"
-    return 0
-  fi
-  echo "  waiting for the first revision of $1 before breaking the second..."
-  "${kc[@]}" rollout status "$1" --timeout=300s
+  case "$ALREADY_BROKEN" in
+    *" $1 "*)
+      echo "  $1 still carries a pod from an earlier break — breaking it again without waiting" ;;
+    *)
+      echo "  waiting for the first revision of $1 before breaking the second..."
+      "${kc[@]}" rollout status "$1" --timeout=300s ;;
+  esac
+  # Never skipped, on either path: the guard above takes away one wait and
+  # nothing else, and a `set image` that fails still ends the run.
   "${kc[@]}" set image "$1" "app=$BAD_IMAGE"
 }
 
 break_it() {
-  need kubectl
-  local kc=(kubectl --context "kind-$CLUSTER")
+  # jq for the scan below — `break` is the last subcommand here that did not
+  # need it, and a capture trip needs it at every other step anyway.
+  need kubectl; need jq
+  local kc=(kubectl --context "kind-$CLUSTER") w
 
   # --- WHAT A SECOND `break` NEEDS, AND WHAT IT CANNOT HAVE ---
   # A pod spec is almost entirely immutable: `updatablePodSpecFields` is image,
@@ -124,15 +213,20 @@ break_it() {
   #
   # The resize is the one case that is not the manifest's doing, and it made
   # every second run fail at the first command: a previous run left the live pod
-  # at 1Pi while broken.yaml still says 64Mi, and `spec.containers[*].resources`
-  # may not change through a pod update. Putting it back through the one
-  # subresource that may change it makes the apply a no-op change again. Guarded
-  # by a `get` rather than `|| true`, so a *real* failure here is still loud —
+  # at its node's whole memory while broken.yaml still says 64Mi, and
+  # `spec.containers[*].resources` may not change through a pod update. Putting
+  # it back through the one subresource that may change it makes the apply a
+  # no-op change again. Guarded by a `get` rather than `|| true`, so a *real*
+  # failure here is still loud —
   # there being no pod yet on a first run is the only silence that is correct.
   if "${kc[@]}" get pod broken-resize >/dev/null 2>&1; then
     "${kc[@]}" patch pod broken-resize --subresource resize --patch \
       '{"spec":{"containers":[{"name":"app","resources":{"requests":{"memory":"64Mi"},"limits":{"memory":"64Mi"}}}]}}'
   fi
+
+  # Before the apply, and the comment on the function is why: the apply is what
+  # destroys the evidence this reads.
+  scan_second_revisions "${SECOND_REVISION[@]}"
 
   "${kc[@]}" apply -f "$BROKEN"
   # The healthy side goes up with the broken one: a rule needs both fixtures,
@@ -143,26 +237,51 @@ break_it() {
   # --- THE STATES A MANIFEST CANNOT DECLARE ---
   # Three fixtures are a *change* to a running object rather than an object, so
   # they are applied here and not in the yaml.
-  second_revision deployment/broken-rollout
-  second_revision statefulset/broken-sts
+  for w in "${SECOND_REVISION[@]}"; do second_revision "$w"; done
 
   # The in-place resize the node cannot fit (D51). It goes through the `resize`
   # subresource, which is the only path that changes the resources of a running
   # pod, and it needs the pod to be running first — an unscheduled pod has no
   # enacted resources for the spec to disagree with. The kubelet then parks it
-  # as PodResizePending/Infeasible instead of enacting it, which is the whole
-  # point: `spec` and `status.resources` genuinely disagree and rule 2 has to
-  # name the second one.
+  # as PodResizePending instead of enacting it, which is the whole point: `spec`
+  # and `status.resources` genuinely disagree and rule 2 has to name the second
+  # one.
   #
-  # 1Pi, and not a number that merely looks large. Feasibility is judged against
-  # the node's allocatable and a kind node reports the *host's* memory, so 100Gi
-  # is infeasible on a laptop and quietly enacted on a big workstation — which
-  # would make this fixture depend on whose machine ran the trip, and fail the
-  # capture with `[resize]` blaming a pod that did exactly what it was told. A
-  # quantity has no upper bound; 1Pi is refused by every machine there is.
+  # --- WHY THE NUMBER IS READ OFF THE NODE AND NOT WRITTEN HERE ---
+  # A constant cannot work, in either direction. Anything *above* the node's
+  # allocatable is refused at admission and never reaches the kubelet at all —
+  # measured on v1.36.1, which is what took `break` down at its last command:
+  #
+  #   Error from server (Forbidden): pods "broken-resize" is forbidden: node
+  #   didn't have enough allocatable resources: memory, requested:
+  #   1125899906842624, allocatable: 24860065792
+  #
+  # so `1Pi` produces no fixture and no pod, and `100Gi` produces the same
+  # refusal on any machine smaller than 100Gi. Anything below the node's *free*
+  # memory is simply enacted, and then nothing disagrees. What is left is the
+  # window `(available, allocatable]`: large enough that the kubelet cannot fit
+  # it, small enough that the apiserver admits it. Its top edge is the one point
+  # in that window which does not depend on how much the other pods on that node
+  # happen to be holding — and something is always holding some, because kindnet
+  # is a DaemonSet and requests 50Mi on every worker there is.
+  #
+  # The request moves with the limit, because feasibility is judged on the
+  # request and a resize that raised only the limit would be enacted happily;
+  # the two stay equal to each other, because a resize that changes the pod's
+  # QoS class is rejected outright.
   "${kc[@]}" wait --for=condition=Ready pod/broken-resize --timeout=300s
+  # Ready implies scheduled, so `.spec.nodeName` is set by the time this reads
+  # it. Asserted rather than assumed: an empty node name would send an empty
+  # quantity to the apiserver, and the error would name the patch rather than
+  # the missing field behind it.
+  local node mem
+  node=$("${kc[@]}" get pod broken-resize -o jsonpath='{.spec.nodeName}')
+  [ -n "$node" ] || { echo "broken-resize is Ready but has no .spec.nodeName — there is no node to read an allocatable off" >&2; exit 1; }
+  mem=$("${kc[@]}" get node "$node" -o jsonpath='{.status.allocatable.memory}')
+  [ -n "$mem" ] || { echo "node $node reports no allocatable memory — the resize target cannot be computed" >&2; exit 1; }
+  echo "  resizing broken-resize to the whole allocatable memory of $node ($mem)"
   "${kc[@]}" patch pod broken-resize --subresource resize --patch \
-    '{"spec":{"containers":[{"name":"app","resources":{"requests":{"memory":"1Pi"},"limits":{"memory":"1Pi"}}}]}}'
+    "{\"spec\":{\"containers\":[{\"name\":\"app\",\"resources\":{\"requests\":{\"memory\":\"$mem\"},\"limits\":{\"memory\":\"$mem\"}}}]}}"
 
   echo
   echo "States need a few minutes to settle — CrashLoopBackOff has to enter"
@@ -311,13 +430,25 @@ declare -A want=(
   # moved between releases — a `.status.resize` string before 1.34, a condition
   # after it — and both spellings mean "asked for, not given", so both count.
   #
-  # `Infeasible` and not merely pending: the kubelet has two reasons for parking
-  # a resize and they are different objects. `Deferred` is "not right now" — the
-  # node could fit it once something else leaves — and it is a state that
-  # resolves itself, so a fixture captured on it is a fixture that expires.
-  # `Infeasible` is "not ever on this node", which is what a 1Pi request is
-  # everywhere, and it is what this record already says it is about.
-  [resize]='(.status.containerStatuses[0].resources.limits.memory=="64Mi") and (.spec.containers[0].resources.limits.memory | . != null and . != "64Mi") and ((.status.resize=="Infeasible") or ([.status.conditions[]?|select(.type=="PodResizePending" and .status=="True" and .reason=="Infeasible")]|length)>0)'
+  # Both of the kubelet's reasons count, and the cluster is why. `Infeasible` is
+  # "not ever on this node" and it is the state this predicate used to demand —
+  # but a request the node can never fit is refused at *admission*, so it never
+  # reaches the kubelet and no such condition is ever written on this path (see
+  # break_it, which measured the refusal). What `break` can produce is a request
+  # the node admits and cannot currently free: `Deferred`, "not right now". Both
+  # mean the same thing about the object in front of us — the spec asked, the
+  # kubelet did not give — and that is the whole of what this fixture needs.
+  # `Infeasible` stays because a node whose allocatable shrinks under a pod that
+  # was already resized still produces it, and because a predicate that names
+  # only the reachable half is one nobody can read a year from now.
+  #
+  # What the reason clause is actually holding out is the resize that is *in
+  # flight*: `PodResizeInProgress` (and, on servers before 1.34, the `.status.resize`
+  # string carrying "InProgress" or "Proposed") is a divergence that resolves
+  # itself in the next second, and certifying that as this fixture is the lie
+  # the reason clause exists to stop. A condition that arrived without a reason
+  # cannot say which of the two it is, so it does not count either.
+  [resize]='(.status.containerStatuses[0].resources.limits.memory=="64Mi") and (.spec.containers[0].resources.limits.memory | . != null and . != "64Mi") and ((.status.resize=="Deferred" or .status.resize=="Infeasible") or ([.status.conditions[]?|select(.type=="PodResizePending" and .status=="True" and (.reason=="Deferred" or .reason=="Infeasible"))]|length)>0)'
   # D53: the key the kubelet enacted that the spec never declared. The pod
   # declares a memory limit, the container declares only a cpu one, and the
   # kubelet writes the pod-level memory limit into the container's status

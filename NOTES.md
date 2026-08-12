@@ -1746,6 +1746,17 @@ has two consumers and gains its second one a phase later.
 
 ### D43 — N2 has no clock, and that makes a finding's age optional (2026-08-12)
 
+> **Superseded in its premise on 2026-08-13 — read
+> [D64](#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13)
+> first.** A cordon *does* leave a timestamp: the node lifecycle controller
+> stamps `timeAdded` on the taint it mirrors from `spec.unschedulable`,
+> regardless of effect, so **N2 may say "cordoned 2 hours ago" after all** —
+> [D65](#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13)
+> records that as a capability the rule may use, not one it must. The rest of
+> this entry — the autoscaler cases, and N2 staying quiet during a scale-down —
+> still holds, and so does the conclusion the title draws: an age stays
+> **optional**, because the hand-applied taint carries no stamp.
+
 N2 was written as **"unschedulable for 6 days"** and `screens/alerts.md` drew
 the card with `6 days ago` in the age column. There is no source for that
 number. `spec.unschedulable` is a bare boolean; no node condition transitions
@@ -2654,6 +2665,10 @@ a pure function that cannot fail.
 
 ### D57 — the pinned `now` is part of the fixture contract, and it makes "recent" unrepresentable (2026-08-12)
 
+> **The value below is superseded: the pin is `2026-08-13T00:00:00Z` since
+> 2026-08-13.** The mechanism this entry describes is unchanged — read it, then
+> the update at the end for what moved and what deliberately did not.
+
 The tests pin `now` at `2026-08-12T00:00:00Z`. The value was not chosen freely:
 `scripts/certs-test.sh` already asserted the committed certificates against that
 instant (24 days / 365 days / −3 days), so any other literal would compute C1's
@@ -2671,6 +2686,20 @@ capture box in Phase 2, which is where the trip is, and it survives
 `rules.rs` freezing at Phase 3 close: a re-capture may touch `fn now()` and
 nothing else in that file — the pin is fixture data that happens to be spelled
 in Rust, not code.
+
+> **The pin moved on 2026-08-13 to `2026-08-13T00:00:00Z`**, with the second
+> capture trip, and this entry's `2026-08-12` is the superseded value — the
+> mechanism above is unchanged, only the instant. All four places moved
+> together. The certificates were **not** regenerated: their `notBefore` and
+> `notAfter` bytes are untouched, so the day counts shifted instead — 23 / 364
+> / −4 where this entry says 24 / 365 / −3. Each fixture still exercises the
+> case it exists for (inside C1's 30-day window, far outside it, already
+> expired), and regenerating would have written fresh key material into the
+> repo to buy nothing. One relationship changed quietly with it and is worth
+> knowing: `now` used to equal the certificates' `notBefore` exactly, and now
+> sits one day after it. Nothing asserts that equality in either direction, so
+> no guard would have caught it had it mattered
+> ([D64](#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13)).
 
 **What the pin costs, which is the part nobody had written down.** It sits 43
 minutes after the newest captured timestamp, so **nothing in the fixture set can
@@ -3039,7 +3068,10 @@ changed by an `apply` and nothing put it back (fixed by resetting through the
 these manifests still cannot be applied over, which is now written where it
 happens instead of claimed away). `100Gi` was infeasible only on small
 machines, since a kind node reports the host's memory — `1Pi` is infeasible
-everywhere. Nothing asserted that the cordoned worker still carried a pod a
+everywhere, **and the cluster then falsified the conclusion drawn from that**:
+a request above the node's allocatable is refused at *admission*, so it never
+reaches the kubelet and parks nothing. Being infeasible everywhere is exactly
+what stops `1Pi` from producing this fixture. Nothing asserted that the cordoned worker still carried a pod a
 drain would move, i.e. that N2's positive fixture was not N2's negative wearing
 its name; the node is now *chosen* by what is on it and the choice is asserted
 against the committed bytes. The `why` line claimed an N3 positive that a
@@ -3069,6 +3101,193 @@ mount on it would leave rule 8 with two positives and no negative · the
 toleration moved to `NoExecute` to match the taint rather than the other way
 round, since with `timeAdded` gone the effect is the only thing separating
 `[tainted]` from its negative.
+
+### D64 — the capture trip: what the cluster settled, and the approval it reversed (2026-08-13)
+
+The capture Phase 2 was built for was finally taken, against a four-node kind
+cluster on `v1.36.1`: **23 of 23 pod predicates and 3 of 3 node predicates
+passed, and 34 fixtures landed.** Everything below is something no amount of
+reading upstream could have produced, which is the argument for the trip.
+
+**The resize fixture cannot use a constant, and the reason inverts the one this
+repo had written down.** `100Gi` was rejected as machine-dependent and replaced
+with `1Pi` on the grounds that it is infeasible everywhere — which is true, and
+is exactly why it produces nothing. A request above the node's allocatable is
+refused at *admission*:
+
+```
+Error from server (Forbidden): pods "broken-resize" is forbidden: node didn't
+have enough allocatable resources: memory, requested: 1125899906842624,
+allocatable: 24860065792
+```
+
+It never reaches the kubelet, so there is no parked resize and no divergence to
+capture. The window that is admitted-and-unenactable is `(available,
+allocatable]`, and its top edge is the only point in it that does not depend on
+what the other pods on that node happen to be holding — so `break` now reads the
+allocatable of whichever node the pod landed on and asks for exactly that. The
+number is written down nowhere.
+
+**And the reason is `Deferred`, not `Infeasible` — an approval I gave was
+falsified by the cluster.** The review asked for the predicate to demand
+`Infeasible`, on the argument that `Deferred` is "not right now" and resolves
+itself; I approved it. Anything that would be `Infeasible` dies at admission, so
+that tightening made the predicate unsatisfiable by the only path `break` has.
+The lesson is not about resize: **a reviewer's argument and my agreement with it
+are still both claims**, and the two of them agreeing is not evidence. The
+predicate now accepts both spellings and holds the line with a reason *enum*
+rather than a single value, so an in-flight `PodResizeInProgress` still fails it.
+
+**`break` was half-idempotent, which is worse than not being idempotent at
+all.** The second run hung: `rollout status statefulset/broken-sts` never
+returns once an earlier `break` has left a pod on the bad revision, because
+under `OrderedReady` the StatefulSet controller will not touch an unready pod,
+so `broken-sts-1` stays on a revision the object no longer has — permanently,
+not slowly. The guard meant to prevent exactly this had been dead since it was
+written: it read the workload's *template* to ask "is this already broken", and
+it ran after the `apply` that puts the good template back, so it could only ever
+answer no. **A comment described the design; the code did not implement it, and
+nothing failed until a second run happened.** The fix reads the **pods'** images
+instead — the one fact the apply cannot rewrite — with each workload's selector
+taken off the workload itself rather than spelled as a convention shared with
+`broken.yaml`. The Deployment survives the same starting state by structure and
+not by luck: its replicas have no identity, and with `maxUnavailable: 0` the
+unready pod is a surge pod above the desired count, so deleting it costs no
+availability.
+
+**The premise under
+[D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)
+is false: a plain `kubectl cordon` does leave a timestamp.** The capture shows
+`node.kubernetes.io/unschedulable:NoSchedule` carrying
+`timeAdded: 2026-08-12T21:43:02Z`, while the hand-applied
+`dedicated=gpu:NoExecute` — the *more* privileged effect — carries none. The
+dividing line is not the effect at all, it is **who wrote the taint**. `kubectl`
+is a client: `cordon` sets the bare `spec.unschedulable` boolean and stamps
+nothing, and `kubectl taint` writes the taint the user typed and nothing more.
+The node lifecycle controller then mirrors that boolean into a taint, and every
+taint it adds goes through `SwapNodeControllerTaint`, which does
+`taintToAdd.TimeAdded = &now` for each one **before looking at its effect** —
+the NoSchedule pass that adds the unschedulable taint calls the identical
+function as the NoExecute pass. Read in upstream source and not only in the
+capture, because a fixture only ever proves what one version did.
+
+D43 was careful about the citation and wrong about the inference. It quoted
+`k8s-openapi 0.28.0`'s `Taint::time_added` — *"It is only written for NoExecute
+taints"* — noted that the sentence is **gone from the v1_34+ generated docs**,
+and concluded "the behaviour is unchanged". The behaviour was never what that
+sentence said: upstream's own comment today is *"TimeAdded represents the time
+at which the taint was added"*, `+optional`, with no mention of effects. Reading
+the *doc* of a field rather than the *writer* of it is what cost the entry, and
+the writer was two function calls away.
+
+What survives D43 untouched is everything downstream of that premise — the
+autoscaler and Karpenter split, and N2 staying quiet while a scale-down taint is
+present. What falls is only "there is no source for that number". What follows
+for `screens/alerts.md`, which drew the card without an age on D43's authority,
+is `tui-designer`'s and is not settled here.
+
+**What the trip proved that could not be proven offline**, all of it previously
+carried as an assumption: the kubelet does copy a pod-level memory limit into a
+container status whose own spec declares only cpu ([D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12));
+a Deployment mid-rollout with `maxSurge: 1 / maxUnavailable: 0` reports exactly
+the five counter values the fixture was designed around; a StatefulSet's
+`updatedReplicas` counts a created-but-not-ready pod; and the kubelet keeps a
+log tail in the termination message under `FallbackToLogsOnError`.
+
+**Decided in passing, none of it forced by the box:** the resize predicate keeps
+its unreachable `.status.resize` string branch — the pin is `v1_32` and the
+support window is pinned ±2, so a server that spells it that way is inside the
+window even though the pinned node image is not, and a predicate naming only the
+reachable half is one nobody can read a year from now · `scan_second_revisions`
+and the break loop are fed by one array, because a workload in the second list
+and not the first walks back into the wait it cannot survive · an unreadable
+selector falls back to *waiting*, never to skipping, since `-l ""` matches every
+pod in the namespace and `broken-image` carries the same bad image · the trip's
+teardown reads the capture **before** `unbreak`, so a missing shape is caught
+while the cluster that could still produce it exists.
+
+**One hazard is known and deliberately left open:** `break` waits on
+`pod/broken-resize` becoming Ready, and on a cluster where `break-nodes` has
+already run that pod can sit on the kubelet-less node or be evicted by the
+`NoExecute` taint — the wait then burns its 300s and ends the run at the same
+place the StatefulSet used to. That is a `break-nodes` leftover rather than a
+`break` one, and what `break` should do about a cluster `break-nodes` damaged is
+a plan decision; `unbreak` is the documented answer until it is made.
+
+### D65 — the repin: N2 gains a clock, and what two agents decided that no brief did (2026-08-13)
+
+The capture stamps every object after the old pin, so the pin moves with it:
+**`2026-08-13T00:00:00Z`**, midnight after the capture day, 2h16m after the
+newest moment in the new fixtures. The value was decided by the PM and taken
+away from both agents on purpose. D57 puts the same instant in four places
+across two ownership rows, and `certs-test.sh` reads the Rust pin and refuses to
+disagree with it — so two agents each choosing a defensible value produces a red
+build whose cause reads like a clock bug. A fact written in four places is not
+four decisions.
+
+**N2 gains a clock, and that is a rule capability change, not a test detail.**
+`Taint::added_at`'s doc said upstream writes `timeAdded` for `NoExecute` taints
+only, therefore N2 could never say how long a node had been cordoned. The
+capture shows the split is *who wrote the taint*, not which effect: the node
+lifecycle controller stamps `timeAdded` on every taint it adds — including the
+`NoSchedule` one it mirrors from `spec.unschedulable` — and `kubectl taint`,
+being client-side, stamps none. So the cordon **does** carry a time and N2 can
+say "cordoned 2 hours ago"; the `Option` survives, for the hand-applied taint
+rather than for the cordon. This is the last standing consequence of the premise
+[D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)
+was built on, and it lands as a capability the rule may now use — not one it
+must. `screens/alerts.md`'s cordon card is `tui-designer`'s round.
+
+**The certificates were not regenerated.** Their `notBefore`/`notAfter` bytes
+are committed evidence; moving `now` past them changes only what the arithmetic
+says — 23 / 364 / −4 where it used to say 24 / 365 / −3. Each fixture still
+exercises the case it exists for, and regeneration would have written fresh key
+material into the repo to buy nothing. One relationship ended quietly with it:
+`now` used to equal the certificates' `notBefore` exactly and now sits a day
+after. Nothing asserted that equality in either direction, so it was free to
+break — which is the point worth keeping, not the day.
+
+**What re-deriving the seventeen tests actually bought.** They were fitted to
+literals — a uid, `restarts == 5`, a scheduler sentence — so a bigger cluster
+reddened them and the cheap repair is to paste in the new literal, which is
+fitting the test to the answer. They now read the capture's own JSON *at the
+path the field must have come from*, which is not a tautology: the decode is not
+what it is read from, so a field dropped, filled from its neighbour or rewritten
+still fails. Each pairs the derivation with the property the fixture must keep —
+`restartCount` **and** `≥3`, because CrashLoopBackOff implies several deaths —
+so a fixture that goes soft is still caught. Two things the old shape hid
+surfaced: one hostPath synthesis had gone **degenerate**, cloning a container
+into a collision with the real one, and `nodes.json`'s "nothing is wrong
+anywhere" loop was **false by construction** against a deliberately broken
+cluster.
+
+**The choices the briefs did not make, recorded because nobody could
+reconstruct them later.** From `dev-core`: `image.json` decodes `ErrImagePull`
+and not `ImagePullBackOff`, because the kubelet alternates between the two for
+one broken image and nothing in `just fixtures` waits for either — the test
+derives the reason from the capture and asserts it is one of the two, and this
+was the single failure where "the world changed" and "the requirement changed"
+were genuinely hard to separate; the three hostPath syntheses are **retired**
+rather than kept beside the capture, which is what their own notes said landing
+meant; `restarts.json` asserts the band `(3..10)` as a deliberate tripwire, so a
+pod that drifts past ten reddens the build for having stopped being rule 5's
+*WARN* fixture; kindnet's `desired` is **not** coupled to the node count, which
+is honest today and a false red the day a node stops tolerating it; and N4 gains
+a cross-check that the control plane's kubelet version equals
+`tests/fixtures/K8S_VERSION`, so a fixture that acquires a skew is announced
+rather than discovered. From `tester`: the repin was **staged in two steps** to
+force a real red on the day-count assertions, because the free red only
+exercised the cross-file check and those three would have gone green to green
+unseen; and two comments outside the lines the brief named were corrected, since
+a file whose header narrates a count its own guard no longer produces
+contradicts itself.
+
+**A concurrency hazard worth knowing before it costs an hour.** `certs-test.sh`
+`sed`-reads the pin out of `src/rules.rs`. Run while a dev holds that pen, it
+read a half-written file and reported a **false red** — five consecutive runs
+passed seconds later. Disjoint file trees make two agents safe to run in
+parallel; a guard that reads across the boundary is the exception, and a lone
+cross-file red is suspect until the writer puts the pen down.
 
 ## Decisions made
 

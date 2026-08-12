@@ -5,15 +5,192 @@
       "apiVersion": "apps/v1",
       "kind": "Deployment",
       "metadata": {
-        "creationTimestamp": "2026-08-11T23:11:47Z",
+        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "generation": 1,
+        "labels": {
+          "demo": "broken"
+        },
+        "name": "broken-owned",
+        "namespace": "default",
+        "resourceVersion": "7806",
+        "uid": "b5f27104-8990-4e9c-8640-490652d56bc7"
+      },
+      "spec": {
+        "progressDeadlineSeconds": 600,
+        "replicas": 1,
+        "revisionHistoryLimit": 10,
+        "selector": {
+          "matchLabels": {
+            "app": "broken-owned"
+          }
+        },
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": "25%",
+            "maxUnavailable": "25%"
+          },
+          "type": "RollingUpdate"
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "broken-owned",
+              "demo": "broken"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "args": [
+                  "echo starting\nsleep 2\necho 'panic: dial tcp db.payments.svc:5432: connect: connection refused' >&2\nexit 1\n"
+                ],
+                "command": [
+                  "sh",
+                  "-c"
+                ],
+                "image": "busybox",
+                "imagePullPolicy": "Always",
+                "name": "quitter",
+                "resources": {},
+                "terminationMessagePath": "/dev/termination-log",
+                "terminationMessagePolicy": "FallbackToLogsOnError"
+              }
+            ],
+            "dnsPolicy": "ClusterFirst",
+            "restartPolicy": "Always",
+            "schedulerName": "default-scheduler",
+            "securityContext": {},
+            "terminationGracePeriodSeconds": 30
+          }
+        }
+      },
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-08-12T20:45:53Z",
+            "lastUpdateTime": "2026-08-12T20:46:01Z",
+            "message": "ReplicaSet \"broken-owned-7bdb7645c8\" has successfully progressed.",
+            "reason": "NewReplicaSetAvailable",
+            "status": "True",
+            "type": "Progressing"
+          },
+          {
+            "lastTransitionTime": "2026-08-12T21:38:57Z",
+            "lastUpdateTime": "2026-08-12T21:38:57Z",
+            "message": "Deployment does not have minimum availability.",
+            "reason": "MinimumReplicasUnavailable",
+            "status": "False",
+            "type": "Available"
+          }
+        ],
+        "observedGeneration": 1,
+        "replicas": 1,
+        "terminatingReplicas": 0,
+        "unavailableReplicas": 1,
+        "updatedReplicas": 1
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "generation": 6,
+        "labels": {
+          "demo": "broken"
+        },
+        "name": "broken-rollout",
+        "namespace": "default",
+        "resourceVersion": "8230",
+        "uid": "6ec89466-2ef5-4d35-b79d-b88c164b17e4"
+      },
+      "spec": {
+        "progressDeadlineSeconds": 3600,
+        "replicas": 2,
+        "revisionHistoryLimit": 10,
+        "selector": {
+          "matchLabels": {
+            "app": "broken-rollout"
+          }
+        },
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": 1,
+            "maxUnavailable": 0
+          },
+          "type": "RollingUpdate"
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "broken-rollout",
+              "demo": "broken"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "command": [
+                  "sleep",
+                  "3600"
+                ],
+                "image": "registry.invalid/does-not-exist:v9",
+                "imagePullPolicy": "Always",
+                "name": "app",
+                "resources": {},
+                "terminationMessagePath": "/dev/termination-log",
+                "terminationMessagePolicy": "File"
+              }
+            ],
+            "dnsPolicy": "ClusterFirst",
+            "restartPolicy": "Always",
+            "schedulerName": "default-scheduler",
+            "securityContext": {},
+            "terminationGracePeriodSeconds": 30
+          }
+        }
+      },
+      "status": {
+        "availableReplicas": 2,
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-08-12T20:46:08Z",
+            "lastUpdateTime": "2026-08-12T20:46:08Z",
+            "message": "Deployment has minimum availability.",
+            "reason": "MinimumReplicasAvailable",
+            "status": "True",
+            "type": "Available"
+          },
+          {
+            "lastTransitionTime": "2026-08-12T20:45:53Z",
+            "lastUpdateTime": "2026-08-12T21:42:33Z",
+            "message": "ReplicaSet \"broken-rollout-5967d47d5b\" is progressing.",
+            "reason": "ReplicaSetUpdated",
+            "status": "True",
+            "type": "Progressing"
+          }
+        ],
+        "observedGeneration": 6,
+        "readyReplicas": 2,
+        "replicas": 3,
+        "terminatingReplicas": 0,
+        "unavailableReplicas": 1,
+        "updatedReplicas": 1
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "creationTimestamp": "2026-08-12T20:45:54Z",
         "generation": 1,
         "labels": {
           "demo": "healthy"
         },
         "name": "healthy-deploy",
         "namespace": "default",
-        "resourceVersion": "4260",
-        "uid": "8e966abf-ac62-43eb-ac30-d876d504367c"
+        "resourceVersion": "994",
+        "uid": "0887135d-1025-44cb-b2c9-b168b935e674"
       },
       "spec": {
         "progressDeadlineSeconds": 600,
@@ -74,16 +251,16 @@
         "availableReplicas": 2,
         "conditions": [
           {
-            "lastTransitionTime": "2026-08-11T23:11:53Z",
-            "lastUpdateTime": "2026-08-11T23:11:53Z",
+            "lastTransitionTime": "2026-08-12T20:46:06Z",
+            "lastUpdateTime": "2026-08-12T20:46:06Z",
             "message": "Deployment has minimum availability.",
             "reason": "MinimumReplicasAvailable",
             "status": "True",
             "type": "Available"
           },
           {
-            "lastTransitionTime": "2026-08-11T23:11:47Z",
-            "lastUpdateTime": "2026-08-11T23:11:53Z",
+            "lastTransitionTime": "2026-08-12T20:45:54Z",
+            "lastUpdateTime": "2026-08-12T20:46:06Z",
             "message": "ReplicaSet \"healthy-deploy-7f84bdfb9b\" has successfully progressed.",
             "reason": "NewReplicaSetAvailable",
             "status": "True",
@@ -101,15 +278,15 @@
       "apiVersion": "apps/v1",
       "kind": "Deployment",
       "metadata": {
-        "creationTimestamp": "2026-08-11T23:11:46Z",
+        "creationTimestamp": "2026-08-12T20:45:53Z",
         "generation": 1,
         "labels": {
           "demo": "broken"
         },
         "name": "broken-quota",
         "namespace": "k8rs-quota",
-        "resourceVersion": "4481",
-        "uid": "d444116c-2da3-4b2b-8ac7-6e25afbd9b31"
+        "resourceVersion": "1382",
+        "uid": "81c3660a-deb1-41ec-830e-ee8ea448e338"
       },
       "spec": {
         "progressDeadlineSeconds": 60,
@@ -160,24 +337,24 @@
       "status": {
         "conditions": [
           {
-            "lastTransitionTime": "2026-08-11T23:11:46Z",
-            "lastUpdateTime": "2026-08-11T23:11:46Z",
+            "lastTransitionTime": "2026-08-12T20:45:53Z",
+            "lastUpdateTime": "2026-08-12T20:45:53Z",
             "message": "Deployment does not have minimum availability.",
             "reason": "MinimumReplicasUnavailable",
             "status": "False",
             "type": "Available"
           },
           {
-            "lastTransitionTime": "2026-08-11T23:11:46Z",
-            "lastUpdateTime": "2026-08-11T23:11:46Z",
-            "message": "pods \"broken-quota-59654c756-w68jf\" is forbidden: exceeded quota: deny-all-pods, requested: pods=1, used: pods=0, limited: pods=0",
+            "lastTransitionTime": "2026-08-12T20:45:53Z",
+            "lastUpdateTime": "2026-08-12T20:45:53Z",
+            "message": "pods \"broken-quota-59654c756-2fvgv\" is forbidden: exceeded quota: deny-all-pods, requested: pods=1, used: pods=0, limited: pods=0",
             "reason": "FailedCreate",
             "status": "True",
             "type": "ReplicaFailure"
           },
           {
-            "lastTransitionTime": "2026-08-11T23:12:47Z",
-            "lastUpdateTime": "2026-08-11T23:12:47Z",
+            "lastTransitionTime": "2026-08-12T20:46:54Z",
+            "lastUpdateTime": "2026-08-12T20:46:54Z",
             "message": "ReplicaSet \"broken-quota-59654c756\" has timed out progressing.",
             "reason": "ProgressDeadlineExceeded",
             "status": "False",
@@ -193,15 +370,15 @@
       "apiVersion": "apps/v1",
       "kind": "Deployment",
       "metadata": {
-        "creationTimestamp": "2026-08-11T22:42:52Z",
+        "creationTimestamp": "2026-08-12T20:45:27Z",
         "generation": 1,
         "labels": {
           "k8s-app": "kube-dns"
         },
         "name": "coredns",
         "namespace": "kube-system",
-        "resourceVersion": "604",
-        "uid": "c45a567c-ecbc-4467-aed7-c1eeb54d5ed6"
+        "resourceVersion": "617",
+        "uid": "ec6122c2-530e-4281-88de-63d198378d53"
       },
       "spec": {
         "progressDeadlineSeconds": 600,
@@ -383,16 +560,16 @@
         "availableReplicas": 2,
         "conditions": [
           {
-            "lastTransitionTime": "2026-08-11T22:43:16Z",
-            "lastUpdateTime": "2026-08-11T22:43:16Z",
+            "lastTransitionTime": "2026-08-12T20:45:46Z",
+            "lastUpdateTime": "2026-08-12T20:45:46Z",
             "message": "Deployment has minimum availability.",
             "reason": "MinimumReplicasAvailable",
             "status": "True",
             "type": "Available"
           },
           {
-            "lastTransitionTime": "2026-08-11T22:42:57Z",
-            "lastUpdateTime": "2026-08-11T22:43:16Z",
+            "lastTransitionTime": "2026-08-12T20:45:33Z",
+            "lastUpdateTime": "2026-08-12T20:45:46Z",
             "message": "ReplicaSet \"coredns-589f44dc88\" has successfully progressed.",
             "reason": "NewReplicaSetAvailable",
             "status": "True",
@@ -410,12 +587,12 @@
       "apiVersion": "apps/v1",
       "kind": "Deployment",
       "metadata": {
-        "creationTimestamp": "2026-08-11T22:42:54Z",
+        "creationTimestamp": "2026-08-12T20:45:29Z",
         "generation": 1,
         "name": "local-path-provisioner",
         "namespace": "local-path-storage",
-        "resourceVersion": "583",
-        "uid": "d6e61e7c-62cf-402d-83aa-d70a360f076f"
+        "resourceVersion": "605",
+        "uid": "d7821e5c-5f66-4878-a31d-d20ce05bf4f9"
       },
       "spec": {
         "progressDeadlineSeconds": 600,
@@ -518,16 +695,16 @@
         "availableReplicas": 1,
         "conditions": [
           {
-            "lastTransitionTime": "2026-08-11T22:43:15Z",
-            "lastUpdateTime": "2026-08-11T22:43:15Z",
+            "lastTransitionTime": "2026-08-12T20:45:46Z",
+            "lastUpdateTime": "2026-08-12T20:45:46Z",
             "message": "Deployment has minimum availability.",
             "reason": "MinimumReplicasAvailable",
             "status": "True",
             "type": "Available"
           },
           {
-            "lastTransitionTime": "2026-08-11T22:42:57Z",
-            "lastUpdateTime": "2026-08-11T22:43:15Z",
+            "lastTransitionTime": "2026-08-12T20:45:33Z",
+            "lastUpdateTime": "2026-08-12T20:45:46Z",
             "message": "ReplicaSet \"local-path-provisioner-855c7b7774\" has successfully progressed.",
             "reason": "NewReplicaSetAvailable",
             "status": "True",

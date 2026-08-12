@@ -20,7 +20,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 certs="$here/../tests/fixtures/certs"
 
-now="2026-08-12 00:00:00Z"   # the reference `now` C1's tests ask about
+now="2026-08-13 00:00:00Z"   # the reference `now` C1's tests ask about
 warn_days=30                 # C1's threshold
 now_s=$(date -u -d "$now" +%s)
 
@@ -32,7 +32,7 @@ declare -A left              # fixture name -> days of validity at `now`
 # `now` above and `fn now()` in src/rules.rs are the same fact written twice —
 # the dates below are asserted against this one, and C1's `Snapshot` is built
 # with that one. Nothing else compares them, so a drift is silent: both files
-# keep passing while "24 days left" and "expires in" are computed from
+# keep passing while "23 days left" and "expires in" are computed from
 # different instants. Compared as seconds, because the two spell the same
 # moment differently (`... 00:00:00Z` here, RFC 3339 `...T00:00:00Z` there).
 #
@@ -48,9 +48,9 @@ fi
 
 # name | notBefore | notAfter | days left at the reference `now`
 pinned=(
-  "expiring-client|2026-08-12 00:00:00Z|2026-09-05 00:00:00Z|24"
-  "healthy-client |2026-08-12 00:00:00Z|2027-08-12 00:00:00Z|365"
-  "expired-client |2025-08-12 00:00:00Z|2026-08-09 00:00:00Z|-3"
+  "expiring-client|2026-08-12 00:00:00Z|2026-09-05 00:00:00Z|23"
+  "healthy-client |2026-08-12 00:00:00Z|2027-08-12 00:00:00Z|364"
+  "expired-client |2025-08-12 00:00:00Z|2026-08-09 00:00:00Z|-4"
 )
 
 # --- PINNED DATES START ---
