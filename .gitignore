@@ -18,6 +18,9 @@ __pycache__/
 # Agent scratch
 /.agent/
 .claude/settings.local.json
+# .claude/agents/ is deliberately NOT ignored: the five subagent definitions
+# are part of how this project is built (CLAUDE.md § Agent workflow), and a
+# clone without them cannot follow that section.
 
 # Editors
 .vscode/
