@@ -1143,6 +1143,44 @@ genuinely broken link green. It now remembers which marker opened the fence
 rather than toggling a boolean, so a ``` inside a `~~~` block does not close it,
 and it gained the `--self-test` the other three guards already had.
 
+### D32 — one long-lived `development` branch, not one per phase (2026-08-12)
+
+The branch-per-phase model (`feat/rules`, `feat/analysis`, … — named in
+todo.md's phase headings since the design phase) is replaced by a single
+long-lived `development` branch. Every box commits onto it; at phase close it
+is merged into `main` by [CLAUDE.md § phase close](CLAUDE.md), item 7;
+`development` is never deleted and work continues on it immediately.
+
+**Why.** The per-phase branch was invented before anything had been built on
+it, and by the time two phases had shipped it had cost more than it returned:
+it added a create step, a delete step and a "which branch am I on" question to
+every phase, and the delete step failed twice on tooling that refuses a remote
+branch deletion. It also duplicated a boundary that already exists and is
+already enforced — the phase itself, in todo.md.
+
+**What it buys with the agents.** A rule already in force is that agents never
+create, switch or delete a branch; they write files on whatever branch they are
+handed. With one permanent branch that rule stops being a restriction anyone
+can trip over, because the branch is simply always there.
+
+**What it costs, and where that cost is now carried.** A branch per phase made
+the freeze mechanically visible: `git diff main...feat/rules` was exactly one
+phase, and a frozen file reappearing in it was impossible to miss. One shared
+branch does not give that for free. The freeze therefore rests entirely on two
+things that were already required — the PM reading every diff before it is
+committed, and the phase-close second pass reading the phase end to end. If a
+frozen file ever does slip through, this is the decision that made it possible,
+and the answer is a guard, not a branch.
+
+**Direction, and why no back-merge.** `main` only ever advances by merging
+`development` into it. That keeps `development` an ancestor of `main` at all
+times, so nothing has to be merged back; the moment someone commits directly to
+`main`, that stops being true and this note stops being accurate.
+
+Phases 1 and 2 ran on `feat/scaffold` and `feat/fixtures` and their headings
+still say so — that is what happened, and rewriting it would make the plan
+file lie about its own history.
+
 ## Decisions made
 
 ### Product

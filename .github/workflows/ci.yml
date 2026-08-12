@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # development is where every box lands (NOTES § D32). Without it here, a
+    # phase's worth of commits would reach CI only when the phase-close PR
+    # opens — the drift this file exists to catch, found a phase late.
+    branches: [main, development]
   pull_request:
 
 # Least privilege by default; no job here needs more (REQUIREMENTS § CI security).

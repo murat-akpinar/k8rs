@@ -351,11 +351,14 @@ ticket. The reasoning behind each item lives in
   fix(k8s): distinguish 403 from a dead API server on startup
   test(rules): add the healthy-pod negative fixture for rule 5
   ```
-- One branch per unit of work, named `<type>/<name>` with a type from the list
-  above (`feat/rules`, `fix/sanitize-shapes`, `docs/agent-workflow`). It is
-  merged into main by the ritual in
+- **All work happens on `development`** — one long-lived branch, never deleted
+  ([NOTES § D32](NOTES.md#d32--one-long-lived-development-branch-not-one-per-phase-2026-08-12)).
+  `main` only ever advances by merging `development` into it, at phase close,
+  by the ritual in
   [phase close, item 7](#phase-close--the-ritual-at-the-end-of-every-phase) —
-  described there and nowhere else.
+  described there and nowhere else. Never commit directly to `main`: the
+  moment that happens, `development` stops being an ancestor of it and the
+  merge stops being clean.
 - **Before pushing**, update the CHANGELOG with
   [git-cliff](https://github.com/orhun/git-cliff).
 
@@ -539,17 +542,18 @@ in `NOTES.md`. "The dev said it is fine" is not a resolution — an unrecorded
 rejection is a finding that will be rediscovered in six months with no memory
 of why it was allowed.
 
-**Branches: the PM cuts one per phase**, with the name `todo.md` already gives
-it (`feat/rules`, `feat/analysis`, …), at the phase's first box. Every box
-commits onto it; the PR opens **and is merged** at phase close, not per box —
-the ritual is [phase close, item 7](#phase-close--the-ritual-at-the-end-of-every-phase),
-and it lives there only, so there is one description of it to keep true.
-Agents never create, switch, merge or delete a branch — they write files on
-whatever branch they are handed.
+**Branches: there is one, `development`, and it is always there.** Every box
+commits onto it, whoever wrote the box; the PR to `main` opens **and is merged**
+at phase close, not per box — the ritual is
+[phase close, item 7](#phase-close--the-ritual-at-the-end-of-every-phase), and
+it lives there only, so there is one description of it to keep true. Agents
+never create, switch, merge or delete a branch — they write files on
+`development` and that is the whole of their git surface
+([NOTES § D32](NOTES.md#d32--one-long-lived-development-branch-not-one-per-phase-2026-08-12)).
 
-Work that is not a phase — a fix, a docs change, this file — takes its own
-branch and runs the same item 7 the moment its own work is done, without
-waiting for a phase to close.
+Work that is not a phase — a fix, a docs change, this file — goes on
+`development` too, and reaches `main` with the next phase close unless the PM
+has a reason to merge it sooner.
 
 ### Step 4 is the anti-leak mechanism, so it is mechanical
 
@@ -622,19 +626,22 @@ list — in order, no skipping:
 5. **Docs sync:** `docs/`, `README.md`, `README_TR.md` for anything
    structural. Stale docs are a failed step, not a follow-up.
 6. **CHANGELOG** with git-cliff, committed separately.
-7. **Commit, push, PR, and merge it — the PM does this, it is not handed
-   back.** Standing authorisation: nobody is asked before a green PR of the
-   current phase is merged. In order: push · open the PR · wait until **every**
-   check has *reported* (a pending check is not a green one) · merge with a
-   merge commit, so the phase stays one readable block in `git log` · delete
-   the branch, local and remote · return to `main` and pull, because the next
-   phase branches from what was actually merged, not from what was pushed.
-   Never on red, never mid-run, never force past a conflict — a conflict means
-   `main` moved while the phase was open, so re-read it and rebase. If the
-   tooling refuses one of these steps, print the exact command for the user
+7. **Commit, push, PR `development` → `main`, and merge it — the PM does this,
+   it is not handed back.** Standing authorisation: nobody is asked before a
+   green PR closing the current phase is merged. In order: push `development` ·
+   open the PR · wait until **every** check has *reported* (a pending check is
+   not a green one) · merge with a merge commit, so the phase stays one
+   readable block in `git log` · **stay on `development`** — it is not deleted
+   and the next phase continues on it
+   ([NOTES § D32](NOTES.md#d32--one-long-lived-development-branch-not-one-per-phase-2026-08-12)).
+   Never on red, never mid-run, never force past a conflict — a clean merge is
+   the proof that nothing was committed to `main` behind the branch's back, so
+   a conflict is a question to answer, not an obstacle to push through. If the
+   tooling refuses a step, print the exact command for the user
    ([§ the boxes no agent can run](#the-boxes-no-agent-can-run--say-so-do-not-fake-them))
-   rather than leaving a merged branch lying around. Frozen files stay frozen
-   from here.
+   rather than leaving the phase half-merged. Frozen files stay frozen from
+   here — and with one shared branch nothing but the diff you read enforces
+   that, so read it.
 8. **Then say, in the reply, that the phase is closed and the context should be
    cleared** — name the phase, name what the next one starts with. Clearing is
    the user's command (`/clear`); the agent cannot issue it and must not
