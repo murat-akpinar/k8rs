@@ -55,6 +55,7 @@ Look it up before asking or re-deriving:
 | Data flow (watch → prune → store → rules → UI) | [docs/architecture § Data flow](docs/architecture.md#data-flow) |
 | Colors / theme constants | [docs/tech-stack § Visual identity](docs/tech-stack.md#visual-identity) |
 | The broken-pod test manifest for kind | [NOTES § kind test manifest](NOTES.md#kind-test-manifest) |
+| Which file holds X, and who may write it | [docs/maps.md](docs/maps.md) — every path, its role, its owner, and what to touch for a given change |
 | What to do next | [todo.md](todo.md) — first unchecked box in the lowest open phase |
 
 ## Language and documentation rules
