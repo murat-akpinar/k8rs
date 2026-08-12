@@ -2777,6 +2777,59 @@ cluster. It writes to a working copy and moves on success, and the delete moved
 into the `EXIT` trap. *"The cluster is left as it was found"* was true of the
 happy path and nothing else.
 
+### D60 — CLAUDE.md was compressed, and four stories moved here (2026-08-12)
+
+`CLAUDE.md` is loaded in full at the start of every session and again after
+every compaction, before a single line of work has been read. Measured, it was
+682 lines and 6,548 words — roughly 9,500 tokens of standing cost, of which
+§ Agent workflow alone was 30%. It is now ~3,000.
+
+**The rule applied: every rule stays in `CLAUDE.md`, the story behind it moves
+here.** That is not a new split, it is the one
+[docs/maps.md](docs/maps.md) already states — *why* is this file, *how must I
+work* is `CLAUDE.md` — and `CLAUDE.md` was the file breaking it, carrying
+paragraphs of justification for rules that already link to a `D`-number. No
+invariant, no security-gate box, no ownership row and no cycle step was
+dropped; what went is prose that argued for them a second time.
+
+**Two defects the pass found, both invisible while writing.** The header read
+*"Current phase: CODE — Phase 1, `feat/scaffold`"* while the same file's git
+rules said all work is on one long-lived `development` branch
+([D32](#d32--one-long-lived-development-branch-not-one-per-phase-2026-08-12)) —
+a hand-maintained status line that rots the moment a phase closes. It is gone
+rather than corrected: the *rule* for finding the next box is stable, the phase
+number is not, and `todo.md` already answers it. And § Workflow (per feature)
+described the same seven steps as § The cycle, having drifted apart in the
+middle — one ordered docs-sync after the `todo.md` tick, the other before.
+There is one description now, in the cycle, and its step 7 spells the order.
+
+**Four things existed only in `CLAUDE.md` and are recorded here so the rules
+they justify do not become arbitrary:**
+
+1. **The scratchpad is a shared tree.** `tester`'s mutation driver was
+   overwritten between rounds by a file it never wrote; running it would have
+   re-run **the author's own sweep** and reported it as independent
+   verification — a plausible, well-formatted, entirely worthless result, and
+   the exact closed loop step 4 exists to break. Hence one subdirectory per
+   agent, and a hash or line count before anything saved earlier is reused.
+2. **Review is not a parallel slot.** Work stacked on an unreviewed box turns a
+   rejection into a rebase, and a rebase under time pressure is how a finding
+   gets quietly dropped. The dev idles during review; that idle is the price of
+   the gate meaning something.
+3. **`just check` is the whole of CI, or it is a lie.** `cargo deny` first went
+   red *after* a push, because CI ran a step `just check` did not. A step whose
+   tool is not installed locally is added anyway — a missing binary is a loud
+   error, a missing step is an invisible gap.
+4. **"Run it" means something different before `main.rs` exists.** Demanding a
+   binary run in Phase 3 would set a gate nobody can pass, and an impassable
+   gate teaches everyone to wave gates through — which is
+   [the second pass's own item 2](CLAUDE.md#second-pass--nothing-is-delivered-on-its-first-draft)
+   turned on the file that states it.
+
+**The limit going forward.** A new rule costs its own line in `CLAUDE.md`; its
+justification costs a `D`-number here. If that file passes ~4,000 words again,
+what grew is prose, not rules — check before adding.
+
 ## Decisions made
 
 ### Product
