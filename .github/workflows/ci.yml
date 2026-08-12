@@ -28,9 +28,9 @@ jobs:
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: test
-        run: cargo test --all-targets
+        run: cargo test --locked --all-targets
 
       # Green tests are not the same as tests that ran (NOTES § D26).
       - name: honest-test guard
@@ -113,4 +113,4 @@ jobs:
           key: ${{ matrix.target }}
       # Check only, not test: cross-compilation breaks at link time and it
       # breaks late, so it is watched from day one — cheaply.
-      - run: cargo check --target ${{ matrix.target }} --all-targets
+      - run: cargo check --locked --target ${{ matrix.target }} --all-targets

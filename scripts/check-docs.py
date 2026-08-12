@@ -8,6 +8,10 @@ ROOT = Path(__file__).resolve().parent.parent
 # changelog is generated — none of them are ours to keep link-clean.
 SKIP = ("tmp", "target", "CHANGELOG.md", "tests/fixtures")
 LINK = re.compile(r'\[([^\]]*)\]\(([^)\s]+)\)')
+# `[label]: ./target.md#anchor` — the other half of Markdown's link syntax, and
+# one this script did not look at at all, so a reference-style link to a file
+# that does not exist was never checked.
+REF_DEF = re.compile(r'^\s{0,3}\[([^\]]+)\]:\s*(\S+)')
 # Both fence markers. Matching only ``` meant a heading inside a ~~~ block
 # became an anchor here and did not on GitHub — the one way this script could
 # call a genuinely broken link green.
@@ -97,7 +101,11 @@ errors = []
 
 for path in files:
     for n, line in outside_fences(path.read_text(encoding='utf-8')):
-        for label, target in LINK.findall(line):
+        found = LINK.findall(line)
+        ref = REF_DEF.match(line)
+        if ref:
+            found = found + [ref.groups()]
+        for label, target in found:
             if target.startswith(('http://', 'https://', 'mailto:')):
                 continue
             filepart, _, anchor = target.partition('#')

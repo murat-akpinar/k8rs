@@ -61,8 +61,27 @@ for entry in "${pinned[@]}"; do
   # does not model and nobody planned a fixture for.
   [ "$(date -u -d "$got_nb" +%s)" -le "$now_s" ] ||
     note "[$name] is not valid yet at $now — that is a different C1 case than expiring"
+
+  # This file's premise is that a real cluster's client certificate never
+  # enters the repository, and until now nothing asserted it. A throwaway from
+  # make-certs.sh is self-signed; anything issued by a real CA is not, and that
+  # is the difference worth catching.
+  subject=$(openssl x509 -in "$pem" -noout -subject -nameopt RFC2253)
+  issuer=$(openssl x509 -in "$pem" -noout -issuer -nameopt RFC2253)
+  [ "${subject#subject=}" = "${issuer#issuer=}" ] ||
+    note "[$name] was issued by someone else (${issuer#issuer=}) — fixtures are self-signed throwaways, never a real cluster's certificate"
 done
 # --- PINNED DATES END ---
+
+# An extra certificate dropped in here would be tested by nothing at all: the
+# loop above reads the three it knows and never looks at what else is present.
+for pem in "$certs"/*.pem; do
+  base=$(basename "$pem")
+  case "$base" in
+    expiring-client.crt.pem|healthy-client.crt.pem|expired-client.crt.pem) ;;
+    *) note "[$base] is in tests/fixtures/certs/ and no test reads it — either pin its dates here or delete it" ;;
+  esac
+done
 
 # --- WHAT C1 NEEDS TO BE TRUE START ---
 if [ ${#left[@]} -eq 3 ]; then

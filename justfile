@@ -1,5 +1,6 @@
-# k8rs task runner. `just check` is byte-for-byte what CI runs — if they can
-# drift, the local run stops meaning anything.
+# k8rs task runner. `just check` runs every step CI runs except the
+# cross-compile matrix, which is `just cross` — if the two can drift, the local
+# run stops meaning anything.
 #
 # Every target is declared here, in Phase 1, including the ones later phases
 # use: a target invented later is a forward-only violation (NOTES § D14, D26).
@@ -21,11 +22,11 @@ default:
 # (the self-test below and cargo-deny were CI-only, so `cargo deny` first failed
 # on a push nobody could have caught locally).
 # cargo-deny runs last: it needs `cargo install cargo-deny`, and when it is
-# missing you still want the eight checks above it to have reported.
+# missing you still want the fifteen checks above it to have reported.
 check:
     cargo fmt --all -- --check
-    cargo clippy --all-targets --all-features -- -D warnings
-    cargo test --all-targets
+    cargo clippy --locked --all-targets --all-features -- -D warnings
+    cargo test --locked --all-targets
     python3 scripts/check-docs.py --self-test
     python3 scripts/check-docs.py
     python3 scripts/screens-check.py --self-test
