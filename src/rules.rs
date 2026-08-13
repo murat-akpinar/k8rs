@@ -863,7 +863,7 @@ pub struct Toleration {
     pub effect: Option<String>,
 }
 
-/// One pod, reduced to what rules 1–8, 10 and 12 read, plus the pod half of the N5 and
+/// One pod, reduced to what rules 1–8, 10 and 12–14 read, plus the pod half of the N5 and
 /// N6 joins.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PodSnapshot {
@@ -946,8 +946,27 @@ pub struct PodSnapshot {
     /// because "no v1 rule reads one" is what it used to say and nobody revisits that.
     pub cpu_request: Option<String>,
     pub memory_request: Option<String>,
+    /// `metadata.creationTimestamp` — **rule 14's clock, and the only age of an object any
+    /// v1 rule reads.** Every other rule dates itself from the event it is about; rule 14 is
+    /// about an event that never happened, so the only moment it can measure from is when
+    /// the pod arrived and the waiting started.
+    ///
+    /// **`None` fires nothing**, the same direction as rule 13's unstamped condition and the
+    /// opposite of rule 10's. There the verdict stands on its own and the age only picks a
+    /// severity; here the two minutes *are* the gate, so a pod that cannot be shown to have
+    /// waited them out has not been shown to be a finding — and inventing a default would
+    /// put a red card on every pod created in the last two minutes of a snapshot that lost
+    /// the field. The API server sets it on every accepted create, so in practice the only
+    /// producers are a hand-built object and a prune that drops it: the second is the one
+    /// that matters, and it is why this field is named in the fields `k8s.rs` must keep
+    /// (invariant 6).
+    pub creation_timestamp: Option<Time>,
     /// `conditions[PodScheduled]` — rule 10's whole input: the scheduler writes both the
     /// verdict and its own sentence here (NOTES § D27).
+    ///
+    /// **Its absence is rule 14's whole input**, which is why that rule cannot be a branch
+    /// of rule 10: the two are mutually exclusive by construction, one reading the verdict
+    /// and the other reading that no verdict was ever written.
     pub scheduled: Option<Condition>,
     /// `status.nominatedNodeName` — **the field that makes rule 10's verdict false**, and
     /// the reason it is on this struct rather than left out as one nobody reads.
@@ -1510,6 +1529,7 @@ impl From<Pod> for PodSnapshot {
             containers,
             cpu_request,
             memory_request,
+            creation_timestamp: metadata.creation_timestamp,
             scheduled: condition("PodScheduled"),
             nominated_node_name: status.nominated_node_name,
             ready: condition("Ready"),
@@ -1695,6 +1715,22 @@ const RESTARTS_CRITICAL: i32 = 10;
 /// reboot and every scale-up (NOTES § D46, § D51).
 const NOT_READY_GRACE: SignedDuration = SignedDuration::from_mins(10);
 
+/// **How long a pod may sit with nothing having judged it at all** — two minutes, and the
+/// number is anchored rather than picked.
+///
+/// kube-scheduler's leader election defaults to a 15-second lease with a 10-second renew
+/// deadline, so leadership moves inside about fifteen seconds: a control-plane restart, a
+/// rollout or a failover is measured in seconds. Two minutes is eight times that — past
+/// every ordinary handover, and short enough to be useful at 3am (NOTES § D74).
+///
+/// **Deliberately not [`NOT_READY_GRACE`].** That number answers *how long may something
+/// take to become ready*, which is a question about work in progress — a large image
+/// legitimately takes minutes to pull. Nothing is in progress here: no scheduler has
+/// acknowledged the pod at all, so the only thing being waited on is a handover between
+/// schedulers, and that has its own default to borrow. Ten minutes of silence on every pod
+/// in the cluster is a long time to print *nothing is broken*.
+const NEVER_JUDGED_GRACE: SignedDuration = SignedDuration::from_mins(2);
+
 /// **The margin on rule 12's deadline** (NOTES § D55). A pod is briefly overdue between
 /// its own deadline and the kubelet's SIGKILL landing even on a perfect clock, and a laptop
 /// running fast makes every pod deleted in the last ten minutes look overdue — the half of
@@ -1732,9 +1768,9 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and
 /// the only entry point `k8s.rs` and the `--once` printer are given.
 ///
-/// Rules 1–8, 10, 12 and 13. Rule 14, the N-series, W-series and C1 are later boxes of this
-/// phase and are deliberately not wired here: a half-built rule is worse than an absent one,
-/// because the screen looks complete either way.
+/// Rules 1–8, 10 and 12–14. The N-series, W-series and C1 are later boxes of this phase and
+/// are deliberately not wired here: a half-built rule is worse than an absent one, because
+/// the screen looks complete either way.
 ///
 /// **Rules 1–6 read every container the pod has**, whichever array the kubelet reported it
 /// in — all three of [`ContainerRole`]. `status.initContainerStatuses` is a separate array,
@@ -1800,6 +1836,7 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
         findings.extend(escalated_host_path(pod));
         findings.extend(no_node_accepted_it(&snapshot.now, pod));
         findings.extend(placed_but_never_started(&snapshot.now, pod));
+        findings.extend(nothing_has_looked_at_it(&snapshot.now, pod));
         for c in &pod.containers {
             findings.extend(crash_looping(pod, c));
             findings.extend(out_of_memory(&snapshot.now, pod, c));
@@ -3131,6 +3168,119 @@ fn placed_but_never_started(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
         // than a second lookup of the same field: the card's age and the rule's threshold
         // answer one question and must never come apart.
         timestamp: Some(since.clone()),
+    })
+}
+
+/// **Rule 14 — nothing has even looked at this pod.** CRITICAL, on a pod that is `Pending`
+/// with **no `PodScheduled` condition at all**, more than [`NEVER_JUDGED_GRACE`] after
+/// `metadata.creationTimestamp` (NOTES § D74).
+///
+/// **The absence is the whole signal, and it is a residual like rule 13's.** Whatever picks
+/// machines writes that condition either way — `True` when it binds the pod, `False` with a
+/// reason when it refuses — so a pod that carries neither has not been judged by anything.
+/// Two things produce it: kube-scheduler is down or crashlooping, or `spec.schedulerName`
+/// names a scheduler that is not installed, has not started, or lacks RBAC on this
+/// namespace. **The card names both and claims neither**, because the rule cannot tell them
+/// apart: `schedulerName` is not on [`PodSnapshot`] and was not added for this. What it can
+/// do is hand the reader the one command that separates them, which is why the action names
+/// the field and the command shows it.
+///
+/// **Why it earns a rule when the set is closed** ([invariant 13](CLAUDE.md)). A wedged
+/// scheduler is rare on a managed control plane and ordinary on kind, k3s, minikube and
+/// single-control-plane on-prem, which is what this tool's audience runs; the other producer
+/// is week one of adopting Volcano or Kueue, which is exactly when someone reaches for a tool
+/// like this. Every rule here that answers *why is this not running* reads a container status
+/// or a condition, and such a pod has neither — so without this rule every pod in the cluster
+/// is Pending while `--once` prints *nothing is broken*, the one claim `screens/once.md` says
+/// has to be true. (Rule 8 is not one of those: it reads `spec.volumes`, so it would still
+/// report a dangerous mount on such a pod — which is true, and is not an answer to why the pod
+/// never started.)
+///
+/// **CRITICAL, where rule 13 is WARN.** The healthy thing that looks like rule 13 is a slow
+/// pull; nothing healthy looks like this. Past the two minutes there is no handover in
+/// flight, the pod is not running, and it will not start on its own — [D2](NOTES.md)'s
+/// definition of broken now.
+///
+/// **An absent `creationTimestamp` fires nothing** ([`PodSnapshot::creation_timestamp`]):
+/// the grace *is* the gate, so a pod with no arrival time cannot be shown to have passed it.
+///
+/// **Silent on a pod that is being deleted**, for rules 10 and 13's reason and one of its
+/// own. Both cards would be true — nothing looked at it, and it is not going away — but only
+/// rule 12's is actionable, and *checking whether the scheduler is running* is advice about a
+/// pod nobody wants scheduled any more (NOTES § D73). The one of its own is the parenthetical
+/// below: `printPod` prints **Terminating** for any non-terminal phase carrying a
+/// `deletionTimestamp`, and `phase` stays `Pending` underneath it, so without this guard this
+/// card would say *it shows as Pending* beside rule 12 saying *it shows as Terminating*,
+/// about one pod on one screen. **The guard and the parenthetical are one decision written in
+/// two places** — deleting either alone reopens that defect.
+///
+/// **The wording is its own and is not rule 10's or rule 13's**, because the three cards are
+/// the three answers to *who has looked at this pod*: nothing has (this one), something looked
+/// and refused (rule 10), something accepted and the machine could not start it (rule 13).
+/// They cannot both fire on one pod either — 10 and 13 need the condition present, this one
+/// needs it absent — so there is no card here to repeat.
+///
+/// **`get -o yaml` and not `describe`.** The evidence is the *absence* of a field, and yaml is
+/// where an absence is visible: a status with a phase and no conditions is the whole picture.
+/// `describe` prints `Events: <none>`, which is precisely the dead end a beginner has already
+/// reached before opening this tool, and it does not print `spec.schedulerName` — the one
+/// field that separates the two causes the card names.
+///
+/// **Known and deliberately unsolved:** if the scheduler really is down, this fires for every
+/// owner in the cluster and buries the rest of the screen. Telling *one bad `schedulerName`*
+/// from *the scheduler is gone* needs cross-pod reasoning, and grouping by owner already
+/// collapses a Deployment's fifty pods into one card. That waits for a real cluster to show
+/// the wall is real (NOTES § D74).
+///
+/// **One shape it names imprecisely, kept rather than guarded.** A pod created with
+/// `spec.nodeName` already set skips the scheduler entirely, and if that node's kubelet never
+/// reports, the pod sits `Pending` with no condition and this card blames a scheduler that was
+/// never in the story. It is not a false *finding* — the pod is broken and no other rule in
+/// this file sees it — only an action pointed one component away, and the yaml the card prints
+/// shows the `nodeName` that redirects it. Narrowing on `pod.node.is_none()` would trade a
+/// misdirected action for silence on a broken pod, which is the failure this rule exists to
+/// end. The node half is N1's. (The ordinary version of that shape does not reach this rule at
+/// all, and the captures show it rather than an argument doing so: the four static pods in
+/// `kube-system-pods.json` were handed straight to a kubelet, no scheduler ever saw them, and
+/// every one of them carries `PodScheduled: True`. A directly-bound pod whose kubelet is alive
+/// therefore has the condition; the dead-kubelet case above is the one left.)
+fn nothing_has_looked_at_it(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
+    if pod.phase.as_deref() != Some("Pending") || pod.scheduled.is_some() {
+        return None;
+    }
+    let created = pod.creation_timestamp.as_ref()?;
+    if now.0.duration_since(created.0) <= NEVER_JUDGED_GRACE {
+        return None;
+    }
+    if pod.deletion_timestamp.is_some() {
+        return None;
+    }
+    Some(Finding {
+        severity: Severity::Critical,
+        // The parenthetical is true only because the guard above already left — see the
+        // deletion note in this function's doc before touching either.
+        title: "Nothing has even looked at this pod yet, so it has never started (it shows as \
+                Pending)"
+            .to_string(),
+        // **The field is explained by what carries it rather than translated**, because there
+        // is no plainer name for a line that is not there. Naming the two states that both
+        // write it is what makes the absence mean something to someone meeting `PodScheduled`
+        // for the first time (invariant 14).
+        evidence: "nothing has written a scheduling decision on it: a pod that was given a \
+                   machine and a pod that was refused one both carry a PodScheduled line in \
+                   their status, and this one has no such line at all"
+            .to_string(),
+        // Both causes, as checks rather than claims, and in the order they cost to check.
+        action: "check that something is actually scheduling — on most clusters kube-scheduler \
+                 is a pod in the kube-system namespace — and that this pod is not asking for a \
+                 different one by name (spec.schedulerName)"
+            .to_string(),
+        kubectl_cmd: get_yaml(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        // The same moment the grace was measured from: when the pod arrived and the waiting
+        // started. There is no event of its own to date it by — that is the finding.
+        timestamp: Some(created.clone()),
     })
 }
 
@@ -5079,6 +5229,11 @@ mod tests {
             if let (Some(dt), Some(grace)) = (&p.deletion_timestamp, p.grace_period_seconds) {
                 out.push(("pod.deletion_timestamp", dt, Some(grace)));
             }
+            labelled(
+                &mut out,
+                "pod.creation_timestamp",
+                p.creation_timestamp.as_ref(),
+            );
             for c in [&p.scheduled, &p.ready, &p.ready_to_start_containers]
                 .into_iter()
                 .flatten()
@@ -5150,10 +5305,11 @@ mod tests {
     /// wrong clock. Every other assertion in this file reads a field; not one of them
     /// subtracts two times, so this is the only place the pin can be wrong out loud.
     ///
-    /// **The sweep is labelled, not counted.** "61 timestamps, all fine" cannot tell nine
-    /// fields walked from one field walked sixty-one times, and a sweep that reached
-    /// nothing prints the same green line as one with nothing to reach (CLAUDE.md — a
-    /// derived list asserts it found something). So the labels reached are asserted to
+    /// **The sweep is labelled, not counted.** A bare total — "96 timestamps, all fine" —
+    /// cannot tell every field walked once from one field walked ninety-six times, and a
+    /// sweep that reached nothing prints the same green line as one with nothing to reach
+    /// (CLAUDE.md — a derived list asserts it found something). The total is printed and
+    /// nothing is asserted about it, precisely because it moves with every capture. So the labels reached are asserted to
     /// cover the ones the captures fill, and each walk is named separately: deleting any
     /// one of them turns this red.
     ///
@@ -5164,25 +5320,32 @@ mod tests {
     /// error, ``error[E0004]: non-exhaustive patterns: `&rules::ContainerState::Paused
     /// { .. }` not covered``.
     /// A new **field** is caught by nothing. Adding `creation_timestamp: Option<Time>` to
-    /// [`PodSnapshot`] and decoding it in `From<Pod>` leaves this test green on the same
-    /// nine labels, with a `Time` in the snapshot that no assertion has ever compared
+    /// [`PodSnapshot`] and decoding it in `From<Pod>` leaves this test green on the labels
+    /// it already had, with a `Time` in the snapshot that no assertion has ever compared
     /// against `now`. That is the likely case, not the exotic one: all nine fields D46
     /// added and all six D51 corrected arrived exactly that way. **A box that adds a
     /// `Time` to these types adds its walk here in the same change**, and no mechanism
     /// will remind it.
     ///
+    /// **That example stopped being hypothetical on 2026-08-13.** Rule 14 needs to know
+    /// how long a pod has been sitting with nothing having judged it, so
+    /// [`PodSnapshot::creation_timestamp`] is exactly the field this paragraph predicted —
+    /// and `pod.creation_timestamp` is walked below and asserted with the rest. It is the
+    /// eleventh label and the first one to arrive by the route named here.
+    ///
     /// **This is a guard over the contract, not over the captures, and the gap between
-    /// those two is four fields.** The JSON carries timestamps these types drop at
+    /// those two is three fields.** The JSON carries timestamps these types drop at
     /// ingest, so the pin is asserted against none of them: `metadata.creationTimestamp`
-    /// on every object (`ObjectId` is kind, namespace, name and uid, and no v1 rule
-    /// reads an object's age), a pod's `status.startTime`, and the two [`Condition`]
+    /// on every object **that is not a Pod** (a node's and a workload's are still dropped —
+    /// `ObjectId` is kind, namespace, name and uid, and no rule reads their age), a pod's
+    /// `status.startTime`, and the two [`Condition`]
     /// keeps no room for — `NodeCondition.lastHeartbeatTime`, `23:16:13Z` in
-    /// `nodes.json` and the likeliest of the four to arrive, since N1's "how long has
+    /// `nodes.json` and the likeliest of the three to arrive, since N1's "how long has
     /// this node been unreachable" is what it answers, and
-    /// `DeploymentCondition.lastUpdateTime`. All four sit before the pin today; nothing
+    /// `DeploymentCondition.lastUpdateTime`. All three sit before the pin today; nothing
     /// asserts that they do, and NOTES § D42 lets Phase 4 add any of them — **the
     /// walk arrives in the same change as the field**, which is the rule stated above
-    /// with the four names it applies to first.
+    /// with the three names it applies to first.
     ///
     /// **`node.taint.added_at` is the field this sweep predicted and has now caught.** It
     /// reached nothing while the only committed taint was the control plane's, and the
@@ -5224,6 +5387,7 @@ mod tests {
             "node.condition.last_transition",
             "node.taint.added_at",
             "pod.condition.last_transition",
+            "pod.creation_timestamp",
             "pod.deletion_timestamp",
             "workload.condition.last_transition",
         ]);
@@ -5236,8 +5400,8 @@ mod tests {
         );
 
         for &(label, t, grace) in &times {
-            // What has to be in the past is the moment the thing *happened*. For eight of
-            // the nine labels that is the value; for the deadline it is the value minus
+            // What has to be in the past is the moment the thing *happened*. For ten of
+            // the eleven labels that is the value; for the deadline it is the value minus
             // the grace it was granted — D46's `asked_at`.
             let moment = match grace {
                 None => t.0,
@@ -9081,6 +9245,300 @@ mod tests {
             titles(&all)
         );
         only(&all, "broken-crashloop", "restarted 15 times");
+    }
+
+    /// **The captured Pending pod with the verdict taken *off* it** — rule 14's shape, built
+    /// on a real capture by removing a field rather than by writing one (NOTES § D40, § D53:
+    /// the committed JSON is never touched, the decoded copy is).
+    ///
+    /// **Removal is the only route to this shape from what is committed, and that is a fact
+    /// about clusters rather than about these captures.** Every pod in the repository carries
+    /// a `PodScheduled` condition — including the four static pods in `kube-system-pods.json`
+    /// that no scheduler ever saw, because the kubelet writes the condition itself for a pod
+    /// handed straight to it. Everything else here is what the cluster produced:
+    /// `phase: Pending`, no container statuses at all, and a `creationTimestamp` two hours
+    /// before the pinned [`now`](now).
+    fn never_judged(edit: impl FnOnce(&mut Pod)) -> PodSnapshot {
+        pending_but(|pod| {
+            pod.status
+                .as_mut()
+                .expect("the captured pod has a status")
+                .conditions = None;
+            edit(pod);
+        })
+    }
+
+    /// **Rule 14, and the pod it must not be confused with** — the same capture with and
+    /// without the scheduler's line on it, which is the whole distinction the rule is.
+    ///
+    /// The unedited capture is `Pending` *with* a verdict: something looked at it and refused
+    /// it, which is rule 10's card. Take the verdict away and nothing has looked at it at all,
+    /// which no other rule in this file can see — it has no container statuses for rules 1–7,
+    /// no condition for rules 10 and 13, and no `deletionTimestamp` for rule 12. Without this
+    /// rule that pod produces the empty screen `screens/once.md` promises means *nothing is
+    /// broken* (NOTES § D74).
+    ///
+    /// **Both framings of the absence are fed**, because two different producers reach it: the
+    /// API server writes no `conditions` key at all for a pod nothing has judged, and a client
+    /// or a prune can leave an empty array. `From<Pod>` collapses them and no rule may depend
+    /// on which arrived (CLAUDE.md — a check is proven only for the shapes it was fed).
+    #[test]
+    fn the_pod_nothing_has_judged_is_not_the_pod_something_refused() {
+        let judged = pod("pending");
+        assert!(
+            judged.scheduled.is_some() && judged.phase.as_deref() == Some("Pending"),
+            "the committed capture is Pending *and* carries a PodScheduled line — which is \
+             this rule's negative, and the reason its positive has to be made by removal"
+        );
+        let refused = analyze(&pods_at(vec![judged], now()));
+        show(&refused);
+        assert_eq!(
+            refused.len(),
+            1,
+            "rule 10 alone on the unedited capture: a pod something refused has been looked \
+             at, and two cards about who looked at one pod is the screen contradicting \
+             itself: {:?}",
+            titles(&refused)
+        );
+        only(&refused, "broken-pending", "will take this pod");
+
+        let created = captured_time(&fixture("pending"), &["metadata", "creationTimestamp"]);
+        for shape in [None, Some(Vec::new())] {
+            let unjudged = pending_but(|pod| {
+                pod.status
+                    .as_mut()
+                    .expect("the captured pod has a status")
+                    .conditions = shape;
+            });
+            assert_eq!(
+                (unjudged.scheduled.as_ref(), unjudged.phase.as_deref()),
+                (None, Some("Pending")),
+                "both framings decode to the same absence, and the phase is the capture's own"
+            );
+            assert_eq!(
+                unjudged.creation_timestamp.as_ref(),
+                Some(&created),
+                "and the moment the waiting started is the one the API server stamped, read \
+                 back out of the capture it came from"
+            );
+
+            let all = analyze(&pods_at(vec![unjudged], now()));
+            show(&all);
+            assert_eq!(
+                all.len(),
+                1,
+                "one card, and it is this rule's. Nothing else in the file has anything to \
+                 read on this pod: no container statuses for rules 1–7, no condition for \
+                 rules 10 and 13, no hostPath for rule 8 and no deletion stamp for rule 12: \
+                 {:?}",
+                titles(&all)
+            );
+            let unlooked = only(
+                &all,
+                "broken-pending",
+                "Nothing has even looked at this pod",
+            );
+            assert!(
+                unlooked.title.contains("(it shows as Pending)"),
+                "the card names the word `kubectl get pods` prints for this pod. The \
+                 parenthetical and the deletion guard are one decision: a deleted pod keeps \
+                 `phase: Pending` while the column reads Terminating, so this assertion and \
+                 `the_unjudged_pod_someone_deleted_is_rule_twelves_alone` hold one half each: {}",
+                unlooked.title
+            );
+            assert_eq!(
+                unlooked.severity,
+                Severity::Critical,
+                "CRITICAL — nothing healthy looks like this, and the pod will not start on \
+                 its own (NOTES § D74)"
+            );
+            assert!(
+                unlooked.evidence.contains("PodScheduled"),
+                "the word is named so the reader can find it, and explained by the two states \
+                 that both write it rather than left bare (invariant 14): {}",
+                unlooked.evidence
+            );
+            assert!(
+                unlooked.action.contains("kube-scheduler")
+                    && unlooked.action.contains("spec.schedulerName"),
+                "both causes, neither claimed — a scheduler that is not running and a \
+                 scheduler named on the pod that nobody runs: {}",
+                unlooked.action
+            );
+            assert_eq!(
+                unlooked.kubectl_cmd.as_deref(),
+                Some("kubectl get pod broken-pending -n default -o yaml"),
+                "`get -o yaml` and not `describe`: an absent condition is visible in the yaml, \
+                 and `spec.schedulerName` — the field that separates the two causes — is \
+                 printed by neither `describe` nor any Event"
+            );
+            assert_eq!(
+                unlooked.timestamp.as_ref(),
+                Some(&created),
+                "the age is how long the pod has been waiting for anything to look at it. \
+                 There is no event of its own to date it by — that absence is the finding"
+            );
+        }
+    }
+
+    /// **The two minutes, from both sides of the line.** A threshold nobody crosses is a
+    /// threshold nobody has tested, and this one is the difference between a card and a red
+    /// screen every time the control plane hands over.
+    ///
+    /// kube-scheduler's leader election defaults to a 15s lease with a 10s renew deadline, so
+    /// a handover completes in seconds; two minutes is eight times that (NOTES § D74). **The
+    /// seconds below are that requirement's own number and not [`NEVER_JUDGED_GRACE`]'s** —
+    /// computing them from the constant would move with any edit to it and prove nothing.
+    #[test]
+    fn a_pod_created_a_moment_ago_is_a_handover_and_not_a_missing_scheduler() {
+        let fresh = never_judged(|_| {});
+        let created = fresh
+            .creation_timestamp
+            .clone()
+            .expect("the capture says when the pod arrived");
+        let at = |secs: i64| {
+            Time(
+                created
+                    .0
+                    .checked_add(SignedDuration::from_secs(secs))
+                    .expect("the capture's creation time plus two minutes is representable"),
+            )
+        };
+        println!(
+            "created at {created:?}, read at {:?} and {:?}",
+            at(120),
+            at(121)
+        );
+
+        nothing(
+            &analyze(&pods_at(vec![fresh.clone()], at(120))),
+            "two minutes to the second is inside the window, not past it: leadership moves \
+             between schedulers in about fifteen seconds and a pod created during one is not \
+             a pod nothing will ever look at",
+        );
+
+        let all = analyze(&pods_at(vec![fresh], at(121)));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "one second later the same pod is a finding — and the pair is what keeps the \
+             constant from being deleted with the suite still green: {:?}",
+            titles(&all)
+        );
+    }
+
+    /// **A pod with no arrival time cannot be shown to have waited**, so it draws nothing —
+    /// the same direction as rule 13's unstamped condition and the opposite of rule 10's,
+    /// because here the grace *is* the gate rather than a severity band.
+    ///
+    /// The API server stamps every accepted create, so the shape's real producer is a prune
+    /// that drops the field on the way in — which is why the field is one `k8s.rs` must keep
+    /// (invariant 6). The pod is not invisible in that case; it is invisible in *this file*,
+    /// and that is the honest failure for a rule whose whole content is a duration.
+    #[test]
+    fn a_pod_with_no_arrival_time_cannot_be_shown_to_have_waited() {
+        let undated = never_judged(|pod| pod.metadata.creation_timestamp = None);
+        println!(
+            "phase={:?} scheduled={:?} created={:?}",
+            undated.phase, undated.scheduled, undated.creation_timestamp
+        );
+        assert!(
+            undated.phase.as_deref() == Some("Pending") && undated.scheduled.is_none(),
+            "every other clause of the rule still holds, so the silence below is the missing \
+             stamp and nothing else"
+        );
+        nothing(
+            &analyze(&pods_at(vec![undated], now())),
+            "no moment to measure from is no finding: a missing field means no finding \
+             (invariant 5), never a default that fires",
+        );
+        assert_eq!(
+            analyze(&pods_at(vec![never_judged(|_| {})], now())).len(),
+            1,
+            "and the same pod *with* its stamp is a card — without this line the assertion \
+             above would pass just as well against a rule that never fires at all"
+        );
+    }
+
+    /// **A pod that is not `Pending` is a pod something has plainly looked at**, whatever its
+    /// conditions array says — it is running, so it was placed and started. The gate is the
+    /// phase and not the absence alone.
+    ///
+    /// The shape is planted because the API server does not produce it: a Running pod always
+    /// carries the condition. That is the point — the clause has to fail out loud rather than
+    /// be held up by a capture that happens never to test it (NOTES § D73, the clause rule 13
+    /// found held in place by nothing).
+    #[test]
+    fn a_running_pod_missing_its_conditions_is_not_one_nothing_has_looked_at() {
+        let strip = |phase: &str| {
+            let phase = phase.to_string();
+            capture_but("healthy", move |pod| {
+                let status = pod.status.as_mut().expect("the captured pod has a status");
+                status.conditions = None;
+                status.phase = Some(phase);
+            })
+        };
+        let running = strip("Running");
+        println!(
+            "phase={:?} scheduled={:?} created={:?}",
+            running.phase, running.scheduled, running.creation_timestamp
+        );
+        assert!(
+            running.scheduled.is_none() && running.creation_timestamp.is_some(),
+            "the absence and the arrival time are both there, so only the phase stands \
+             between this pod and the card"
+        );
+        nothing(
+            &analyze(&pods_at(vec![running], now())),
+            "*nothing has even looked at this pod* about a pod that is running would be the \
+             card contradicting the phase beside it on the same screen",
+        );
+
+        // The control: the same pod with only the phase moved. Without it the silence above
+        // would also be satisfied by a stamp too young to have cleared NEVER_JUDGED_GRACE.
+        assert_eq!(
+            analyze(&pods_at(vec![strip("Pending")], now())).len(),
+            1,
+            "the same pod, Pending, is a card — so the phase is what silenced it and not an \
+             arrival time still inside the two minutes"
+        );
+    }
+
+    /// **The unjudged pod somebody deleted is rule 12's alone.** Both cards are true of it —
+    /// nothing looked at it, and it is not going away — and only rule 12's is actionable:
+    /// *check whether the scheduler is running* is advice about a pod nobody wants scheduled
+    /// any more, while rule 12 names the finalizer holding it (NOTES § D73).
+    ///
+    /// **It also keeps two words off one pod.** `printPod` prints **Terminating** for any
+    /// non-terminal phase carrying a `deletionTimestamp` while `phase` stays `Pending`
+    /// underneath, so without the guard this card's *(it shows as Pending)* would sit beside
+    /// rule 12's *(it shows as Terminating)* about one pod. The guard and the parenthetical
+    /// are one decision in two places, and this is the test that fails if either goes.
+    #[test]
+    fn the_unjudged_pod_someone_deleted_is_rule_twelves_alone() {
+        let deleted = never_judged(|pod| {
+            pod.metadata.deletion_timestamp = Some(time("2026-08-12T20:46:23Z"));
+            pod.metadata.deletion_grace_period_seconds = Some(30);
+            pod.metadata.finalizers = Some(vec!["k8rs.test/never-removed".to_string()]);
+        });
+        assert_eq!(
+            deleted.phase.as_deref(),
+            Some("Pending"),
+            "the phase does not move when a pod is deleted, which is exactly why the \
+             parenthetical cannot be trusted to the phase alone"
+        );
+
+        let all = analyze(&pods_at(vec![deleted], now()));
+        show(&all);
+        assert_eq!(all.len(), 1, "rule 12 alone: {:?}", titles(&all));
+        let terminating = only(&all, "broken-pending", "asked to shut down");
+        assert!(
+            terminating.title.contains("Terminating"),
+            "and the one card left names the word `kubectl get pods` actually prints — the \
+             word this rule's card would have contradicted: {}",
+            terminating.title
+        );
     }
 
     /// The whole committed capture through [`analyze`] at once — every card printed, so

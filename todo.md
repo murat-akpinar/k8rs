@@ -821,7 +821,7 @@ this plan is delivery mechanism for what this phase produces.
       `RegistryUnavailable`, `SignatureValidationFailed`) **moved to rule 3**,
       which they always belonged to
       ([NOTES § D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13))
-- [ ] **Rule 14 — nothing has even looked at this pod.** `phase == Pending`
+- [x] **Rule 14 — nothing has even looked at this pod.** `phase == Pending`
       with **no `PodScheduled` condition at all**, older than **2 minutes**
       from `metadata.creationTimestamp` — a field `PodSnapshot` must gain, and
       its window closes at Phase 4 close
