@@ -910,13 +910,29 @@ this plan is delivery mechanism for what this phase produces.
       **managed-taint translation table** exists because naming those keys raw
       told the reader to tolerate a cordon, an unreachable node and an
       autoscaler's own scale-down
-- [ ] **Workload rules W1–W2** — W1: the pods were never created
+- [x] **Workload rules W1–W2** — W1: the pods were never created
       (`ReplicaSet.status.conditions[ReplicaFailure]`, quota/webhook/PVC
       message shown verbatim); W2: the rollout gave up
       (`Progressing.reason == ProgressDeadlineExceeded`). **W2 fires only when
       no pod-level finding already explains the shortfall** — two findings for
       one problem is how the list stops being believable
-      ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
+      ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)).
+      **Three passes of the cycle, and the box is the reason the gate order
+      exists** ([NOTES § D82](NOTES.md#d82--the-w-series-and-the-card-that-would-have-taught-people-to-mute-the-tool-2026-08-14)):
+      the author's own pass was green, the first operator review found **three
+      blockers** — W1 paging CRITICAL for a service that was 100% up, W2 silent
+      on every rollout at one, two or three replicas because `maxUnavailable`
+      rounds down to zero, and `ReplicaFailure` read as creation-only when
+      upstream also writes `FailedDelete` — and the **second** review found a
+      defect the *first fix* had created, an owner lookup falling back to the
+      refused object, which can only ever produce a wrong red card. Six things
+      the box did not decide are settled in D82: the shortfall's three arms and
+      why each is the only one that sees a shape; the suppression keying on the
+      pod's own `Ready` condition rather than `doing_its_job`, which is
+      vacuously true for a pod with no containers; the three lookups that fail
+      towards *unknown* rather than towards *down*; `FailedDelete` ruled out of
+      v1; a counter that may not contradict the severity beside it; and an
+      action that may not name a command the object in front of it cannot run
 - [ ] Certificate rule C1 — kubeconfig client certificate expiry, warn at 30
       days. Pure — and **its input arrives on `ClusterSnapshot` like every
       other rule's**, not through a second entry point: the context name and
@@ -1068,7 +1084,7 @@ this plan is delivery mechanism for what this phase produces.
         `PodScheduled` condition is ever written; no control-plane surgery, and
         `unbreak` only has to delete it
         ([NOTES § D74](NOTES.md#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13))
-- [ ] **`tui-designer`: the cordon-card round, and it has to close before this
+- [x] **`tui-designer`: the cordon-card round, and it has to close before this
       phase does.** `screens/alerts.md` § *the cordon card* and
       `screens/once.md` still argue from
       [D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)'s
@@ -1111,7 +1127,26 @@ this plan is delivery mechanism for what this phase produces.
       long because it answers a question the reader actually has
       ([NOTES § D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
       for why rule 8's grew). Mitigating, from D3: findings group by owner, so a
-      40-node DaemonSet is one card and not forty
+      40-node DaemonSet is one card and not forty.
+      **Closed 2026-08-14, and all four answered with drawings rather than
+      prose** ([NOTES § D83](NOTES.md#d83--the-hours-rung-runs-to-48-and-the-age-ladder-gets-one-home-2026-08-14)):
+      (1) the cordon card prints the ladder's ordinary string and **nothing on
+      it reasons from the age** — `timeAdded` dates the *taint*, so a
+      `spec.taints` rewrite re-stamps it and the number can only ever be too
+      small, which is a safe floor to sort by and a fatal thing to argue from.
+      (2) The hours rung runs to **48**, matching `HumanDuration`'s own
+      boundary, and `1 day ago` becomes an unreachable string. (3) The age
+      column's budget is **14** columns, from the epoch string. (4) The geometry
+      is settled at the 80×24 floor — card region 53, body text 51, evidence
+      capped at **three** wrapped lines with the full text one `⏎` away, action
+      never cut, card 3–10 lines so a second finding is always on screen; and
+      `--once` does not cut at all, because it has no keypress to restore with.
+      The round also gave the ladder **one home**, `screens/widgets.md` § 1b,
+      which is now what `rules::age` cites instead of three screens. Two
+      measurements corrected numbers this file had been quoting: rule 3's
+      evidence is **347** characters, not ~250, and the longest unbreakable
+      token is 58 columns — wide enough that wrapping alone cannot fit it and
+      only a character break can
 - [ ] Plain-language pass over every string a user will read — the jargon test
       is "would someone in their first month understand this sentence?"
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test

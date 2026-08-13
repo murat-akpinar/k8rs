@@ -4689,6 +4689,277 @@ that matters is N3 — its mutation does **not** redden the whole-capture test,
 because no captured node is under pressure, so the planted test is its only
 proof.
 
+### D82 — the W-series, and the card that would have taught people to mute the tool (2026-08-14)
+
+W1 and W2 landed together. **The entry's real subject is the gate order**, because
+this box went through the cycle three times and each pass found something the
+one before it could not — including a defect that existed *only because* of the
+previous pass's fix.
+
+| pass | outcome |
+|---|---|
+| author's own, green | 7 tests, `just check` green, both rules firing on the committed capture |
+| `k8s-admin`, first | **3 blockers**, 3 should-fixes, 6 nits — most reproduced against a live cluster |
+| rework, green again | all 12 taken, red-and-green witnessed per fix |
+| `k8s-admin`, second | **0 blockers**, 6 should-fixes — one of them created by the rework itself |
+| rework, green again | all 8 taken, 7 of 8 witnessed red |
+
+Nothing was negotiated down to get past a gate, and the box was not checked off
+until the third pass. What follows is what those passes settled.
+
+#### The three blockers, because each is a rule about rules
+
+**1. W1 paged CRITICAL for a service that was 100% up.** The severity band read
+`readyReplicas` off the **ReplicaSet** the finding is about. A refused rollout's
+*new* ReplicaSet always reads `0 of N` while the old one carries every request —
+so every quota-refused rollout drew a red card for a service that never went
+down, with no pods under that ReplicaSet for anything on the screen to
+contradict. Reproduced live: a `pods: 2` quota against a 2-replica Deployment,
+both pods `Running 1/1`, `Available: True`, and k8rs saying CRITICAL. **That is
+the card that teaches a user to mute the tool in week one**, and after that none
+of the other findings matter. The band now reads the **owning Deployment**.
+
+**2. W2 was silent on the most common failed rollout there is.** The shortfall
+gate was `ready < desired`. RollingUpdate defaults `maxUnavailable` to 25%
+*rounded down* — **0** at one, two and three replicas — so the old pods are never
+removed, `readyReplicas` stays equal to `spec.replicas`, and the gate is false on
+a Deployment whose own condition says it gave up. The repo's own
+`tests/fixtures/deployments.json` has that shape and only fails to draw because
+`broken.yaml` set `progressDeadlineSeconds: 3600`.
+
+**3. `ReplicaFailure` is not only about creating pods.** Upstream writes two
+reasons — `FailedCreate` and **`FailedDelete`**, a scale-*down* the API refused.
+Reproduced live with a webhook denying `DELETE pods`: W1 drew *"Kubernetes
+refused to create the pods…"* over the evidence line **"2 of 1 pod ready"**, a
+number on a screen whose whole promise is that its numbers can be believed. W1
+now filters `reason == FailedCreate`. **`FailedDelete` gets no card in v1** — a
+PM ruling, recorded here so the next reader knows it is a decision and not an
+oversight: the service is up, a third card is a new rule, and
+[invariant 13](CLAUDE.md)'s guard applies. Gatekeeper and Kyverno delete
+constraints make it reachable, so it is a known gap and a v0.2 candidate.
+
+#### The shortfall has three arms, and each is the only one that sees a shape
+
+`short_of_pods` is `ready < desired || updated < desired || unavailable > 0`.
+
+- `unavailable > 0` is the only arm that sees the **n=1** rollout above.
+- `updated < desired` is what a rollout is actually short of, and it doubles as
+  the evidence line `kubectl rollout status` leads with.
+- `ready < desired` is **redundant on a Deployment** — `unavailable == 0` implies
+  `ready >= desired` there — and is *not* redundant on a ReplicaSet or
+  StatefulSet, which carry no unavailable counter and whose `updated` counts pods
+  that exist rather than pods that work. `broken-owned-7bdb7645c8` is the proof:
+  one crash-looping pod, `updated == desired`, short only through readiness. The
+  author derived this in their own second pass, after first justifying the arm
+  with a Recreate transient that does not need it.
+
+**A scaled-to-zero Deployment is silent — but only because the arms are gated on
+`desired > 0`, and this entry said otherwise for an hour.** The first version of
+this paragraph argued the arms take care of it: `spec.replicas` is a pointer, so
+`omitempty` does not hide its zero
+([D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)),
+and nothing can be below zero. That is true of arms 1 and 2 and **false of arm
+3**, which `tui-designer` caught while drawing the counter table off this very
+paragraph. `unavailableReplicas` is `sum(replicaset.spec.replicas) −
+availableReplicas`, floored at zero — it is **never** read off the Deployment's
+own `spec.replicas`, so the two have different authors and no shared instant. In
+the window where the pod is no longer available and not yet gone,
+`spec.replicas: 0` and `unavailableReplicas: 1` coexist. Add the sticky
+`ProgressDeadlineExceeded` — and `kubectl scale --replicas=0` is *how a person
+stops a broken rollout*, so it is reliably there — and W2 drew **CRITICAL
+`1 pod not answering` about a Deployment the user had just deliberately turned
+off**. Seconds long, and red. The gate is written in front of all three arms
+rather than inside the one that needs it, because that is where the rule is
+stated once: a workload that wants no pods is not short of them.
+
+The same false guarantee was written in two more places — `WorkloadSnapshot::unavailable`'s
+own field doc, and this paragraph. **A sentence that is wrong is worth finding
+twice**: the fix that only closes the site named in the report leaves the
+written promise standing two doc comments away, which is where the next reader
+looks.
+
+#### Three lookups that must fail towards *unknown*, not towards *down*
+
+The rework closed blocker 2 with a lookup that fell back to the refused object
+when the owner was absent — and **that fallback can only ever produce a wrong
+CRITICAL**, because a refused ReplicaSet's `readyReplicas` is 0 *by definition of
+having been refused*. It is blocker 1 arriving through a different door, and the
+second review caught it. Argo Rollouts is the shape that reaches it: a `Rollout`
+CR owns ReplicaSets directly with no Deployment between, and
+[invariant 12](CLAUDE.md) forbids decoding a CR. A 403 on `deployments` with
+`replicasets` readable is the second path.
+
+So all three lookups now answer the same way:
+
+- **`the_workload_that_serves` returns `Option`.** No owner resolved → no severity
+  band and **no counter** — the card prints the controller's quote alone. That is
+  *"no number we cannot produce"* applied to a count instead of an age.
+- **`workload_owner` hops only off a ReplicaSet.** The chain is exactly
+  Pod → ReplicaSet → Deployment; an unconditional hop walked one step too far
+  from W1's own finding, whose owner is already the Deployment, and landed on the
+  operator CR above it — two CRITICALs for one refusal, the second headed by the
+  CR while its `$ kubectl` line named the Deployment.
+- **W2 fails open.** An owner it cannot resolve is unknown, so the card draws.
+  Reading unknown as *related* would let one crash loop anywhere in the snapshot
+  silence every W2 in it, and silence is the failure the W-series exists to end.
+
+#### The suppression is per-shortfall, not per-owner
+
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) says W2
+stands down when a pod-level finding **explains** the shortfall. The first
+implementation read "when any finding exists under this owner", which let rule
+5's *"it is serving now, but something keeps killing it"* — a card whose own
+sentence says the pod is fine — silence a CRITICAL saying the rollout is dead.
+
+**The discriminator is the pod's own `Ready` condition, not `doing_its_job`.**
+That was the author's call and it is right: `doing_its_job` is per-container and
+`.all()` over an empty container list is vacuously **true**, so an unscheduled
+pod would read as *serving* — which is rules 10 and 14's exact shape and the most
+common true explanation of a stalled rollout. `Ready == True` is the same
+arithmetic `readyReplicas` is counted in, so a pod that fails it is by definition
+part of the shortfall. A pod with **no** `Ready` condition at all counts as
+explaining, and that third framing is fed a real object rather than argued from
+the source ([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)).
+
+W1 suppresses W2 too. On the committed capture the quota refusal and the timeout
+it caused are sixty seconds apart on one owner, and the screen shows **one card**
+— the same fold N6 got into rule 10
+([D81](#d81--the-node-rules-and-the-four-things-a-real-cluster-said-about-them-2026-08-13)).
+
+#### Two things the cards may not do
+
+**A counter may not contradict the dot beside it.** W2 first chose its counter by
+the *update* arithmetic, so a CRITICAL could print `0 of 1 pod on the new version`
+on a first-revision Deployment — red saying *down*, the words saying *an old
+version is still up*, which are the two opposite triage decisions at 3am on one
+line. The counter is chosen by the readiness arithmetic first, so *"on the new
+version"* is only ever printed when an old version demonstrably is serving.
+
+**An action may not name a command the object in front of it cannot run.**
+W2 offered `kubectl rollout undo`, which errors on a single-revision Deployment —
+which is the shipped fixture — and on a paused one. [Invariant 4](CLAUDE.md)
+governs `kubectl_cmd`; this entry extends the same honesty to the action line.
+Both W cards use `kubectl get … -o yaml` rather than `describe`, because
+`describeReplicaSet` and `describeDeployment` reduce conditions to a
+Type/Status/Reason table and drop the message the whole card is made of.
+
+### D83 — the hours rung runs to 48, and the age ladder gets one home (2026-08-14)
+
+[D68](#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13)
+settled that the age ladder's rungs are not the formatter's choice but the
+strings the screens already print. It left one rung wrong, and the cordon-card
+round measured it.
+
+**`1 day ago` covered 24h01m through 47h59m** — a whole day of resolution thrown
+away in the one band where the reader's question is *"was this before or after
+yesterday's change window?"*. `kubectl`'s own `HumanDuration` prints `30h`, then
+`47h`, then `2d3h`, so k8rs was **coarser than the command it exists to teach**,
+in the band that matters most. The hours rung now runs to 48. Past it the
+question stops being *which* window and one unit is enough, so the days rung
+stays coarse on purpose — nothing here invites `2 days 3 hours ago` later.
+
+**`1 day ago` is therefore not a reachable string**, and neither is `0s ago`.
+Both absences are deliberate; a screen drawing either is drawing something the
+ladder cannot produce.
+
+**The ladder now has exactly one home** —
+[`screens/widgets.md` § 1b](screens/widgets.md) — because it was derived from
+three screens and lived in none of them. `rules::age`'s doc table cites that
+section rather than re-arguing the rungs, which is the shape CLAUDE.md asks a
+doc comment to have.
+
+**`lasted`'s identical `as_hours() < 24` was deliberately left alone**, and this
+sentence exists so nobody closes the gap with a find-and-replace. It formats a
+*span*, not a moment: `1 day` reads naturally there, kubectl renders no
+equivalent, and the two functions only ever shared `counted`.
+
+**The round also fixed the age column's budget, which had never been stated**:
+14 columns, from `20678 days ago` — the epoch string, i.e. the case
+`Option<Time>` exists to keep off the screen. Nothing is clamped at 14; a wider
+string takes one more column from the name beside it.
+
+### D84 — a memory-starved capture host silently turns `OOMKilled` into `Error` (2026-08-14)
+
+Found while pre-warming the capture trip's cluster. Nothing was failing;
+`just check` was green and had been for days. **This entry was written once with
+the wrong cause and is recorded here with both** — the mistake is the more
+useful half.
+
+**What happened.** The 4-node cluster was stood up on the LAN host and
+`cluster.sh verify` came back **22 of 23** — `oom` failed, printing
+`exitCode: 137, reason: "Error"`. The committed `tests/fixtures/oom.json` says
+`reason: "OOMKilled"`, and rule 2's entire discrimination rests on that word
+([D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13):
+*137 with `OOMKilled` is memory, 137 without it is a container that did not stop
+when asked*). A re-capture there would have replaced rule 2's positive fixture
+with an object proving the opposite rule.
+
+**Four things it is not.** Not a per-restart race — five consecutive restarts,
+all `Error`. Not the manifest — four further shapes, all `Error`: `stress` with
+a five-second sleep before allocating so the shim's watcher is armed, a gentle
+70 M overshoot instead of 250 M, and `dd bs=100M` as PID 1. Not the kernel
+failing to notice — the pod cgroup's own `memory.events` read
+`oom 8 · oom_kill 24 · oom_group_kill 8`, and `dmesg` named the right
+constraint, `CONSTRAINT_MEMCG`. Not `memory.oom.group`, which was 0 on the
+container scopes, was set to **1** by hand during a deliberate 40-second sleep,
+and changed nothing.
+
+**The wrong conclusion, and how it was caught.** One command run on both
+machines — docker 29.7.2, cgroup v2, `kindest/node:v1.36.1` identical on both —
+gave `OOMKilled=true` on the dev machine (kernel 7.1.6-cachyos) and
+`OOMKilled=false` on the LAN host (kernel 6.8.0-137-generic), and this entry
+first said **the host kernel decides**. It does not. The two hosts differed in
+*two* ways at once — kernel version **and** free memory — and the conclusion
+changed one while observing the other, which is the plainest confounded
+variable there is. Repeating it against the **idle** LAN host, after its cluster
+was torn down, gives the opposite answer:
+
+| host | kernel | free | `tail /dev/zero` | `dd … bs=100M` |
+|---|---|---|---|---|
+| dev machine, cluster running | 7.1.6 | 15 GiB of 23 | `true` ×5 | `true` ×5 |
+| LAN host, **cluster running** | 6.8.0 | ~0.2 GiB of 3.8 | — | **`false`**, and `Error` on every in-cluster shape |
+| LAN host, **idle** | 6.8.0 | 3 GiB of 3.8 | `true` ×5 | `true` ×5 |
+
+**What actually decides it is how much memory the host has left.** Under the
+4-node cluster on a 3.8 GiB box the attribution was lost *systematically*; with
+the same kernel and the same docker on the same box, idle, it is reliable. The
+dev machine attributes correctly **while running the identical cluster**,
+because 23 GiB leaves it 15 GiB of headroom. One `false` was also seen on the
+idle LAN host in an earlier single run, so even idle it is not perfect there —
+the honest reading is *headroom*, not a threshold anyone should write down.
+
+**Three things follow.**
+
+1. **The capture trip runs on a host with real memory headroom** — the dev
+   machine. That the committed fixtures carry `OOMKilled` says only that they
+   were captured somewhere with enough room, and
+   [D57](#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)'s
+   rule that the set describes *one afternoon* means the rest of it cannot be
+   re-captured somewhere the word does not survive.
+2. **The pinned node image is not the whole reproducibility contract.**
+   `scripts/cluster.sh` pins `kindest/node:v1.36.1` precisely so fixtures do not
+   change when `just fixtures` is re-run on a different machine — and the host's
+   spare memory walks straight through that pin, silently, changing one word in
+   one field. `tests/fixtures/K8S_VERSION` records the server version; **nothing
+   records the machine**, and this entry is the only place that gap is written
+   down.
+3. **The guard held.** `just fixtures` runs `cluster.sh verify` *first*, so on a
+   host that cannot produce the state the trip aborts before writing a byte and
+   the good fixture is never overwritten. That ordering was written for a
+   different reason — a fixture that never reached its state is a test that
+   cannot fail — and it paid for itself here.
+
+**Two traps for anyone reproducing this.** `--memory-swap` must equal `-m`, or
+docker grants an equal amount of swap, nothing OOMs at all, and the container
+runs forever; that cost two runs before it was noticed. And **`count=1` is the
+difference between a container that OOMs and one that exits 0** — a `read()` of
+100 MB from `/dev/zero` may return short, busybox `dd` counts a short read as
+its one block, and it exits cleanly having never held 100 MB. `broken-oomserving`
+shipped with `count=1` while the command validated here had no `count`: the two
+differed by exactly the token that mattered, and `cluster.sh verify` was what
+caught it. The manifest now uses `exec tail /dev/zero`, which has no newline to
+stop at and therefore no short read to end on.
+
 ## Decisions made
 
 ### Product
