@@ -3521,11 +3521,13 @@ again, the last one being the only reading that may change.
 
 **And the line that was never true, found by the same review.** Four files said
 the Alerts watches keep *"metadata + status only"* — CLAUDE.md's invariant 6
-among them. The rule set reads `spec` on all three watched kinds:
-`spec.volumes` (rule 8), `spec.terminationGracePeriodSeconds` (rule 12),
-`spec.unschedulable` and its taints (N2), `spec.containers[].resources` (rule 2,
-N5), `spec.replicas` (the workload `desired`, whose own doc argues from
-`apps/v1/defaults.go`). A Phase 5 prune written literally from that phrase
+among them. Five fields the rule set reads live in `spec`: `spec.volumes`
+(rule 8), `spec.terminationGracePeriodSeconds` (rule 12), `spec.unschedulable`
+and its taints (N2), `spec.containers[].resources` (rule 2, N5) and
+`spec.replicas` (the workload `desired` — for Deployments, StatefulSets and
+ReplicaSets; a DaemonSet is the one kind that answers from
+`status.desiredNumberScheduled`, and it is the only watched kind the old phrase
+would have survived). A Phase 5 prune written literally from that phrase
 deletes the field this box exists to fill, along with four rules. The wording is
 now **"pruned to the fields the `rules.rs` snapshot types name"**, which is
 single-sourced and checkable where the old one was a guess that read like a

@@ -130,8 +130,10 @@ to require it, the plan is wrong: fix the plan, record the reversal in
    Alerts view's own inputs are watched permanently — Pods, Nodes, and
    Deployments/StatefulSets/DaemonSets, **pruned to the fields the snapshot
    types in `rules.rs` name** and no others, across metadata, spec *and*
-   status: the rule set reads `spec` on all three kinds, so "metadata + status
-   only" was never true of it
+   status — `spec.volumes`, `spec.terminationGracePeriodSeconds`,
+   `spec.unschedulable` and its taints, `spec.containers[].resources` and
+   `spec.replicas` are each read by a rule, so "metadata + status only" was
+   never true of this design
    ([D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) ·
    [D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13));
    ReplicaSets are fetched on demand, never watched; browser kinds are watched

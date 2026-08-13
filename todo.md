@@ -1011,9 +1011,12 @@ public release.
       which is why the box is here. It is the other half of the bound
       `rules::age` now carries: past five minutes of skew `age` produces no
       number at all rather than a plausible one, and a screen that goes blank
-      without saying why is a worse bug than the one it replaced. Needs a state
-      in `screens/states.md` **and** in `screens/once.md`, which has no header
-      to put it in
+      without saying why is a worse bug than the one it replaced. **It spans
+      two ownership rows, so it is two turns, not one:** `tui-designer` first —
+      the box needs a state in `screens/states.md` **and** in `screens/once.md`,
+      which has no header to put one in — then `dev-core` wires it. That is
+      just step 2 of the cycle, named here because a box whose files have two
+      owners is where "someone will do it" means nobody does
       ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) ·
       [§ D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
 - [ ] Certificate rules that need the wire: C2 (API server serving cert) and
