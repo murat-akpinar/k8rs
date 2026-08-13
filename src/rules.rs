@@ -224,11 +224,11 @@ pub struct Finding {
     /// (`screens/detail.md`: "`⏎` first lists *which* pods are affected").
     pub object: ObjectId,
     /// **When the event this card is about happened — the moment, never the phrase.**
-    /// "4 min ago" is [`age`]'s answer, computed at draw time by whichever renderer is
-    /// drawing: `ui.rs` (Phase 11) and the `--once` printer call that one function, so
-    /// the two cannot disagree about the same finding (NOTES § D18,
-    /// `screens/once.md`), and a rule test asserts a duration instead of parsing English
-    /// back into a number.
+    /// "4 min ago" is computed at draw time, and what a renderer calls for a finding is
+    /// [`Finding::age`] — never the free [`age`] on this field. `ui.rs` (Phase 11) and the
+    /// `--once` printer make that one call, so the two cannot disagree about the same
+    /// finding (NOTES § D18, `screens/once.md`), and a rule test asserts a duration
+    /// instead of parsing English back into a number.
     ///
     /// **A rule may fill this only from a field that records the event itself**, and
     /// which field that is has one answer per rule, not one per author. A timestamp is
@@ -291,7 +291,9 @@ pub struct Finding {
 
 impl Finding {
     /// **How long ago this finding's event happened, or nothing** — the whole render
-    /// decision, in the one place both renderers reach for it.
+    /// decision, and **the call a renderer makes for a finding**: the Alerts view and
+    /// `--once` both come through here, and neither reaches past it to [`age`], which is
+    /// the header's door rather than a card's.
     ///
     /// It exists rather than leaving `timestamp.as_ref().and_then(|t| age(now, t))` to be
     /// written in `ui.rs` and again in the `--once` printer: that is one expression in two
@@ -308,10 +310,15 @@ impl Finding {
     }
 }
 
-/// **How long ago it happened, in the words the screens already print.** The one age
-/// formatter: `ui.rs` (Phase 11) and the `--once` printer (this phase's temporary
-/// `main.rs`) both call it, because if the two renderers could disagree about the same
-/// finding, one of them is lying (`screens/once.md`).
+/// **How long ago it happened, in the words the screens already print** — the one place
+/// those words are spelled, so that two renderers cannot disagree about the same moment
+/// (`screens/once.md`).
+///
+/// **For a finding, a renderer calls [`Finding::age`] and not this**, which is the
+/// swap-proof way in and the whole render decision in one call. What comes here directly
+/// is the age that hangs off no `Finding` and has no `self` to reach it by: the header's
+/// stale-vitals age, `nodes 3/3 (40s ago)` in `screens/states.md`, which is also where the
+/// seconds rung below gets its spelling.
 ///
 /// Pure like the rest of this file — no clock call, the moment arrives as an argument
 /// (invariant 5). **`now` is the *caller's* moment, and which moment that is depends on
@@ -1010,10 +1017,10 @@ pub struct ClusterSnapshot {
     /// is `now − (deletionTimestamp − grace)` — measured from the moment the user asked,
     /// because the deadline is one grace period later than that and an age taken from it
     /// is short by exactly that much, forever (NOTES § D46). C1 compares it against a
-    /// certificate's `notAfter`; the "4 min ago" on the Alerts screen is the *renderer*
+    /// certificate's `notAfter`; the "4 min ago" on the Alerts screen is [`Finding::age`]
     /// subtracting a timestamp the finding carried **from it** — that way round, or the
     /// age is negative on a healthy cluster (D18's second
-    /// consequence, and the next box's). None of them calls a clock, because
+    /// consequence, and now built). None of them calls a clock, because
     /// `analyze(&Snapshot) -> Vec<Finding>` is a pure function (invariant 5) and a clock
     /// call is the impurity that hides: it takes no argument, returns no error, and reads
     /// as arithmetic (NOTES § D18).
@@ -1602,8 +1609,10 @@ mod tests {
 
     // --- THE AGE AT THE RIGHT EDGE ---
     //
-    // Every case here hands [`age`] a **duration** and compares the answer against the
-    // string a screen draws. Nothing parses English back into a number: a test that read
+    // Every case here hands a **duration** in and compares the answer against the string a
+    // screen draws. The ladder goes through [`age`] because the rungs are what it is
+    // testing; the card goes through [`Finding::age`], because that is the call a renderer
+    // makes for a finding. Nothing parses English back into a number: a test that read
     // "4" out of "4 min ago" would agree with an implementation that printed the minutes
     // of the wall clock, which is the class of bug the whole "timestamps, not phrases"
     // contract exists to stop.
