@@ -39,17 +39,56 @@ screen could ever disagree, one of them is lying
 
 That includes the ages, which is where the two nearly did disagree. `· 4 min
 ago` is a suffix on the title line here rather than a right-aligned column, but
-it holds the same fact and obeys the same rule: **it is present only when a
-field says when the event happened.** The cordon finding usually has one now —
-the node lifecycle controller stamps the taint it mirrors from
-`spec.unschedulable`, so a plain `kubectl cordon` leaves a time behind — but
-not always: a taint applied by hand (`kubectl taint`) stamps nothing, and on
-that node `node-3` gets a bare title line in both renderers — drawn, both
-ways, in
+it is **the same string, from the same ladder**
+([widgets.md § 1b](widgets.md#1b-how-long-ago-it-happened--one-ladder-every-screen))
+and it obeys the same rule: **it is present only when a field says when the
+event happened.** The cordon finding usually has one now — the node lifecycle
+controller stamps the taint it mirrors from `spec.unschedulable`, so a plain
+`kubectl cordon` leaves a time behind — but not always: a taint applied by hand
+(`kubectl taint`) stamps nothing, and on that node `node-3` gets a bare title
+line in both renderers — drawn, both ways, in
 [alerts.md § the cordon card](alerts.md#the-cordon-card-with-and-without-its-clock).
 Without the frame there is no column for a blank to sit in, which makes the
 absence invisible here — one more reason the pod count stays in the card body
 where both renderers show it, whether or not the age is present beside it.
+
+**There is no age column here, so none of the console's width budget applies —
+and none of it needs to.** The age is a suffix on a line that is as long as it
+needs to be; the console's 14-column maximum is a fact about a right-aligned
+field competing with a name for one line, and it stops at the frame
+([alerts.md](alerts.md#how-wide-a-card-is-and-how-tall)). What crosses over is
+the ladder itself, and one consequence of it worth naming because a reader
+comparing two reports will notice: **an event between 24 and 48 hours old
+prints `30 hours ago`, not `1 day ago`.** The hours rung runs to 48, which is
+where `kubectl` puts it too, so a report and the `kubectl` output beside it do
+not describe the same moment two different ways.
+
+## How wide the report is, and why nothing in it is cut
+
+**The report wraps at a fixed 72 columns** — 70 of text after the two-column
+indent every body line carries. It is fixed rather than read from the terminal
+because stdout is as often a file, a pipe or a CI log as it is a terminal, and
+a report whose line breaks depend on the window it was produced in is one that
+looks different every time it is pasted into a ticket. 72 survives an email
+quote, a GitHub comment and an 80-column terminal with room to spare.
+
+**Nothing here is truncated, and that is the one place the two renderers
+deliberately differ.** The console caps a card's evidence at three lines with
+`…`, because a controller's verbatim message can run to 350 characters and the
+Alerts pane has 16 rows to hold a *list*
+([alerts.md § the height](alerts.md#the-height)). It can afford the cut because
+`⏎` reaches the full text one keypress away. **`--once` has no `⏎`**: this
+output is the whole of what the user gets, so the message prints in full and
+the report is as long as it is.
+
+**That is not the two renderers disagreeing, and the difference between the two
+is worth being precise about.** They produce the same findings, in the same
+order, with the same strings and the same ages — the rule this whole file is
+built on. What differs is how much of one string is *on screen at once*: the
+console shows the first three lines of it and marks the rest with `…`, because
+it has somewhere to send the reader for the remainder. A renderer that cut text
+it could not restore would be the lie; a renderer that cuts what one keypress
+brings back is a pane doing its job.
 
 ## When nothing is broken
 
