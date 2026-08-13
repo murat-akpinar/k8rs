@@ -37,6 +37,10 @@
 
 - Close the last gaps between just check and CI ([c0582ce](https://github.com/murat-akpinar/k8rs/commit/c0582ce94593715ca4c0bd61e22d670db7a28baa))
 
+### 🚜 Refactor
+
+- *(rules)* Move the tests beside rules.rs instead of inside it ([0c52097](https://github.com/murat-akpinar/k8rs/commit/0c52097c8c2a9c8cf7fc6e179e57f250202067a2)) — src/rules.rs was 8913 lines and 6584 of them were `#[cfg(test)] mod tests` — the product file was a quarter of its own file. The tests now live in src/rules_tests.rs behind the one declaration `#[cfg(test)] #[path = "rules_tests.rs"] mod tests;`, and CLAUDE.md carries it as a convention rather than a one-off: every product file that grows tests splits the same way, so analysis.rs does it in Phase 4 without anyone deciding again.
+
 ### 📚 Documentation
 
 - Record the git remote and the history restart ([244f9ce](https://github.com/murat-akpinar/k8rs/commit/244f9cec080ba07a956b703b676f9aba629a616a))
