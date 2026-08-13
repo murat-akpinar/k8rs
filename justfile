@@ -1,6 +1,8 @@
-# k8rs task runner. `just check` runs every step CI runs except the
-# cross-compile matrix, which is `just cross` — if the two can drift, the local
-# run stops meaning anything.
+# k8rs task runner. `just check` runs every step CI runs — if the two can
+# drift, the local run stops meaning anything. The last row where they still
+# disagreed was the cross-compile matrix; `check` calls `cross` for it now
+# (NOTES § D66), and `cross` reads CI's own target list rather than keeping a
+# second copy of it.
 #
 # Every target is declared here, in Phase 1, including the ones later phases
 # use: a target invented later is a forward-only violation (NOTES § D14, D26).
@@ -16,13 +18,19 @@ default:
 
 # --- the loop you run all day ---
 
-# fmt + clippy + tests + the guards. Every step CI runs except the cross-compile
-# matrix, which is `just cross` because it needs rustup — nothing else CI runs is
-# missing here, and nothing here is skipped by CI. The two drifted once already
+# fmt + clippy + tests + the guards + the cross-compile matrix. Every step CI
+# runs is here, and nothing here is skipped by CI. The two drifted twice already
 # (the self-test below and cargo-deny were CI-only, so `cargo deny` first failed
-# on a push nobody could have caught locally).
-# cargo-deny runs last: it needs `cargo install cargo-deny`, and when it is
-# missing you still want the fifteen checks above it to have reported.
+# on a push nobody could have caught locally; then the cross matrix was CI-only
+# for a phase and a half, NOTES § D66).
+# The last two run last because they are the two that need something `cargo`
+# alone does not give you — `cargo install cargo-deny`, and a cross std — and
+# when either is missing you still want the fifteen checks above them to have
+# reported. `cross` is after `deny` because on a green run its report is the
+# last thing on screen, which is the entire reason a skipped target stays
+# visible: see the recipe.
+
+# Everything CI runs: fmt, clippy, tests, the guards, cargo-deny, cross-compile
 check:
     cargo fmt --all -- --check
     cargo clippy --locked --all-targets --all-features -- -D warnings
@@ -41,20 +49,86 @@ check:
     bash scripts/fixture-audit.sh --self-test
     bash scripts/fixture-audit.sh
     cargo deny check advisories licenses sources bans
+    {{just_executable()}} cross
 
-# The one thing CI runs that `check` does not, because it needs `rustup target
-# add` and rustup is not everywhere cargo is. Kept as its own recipe rather
-# than silently dropped: cross-compilation breaks at link time and it breaks
-# late, so the step has to be nameable and runnable by hand.
+# The row where `just check` was not CI (NOTES § D66). CI runs
+# `cargo check --locked --target <t> --all-targets` over a four-way matrix and
+# nothing local did, so a break that only appears for musl or darwin was
+# discoverable only after a push — cross-compilation breaks at link time and it
+# breaks late, which is exactly the failure "`just check` is the whole of CI, or
+# it is a lie" exists to prevent.
 #
-# Cross-compile check for every release target
+# THE COST DECISION, and it went to the skip. Requiring the four targets makes
+# the gate red on every machine that has not run `rustup target add` — including
+# this one, where /usr/bin/cargo is a distro rust with no rustup at all — and a
+# gate that is red by default is one everybody learns to wave through, which
+# costs more than the gap does. So a target whose std is not installed is
+# skipped — and on a machine that has all four, `just check` grows four full
+# dependency builds, which is the other half of the price and the reason this
+# recipe is at the end rather than in the middle. A skip is only worth having
+# if it survives a *green* run, so it is
+# paid for three ways: `cross` is the last thing `check` runs, so on a green run
+# the banner is the last thing on screen; the banner names every target that did
+# not run, not just a count; and it prints on stderr, so it is still there when
+# stdout went to a log file.
+#
+# Two things are deliberately NOT skips, because either would delete a target
+# from the gate in silence — the same invisible gap wearing a different coat:
+#   · a triple rustc has never heard of is a typo in CI's matrix, and fails.
+#   · a matrix this recipe cannot read out of ci.yml fails, rather than
+#     cheerfully checking the empty list. The list is read from the workflow
+#     instead of copied here for the same reason: two copies of it is how this
+#     row would reopen.
+#
+# Cross-compile check for every release target CI builds
 cross:
     #!/usr/bin/env bash
     set -euo pipefail
-    for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl \
-             x86_64-apple-darwin aarch64-apple-darwin; do
-      cargo check --locked --target "$t" --all-targets
+
+    targets=$(sed -n 's/^[[:space:]]*- target:[[:space:]]*//p' .github/workflows/ci.yml)
+    # "extracted nothing" and "nothing to extract" print the same line, so the
+    # derived list is asserted and not trusted (CLAUDE.md § A derived list
+    # asserts it found something). Rename the matrix key upstream and this
+    # recipe would otherwise pass by checking nothing at all. The canary is the
+    # one target REQUIREMENTS names as the primary release artifact, so it is
+    # also the one whose removal should stop and be looked at rather than
+    # silently shrink the gate — if it went on purpose, move this line to
+    # whatever replaced it.
+    echo "$targets" | grep -qx x86_64-unknown-linux-musl \
+      || { echo "cross: x86_64-unknown-linux-musl is not in .github/workflows/ci.yml's matrix — either the matrix moved and this recipe was about to check nothing, or the target was dropped on purpose and this line has to move with it" >&2; exit 1; }
+
+    skipped=
+    for t in $targets; do
+      # Two different failures that look alike from here: a non-zero rustc means
+      # the triple does not exist, a zero rustc with a directory that is not
+      # there means the triple is real and its std was never installed. Only the
+      # second one is a skip.
+      libdir=$(rustc --print target-libdir --target "$t") \
+        || { echo "cross: rustc does not know the target '$t' — that is a typo in CI's matrix, not a missing toolchain" >&2; exit 1; }
+      if [ -d "$libdir" ]; then
+        cargo check --locked --target "$t" --all-targets
+      else
+        skipped="$skipped $t"
+      fi
     done
+
+    if [ -z "$skipped" ]; then
+      echo "cross: every release target in CI's matrix was checked"
+      exit 0
+    fi
+    {
+      echo
+      echo "###############################################################################"
+      echo "#  GREEN WITHOUT THE CROSS-COMPILE MATRIX — these targets were NOT checked:"
+      for t in $skipped; do echo "#      $t"; done
+      echo "#"
+      echo "#  Their std is not installed on this machine, so the step was skipped, not"
+      echo "#  passed. CI runs all of them: a break that only shows up for musl or darwin"
+      echo "#  is still ahead of you, and it will land on the push instead of here."
+      echo "#"
+      echo "#  To close it locally:  rustup target add$skipped"
+      echo "###############################################################################"
+    } >&2
 
 # Run the binary with the given arguments
 run *ARGS:
@@ -68,8 +142,10 @@ mutants:
 
 # --- the test cluster (scripts/cluster.sh does the work) ---
 
-# Bring up the four-node kind test cluster (1 control-plane + 3 workers: one
-# worker per node state `break-nodes` produces, so no fixture has two causes)
+# One worker per node state `break-nodes` produces, so no fixture has two
+# causes.
+
+# Bring up the four-node kind test cluster (1 control-plane + 3 workers)
 cluster-up:
     scripts/cluster.sh up
 
