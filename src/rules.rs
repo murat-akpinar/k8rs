@@ -175,6 +175,17 @@ pub struct Finding {
     /// quoted **verbatim** (NOTES § D37); what is absolute is what k8rs *fetches* —
     /// never Secret data, never an environment variable value. The type cannot enforce
     /// that; rule authors do.
+    ///
+    /// **This can be empty, and an empty one is drawn by leaving the line out** — not by
+    /// drawing a blank one, which is a hole in the middle of a card where
+    /// [`Finding::timestamp`]'s `None` is a blank at a right edge nobody reads as content.
+    /// [`no_node_accepted_it`] is the first rule that can produce it: its evidence is a
+    /// controller's message and nothing else, so a status with no message leaves it with
+    /// nothing to say while the title and action still stand on their own. Only a
+    /// hand-written status reaches it today — the scheduler always writes a message — but
+    /// "only reachable by a hand-written status" is the same class as the pair
+    /// `a_scheduled_pod_carrying_the_unschedulable_reason_anyway_is_not_a_finding` guards,
+    /// and the renderers (Phase 9, Phase 11) owe it the same answer as a missing age.
     pub evidence: String,
     /// **What to do** about it, in one line the reader can act on.
     pub action: String,
@@ -501,6 +512,11 @@ fn lasted(run: &Terminated) -> Option<String> {
 // [`ObjectKind::from_api`]), and **`metadata.finalizers`** — anyone with `patch` on pods can
 // put any string in that array, it is not validated beyond being a qualified name's shape,
 // and rule 12 joins it straight into a `Finding`'s evidence line.
+//
+// **`status.conditions[].message` joined that list with rule 10**, and it is the cheapest of
+// them to reach: `patch pods/status` alone writes it — no pod to own, no workload to deploy,
+// no name to control — and rule 10 renders the string whole and unabridged, by design
+// (NOTES § D37). It is the widest untrusted field this file hands to a screen.
 
 /// One `status.conditions[]` entry, from whichever object carries it.
 ///
@@ -933,6 +949,30 @@ pub struct PodSnapshot {
     /// `conditions[PodScheduled]` — rule 10's whole input: the scheduler writes both the
     /// verdict and its own sentence here (NOTES § D27).
     pub scheduled: Option<Condition>,
+    /// `status.nominatedNodeName` — **the field that makes rule 10's verdict false**, and
+    /// the reason it is on this struct rather than left out as one nobody reads.
+    ///
+    /// When preemption picks a node for a pod, kube-scheduler writes this in the *same*
+    /// status patch that sets `PodScheduled: False / Unschedulable`, and the pair stays
+    /// that way for the whole graceful termination of the victims it evicted — 30s by
+    /// default, minutes with a real `terminationGracePeriodSeconds` or a `preStop` hook,
+    /// and unbounded when a victim will not go, which is rule 12's entire reason to exist.
+    /// So the pod genuinely is unschedulable *and* a machine has already been chosen for
+    /// it, and a card reading "no machine in the cluster will take this pod" sends someone
+    /// to audit requests, labels and taints while the API says worker2 is clearing space.
+    ///
+    /// Rule 10 stays silent on it. *"A machine has been chosen, it is waiting for other
+    /// pods there to shut down"* is a true and useful sentence and it is **a new rule**,
+    /// not a branch of this one — scope creep is this project's named number-one risk
+    /// ([invariant 13](CLAUDE.md)), and rule 12 already covers the half that goes wrong,
+    /// on the victim.
+    ///
+    /// **Written by the scheduler today, and nothing here assumes it stays that way.** The
+    /// operator review reported that 1.34+ may open the field to external provisioners and
+    /// could not confirm the KEP from where it sat, so that half is *not* built on: this
+    /// layer records what the object said, and the rule above reads only whether a machine
+    /// has been named — never who named it. Both readings survive either answer.
+    pub nominated_node_name: Option<String>,
     /// `conditions[Ready]`, kept whole beside `scheduled` for its `last_transition`.
     /// **It is the only source of "not ready since" there is** — no container status
     /// carries such a field anywhere, and rule 7 ("Running and `ready: false`") without a
@@ -1452,6 +1492,7 @@ impl From<Pod> for PodSnapshot {
             cpu_request,
             memory_request,
             scheduled: condition("PodScheduled"),
+            nominated_node_name: status.nominated_node_name,
             ready: condition("Ready"),
             deletion_timestamp: metadata.deletion_timestamp,
             grace_period_seconds: metadata
@@ -1665,20 +1706,26 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and
 /// the only entry point `k8s.rs` and the `--once` printer are given.
 ///
-/// Rules 1–8 and 12. Rule 10 (Pending, and why), rules 1–6 over `initContainerStatuses`,
-/// the N-series, W-series and C1 are later boxes of this phase and are deliberately not
-/// wired here: a half-built rule is worse than an absent one, because the screen looks
-/// complete either way.
+/// Rules 1–8, 10 and 12. Rules 1–6 over `initContainerStatuses`, rule 13, the N-series,
+/// W-series and C1 are later boxes of this phase and are deliberately not wired here: a
+/// half-built rule is worse than an absent one, because the screen looks complete either
+/// way.
 ///
 /// **Rules 1–7 read `containerStatuses` only**, which is [`ContainerRole::Regular`] on the
 /// merged list. The init containers are one box away (NOTES § D27) and reading them needs
 /// the finding to name *which* init container, so it is a change to every sentence in those
-/// rules and not a change to this loop. **Rule 8 is not in that sentence** and must not be
-/// read as if it were: its input is `spec.volumes` and the mounts against it, which
-/// [`host_path_mounts`] walks across the init containers as well — a hostPath is mounted
-/// whatever list the container was declared in, and no status is consulted to know it.
+/// rules and not a change to this loop. **Rules 8 and 10 are not in that sentence** and must
+/// not be read as if they were: rule 8's input is `spec.volumes` and the mounts against it,
+/// which [`host_path_mounts`] walks across the init containers as well — a hostPath is
+/// mounted whatever list the container was declared in, and no status is consulted to know
+/// it. Rule 10's input is a pod condition and it reads no container at all, which is what
+/// lets it fire on a pod that has none.
 ///
-/// **A pod that finished successfully is not broken now**, so rules 1–8 skip it. `Succeeded`
+/// **A pod that finished successfully is not broken now**, so rules 1–8 and 10 skip it.
+/// Rule 10 is inside the skip and not beside rule 12: a pod that reached `Succeeded` or
+/// `Failed` will never be scheduled again whatever its `PodScheduled` condition still says,
+/// and *"no machine will take this pod"* about one that is finished with is a card nobody
+/// can act on. `Succeeded`
 /// is the state every `restartPolicy: OnFailure` Job pod ends in, and it keeps its restart
 /// count and its last non-zero exit for as long as nobody collects it — rules 5 and 6 would
 /// then report the history of a job that worked, in the hundreds, on the one screen whose
@@ -1707,6 +1754,7 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
             continue;
         }
         findings.extend(escalated_host_path(pod));
+        findings.extend(no_node_accepted_it(&snapshot.now, pod));
         for c in pod
             .containers
             .iter()
@@ -2357,6 +2405,198 @@ fn mounted_path(m: &HostPathMount) -> String {
     } else {
         kept
     }
+}
+
+/// **Rule 10 — no machine in the cluster will take this pod.**
+/// `conditions[PodScheduled]` at `False` with reason `Unschedulable`, CRITICAL, and the
+/// scheduler's own sentence is the finding (NOTES § D27, § D37).
+///
+/// **It needs no Events watch**, which is the whole reason it ships in v1: the scheduler
+/// writes both the verdict *and* the human sentence onto the pod, into a field the Pod
+/// watch already carries (NOTES § D27). The `FailedScheduling` Event says the same thing
+/// and disappears at `--event-ttl`; this does not.
+///
+/// **Both halves of the condition are tested, never its presence.** The condition does not
+/// go away once a pod is scheduled — it flips to `True` with no reason — so
+/// `scheduled.is_some()` is true of every healthy pod in the repository. `status` is asked
+/// as well as `reason` because the two are separate strings on an object anyone with
+/// `patch pods/status` can write, and *"no machine will take this pod"* over a pod that is
+/// running is the loudest wrong card this rule could produce.
+///
+/// **No committed capture separates those two halves**, and that was measured rather than
+/// assumed: every fixture carrying `reason: Unschedulable` also carries `status: "False"`,
+/// every fixture at `status: "True"` carries no reason at all, and dropping the status
+/// check left the whole suite green — this box's own positive and negative included, which
+/// is what makes it worth writing down. So it is proven the way the rest of this file
+/// proves an unreachable shape: one field moved on a real captured pod, in
+/// `a_scheduled_pod_carrying_the_unschedulable_reason_anyway_is_not_a_finding`, and not by
+/// a fixture — because the API server does not produce this pair. Only a hand-written
+/// status does, which is the whole reason the guard is there.
+///
+/// **The other two reasons the scheduler writes are deliberately not read, and the reason
+/// half of the gate is the only thing excluding them.** `SchedulingGated` is a pod its
+/// author asked to be held back (`spec.schedulingGates` — how Kueue, Volcano and every
+/// quota-manager queue work): placed nowhere on purpose, and a card about it is k8rs
+/// disagreeing with the user about a decision the user made. `SchedulerError` is an
+/// internal failure the scheduler retries by itself. Both are `PodScheduled: False`, so
+/// **cutting `reason` out of the gate leaves a suite that was green still green** while
+/// putting a CRITICAL on every queued pod of a Kueue cluster. That is not a capture trip —
+/// a gated pod is three lines to synthesize from a real one — and
+/// `a_pod_the_scheduler_never_judged_is_not_a_pod_it_refused` plants both reasons on a
+/// captured object and asserts silence.
+///
+/// **The severity is a ladder on the condition's own age, not a constant** — WARN below
+/// [`NOT_READY_GRACE`], CRITICAL above it, CRITICAL when there is no stamp to measure. The
+/// card is immediate either way: the beginner gets the scheduler's sentence the moment it
+/// exists, and only the colour waits.
+///
+/// This replaces a flat CRITICAL that rested on *"a pod that places normally never carries
+/// this"*, which is false on three routine paths, all of which resolve without a human:
+///
+/// - **an autoscaler scale-up**, where this condition is not a symptom but the *trigger* —
+///   Cluster Autoscaler and Karpenter both watch for it, and under an HPA it happens
+///   several times a day, clearing in 30s to about 4 minutes;
+/// - **`Immediate`-mode volume provisioning**, where every fresh StatefulSet replica reads
+///   `pod has unbound immediate PersistentVolumeClaims` for as long as the CSI driver takes;
+/// - **node-group rollover and spot reclaim**, where capacity is being replaced under it.
+///
+/// CRITICAL in this file means *this will not run until someone acts*, and on those three
+/// nobody need act. Rule 13, in this same phase, takes WARN and a ten-minute window because
+/// **one** healthy thing looks like it; rule 10 has three, so it may not be both louder and
+/// unconditioned. The window is [`NOT_READY_GRACE`] — the same `progressDeadlineSeconds`
+/// borrow rules 7 and 13 make, not a number picked for this rule.
+///
+/// **The age is when the condition last changed *status*, which is not always when the pod
+/// became unplaceable.** `UpdatePodCondition` moves `LastTransitionTime` only when `Status`
+/// differs (`k8s.io/api/core/v1/pod/util.go`), so the scheduler rewriting this condition on
+/// every failed retry correctly leaves the first refusal's stamp in place — the number the
+/// card wants. But `SchedulingGated` is **also** `False`: a pod Kueue held for two days and
+/// released at 03:00 into a full cluster keeps its *gating* stamp, and one second after it
+/// became unschedulable the card reads *"2 days ago"*.
+///
+/// **Said out loud because it compounds with the ladder above:** that pod is CRITICAL
+/// immediately, its stamp being older than its own unschedulability. It is a known
+/// imprecision accepted for want of a better field — nothing else on the object dates this
+/// — and not something to rediscover in Phase 9.
+///
+/// **Unlike rule 7, a missing stamp does not silence the rule.** Rule 7 has no finding
+/// without a since-when, because *Running and unready* without one describes every rolling
+/// update. Here the finding stands on the verdict alone: an absent `lastTransitionTime`
+/// draws a blank right edge and reads CRITICAL, the safe direction for a pod that cannot be
+/// shown to be recent ([`Finding::timestamp`]).
+///
+/// **`get -o yaml` and not `describe`**, for rules 3 and 4's reason with one correction to
+/// how it was first written here. `describePodConditions` prints a Type/Status table and no
+/// reason or message — but `describe` also prints Events, and the scheduler re-emits
+/// `FailedScheduling` on every retry, so for an actively-retried pod the sentence usually
+/// *does* appear there. The argument survives the correction and is the narrower one: an
+/// Event expires at `--event-ttl` and a field does not, so a teaching command that shows
+/// the card's evidence only while the cluster happens to still hold an Event is not one
+/// invariant 4 can stand on. `-o yaml` also shows `spec.affinity`, which this fixture's own
+/// message blames and which `describe` prints nowhere at all.
+///
+/// **Rule 10 is silent on a Pending pod that has no `PodScheduled` condition, and that is a
+/// gap with an owner rather than a decision.** kube-scheduler down or crash-looping, or a
+/// `schedulerName` naming a scheduler that is not installed, is crash-looping or lacks
+/// RBAC — week one of adopting Volcano or Kueue, which is exactly when someone reaches for
+/// a tool like this — leaves a wall of Pending pods that *no* rule in this file sees: 1–7
+/// iterate containers and there are none, rule 8 needs a hostPath, rule 12 a
+/// `deletionTimestamp`, rule 13 gates on `PodScheduled == True`. `k8rs --once` would print
+/// *nothing is broken*, the one claim `screens/once.md` says must be true. Rule 10 cannot
+/// cover it — it has no verdict to read and no sentence to quote, and firing on absence
+/// would also fire in the seconds between a pod's creation and the scheduler's first look.
+/// It is a residual rule of its own, and it needs `metadata.creationTimestamp`, which
+/// [`PodSnapshot`] does not carry and whose window closes at Phase 4 (NOTES § D42).
+///
+/// **This rule can emit an empty `evidence`, and it is the first in the file that can.**
+/// Only a hand-written status produces it — the scheduler always writes a message — but
+/// the renderers owe it the treatment [`Finding::timestamp`]'s `None` already has:
+/// **Phase 9 and 11 drop the line rather than draw a hole**, the same way a missing age
+/// leaves a bare title rather than an empty right edge.
+///
+/// **Nothing here touches a container.** An unschedulable pod has no `containerStatuses`
+/// at all — the kubelet never saw it — so a rule shaped like rules 1–7 would have nothing
+/// to iterate and would go silent on its own fixture. This one reads the pod.
+fn no_node_accepted_it(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
+    let scheduled = pod.scheduled.as_ref()?;
+    if scheduled.status != "False" || scheduled.reason.as_deref() != Some("Unschedulable") {
+        return None;
+    }
+    // Preemption has already chosen a machine and is clearing it ([`PodSnapshot::
+    // nominated_node_name`]). The pod is unschedulable and the card's sentence is still
+    // false, which is the one shape where those two come apart.
+    if pod.nominated_node_name.is_some() {
+        return None;
+    }
+    // **Somebody has asked for this pod to go away, so where it could have run is no
+    // longer a question anyone can act on.** Both cards would be *true* on a deleting
+    // unschedulable pod — it is unplaceable and it is not going away — but this one's
+    // action sends the reader to audit `nodeSelector`, affinity and requests, and the only
+    // move left is finding what is holding the delete. That is rule 12's card, and rule 12
+    // names the finalizer. Alerts is D2's queue of what is broken now *and actionable*,
+    // and this stops being the second half the moment a delete is accepted.
+    //
+    // For the first sixty seconds such a pod draws nothing at all, until rule 12's margin
+    // opens — which is right: for that minute it is deleting normally.
+    if pod.deletion_timestamp.is_some() {
+        return None;
+    }
+    let since = scheduled.last_transition.as_ref();
+    // No stamp is not "recent": a pod that cannot be shown to have just become
+    // unplaceable is read as one that has been that way, which is the safe direction.
+    let resolving = since.is_some_and(|t| now.0.duration_since(t.0) <= NOT_READY_GRACE);
+    Some(Finding {
+        severity: if resolving {
+            Severity::Warn
+        } else {
+            Severity::Critical
+        },
+        // **The parenthetical is gated on the reader actually seeing that word, and this
+        // reads as `phase` alone only because the guard above already left.** `phase` does
+        // not decide it by itself: an unscheduled pod held by a finalizer and then deleted
+        // keeps both `Unschedulable` *and* `phase: Pending`, while `kubectl get pods`
+        // prints **Terminating** — `printPod` overrides the column on `deletionTimestamp
+        // != nil` for any non-terminal phase, which is why `stuck.json` is `phase: Running`
+        // and shows as Terminating too. The phase is the field that does *not* move. So a
+        // reader adding a phase here later, or deleting the `deletion_timestamp` guard
+        // above as redundant, reopens a card that tells someone to look for a word that is
+        // not on their screen — the two lines are one decision written in two places.
+        title: format!(
+            "No machine in the cluster will take this pod, so it has never started{}",
+            if pod.phase.as_deref() == Some("Pending") {
+                " (it shows as Pending)"
+            } else {
+                ""
+            }
+        ),
+        // The scheduler's sentence, verbatim and framed (NOTES § D37). The prefix does two
+        // things and both are invariant 14. It says a machine wrote this, which is the
+        // difference between meeting `0/4 nodes are available: …` as k8rs's own prose and
+        // meeting it as a quote — it reads like neither English nor an error message. And
+        // it spends four words teaching the one word that would otherwise split this card
+        // into two vocabularies: the title says *machine* because that is what a beginner
+        // knows, the scheduler says *node* four times in the next breath, and nothing else
+        // on the card connects them. The gloss travels with the quote and disappears with
+        // it, which is right — with no message there is no `node` on the card to explain.
+        evidence: scheduled.message.as_deref().map_or_else(String::new, |m| {
+            format!("the scheduler's own words (a node is one machine): {m}")
+        }),
+        // **Only the half the command can answer.** This said "compare what this pod asks
+        // for *with what the machines have*", and `get -o yaml` shows one side of that
+        // comparison: the other is `kubectl get nodes --show-labels`, a command this card
+        // does not print. Asking for work the command beside it cannot start is invariant
+        // 4's teaching device pointing away from itself. The node half belongs to N6,
+        // which owns "which taint or nodeSelector is blocking it" and has the join to
+        // answer it. No reference to the line above either — that line is empty whenever
+        // the message is missing.
+        action: "check what this pod asks for: the node labels it selects, which machines \
+                 it says it can run on, and how much cpu and memory it requests"
+            .to_string(),
+        kubectl_cmd: get_yaml(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: scheduled.last_transition.clone(),
+    })
 }
 
 /// **Rule 12 — the pod was asked to shut down and is still here.** WARN: nothing is down,
@@ -6730,7 +6970,7 @@ mod tests {
     /// test that goes from red to green rather than a claim in a commit message.
     #[test]
     fn the_rules_this_box_does_not_carry_are_silent_and_not_half_built() {
-        // Rules 1–6 over `initContainerStatuses` is the box after next (D27). This pod's
+        // Rules 1–6 over `initContainerStatuses` is the next box (D27). This pod's
         // init container is in `Init:CrashLoopBackOff` with fifteen restarts and its app
         // container is merely waiting on it — so the pod produces nothing today, which is
         // exactly the blind spot D27 describes and the reason it is a box.
@@ -6746,18 +6986,447 @@ mod tests {
         );
         nothing(
             &findings(&["init"]),
-            "reading `initContainerStatuses` is the box after next, and half-building it \
-             would leave a finding that cannot say which container it is about",
+            "reading `initContainerStatuses` is the next box, and half-building it would \
+             leave a finding that cannot say which container it is about",
+        );
+    }
+
+    /// The captured Pending pod with one field moved — the technique the rest of this file
+    /// uses for a shape no capture holds. The committed JSON is never touched
+    /// (NOTES § D53); the decoded copy is.
+    fn pending_but(edit: impl FnOnce(&mut Pod)) -> PodSnapshot {
+        let mut object: Pod =
+            serde_json::from_value(fixture("pending")).expect("pending.json is a Pod");
+        edit(&mut object);
+        PodSnapshot::from(object)
+    }
+
+    /// The `PodScheduled` entry of a captured pod's condition array, to be written through.
+    fn scheduled_condition(pod: &mut Pod) -> &mut PodCondition {
+        pod.status
+            .as_mut()
+            .and_then(|s| s.conditions.as_mut())
+            .into_iter()
+            .flatten()
+            .find(|c| c.type_ == "PodScheduled")
+            .expect("the capture carries the condition it was captured for")
+    }
+
+    /// **Rule 10, and the fixture that would break a rule shaped like its neighbours.**
+    /// `broken-pending` has no `containerStatuses` at all — the kubelet never saw it — so
+    /// every rule in this file that loops over containers is structurally silent on it, and
+    /// the one rule that is *about* it has to read the pod.
+    ///
+    /// The scheduler's own sentence is the card, verbatim (NOTES § D27, § D37): it is the
+    /// answer to the question a beginner asks most often, and no paraphrase of it can name
+    /// which nodes refused and for what.
+    #[test]
+    fn the_pending_pod_carries_the_schedulers_verdict_and_the_sentence_behind_it() {
+        let raw = fixture("pending");
+        let all = findings(&["pending"]);
+        show(&all);
+        assert_eq!(all.len(), 1, "rule 10 alone: {:?}", titles(&all));
+
+        assert!(
+            pod("pending").containers.is_empty(),
+            "a capture whose kubelet had reported on a container would let a \
+             container-shaped rule pass this test by accident, and rule 10's whole subject \
+             is the pod no kubelet has seen"
         );
 
-        // Rule 10 (Pending, and why) is the very next box, and its input is already
-        // decoded and already asserted — it is the rule that is missing, not the field.
-        let pending = pod("pending");
+        let unplaced = only(&all, "broken-pending", "will take this pod");
         assert_eq!(
-            pending.scheduled.as_ref().and_then(|c| c.reason.as_deref()),
-            Some("Unschedulable"),
+            unplaced.severity,
+            Severity::Critical,
+            "this capture is three hours past its refusal, which is well outside the window \
+             below — nothing is going to place it until a human acts"
         );
-        nothing(&findings(&["pending"]), "rule 10 has its own box");
+        assert!(
+            unplaced.title.contains("No machine in the cluster")
+                && unplaced.title.contains("Pending"),
+            "invariant 14: the sentence explains what happened, and then names the word the \
+             reader is staring at in `kubectl get pods`: {}",
+            unplaced.title
+        );
+
+        // **Equality against the capture's own bytes.** D37 is the whole rule here: the
+        // scheduler counts the nodes and says what each one refused the pod for, and a
+        // finding that summarised, truncated or re-punctuated that has thrown away the only
+        // thing it had to offer. `contains` would pass on a card that appended to it.
+        let sentence = captured_str(captured_condition(&raw, "PodScheduled"), &["message"]);
+        assert_eq!(
+            unplaced.evidence,
+            format!("the scheduler's own words (a node is one machine): {sentence}"),
+            "quoted whole, and framed so a newcomer reads it as a quote rather than as \
+             k8rs's own prose — and the four-word gloss is the only thing on this card \
+             joining the title's *machine* to the quote's four *node*s (invariant 14)"
+        );
+        assert!(
+            unplaced.evidence.contains("nodes are available"),
+            "and the sentence still counts the machines that refused it — a capture whose \
+             message no longer does is not this rule's fixture: {}",
+            unplaced.evidence
+        );
+
+        // **The condition's own transition, which is the *first* refusal.**
+        // `UpdatePodCondition` carries the old stamp forward while the status has not
+        // changed, and the scheduler rewrites this condition on every retry with the same
+        // `False` — so this dates the moment the pod became unplaceable, not the last
+        // attempt at it.
+        assert_eq!(
+            unplaced.timestamp,
+            Some(captured_time(
+                captured_condition(&raw, "PodScheduled"),
+                &["lastTransitionTime"]
+            ))
+        );
+        assert_eq!(
+            unplaced.age(&now()).as_deref(),
+            Some("3 hours ago"),
+            "a duration, not English parsed back into a number"
+        );
+
+        // `describe` prints conditions as a Type/Status table with no reason and no
+        // message. It does print Events, and the scheduler re-emits `FailedScheduling` on
+        // every retry, so the sentence usually *is* reachable there — but an Event expires
+        // at `--event-ttl` and a field does not, which is the narrower form of rules 3 and
+        // 4's argument (invariant 4). `-o yaml` also shows `spec.affinity`, which this
+        // capture's own message blames and `describe` never prints.
+        assert_eq!(
+            unplaced.kubectl_cmd.as_deref(),
+            Some("kubectl get pod broken-pending -n default -o yaml")
+        );
+        assert!(
+            !unplaced.action.contains("the machines have"),
+            "the action may only ask for what the command beside it can answer: the node \
+             side of that comparison is `kubectl get nodes --show-labels`, and it is N6's \
+             to make: {}",
+            unplaced.action
+        );
+    }
+
+    /// **Rule 10's severity ladder, both sides of it.** A flat CRITICAL rested on *"a pod
+    /// that places normally never carries this"*, and three routine paths falsify it — an
+    /// autoscaler scale-up (where this condition is the *trigger*), `Immediate`-mode volume
+    /// provisioning on a fresh StatefulSet replica, and node-group rollover. None needs a
+    /// human, and CRITICAL in this file means *this will not run until someone acts*.
+    ///
+    /// The card is immediate either way — the scheduler's sentence is the good half and it
+    /// does not wait. Only the colour does.
+    #[test]
+    fn a_refusal_the_cluster_may_still_fix_itself_is_amber_until_it_has_had_ten_minutes() {
+        // The captured refusal is at 20:45:53Z. Exactly [`NOT_READY_GRACE`] later, which is
+        // an autoscaler that has not finished bringing a node up.
+        let early = findings_at(&["pending"], time("2026-08-12T20:55:53Z"));
+        show(&early);
+        assert_eq!(
+            early.len(),
+            1,
+            "the card is immediate — a beginner gets the scheduler's sentence at once, and \
+             only the band waits: {:?}",
+            titles(&early)
+        );
+        assert_eq!(
+            early[0].severity,
+            Severity::Warn,
+            "ten minutes unplaced is a scale-up in progress, not an outage — and rule 13 in \
+             this same phase takes WARN plus this same window for one healthy look-alike, \
+             where this rule has three"
+        );
+
+        // One second past it.
+        let late = findings_at(&["pending"], time("2026-08-12T20:55:54Z"));
+        assert_eq!(
+            late[0].severity,
+            Severity::Critical,
+            "past `progressDeadlineSeconds`' own default is where Kubernetes itself stops \
+             calling a rollout healthy, and it is the window rules 7 and 13 borrow — not a \
+             number picked for this rule"
+        );
+
+        // **No stamp is not read as recent.** A pod that cannot be shown to have just
+        // become unplaceable is read as one that has been that way, which is the safe
+        // direction — and it is the shape a Kueue-gated pod arrives in from the other
+        // side, carrying a *gating* stamp older than its own unschedulability.
+        let stampless = pending_but(|p| {
+            scheduled_condition(p).last_transition_time = None;
+        });
+        let all = analyze(&pods_at(vec![stampless], time("2026-08-12T20:45:54Z")));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "a missing stamp costs the age, never the card — rule 7 is the rule that has no \
+             finding without a since-when, and this one stands on the verdict alone: {:?}",
+            titles(&all)
+        );
+        assert_eq!(all[0].timestamp, None, "and the right edge is blank");
+        assert_eq!(
+            all[0].severity,
+            Severity::Critical,
+            "one second after the capture's own refusal, which would be WARN with a stamp — \
+             so this is the absence deciding, not the clock"
+        );
+    }
+
+    /// **Rule 10's negatives, and the two that matter are Pending for a different reason.**
+    /// `Pending` is the phase of a pod waiting on an image pull and of one waiting on a
+    /// ConfigMap, and rules 3 and 4 already explain both — a rule 10 that read the phase,
+    /// or that read the condition's presence rather than its value, would put a second and
+    /// wrong card on each of them.
+    #[test]
+    fn a_pod_pending_for_a_reason_that_is_not_the_scheduler_gets_no_rule_ten_card() {
+        // The negatives are asserted to be in the shape that could trip the rule, before
+        // their silence is worth anything: both really are `Pending`, and both really do
+        // carry the condition rule 10 reads.
+        for name in ["image", "config"] {
+            let p = pod(name);
+            let scheduled = p
+                .scheduled
+                .as_ref()
+                .expect("the condition does not go away once a node accepts the pod");
+            println!(
+                "{}: phase={:?} PodScheduled={} reason={:?}",
+                p.id.name, p.phase, scheduled.status, scheduled.reason
+            );
+            assert_eq!(
+                p.phase.as_deref(),
+                Some("Pending"),
+                "a pod whose image will not pull is Pending, and this is the capture that \
+                 makes 'Pending' the wrong thing for rule 10 to read"
+            );
+            assert_eq!(
+                scheduled.status, "True",
+                "a node did accept it — what is stuck is what happened afterwards"
+            );
+        }
+
+        let all = findings(&["image", "config"]);
+        show(&all);
+        assert_eq!(
+            all.iter()
+                .filter(|f| f.title.contains("will take this pod"))
+                .count(),
+            0,
+            "rules 3 and 4 own these two pods, and a second card saying no machine would \
+             have them is both wrong and the loudest thing on the screen: {:?}",
+            titles(&all)
+        );
+        assert_eq!(
+            all.len(),
+            2,
+            "one card each, exactly as before rule 10 existed: {:?}",
+            titles(&all)
+        );
+
+        // The healthy pod is the other half: `PodScheduled` is `True` there with no reason
+        // at all, so a rule testing `scheduled.is_some()` would fire on every working pod
+        // in the cluster.
+        nothing(
+            &findings(&["healthy"]),
+            "a scheduled pod keeps the condition rather than dropping it, so presence is \
+             not what this rule may test",
+        );
+    }
+
+    /// **The half of rule 10's gate no capture can reach.** Every fixture carrying
+    /// `reason: Unschedulable` also carries `status: "False"`, and every fixture at
+    /// `status: "True"` carries no reason at all — so a rule that dropped the status check
+    /// and read the reason alone leaves this suite green, and only this test says
+    /// otherwise. Measured, not assumed: the gate was mutated to the reason alone and all
+    /// 66 tests passed.
+    ///
+    /// The two are separate strings on `status.conditions`, which is a subresource anyone
+    /// with `patch pods/status` may write — a stale or planted `reason` beside a `True`
+    /// status is not something the scheduler produces, and it is exactly what invariant 9's
+    /// "free text from the API is untrusted" means one level up from a string: a *field
+    /// combination* the object model permits and the controller never emits. The card it
+    /// would draw is the worst one available here, `No machine in the cluster will take
+    /// this pod` over a pod that is running and serving.
+    ///
+    /// One field, on a real captured object, exactly as the `subPathExpr` and DaemonSet
+    /// tests do it — the capture is not edited (NOTES § D53).
+    #[test]
+    fn a_scheduled_pod_carrying_the_unschedulable_reason_anyway_is_not_a_finding() {
+        let mut object: Pod =
+            serde_json::from_value(fixture("healthy")).expect("healthy.json is a Pod");
+        let condition = object
+            .status
+            .as_mut()
+            .and_then(|s| s.conditions.as_mut())
+            .into_iter()
+            .flatten()
+            .find(|c| c.type_ == "PodScheduled")
+            .expect("the captured healthy pod keeps its PodScheduled condition");
+        condition.reason = Some("Unschedulable".to_string());
+        assert_eq!(
+            condition.status, "True",
+            "and the status is left as the cluster wrote it — the whole point is the pair"
+        );
+
+        let p = PodSnapshot::from(object);
+        println!("{:?}", p.scheduled);
+        nothing(
+            &analyze(&pods_at(vec![p], now())),
+            "a pod a node accepted is running, whatever reason string is sitting beside \
+             that condition — **and neither half of this gate is redundant**: the reason \
+             half is what excludes a gated pod, asserted in \
+             `a_pod_the_scheduler_never_judged_is_not_a_pod_it_refused`",
+        );
+    }
+
+    /// **The two `PodScheduled: False` reasons that are not a refusal**, and the test that
+    /// holds the reason half of rule 10's gate in place. Cutting `reason` out of the gate
+    /// leaves every other test in this file green.
+    ///
+    /// `SchedulingGated` is a pod its author asked to be held back — `spec.schedulingGates`,
+    /// which is how Kueue, Volcano and Yunikorn queue work — so a CRITICAL on it is k8rs
+    /// contradicting a decision the user made, once per queued pod, on a cluster whose whole
+    /// point is that the queue is long. `SchedulerError` is an internal failure the
+    /// scheduler retries by itself.
+    ///
+    /// Both are synthesized from the real refusal rather than captured, because three lines
+    /// on a committed object is not a capture trip — the shape is one field of one string.
+    #[test]
+    fn a_pod_the_scheduler_never_judged_is_not_a_pod_it_refused() {
+        for reason in ["SchedulingGated", "SchedulerError"] {
+            let p = pending_but(|pod| {
+                scheduled_condition(pod).reason = Some(reason.to_string());
+            });
+            let scheduled = p.scheduled.as_ref().expect("the condition is still there");
+            println!(
+                "{}: PodScheduled={} reason={:?}",
+                p.id.name, scheduled.status, scheduled.reason
+            );
+            assert_eq!(
+                scheduled.status, "False",
+                "the status is left exactly as the scheduler wrote it — if these were \
+                 `True` the status half of the gate would be excluding them and this test \
+                 would prove nothing about the reason half"
+            );
+            nothing(
+                &analyze(&pods_at(vec![p], now())),
+                &format!(
+                    "`{reason}` is not `Unschedulable`: nothing has refused this pod, so \
+                     there is no verdict to report and no scheduler sentence to quote"
+                ),
+            );
+        }
+    }
+
+    /// **The unscheduled pod somebody deleted — rule 10 hands it to rule 12 and says
+    /// nothing.** Both cards would be *true* on it: it is unplaceable, and it is not going
+    /// away. Rule 10's action is what disqualifies it — *check what this pod asks for* sends
+    /// the reader to audit `nodeSelector`, affinity and requests when the only move left is
+    /// finding what is holding the delete, which is rule 12's card and rule 12 names the
+    /// finalizer. Alerts is D2's queue of what is broken now **and actionable**, and where
+    /// a pod could have run stops being actionable once someone has asked for it to go.
+    ///
+    /// **It also removes the two-word problem rather than managing it.** `printPod`
+    /// overrides the STATUS column to `Terminating` whenever `deletionTimestamp` is set and
+    /// the phase is not terminal, while `phase` itself stays `Pending` — which is why
+    /// `stuck.json` is `phase: Running` and still shows as Terminating. So this pod would
+    /// have drawn rule 10 saying *"it shows as Pending"* beside rule 12 saying
+    /// *"it shows as Terminating"*, about one pod, on one screen. The card that had the
+    /// wrong word is the card that had no business being there.
+    ///
+    /// This test asserted that pair agreeing until 2026-08-13; it now asserts rule 10 is
+    /// absent, and it is the red run for the `deletion_timestamp` guard.
+    #[test]
+    fn the_deleted_pod_is_rule_twelves_alone_and_rule_ten_stands_down() {
+        let deleted = pending_but(|pod| {
+            pod.metadata.deletion_timestamp = Some(time("2026-08-12T20:46:23Z"));
+            pod.metadata.deletion_grace_period_seconds = Some(30);
+            pod.metadata.finalizers = Some(vec!["k8rs.test/never-removed".to_string()]);
+        });
+        assert_eq!(
+            deleted.scheduled.as_ref().and_then(|c| c.reason.as_deref()),
+            Some("Unschedulable"),
+            "the trigger is untouched — this pod still satisfies rule 10's gate, which is \
+             what makes the silence below the deletion's doing"
+        );
+        assert_eq!(
+            deleted.phase.as_deref(),
+            Some("Pending"),
+            "and the phase does not move when a pod is deleted, which is why the \
+             parenthetical's `phase` check could never have closed this on its own"
+        );
+
+        let all = analyze(&pods_at(vec![deleted], now()));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "rule 12 alone: a pod on its way out is rule 12's, and rule 10's action points \
+             the reader at the wrong half of the object: {:?}",
+            titles(&all)
+        );
+        let terminating = only(&all, "broken-pending", "asked to shut down");
+        assert!(
+            terminating.title.contains("Terminating"),
+            "and the one card left names the word `kubectl get pods` actually prints: {}",
+            terminating.title
+        );
+        assert!(
+            terminating.evidence.contains("k8rs.test/never-removed"),
+            "with the finalizer, which is the only thing anyone can act on here: {}",
+            terminating.evidence
+        );
+
+        // **The minute before rule 12's margin opens draws nothing at all**, and that is
+        // correct rather than a hole: for that minute the pod is deleting normally, and
+        // neither rule has anything to say about a delete that was accepted seconds ago.
+        nothing(
+            &analyze(&pods_at(
+                vec![pending_but(|pod| {
+                    pod.metadata.deletion_timestamp = Some(time("2026-08-12T20:46:23Z"));
+                    pod.metadata.deletion_grace_period_seconds = Some(30);
+                })],
+                time("2026-08-12T20:47:00Z"),
+            )),
+            "inside rule 12's margin the delete is still in progress, and rule 10 has \
+             already stood down — a deliberate gap, not an unhandled one",
+        );
+    }
+
+    /// **The pod preemption has already found a machine for** — where rule 10's trigger is
+    /// true and its sentence is false, which is the one shape those two come apart in.
+    ///
+    /// kube-scheduler writes `status.nominatedNodeName` in the *same* status patch that
+    /// sets `PodScheduled: False / Unschedulable`, and the pair stands for the whole
+    /// graceful termination of the victims — 30s by default, minutes with a real grace or a
+    /// `preStop` hook, unbounded when a victim will not go. Through all of it the card
+    /// would read *"no machine in the cluster will take this pod"* while the API says which
+    /// machine is being cleared for it.
+    #[test]
+    fn a_pod_with_a_machine_already_being_cleared_for_it_is_not_a_pod_nothing_will_take() {
+        let nominated = pending_but(|pod| {
+            pod.status
+                .as_mut()
+                .expect("the captured pod has a status")
+                .nominated_node_name = Some("k8rs-worker2".to_string());
+        });
+        println!(
+            "nominated={:?} scheduled={:?}",
+            nominated.nominated_node_name, nominated.scheduled
+        );
+        assert_eq!(
+            nominated
+                .scheduled
+                .as_ref()
+                .and_then(|c| c.reason.as_deref()),
+            Some("Unschedulable"),
+            "the trigger is untouched — this pod satisfies every other condition of rule \
+             10, which is what makes the silence below the nomination's doing"
+        );
+
+        nothing(
+            &analyze(&pods_at(vec![nominated], now())),
+            "a machine has been chosen and is being cleared, so 'no machine will take this \
+             pod' is false — and *'a machine has been chosen, it is waiting for other pods \
+             there to shut down'* is a new rule, not a branch of this one (invariant 13). \
+             Rule 12 already covers the half that goes wrong, on the victim",
+        );
     }
 
     /// The whole committed capture through [`analyze`] at once — every card printed, so
@@ -6777,9 +7446,9 @@ mod tests {
 
         assert_eq!(
             all.len(),
-            11,
-            "two on the crash loop, two on the OOM, one image, one config, two host mounts, \
-             one readiness, one restart counter, one terminating: {:?}",
+            12,
+            "two on the crash loop, two on the OOM, one image, one config, one unplaceable, \
+             two host mounts, one readiness, one restart counter, one terminating: {:?}",
             titles(&all)
         );
 

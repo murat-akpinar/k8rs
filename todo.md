@@ -754,11 +754,22 @@ this plan is delivery mechanism for what this phase produces.
       it wrote the field
       ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12))
       ([NOTES § D2](NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later))
-- [ ] **Rule 10 — Pending, and why**, from `conditions[PodScheduled]`: reason
+- [x] **Rule 10 — Pending, and why**, from `conditions[PodScheduled]`: reason
       `Unschedulable` plus that condition's own message, which is the
       scheduler's sentence. No Events watch, no new stream — the fixture is
       already captured
-      ([NOTES § D27](NOTES.md#d27--two-findings-the-open-watch-already-paid-for-2026-08-12))
+      ([NOTES § D27](NOTES.md#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)).
+      **Three things the box did not say and the operator review did.** It is
+      silent when `status.nominatedNodeName` is set — preemption has already
+      chosen a machine and the card's sentence is simply false — which cost
+      `PodSnapshot` one field. Severity **ladders on the condition's age**
+      against the ten-minute grace instead of being flat CRITICAL: an
+      autoscaler scale-up, `Immediate`-mode volume provisioning and a
+      node-group rollover all carry `Unschedulable` on the healthy path, so
+      red is reserved for the pod that has not resolved itself. And it stands
+      down entirely on a pod with a `deletionTimestamp` — true is not the same
+      as actionable, and rule 12 owns that pod and names the finalizer
+      ([NOTES § D73](NOTES.md#d73--rule-10-and-the-test-that-argued-for-its-own-deletion-2026-08-13))
 - [ ] **Rules 1–6 read `initContainerStatuses` too.** A pod at
       `Init:CrashLoopBackOff` produces no finding otherwise, and the finding
       has to name the init container — "the app container is fine, the init one
@@ -786,6 +797,28 @@ this plan is delivery mechanism for what this phase produces.
       **It ships with a negative side only** — every captured pod has the
       condition `True`, so the positive fixture is a capture-trip item below
       ([NOTES § D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13))
+- [ ] **Rule 14 — nothing has even looked at this pod.** `phase == Pending`
+      with **no `PodScheduled` condition at all**, older than **2 minutes**
+      from `metadata.creationTimestamp` — a field `PodSnapshot` must gain, and
+      its window closes at Phase 4 close
+      ([NOTES § D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+      **The two minutes are anchored, not picked:** kube-scheduler's leader
+      election defaults to a 15s lease with a 10s renew deadline, so leadership
+      moves inside ~15 seconds and two minutes is eight times that — past every
+      ordinary restart and failover, short enough to be useful at 3am.
+      CRITICAL. **Why it earns its place when the rule set is closed:** without
+      it, a wedged kube-scheduler — or a `schedulerName` naming one that is not
+      installed or lacks RBAC — leaves every pod Pending while `k8rs --once`
+      prints *nothing is broken*, which is the one claim
+      [`screens/once.md`](screens/once.md) says has to be true. Rare on a
+      managed control plane; not rare on kind, k3s or single-control-plane
+      on-prem, which is what this tool's audience runs. **The card names both
+      causes and claims neither** — `schedulerName` is not in the snapshot and
+      is not being added. **Known and deliberately unsolved:** a cluster-wide
+      scheduler outage fires this for every owner and buries the screen;
+      telling that apart from one bad `schedulerName` needs cross-pod
+      reasoning, and that waits for a real cluster to show the wall is real
+      ([NOTES § D74](NOTES.md#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13))
 - [ ] Node rules N1–N6 (NotReady · cordoned · pressure · kubelet skew ·
       overcommit · what blocks a Pending pod). **N1's card has to reach the
       pods, not only the node** — every pod rule reads pod *status*, and the
@@ -896,10 +929,11 @@ this plan is delivery mechanism for what this phase produces.
       ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
 - [ ] **A capture trip for the branches no committed fixture can reach — you
       run this one, not an agent** (`just cluster-up` · edit
-      `scripts/broken.yaml` · `just fixtures`). Three rule branches shipped
-      with no test that can fail, and a fourth shape the review asked for.
-      Manifests corrected by the operator review, because the obvious version
-      of each one does not produce the shape on kind:
+      `scripts/broken.yaml` · `just fixtures`). **Seven branches shipped with
+      no test that can fail** — the mutation sweep leaves them green because no
+      captured object reaches them, and each is named in `rules.rs` where it
+      sits. Manifests corrected by the operator review, because the obvious
+      version of the first four does not produce the shape on kind:
       - **rule 6's `exit 0` exemption** — `restartPolicy: Always` with
         `command: ["sh","-c","sleep 20; exit 0"]`. The sleep matters: an
         instant-exit container spends its life in `Waiting` and the capture is
@@ -932,6 +966,37 @@ this plan is delivery mechanism for what this phase produces.
         **Capture the `Failed` sibling on the same trip** — same Job with
         `backoffLimit: 0` and a command that always exits 1, or a pod evicted
         by an ephemeral-storage limit.
+      - **rule 5's CRITICAL band, and `&& !serving` with it** — no capture
+        reaches `RESTARTS_CRITICAL`, so only the constants are asserted and
+        both halves of the severity branch are unproven. Needs a container past
+        ten restarts that is **serving** (WARN despite the count) and one past
+        ten that is not; `broken-restarts` sits at 3 on purpose and must stay
+        there, so this is a second pod, not a change to that one.
+      - **rule 7's `!c.started` suppressor** — no fixture declares a
+        `startupProbe`, so every container reports `started: true` and the
+        state gate covers the same ground; deleting either leaves the other
+        passing. One pod with `startupProbe: {exec: {command: ["false"]},
+        failureThreshold: 60, periodSeconds: 5}` separates all three readings
+        and is the only thing that proves the suppressor does what
+        [D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)
+        says it does.
+      - **rule 6's two fallback actions** — with a serving container now
+        silent, only the log-line arm has a fixture. `(None, 126|127)` needs a
+        container whose `command` names something not in the image and whose
+        termination message is empty; `(None, _)` needs a non-zero exit with no
+        message at all.
+      - **rule 13's positive side** ([D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13))
+        — a `configMap` **volume** naming an object that does not exist wedges
+        a scheduled pod in `ContainerCreating` with
+        `PodReadyToStartContainers: True`, which is the residual branch. The
+        **network** branch (`False`) needs the sandbox itself to fail and may
+        not be reachable on kind without breaking the CNI cluster-wide; if it
+        is not, say so in the box rather than leaving it looking untried.
+      - **rule 14's positive side, and it is the cheapest one here** — a pod
+        with `schedulerName: does-not-exist`. Nothing picks it up, so no
+        `PodScheduled` condition is ever written; no control-plane surgery, and
+        `unbreak` only has to delete it
+        ([NOTES § D74](NOTES.md#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13))
 - [ ] **`tui-designer`: the cordon-card round, and it has to close before this
       phase does.** `screens/alerts.md` § *the cordon card* and
       `screens/once.md` still argue from

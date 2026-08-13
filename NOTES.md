@@ -3799,6 +3799,179 @@ the second marked as possibly unreachable there — a branch that ships with a
 negative side only is worth saying out loud rather than discovering at the
 phase close.
 
+### D73 — rule 10, and the test that argued for its own deletion (2026-08-13)
+
+Rule 10 reads one condition and quotes the scheduler's sentence, which is the
+whole value of it. The operator review found the gate correct for every shape it
+could construct but one, and the two blockers are worth keeping for what they
+are rather than what they cost.
+
+**The card was false for a preempting pod, and the field that disproves it sits
+in the same status object.** When preemption picks a node, kube-scheduler writes
+`status.nominatedNodeName` in the *same status patch* as
+`PodScheduled: False / Unschedulable`, and the pod stays there for the whole
+graceful termination of its victims — 30s by default, minutes with a real grace
+or a `preStop` hook, unbounded when a victim is stuck, which is rule 12's reason
+to exist. So k8rs said *"no machine in the cluster will take this pod"* and sent
+the reader to audit requests, labels and taints, while the API said a machine had
+been chosen and was clearing space. `PodSnapshot` gains `nominated_node_name`
+and rule 10 is silent when it is set.
+
+**The second card was refused, and recorded rather than dropped.** *"A machine
+has been chosen for this pod, but it is waiting for other pods there to shut
+down first"* is true, useful, and something no other tool explains to a
+beginner — and it is a **new rule**, so it goes to the user like
+[rule 13](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)
+did rather than arriving as a side effect of a bug fix. Silence is defensible
+in the meantime: preemption in progress is the system working, and when it
+stops working the victim carries rule 12.
+
+**The second blocker is the one to remember: the box's most consequential
+decision was held in place by nothing.** Deleting the reason half of the gate —
+`if scheduled.status != "False"` — left the **entire suite green**. So the
+`SchedulingGated` exclusion, which the rule's doc argues at length, was
+untested; and on a Kueue, Volcano or Yunikorn cluster that one-line
+simplification puts a CRITICAL *"no machine will take this pod"* on every pod
+in the queue, all of them parked exactly as their author intended.
+
+What makes it worth an entry is *why* it was missed. The dev tested the pair the
+API server **cannot** produce — `status: True` with `reason: Unschedulable`,
+reachable only by `patch pods/status` — and measured that hole honestly, closed
+it with a planted field, and proved it red. Both shapes the API server produces
+**daily** went untested, and the test's own closing message —
+*"the verdict is `status`, and `reason` only says which verdict it was"* — reads
+as permission to delete the untested half. **A test can argue for its own
+deletion.** The rule that catches this is already in CLAUDE.md and is about
+inputs, not intentions: a check is proven only for the shapes it was fed
+([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)),
+and "shapes" means the ones the real pipeline hands it, not the ones the
+argument is about.
+
+**Severity: the flat CRITICAL was reversed into a ladder.** The dev's argument
+was that `Unschedulable` is a verdict rather than a phase every healthy pod
+passes through, so the window rules 7 and 13 need does not apply. The premise is
+false on three routine paths: an autoscaler scale-up, where this condition **is**
+the trigger Cluster Autoscaler and Karpenter watch for; `Immediate`-mode volume
+provisioning, where every fresh StatefulSet replica carries *"pod has unbound
+immediate PersistentVolumeClaims"* for the seconds the CSI driver takes; and
+node-group rollover or spot reclaim. None needs a human, and CRITICAL in this
+file means *this will not run until someone acts*. The card stays immediate —
+the scheduler's sentence is the value and a beginner should not wait ten minutes
+for it — and the **severity** ladders on the condition's age against
+`NOT_READY_GRACE`: WARN below, CRITICAL above, CRITICAL when the stamp is
+missing.
+
+**The age is honest about less than it looks.** `LastTransitionTime` moves only
+when `Status` changes, and `SchedulingGated` is also `False` — so a pod held by
+Kueue for two days and released at 03:00 into a full cluster keeps the *gating*
+stamp and reads "2 days ago" one second after becoming unschedulable. It is
+still the best field available and there is no code change; what changed is the
+wording, and the interaction with the ladder above is stated rather than left to
+be discovered: such a pod reaches CRITICAL immediately.
+
+**Recorded for the user, not built: the Pending pod nobody explains.** A pod
+with **no `PodScheduled` condition at all** — kube-scheduler down or
+crashlooping, or a `schedulerName` naming a scheduler that is not installed,
+crashlooping, or missing RBAC — is silent in every rule in the file: rules 1–7
+iterate containers and there are none, rule 8 needs a hostPath, rule 12 a
+`deletionTimestamp`, rule 13 gates on `PodScheduled == True`. `kubectl get pods`
+shows a wall of Pending and `k8rs --once` prints *nothing is broken*, the one
+claim `screens/once.md` says has to be true. It is week one of adopting Volcano
+or Kueue, which is exactly when someone reaches for a tool like this — but it is
+also a **new rule**, and the residual it needs (`Pending`, no condition, older
+than a grace) requires `metadata.creationTimestamp`, which `PodSnapshot` does
+not carry and whose window closes at Phase 4
+([D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+It is taken as **rule 14** in
+[D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13).
+
+**A finding whose fix the PM specified wrongly, and the dev proved it.** The
+review found the card's `(it shows as Pending)` asserted without reading a
+field; the instruction back was *"gate the parenthetical on the phase actually
+being `Pending`"*, and that does not close it. `kubectl` prints **Terminating**
+off `deletionTimestamp`, not off `phase` — `printPod` overrides the column
+whenever a non-terminal phase carries a deletion stamp, which is why
+`stuck.json` is `phase: Running` and shows as Terminating. A deleted unscheduled
+pod keeps `phase: Pending`, so the literal instruction leaves the parenthetical
+saying "Pending" at a reader looking at "Terminating" — the same two-words-one-pod
+defect it was meant to fix. The dev implemented the correct gate, then **mutated
+the code down to the brief's literal wording and watched the test fail**, which
+is what a brief that under-specifies is owed.
+
+**And rule 10 now goes silent on a deleting pod rather than merely quieter.**
+Both cards were true of that pod, which is why the dev left the choice open. The
+tiebreak is not truth but direction: rule 10's action sends the reader to audit
+`nodeSelector`, affinity and requests, while the only thing anyone can do for a
+pod on its way out is find what is holding the delete — rule 12's card, which
+names the finalizer. Alerts is D2's queue of what is broken now **and
+actionable**, and "unschedulable" stops being actionable the moment someone has
+asked for the pod to go away. For the 60 seconds before rule 12's margin opens
+such a pod draws nothing, which is correct: it is deleting normally.
+
+### D74 — two candidate rules, one refused and one taken, decided on who actually runs this (2026-08-13)
+
+[D73](#d73--rule-10-and-the-test-that-argued-for-its-own-deletion-2026-08-13)
+left two new-rule candidates for the user, who handed the ruling back on
+2026-08-13: *decide it yourself, for this project.* Both are run through
+[invariant 13](CLAUDE.md)'s two halves, and they come out on opposite sides —
+which is the useful part, because it shows the guard discriminating rather than
+waving things through.
+
+**Refused: "a machine has been chosen, it is waiting for other pods to shut
+down" (the preemption card).** The sentence is true, readable, and unexplained
+by any other tool — it fails the *first* half anyway. Preemption of user
+workloads needs PriorityClasses configured for it, which is a deliberate and
+relatively advanced setup: common on batch and ML clusters, absent from most
+others, so it is not something someone meets in a normal week. And the deciding
+argument is not frequency but **what the reader does with it: nothing.** The
+card is informational, the state resolves itself, and Alerts is
+[D2](#d2--the-dividing-line-broken-now-vs-risky-later)'s
+work queue of things that are broken *now*. When preemption genuinely stops —
+a victim held by a finalizer — rule 12 already fires, **on the victim**, which
+is both the actionable object and the one the user can do something about.
+Suppressing rule 10 on `nominatedNodeName` is the whole fix; silence there is
+not a gap.
+
+**Taken as rule 14: the Pending pod with no `PodScheduled` condition at all.**
+It passes the first half in a way the raw frequency hides. A wedged
+kube-scheduler is rare on a managed control plane and *not* rare on the clusters
+this tool's audience actually runs — kind, minikube, k3s, single-control-plane
+on-prem — and the other producer, a `schedulerName` naming a scheduler that is
+not installed or lacks RBAC, is week one of adopting Volcano or Kueue, which is
+exactly when someone reaches for a tool like this. It passes the second half
+easily: *"nothing has even looked at this pod yet"* needs no glossary, and it is
+precisely the diagnosis a beginner cannot reach alone — they see `Pending`, run
+`kubectl describe`, find **no events at all**, and have nowhere to go.
+
+**What decides it is the failure mode, not the frequency.** Without this rule,
+every pod in the cluster is Pending and `k8rs --once` prints *nothing is
+broken* — the one claim [`screens/once.md`](screens/once.md) says has to be
+true. A tool whose empty screen is a lie is worse than no tool, and this is the
+only known input that produces one.
+
+**Its shape, decided here so the box does not have to invent it.** Residual, like
+rule 13: `phase == Pending`, **no `PodScheduled` condition at all**, and older
+than **2 minutes** measured from `metadata.creationTimestamp` — which
+`PodSnapshot` must gain, and whose window closes at Phase 4 close
+([D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+The two minutes are anchored rather than picked: kube-scheduler's leader
+election defaults to a 15s lease with a 10s renew deadline, so leadership moves
+within about fifteen seconds, and two minutes is eight times that — long enough
+that no ordinary restart or failover reaches it, short enough to be useful at
+3am. CRITICAL: a pod nothing has looked at is not running and will not start on
+its own. The card names both causes without claiming which, because the rule
+cannot tell them apart — `schedulerName` is not in the snapshot and is not being
+added for this.
+
+**One consequence is known and deliberately not solved now.** If the scheduler
+really is down cluster-wide, this fires for every owner in the cluster and
+buries everything else on the screen. Distinguishing "one pod's `schedulerName`
+is wrong" from "the scheduler is gone" needs cross-pod reasoning that `analyze`
+could do — it holds the whole snapshot — and that is a second mechanism for a
+case nobody has met yet on a real cluster. Grouping by owner already collapses a
+Deployment's fifty pods into one card. If the wall turns out to be real, it is a
+finding from a real cluster and a later box, not a guess encoded today.
+
 ## Decisions made
 
 ### Product
@@ -3957,6 +4130,7 @@ all of them testable.
 | 10 | **Pending — and why** | `conditions[PodScheduled].reason == Unschedulable` + that condition's own `message` | "No node can accept it" + the scheduler's own sentence (insufficient cpu / nodeSelector / taint) |
 | 12 | **Pod stuck Terminating** | `deletionTimestamp` already in the past — the apiserver sets it to *request time + grace*, so it is the deadline, not the moment ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | "Asked to shut down N minutes ago and still hasn't — held by *(the finalizer, named)* / the kubelet" |
 | 13 | **Placed on a node, but the containers never started** — the `ContainerCreating` wedge, the *residual* after rules 1/3/4 explain themselves. Gate: `conditions[PodScheduled] == True`, no container started, > 10 min since that transition. `conditions[PodReadyToStartContainers]` is the **evidence**, not the gate — `False` = no sandbox/network yet, `True` = the block is after it, almost always a volume ([D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)) | `conditions[PodScheduled]` + `containerStatuses[].state` + `conditions[PodReadyToStartContainers]` | "It was given a machine to run on, but it has not been able to start — the node cannot give it *(a network / its storage)*" |
+| 14 | **Nothing has even looked at this pod** — `phase == Pending` with **no `PodScheduled` condition at all**, older than 2 minutes from `metadata.creationTimestamp`. kube-scheduler is down or crashlooping, or `schedulerName` names one that is not installed or lacks RBAC. Without it every pod is Pending and `--once` prints *nothing is broken* ([D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13)) | absence of `conditions[PodScheduled]` + `metadata.creationTimestamp` | "Nothing has even looked at this pod yet — the scheduler that should give it a machine may not be running" |
 
 **Rules 1–6 read `initContainerStatuses` as well as `containerStatuses`** — a
 pod stuck at `Init:CrashLoopBackOff` is invisible otherwise, and init
@@ -4622,6 +4796,7 @@ in the prose.
 | 9 | `broken-nolimits` | No limits set. **Not an alert** — this fixture exists to prove the *Capacity report* row |
 | 12 | `broken-stuck` | Stuck Terminating: a finalizer nothing removes. Applied by the script, put into Terminating by the capture step |
 | 1–6 (init) | `broken-init` | `Init:CrashLoopBackOff` — an init container that exits non-zero while the app container never starts. The pod the old rule set could not see ([D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)) |
+| 14 | **none yet, and this one is easy** | `schedulerName: does-not-exist` on an otherwise ordinary pod. Nothing picks it up, so no `PodScheduled` condition is ever written — the exact shape, with no control-plane surgery and nothing to clean up ([D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13)) |
 | 13 | **none yet** | The `ContainerCreating` wedge. Every captured pod has `PodReadyToStartContainers: True`, so rule 13 ships with a negative side only until the next trip. The residual branch is reachable — a `configMap` **volume** naming an object that does not exist — and the network branch may not be, since it needs the sandbox itself to fail ([D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)) |
 | W1 | `broken-quota` (namespace `k8rs-quota`) | A Deployment whose ReplicaSet cannot create a single pod — the quota allows zero. `kubectl get pods` is empty and the truth lives only on the ReplicaSet's `ReplicaFailure`. It sits in its own namespace because a `pods: "0"` quota applies namespace-wide and would block every pod above ([D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)) |
 
