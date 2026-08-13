@@ -3760,12 +3760,30 @@ sees it, and **rule 10 does not either**, because such a pod *is* scheduled.
 **But the field the review proposed it on does not cover the failures the
 review listed, and building on that sentence would have shipped a rule that is
 quiet for most of its own class.** `conditions[PodReadyToStartContainers]` is
-KEP-3085's renamed `PodHasNetwork`, and it is True once the **sandbox exists and
-the network is configured**. Volume work happens after that: `FailedAttachVolume`,
-a volume still attached to a dead node, a `configMap` volume whose object is
-missing — the kubelet has already built the sandbox, so the condition reads
-`True` while the pod sits in `ContainerCreating` indefinitely. The condition
-distinguishes *why*; it is not the trigger.
+KEP-3085's renamed `PodHasNetwork`, it is written only once a pod is assigned to
+a node, and it is not the trigger — it distinguishes *why*.
+
+> **The mechanism in the paragraph that used to stand here was wrong, and it was
+> mine.** It said the sandbox is built first and volume work happens after, so a
+> volume wedge would read `True`. The opposite is true: `kubelet.SyncPod` calls
+> `volumeManager.WaitForAttachAndMount` **before** `containerRuntime.SyncPod`
+> creates the sandbox, so **every volume failure leaves the condition `False`**,
+> and `True` means the mounts already succeeded. Measured on a real kind cluster
+> at the fixtures' own node image, not reasoned: a pod with a missing `configMap`
+> volume — this entry's own proposed capture shape — reads `False`; a pod
+> mid-pull on a large image reads `True`. The code implemented the sentence
+> faithfully and told a beginner whose ConfigMap did not exist to go and look at
+> the CNI. Corrected below and in `rules.rs`
+> ([D76](#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)).
+
+So the condition reads **`False` for both pre-sandbox causes — storage and
+network** — and `True` when the pod has its storage and its network and the
+block is later: the image still downloading, or a container that could not be
+created. The name is the trap: `PodHasNetwork` is what it used to be called, and
+reading the *name* rather than the *writer* is what cost this entry its
+mechanism — the same mistake, in the same file, that
+[D64](#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13)
+recorded about `Taint::time_added` a day earlier.
 
 Two facts from the committed captures, checked rather than assumed: **every**
 captured pod carries the condition and every one is `True`, so there is no
@@ -3790,14 +3808,12 @@ is sometimes a slow pull is how red stops meaning broken
 ([D2](#d2--the-dividing-line-broken-now-vs-risky-later)).
 
 **Its positive side does not exist yet and the capture is not obviously
-producible.** The reliable shape is the *residual* branch — a `configMap` volume
-naming an object that does not exist wedges a scheduled pod in
-`ContainerCreating` with the condition `True`. The **network** branch needs the
-sandbox itself to fail, which on kind means breaking the CNI, and that is a
-cluster-wide break rather than one pod's. Both go in the capture-trip box, with
-the second marked as possibly unreachable there — a branch that ships with a
-negative side only is worth saying out loud rather than discovering at the
-phase close.
+producible.** Both branches are, and cheaply — which is the *other* thing the
+corrected mechanism changes. A `configMap` volume naming an object that does not
+exist wedges a scheduled pod in `ContainerCreating` with the condition
+**`False`**, and any image failure gives **`True`**. Neither needs CNI surgery;
+the paragraph that used to stand here sent the capture trip after a cluster-wide
+break to reach a branch a bad image name produces on its own.
 
 ### D73 — rule 10, and the test that argued for its own deletion (2026-08-13)
 
@@ -4037,6 +4053,97 @@ passed for a reason unrelated to what it claimed. It is the failure
 inside a test that had a red run: witnessing red proves the assertion is
 connected to *something*, not that it is connected to the thing named in it.
 
+### D76 — the review that built a cluster, and the premise it measured away (2026-08-13)
+
+Rule 13's operator review did what nothing else in this project has done yet: it
+**stood up a real kind cluster** on the fixtures' own node image, planted nine
+pods covering the shapes the brief named, put each through `sanitize.jq`, and
+read the cards out of the unmodified `analyze()`. Every finding below is a
+measurement. Three of them are blockers, and the first one was **mine**.
+
+**The condition's mechanism was backwards, and the card was confidently wrong
+in plain language.**
+[D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)
+said the kubelet builds the sandbox first and mounts volumes after. It does the
+reverse — `WaitForAttachAndMount` runs before `containerRuntime.SyncPod` — so
+every volume failure leaves `PodReadyToStartContainers: False`, and `True` means
+the mounts already succeeded. The code implemented the sentence faithfully and
+therefore told a beginner whose ConfigMap did not exist to go and look at the
+CNI, and told a pod whose disks are provably fine that a disk was probably
+missing. Corrected in D72 and in the two evidence sentences.
+
+**What produced the error is worth more than the error.** I read the field's
+*name* — `PodHasNetwork`, what KEP-3085 called it before the rename — and
+inferred the mechanism from it. That is the identical mistake
+[D64](#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13)
+recorded one day earlier about `Taint::time_added`, where the field's *doc* was
+trusted over the field's *writer*. Twice now the fix has come from reading the
+code that writes the field, and twice the cost was a rule that would have shipped
+a confident wrong sentence. **A field is defined by what writes it.**
+
+**The rule was silent on most production pods, and the doc argued it could not
+be.** `PodInitializing` was excluded as a pointer that always has something to
+point at. The kubelet's `defaultWaitingState` is `PodInitializing` for **both**
+status arrays whenever a pod declares an init container — so on anything with
+Istio or Linkerd injection, a migration, or a vault-agent-init, every container
+reads `PodInitializing` and rule 13 could not fire on a volume wedge, a sandbox
+wedge or a stuck pull. It is a pointer only when something is there to point at:
+treated as stuck when no container is `Running` and none carries a reason of its
+own.
+
+**A gate that needed one container, and a title that spoke for all of them.**
+One typo in a sidecar's image gave a pod `kubectl get pods` reports as `1/2`, and
+a card claiming its containers had never started — so the reader debugged the
+container that had been serving for three minutes. **Both halves were wrong and
+both were fixed**, which the brief only asked for one of: the rule skips when any
+container is running, *and* the title became NOTES' own row-13 sentence, *"given
+a machine to run on, but it has not been able to start"*. The dev found the
+second half — the old title is false of a pod whose **init** container completed,
+and no skip covers that, because nothing there is running.
+
+**Two containers, two failures, one card, and the count said they matched.**
+`stuck.first()` is not spec order: the kubelet **sorts regular container
+statuses by name**, so the named container is alphabetical. The count fact said
+*"1 other container in the same state"* about a container failing for an
+entirely different reason.
+
+**And the residual was swallowing a family that has a rule already.**
+`InvalidImageName`, `ErrImageNeverPull`, `ImageInspectError`,
+`RegistryUnavailable` and `SignatureValidationFailed` all mean *this image will
+never become available*, and the kubelet's message carries the whole diagnosis.
+So `nginx:doesnotexist` drew rule 3's CRITICAL immediately with the registry's
+own sentence, while `NGINX:::latest` drew **nothing for ten minutes** and then a
+WARN about starting that blamed a disk. Two typos, two unrecognisably different
+answers. They move to rule 3 — whose box is closed and whose phase is not, the
+same in-phase correction rule 2 took in
+[D75](#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13)
+— and into `EXPLAINED_ELSEWHERE` in the same change, because that const's own
+doc requires the pair to move together. `CreateContainerError` and
+`RunContainerError` stay in the residual: open-ended causes, and the message
+carries the diagnosis.
+
+**The test locked the inversion in, and CLAUDE.md already names why.** The
+positive planted `ContainerCreating` on a capture while keeping its `True` and
+asserted the evidence contained *"disk"* — but that pair is a real shape, a pod
+downloading an image, and *"disk"* is the wrong answer for it. Both halves
+asserted what the implementation returned rather than what the requirement says
+it must, which is the one thing
+[§ Tests must not lie](CLAUDE.md) forbids by name. **A test written from the
+code cannot falsify the code**, and a red run does not save it: witnessing red
+proves the assertion is wired to something, never that the something is right.
+Each half now also asserts the sentence it must **not** carry, so a future swap
+has to fail.
+
+**Three things the dev settled that the findings did not.** The image family is
+**seven** reasons, not the six the send-back counted — the enumeration was taken
+over the arithmetic. `UNUSABLE_IMAGE` is a single const read by rule 3 as its
+trigger and by rule 13 as its exclusion, rather than five strings copied into
+`EXPLAINED_ELSEWHERE`, which meets that const's *move together* requirement
+structurally instead of by promise. And the bare card had been printing *"the
+machine's own word for where it is stuck: PodInitializing"* — dressing the least
+informative string in the status as a diagnosis; it now says the machine has not
+said which step it is on.
+
 ## Decisions made
 
 ### Product
@@ -4186,7 +4293,7 @@ all of them testable.
 |---|---|---|---|
 | 1 | CrashLoopBackOff | `state.waiting.reason` | "Container keeps crashing and restarting" + exit code |
 | 2 | OOMKilled | `lastState.terminated.reason` (exit 137) + `resources.limits.memory` | "Exceeded its memory limit and was killed by the kernel" |
-| 3 | ImagePullBackOff / ErrImagePull | `state.waiting.reason` + `.message` | "Image can't be pulled — wrong name/tag, or registry credentials missing" |
+| 3 | **The image is not usable** — the whole family, not just the two: `ErrImagePull`, `ImagePullBackOff`, `InvalidImageName`, `ErrImageNeverPull`, `ImageInspectError`, `RegistryUnavailable`, `SignatureValidationFailed`. All of them mean *this image will never become available* and all carry the kubelet's diagnosis; splitting them sent `nginx:doesnotexist` to rule 3 immediately and `NGINX:::latest` to rule 13 ten minutes later with a card about a disk ([D76](#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)) | `state.waiting.reason` + `.message` | "Container image is not usable, so the container never started" — wrong name or tag, no pull secret for that registry, or a pull policy that forbids fetching it |
 | 4 | CreateContainerConfigError | `state.waiting.reason` + `.message` | "Referenced a ConfigMap/Secret that doesn't exist" |
 | 5 | High restart count (even if Running) | `restartCount` | "Restarted N times — looks healthy now, but something is wrong" |
 | 6 | Non-zero exit | `lastState.terminated.exitCode` | Translate the exit code (see below) |

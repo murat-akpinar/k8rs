@@ -984,6 +984,25 @@ pub struct PodSnapshot {
     /// `None` for a pod the kubelet has not reached — `pending.json` carries
     /// `PodScheduled` and nothing else.
     pub ready: Option<Condition>,
+    /// `conditions[PodReadyToStartContainers]` — **rule 13's evidence line, and never its
+    /// gate**. KEP-3085's renamed `PodHasNetwork`: `True` once the kubelet has created the
+    /// pod's sandbox *and* configured its network, and nothing more than that.
+    ///
+    /// **The distance between what it says and what rule 13 is about is the whole reason
+    /// this doc exists.** Volume work happens *after* the sandbox: `FailedAttachVolume`, a
+    /// volume still attached to a dead node, a `configMap` volume whose object is missing —
+    /// the kubelet has already built the sandbox, so this reads `True` while the pod sits
+    /// in `ContainerCreating` for hours. A rule gated on `False` here would be silent for
+    /// most of its own class (NOTES § D72), so [`placed_but_never_started`] gates on the
+    /// residual and reads this only to say *which side of the sandbox* the block is on:
+    /// `False` — no network yet; `True` or absent — past the sandbox, almost always a disk.
+    ///
+    /// **`None` is not a third case, it is the second one.** The condition is written only
+    /// once the pod is assigned to a node and the kubelet has looked at it — `pending.json`
+    /// carries `PodScheduled` and nothing else — and it did not exist at all before 1.28.
+    /// An old server and a kubelet that has said nothing both read the same here, and the
+    /// evidence line treats both as "not `False`", which is the claim that survives either.
+    pub ready_to_start_containers: Option<Condition>,
     /// Rule 12. **Not the moment the delete was accepted: it is request time plus the
     /// grace period** — `apiserver/pkg/registry/rest/delete.go` sets
     /// `metav1.Now().Add(gracePeriodSeconds)`, and `stuck.json` shows it, deleted at
@@ -1471,8 +1490,8 @@ impl From<Pod> for PodSnapshot {
         let pod_resources = spec.resources.as_ref();
         let cpu_request = pod_resources.and_then(|r| quantity(&r.requests, "cpu"));
         let memory_request = pod_resources.and_then(|r| quantity(&r.requests, "memory"));
-        // Both are picked by name off the same array. A pod carries five conditions and
-        // `PodScheduled` is the last of them, so neither can be "the first one".
+        // All three are picked by name off the same array. A pod carries five conditions
+        // and `PodScheduled` is the last of them, so none can be "the first one".
         let conditions = status.conditions.unwrap_or_default();
         let condition = |type_: &str| {
             conditions
@@ -1494,6 +1513,7 @@ impl From<Pod> for PodSnapshot {
             scheduled: condition("PodScheduled"),
             nominated_node_name: status.nominated_node_name,
             ready: condition("Ready"),
+            ready_to_start_containers: condition("PodReadyToStartContainers"),
             deletion_timestamp: metadata.deletion_timestamp,
             grace_period_seconds: metadata
                 .deletion_grace_period_seconds
@@ -1712,7 +1732,7 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and
 /// the only entry point `k8s.rs` and the `--once` printer are given.
 ///
-/// Rules 1–8, 10 and 12. Rule 13, the N-series, W-series and C1 are later boxes of this
+/// Rules 1–8, 10, 12 and 13. Rule 14, the N-series, W-series and C1 are later boxes of this
 /// phase and are deliberately not wired here: a half-built rule is worse than an absent one,
 /// because the screen looks complete either way.
 ///
@@ -1740,7 +1760,12 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// it. Rule 10's input is a pod condition and it reads no container at all, which is what
 /// lets it fire on a pod that has none.
 ///
-/// **A pod that finished successfully is not broken now**, so rules 1–8 and 10 skip it.
+/// **Rule 13 is a third shape and is neither of those.** It is one card about the *pod* —
+/// placed on a machine, nothing started — but it reaches the containers to find out, so it
+/// takes the whole pod and does its own walk rather than being called once per container.
+/// The loop below would draw one card per container for a single wedge.
+///
+/// **A pod that finished successfully is not broken now**, so rules 1–8, 10 and 13 skip it.
 /// Rule 10 is inside the skip and not beside rule 12: a pod that reached `Succeeded` or
 /// `Failed` will never be scheduled again whatever its `PodScheduled` condition still says,
 /// and *"no machine will take this pod"* about one that is finished with is a card nobody
@@ -1774,6 +1799,7 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
         }
         findings.extend(escalated_host_path(pod));
         findings.extend(no_node_accepted_it(&snapshot.now, pod));
+        findings.extend(placed_but_never_started(&snapshot.now, pod));
         for c in &pod.containers {
             findings.extend(crash_looping(pod, c));
             findings.extend(out_of_memory(&snapshot.now, pod, c));
@@ -1790,6 +1816,10 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
 /// `kubectl describe pod …` — the one command that shows a container's current state, how
 /// its last run ended, its restart count, the limits it is running under and its mounts.
 /// That is what rules 1–8 claim, so it is the command invariant 4 shows beside them.
+///
+/// **Rule 13 is here for a different reason**: its card quotes a waiting reason that usually
+/// carries no message at all, and what finishes the diagnosis is an Event — which `describe`
+/// prints and `get -o yaml` does not ([`placed_but_never_started`]).
 ///
 /// **Rule 12 does not use it**: `describe` prints no finalizers at all (NOTES § D46), and a
 /// teaching command that does not show what the card says is worse than none.
@@ -2107,9 +2137,46 @@ fn out_of_memory(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option
     })
 }
 
-/// **Rule 3 — the image could not be downloaded, so the container never started.**
-/// `state.waiting.reason` of `ErrImagePull` or `ImagePullBackOff` — the kubelet alternates
-/// between the two as it backs off and retries, and both mean the same thing. CRITICAL.
+/// **Every way the kubelet says "this container is not getting its image"** — rule 3's
+/// trigger, and, through [`stuck_at_the_starting_line`], rule 13's largest exclusion.
+///
+/// **One list read by two rules, rather than the same seven strings written twice.**
+/// [`EXPLAINED_ELSEWHERE`] requires a reason that gains a rule to leave the residual in the
+/// same change; a shared constant makes that structural instead of a promise — the pair
+/// cannot drift because there is no pair.
+///
+/// **The five past the first two are why this list exists.** `ErrImagePull` and
+/// `ImagePullBackOff` were the whole set, and every other member fell through to rule 13:
+/// `nginx:doesnotexist` drew rule 3's CRITICAL immediately with the registry's sentence,
+/// while `NGINX:::latest` drew **nothing for ten minutes** and then a WARN about starting
+/// that blamed a disk. Two typos, two unrecognisably different answers.
+///
+/// They are `pkg/kubelet/images/types.go`'s error set and they all mean the same thing to
+/// the reader — *this image will never become available* — even though the causes differ:
+/// a name that is not a valid reference, a `imagePullPolicy: Never` with nothing on the
+/// node, an image the runtime cannot read, a registry that is down, a signature that did
+/// not verify. Each carries the kubelet's own sentence, which is the diagnosis, and rule
+/// 3's action already answers most of them.
+const UNUSABLE_IMAGE: [&str; 7] = [
+    "ErrImagePull",
+    "ImagePullBackOff",
+    "InvalidImageName",
+    "ErrImageNeverPull",
+    "ImageInspectError",
+    "RegistryUnavailable",
+    "SignatureValidationFailed",
+];
+
+/// **Rule 3 — the container cannot get its image, so it never started.**
+/// `state.waiting.reason` in [`UNUSABLE_IMAGE`]. CRITICAL.
+///
+/// **The title does not say "download".** `ErrImagePull` and `ImagePullBackOff` are one
+/// failed download the kubelet alternates between as it backs off, and that word was right
+/// while they were the whole trigger. It is wrong about `InvalidImageName` — nothing was
+/// ever downloaded, because the name is not a reference — and about `ErrImageNeverPull`,
+/// where the policy forbids downloading at all. Naming the reason in brackets and the
+/// kubelet's sentence below it is what tells the reader which of the seven they have
+/// (invariant 14).
 ///
 /// The runtime's own sentence is quoted verbatim (NOTES § D37) because it is the only place
 /// the actual failure appears — a name typo, a missing tag and a registry that needs
@@ -2121,17 +2188,17 @@ fn out_of_memory(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option
 /// container status records when the first attempt was made.
 fn image_not_pulled(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     let (reason, message) = waiting(c)?;
-    if !matches!(reason, "ErrImagePull" | "ImagePullBackOff") {
+    if !UNUSABLE_IMAGE.contains(&reason) {
         return None;
     }
     let mut facts = vec![container_fact(c), format!("image {}", c.image)];
     facts.extend(message.map(str::to_string));
     Some(Finding {
         severity: Severity::Critical,
-        title: format!("Container image could not be downloaded ({reason})"),
+        title: format!("Container image is not usable, so the container never started ({reason})"),
         evidence: facts.join(FACTS),
-        action: "check the image name and tag, and whether this namespace has a pull secret \
-                 for that registry"
+        action: "check the image name and tag, whether this namespace has a pull secret for \
+                 that registry, and whether the pull policy lets the node fetch it at all"
             .to_string(),
         kubectl_cmd: get_yaml(&pod.id),
         owner: pod.owner.clone(),
@@ -2775,6 +2842,298 @@ fn no_node_accepted_it(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
     })
 }
 
+/// **Every waiting reason another rule in this file already has a card for** — rule 13's
+/// exclusion list, and the reason it is a *residual* rather than a twelfth opinion.
+///
+/// [`placed_but_never_started`] fires on what is left after these, so the list is the one
+/// place the overlap is decided: a reason that gains a rule of its own is added here in the
+/// same change, or two cards describe one incident and the screen doubles. Rule 3's seven
+/// are excluded through [`UNUSABLE_IMAGE`] itself rather than copied here — the same
+/// requirement, met by there being nothing to keep in step.
+const EXPLAINED_ELSEWHERE: [&str; 2] = [
+    "CrashLoopBackOff", // rule 1 — and it has run, which rule 13 also excludes
+    "CreateContainerConfigError", // rule 4
+];
+
+/// **The kubelet's `defaultWaitingState`, which is not a diagnosis and is not always a
+/// pointer either** — and the difference between those two readings is most of this rule.
+///
+/// The kubelet writes it into **both** status arrays for every container of a pod that
+/// declares an init container, from the moment it takes the pod until the init sequence
+/// finishes. So it is at once the commonest waiting reason in any cluster and, on its own,
+/// completely uninformative.
+///
+/// **Reading it as a block would fire on every slow init container** — a migration, a large
+/// restore, a wait-for-dependency loop — which is the false-positive class this rule exists
+/// to avoid becoming (NOTES § D2).
+///
+/// **Reading it as a pointer silences the rule on most production pods, which is the worse
+/// half and is what shipped first.** Istio and Linkerd injection, `vault-agent-init`, most
+/// Helm charts: with an init container declared, a pod wedged on a missing volume reports
+/// `PodInitializing` on *every* container and names its real reason nowhere at all — and
+/// the same is true of a stuck pull once the init container has completed. Rule 13 could
+/// not fire on any of the cases it was added for.
+///
+/// **So it is a pointer only when there is something to point at**, which is what
+/// [`nothing_else_to_point_at`] decides: some container is `Running`, or some container
+/// carries a reason of its own. When neither is true this reason is the only thing the pod
+/// has said, and the pod is exactly as wedged as one that says `ContainerCreating`.
+const WAITING_ON_A_SIBLING: &str = "PodInitializing";
+
+/// **Is `PodInitializing` the only thing this pod has to say?** — the pod-level half of
+/// [`WAITING_ON_A_SIBLING`], and the reason rule 13 takes the whole pod.
+///
+/// A container that is `Running` is something to wait for; a container carrying a reason of
+/// its own is something to point at, whoever owns that reason — rule 1's `CrashLoopBackOff`
+/// on an init container is a pointer exactly as much as a bare `ContainerCreating` is, and
+/// the card for it is rule 1's rather than this one's.
+fn nothing_else_to_point_at(pod: &PodSnapshot) -> bool {
+    !pod.containers
+        .iter()
+        .any(|c| is_running(c) || waiting(c).is_some_and(|(r, _)| r != WAITING_ON_A_SIBLING))
+}
+
+/// **Is this container up right now?** — [`ContainerState::Running`] and nothing about
+/// readiness, which is [`doing_its_job`]'s question and a different one. Rule 13 asks it
+/// twice: a running container is something for a `PodInitializing` sibling to be waiting
+/// on, and it is also what makes *"it has not been able to start"* false about the pod.
+fn is_running(c: &ContainerSnapshot) -> bool {
+    matches!(c.state, ContainerState::Running { .. })
+}
+
+/// **A container that has never run and is not waiting for a reason somebody else owns** —
+/// rule 13's per-container half, returning the kubelet's reason and sentence for the card.
+///
+/// `bare` carries [`nothing_else_to_point_at`]'s answer, because whether
+/// [`WAITING_ON_A_SIBLING`] counts is a fact about the pod and cannot be decided from one
+/// container.
+///
+/// **"Never run" is [`ContainerSnapshot::last_terminated`] and not the state alone.** A
+/// container that ran, died and is now waiting to be recreated — `CreateContainerError`
+/// after a node lost the disk under it — is a real shape, and rule 13's card would be
+/// claiming the pod never started when it did.
+///
+/// **What that leaves uncovered is wider than "rule 5 has it".** The pod is carried by
+/// [`restarting_repeatedly`] only once it reaches [`RESTARTS_WARN`], or by
+/// [`previous_run_failed`] if the run exited non-zero — and that rule skips `0`, `143` and
+/// `OOMKilled`. A container SIGTERMed by a node reboot and then unable to be recreated
+/// draws nothing from any rule in this file. It is still the right trade against a card
+/// that says a pod never started when it ran for a week, but it is a hole and not a
+/// hand-off.
+fn stuck_at_the_starting_line(c: &ContainerSnapshot, bare: bool) -> Option<(&str, Option<&str>)> {
+    if c.last_terminated.is_some() {
+        return None;
+    }
+    let (reason, message) = waiting(c)?;
+    if (reason == WAITING_ON_A_SIBLING && !bare)
+        || EXPLAINED_ELSEWHERE.contains(&reason)
+        || UNUSABLE_IMAGE.contains(&reason)
+    {
+        return None;
+    }
+    Some((reason, message))
+}
+
+/// **Rule 13 — it was given a machine to run on, and it has not been able to start.** The
+/// `ContainerCreating` wedge: WARN, on a pod whose `PodScheduled` condition has read `True`
+/// for more than [`NOT_READY_GRACE`] while nothing in it is running.
+///
+/// **It fires on the residual, and that is the design rather than an implementation
+/// shortcut** (NOTES § D72). `CreateContainerError`, `RunContainerError`, a
+/// `FailedAttachVolume` behind a bare `ContainerCreating` — each is real, none has a rule,
+/// and the list of reasons a kubelet can be stuck on grows upstream without asking. A
+/// positive match on `ContainerCreating` would cover one of them and go silent on the rest;
+/// *"something is stopping this from starting and here is the word the machine used"* covers
+/// the ones nobody has taught it, which is the only shape that stays true next release. What
+/// it must not do is repeat a card another rule already drew, and that is
+/// [`EXPLAINED_ELSEWHERE`] and [`UNUSABLE_IMAGE`]'s job.
+///
+/// **The image-error family is on the other side of that line and no longer reaches here.**
+/// `InvalidImageName` and the four beside it mean *this image will never become available*,
+/// which is rule 3's sentence and rule 3's severity — a wedged-and-waiting WARN ten minutes
+/// later, blaming the node, is the wrong answer to a typo ([`UNUSABLE_IMAGE`]).
+///
+/// **Rule 10 does not see this pod, which is why the rule exists.** Such a pod *is*
+/// scheduled — `PodScheduled: True` — so the rule about the pod nothing would take has
+/// nothing to say, and rules 1–7 read container states that name no problem.
+///
+/// **Silent on a pod that has no container statuses at all, and the owner of that gap is the
+/// N-series.** A pod bound to a node whose kubelet never reported — the machine is up as far
+/// as the API server knows, or was when the binding was written — carries `PodScheduled:
+/// True` and an empty status, so the walk below finds nothing and this rule says nothing
+/// about a pod that is literally *given a machine and never started*. Firing on the absence
+/// would put a card on every pod in the seconds between binding and the kubelet's first
+/// status write, and it would name the pod when the fault is the node. N1 owns the node that
+/// stopped reporting, which is one card for the machine instead of one per pod on it.
+///
+/// **Ten minutes, from `scheduled.last_transition`.** The borrow is rule 7's
+/// (`progressDeadlineSeconds`' default) for the same reason: pulling a large image onto a
+/// cold node legitimately takes minutes, and a rule firing under that alerts on every cold
+/// start. The since-when is when the scheduler placed the pod, because that is the moment
+/// the machine became responsible for starting it.
+///
+/// **An unstamped condition fires nothing**, which is the opposite direction from rule 10
+/// and deliberate. There the verdict stands on its own and the age only picks a severity;
+/// here the ten minutes *is* the gate, so a condition with no `lastTransitionTime` is one
+/// that cannot be shown to have passed it.
+///
+/// **WARN, not CRITICAL.** The one healthy thing that still looks exactly like this is a
+/// slow pull, and a red card that is sometimes a slow pull is how red stops meaning broken
+/// (NOTES § D2).
+///
+/// **Silent on a pod that is being deleted**, for rule 10's reason: both cards would be
+/// true, and only rule 12's is actionable.
+///
+/// **Silent the moment anything in the pod is running, and the title is why.** *"It has not
+/// been able to start"* is false about a pod that is half up: one typo in a sidecar's image
+/// leaves a pod `kubectl get pods` shows as `1/2`, and a card saying it never started sends
+/// the reader to debug the container that has been serving for three minutes. Nothing else
+/// in [`analyze`] filters that pod out — it stays `phase: Pending` — so the skip is here.
+/// **It costs a real case:** a sidecar up and one regular container stuck on a
+/// `CreateContainerError` draws nothing from this file. That is a named hole, kept because a
+/// confident sentence that is false about the pod in front of you is the more expensive
+/// failure, and because the same skip is what makes [`WAITING_ON_A_SIBLING`] safe to read as
+/// a block below.
+///
+/// **One card per pod, not per container.** The wedge is a statement about the pod — the
+/// machine cannot give it what it needs — and the containers are how that shows. Repeating
+/// the sentence per container would draw five cards for one missing volume.
+///
+/// **Which container it names is whichever the decode put first, and the others are never
+/// hidden behind it.** The kubelet sorts each status array **by name**, so "first" is
+/// alphabetical rather than the order the author wrote the spec in — not a claim about
+/// which container matters, and [`PodSnapshot::containers`] promises no order at all
+/// ([`ContainerRole`], where N5's arithmetic turns on it). Nor is the list homogeneous: a
+/// broken sidecar in the init array and a regular container with its own reason land in it
+/// together, and two containers can carry two different failures needing two different
+/// fixes. So the others are **counted only when they share the reason** and **named with
+/// their own otherwise** — calling an `ErrImageNeverPull` "in the same state" as an
+/// `InvalidImageName` would be the card inventing an agreement the kubelet never reported.
+///
+/// **`describe` and not `get -o yaml`, which is the opposite of rules 3, 4 and 10.** Those
+/// three quote a field, and a field outlives the Event that mentions it. This card quotes a
+/// reason with, usually, **no message at all** — `ContainerCreating` carries none — and the
+/// sentence that finishes the diagnosis (`Unable to attach or mount volumes: …`) exists
+/// only as an Event, which `describe` prints and `-o yaml` does not. A wedged pod is being
+/// retried continuously, so those Events are being re-emitted rather than ageing out: the
+/// `--event-ttl` argument that decided rules 3, 4 and 10 does not reach this one.
+///
+/// **It ships with a negative side only and that is recorded, not hidden.** Every committed
+/// capture carries `PodReadyToStartContainers: True` and none is wedged, so the positive is
+/// proved on decoded copies (D40/D53 — the committed JSON is never touched). **Capture
+/// trip, and both branches are ordinary:** a pod with a `configMap` volume naming an object
+/// that does not exist wedges in `ContainerCreating` and produces the **`False`** branch,
+/// because the mount is attempted before the sandbox exists; any image failure the kubelet
+/// is still retrying produces the **`True`** branch, since the sandbox is already up by
+/// then. Neither needs the CNI broken — the first draft of this note claimed both the
+/// opposite condition value and a cluster-wide break, on the same inverted premise the
+/// evidence sentences carried.
+fn placed_but_never_started(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
+    let scheduled = pod.scheduled.as_ref()?;
+    if scheduled.status != "True" {
+        return None;
+    }
+    let since = scheduled.last_transition.as_ref()?;
+    if now.0.duration_since(since.0) <= NOT_READY_GRACE {
+        return None;
+    }
+    if pod.deletion_timestamp.is_some() {
+        return None;
+    }
+    // Anything serving makes the title false, whatever else is wrong with the pod.
+    if pod.containers.iter().any(is_running) {
+        return None;
+    }
+    let bare = nothing_else_to_point_at(pod);
+    let stuck: Vec<_> = pod
+        .containers
+        .iter()
+        .filter_map(|c| stuck_at_the_starting_line(c, bare).map(|(r, m)| (c, r, m)))
+        .collect();
+    let &(named, reason, message) = stuck.first()?;
+
+    let mut facts = vec![container_fact(named)];
+    let rest = &stuck[1..];
+    if !rest.is_empty() {
+        facts.push(if rest.iter().all(|&(_, r, _)| r == reason) {
+            format!(
+                "{} in the same state",
+                counted(rest.len() as i64, "other container")
+            )
+        } else {
+            // Two failures needing two different fixes, so both are named. "In the same
+            // state" here would be the card inventing an agreement the kubelet never made.
+            format!(
+                "also: {}",
+                rest.iter()
+                    .map(|(c, r, _)| format!("{} ({r})", c.name))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        });
+    }
+    // The machine's own word, framed as a quote rather than translated: the reasons a
+    // kubelet can be stuck on are an open set, and a rule that explains the ones it knows
+    // and prints the rest bare teaches the reader that the unexplained ones are less real.
+    // The frame has to fit all of them — `ContainerCreating` is a step it is on and
+    // `CreateContainerError` is one it failed at, so "got as far as" would be false of half
+    // the set it exists to cover.
+    //
+    // **`PodInitializing` is the one that may not be framed that way.** It is the kubelet's
+    // default waiting state, not a step anything is stuck at, and it only reaches this line
+    // when it is the *only* thing the pod has said ([`WAITING_ON_A_SIBLING`]). Quoting it as
+    // "where it is stuck" would dress up the least informative string in the status as a
+    // diagnosis; the honest sentence is that the machine has not named a step at all, which
+    // is itself the fact that sends the reader to the Events.
+    facts.push(if reason == WAITING_ON_A_SIBLING {
+        "the machine has not said which step it is on — it still reports every container as \
+         starting up (PodInitializing)"
+            .to_string()
+    } else {
+        format!("the machine's own word for where it is stuck: {reason}")
+    });
+    facts.extend(message.map(str::to_string));
+    facts.push(
+        // **The order of the kubelet's own work decides which sentence is which, and the
+        // first draft had them the wrong way round.** `kubelet.SyncPod` calls
+        // `volumeManager.WaitForAttachAndMount` *before* `containerRuntime.SyncPod` creates
+        // the sandbox, so storage is attempted first and the condition is `False` for a
+        // volume failure as much as for a network one. The inverted pair told a reader whose
+        // ConfigMap did not exist to go and look at the CNI, and told a pod whose disks are
+        // demonstrably fine — the sandbox exists, so the mounts succeeded — that a disk was
+        // probably missing ([`PodSnapshot::ready_to_start_containers`]).
+        if pod
+            .ready_to_start_containers
+            .as_ref()
+            .is_some_and(|c| c.status == "False")
+        {
+            "the machine has not been able to give this pod its storage or its network yet — \
+             it has not got as far as creating the container"
+                .to_string()
+        } else {
+            "this pod has its storage and its network, so the block is later — the image is \
+             still downloading, or the container could not be created"
+                .to_string()
+        },
+    );
+    Some(Finding {
+        severity: Severity::Warn,
+        title: "This pod was given a machine to run on, but it has not been able to start"
+            .to_string(),
+        evidence: facts.join(FACTS),
+        action: "read the Events at the bottom of the describe output — that is where the \
+                 machine says what it is still waiting for"
+            .to_string(),
+        kubectl_cmd: describe(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        // The same moment the grace was measured from, and it is the same binding rather
+        // than a second lookup of the same field: the card's age and the rule's threshold
+        // answer one question and must never come apart.
+        timestamp: Some(since.clone()),
+    })
+}
+
 /// **Rule 12 — the pod was asked to shut down and is still here.** WARN: nothing is down,
 /// but an operation somebody started has not finished, and until it does the replacement
 /// pod does not start and the node does not drain.
@@ -2848,7 +3207,8 @@ mod tests {
     // product code in this file constructs one, and the top-level list is what `rules.rs`
     // reads off the API.
     use k8s_openapi::api::core::v1::{
-        ContainerStateRunning, Taint as ApiTaint, Toleration as ApiToleration,
+        ContainerStateRunning, ContainerStateWaiting, Taint as ApiTaint,
+        Toleration as ApiToleration,
     };
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
     use std::collections::{BTreeSet, HashSet};
@@ -4719,7 +5079,10 @@ mod tests {
             if let (Some(dt), Some(grace)) = (&p.deletion_timestamp, p.grace_period_seconds) {
                 out.push(("pod.deletion_timestamp", dt, Some(grace)));
             }
-            for c in [&p.scheduled, &p.ready].into_iter().flatten() {
+            for c in [&p.scheduled, &p.ready, &p.ready_to_start_containers]
+                .into_iter()
+                .flatten()
+            {
                 labelled(
                     &mut out,
                     "pod.condition.last_transition",
@@ -6793,7 +7156,7 @@ mod tests {
         show(&all);
         assert_eq!(all.len(), 2, "one card each: {:?}", titles(&all));
 
-        let image = only(&all, "broken-image", "image could not be downloaded");
+        let image = only(&all, "broken-image", "image is not usable");
         assert_eq!(image.severity, Severity::Critical);
         assert!(
             image.title.contains("ErrImagePull") || image.title.contains("ImagePullBackOff"),
@@ -7548,25 +7911,60 @@ mod tests {
         );
     }
 
-    /// The captured Pending pod with one field moved — the technique the rest of this file
-    /// uses for a shape no capture holds. The committed JSON is never touched
-    /// (NOTES § D53); the decoded copy is.
-    fn pending_but(edit: impl FnOnce(&mut Pod)) -> PodSnapshot {
-        let mut object: Pod =
-            serde_json::from_value(fixture("pending")).expect("pending.json is a Pod");
+    /// A committed capture with one field moved — the technique the rest of this file uses
+    /// for a shape no capture holds. The committed JSON is never touched (NOTES § D53); the
+    /// decoded copy is.
+    fn capture_but(name: &str, edit: impl FnOnce(&mut Pod)) -> PodSnapshot {
+        let mut object: Pod = serde_json::from_value(fixture(name))
+            .unwrap_or_else(|e| panic!("{name}.json is not a Pod: {e}"));
         edit(&mut object);
         PodSnapshot::from(object)
     }
 
-    /// The `PodScheduled` entry of a captured pod's condition array, to be written through.
-    fn scheduled_condition(pod: &mut Pod) -> &mut PodCondition {
+    /// The captured Pending pod, edited — rule 10's shapes all start here.
+    fn pending_but(edit: impl FnOnce(&mut Pod)) -> PodSnapshot {
+        capture_but("pending", edit)
+    }
+
+    /// One entry of a captured pod's condition array, by type, to be written through.
+    fn pod_condition<'a>(pod: &'a mut Pod, type_: &str) -> &'a mut PodCondition {
         pod.status
             .as_mut()
             .and_then(|s| s.conditions.as_mut())
             .into_iter()
             .flatten()
-            .find(|c| c.type_ == "PodScheduled")
-            .expect("the capture carries the condition it was captured for")
+            .find(|c| c.type_ == type_)
+            .unwrap_or_else(|| panic!("the capture carries no {type_} condition to edit"))
+    }
+
+    /// The `PodScheduled` entry, which is the one every rule-10 shape moves.
+    fn scheduled_condition(pod: &mut Pod) -> &mut PodCondition {
+        pod_condition(pod, "PodScheduled")
+    }
+
+    /// One entry of a captured pod's status arrays, by name — init containers and regular
+    /// ones searched together, the way [`container_snapshots`] reads them.
+    fn container_status<'a>(pod: &'a mut Pod, name: &str) -> &'a mut ContainerStatus {
+        let status = pod.status.as_mut().expect("the capture has a status");
+        status
+            .init_container_statuses
+            .iter_mut()
+            .chain(status.container_statuses.iter_mut())
+            .flatten()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("the capture reports on no container {name}"))
+    }
+
+    /// A container status rewritten to *waiting*, with the kubelet's reason and sentence —
+    /// the shape rule 13's positives are built out of.
+    fn waiting_at(reason: &str, message: Option<&str>) -> Option<ApiContainerState> {
+        Some(ApiContainerState {
+            waiting: Some(ContainerStateWaiting {
+                reason: Some(reason.to_string()),
+                message: message.map(str::to_string),
+            }),
+            ..ApiContainerState::default()
+        })
     }
 
     /// **Rule 10, and the fixture that would break a rule shaped like its neighbours.**
@@ -7984,6 +8382,705 @@ mod tests {
              there to shut down'* is a new rule, not a branch of this one (invariant 13). \
              Rule 12 already covers the half that goes wrong, on the victim",
         );
+    }
+
+    // --- RULE 13, THE RESIDUAL ---
+    //
+    // The rule with no positive capture (NOTES § D72), so the order below is the reverse of
+    // every other rule's: the negatives are committed captures and the positives are
+    // decoded copies. That is not a weaker proof of the negatives — `image.json` and
+    // `config.json` are the two pods in the repository that match rule 13's gate in every
+    // respect *except* the residual clause, and they are real.
+
+    /// **The two captures rule 13 would fire on if it were not a residual**, and they are
+    /// the hardest negatives in the file because nothing about them is synthetic.
+    ///
+    /// `image.json` and `config.json` are both `phase: Pending`, both `PodScheduled: True`,
+    /// both have a container that has never run, and both are **three hours** older than the
+    /// pinned `now` — so they clear the ten-minute grace with room to spare and satisfy
+    /// every clause of [`placed_but_never_started`] except the one that matters. Dropping
+    /// either exclusion — [`EXPLAINED_ELSEWHERE`] or [`UNUSABLE_IMAGE`] — puts a second card
+    /// on each: *"it has not been able to start"* beside *"the image is not usable"*, which
+    /// is the same incident said twice and is exactly the failure a residual rule risks.
+    #[test]
+    fn the_two_pods_that_look_like_a_wedge_are_already_explained_by_rules_three_and_four() {
+        for (name, phrase) in [
+            ("image", "image is not usable"),
+            ("config", "ConfigMap or Secret that does not exist"),
+        ] {
+            let p = pod(name);
+            let scheduled = p
+                .scheduled
+                .as_ref()
+                .expect("the capture carries PodScheduled");
+            let since = scheduled
+                .last_transition
+                .as_ref()
+                .expect("and the moment it was placed");
+            println!(
+                "{name}: scheduled={} at {since:?}, {:?} before the pin; containers {:?}",
+                scheduled.status,
+                now().0.duration_since(since.0),
+                p.containers
+                    .iter()
+                    .map(|c| (&c.name, &c.state, c.last_terminated.is_some()))
+                    .collect::<Vec<_>>(),
+            );
+
+            // The preconditions are asserted before the outcome, so a capture that had
+            // quietly stopped matching rule 13's gate cannot pass this by producing one
+            // finding for the wrong reason.
+            assert_eq!(
+                scheduled.status, "True",
+                "{name} is on a machine — this is not rule 10's pod"
+            );
+            assert!(
+                now().0.duration_since(since.0) > NOT_READY_GRACE,
+                "{name} was placed {:?} before the pin, and a capture inside the grace \
+                 would make the silence below the *clock's* doing rather than the \
+                 residual's",
+                now().0.duration_since(since.0)
+            );
+            assert!(
+                p.containers.iter().all(|c| c.last_terminated.is_none()
+                    && matches!(c.state, ContainerState::Waiting { .. })),
+                "and not one of its containers has ever run: {:?}",
+                p.containers.iter().map(|c| &c.state).collect::<Vec<_>>()
+            );
+
+            let all = findings(&[name]);
+            show(&all);
+            assert_eq!(
+                all.len(),
+                1,
+                "one incident, one card: {name}.json is explained by the rule that owns its \
+                 waiting reason, and rule 13 is what is left *after* those rules — not a \
+                 twelfth opinion on the same pod: {:?}",
+                titles(&all)
+            );
+            only(&all, &p.id.name, phrase);
+        }
+    }
+
+    /// **A migration that is simply taking a long time**, which is the false-positive class
+    /// this whole rule is trying not to become.
+    ///
+    /// Rules 1–6 read init containers now, so a *broken* one gets its own card. A long one
+    /// is a different thing entirely: a database migration or a large restore leaves every
+    /// regular container at `PodInitializing` for as long as it runs, and nothing is wrong.
+    /// Ten minutes is nothing for that work.
+    ///
+    /// **Both halves are silent for the same reason, and it is not the waiting reason
+    /// itself.** [`WAITING_ON_A_SIBLING`] is uninformative on its own — the kubelet writes it
+    /// on every container of a pod that declares an init container, wedged or not, which is
+    /// what [`a_pod_that_only_ever_says_podinitializing_is_the_wedge_the_rule_was_added_for`]
+    /// is about. What silences these two is that there **is** something to point at: here a
+    /// running init container, and in the committed `init.json` an init container carrying
+    /// `CrashLoopBackOff`, which is rule 1's card. Two cards there, both about `migrate`, and
+    /// none about `app`.
+    #[test]
+    fn an_init_container_still_doing_its_work_is_not_a_pod_that_never_started() {
+        // The capture, unedited: `migrate` is looping and `app` is behind it.
+        let captured = findings(&["init"]);
+        show(&captured);
+        assert!(
+            captured.iter().all(|f| f.evidence.contains("migrate")),
+            "every card on this pod is about the init container that is failing — a card \
+             naming `app` sends the reader to logs that are empty, because the app has not \
+             run (D27): {:?}",
+            titles(&captured)
+        );
+
+        // The same pod with the migration *running* instead of looping — twenty minutes
+        // into work that legitimately takes an hour.
+        let running = capture_but("init", |pod| {
+            let migrate = container_status(pod, "migrate");
+            migrate.state = Some(ApiContainerState {
+                running: Some(ContainerStateRunning {
+                    started_at: Some(time("2026-08-12T23:40:00Z")),
+                }),
+                ..ApiContainerState::default()
+            });
+            // First attempt, and still on it: the crash loop's history goes with the loop,
+            // or rules 5 and 6 answer this test instead of rule 13.
+            migrate.restart_count = 0;
+            migrate.last_state = None;
+        });
+        let migrate = container(&running, "migrate");
+        let app = container(&running, "app");
+        println!("migrate={:?}\napp={:?}", migrate.state, app.state);
+        assert!(
+            matches!(migrate.state, ContainerState::Running { .. }),
+            "the edit has to land on a running init container, or the silence below is the \
+             crash loop's doing and not this rule's: {migrate:?}"
+        );
+        assert!(
+            matches!(&app.state, ContainerState::Waiting { reason, .. }
+                if reason.as_deref() == Some(WAITING_ON_A_SIBLING)),
+            "and the app container has to still be the one waiting its turn — that reason \
+             is what this test is about: {app:?}"
+        );
+
+        nothing(
+            &analyze(&pods_at(vec![running], now())),
+            "the pod was placed three hours ago and its app container has never started, so \
+             every other clause of rule 13 holds — and it is a migration doing its job. The \
+             running init container is both what `PodInitializing` is pointing at and what \
+             makes *it has not been able to start* false about this pod; firing here would \
+             put a card on every slow migration in the cluster (D2)",
+        );
+    }
+
+    /// **The wedge itself, in the two shapes a real kubelet produces** — the rule's only
+    /// positives, and they are decoded copies because no committed capture is in either
+    /// state (NOTES § D72, and the capture-trip item on [`placed_but_never_started`]).
+    ///
+    /// **What the card has to say is decided by the order the kubelet does its work, not by
+    /// what this rule happens to return.** `kubelet.SyncPod` waits for volumes to attach and
+    /// mount *before* the runtime creates the sandbox, so:
+    ///
+    /// - **storage or network missing → the condition is `False`.** A `configMap` volume
+    ///   naming an object that does not exist — D72's own proposed capture shape — never
+    ///   reaches the sandbox at all.
+    /// - **anything after that → the condition is `True`.** The sandbox exists, which is
+    ///   itself proof the mounts succeeded, so a card blaming a disk here is contradicted by
+    ///   the very field it is reading.
+    ///
+    /// The first draft of this test asserted the opposite of both, because it asserted what
+    /// the implementation returned instead of what the requirement says — which is how the
+    /// inversion shipped past a green suite. Each half below therefore also asserts the
+    /// sentence it must **not** carry: a swap of the two branches has to fail here, and
+    /// "contains the right words" alone would survive it.
+    ///
+    /// `config.json` is the base rather than a hand-written pod: it is already a scheduled,
+    /// three-hour-old pod whose single container has never run, which is every clause of the
+    /// gate (D40, D53 — the committed JSON is untouched).
+    #[test]
+    fn the_wedged_pod_names_the_side_of_the_sandbox_the_kubelet_actually_stopped_on() {
+        let wedged = |reason: &'static str, condition: Option<&'static str>| {
+            capture_but("config", move |pod| {
+                container_status(pod, "app").state = waiting_at(reason, None);
+                match condition {
+                    Some(status) => {
+                        pod_condition(pod, "PodReadyToStartContainers").status = status.to_string();
+                    }
+                    None => pod
+                        .status
+                        .as_mut()
+                        .and_then(|s| s.conditions.as_mut())
+                        .expect("the capture has conditions")
+                        .retain(|c| c.type_ != "PodReadyToStartContainers"),
+                }
+            })
+        };
+        let one_card = |p: PodSnapshot| {
+            let all = analyze(&pods_at(vec![p], now()));
+            show(&all);
+            assert_eq!(
+                all.len(),
+                1,
+                "rule 13 alone: nothing else in the file reads a container waiting for a \
+                 reason no rule owns: {:?}",
+                titles(&all)
+            );
+            only(&all, "broken-config", "not been able to start").clone()
+        };
+
+        // --- BEFORE THE SANDBOX: the volume wedge, which is what `False` means ---
+        let card = one_card(wedged("ContainerCreating", Some("False")));
+        assert_eq!(
+            card.severity,
+            Severity::Warn,
+            "the one healthy thing that still looks exactly like this is a slow pull, and a \
+             red card that is sometimes a slow pull is how red stops meaning broken (D2)"
+        );
+        assert!(
+            card.evidence.contains("container app") && card.evidence.contains("ContainerCreating"),
+            "the card names the container and quotes the machine's own word for where it \
+             stopped — the reasons a kubelet can be stuck on are an open set, so the word is \
+             passed through rather than translated: {}",
+            card.evidence
+        );
+        assert!(
+            card.evidence.contains("storage"),
+            "`False` is written before the sandbox exists, and volumes are attached before \
+             the sandbox too — so this is the missing-ConfigMap-volume pod, and a card that \
+             names only the network sends its reader to the CNI over a storage fault: {}",
+            card.evidence
+        );
+        assert!(
+            !card.evidence.contains("the block is later"),
+            "and it must not claim the pod already has what it is waiting for — this is the \
+             half of the inversion that told a reader their disks were fine: {}",
+            card.evidence
+        );
+        assert_eq!(
+            card.timestamp.as_ref(),
+            pod("config")
+                .scheduled
+                .as_ref()
+                .and_then(|c| c.last_transition.as_ref()),
+            "the since-when is the moment the scheduler placed it, which is when the machine \
+             became responsible for starting it"
+        );
+        assert_eq!(
+            card.kubectl_cmd.as_deref(),
+            Some("kubectl describe pod broken-config -n default"),
+            "and the command is `describe` and not `-o yaml`, unlike every other card whose \
+             evidence is a field: what finishes this diagnosis is a `FailedMount` Event, \
+             which only `describe` prints"
+        );
+
+        // --- AFTER THE SANDBOX: `True` is proof the mounts already succeeded ---
+        for (label, p) in [
+            ("still pulling", wedged("ContainerCreating", Some("True"))),
+            (
+                "the container could not be created",
+                wedged("CreateContainerError", Some("True")),
+            ),
+            // Absent is not a third case: an old server or a kubelet that has said nothing
+            // is read as "not False", the only claim that survives both.
+            ("no condition at all", wedged("ContainerCreating", None)),
+        ] {
+            let card = one_card(p);
+            assert!(
+                card.evidence.contains("storage and its network"),
+                "{label}: the sandbox exists, so the mounts succeeded and the network is up \
+                 — the card says so and points past them: {}",
+                card.evidence
+            );
+            assert!(
+                !card.evidence.contains("has not been able to give"),
+                "{label}: and it must not blame storage the pod demonstrably has. This is \
+                 the half of the inversion that sent someone hunting a disk while an image \
+                 downloaded: {}",
+                card.evidence
+            );
+        }
+    }
+
+    /// **The pod that reports `PodInitializing` and nothing else**, which is the shape rule
+    /// 13 was silent on when it first shipped — and it is most production pods.
+    ///
+    /// The kubelet's `defaultWaitingState` is `PodInitializing` for **both** status arrays
+    /// whenever a pod declares an init container, so an Istio- or Linkerd-injected pod, a
+    /// `vault-agent-init` pod or most Helm charts report exactly this while wedged on a
+    /// missing volume: every container says the same uninformative word and the real reason
+    /// appears nowhere in the status at all. Reading that word as a pointer — *another
+    /// container goes first* — silenced the rule on the whole class it was added for.
+    ///
+    /// **The preconditions are asserted first**, because a copy that had quietly kept a real
+    /// reason on one container would fire for the ordinary residual reason and pass this
+    /// test without ever exercising the branch it is about.
+    #[test]
+    fn a_pod_that_only_ever_says_podinitializing_is_the_wedge_the_rule_was_added_for() {
+        let injected = capture_but("init", |pod| {
+            let migrate = container_status(pod, "migrate");
+            migrate.state = waiting_at(WAITING_ON_A_SIBLING, None);
+            migrate.restart_count = 0;
+            migrate.last_state = None;
+        });
+        println!(
+            "{:?}",
+            injected
+                .containers
+                .iter()
+                .map(|c| (&c.name, &c.state))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            injected.containers.len() == 2
+                && injected.containers.iter().all(|c| matches!(
+                    &c.state,
+                    ContainerState::Waiting { reason, .. }
+                        if reason.as_deref() == Some(WAITING_ON_A_SIBLING)
+                )),
+            "every container has to carry the default waiting state and nothing else, or \
+             this fires for an ordinary residual reason and proves nothing: {:?}",
+            injected.containers
+        );
+        assert!(
+            nothing_else_to_point_at(&injected),
+            "and there has to be nothing for that word to point at — no container running, \
+             none carrying a reason of its own"
+        );
+
+        let all = analyze(&pods_at(vec![injected], now()));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "one card: this pod has been on a machine for three hours, nothing in it has \
+             started, and `PodInitializing` is the only thing it has said — which is exactly \
+             as wedged as one saying `ContainerCreating`, and was silence before: {:?}",
+            titles(&all)
+        );
+        let card = only(&all, "broken-init", "not been able to start");
+        assert!(
+            card.evidence.contains("has not said which step it is on"),
+            "and the card says the machine named no step, rather than quoting \
+             `PodInitializing` as if it were one — it is the kubelet's default waiting \
+             state, and dressing the least informative string in the status up as a \
+             diagnosis is invariant 14 backwards: {}",
+            card.evidence
+        );
+    }
+
+    /// **A pod with something already serving is not a pod that has not been able to
+    /// start**, and the title is the whole reason for the skip.
+    ///
+    /// One typo in a sidecar's image leaves a pod `kubectl get pods` shows as `1/2`. A card
+    /// saying the pod has not started sends the reader to debug the container that has been
+    /// answering traffic for three minutes — and nothing else in [`analyze`] filters that
+    /// pod out, because it stays `phase: Pending`.
+    ///
+    /// **What this costs is named rather than hidden:** the wedged container here draws no
+    /// card from any rule in the file. That is the trade — a true silence over a confident
+    /// false sentence ([`placed_but_never_started`]).
+    #[test]
+    fn a_pod_with_something_already_serving_gets_no_card_saying_it_never_started() {
+        let half_up = capture_but("healthy-sidecar", |pod| {
+            container_status(pod, "app").state = waiting_at(
+                "CreateContainerError",
+                Some("failed to create containerd task"),
+            );
+        });
+        let proxy = container(&half_up, "proxy");
+        let app = container(&half_up, "app");
+        println!("proxy={:?}\n  app={:?}", proxy.state, app.state);
+        assert!(
+            is_running(proxy) && proxy.role == ContainerRole::Sidecar,
+            "the sidecar has to still be up — it is the container the card would send the \
+             reader away from: {proxy:?}"
+        );
+        assert!(
+            stuck_at_the_starting_line(app, nothing_else_to_point_at(&half_up)).is_some(),
+            "and the app container has to satisfy every other clause of the rule, or the \
+             silence below is not the skip's doing: {app:?}"
+        );
+
+        nothing(
+            &analyze(&pods_at(vec![half_up], now())),
+            "half of this pod is serving, so *it has not been able to start* is false about \
+             it — and a confident plain-language sentence that is false about the pod in \
+             front of the reader is the 3am failure this file exists to avoid",
+        );
+    }
+
+    /// **Two containers, two different failures, and the card may not call them the same
+    /// thing.** `InvalidImageName` and `ErrImageNeverPull` need two different fixes; folding
+    /// the second into *"1 other container in the same state"* is the card inventing an
+    /// agreement the kubelet never reported.
+    #[test]
+    fn two_containers_stuck_for_different_reasons_are_both_named() {
+        let mixed = capture_but("hostpath", |pod| {
+            container_status(pod, "nosy").state = waiting_at("CreateContainerError", None);
+            container_status(pod, "shipper").state = waiting_at("RunContainerError", None);
+        });
+        let all = analyze(&pods_at(vec![mixed], now()));
+        show(&all);
+        let card = only(&all, "broken-hostpath", "not been able to start");
+        assert!(
+            card.evidence.contains("shipper (RunContainerError)"),
+            "the second container is named with its own reason, because it is a different \
+             failure with a different fix: {}",
+            card.evidence
+        );
+        assert!(
+            !card.evidence.contains("in the same state"),
+            "and it is not counted as agreeing with the first — the count is for containers \
+             the kubelet actually reported the same way: {}",
+            card.evidence
+        );
+    }
+
+    /// **Every way the kubelet says the image is not coming, answered by rule 3 and not by a
+    /// ten-minute wait.** `nginx:doesnotexist` drew rule 3's CRITICAL immediately with the
+    /// registry's sentence; `NGINX:::latest` drew nothing for ten minutes and then a WARN
+    /// about starting that blamed a disk. Two typos, two unrecognisably different answers.
+    ///
+    /// The moment below is **seven seconds** after the pod was placed — well inside rule
+    /// 13's grace — so this asserts the answer arrives *now*, which is half the point.
+    ///
+    /// **One list, so this is one test for two rules.** [`UNUSABLE_IMAGE`] is rule 3's
+    /// trigger and rule 13's exclusion at the same time, so a reason added to rule 3 that
+    /// somebody forgot to exclude from the residual is not a shape that exists.
+    #[test]
+    fn every_unusable_image_reason_is_rule_threes_card_and_arrives_at_once() {
+        let just_placed = time("2026-08-12T20:46:00Z");
+        for reason in UNUSABLE_IMAGE {
+            let broken = capture_but("config", |pod| {
+                container_status(pod, "app").state =
+                    waiting_at(reason, Some("the runtime's own sentence"));
+            });
+            let all = analyze(&pods_at(vec![broken.clone()], just_placed.clone()));
+            show(&all);
+            assert_eq!(
+                all.len(),
+                1,
+                "{reason}: rule 3 alone, and immediately — the reader does not wait ten \
+                 minutes to be told a typo is a typo: {:?}",
+                titles(&all)
+            );
+            let card = only(&all, "broken-config", "image is not usable");
+            assert_eq!(
+                card.severity,
+                Severity::Critical,
+                "{reason}: this image is never becoming available on its own"
+            );
+            assert!(
+                card.title.contains(reason) && card.evidence.contains("the runtime's own sentence"),
+                "{reason}: the reason names which of the seven it is and the kubelet's \
+                 sentence carries the diagnosis: {} / {}",
+                card.title,
+                card.evidence
+            );
+
+            // ...and three hours later it is still rule 3's card, never the residual's.
+            let later = analyze(&pods_at(vec![broken], now()));
+            assert_eq!(
+                titles(&later),
+                titles(&all),
+                "{reason}: past rule 13's grace the answer must not change into a WARN about \
+                 starting — one incident, one card, and the right one"
+            );
+        }
+    }
+
+    /// **Somebody has already given up on the wedged pod and deleted it**, and rule 13
+    /// stands down for the reason rule 10 does — the mutation sweep found this clause
+    /// holding nothing, the same way [D73](NOTES.md) found rule 10's.
+    ///
+    /// Both cards are *true* about this pod: it never started, and it is not going away.
+    /// Only one is actionable. Rule 13's action sends the reader to the machine's Events to
+    /// find out what it is still waiting for, and the answer has stopped mattering the
+    /// moment the pod is on its way out; what is left to do is find what is holding the
+    /// delete, which is rule 12's card and names the finalizer. Alerts is D2's queue of what
+    /// is broken now **and** actionable.
+    #[test]
+    fn a_wedged_pod_someone_has_already_deleted_is_rule_twelves_alone() {
+        let abandoned = capture_but("config", |pod| {
+            container_status(pod, "app").state = waiting_at("ContainerCreating", None);
+            pod.metadata.deletion_timestamp = Some(time("2026-08-12T21:00:00Z"));
+            pod.metadata.deletion_grace_period_seconds = Some(30);
+            pod.metadata.finalizers = Some(vec!["k8rs.test/never-removed".to_string()]);
+        });
+        assert!(
+            abandoned
+                .containers
+                .iter()
+                .any(
+                    |c| stuck_at_the_starting_line(c, nothing_else_to_point_at(&abandoned))
+                        .is_some()
+                ),
+            "the pod still satisfies every other clause of rule 13, which is what makes the \
+             silence below the deletion's doing: {:?}",
+            abandoned
+                .containers
+                .iter()
+                .map(|c| &c.state)
+                .collect::<Vec<_>>()
+        );
+
+        let all = analyze(&pods_at(vec![abandoned], now()));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "rule 12 alone: *what is the machine still waiting for* has stopped being a \
+             question anyone can act on once the pod has been asked to go: {:?}",
+            titles(&all)
+        );
+        only(&all, "broken-config", "asked to shut down");
+    }
+
+    /// **Two containers of one pod wedged on the same node.** A missing volume blocks every
+    /// container of the pod at once — one fault, so one card with a count rather than the
+    /// same sentence per container.
+    ///
+    /// `hostpath.json` is the base because it is the repository's only multi-container pod
+    /// whose containers are peers. The planted shape is kept coherent with the cause it
+    /// names: `ContainerCreating` on both **and** the condition at `False`, which is what a
+    /// volume that will not mount actually produces, since the mount is attempted before the
+    /// sandbox exists.
+    #[test]
+    fn two_containers_stuck_on_the_same_node_are_one_card_with_a_count() {
+        let wedged = capture_but("hostpath", |pod| {
+            for name in ["nosy", "shipper"] {
+                container_status(pod, name).state = waiting_at("ContainerCreating", None);
+            }
+            pod_condition(pod, "PodReadyToStartContainers").status = "False".to_string();
+        });
+        assert_eq!(
+            wedged
+                .containers
+                .iter()
+                .filter(
+                    |c| stuck_at_the_starting_line(c, nothing_else_to_point_at(&wedged)).is_some()
+                )
+                .count(),
+            2,
+            "both containers have to reach the rule, or the count below is untested: {:?}",
+            wedged
+                .containers
+                .iter()
+                .map(|c| &c.state)
+                .collect::<Vec<_>>()
+        );
+
+        let all = analyze(&pods_at(vec![wedged], now()));
+        show(&all);
+        let card = only(&all, "broken-hostpath", "not been able to start");
+        assert!(
+            card.evidence
+                .contains("1 other container in the same state"),
+            "one card for the pod, and the second container is a count rather than a second \
+             copy of the same sentence — the node is what is wrong, not either container: {}",
+            card.evidence
+        );
+        assert_eq!(
+            all.iter()
+                .filter(|f| f.title.contains("not been able to start"))
+                .count(),
+            1,
+            "and it is one card and not two, which is the whole reason this rule takes the \
+             pod rather than being called per container: {:?}",
+            titles(&all)
+        );
+    }
+
+    /// **The ten minutes, from both sides of the line.** A threshold nobody crosses is a
+    /// threshold nobody has tested, and this one is the whole difference between rule 13 and
+    /// a card on every cold start of a large image.
+    ///
+    /// The moment is the pod's own `PodScheduled` transition — `20:45:53Z` in the capture —
+    /// so the two readings below are the same wedge at `+10:00` and at `+10:01`.
+    #[test]
+    fn a_pod_only_just_placed_is_a_slow_pull_and_not_a_wedge() {
+        let wedged = capture_but("config", |pod| {
+            container_status(pod, "app").state = waiting_at("ContainerCreating", None);
+        });
+        let placed = wedged
+            .scheduled
+            .as_ref()
+            .and_then(|c| c.last_transition.clone())
+            .expect("the capture says when it was placed");
+        println!("placed at {placed:?}");
+
+        nothing(
+            &analyze(&pods_at(vec![wedged.clone()], time("2026-08-12T20:55:53Z"))),
+            "ten minutes to the second is inside the window, not past it: pulling a large \
+             image onto a cold node legitimately takes minutes, and a rule firing under \
+             `progressDeadlineSeconds`' own default alerts on every cold start",
+        );
+
+        let all = analyze(&pods_at(vec![wedged], time("2026-08-12T20:55:54Z")));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "one second later the same pod is a finding — and the pair is what keeps the \
+             constant from being deleted with the suite still green: {:?}",
+            titles(&all)
+        );
+    }
+
+    /// **The clause the rule is named after, and it was held in place by nothing** — the
+    /// defect [D73](NOTES.md) recorded on rule 10, one box later and caught by looking for
+    /// it: deleting `if scheduled.status != "True"` leaves the whole suite green.
+    ///
+    /// The reason is structural rather than an oversight in the captures. The only pod in
+    /// the repository with `PodScheduled: False` is `pending.json`, and no kubelet has ever
+    /// seen it, so it has **no container statuses at all** — the walk finds nothing and the
+    /// rule is silent for a reason that has nothing to do with the gate. Every other
+    /// capture is scheduled. So the shape that tells the two apart has to be planted, and
+    /// it is one the API server does not produce: container statuses appear only once a pod
+    /// is assigned to a node, and `PodScheduled` never goes back to `False` after that.
+    ///
+    /// **A shape the API cannot produce is still worth a test when it is the only thing
+    /// standing between a card and a lie.** *"This pod was given a machine to run on"* is
+    /// false about an unschedulable pod, its `lastTransitionTime` dates the *refusal* rather
+    /// than a placement, and rule 10 already owns the pod and quotes the scheduler. The
+    /// planted status is what makes the clause fail out loud instead of silently.
+    #[test]
+    fn a_pod_no_machine_took_was_never_given_one_to_run_on() {
+        let refused = pending_but(|pod| {
+            pod.status
+                .as_mut()
+                .expect("the captured pod has a status")
+                .container_statuses = Some(vec![ContainerStatus {
+                name: "app".to_string(),
+                image: "docker.io/library/busybox:latest".to_string(),
+                state: waiting_at("ContainerCreating", None),
+                ..ContainerStatus::default()
+            }]);
+        });
+        println!(
+            "scheduled={:?}\n  containers={:?}",
+            refused.scheduled, refused.containers
+        );
+        assert_eq!(
+            refused.scheduled.as_ref().map(|c| c.status.as_str()),
+            Some("False"),
+            "the pod is still the one no machine would take — only the kubelet's report is \
+             planted, and it is planted precisely because the API server never writes one \
+             for this pod"
+        );
+        assert!(
+            stuck_at_the_starting_line(&refused.containers[0], nothing_else_to_point_at(&refused))
+                .is_some(),
+            "and the planted container satisfies every *other* clause of rule 13, or the \
+             silence below is the walk finding nothing rather than the gate holding"
+        );
+
+        let all = analyze(&pods_at(vec![refused], now()));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "rule 10 alone. *Given a machine to run on* is false about a pod nothing would \
+             take, and the moment beside it would date the refusal rather than a placement: \
+             {:?}",
+            titles(&all)
+        );
+        only(&all, "broken-pending", "will take this pod");
+    }
+
+    /// **A container that has run before is not a container that never started**, which is
+    /// what the title claims and therefore what the rule has to mean.
+    ///
+    /// The shape is real: a container that ran, died, and now cannot be recreated because
+    /// the node lost the disk under it — `CreateContainerError`, a reason no rule owns, so
+    /// the exclusion list does not reach it. What keeps rule 13 off it is
+    /// [`ContainerSnapshot::last_terminated`], and the pod is not invisible meanwhile: the
+    /// restarts that got it there are rule 5's card.
+    #[test]
+    fn a_container_that_ran_and_died_is_not_one_that_never_started() {
+        let recreating = capture_but("crashloop", |pod| {
+            container_status(pod, "quitter").state = waiting_at(
+                "CreateContainerError",
+                Some("failed to create containerd task"),
+            );
+        });
+        let quitter = container(&recreating, "quitter");
+        println!("{:?}\n  restarts {}", quitter.state, quitter.restarts);
+        assert!(
+            quitter.last_terminated.is_some()
+                && !EXPLAINED_ELSEWHERE.contains(&"CreateContainerError"),
+            "the edit has to leave a previous run on the container and pick a reason no \
+             other rule owns, or this passes for the wrong reason: {quitter:?}"
+        );
+
+        let all = analyze(&pods_at(vec![recreating], now()));
+        show(&all);
+        assert!(
+            !all.iter()
+                .any(|f| f.title.contains("not been able to start")),
+            "this container started fifteen times — *never started* would be a plain lie \
+             about it, and the card that is true here is the restart count: {:?}",
+            titles(&all)
+        );
+        only(&all, "broken-crashloop", "restarted 15 times");
     }
 
     /// The whole committed capture through [`analyze`] at once — every card printed, so

@@ -785,7 +785,7 @@ this plan is delivery mechanism for what this phase produces.
       cleared it; it is silent only when the container is doing its job *and*
       the kill is older than the grace
       ([NOTES § D75](NOTES.md#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13))
-- [ ] **Rule 13 — placed on a node, but the containers never started.** The
+- [x] **Rule 13 — placed on a node, but the containers never started.** The
       twelfth Alerts rule, added on 2026-08-13 by an explicit reversal of
       [invariant 13](CLAUDE.md)'s scope guard: the `ContainerCreating` wedge is
       a weekly failure that no v1 rule sees, and **rule 10 does not see it
@@ -807,7 +807,20 @@ this plan is delivery mechanism for what this phase produces.
       the sandbox, almost always a volume.
       **It ships with a negative side only** — every captured pod has the
       condition `True`, so the positive fixture is a capture-trip item below
-      ([NOTES § D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13))
+      ([NOTES § D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)).
+      **The operator review built a real kind cluster for this one and three
+      blockers came back.** The two evidence sentences were **inverted** —
+      the kubelet mounts volumes *before* it creates the sandbox, so `False`
+      covers storage *and* network and `True` means the mounts already
+      succeeded; the card had been sending a beginner whose ConfigMap was
+      missing to look at the CNI. `PodInitializing` was silencing the rule on
+      every pod that declares an init container — Istio, Linkerd, migrations,
+      most Helm charts — which is most of the class it was added for. And the
+      title spoke for every container while the gate needed one. The image
+      family (`InvalidImageName`, `ErrImageNeverPull`, `ImageInspectError`,
+      `RegistryUnavailable`, `SignatureValidationFailed`) **moved to rule 3**,
+      which they always belonged to
+      ([NOTES § D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13))
 - [ ] **Rule 14 — nothing has even looked at this pod.** `phase == Pending`
       with **no `PodScheduled` condition at all**, older than **2 minutes**
       from `metadata.creationTimestamp` — a field `PodSnapshot` must gain, and
