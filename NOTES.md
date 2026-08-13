@@ -1244,9 +1244,13 @@ to a false tick.
 sentences that cannot both be obeyed, found the first time a box needed the
 file. The table is corrected rather than worked around.
 
-**`main.rs` is `dev-core`'s while it is the temporary driver — Phases 3 to 7 —
-and passes to `dev-ui` at Phase 12, where it is wired for real.** Nothing about
-it draws before then: it parses `args`, loads a fixture or a client, and prints.
+**`main.rs` is `dev-core`'s while it is the temporary driver, and passes to
+`dev-ui` at Phase 12, where it is wired for real.** The driver's boxes are in
+Phases 3, 5 and 7, but naming that range as the ownership window leaves 8–11
+with no owner at all — the same hole one phase further on. No box in those four
+phases touches the file, and the handover stays where it was decided. Nothing
+about it draws before then: it parses `args`, loads a fixture or a client, and
+prints.
 The file is the one place the ownership rule has a handover, and the handover is
 a phase boundary, which is exactly where the plan already stops.
 
@@ -4143,6 +4147,62 @@ structurally instead of by promise. And the bare card had been printing *"the
 machine's own word for where it is stuck: PodInitializing"* — dressing the least
 informative string in the status as a diagnosis; it now says the machine has not
 said which step it is on.
+
+### D77 — the comment cut, and the rationale that stays in the code (2026-08-13)
+
+`rules.rs`' product half carried **1557 comment lines against 1180 of code**,
+and the largest blocks were second copies of entries in this file — rule 10's
+74 lines against [D73](#d73--rule-10-and-the-test-that-argued-for-its-own-deletion-2026-08-13),
+rule 13's 63 against [D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13),
+rule 14's 53 against [D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13).
+Two copies of one argument have no owner keeping them in step. The half is now
+**1019 comment lines (46%)**, every block *what the item is plus the decision it
+cites*, and the guard is mechanical: the non-comment lines are byte-identical to
+the previous commit, checked by diffing both files with comments stripped.
+
+**The ruling: ten rationales stay in `rules.rs` rather than becoming entries
+here.** [CLAUDE.md § Code phase rules](CLAUDE.md) says a rationale that lives
+nowhere else is kept short *and* written into NOTES in the same change. That is
+read as being about **arguments**, not **constraints**. A sentence that tells the
+next reader what they may not break — `mounted_path` normalising before it
+compares, `last_log_line` taking the *last* non-empty line because the first is
+the boot banner, `RUNTIME_SOCKETS` carrying both spellings of each socket, an
+`Other(_)` needing lowercasing before Phase 7 prints it — belongs against the
+line it constrains, where deleting the code deletes it too. Moved here, ten
+constraints would sit one file away from the only place anyone meets them. **What
+belongs here is why a choice was made; what stays there is what the code may not
+stop doing.**
+
+**The pass found a defect a comment cut created — the previous one.**
+`RUNTIME_SOCKETS` says *"each socket appears under both spellings, so the rule
+may not depend on which one an author typed"*, and the clause that made that
+true — CRI-O's default is the `/var/run` form — arrived with the rule-8 box
+(`a3bd1fc`) and left with the **first** cut (`cdc2a89`), whose own second pass
+did not notice it had orphaned the sentence above the five entries that
+contradict it. **A cut is an edit, and an edit can break a claim by taking away
+its support** — which is why step 7 reads the result rather than the diff, and
+why reading it again a commit later is not wasted. The sentence now names the
+miss instead of merely being true about it.
+
+**Recorded, not built: `/run/crio/crio.sock` matches nothing.** The list carries
+one spelling of the CRI-O socket, so a mount written the other way falls through
+to the writable branch — and a *read-only* one draws no card at all, which is
+exactly the shape [D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)
+added containerd for. It is one string plus a positive and a negative test and an
+operator review, and it is not smuggled into a comment-only commit. It sits in
+todo.md's *Later* list until someone takes the box.
+
+**Four corrections to CLAUDE.md, from reading it as its first reader.** The
+ownership table gave `main.rs` to `dev-core` for *"Phases 3–7"* while the phase
+map gave 8–12 to `dev-ui`, so **Phases 8–11 owned the file by nobody** —
+[D34](#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)'s
+own title already said *until Phase 12* and its body said otherwise;
+[docs/maps.md](docs/maps.md) had it right all along, which is what a third copy
+is for. `LICENSE` appeared in no **Writes** cell under a table claiming every
+path appears in exactly one. The evidence rule pointed at *"before Phase 5 wires
+the binary"* when Phase 3's last box wires it. And the docs-sync rule ordered
+`README.md` and `README_TR.md` updated in the same change — two files Phase 13
+has not written yet.
 
 ## Decisions made
 

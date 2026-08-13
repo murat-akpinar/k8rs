@@ -61,8 +61,8 @@ committed.
 - Code comments and commit messages are in English.
 - **A structural change is not done until the docs match it.** Anything that
   changes file layout, architecture, dependencies, the rule set, the key map or
-  the CLI surface updates `docs/` (the affected file), `README.md`, and
-  `README_TR.md` if the README changed — in the *same* change. Stale docs are a
+  the CLI surface updates `docs/` (the affected file) and — once Phase 13 writes
+  them — `README.md` and `README_TR.md`, in the *same* change. Stale docs are a
   failed step; do not commit them.
 
 ## Architecture workflow
@@ -283,10 +283,10 @@ error, a missing step is an invisible gap.
 
 **Green tests are not the same as working software.** Something is *run* every
 box, and its output goes in the report — never report "done" for something that
-was not run. Before Phase 5 wires the binary, the real run is the test binary
-over a captured fixture, printed and read (`cargo test -- --nocapture`, with the
-finding text quoted); from Phase 5 on it is the actual binary, against a fixture
-or kind.
+was not run. Until Phase 3's last box wires the temporary `main.rs`, the real run
+is the test binary over a captured fixture, printed and read
+(`cargo test -- --nocapture`, with the finding text quoted); after it, the actual
+binary, against a fixture or kind.
 
 ## Second pass — nothing is delivered on its first draft
 
@@ -322,12 +322,12 @@ Every path in the repo appears in exactly one **Writes** cell.
 
 | Agent | Writes | Never writes |
 |---|---|---|
-| `dev-core` | `rules.rs` `analysis.rs` `k8s.rs` `ops.rs`, **and `main.rs` while it is the temporary driver (Phases 3–7)** | anything that draws |
+| `dev-core` | `rules.rs` `analysis.rs` `k8s.rs` `ops.rs`, **and `main.rs` while it is the temporary driver — until `dev-ui` wires it at Phase 12** | anything that draws |
 | `dev-ui` | `theme.rs` `views.rs` `ui.rs`, `main.rs` **from Phase 12**, `examples/` (the Phase 8 spike) | the four lower files |
 | `tui-designer` | `screens/` | any `.rs` |
 | `tester` | `tests/` `scripts/` `justfile` `clippy.toml` `deny.toml` `.github/workflows/` | product code in `src/` — **including the rule tests**, see below |
 | `k8s-admin` | nothing — reads everything, reports | every file |
-| **PM** (main session) | `todo.md` `NOTES.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `.claude/agents/`, branches, commits, PRs | `src/` (delegate it) |
+| **PM** (main session) | `todo.md` `NOTES.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/`, branches, commits, PRs | `src/` (delegate it) |
 
 Phase map, from [`todo.md`](todo.md): **2** → `tester` · **3–7** → `dev-core` ·
 **8–12** → `dev-ui` · **13** → PM. `tui-designer` and `k8s-admin` have no phases

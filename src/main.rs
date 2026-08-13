@@ -5,9 +5,8 @@
 //! cluster or a terminal, and `main.rs` is the last file to be wired. Until
 //! then this binary exists so the crate builds, lints and publishes.
 
-// A module no `mod` line reaches is not in the crate: `cargo fmt` skips it and
-// clippy never sees it. `rules.rs` is declared the moment it exists, not when
-// something calls it.
+// A module no `mod` line reaches is not in the crate at all, so `rules.rs` is declared the
+// moment it exists rather than when something calls it (NOTES § D34).
 mod rules;
 
 fn main() {

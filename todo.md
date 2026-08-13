@@ -1543,6 +1543,15 @@ without asking us anything.
   than silence, since the plain hostPath case already belongs to the Analysis
   posture rows
   ([NOTES § D70](NOTES.md#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13))
+- **The CRI-O socket k8rs does not match** — `RUNTIME_SOCKETS` carries
+  `/var/run/crio/crio.sock` and not `/run/crio/crio.sock`, though `/var/run` is
+  a symlink to `/run` on every systemd distribution and a manifest may use
+  either. A mount written the second way falls through to rule 8's writable
+  branch, and a **read-only** one draws no card at all — the escalator exists
+  because a read-only bind of a runtime socket is still full root. One string,
+  plus the positive and negative test that string needs and an operator review;
+  found during a comment-only pass and deliberately not done there
+  ([NOTES § D77](NOTES.md#d77--the-comment-cut-and-the-rationale-that-stays-in-the-code-2026-08-13))
 - **v0.2** — cordon / uncordon / drain, wired to the N-series rules and the
   drain-safety report that already exist by then. Cheaper than it looks:
   kube-rs provides `Api<Node>::cordon` / `uncordon` and `Api::evict`, so the
