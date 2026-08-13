@@ -204,17 +204,26 @@ impl Finding {
 /// has to keep advancing while the snapshot does not (NOTES § D69). The subtraction is
 /// `now − event`, that way round (invariant 5, NOTES § D18).
 ///
-/// | age | text | where the spelling comes from |
-/// |---|---|---|
-/// | ahead by more than [`SKEW_ALLOWANCE`] | **`None`** — draw nothing | `screens/alerts.md` § *No number we cannot produce* |
-/// | ahead by less, or under one whole second | `just now` | NOTES § D68 |
-/// | under a minute | `40s ago` | `screens/states.md`, the header's stale-vitals age |
-/// | under an hour | `4 min ago` | `screens/alerts.md`, `screens/once.md` |
-/// | under a day | `2 hours ago`, `1 hour ago` | nothing draws one yet; it follows the days rung |
-/// | a day or more | `6 days ago`, `1 day ago` | `screens/alerts.md` |
+/// **`screens/widgets.md` § 1b is the whole of this ladder** — one table, read top to bottom, so
+/// the three renderers that draw an age cannot drift apart (NOTES § D68).
+///
+/// | age | text |
+/// |---|---|
+/// | ahead by more than [`SKEW_ALLOWANCE`] | **`None`** — draw nothing |
+/// | ahead by less, or under one whole second | `just now` |
+/// | 1 s … 59 s | `40s ago` |
+/// | 1 min … 59 min | `4 min ago` |
+/// | 1 h … 47 h | `1 hour ago`, `47 hours ago` |
+/// | 48 h and up | `2 days ago`, `6 days ago` |
+///
+/// **The hours rung runs to 48, not to 24.** `1 day ago` covered 24h01m through 47h59m, a whole
+/// day of resolution thrown away in the one band where the reader is asking *before or after
+/// yesterday's change window?* — and `kubectl`'s own `HumanDuration` prints `30h`, `47h`, `2d3h`,
+/// so k8rs was coarser than the command it teaches. **`1 day ago` is therefore not a reachable
+/// string**, and neither is `0s ago`; both absences are the spec's.
 ///
 /// Every rung truncates, and **`min` stays abbreviated and unpluralised** because that is how
-/// both screens spell it (NOTES § D68).
+/// the screens spell it (NOTES § D68).
 ///
 /// **The `None` rung is a wrong-field guard, not a clock feature**, and the other half of the
 /// skew is deliberately not clamped (NOTES § D55, § D69). **The arithmetic is
@@ -230,7 +239,7 @@ pub fn age(now: &Time, event: &Time) -> Option<String> {
         format!("{}s ago", elapsed.as_secs())
     } else if elapsed.as_hours() < 1 {
         format!("{} min ago", elapsed.as_mins())
-    } else if elapsed.as_hours() < 24 {
+    } else if elapsed.as_hours() < 48 {
         format!("{} ago", counted(elapsed.as_hours(), "hour"))
     } else {
         format!("{} ago", counted(elapsed.as_hours() / 24, "day"))
@@ -266,6 +275,11 @@ fn counted(n: i64, unit: &str) -> String {
 /// special rungs are wrong here: a run that lasted no measurable time is an ordinary instant
 /// crash, and *"under a second"* is the fact rather than a refusal to answer. The rungs and
 /// the pluralisation are still shared, through [`counted`].
+///
+/// **The days rung starts at 24 hours here and at 48 in [`age`], and that is not a missed
+/// edit.** `age` answers *when*, where `1 day ago` throws away the resolution a reader needs to
+/// place an event either side of yesterday; this answers *how long for*, where `1 day` is the
+/// natural reading and `30 hours` is not. A find-and-replace across the two breaks this one.
 ///
 /// `None` when either end is missing, and when the run ended before it began.
 fn lasted(run: &Terminated) -> Option<String> {
@@ -759,9 +773,58 @@ pub struct WorkloadSnapshot {
     /// `Some(0)` for the same fact. So this reads as `ready.unwrap_or(0)`, and a W2 written
     /// `if let (Some(d), Some(r))` goes silent on **total** outage (NOTES § D28, § D53).
     pub ready: Option<i32>,
-    /// W1: `ReplicaFailure`, message verbatim. W2: `Progressing` with reason
-    /// `ProgressDeadlineExceeded` — which fires only when the two counters above show a
-    /// shortfall and no pod-level finding already explains it.
+    /// **How many pods exist on the template the controller is currently rolling out** —
+    /// `status.updatedReplicas` for a Deployment or StatefulSet, `updatedNumberScheduled` for a
+    /// DaemonSet, and a ReplicaSet's own **required** `status.replicas`: a ReplicaSet *is* one
+    /// template, so every pod it has is a pod on the version it is rolling out (NOTES § D82).
+    ///
+    /// **`None` is zero, the [`ready`](WorkloadSnapshot::ready) reading and not the
+    /// [`desired`](WorkloadSnapshot::desired) one** — `updatedReplicas` carries `omitempty`, so
+    /// the API server omits it exactly when no pod of the new version exists, which is the worst
+    /// state W2 has to report. **A ReplicaSet therefore never answers `None` here**, and reading
+    /// its absent field as *"none of them are updated"* was what made [`short_of_pods`] true of
+    /// every healthy ReplicaSet alive (NOTES § D82).
+    ///
+    /// **It is the number W2 prints on its amber card, and `readyReplicas` cannot be.** A
+    /// RollingUpdate Deployment keeps its old pods for as long as the new ones cannot start
+    /// whenever `maxUnavailable` resolves to 0 — the 25% default *rounds down* to 0 at one, two or
+    /// three replicas, and `broken-rollout` sets it to 0 outright — so `readyReplicas` stays equal
+    /// to `spec.replicas` for the whole of a failed rollout, and `2 of 2 ready` is a true sentence
+    /// about a rollout that is dead (NOTES § D42, § D82). Which shape each of the three counters
+    /// is the only one to see is argued once, in [`short_of_pods`].
+    ///
+    /// **A StatefulSet holds this below `desired` forever, by design**, so a future rule that
+    /// read it the way [`short_of_pods`] does would fire permanently on a healthy one: an
+    /// `updateStrategy` with a `rollingUpdate.partition`, or `OnDelete`, leaves every pod below
+    /// the partition on the old revision until a human touches it. No v1 rule reads a StatefulSet
+    /// here — W2 is gated to Deployments — and one that did would need that gate first.
+    pub updated: Option<i32>,
+    /// **How many pods the workload wants that are not answering** — `status.unavailableReplicas`
+    /// for a Deployment, `status.numberUnavailable` for a DaemonSet. **A StatefulSet and a
+    /// ReplicaSet have no such field and answer `None`**, which reads as zero and costs them
+    /// nothing: neither kind surges, so the two counters above already see everything either of
+    /// them can be short of.
+    ///
+    /// **The only counter that sees a rollout of one replica** (NOTES § D82). At `replicas: 1`
+    /// upstream's `ResolveFenceposts` gives `maxSurge: 1, maxUnavailable: 0`: the new ReplicaSet
+    /// is scaled to exactly one and the old one is left at one, so a second revision that cannot
+    /// start reads `spec.replicas 1 · readyReplicas 1 · updatedReplicas 1` — [`ready`] and
+    /// [`updated`] both say the workload is whole, and the surge that is not landing is visible
+    /// only here.
+    ///
+    /// The Deployment controller writes it `sum(replicaset.spec.replicas) - availableReplicas`,
+    /// floored at zero, which is why a healthy Deployment has none — **the ReplicaSets' spec, never
+    /// the Deployment's own**, so a Deployment scaled to zero reaches none only once the controller
+    /// has scaled those down and written the status back, and carries a positive counter against
+    /// `spec.replicas: 0` until it does ([`short_of_pods`]). **`None` is zero**, the [`ready`]
+    /// reading again: `omitempty` omits it exactly when nothing is unavailable.
+    ///
+    /// [`ready`]: WorkloadSnapshot::ready
+    /// [`updated`]: WorkloadSnapshot::updated
+    pub unavailable: Option<i32>,
+    /// W1: `ReplicaFailure` with reason `FailedCreate`, message verbatim. W2: `Progressing` with
+    /// reason `ProgressDeadlineExceeded` — which fires only while the counters above show a
+    /// shortfall and no finding that explains a shortfall is already on the list.
     pub conditions: Vec<Condition>,
 }
 
@@ -1099,6 +1162,8 @@ fn workload(
     metadata: ObjectMeta,
     desired: Option<i32>,
     ready: Option<i32>,
+    updated: Option<i32>,
+    unavailable: Option<i32>,
     conditions: Vec<Condition>,
 ) -> WorkloadSnapshot {
     let id = object_id(kind, &metadata);
@@ -1109,6 +1174,8 @@ fn workload(
         owner,
         desired,
         ready,
+        updated,
+        unavailable,
         conditions,
     }
 }
@@ -1121,6 +1188,8 @@ impl From<Deployment> for WorkloadSnapshot {
             d.metadata,
             d.spec.and_then(|s| s.replicas),
             status.ready_replicas,
+            status.updated_replicas,
+            status.unavailable_replicas,
             conditions(status.conditions),
         )
     }
@@ -1138,6 +1207,10 @@ impl From<StatefulSet> for WorkloadSnapshot {
             s.metadata,
             s.spec.and_then(|s| s.replicas),
             status.ready_replicas,
+            status.updated_replicas,
+            // A StatefulSet replaces its pods in place, ordinal by ordinal, and has no such
+            // field ([`WorkloadSnapshot::unavailable`]).
+            None,
             conditions(status.conditions),
         )
     }
@@ -1151,6 +1224,13 @@ impl From<ReplicaSet> for WorkloadSnapshot {
             r.metadata,
             r.spec.and_then(|s| s.replicas),
             status.ready_replicas,
+            // A ReplicaSet is one version of one template, so every pod it has is on the
+            // version it is rolling out — and `status.replicas` is required, never absent
+            // ([`WorkloadSnapshot::updated`]).
+            Some(status.replicas),
+            // It cannot surge, so it has no such field either
+            // ([`WorkloadSnapshot::unavailable`]).
+            None,
             conditions(status.conditions),
         )
     }
@@ -1166,6 +1246,10 @@ impl From<DaemonSet> for WorkloadSnapshot {
             d.metadata,
             Some(status.desired_number_scheduled),
             Some(status.number_ready),
+            // `updatedNumberScheduled` and `numberUnavailable` are the two the API marks
+            // optional, so both arrive already shaped the way the fields above read them.
+            status.updated_number_scheduled,
+            status.number_unavailable,
             conditions(status.conditions),
         )
     }
@@ -1249,11 +1333,11 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and the only
 /// entry point `k8s.rs` and the `--once` printer are given.
 ///
-/// Rules 1–8, 10 and 12–14, and the node rules that draw a card — N1, N2 and N3. The W-series and
-/// C1 are later boxes of this phase and are deliberately not wired here: a half-built rule is worse
-/// than an absent one, because the screen looks complete either way. **N4 and N5 are not missing,
-/// they are `Info`**: they are the Versions and Capacity reports' input and no `Info` finding
-/// reaches the Alerts list, so `analysis.rs` calls them and this does not (NOTES § D2).
+/// Rules 1–8, 10 and 12–14, the node rules that draw a card — N1, N2 and N3 — and the W-series,
+/// W1 and W2. C1 is a later box of this phase and is deliberately not wired here: a half-built rule
+/// is worse than an absent one, because the screen looks complete either way. **N4 and N5 are not
+/// missing, they are `Info`**: they are the Versions and Capacity reports' input and no `Info`
+/// finding reaches the Alerts list, so `analysis.rs` calls them and this does not (NOTES § D2).
 /// **N6 is not here either, and is not missing**: it is the node half of rule 10's card, which is
 /// why [`no_node_accepted_it`] takes the nodes.
 ///
@@ -1293,6 +1377,25 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
             findings.extend(running_but_not_ready(&snapshot.now, pod, c));
         }
     }
+    // **The W-series runs last, and in two passes rather than one.** W2 asks whether anything
+    // already on the list explains the shortfall it is about to report, so every pod rule *and* W1
+    // have to have finished first (NOTES § D28) — and the second pass collects before it appends,
+    // so a Deployment cannot be suppressed by a card drawn about it in the same pass.
+    for w in &snapshot.workloads {
+        findings.extend(pods_were_never_created(snapshot, w));
+    }
+    // Not every finding, only the ones that say why a pod is not ready ([`explains_a_shortfall`]).
+    let explained: Vec<&ObjectId> = findings
+        .iter()
+        .filter(|f| explains_a_shortfall(snapshot, f))
+        .map(|f| workload_owner(snapshot, &f.owner))
+        .collect();
+    let gave_up: Vec<Finding> = snapshot
+        .workloads
+        .iter()
+        .filter_map(|w| rollout_gave_up(w, &explained))
+        .collect();
+    findings.extend(gave_up);
     findings
 }
 
@@ -1312,17 +1415,30 @@ fn describe(id: &ObjectId) -> Option<String> {
     ))
 }
 
-/// `kubectl get pod … -o yaml` — for the three cards whose evidence is a field `describe` does
-/// not print at all: rule 12's `metadata.finalizers`, and rules 3 and 4's
-/// `state.waiting.message`, which kubectl's `describeStatus` never renders and which is the
-/// entire evidence line of both cards (NOTES § D46, § D71). A teaching command that does not
-/// show what the card says is worse than none (invariant 4).
-fn get_yaml(id: &ObjectId) -> Option<String> {
+/// `kubectl get <resource> … -o yaml` — for the cards whose evidence is a field `describe` does
+/// not print at all: rule 12's `metadata.finalizers`, rules 3 and 4's `state.waiting.message`,
+/// which kubectl's `describeStatus` never renders, and **the W-series' condition messages**,
+/// which `describeReplicaSet` and `describeDeployment` both reduce to a
+/// `Type / Status / Reason` table. A teaching command that does not show what the card says is
+/// worse than none (invariant 4, NOTES § D46, § D71).
+///
+/// **The resource word is the caller's** because it is the one part that is not derivable here:
+/// `ObjectKind` is a kind and `kubectl` takes a resource, and mapping between them is API
+/// discovery's job, not a table in this file (invariant 12).
+fn get_yaml(resource: &str, id: &ObjectId) -> Option<String> {
     Some(format!(
-        "kubectl get pod {}{} -o yaml",
+        "kubectl get {resource} {}{} -o yaml",
         id.name,
         in_namespace(id)
     ))
+}
+
+/// One `status.conditions[]` entry, by type — **and the reason every caller looks its own one
+/// up**: the list is flat, so `Ready`'s stamp sits three lines from `DiskPressure`'s and a
+/// Deployment's `Available` sits beside its `Progressing`, and a card dated or reasoned from the
+/// neighbour is what taking the first one produces (NOTES § D69).
+fn condition<'a>(conditions: &'a [Condition], type_: &str) -> Option<&'a Condition> {
+    conditions.iter().find(|c| c.type_ == type_)
 }
 
 /// ` -n <namespace>`, or nothing at all when there is none. The flag is appended rather than
@@ -1610,7 +1726,7 @@ fn image_not_pulled(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding>
         action: "check the image name and tag, whether this namespace has a pull secret for \
                  that registry, and whether the pull policy lets the node fetch it at all"
             .to_string(),
-        kubectl_cmd: get_yaml(&pod.id),
+        kubectl_cmd: get_yaml("pod", &pod.id),
         owner: pod.owner.clone(),
         object: pod.id.clone(),
         timestamp: None,
@@ -1637,7 +1753,7 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
             .to_string(),
         evidence: facts.join(FACTS),
         action: "create the missing object, or correct the name the pod refers to".to_string(),
-        kubectl_cmd: get_yaml(&pod.id),
+        kubectl_cmd: get_yaml("pod", &pod.id),
         owner: pod.owner.clone(),
         object: pod.id.clone(),
         timestamp: None,
@@ -2054,7 +2170,7 @@ fn no_node_accepted_it(now: &Time, pod: &PodSnapshot, nodes: &[NodeSnapshot]) ->
             },
             |b| b.action,
         ),
-        kubectl_cmd: get_yaml(&pod.id),
+        kubectl_cmd: get_yaml("pod", &pod.id),
         owner: pod.owner.clone(),
         object: pod.id.clone(),
         timestamp: scheduled.last_transition.clone(),
@@ -2321,7 +2437,7 @@ fn nothing_has_looked_at_it(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
                  is a pod in the kube-system namespace — and that this pod is not asking for a \
                  different one by name (spec.schedulerName)"
             .to_string(),
-        kubectl_cmd: get_yaml(&pod.id),
+        kubectl_cmd: get_yaml("pod", &pod.id),
         owner: pod.owner.clone(),
         object: pod.id.clone(),
         // The same moment the grace was measured from: when the pod arrived and the waiting
@@ -2380,7 +2496,7 @@ fn stuck_terminating(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
         } else {
             "nothing is holding the pod, so check the kubelet on that machine".to_string()
         },
-        kubectl_cmd: get_yaml(&pod.id),
+        kubectl_cmd: get_yaml("pod", &pod.id),
         owner: pod.owner.clone(),
         object: pod.id.clone(),
         timestamp: grace.and_then(|g| deadline.0.checked_sub(g).ok()).map(Time),
@@ -2613,12 +2729,11 @@ fn describe_node(id: &ObjectId) -> Option<String> {
     Some(format!("kubectl describe node {}", id.name))
 }
 
-/// One `status.conditions[]` entry of a node, by type — N1 and N3's whole input, and **the reason
-/// both read their own condition's `last_transition`**: the list is flat, `Ready`'s stamp is three
-/// lines from DiskPressure's, and a DiskPressure card dated the node's boot time is what taking
-/// the wrong one produces (NOTES § D69).
+/// One `status.conditions[]` entry of a node, by type — N1 and N3's whole input. Named separately
+/// from [`condition`] because the node rules read a `NodeSnapshot` and not a slice; the lookup
+/// itself, and the reason it is by type, are spelled there.
 fn node_condition<'a>(node: &'a NodeSnapshot, type_: &str) -> Option<&'a Condition> {
-    node.conditions.iter().find(|c| c.type_ == type_)
+    condition(&node.conditions, type_)
 }
 
 /// The pods this node is carrying that are still a going concern — the join N1, N2 and N5 are.
@@ -3337,6 +3452,332 @@ fn tolerated(pod: &PodSnapshot, taint: &Taint) -> bool {
 }
 
 // --- THE NODE RULES END ---
+
+// --- THE WORKLOAD RULES START ---
+//
+// The W-series of NOTES § D28 — the two rules whose subject is not a pod. When the pods were never
+// created there is nothing for a pod rule to iterate over, `kubectl get pods` is empty and k8rs
+// reported a healthy cluster; that is the blind spot these close, and it is the one failure that
+// would make the Alerts screen not believable.
+//
+// Both read a controller's own `status.conditions[]` and quote its message **verbatim**
+// (NOTES § D37) — the quota's refusal is the whole diagnosis, and paraphrasing it is how a tool
+// becomes useless.
+
+/// **Is nothing of this workload serving?** — the split between the two severities both W rules
+/// use. Nothing ready is an outage; two of three ready is a change that did not land, with the
+/// workload still up, and paging for that is how a screen stops being read.
+///
+/// **The workload this is asked about is not always the one the rule looked at**, and W1 is where
+/// that matters — see [`the_workload_that_serves`].
+///
+/// **`ready.unwrap_or(0)`, and that `None` is a zero**: `readyReplicas` carries `omitempty`, so
+/// the API server omits it exactly when it is 0 — which is the state these rules exist for
+/// ([`WorkloadSnapshot::ready`], NOTES § D53).
+fn nothing_is_serving(w: &WorkloadSnapshot) -> bool {
+    w.ready.unwrap_or(0) == 0
+}
+
+/// **Is this workload short of the pods it was told to run?** — W2's second gate, so a Deployment
+/// that timed out and has since caught up does not keep a card that is no longer true.
+///
+/// **Three counters, and W2's evidence line names them back in this order** (NOTES § D82):
+///
+/// - `ready < desired` — pods that exist and are not passing their probes. **The only arm a
+///   ReplicaSet or a StatefulSet has**: neither kind carries an unavailable counter, and a
+///   ReplicaSet's `updated` counts the pods it has rather than the pods that work —
+///   `broken-owned-7bdb7645c8` is one crash-looping pod of one wanted, so its `updated` equals its
+///   `desired` and nothing else here would see it.
+/// - `updated < desired` — pods on the current template that were **never created**. On a
+///   Deployment this also covers everything the arm above does, because `unavailable == 0` there
+///   can only mean the ReplicaSets have not been scaled up to `desired` yet.
+/// - `unavailable > 0` — the **surge that is not landing**, which is every rollout of one replica:
+///   `maxUnavailable` resolves to 0, the old pod stays up and is counted ready, one pod exists on
+///   the new template, and both arms above read whole ([`WorkloadSnapshot::unavailable`]).
+///
+/// **The `Option`s are read in two directions, and that is not a slip.** An absent `readyReplicas`,
+/// `updatedReplicas` or `unavailableReplicas` is **zero**; an absent `spec.replicas` is **one**,
+/// which is what the API server defaults it to — `desired.unwrap_or(0)` would say the workload
+/// wants nothing ([`WorkloadSnapshot::desired`], NOTES § D53).
+///
+/// **A workload that wants zero pods is not short of pods, and only the third arm has to be told**
+/// (NOTES § D82). At `desired == 0` the first two are false by arithmetic — nothing is below zero.
+/// The third is not derived from `spec.replicas` at all: upstream writes `unavailableReplicas` as
+/// `sum(replicaset.spec.replicas) - availableReplicas`, floored at zero, and the user writes
+/// `spec.replicas` — two fields, two authors, no shared instant. So `kubectl scale --replicas=0`,
+/// which is how a broken rollout is stopped, puts an explicit `Some(0)` beside the status of a
+/// moment ago, `unavailable: 1`; and W2's other two gates still pass, because a
+/// `ProgressDeadlineExceeded` written before the scale-down is sticky. Ungated, that is a CRITICAL
+/// card about a workload the user has just deliberately turned off. **The gate is written in front
+/// of all three anyway**, because that is where the sentence above is stated once rather than
+/// hidden inside the arm that happens to need it; the first two pass through it unchanged.
+fn short_of_pods(w: &WorkloadSnapshot) -> bool {
+    let desired = w.desired.unwrap_or(1);
+    desired > 0
+        && (w.ready.unwrap_or(0) < desired
+            || w.updated.unwrap_or(0) < desired
+            || w.unavailable.unwrap_or(0) > 0)
+}
+
+/// **`0 of 1 pod ready`** — the count both W rules print, spelled once. Its subject is always the
+/// object in the card's header: W2 reads the Deployment it fired on, W1 the workload above the
+/// ReplicaSet that was refused ([`the_workload_that_serves`], NOTES § D82).
+fn ready_count(w: &WorkloadSnapshot) -> String {
+    format!(
+        "{} of {} ready",
+        w.ready.unwrap_or(0),
+        counted(i64::from(w.desired.unwrap_or(1)), "pod")
+    )
+}
+
+/// **The controller's own sentence, framed so it is not read as k8rs's** — the prefix says a
+/// machine wrote what follows, the way rule 10 frames the scheduler's and N1 the kubelet's
+/// (NOTES § D37). The quote is never paraphrased: on W1 the API server's refusal *is* the whole
+/// diagnosis.
+///
+/// Both W rules fire on conditions upstream always writes with a message, so the fallback is a
+/// shape no cluster has been seen to produce — and an empty evidence line is a blank row on the
+/// card, which is worse than saying there was nothing to quote.
+fn controller_said(c: &Condition) -> String {
+    match c.message.as_deref() {
+        Some(m) => format!("the reason Kubernetes gave: {m}"),
+        None => "Kubernetes recorded no reason for it".to_string(),
+    }
+}
+
+/// **The workload whose readiness decides W1's severity — the Deployment above the ReplicaSet,
+/// not the ReplicaSet itself** (NOTES § D82).
+///
+/// A refused *rollout* leaves the new ReplicaSet reading `0 of N` forever while the old one carries
+/// every request, so a band read off the refused object pages CRITICAL for a service that is
+/// wholly up — and there are no pods under that ReplicaSet, so nothing else on the screen
+/// contradicts it. Reading past its own object is the shape [`no_node_accepted_it`] already has.
+///
+/// **A ReplicaSet nothing controls answers with itself**, because its own `owner` is itself
+/// ([`owner_of`]) — which is the right answer there: a bare ReplicaSet is the whole workload.
+///
+/// **An owner that is named and absent is `None`, and that is the direction this fails in on
+/// purpose** — the same direction [`workload_owner`] fails in, one screen down. Absent is
+/// *unknown*, not *down*, and it arises: an Argo `Rollout` owns its ReplicaSets directly, which
+/// [`ObjectKind::from_api`] resolves to an `Other(_)` no watch decodes and invariant 12 forbids
+/// decoding; a 403 on `deployments` with `replicasets` still readable does the same. Falling back
+/// to the ReplicaSet the rule looked at would read the `readyReplicas: 0` it has **by definition
+/// of having been refused** and page CRITICAL for a canary while the stable version serves every
+/// request — with no pods under it for the rest of the screen to contradict.
+fn the_workload_that_serves<'a>(
+    snapshot: &'a ClusterSnapshot,
+    w: &'a WorkloadSnapshot,
+) -> Option<&'a WorkloadSnapshot> {
+    snapshot.workloads.iter().find(|o| o.id == w.owner)
+}
+
+/// **W1 — the pods were never created.** `ReplicaSet.status.conditions[ReplicaFailure]` at `True`
+/// with reason `FailedCreate`, and the API server's refusal shown word for word (NOTES § D28,
+/// § D37). CRITICAL while nothing of the workload is serving, WARN while something still is.
+///
+/// **A ReplicaSet and nothing else, and that gate is load-bearing rather than defensive**: the
+/// Deployment controller copies `ReplicaFailure` up onto the Deployment as well —
+/// `tests/fixtures/deployments.json` carries the identical message on `broken-quota` — so a rule
+/// that read every workload would file two cards on one refusal, which is exactly what D28 forbids.
+///
+/// **`FailedCreate` and nothing else, and that is a ruling rather than an oversight**
+/// (NOTES § D82). Upstream's `replica_set_utils.go` writes this condition under two reasons, and
+/// the other is `FailedDelete` — a scale-*down* the API refused, which every sentence on this card
+/// is wrong about: nothing was refused creation, the counters read *"2 of 1 pod"*, and the service
+/// is up. A card for it would be a new rule and is not in v1 (invariant 13).
+///
+/// **The count on the evidence line is the header's**, not the refused ReplicaSet's: the card
+/// files under the Deployment, the band is read off the Deployment, and `0 of 1 pod ready` about
+/// it is one object on the line where the ReplicaSet's own count beside that band was two
+/// (NOTES § D82). **A workload that cannot be resolved prints no count rather than borrowing
+/// one** — and there is no count from anywhere else to fall back on, because `Finding::object` is
+/// a ReplicaSet and D69's `n of m` counts pods.
+///
+/// The card files under the ReplicaSet's **owner**, so the reader sees the name they deployed and
+/// not a hashed one ([`WorkloadSnapshot::owner`]).
+///
+/// **The action names the three causes rather than pointing at the quote**, because the quote is
+/// an `Option` and an action that referred to it would be wrong on the card that has none.
+///
+/// **This card outlives its cause by minutes and there is no fix here.** Upstream's
+/// `calculateStatus` clears `ReplicaFailure` only on a resync that succeeds, and the ReplicaSet
+/// controller's rate limiter backs off to about sixteen minutes — a card was seen standing eight
+/// seconds after the quota that caused it was removed, and it would have stood far longer. The
+/// screen has no manual refresh to offer, so the honest thing is that the reader knows: this is a
+/// condition the controller has not revisited yet, not a refusal happening now.
+fn pods_were_never_created(snapshot: &ClusterSnapshot, w: &WorkloadSnapshot) -> Option<Finding> {
+    if w.id.kind != ObjectKind::ReplicaSet {
+        return None;
+    }
+    let failure = condition(&w.conditions, "ReplicaFailure")
+        .filter(|c| c.status == "True" && c.reason.as_deref() == Some("FailedCreate"))?;
+    let serves = the_workload_that_serves(snapshot, w);
+    Some(Finding {
+        severity: if serves.is_some_and(nothing_is_serving) {
+            Severity::Critical
+        } else {
+            Severity::Warn
+        },
+        // **Not *"the pods were never created"***, which is D28's name for the rule and not a
+        // sentence that survives the amber band: two of three running and the third refused is the
+        // same condition, and a title saying none exist is a card that lies about the count
+        // printed directly under it.
+        title: "Kubernetes refused to create the pods this workload asked for".to_string(),
+        evidence: match serves {
+            Some(o) => [ready_count(o), controller_said(failure)].join(FACTS),
+            None => controller_said(failure),
+        },
+        action: "find what refused them — usually a quota that is full, a policy that rejected \
+                 the pod, or a volume that does not exist"
+            .to_string(),
+        kubectl_cmd: get_yaml("replicaset", &w.id),
+        owner: w.owner.clone(),
+        object: w.id.clone(),
+        timestamp: failure.last_transition.clone(),
+    })
+}
+
+/// **The workload a finding is really filed against, one step further up than its own `owner`.**
+/// A pod's controller is its ReplicaSet while W2's subject is the Deployment above it, so the chain
+/// is walked through the snapshot's own ReplicaSets — which is where `k8s.rs` puts them, fetched on
+/// demand rather than watched (NOTES § D28). Anything the snapshot does not carry answers with
+/// itself, and so does anything that is already at the top, which is where W1's owner already sits.
+///
+/// **A ReplicaSet the snapshot does not hold answers with itself, and that is the direction this
+/// fails in on purpose.** An owner that cannot be resolved is *unknown*, not *related*: reading
+/// unknown as related would let one pod's crash loop, anywhere in the snapshot, silence every W2 in
+/// it. The cost of failing the other way is a second card saying the same thing; the cost of this
+/// way is the silence the whole W-series exists to end (NOTES § D28).
+///
+/// **One hop, and only ever off a ReplicaSet**: the chain D28 describes is exactly
+/// Pod → ReplicaSet → Deployment, and the kind gate is what holds the code to that sentence
+/// (NOTES § D82). Hopping off whatever workload was found instead walks off the top of the chain
+/// the moment a Deployment carries a controlling `ownerReference` — which the Deployments ECK,
+/// OLM and most operators emit all do — landing on the operator's CR, so W1's card and W2's stop
+/// resolving to the same object and one refusal draws two cards, the second headed with a name
+/// its own `kubectl` line does not mention.
+fn workload_owner<'a>(snapshot: &'a ClusterSnapshot, owner: &'a ObjectId) -> &'a ObjectId {
+    if owner.kind != ObjectKind::ReplicaSet {
+        return owner;
+    }
+    snapshot
+        .workloads
+        .iter()
+        .find(|w| w.id == *owner)
+        .map_or(owner, |w| &w.owner)
+}
+
+/// **Does this finding say why pods are not ready?** — the filter on what may silence W2
+/// (NOTES § D28, § D82).
+///
+/// D28's clause is *"no pod-level finding already **explains** the shortfall"*, and the list of
+/// every finding is not that list. Rule 5's amber card says in its own sentence that the container
+/// **is serving now**; rule 8's hostPath card, rule 12's and rule 14's are about pods that answer
+/// requests too. Any of them silencing a Deployment whose rollout is dead is a screen that hides
+/// the outage behind the note beside it.
+///
+/// **The discriminator is the pod's `Ready` condition, because that is the same arithmetic the
+/// shortfall is measured in**: `status.readyReplicas` counts pods whose `Ready` is `True`, so a
+/// pod that is not counted there is exactly a pod that is part of the shortfall.
+///
+/// **Not [`doing_its_job`], which is rule 5's discriminator and is per *container*.** It reads a
+/// pod with no container statuses at all as serving — and that is precisely rules 10 and 14's
+/// shape, the unscheduled pod, which is the most common true explanation of a rollout that never
+/// finished.
+///
+/// **Anything that is not a pod passes**, which is what keeps W1 suppressing W2: one quota
+/// refusal is one card, and the object it is filed on is a ReplicaSet.
+fn explains_a_shortfall(snapshot: &ClusterSnapshot, f: &Finding) -> bool {
+    !snapshot
+        .pods
+        .iter()
+        .any(|p| p.id == f.object && p.ready.as_ref().is_some_and(|c| c.status == "True"))
+}
+
+/// **W2 — the rollout gave up.** `Deployment.status.conditions[Progressing]` with reason
+/// `ProgressDeadlineExceeded`, while the counters still show a shortfall (NOTES § D28). CRITICAL
+/// while nothing is serving, WARN while the previous version still is.
+///
+/// **Three gates, and the third is the rule's whole character.** It is a Deployment, because that
+/// is the only kind that has this condition and the only one whose resource word the command below
+/// can be sure of. It is [`short_of_pods`], because the condition outlives the timeout it recorded
+/// and a rollout that caught up is not a card. And **nothing on the list already explains the
+/// shortfall** ([`explains_a_shortfall`]) — otherwise a crash-looping Deployment produces a pod
+/// card *and* this one, for one problem, and the reader stops trusting the count at the top of the
+/// screen.
+///
+/// **Only `reason` is read, where W1 reads `status` too, and the asymmetry is safe rather than
+/// tidy.** Upstream's `NewDeploymentCondition` writes status, reason and message in one call, so
+/// `ProgressDeadlineExceeded` never arrives on a condition that is still `True`.
+///
+/// **A Deployment merely short of pods says nothing here.** Every `kubectl apply` is short of pods
+/// for a while; `progressDeadlineSeconds` is Kubernetes' own answer to when that stops being normal,
+/// and this rule reads that answer rather than inventing a second one.
+///
+/// **The evidence names the counter that is actually short, in [`short_of_pods`]' own order**, so
+/// the number on the card is always the one the band was read off (NOTES § D82). `ready < desired`
+/// comes first and takes every CRITICAL with it — nothing serving is nothing ready. *"On the new
+/// version"* is therefore printed only where `ready >= desired`, which is exactly where an old
+/// version demonstrably still is serving, and the third line is reached only when both counters
+/// read whole and the surge is what is missing — where it is never `0 pods`, because a workload
+/// with nothing unavailable did not get past the gate.
+///
+/// **The action names no command.** `kubectl rollout undo` errors on a single-revision Deployment
+/// — *"no rollout history found"*, which is the shipped `broken-quota` fixture exactly — and on a
+/// paused one, and this card cannot tell either apart without a field the contract does not carry.
+/// An action line that names a command is under invariant 4's honesty rule as much as
+/// `kubectl_cmd` is.
+///
+/// `explained` is every finding that explains a shortfall, each resolved through
+/// [`workload_owner`] — built once by [`analyze`] rather than here, because it is a query over the
+/// whole list. **Membership is identity, not [`ObjectId::group_key`]**: a Deployment deleted and
+/// recreated under the same name is a different object, and its predecessor's pods explain nothing
+/// about its rollout (NOTES § D38).
+fn rollout_gave_up(w: &WorkloadSnapshot, explained: &[&ObjectId]) -> Option<Finding> {
+    if w.id.kind != ObjectKind::Deployment {
+        return None;
+    }
+    let progressing = condition(&w.conditions, "Progressing")
+        .filter(|c| c.reason.as_deref() == Some("ProgressDeadlineExceeded"))?;
+    if !short_of_pods(w) || explained.contains(&&w.id) {
+        return None;
+    }
+    let desired = w.desired.unwrap_or(1);
+    let updated = w.updated.unwrap_or(0);
+    Some(Finding {
+        severity: if nothing_is_serving(w) {
+            Severity::Critical
+        } else {
+            Severity::Warn
+        },
+        title: "This rollout gave up — Kubernetes has stopped waiting for it to finish".to_string(),
+        evidence: [
+            if w.ready.unwrap_or(0) < desired {
+                ready_count(w)
+            } else if updated < desired {
+                format!(
+                    "{updated} of {} on the new version",
+                    counted(i64::from(desired), "pod")
+                )
+            } else {
+                format!(
+                    "{} not answering",
+                    counted(i64::from(w.unavailable.unwrap_or(0)), "pod")
+                )
+            },
+            controller_said(progressing),
+        ]
+        .join(FACTS),
+        action: "find out why the new pods will not start, then fix the deployment and apply it \
+                 again — or put the version that worked back"
+            .to_string(),
+        kubectl_cmd: get_yaml("deployment", &w.id),
+        owner: w.owner.clone(),
+        object: w.id.clone(),
+        timestamp: progressing.last_transition.clone(),
+    })
+}
+// --- THE WORKLOAD RULES END ---
 
 #[cfg(test)]
 #[path = "rules_tests.rs"]
