@@ -270,8 +270,9 @@ Applied to the existing set, this **moves four rules out of Alerts**:
 - **Rule 9 (no limits defined)** → the Capacity report. A pod without limits is
   not broken; it is a risk. Almost every cluster has hundreds of them, and left
   in Alerts it would bury the three findings that matter on day one.
-- **Rule 8 (hostPath)** → only the escalated case stays in Alerts (`/`,
-  `/var/run/docker.sock`, or a writable host mount). The plain read-only
+- **Rule 8 (hostPath)** → only the escalated case stays in Alerts (`/`, a
+  container-runtime socket or a directory one sits under, or a writable host
+  mount — [D79](#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)). The plain read-only
   hostPath is how CNI, CSI and every node agent are *supposed* to work; it goes
   to the posture rows of Analysis.
 - **N4 (kubelet version skew)** → the Versions report, where it already had a
@@ -4189,8 +4190,9 @@ one spelling of the CRI-O socket, so a mount written the other way falls through
 to the writable branch — and a *read-only* one draws no card at all, which is
 exactly the shape [D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)
 added containerd for. It is one string plus a positive and a negative test and an
-operator review, and it is not smuggled into a comment-only commit. It sits in
-todo.md's *Later* list until someone takes the box.
+operator review, and it is not smuggled into a comment-only commit. **Taken and
+closed the same day in [D78](#d78--the-socket-the-escalator-could-not-see-and-the-three-mutations-that-survived-the-fix-2026-08-13)**,
+which is also where the three mutations that survived the first fix are recorded.
 
 **Four corrections to CLAUDE.md, from reading it as its first reader.** The
 ownership table gave `main.rs` to `dev-core` for *"Phases 3–7"* while the phase
@@ -4203,6 +4205,219 @@ path appears in exactly one. The evidence rule pointed at *"before Phase 5 wires
 the binary"* when Phase 3's last box wires it. And the docs-sync rule ordered
 `README.md` and `README_TR.md` updated in the same change — two files Phase 13
 has not written yet.
+
+### D78 — the socket the escalator could not see, and the three mutations that survived the fix (2026-08-13)
+
+`RUNTIME_SOCKETS` carried `/var/run/crio/crio.sock` and not `/run/crio/crio.sock`,
+though `/var/run` is a symlink to `/run` on every systemd distribution and a
+manifest may write either. **The miss is not the interesting part; where it
+landed is.** Rule 8 escalates on the *path* and not on the mode precisely because
+a read-only bind of a runtime socket is still full root — and
+[D70](#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)
+silences the writable branch for `kube-system` node agents. So a **read-only**
+`/run/crio/crio.sock` on a `kube-system` DaemonSet fell through both and drew
+**no card at all**. Reproduced against the pre-fix code before anything was
+written: zero findings for a container holding the machine.
+
+**The mechanism, and the one that was refused.** The constant now carries three
+canonical `/run` spellings and `is_runtime_socket` folds `/var/run/…` → `/run/…`
+**at the compare only**; `mounted_path` is untouched, so the card still prints
+what the manifest wrote — the string the reader greps their own YAML for.
+(Approximately: `mounted_path` normalises first, so Longhorn's real
+`hostPath: /var/lib/longhorn/` prints without its trailing separator. A grep
+still lands on the line, which is what the claim is for.) The
+alternative, carrying both spellings in the list, was refused: it is one string
+smaller and it leaves the next socket's correctness resting on an author
+remembering to add a duplicate line, which is the defect this entry exists for.
+
+**Settled by the dev, not by the brief:** the stored form is `/run`, so the array
+no longer literally contains the `/var/run/docker.sock` string [§ v1 rule
+set](#v1-rule-set) names; the fold is one-directional and `/var/run/`-only, not a
+symlink resolver; `is_runtime_socket` is a named function so the constraint has
+somewhere to live; the planted node agent is `kube-proxy-88dlk` because it is
+DaemonSet-owned in `kube-system`, the exact shape D70 silences; and the negatives
+are planted in `default` rather than `kube-system`, because there *"no socket
+card"* and *"no card at all"* print the same green line.
+
+**What the test gate found after the fix is why this entry is long.** The box
+arrived with three new tests, 95 green, both reds witnessed. `tester` then ran 21
+hand mutations and **three survived**:
+
+- **`is_runtime_socket(&m.path)` in place of the joined path.**
+  [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)'s
+  original bug walking back in — `hostPath: /run/crio` + `subPath: crio.sock` is
+  a socket only after the join. Under the mutation the read-only container's card
+  disappears: the same symptom this box exists to fix, through a different door.
+  No test reached the socket branch through a join, because the sweep's own
+  helper strips the `subPath`. **Closed since, in
+  [D79](#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13),
+  and the join has two directions** — which is worth reading before the next
+  such claim. *Narrow → wide*, the raw path missing a socket the join creates,
+  fell out as a side effect: `nosy`'s raw path is `/` and its joined path is
+  `/run/containerd`, so the capture's own verdict test kills it. *Wide → narrow*,
+  the raw path being a socket ancestor the join then leaves — `hostPath: /run`
+  with `subPath: netns` — had no test at all, survived D79's own gate, and needed
+  one written for it. The first was mistaken for the whole thing until `tester`
+  asked which other direction existed.
+- **Deleting `/run/docker.sock` from the list.** Green. The sweep *iterates* the
+  constant, so it structurally cannot notice a member gone; containerd had a
+  canary, crio was hard-coded in another test, Docker had nobody. CLAUDE.md's *a
+  derived list asserts it found something* — found by mutation, not by reading.
+- **The `.filter(|rest| rest.starts_with("/run/"))` could not be killed, and no
+  test could ever kill it:** the filtered and unfiltered versions differ only for
+  an entry whose `/var`-stripped remainder is in the list without starting with
+  `/run/`, and no such entry exists. **Ruled: delete it and assert the invariant
+  instead** — every entry starts with `/run/`. That is what the fold's
+  correctness actually rests on, and what the sweep's `format!("/var{socket}")`
+  already assumed in silence; it goes red the moment someone adds a non-`/run`
+  entry, which is exactly when a human should be made to think. Dead code that
+  cannot be proven wrong is worse than no code.
+
+**Still unproven, and not by an oversight this time.** Nothing here has a capture
+behind it, and unlike the rest of `rules.rs`'s planted shapes this one does not
+wait for the capture trip: the fixtures' own cluster runs **containerd**
+(`containerd://2.3.1` on all three nodes, checked live), so a CRI-O socket mount
+cannot be produced there at all. The planted shape is permanent here, not
+provisional.
+
+This closes [D77](#d77--the-comment-cut-and-the-rationale-that-stays-in-the-code-2026-08-13)'s
+*"Recorded, not built"* paragraph and the `todo.md` § Later bullet it created.
+It did **not** close the class it belongs to — see
+[D79](#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13),
+which the operator review opened before any of this was committed.
+
+### D79 — the review that found the door beside the one D78 closed (2026-08-13)
+
+[D78](#d78--the-socket-the-escalator-could-not-see-and-the-three-mutations-that-survived-the-fix-2026-08-13)
+taught the escalator a second **spelling** of a socket. The blocking operator
+review asked the next question and it had a worse answer: `is_runtime_socket`
+matched the socket **file** and nothing above it, so a container handed the
+*directory* — `/run/containerd`, `/var/run`, `/run` itself — got exactly the same
+node-root and fell through to the writable branch.
+
+**What made this a blocker rather than a later box: the wrong card was already
+being printed by our own committed capture.** `hostpath.json`'s `nosy` mounts
+`hostPath: /` with `subPath: run/containerd`, and rule 8 answered
+
+> `container nosy · /run/containerd on the node · writable`
+> → *mount it read-only if the container only needs to read it*
+
+while forty lines up the same rule says a read-only bind of that socket is full
+control. Two cards, opposite advice, one capability — and the beginner at 3am
+gets the one that changes nothing. Reproduced, printed, and read before the fix.
+
+**The escalator now matches the socket or any directory above it.** The obvious
+implementation is a trap and was rejected in the brief rather than in review:
+`"/var".strip_prefix("/var")` is `Some("")`, so a `format!("{p}/")` prefix test
+becomes `"/"` and *every* socket matches — a pod mounting `/var` would draw a
+CRITICAL socket card. The shipped form strips in reverse (`socket.strip_prefix(path)`,
+remainder empty or starting with `/`) behind a non-empty guard, and allocates
+nothing.
+
+**The guard's justification was wrong on the first telling, which is worth
+keeping visible.** This entry claimed `path: ""` reaches the function off the
+wire because `host_path_mounts` copies `hostPath.path` verbatim. It does not —
+the operator review put it to a live apiserver and `validateHostPathVolumeSource`
+answers `spec.volumes[0].hostPath.path: Required value`. The guard is still
+necessary and unchanged, for the reason beside it: **`/var` folds to `""`**, and
+`/var` does arrive off the wire. A load-bearing reason sitting next to a false
+one is how the false one survives a review, so the false one is cut rather than
+demoted.
+
+**Two tests were reversed, deliberately, and that is why they are written here.**
+`a_path_beside_a_runtime_socket_is_not_a_runtime_socket` asserted `/run/crio` is
+*not* a socket — it is the socket's directory, so it now is one, and the
+beside-but-not-under case survives as `/run/crio.sock.bak` and `/run/criox`.
+`the_two_escalated_host_mounts_both_fire_and_the_ordinary_one_does_not` expected
+the writable card for `nosy` and now expects the socket card. The capture itself
+was not touched ([D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12));
+only the expectation moved, and it moved because it was asserting the defect.
+
+**The list was right for 2022 and shipped blind to the distro the audience
+runs.** `/run/k3s/containerd/containerd.sock` — k3s *and* RKE2, which embeds
+k3s's containerd — is what a homelab, an edge fleet and half of all first real
+clusters run. `/run/cri-dockerd.sock` is in `crictl`'s own default probe list and
+is every node that kept Docker past 1.24, minikube included. Both added; both
+under `/run`, so the fold invariant holds. **The list is not complete and the
+comment now says so**: a kubelet `--container-runtime-endpoint` can put
+containerd anywhere, and no path list closes that.
+
+**Refused, with the reason, so the next reader does not re-open them:**
+`/run/nri/nri.sock` grants the same power but kindnet mounts `/var/run/nri`
+writable on every kind cluster — with an ancestor match, adding it lights a
+CRITICAL on a healthy cluster, and the whole-capture test is the live proof.
+microk8s's `/var/snap/microk8s/common/run/containerd.sock` is not under `/run`
+and cannot be added without breaking the fold invariant D78 rests on. Podman,
+`.ttrpc` and `device-plugins/kubelet.sock` are different escalation classes and
+are `todo.md` § Later.
+
+**The card's advice was true and still harmful.** *"remove the mount — a
+read-only bind of this socket is still full control"* is unconditional, and a
+real cluster has legitimate holders in `kube-system`: an nvidia container-toolkit
+installer, a Falco or Datadog node agent. A newcomer who obeys it breaks GPU
+scheduling or their own security agent, at 3am, on the most severe card on the
+screen. Title and severity are unchanged — it *is* root on that machine — and
+the action now carries both halves: remove it unless **managing or watching**
+the node's containers is this pod's job, and if it is, it already has full
+control of every node it runs on. This is [D70](#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)'s
+open *"severity rather than silence"* question surfacing on the escalator side.
+
+**"Or watch" is there because the first rewrite said only "manage", and missed
+two of the three holders it was written for.** The installer manages containers;
+Falco and Datadog *watch* them. The second operator review pulled Google's own
+cAdvisor DaemonSet, which mounts `hostPath: /var/run` with `readOnly: true` — so
+it draws this card, since the socket branch runs before the mode check — and
+pointed out that a newcomer looking at `falco-8x2qk` reads "unless this pod's job
+is to manage the containers", decides monitoring is not managing, and removes the
+mount. One verb short of the exact failure the sentence exists to prevent. **The
+lesson is not about the word.** An exception written for a list of examples has to
+be checked back against that list, and this one was not until a reviewer did it.
+
+**The false-positive question the widening actually raises was answered on a
+cluster, not in argument.** Adding sockets is cheap; making `/run` and `/var/run`
+escalate is not, and a wall of CRITICALs on k3s would have been worse than the
+miss it closes. So a stock `rancher/k3s:v1.31.5-k3s1` was stood up: coredns,
+both helm-install jobs, local-path-provisioner, metrics-server, svclb, traefik —
+**zero hostPath volumes cluster-wide**, nothing above `/run/k3s/containerd`. RKE2
+was read at the source instead (`pkg/rke2/rke2.go` hard-codes the same socket
+path; its static pods mount only ssl dirs and `$DataDir`), and every hostPath in
+canal, Calico 3.29.1, Cilium 1.16.5, Longhorn 1.7.2, Rook 1.15.6 and KubeVirt
+1.4.0 was run through a verbatim copy of the shipped predicate: no socket verdict
+anywhere. **The new entries add almost no surface** — `/run/cri-dockerd.sock`
+sits under `/run`, which `/run/docker.sock` already made an ancestor, and nothing
+on any distro mounts `/run/k3s`. The whole of the risk in this change is `/run`
+and `/var/run` as ancestors, which is where cAdvisor lands.
+
+**Settled by the dev, not by the brief:** the guard is `!path.is_empty()` rather
+than a `starts_with("/run")` test, because the latter restates the constant's
+invariant in a second place — the thing D78 deleted; the canary table is checked
+**both** directions, so a sixth entry added without a canary goes red instead of
+relying on the next author's memory; and the action got its own assertions after
+the first draft's `!contains("mount it read-only")` stayed green under a revert
+to the old string — the whole of this fix would have been undoable in silence.
+
+**Four comments in this one rule stated something false, and that is the finding
+rather than any one of them.** The `/var/run`-default clause a cut removed and
+left its conclusion behind
+([D78](#d78--the-socket-the-escalator-could-not-see-and-the-three-mutations-that-survived-the-fix-2026-08-13));
+`path: ""` above; *"a relative path cannot come off the API — `hostPath.path`
+must be absolute"*, which `--dry-run=server` accepts (upstream rejects `..` and
+nothing else, and `run/crio` resolves against the pod's bundle directory on the
+node, so matching no escalator stays the safe direction); and a claim that the
+emptiness guard is what excludes `/`, when the below-check does it. **Every one
+of them was a sentence about what the API can hand us, and every one was true of
+the author's mental model rather than of an apiserver.** They survive review
+because they read as background rather than as claims. The habit that catches
+them is the one that caught all four here: put the sentence to a live
+`--dry-run=server` instead of to a reviewer.
+
+**One caveat the review proved live and no code closes.** `kubectl describe pod`
+prints the host path and the mode, so the card is backed by the command it hands
+you — but when a `subPath` is involved the evidence string is a **join** the
+reader performs across the `Mounts:` and `Volumes:` sections; it never appears as
+one string. And `subPathExpr` is not printed by describe at all, so for that
+shape the path is unfindable in the command offered. Pre-existing, same class as
+the N2 `timeAdded` admission, recorded rather than fixed.
 
 ## Decisions made
 
@@ -4358,7 +4573,7 @@ all of them testable.
 | 5 | High restart count (even if Running) | `restartCount` | "Restarted N times — looks healthy now, but something is wrong" |
 | 6 | Non-zero exit | `lastState.terminated.exitCode` | Translate the exit code (see below) |
 | 7 | **Pod Running but container not ready** | `containerStatuses[].ready == false`, **plus how long** — `conditions[Ready].lastTransitionTime` and `containerStatuses[].started`, or the rule fires on every rolling update ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | "Running but not receiving traffic — readiness probe is failing, so it was removed from the Service" |
-| 8 | hostPath mount — **only the escalated case** (`/`, docker.sock, writable) | `spec.volumes[].hostPath` | "Mounts the node's own filesystem, writable" |
+| 8 | hostPath mount — **only the escalated case** (`/`, a runtime socket **or a directory one sits under**, writable) | `spec.volumes[].hostPath` | "Mounts the node's own filesystem, writable" |
 | 10 | **Pending — and why** | `conditions[PodScheduled].reason == Unschedulable` + that condition's own `message` | "No node can accept it" + the scheduler's own sentence (insufficient cpu / nodeSelector / taint) |
 | 12 | **Pod stuck Terminating** | `deletionTimestamp` already in the past — the apiserver sets it to *request time + grace*, so it is the deadline, not the moment ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | "Asked to shut down N minutes ago and still hasn't — held by *(the finalizer, named)* / the kubelet" |
 | 13 | **Placed on a node, but the containers never started** — the `ContainerCreating` wedge, the *residual* after rules 1/3/4 explain themselves. Gate: `conditions[PodScheduled] == True`, no container started, > 10 min since that transition. `conditions[PodReadyToStartContainers]` is the **evidence**, not the gate — `False` = no sandbox/network yet, `True` = the block is after it, almost always a volume ([D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)) | `conditions[PodScheduled]` + `containerStatuses[].state` + `conditions[PodReadyToStartContainers]` | "It was given a machine to run on, but it has not been able to start — the node cannot give it *(a network / its storage)*" |
@@ -4404,12 +4619,19 @@ the most expensive kind of wrong, because the fix appears to work for a while
 ([D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
 
 **Severity escalators** (for rule 8): if the path is `/`, a **container-runtime
-socket**, or the mount is not `readOnly` → CRITICAL instead. **The socket is not
-Docker's alone** — the list read `/var/run/docker.sock` until 2026-08-13, and
-kind, and essentially every cluster built after 2022, runs containerd:
-`/run/containerd/containerd.sock` (and CRI-O's `/var/run/crio/crio.sock`) grant
-the same node-root, so the escalator that could not see them silenced the exact
-object rule 8 exists for. Paths are compared after normalisation, because `//`
+socket or any directory one sits under**, or the mount is not `readOnly` →
+CRITICAL instead. **The socket is not Docker's alone** — the list read
+`/var/run/docker.sock` until 2026-08-13, and kind, and essentially every cluster
+built after 2022, runs containerd: `/run/containerd/containerd.sock`, CRI-O's
+`/run/crio/crio.sock`, k3s and RKE2's `/run/k3s/containerd/containerd.sock` and
+`/run/cri-dockerd.sock` grant the same node-root, so the escalator that could not
+see them silenced the exact object rule 8 exists for. **Each is stored once, in
+its `/run` form**, and the compare folds `/var/run/…` onto it
+([D78](#d78--the-socket-the-escalator-could-not-see-and-the-three-mutations-that-survived-the-fix-2026-08-13))
+and matches ancestors
+([D79](#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13));
+the list is deliberately **not** complete, since `--container-runtime-endpoint`
+can move the socket anywhere. Paths are compared after normalisation, because `//`
 and `/.` are `/` to the kernel and were not to a string compare
 ([D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
 of WARN.

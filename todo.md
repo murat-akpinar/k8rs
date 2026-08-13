@@ -931,9 +931,25 @@ this plan is delivery mechanism for what this phase produces.
       startup
       ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12))
 - [x] Exit-code translation table (137/143/1/126/127) — **137 has two meanings and the object says which**: with `reason: OOMKilled` it is memory, without it the container did not stop when asked, which is a failing liveness probe or a hanging shutdown. The old "almost always OOM" row was written before the rule had `reason` beside the code ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
-- [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket or a writable
-      host mount. There is no lower severity to escalate from any more — the
-      ordinary read-only mount is a Phase 4 posture row, computed there
+- [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket
+      **or any directory one sits under**, or a writable host mount. There is no
+      lower severity to escalate from any more — the ordinary read-only mount is
+      a Phase 4 posture row, computed there.
+      **The socket list carries one canonical `/run` spelling per socket and the
+      compare strips a leading `/var`**, because `/var/run` is a symlink to
+      `/run` and a manifest may write either. It used to hold
+      `/var/run/crio/crio.sock` alone, so a **read-only** `/run/crio/crio.sock`
+      on a `kube-system` DaemonSet fell through the socket branch *and* through
+      D70's writable-branch exemption and drew **no card at all** — the exact
+      shape the escalator tests the path rather than the mode for
+      ([NOTES § D78](NOTES.md#d78--the-socket-the-escalator-could-not-see-and-the-three-mutations-that-survived-the-fix-2026-08-13)).
+      The operator review then found the same door one level up: matching the
+      socket **file** alone left `/run/containerd` — which our own capture
+      mounts — drawing the writable card and its *"mount it read-only"* advice,
+      which hands over the node. Ancestors match now, k3s/RKE2 and cri-dockerd
+      joined the list, and the socket card no longer tells a legitimate node
+      agent to remove the mount that is its job
+      ([NOTES § D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13))
 - [x] Rule 5 thresholds (≥3 WARN, ≥10 CRITICAL) — **and CRITICAL only when the container is not serving**, because a red card whose own title says it is serving is what teaches people to ignore red. **Rule 12 does not add a
       second grace period** — the apiserver already wrote *request time +
       grace* into `deletionTimestamp`, and the grace beside it is read for the
@@ -975,9 +991,14 @@ this plan is delivery mechanism for what this phase produces.
         true` (the `type` is what lets the container start on a kind node,
         which has no such file, and read-only is the case worth proving —
         the escalator fires on the path, not the mode); and `hostPath: /run`
-        with `subPath: containerd/containerd.sock`, which proves the join and
-        is the red-then-green case for the widened socket list
+        with `subPath: containerd/containerd.sock`, which puts a **real**
+        containerd socket behind the escalator instead of a planted one
         ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
+        **That second manifest no longer proves the join**, which is what it was
+        written for: since ancestors match, `/run` alone escalates and the
+        `subPath` changes nothing. The join is already captured — `hostpath.json`'s
+        `nosy` mounts raw `/` and only reaches `/run/containerd` through it
+        ([NOTES § D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)).
         **The originally proposed `/var/run` + `subPath: docker.sock` does not
         work** — the kubelet's subPath preparation fails and the pod lands in a
         permanent error state that pollutes the whole-capture test.
@@ -1062,7 +1083,16 @@ this plan is delivery mechanism for what this phase produces.
       six. `rules.rs` cannot resolve it without breaking D37, so the answer is
       geometry: wrap, truncate with the full text on selection, or let one card
       be tall. Whichever it is, `views.rs` needs it decided before Phase 9, not
-      discovered there
+      discovered there.
+      **It is owed on the `action` line too, not just on evidence** — measured
+      off the printed cards, three actions run 200, 149 and 146 characters
+      (rule 10's scheduler advice, rule 1's pull advice, rule 8's socket
+      advice), and at `alerts.md`'s 45-column card pane the socket action alone
+      wraps to four lines by itself. Shortening them is not the fix: each is
+      long because it answers a question the reader actually has
+      ([NOTES § D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
+      for why rule 8's grew). Mitigating, from D3: findings group by owner, so a
+      40-node DaemonSet is one card and not forty
 - [ ] Plain-language pass over every string a user will read — the jargon test
       is "would someone in their first month understand this sentence?"
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test
@@ -1532,9 +1562,16 @@ without asking us anything.
 ## Later (recorded, not planned)
 
 - **Rule 8 outside `kube-system`** — the narrowing that keeps it quiet for
-  node infrastructure is namespace-bound, and every storage operator lives
+  node infrastructure is namespace-bound, and most storage operators live
   somewhere else: Rook in `rook-ceph`, Longhorn in `longhorn-system`, every
-  CSI node plugin on `/var/lib/kubelet/plugins` writable. On those clusters
+  CSI node plugin on `/var/lib/kubelet/plugins` writable. **The namespace is
+  not the whole of it, and a live k3s cluster proved so**: the local-path
+  provisioner's `helper-pod-create-pvc-…` runs *inside* `kube-system` with **no
+  owner at all**, and `node_agent` asks for `mirror || DaemonSet`, so an
+  ordinary 64Mi PVC on a healthy k3s cluster draws a CRITICAL. Widening the
+  exemption to owner-less pods is not obviously right either — a bare pod with a
+  writable host mount is also exactly what an attacker leaves behind. On those
+  clusters
   rule 8 prints a wall of CRITICALs, which fails
   [invariant 13](CLAUDE.md)'s first half. **Not fixed on purpose:** widening
   to any DaemonSet anywhere deletes the rule's reason, and an allowlist is
@@ -1543,15 +1580,46 @@ without asking us anything.
   than silence, since the plain hostPath case already belongs to the Analysis
   posture rows
   ([NOTES § D70](NOTES.md#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13))
-- **The CRI-O socket k8rs does not match** — `RUNTIME_SOCKETS` carries
-  `/var/run/crio/crio.sock` and not `/run/crio/crio.sock`, though `/var/run` is
-  a symlink to `/run` on every systemd distribution and a manifest may use
-  either. A mount written the second way falls through to rule 8's writable
-  branch, and a **read-only** one draws no card at all — the escalator exists
-  because a read-only bind of a runtime socket is still full root. One string,
-  plus the positive and negative test that string needs and an operator review;
-  found during a comment-only pass and deliberately not done there
-  ([NOTES § D77](NOTES.md#d77--the-comment-cut-and-the-rationale-that-stays-in-the-code-2026-08-13))
+- **The runtime sockets deliberately left out of the list**, each with the
+  reason, so nobody re-opens them from scratch: `/run/nri/nri.sock` grants the
+  same node-root but kindnet mounts `/var/run/nri` writable on every kind
+  cluster, so with ancestor matching it would light a CRITICAL on a healthy
+  screen — a decision, not an add. microk8s's
+  `/var/snap/microk8s/common/run/containerd.sock` is **not under `/run`** and
+  cannot join without breaking the fold invariant the whole compare rests on.
+  Podman's `/run/podman/podman.sock` is a build-farm socket rather than a node
+  one; `containerd.sock.ttrpc` and `/var/lib/kubelet/device-plugins/kubelet.sock`
+  are real but different escalation classes. `/var/run/dockershim.sock` (k8s
+  ≤1.23, still in older crictl probe lists) is redundant rather than missing —
+  any node that has it runs dockerd, so `/run/docker.sock` is on the same node
+  and already covers it. And no list closes the case at all: a kubelet
+  `--container-runtime-endpoint` can put the socket anywhere
+  ([NOTES § D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13))
+- **The two node takeovers rule 8 is structurally blind to**, found by the second
+  operator review and recorded here because walking past them twice is how a
+  third reviewer finds them again. Neither is a defect in rule 8; both are
+  outside what it looks at.
+  1. **No hostPath needed.** `hostPID: true` + `privileged: true` +
+     `nsenter --target 1` is a complete node takeover with zero volumes, and
+     `privileged`, `hostPID`, `hostNetwork` and `capabilities` appear nowhere in
+     `rules.rs` — run live on a k3s node, the pod printed the node's hostname
+     and rule 8 emitted nothing, while a **read-only** `/var/run` mount gets the
+     loudest card on the screen.
+  2. **A hostPath that is not a `hostPath`.** A `PersistentVolume` with
+     `hostPath: /run/k3s/containerd`, bound to a PVC and mounted through
+     `spec.volumes[].persistentVolumeClaim`, hands over the socket while
+     `host_path_mounts` sees an empty list — verified live, the container really
+     had the socket. This is the documented Pod Security Admission gap
+     (Baseline/Restricted block `hostPath` volumes and do not block PVCs), which
+     makes it the shape someone who has read the docs uses.
+
+  **Not v1, and the reason is the same for both:** a securityContext rule is a
+  posture rule, not a triage rule — nothing is *broken*, and Alerts is for what
+  is broken (the Phase 4 posture rows are where it belongs, and there is no
+  posture report yet to receive it). The PVC path additionally needs a PV lookup,
+  which the permanent-watch budget has no room for
+  ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)).
+  Until one of those exists, k8rs must not be read as an admission controller
 - **v0.2** — cordon / uncordon / drain, wired to the N-series rules and the
   drain-safety report that already exist by then. Cheaper than it looks:
   kube-rs provides `Api<Node>::cordon` / `uncordon` and `Api::evict`, so the

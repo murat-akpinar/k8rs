@@ -1224,19 +1224,25 @@ const NODE_NAMESPACE: &str = "kube-system";
 /// start a privileged container on the node, so a **read-only** bind of it is still full root —
 /// which is why rule 8 escalates on the path and not on the mode.
 ///
-/// **Docker's socket is not the list.** NOTES § v1 rule set names `/var/run/docker.sock`, which
-/// is the one runtime these fixtures' own cluster does not run (NOTES § D71).
+/// **One spelling each, written under `/run`, and [`is_runtime_socket`] reaches the rest** — the
+/// `/var/run/…` name every systemd distribution also has for the same file, and any directory an
+/// entry sits under. So a socket added here is matched under both names and through its
+/// directories without a second line, which is the part that has to be mechanical: carrying
+/// spellings by hand is what left `/run/crio/crio.sock` matching nothing (NOTES § D77, § D78).
+/// **Every entry being under `/run` is what makes the fold safe** — it is the one property of
+/// this list the function relies on, and the sweep asserts it rather than re-checking it here.
 ///
-/// `/var/run` is a symlink to `/run` on every systemd distribution, so a socket is reachable
-/// under both spellings and the rule may not depend on which one an author typed. Docker and
-/// containerd are carried both ways; **CRI-O is here at its default `/var/run` form only, so a
-/// mount written `/run/crio/crio.sock` matches nothing** — a gap this list has not closed.
+/// **The list is not complete and no list of paths can be**: a kubelet's
+/// `--container-runtime-endpoint` puts the socket wherever the operator says. These are the
+/// defaults a 2026 node ships — Docker (which NOTES § v1 rule set names, in its `/var/run` form),
+/// containerd, CRI-O, the containerd k3s and RKE2 embed, and cri-dockerd, which is what a cluster
+/// that kept Docker past 1.24 runs.
 const RUNTIME_SOCKETS: [&str; 5] = [
-    "/var/run/docker.sock",
     "/run/docker.sock",
     "/run/containerd/containerd.sock",
-    "/var/run/containerd/containerd.sock",
-    "/var/run/crio/crio.sock",
+    "/run/crio/crio.sock",
+    "/run/k3s/containerd/containerd.sock",
+    "/run/cri-dockerd.sock",
 ];
 
 /// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and the only
@@ -1773,15 +1779,21 @@ fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 /// **What the container gets is `path` joined with the mount's `subPath`**, never `path` alone,
 /// and the join cuts both ways, which is correct (NOTES § D46, [`mounted_path`]).
 ///
+/// **The socket escalator matches a runtime socket or any directory one sits under**
+/// ([`is_runtime_socket`]), because what is inside a mounted directory is mounted too. Its action
+/// carries the legitimate holder — an nvidia toolkit installer, a node security agent — since the
+/// most severe card on the screen must not talk a newcomer into breaking one (NOTES § D78).
+///
 /// **Node infrastructure in `kube-system` is silent on the writable escalator alone** —
 /// DaemonSet-owned **or** a mirror pod, since `etcd` and `kube-apiserver` are the latter
 /// ([`PodSnapshot::mirror`]). **The other two escalators fire straight through that silence.**
 /// **The `kube-system` narrowing is a known limit**: a CSI driver in `longhorn-system` gets a card
 /// it has not earned (NOTES § D70).
 ///
-/// No age ([`Finding::timestamp`]). **The socket escalator has no capture behind it** — todo.md's
-/// capture-trip box; [`RUNTIME_SOCKETS`] is proven *reachable*, which is a different claim from
-/// the branch firing.
+/// No age ([`Finding::timestamp`]). **One captured shape reaches the socket escalator** —
+/// `hostpath.json`'s `nosy` is handed `/run/containerd`. The named sockets themselves are planted
+/// into decoded copies and stay that way: the fixtures' cluster runs containerd, so no capture off
+/// it can carry a Docker or CRI-O socket at all (NOTES § D40, § D78).
 fn escalated_host_path(pod: &PodSnapshot) -> Vec<Finding> {
     let node_agent = pod.id.namespace.as_deref() == Some(NODE_NAMESPACE)
         && (pod.mirror || pod.owner.kind == ObjectKind::DaemonSet);
@@ -1798,11 +1810,13 @@ fn escalated_host_path(pod: &PodSnapshot) -> Vec<Finding> {
                      inside it",
                     "mount only the directory the container actually needs, not the root",
                 )
-            } else if RUNTIME_SOCKETS.contains(&path.as_str()) {
+            } else if is_runtime_socket(&path) {
                 (
                     "A container can drive the container runtime, which is full control of \
                      that machine",
-                    "remove the mount — a read-only bind of this socket is still full control",
+                    "remove the mount, unless this pod's job is to manage or watch the \
+                     containers on the node — if it is, it already has full control of every \
+                     node it runs on",
                 )
             } else if !m.read_only && !node_agent {
                 (
@@ -1860,13 +1874,40 @@ fn mounted_path(m: &HostPathMount) -> String {
         .collect::<Vec<_>>()
         .join("/");
     // An absolute path keeps its leading separator and a root that emptied out is `/`. A relative
-    // one cannot come off the API — `hostPath.path` must be absolute — and is returned as it
-    // arrived rather than being given a root it never had.
+    // one does reach here — upstream validation rejects `..` and nothing else — and is returned as
+    // it arrived rather than being given a root it never had: `run/crio` is resolved against the
+    // pod's bundle directory on the node and is not the node's `/run/crio`, so matching no
+    // escalator is the safe direction (NOTES § D79).
     if joined.starts_with('/') {
         format!("/{kept}")
     } else {
         kept
     }
+}
+
+/// Whether what the container gets is one of [`RUNTIME_SOCKETS`] **or a directory one of them
+/// sits under** — a container handed `/run/containerd` opens the socket inside it, which is the
+/// same machine as being handed the socket. `/var/run/…` is folded onto `/run/…` first, so either
+/// of the two names a systemd distribution has for the file answers the same (NOTES § D78).
+///
+/// **The rewrite is the comparison's and never the card's** — [`escalated_host_path`] prints the
+/// path the manifest wrote, which is the string the reader searches their own YAML for. A path
+/// that reaches no socket matches nothing and lands in the writable branch under its own name.
+///
+/// **`/var` and the empty string are not ancestors**, and the emptiness guard is what says so:
+/// every prefix test calls `""` a prefix of everything, and `/var` — which does arrive off the
+/// wire — folds to `""`. A mount of `/var` genuinely does not hand over the socket: a bind mount
+/// carries `/var/run` as the symlink it is — `/run` on some hosts, `../run` on others — and
+/// either form resolves inside the container's own mount namespace. The fold is `/var`-only and
+/// one-directional, not a symlink resolver (NOTES § D78, § D79).
+fn is_runtime_socket(path: &str) -> bool {
+    let path = path.strip_prefix("/var").unwrap_or(path);
+    !path.is_empty()
+        && RUNTIME_SOCKETS.iter().any(|socket| {
+            socket
+                .strip_prefix(path)
+                .is_some_and(|below| below.is_empty() || below.starts_with('/'))
+        })
 }
 
 /// **Rule 10 — no machine in the cluster will take this pod.** `conditions[PodScheduled]` at
@@ -2292,8 +2333,8 @@ mod tests {
     // product code in this file constructs one, and the top-level list is what `rules.rs`
     // reads off the API.
     use k8s_openapi::api::core::v1::{
-        ContainerStateRunning, ContainerStateWaiting, Taint as ApiTaint,
-        Toleration as ApiToleration,
+        ContainerStateRunning, ContainerStateWaiting, HostPathVolumeSource, Taint as ApiTaint,
+        Toleration as ApiToleration, Volume, VolumeMount,
     };
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
     use std::collections::{BTreeSet, HashSet};
@@ -3280,8 +3321,9 @@ mod tests {
         );
     }
 
-    /// Rule 8 fires on `/`, docker.sock or a writable mount, and the Phase 4 posture
-    /// report lists the read-only ones — so the decode carries the fact and not a verdict.
+    /// Rule 8 fires on `/`, on a runtime socket or a directory one sits under, or on a
+    /// writable mount (NOTES § D78), and the Phase 4 posture report lists the read-only
+    /// ones — so the decode carries the fact and not a verdict.
     ///
     /// **One volume, two mounts, and every field of the pair is asserted here**, because
     /// this is the object the three discriminations below are read off: one hostPath
@@ -5906,12 +5948,64 @@ mod tests {
                 "{socket} is not in the form this function produces, so rule 8 could never \
                  match it"
             );
+            // **The invariant [`is_runtime_socket`]'s fold rests on.** It strips a leading
+            // `/var` and compares what is left against this list, which only finds the
+            // second spelling of anything if every entry is written under `/run`. An entry
+            // elsewhere would be matched under one name and silently missed under the
+            // other — the defect this list has already had once (NOTES § D77) — so it is
+            // the constant that is asserted and not the stripping.
+            assert!(
+                socket.starts_with("/run/"),
+                "{socket} is not under /run: stripping a leading `/var` can never produce \
+                 it, so it would be matched under the one spelling written here and missed \
+                 under whatever its second name is"
+            );
         }
-        assert!(
-            RUNTIME_SOCKETS.contains(&"/run/containerd/containerd.sock"),
-            "kind — the cluster every fixture here came off — runs containerd, so a list \
-             that stops at Docker's socket is a rule that cannot fire on its own test bed"
-        );
+        // **Every member, by name, and the naming kept in step with the list.** The sweeps
+        // over rule 8 *iterate* this constant, so they structurally cannot notice a member
+        // gone — "matched nothing" and "had nothing to match" are the same green line
+        // (CLAUDE.md § Code phase rules). Docker was the one entry with no canary and
+        // deleting it survived every mutation `tester` ran (NOTES § D78).
+        let canaries = [
+            (
+                "/run/docker.sock",
+                "NOTES § v1 rule set names Docker's socket as the escalator's own example, \
+                 and it is still what a pre-2022 cluster and every Docker-in-Docker build \
+                 agent mounts",
+            ),
+            (
+                "/run/containerd/containerd.sock",
+                "kind — the cluster every fixture here came off — runs containerd, so a \
+                 list that stops at Docker's socket is a rule that cannot fire on its own \
+                 test bed",
+            ),
+            (
+                "/run/crio/crio.sock",
+                "CRI-O under the spelling a manifest may actually write is the miss NOTES \
+                 § D78 exists for",
+            ),
+            (
+                "/run/k3s/containerd/containerd.sock",
+                "k3s puts containerd's socket here and nowhere else, and RKE2 embeds k3s's \
+                 containerd — the distro half of the audience that meets this in a normal \
+                 week",
+            ),
+            (
+                "/run/cri-dockerd.sock",
+                "cri-dockerd is in crictl's own default endpoint probe list, and it is \
+                 what every node that kept Docker past 1.24 runs, minikube included",
+            ),
+        ];
+        for (socket, why) in canaries {
+            assert!(RUNTIME_SOCKETS.contains(&socket), "{socket}: {why}");
+        }
+        for socket in RUNTIME_SOCKETS {
+            assert!(
+                canaries.iter().any(|(named, _)| *named == socket),
+                "{socket} was added to RUNTIME_SOCKETS without a canary here, so deleting \
+                 it again would be green: every sweep below iterates the list"
+            );
+        }
     }
 
     /// Rules 1, 5 and 6 on the one pod that earns all three, which is also where every
@@ -6411,8 +6505,9 @@ mod tests {
         );
     }
 
-    /// Rule 8's positives, both of them, on one captured pod — and the read-only mount of a
-    /// path that is not the node's root, which is the Analysis posture row and not a card.
+    /// Rule 8's positives on one captured pod — the node's root and the node's runtime
+    /// socket — and the read-only mount of a path that is neither, which is the Analysis
+    /// posture row and not a card.
     #[test]
     fn the_two_escalated_host_mounts_both_fire_and_the_ordinary_one_does_not() {
         let all = findings(&["hostpath"]);
@@ -6431,24 +6526,29 @@ mod tests {
         );
 
         // `nosy` mounts the same volume with `subPath: run/containerd`, so what it actually
-        // gets is `/run/containerd` — not the node's root. It fires on the writable
-        // escalator instead, and the path it names is the one the container has.
-        let writable = only(&all, "broken-hostpath", "change files on the machine");
+        // gets is `/run/containerd` — not the node's root, but the directory the node's
+        // runtime socket sits in, which is the socket (NOTES § D78). **This is the one
+        // captured shape the socket escalator fires on**, and the path it names is the one
+        // the container has.
+        let socket = only(&all, "broken-hostpath", "drive the container runtime");
+        assert_eq!(socket.severity, Severity::Critical);
         assert!(
-            writable.evidence.contains("/run/containerd on the node"),
+            socket.evidence.contains("/run/containerd on the node"),
             "the subPath narrows what is mounted and the card has to say what the container \
              really got (D46): {}",
-            writable.evidence
+            socket.evidence
         );
         assert!(
-            !writable.evidence.contains("/ on the node"),
+            !socket.evidence.contains("/ on the node"),
             "a rule reading `path` alone would call this a mount of the node's root: {}",
-            writable.evidence
+            socket.evidence
         );
+        assert!(socket.evidence.contains("writable"), "{}", socket.evidence);
         assert!(
-            writable.evidence.contains("writable"),
-            "{}",
-            writable.evidence
+            !socket.action.contains("mount it read-only"),
+            "and the reader is not told read-only fixes it — that is the writable branch's \
+             advice, and on a runtime socket it gives away the node: {}",
+            socket.action
         );
 
         for f in &all {
@@ -6513,6 +6613,322 @@ mod tests {
             "a fresh kind cluster's own kube-system is healthy, and every rule in this box \
              has to be silent on it",
         );
+    }
+
+    // --- RULE 8'S SOCKET ESCALATOR, ON PLANTED MOUNTS ---
+    //
+    // No committed capture mounts a runtime socket — kind's own components have no reason
+    // to — and none is edited to grow one (NOTES § D53). So every shape below is planted
+    // into a decoded copy of a real captured pod, one coherent group of fields at a time,
+    // and each is a shape `kubectl apply` would produce (NOTES § D40).
+
+    /// The captured hostPath pod with its one host volume repointed at `path` and both
+    /// mounts of it narrowed by `sub` — `shipper` read-only, `nosy` writable, so what the
+    /// two containers get is the same node path under two modes. That is the whole reason
+    /// this capture is the one to plant on: it is where the question *does the mode matter*
+    /// can be asked at all.
+    ///
+    /// **`sub` is the mount's `subPath`, and `None` is not the same test as `Some`** — rule 8
+    /// reads the join and never `path` alone (NOTES § D46), so a socket assembled out of a
+    /// directory and a file has to be swept beside the ones written whole.
+    fn host_volume(path: &str, sub: Option<&str>) -> Vec<Finding> {
+        let pod = capture_but("hostpath", |p| {
+            let spec = p.spec.as_mut().expect("a captured pod has a spec");
+            let volume = spec
+                .volumes
+                .iter_mut()
+                .flatten()
+                .find(|v| v.host_path.is_some())
+                .expect("hostpath.json is the capture that carries a host volume");
+            volume
+                .host_path
+                .as_mut()
+                .expect("the volume just found is the host one")
+                .path = path.to_string();
+            let name = volume.name.clone();
+            for mount in spec
+                .containers
+                .iter_mut()
+                .flat_map(|c| c.volume_mounts.iter_mut().flatten())
+                .filter(|m| m.name == name)
+            {
+                mount.sub_path = sub.map(str::to_string);
+            }
+        });
+        analyze(&pods_at(vec![pod], now()))
+    }
+
+    /// **Every socket in the list, under both of its names and both of its writings.**
+    /// `/var/run` is a symlink to `/run` on every systemd distribution, so the two spellings
+    /// are one file on the node and the card may not depend on which one an author typed
+    /// ([`is_runtime_socket`]); and a manifest may mount the directory and name the socket
+    /// in the `subPath`, which is a socket only once rule 8 joins them (NOTES § D46).
+    #[test]
+    fn a_runtime_socket_is_the_same_socket_under_either_of_its_two_spellings() {
+        for socket in RUNTIME_SOCKETS {
+            let var = format!("/var{socket}");
+            let (dir, file) = socket
+                .rsplit_once('/')
+                .expect("every socket in the list is an absolute path to a file");
+
+            for (path, sub, spelling) in [
+                (socket.to_string(), None, socket.to_string()),
+                (var.clone(), None, var.clone()),
+                (dir.to_string(), Some(file), socket.to_string()),
+                (format!("/var{dir}"), Some(file), var.clone()),
+            ] {
+                let all = host_volume(&path, sub);
+                show(&all);
+
+                assert_eq!(
+                    all.len(),
+                    2,
+                    "both containers mount {spelling} — written {path:?} + subPath \
+                     {sub:?} — and nothing else is wrong with this pod: {:?}",
+                    titles(&all)
+                );
+                for f in &all {
+                    assert!(
+                        f.title.contains("drive the container runtime"),
+                        "and each of them has the machine, not a directory on it: {}",
+                        f.title
+                    );
+                    assert_eq!(f.severity, Severity::Critical);
+                    assert!(
+                        f.evidence.contains(&format!("{spelling} on the node")),
+                        "the card names the path the manifest wrote — the folding of \
+                         `/var/run` onto `/run` belongs to the compare, not to the reader \
+                         who has to find this mount in their own YAML: {}",
+                        f.evidence
+                    );
+                }
+                assert!(
+                    all.iter().any(|f| f.evidence.contains("container shipper")
+                        && f.evidence.contains("read-only")),
+                    "and `shipper`'s bind is read-only, which is no defence: anything that \
+                     can talk to this socket can start a privileged container on the node"
+                );
+            }
+        }
+    }
+
+    /// **The shape that drew nothing at all**, and the reason rule 8 escalates on the path
+    /// rather than on the mode: a *read-only* bind of the runtime socket on a `kube-system`
+    /// DaemonSet, where the writable escalator is deliberately silent (NOTES § D70). With
+    /// CRI-O carried under one spelling this pod produced no card — a container able to
+    /// drive the runtime, invisible (NOTES § D77).
+    #[test]
+    fn a_read_only_runtime_socket_on_a_node_agent_is_still_the_whole_machine() {
+        let mut pods = items::<Pod>("kube-system-pods");
+        let agent = pods
+            .iter_mut()
+            .find(|p| p.metadata.name.as_deref() == Some("kube-proxy-88dlk"))
+            .expect("the capture carries kube-proxy, a DaemonSet D70's narrowing silences");
+        let spec = agent.spec.as_mut().expect("a captured pod has a spec");
+        spec.volumes.get_or_insert_with(Vec::new).push(Volume {
+            name: "runtime".to_string(),
+            host_path: Some(HostPathVolumeSource {
+                path: "/run/crio/crio.sock".to_string(),
+                type_: Some("Socket".to_string()),
+            }),
+            ..Volume::default()
+        });
+        spec.containers[0]
+            .volume_mounts
+            .get_or_insert_with(Vec::new)
+            .push(VolumeMount {
+                name: "runtime".to_string(),
+                mount_path: "/run/crio/crio.sock".to_string(),
+                read_only: Some(true),
+                ..VolumeMount::default()
+            });
+
+        let all = analyze(&pods_at(
+            pods.into_iter().map(PodSnapshot::from).collect(),
+            now(),
+        ));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "the rest of this capture is the healthy kube-system the test above proves \
+             silent, so one card is the planted mount and nothing else: {:?}",
+            titles(&all)
+        );
+
+        let card = only(&all, "kube-proxy-88dlk", "drive the container runtime");
+        assert_eq!(card.severity, Severity::Critical);
+        assert_eq!(card.owner.kind, ObjectKind::DaemonSet);
+        assert!(
+            card.evidence.contains("/run/crio/crio.sock on the node")
+                && card.evidence.contains("read-only"),
+            "it says which socket and that read-only did not save it: {}",
+            card.evidence
+        );
+        // **And the action does not order this pod's mount deleted.** kube-proxy is
+        // `kube-system`'s own DaemonSet, which is the shape a legitimate holder has too —
+        // an nvidia container-toolkit installer, a Falco or Datadog node agent. The most
+        // severe card on the screen must not talk a newcomer at 3am into breaking GPU
+        // scheduling or their own security agent, so it carries both halves: remove it if
+        // this is not a pod that manages or watches containers, and if it is, know what it
+        // holds.
+        assert!(
+            card.action.contains("unless"),
+            "the socket card is drawn on legitimate holders by design (NOTES § D70, § D78) \
+             and an unconditional 'remove the mount' is wrong for every one of them: {}",
+            card.action
+        );
+        assert!(
+            card.action.contains("manage or watch"),
+            "and the exception has to name what those holders actually do: Falco and Datadog \
+             *watch* the containers on the node, they do not manage them, and Google's own \
+             cAdvisor DaemonSet draws this card off a read-only `/var/run`. A reader who \
+             cannot find their agent in the verb removes the mount, which is the failure the \
+             half exists to prevent (NOTES § D79): {}",
+            card.action
+        );
+        assert!(
+            card.action.contains("every node"),
+            "and the half that is true when the mount stays has to be said out loud — this \
+             pod has root on every machine it runs on, which is the finding for a reader \
+             who keeps the mount: {}",
+            card.action
+        );
+    }
+
+    /// The neighbours of a socket that are not one — names that only *look* like a prefix of
+    /// one, a file beside it, a `/var/run` path that is no socket at all, and `/var` itself.
+    /// Those last two are what the folding could break: `/var/run/netns` has to reach the
+    /// ordinary writable branch **under the name it was written with**, and `/var` folds to
+    /// the empty string, which every ancestor test written the obvious way calls a prefix of
+    /// everything (NOTES § D78).
+    ///
+    /// **The last row is the join running the other way.** Everywhere else a `subPath`
+    /// widens what the volume said — `/` narrowed to `/run/containerd`. Here it narrows out
+    /// of trouble: the volume is `/run`, which is every socket on the node, and the container
+    /// is handed `/run/netns`, which is none of them. A check that asked the volume's own
+    /// path *as well as* the join would call this the machine (NOTES § D46).
+    #[test]
+    fn a_path_beside_a_runtime_socket_is_not_a_runtime_socket() {
+        for (path, sub, gets) in [
+            ("/run/crio.sock.bak", None, "/run/crio.sock.bak"),
+            ("/run/crio/crio.sock.bak", None, "/run/crio/crio.sock.bak"),
+            ("/run/criox", None, "/run/criox"),
+            ("/var/run/netns", None, "/var/run/netns"),
+            ("/var", None, "/var"),
+            ("/run", Some("netns"), "/run/netns"),
+        ] {
+            let all = host_volume(path, sub);
+            show(&all);
+            assert!(
+                !all.iter()
+                    .any(|f| f.title.contains("drive the container runtime")),
+                "{gets} is not a control socket — written {path:?} + subPath {sub:?}: {:?}",
+                titles(&all)
+            );
+            let writable = only(&all, "broken-hostpath", "change files on the machine");
+            assert!(
+                writable.evidence.contains(&format!("{gets} on the node")),
+                "and the ordinary branch names what the container was handed: {}",
+                writable.evidence
+            );
+        }
+    }
+
+    /// **A directory above the socket is the socket.** A container handed `/run/containerd`
+    /// opens `containerd.sock` inside it, and a container handed `/run` opens all five — the
+    /// same capability as mounting the socket file, and until D78 was widened it drew the
+    /// writable card, whose advice is *mount it read-only*: giving the node away in the
+    /// sentence meant to save it.
+    ///
+    /// Both spellings again, because the fold and the ancestor match have to compose.
+    #[test]
+    fn a_directory_above_a_runtime_socket_hands_over_the_same_socket() {
+        for dir in [
+            "/run",
+            "/var/run",
+            "/run/containerd",
+            "/var/run/containerd",
+            "/run/crio",
+            "/run/k3s",
+            "/run/k3s/containerd",
+        ] {
+            let all = host_volume(dir, None);
+            show(&all);
+
+            assert_eq!(
+                all.len(),
+                2,
+                "both containers are handed {dir}, which is a directory the node's runtime \
+                 socket lives under: {:?}",
+                titles(&all)
+            );
+            for f in &all {
+                assert!(
+                    f.title.contains("drive the container runtime"),
+                    "what is inside a mounted directory is mounted too: {}",
+                    f.title
+                );
+                assert_eq!(f.severity, Severity::Critical);
+                assert!(
+                    f.evidence.contains(&format!("{dir} on the node")),
+                    "and the card names the directory the manifest wrote: {}",
+                    f.evidence
+                );
+            }
+        }
+    }
+
+    /// [`is_runtime_socket`] alone, on the inputs the pipeline cannot hand it and the ones
+    /// where a prefix test degenerates.
+    ///
+    /// **The obvious form of the ancestor match is wrong here and this is what catches it**:
+    /// strip a leading `/var`, then ask whether a socket starts with `format!("{path}/")`.
+    /// For `/var` the strip yields `""`, the prefix becomes `"/"`, and every socket in the
+    /// list matches — a CRITICAL *"can drive the container runtime"* card on a pod that
+    /// mounts `/var` and nothing else (NOTES § D78).
+    #[test]
+    fn only_a_real_ancestor_of_a_runtime_socket_counts_as_one() {
+        for quiet in [
+            "",
+            "/",
+            "/var",
+            "/varlib/run/docker.sock",
+            "/runx",
+            "/run/cri",
+            "/run/crio.sock.bak",
+            "/run/criox",
+            "/var/lib",
+            "/etc/kubernetes",
+        ] {
+            assert!(
+                !is_runtime_socket(quiet),
+                "{quiet:?} is neither a runtime socket nor a directory one lives under, and \
+                 a container given it cannot reach the runtime"
+            );
+        }
+        for loud in [
+            "/run",
+            "/var/run",
+            "/run/containerd",
+            "/var/run/containerd",
+            "/run/crio",
+            "/run/k3s",
+            "/run/k3s/containerd",
+        ] {
+            assert!(
+                is_runtime_socket(loud),
+                "{loud:?} contains a runtime socket, so a container given it has the machine"
+            );
+        }
+        for socket in RUNTIME_SOCKETS {
+            assert!(is_runtime_socket(socket), "{socket} is the socket itself");
+            assert!(
+                is_runtime_socket(&format!("/var{socket}")),
+                "/var{socket} is the same file under the name every systemd distribution \
+                 also has for it"
+            );
+        }
     }
 
     /// Rule 12, both sides of its margin.
