@@ -132,6 +132,8 @@ struct Finding {
     owner:       ObjectId,       // the grouping key: Deployment/DaemonSet/…,
                                  // or the pod itself when it has no owner
     object:      ObjectId,       // what the finding is about — the pod, the node
+    timestamp:   Option<Time>,   // when the event happened — the moment, never
+                                 // the phrase; None when no field records it
 }
 
 struct ObjectId {
@@ -159,6 +161,19 @@ counting *findings* would say "4 of 5 pods" about a single pod. The numerator
 is the count of distinct `object`s; the denominator comes from the snapshot.
 The reasons behind the rest of the shape are
 [NOTES § D36](../NOTES.md#d36--the-finding-shape-the-review-sent-back-2026-08-12).
+
+`timestamp` is a moment and never a phrase: `Finding::age(now)` turns it into
+`Some("4 min ago")` at draw time, and it is the one call both the Alerts view
+and `--once` make — two renderers spelling the same finding differently is one
+of them lying. It answers `None` in two cases that draw the same blank: no
+field records when the event happened, so the right edge stays empty rather
+than borrowing a nearby timestamp that answers a different question; or the
+moment is *ahead* of `now` by more than five minutes, which is not a clock the
+tool can absorb but a rule that filled the wrong field, and a plausible phrase
+would hide it. Inside that five-minute window a future moment is the user's
+clock running behind the API server's and draws `just now`
+([NOTES § D18](../NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact) ·
+[§ D68](../NOTES.md#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13)).
 
 ### Rules are pure functions
 
@@ -225,9 +240,16 @@ code and never touch product files.
 ## Performance behaviors
 
 - The Alerts view's own inputs are watched permanently: Pods, Nodes, and
-  Deployments/StatefulSets/DaemonSets (metadata + status only — five
-  low-traffic streams; workload objects are far fewer than pods and barely
-  churn). ReplicaSets are fetched on demand and cached, never watched. Every
+  Deployments/StatefulSets/DaemonSets — five low-traffic streams; workload
+  objects are far fewer than pods and barely churn. **The prune list is the
+  snapshot types in `rules.rs`**, and it spans metadata, spec and status on all
+  three kinds: `spec.volumes` (rule 8), `spec.terminationGracePeriodSeconds`
+  (rule 12), `spec.unschedulable` and the taints under it (N2),
+  `spec.containers[].resources` (rule 2, N5) and `spec.replicas` (the workload
+  `desired`) all sit in the half an earlier "metadata + status only" would have
+  dropped
+  ([NOTES § D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+  ReplicaSets are fetched on demand and cached, never watched. Every
   other kind is listed when its view opens and watched only while it is on
   screen — "browse everything" must not mean forty permanent streams.
 - Drop `metadata.managedFields` at ingest — often a third of the object.

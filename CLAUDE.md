@@ -128,8 +128,12 @@ to require it, the plan is wrong: fix the plan, record the reversal in
    ([NOTES § Architecture](NOTES.md#architecture--where-lightweight-comes-from)).
    LIST once then stream changes, pruned with `managedFields` dropped. The
    Alerts view's own inputs are watched permanently — Pods, Nodes, and
-   Deployments/StatefulSets/DaemonSets, metadata + status only
-   ([D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12));
+   Deployments/StatefulSets/DaemonSets, **pruned to the fields the snapshot
+   types in `rules.rs` name** and no others, across metadata, spec *and*
+   status: the rule set reads `spec` on all three kinds, so "metadata + status
+   only" was never true of it
+   ([D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) ·
+   [D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13));
    ReplicaSets are fetched on demand, never watched; browser kinds are watched
    only while their view is open.
 7. **No fixed FPS.** Draw on events, coalesce ~100ms during storms, block when

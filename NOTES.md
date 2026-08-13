@@ -3291,6 +3291,12 @@ cross-file red is suspect until the writer puts the pen down.
 
 ### D66 — `just check` is not quite the whole of CI, and the gap is the one CI was built to watch (2026-08-13)
 
+> **Closed the same day it was opened —
+> [D67](#d67--the-cross-compile-row-closed-with-a-skip-and-what-the-skip-costs-2026-08-13)
+> records which horn was taken.** `just check` now ends with `just cross`, so
+> the row below is history: the eleven-out-of-twelve caveat is spent, and the
+> deferral in the middle paragraph was a deferral of about six hours.
+
 Found by Phase 2's closing second pass, against
 [CLAUDE.md § Running it](CLAUDE.md): *"`just check` is the whole of CI, or it is
 a lie."* Comparing the two step lists, they agree everywhere except one row.
@@ -3316,6 +3322,230 @@ whoever owns the CI box, not to a phase close that found it in passing.
 **What is not deferred:** the claim. Until it is closed, "`just check` is the
 whole of CI" is true of eleven steps out of twelve, and anybody relying on it
 for a cross-target change should run the matrix by hand.
+
+### D67 — the cross-compile row closed with a skip, and what the skip costs (2026-08-13)
+
+[D66](#d66--just-check-is-not-quite-the-whole-of-ci-and-the-gap-is-the-one-ci-was-built-to-watch-2026-08-13)
+named two horns and left the choice to `tester`. **The skip won, and on this
+machine it was not really a choice:** there is no `rustup` here at all —
+`/usr/bin/cargo` is the distribution's rust — so "require the four targets"
+does not mean "inconvenient until someone runs `rustup target add`", it means
+`just check` is red forever on the machine that closes phases. That is D66's
+own *"a gate red by default is one everybody learns to wave through"* in its
+worst available form.
+
+**The skip is a narrow, deliberate exception to
+[CLAUDE.md § Running it](CLAUDE.md)'s *"a missing binary is a loud error, a
+missing step is an invisible gap"*, and the exception is smaller than it
+looks.** What that sentence is protecting is the *step*, and the step is now in
+`just check` where it was not before. What is missing here is not a binary but
+a target's standard library, and the rule offers no verdict on that case. The
+loudness is paid for three ways, all of which had to survive a **green** run:
+`cross` is the last thing `check` runs, so the banner is the last thing on
+screen; the banner names every target that did not run rather than counting
+them; and it goes to stderr, so redirecting stdout to a log does not eat it.
+
+**Two failures are deliberately *not* skips**, because either would shrink the
+gate in silence — the same invisible gap wearing a different coat. A triple
+`rustc` has never heard of is a typo in CI's matrix and fails hard. A matrix
+the recipe cannot read out of `ci.yml` fails hard too, rather than cheerfully
+checking an empty list.
+
+**The coupling nobody asked for, and why it is the right one.** `just cross`
+reads the `- target:` lines straight out of `.github/workflows/ci.yml` instead
+of holding its own copy. A second copy of that list is *precisely* the material
+this row is made of — a list in two files that agree until they do not — so
+closing the drift with a fresh instance of it would have been a repair that
+reopens itself. It is guarded by a canary
+([CLAUDE.md § a derived list asserts it found something](CLAUDE.md)):
+`x86_64-unknown-linux-musl` must appear in the extraction or the recipe stops,
+since "extracted nothing" and "nothing to extract" print the same line.
+
+**The direction of that dependency is worth noticing**, because it is the
+opposite of the structural fix still recorded as open above — *a CI job that
+installed `just` and ran `just check`*. That imagined the workflow depending on
+the justfile; what landed is the justfile depending on the workflow. Both leave
+exactly one list, so neither blocks the other, and if the CI-runs-`just check`
+fix is ever taken the two compose rather than collide. It is a partial step in
+that direction and not a substitute for it.
+
+**What could not be proven, stated rather than hidden.** No cross std exists on
+this host, so the *non*-skip branch was proven against the host triple
+(`x86_64-unknown-linux-gnu` temporarily added to the matrix): same code path,
+same command string, only `$t` differs — a real type error in a temporary test
+file took `just check` to exit 101, and the healthy run before it genuinely
+compiled the crate. A musl- or darwin-*specific* break remains unprovable here,
+which is the gap the banner exists to announce. And "loud enough" is a human
+judgement, not a testable claim; what is testable and true is *last on screen,
+on stderr, every skipped target named*.
+
+**Found in passing and fixed:** `cluster-up`'s `just --list` description was a
+dangling fragment (`# worker per node state break-nodes produces…`), because a
+two-line comment above a recipe loses its first line to the listing.
+
+### D68 — the age ladder is not the formatter's choice, and what the brief still left open (2026-08-13)
+
+`Finding` now carries `timestamp: Option<Time>` and `rules::age(now, event)`
+turns it into words. Two things about that were **taken away from the agent on
+purpose**, for the same reason D65 took the pin away from two of them:
+
+**Where the formatter lives.** [Invariant 5](CLAUDE.md) says the *renderer*
+turns a timestamp into "4 min ago", and the renderer does — but the function it
+calls sits in `rules.rs`, the only file the pyramid lets both callers reach:
+`ui.rs` is Phase 11 and the `--once` printer is this phase's temporary
+`main.rs`. `screens/once.md` states the consequence outright — *if the two
+renderers could disagree about the same finding, one of them is lying* — and
+two copies of a ladder is how they would.
+
+**The rungs themselves**, which are not a formatting preference: every string
+is one a `screens/` file already prints. `40s ago` from `states.md`'s stale
+vitals, `4 min ago` from `alerts.md` and `once.md`, `6 days ago` from the
+cordon card `alerts.md` describes as the age it lost. `min` stays abbreviated
+and unpluralised because that is how both screens spell it; hours and days are
+words and get their singular. The hours rung is the one nothing draws yet — it
+follows from the days rung above it rather than from a screen.
+
+**What `dev-core` decided that no brief did, recorded so nobody has to
+reconstruct it.** The function is `age` and the private pluraliser is
+`counted`. "No age at all" stays `None` all the way to the renderer instead of
+arriving as an empty `String` that neither renderer could tell from a
+formatting bug — the operator review below then moved the whole render decision
+behind `Finding::age`, so no caller writes the flattening at all. Days come from
+`as_hours() / 24` rather than
+a second division of seconds, so no bare `86400` is in the file. `timestamp` is
+the last field of `Finding`. The fixture test asserts the **band before the
+string** — the cordon must land on the hours rung, *then* read `2 hours ago` —
+so a recapture that moves the pin fails with a repin hint rather than on the
+phrase. And `Finding` is not a snapshot type, so the pinned-`now` sweep gains
+no walk: the moment a rule puts there comes from a field that sweep already
+covers.
+
+**The one rung the brief did not reach, found by the agent's own second pass:**
+an event 400ms old. The ladder was keyed on whole seconds and said nothing
+about the sub-second window, where the truncation produces `0s ago` — a string
+no screen draws and one that reads as a stopped clock. It says `just now`,
+which puts a *positive* age in the branch [D18](#d18--the-clock-is-an-input-not-an-ambient-fact)
+built for negative ones; that branch is now "too new to count" as well as "the
+laptop is behind", and only the second half is about a wrong clock.
+
+**Still open, and it is `tui-designer`'s:** `screens/alerts.md` § *the cordon
+card* and `screens/once.md` both still argue from
+[D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)'s
+falsified premise — quoting `Taint.timeAdded` as *"only written for NoExecute
+taints"* — and the test landing here asserts the opposite for the card N2 will
+file. Nothing ships a contradiction yet, because N2 itself is a later box, but
+the two have to be reconciled before it does. [D65](#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13)
+handed that round to `tui-designer` and this is the second entry pointing at
+it.
+
+### D69 — the operator review that reopened the box, and the prune line that was never true (2026-08-13)
+
+The `Finding.timestamp` box passed its own second pass, `just check` and a real
+`--nocapture` run, and the **operator review sent it back anyway**. Every
+finding below is closed here — fixed, or deferred to a box with a named owner.
+None was rejected, which is worth saying plainly: the gate earned its place for
+the fourth time on the same contract
+([D36](#d36--the-finding-shape-the-review-sent-back-2026-08-12) ·
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12) ·
+[D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)).
+
+**The blocker: `just now` had no bound on the future side.** `elapsed <= 0`
+rendered *any* moment after `now` as "just now" — an event 25 hours ahead
+included, and the ladder test pinned that as the requirement. The `Option`
+catches *"there is no field to point at"*; this branch **hid** *"the rule
+filled the wrong field"*, and the wrong fields here are future-dated by nature:
+C1's `notAfter`, C2/C4's the same, rule 12's raw `deletionTimestamp` inside its
+grace window — which the snapshot sweep already documents as legitimately
+future. A confident wrong string, on the screen whose whole promise is that a
+number on it can be believed.
+
+`age` now answers `Option<String>` and produces **no number** past the bound,
+which is `screens/alerts.md` § *No number we cannot produce* applied to the one
+case the code exempted from it — the blank right edge already exists and needs
+no new screen state. **The bound is five minutes and it was the PM's to set,
+not the formatter's:** five minutes is the conventional clock-skew tolerance
+(Kerberos, JWT `nbf`/`exp` leeway, most TLS handshake allowances), it covers an
+unsynced laptop without argument, and past it the honest answer is not a
+smaller number but the header line D55 asked for. Which is the second half of
+this decision, because a screen that goes quietly blank is a worse bug than the
+one it replaced — see the deferrals below.
+
+**The doc sentence that would have frozen an age two screens require to
+advance.** *"`now` is `ClusterSnapshot::now`, handed in"* reads as binding on
+every caller; combined with `now` captured once per pass and invariant 7's
+block-when-idle, the header's stale-vitals age (`screens/states.md`
+`nodes 3/3 (40s ago)` → `(2 min ago)`, both **disconnected** states) could never
+move off its first value — and that string is the provenance the ladder cites
+for its own seconds rung. `now` is the *caller's* moment: the snapshot's for a
+finding drawn in that pass, a fresh read for the staleness age.
+
+**Three more fixed in the same turn.** `age(now, event)` is two arguments of
+one type, so a swapped call compiles, cannot panic, and paints *every* card
+`just now` — which reads as the cluster falling over; `Finding::age(&self, now)`
+removes the swap on the path that matters and collapses the render expression
+D68 had recorded as something two agents write twice. The cordon test's band
+accepted `[1h, 24h)` and then asserted `"2 hours ago"`, so the recapture it was
+built to catch would still have failed on the phrase. And `Option`'s derived
+`Ord` puts `None` **first** while `screens/alerts.md` requires ageless cards to
+sort **last** in their band — nothing derives `Ord` today, which is exactly why
+it needed writing down before Phase 9 reaches for the reflex.
+
+**The wrong-field class had a name and not a single pair.** The review supplied
+them, and three are reachable today from fields the snapshot already carries:
+**rule 7** must read `ready.last_transition`, never `scheduled.last_transition`
+three lines away — a pod up six days that went unready four minutes ago would
+have read `6 days ago`, and that number is the one correlated with the deploy;
+**N3** must read *that condition's* `last_transition`, not `Ready`'s off the
+same flat `Vec`, or a DiskPressure card carries the node's boot time; **N6**'s
+subject is the pod, so the blocking node's taint `added_at` is the wrong clock
+on the right card — newly tempting precisely because D65 just certified taint
+stamps. The list now sits on the field. It also corrected the weakest sentence
+in that doc: rule 8 stays `None` **not** because creation time is not when the
+mount became dangerous — `spec.volumes` is immutable, so it is exactly that —
+but because the card describes a standing property rather than an event, and a
+date beside it reads as *"something happened"*.
+
+**`timeAdded` is the age of the taint, not of the cordon**, and N2 will print
+it. It survives a kubelet restart (the kubelet writes `spec.taints` only at
+registration) and a controller-manager restart (`MatchTaint` compares key and
+effect, so an existing taint is never re-added), but anything that rewrites
+`node.spec.taints` wholesale — `kubectl edit`, a GitOps controller reconciling
+Node objects, a manifest re-apply — drops it and the controller re-stamps it,
+and a taint that pre-existed the cordon is never stamped at all. So the card may
+say *"cordoned about 2 hours ago"* and never build an argument on it. **The
+durability claims are upstream-derived, not measured** — there is no cluster up
+([§ the boxes no agent can run](CLAUDE.md)) — and the sequence that would close
+it is `cordon` → read `.spec.taints` → delete the controller-manager pod → read
+again → `docker restart` the node → read again → `uncordon && cordon` → read
+again, the last one being the only reading that may change.
+
+**And the line that was never true, found by the same review.** Four files said
+the Alerts watches keep *"metadata + status only"* — CLAUDE.md's invariant 6
+among them. The rule set reads `spec` on all three watched kinds:
+`spec.volumes` (rule 8), `spec.terminationGracePeriodSeconds` (rule 12),
+`spec.unschedulable` and its taints (N2), `spec.containers[].resources` (rule 2,
+N5), `spec.replicas` (the workload `desired`, whose own doc argues from
+`apps/v1/defaults.go`). A Phase 5 prune written literally from that phrase
+deletes the field this box exists to fill, along with four rules. The wording is
+now **"pruned to the fields the `rules.rs` snapshot types name"**, which is
+single-sourced and checkable where the old one was a guess that read like a
+budget. The occurrence inside D28's resolved open question is left alone: it is
+a record of what was argued then, not an instruction.
+
+**Deferred, each to a box with an owner** — the review's remaining findings are
+real and none of them belongs to this file. The **day rung** hides 24h01m
+through 47h59m behind `1 day ago` while `kubectl`'s own `HumanDuration` prints
+`30h` and `47h` before `2d3h`, so k8rs is coarser than the command it teaches
+in the band where "before or after yesterday's window" is the question; that,
+the cordon card's wording, and the age column's **width budget** (widest string
+14 characters, no stated maximum) are one `tui-designer` box, and it is now
+Phase 3's, **before** close — `rules::age` freezes with `rules.rs` while `ui.rs`
+is Phase 11, so a rung changed after that is a forward-only violation. The
+**skew header line** is a Phase 5 box. And the cordon card's `kubectl describe
+node` is the one command that does **not** print `timeAdded`, so N2's box owes
+either a line that shows it (`-o jsonpath='{.spec.taints}'`) or a written
+admission that the age is the claim `describe` cannot back — invariant 4's
+teaching device pointing at the one thing it fails to teach.
 
 ## Decisions made
 
@@ -3445,8 +3675,10 @@ Concrete load reducers:
 Added by the browser (2026-08-11), widened by
 [D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)
 (2026-08-12): **the Alerts view's own inputs are watched permanently** — Pods,
-Nodes, and Deployments/StatefulSets/DaemonSets (metadata + status only), five
-low-traffic streams. Every other kind in the Resources view is listed when you
+Nodes, and Deployments/StatefulSets/DaemonSets, five low-traffic streams,
+pruned to the fields the `rules.rs` snapshot types name — metadata, spec **and**
+status, since the rule set reads `spec` on all three kinds
+([D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)). Every other kind in the Resources view is listed when you
 open it and watched only while it is on screen; closing the view drops the
 watch. Otherwise "browse every kind" would mean forty permanent streams, which
 is a worse version of the polling problem this architecture exists to avoid.

@@ -27,6 +27,7 @@ use k8s_openapi::api::core::v1::{
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
+use k8s_openapi::jiff::SignedDuration;
 use std::collections::BTreeMap;
 
 /// How bad it is. **Declaration order is severity order** — the derived `Ord` sorts
@@ -222,6 +223,185 @@ pub struct Finding {
     /// snapshot. This is also the only source for the detail view's first act
     /// (`screens/detail.md`: "`⏎` first lists *which* pods are affected").
     pub object: ObjectId,
+    /// **When the event this card is about happened — the moment, never the phrase.**
+    /// "4 min ago" is [`age`]'s answer, computed at draw time by whichever renderer is
+    /// drawing: `ui.rs` (Phase 11) and the `--once` printer call that one function, so
+    /// the two cannot disagree about the same finding (NOTES § D18,
+    /// `screens/once.md`), and a rule test asserts a duration instead of parsing English
+    /// back into a number.
+    ///
+    /// **A rule may fill this only from a field that records the event itself**, and
+    /// which field that is has one answer per rule, not one per author. A timestamp is
+    /// always *available* somewhere near an object — that is what makes this worth
+    /// spelling out, because the wrong one is never missing, it is three lines away and
+    /// it draws:
+    ///
+    /// | rule | the field | the one it is not |
+    /// |---|---|---|
+    /// | 1, 2, 6 | [`Terminated::finished_at`] on [`ContainerSnapshot::last_terminated`] — when the run ended | `started_at`, one line above it in the same struct, which is when that run *began* |
+    /// | 7 | [`PodSnapshot::ready`]'s `last_transition` — when it stopped taking traffic | [`PodSnapshot::scheduled`]'s, three lines away: a pod up six days that went unready four minutes ago would read `6 days ago`, and that is the number someone correlates with a deploy |
+    /// | 12 | `deletionTimestamp − grace` — the moment the user asked (NOTES § D46) | the `deletionTimestamp` itself, which is the deadline and is short by exactly one grace period, forever |
+    /// | N2 | the cordon taint's [`Taint::added_at`] (NOTES § D65), with the caveat below | — |
+    /// | N3 | *that* condition's `last_transition` — DiskPressure's, PIDPressure's | `Ready`'s, off the same flat [`NodeSnapshot::conditions`] `Vec`, which dates the card to the node's boot |
+    /// | N6 | the pod's `scheduled` `last_transition` — N6's subject is the Pending pod | the blocking node's taint `added_at`: it is stamped, it is nearby, and it answers when the *node* changed |
+    ///
+    /// The table is the rules whose wrong field is closest to hand, not the whole rule
+    /// set. A rule that is not in it owes the same answer — the moment its own event
+    /// happened, or `None` — and owes it in a test, which is the only place the
+    /// distinction between "the right field" and "a field that renders" is visible.
+    ///
+    /// **Rule 8 is `None`, and not for the reason it looks like.** `spec.volumes` is
+    /// immutable, so the pod's creation time *is* when its mount became dangerous — the
+    /// number would be accurate. It is left out because the card describes a standing
+    /// property rather than an event, and a date beside it reads as *"something
+    /// happened"*, sending the reader looking for a change that never occurred. A column
+    /// that is always populated and sometimes means something else is worse than one that
+    /// is sometimes empty, because nothing on screen marks the rows where it lied
+    /// (`screens/alerts.md` § *No number we cannot produce*).
+    ///
+    /// **N2's number dates the taint, not the cordon**, and the wording a card builds on
+    /// it has to survive that. Anything that rewrites `node.spec.taints` wholesale —
+    /// `kubectl edit`, a GitOps controller reconciling Node objects, a manifest re-apply —
+    /// drops the mirrored taint and the node lifecycle controller re-adds it with a fresh
+    /// stamp, and a taint that pre-dated the cordon carries no stamp at all. So *"cordoned
+    /// about 2 hours ago"* is sayable and *"someone's maintenance window has been open for
+    /// two hours"* is not — that argument is exactly what `screens/alerts.md` already
+    /// deleted once for lack of a number, and a resettable clock does not bring it back.
+    ///
+    /// **`None` is the empty right edge**, and it has two producers that draw
+    /// identically: no field to read — `kubectl taint` is client-side and stamps no
+    /// `timeAdded`, so a hand-applied taint has no moment (NOTES § D43, § D65) — and a
+    /// moment [`age`] refuses, which is the far-future guard on that function. Both are
+    /// a bare title line in both renderers.
+    ///
+    /// **An `Option`, and not a zero.** `Time` has no "absent" value, so the epoch is
+    /// what a non-optional field would carry, and [`age`] dates it honestly: a five-figure
+    /// day count — *20678 days ago* against the pin the tests use — which is a confident
+    /// wrong answer on the screen whose whole promise is that a number on it can be
+    /// believed.
+    ///
+    /// **This field says how a finding *renders*, and nothing about how it sorts.**
+    /// `screens/alerts.md` wants the cards with no age **last** inside their severity
+    /// band; the derived `Ord` on `Option` puts `None` **first**, so the reflex
+    /// `sort_by_key(|f| (f.severity, f.timestamp))` in Phase 9 produces the reverse of the
+    /// requirement. Nothing is broken here today — [`Finding`] derives no `Ord` — and the
+    /// note exists because the next reader gets this wrong for free.
+    pub timestamp: Option<Time>,
+}
+
+impl Finding {
+    /// **How long ago this finding's event happened, or nothing** — the whole render
+    /// decision, in the one place both renderers reach for it.
+    ///
+    /// It exists rather than leaving `timestamp.as_ref().and_then(|t| age(now, t))` to be
+    /// written in `ui.rs` and again in the `--once` printer: that is one expression in two
+    /// files by two authors, and the house rule is that shared code is extracted rather
+    /// than retyped. It also removes the way the free function can be called wrong —
+    /// [`age`]`(&event, &now)` with the arguments swapped compiles, never panics, and
+    /// paints *every* card `just now`, which reads as a cluster that has just fallen over.
+    /// Here there is one argument and it is the one the caller has.
+    ///
+    /// `None` means **draw no age at all**: no timestamp, or one [`age`] itself refuses.
+    /// The two are the same blank on screen and deliberately not distinguished here.
+    pub fn age(&self, now: &Time) -> Option<String> {
+        self.timestamp.as_ref().and_then(|t| age(now, t))
+    }
+}
+
+/// **How long ago it happened, in the words the screens already print.** The one age
+/// formatter: `ui.rs` (Phase 11) and the `--once` printer (this phase's temporary
+/// `main.rs`) both call it, because if the two renderers could disagree about the same
+/// finding, one of them is lying (`screens/once.md`).
+///
+/// Pure like the rest of this file — no clock call, the moment arrives as an argument
+/// (invariant 5). **`now` is the *caller's* moment, and which moment that is depends on
+/// what is being aged**: [`ClusterSnapshot::now`] for a finding rendered in that analysis
+/// pass, and for every test in this file; a freshly read clock for the header's
+/// stale-vitals age (`screens/states.md`), which measures how old the data on screen is
+/// and therefore has to keep advancing while the snapshot does not. What wakes a redraw
+/// is Phase 10/11's question and is deliberately not answered here. The subtraction is
+/// `now − event`, that way round, or every age on a healthy cluster is negative
+/// (NOTES § D18).
+///
+/// The ladder is the strings `screens/` draws, and nothing invented beside them:
+///
+/// | age | text | where the spelling comes from |
+/// |---|---|---|
+/// | ahead by more than [`SKEW_ALLOWANCE`] | **`None`** — draw nothing | `screens/alerts.md` § *No number we cannot produce* |
+/// | ahead by less, or under one whole second | `just now` | NOTES § D18 |
+/// | under a minute | `40s ago` | `screens/states.md`, the header's stale-vitals age |
+/// | under an hour | `4 min ago` | `screens/alerts.md`, `screens/once.md` — finding ages, both |
+/// | under a day | `2 hours ago`, `1 hour ago` | nothing draws one yet; it follows the days rung below |
+/// | a day or more | `6 days ago`, `1 day ago` | `screens/alerts.md`, the age its cordon card used to carry |
+///
+/// **Every rung truncates, and `just now` swallows the sub-second gap on purpose.**
+/// An event 400ms old is "just now" and not `0s ago`, which is a string no screen draws
+/// and which reads as a stopped clock; the same truncation is why 4m59s is still
+/// `4 min ago`, the way a reader counts.
+///
+/// **`min` stays abbreviated and unpluralised** because that is how both screens spell
+/// it; hours and days are words, and a word gets its singular.
+///
+/// **The `None` rung is a wrong-field guard, not a clock feature.** Inside
+/// [`SKEW_ALLOWANCE`] a future timestamp is a laptop behind the cluster and "just now" is
+/// the honest reading (NOTES § D55). Beyond it, a clock is not the likeliest explanation
+/// any more: the rule was pointed at a field that is future-dated *by design*, and this
+/// file is full of them — C1's `notAfter`, C2/C4's after this file freezes, rule 12's raw
+/// `deletionTimestamp` while the pod is still inside its grace window, which
+/// `the_pinned_now_is_not_before_the_captures_it_is_read_against` already documents as
+/// legitimately ahead of `now`. [`Finding::timestamp`]'s `Option` catches *"there is no
+/// field"*; without this rung, *"the wrong field"* renders as a plausible English
+/// sentence and nothing anywhere says so. So it draws the same blank the missing field
+/// draws, which is `screens/alerts.md`'s own rule applied to the one case the code used
+/// to exempt from it. A genuinely mis-set laptop is not this function's to announce —
+/// the header says it in plain language, and that is its own box.
+///
+/// **What is not clamped is the other half of the skew.** A laptop *ahead* of the cluster
+/// inflates every age instead of negating it, and that is the half that manufactures
+/// findings on a healthy cluster (NOTES § D55). It is left visible, because hiding it
+/// would hide a wrong clock rather than survive one — and no object timestamp can reveal
+/// it anyway, the honest source being the API server's `Date` header (Phase 5).
+///
+/// **The arithmetic is `Timestamp::duration_since`, never `-`** (NOTES § D54):
+/// subtracting two timestamps yields a seconds-only `Span` whose `.get_minutes()` is `0`
+/// over a 43-minute gap, so the screen would read "0 min ago" and no type would object.
+pub fn age(now: &Time, event: &Time) -> Option<String> {
+    let elapsed = now.0.duration_since(event.0);
+    if elapsed < -SKEW_ALLOWANCE {
+        return None;
+    }
+    Some(if elapsed.as_secs() <= 0 {
+        "just now".to_string()
+    } else if elapsed.as_mins() < 1 {
+        format!("{}s ago", elapsed.as_secs())
+    } else if elapsed.as_hours() < 1 {
+        format!("{} min ago", elapsed.as_mins())
+    } else if elapsed.as_hours() < 24 {
+        counted(elapsed.as_hours(), "hour")
+    } else {
+        counted(elapsed.as_hours() / 24, "day")
+    })
+}
+
+/// **How far into the future a timestamp may sit and still be read as a wrong clock
+/// rather than a wrong field** — five minutes, and past it [`age`] draws nothing.
+///
+/// The number is not free and it is not tuned: five minutes is the clock-skew tolerance
+/// the ecosystem already settled on — Kerberos' allowable clock skew, the leeway
+/// implementations grant a JWT's `nbf`/`exp`, the slack in most TLS handshake validity
+/// checks. It covers an unsynced laptop, a VM resumed from suspend, a WSL2 host after
+/// sleep; it does not cover a certificate that expires next year or a deletion deadline
+/// thirty minutes out, and those are the values a mis-pointed rule actually produces.
+const SKEW_ALLOWANCE: SignedDuration = SignedDuration::from_mins(5);
+
+/// `1 hour ago` / `2 hours ago` — the two rungs of [`age`] whose unit is a word the
+/// reader pluralises. Not the minutes rung: both screens spell that `4 min ago`.
+fn counted(n: i64, unit: &str) -> String {
+    if n == 1 {
+        format!("1 {unit} ago")
+    } else {
+        format!("{n} {unit}s ago")
+    }
 }
 
 // --- SNAPSHOT TYPES START ---
@@ -717,9 +897,21 @@ pub struct PodSnapshot {
 /// `timeAdded`, both being the controller's; the operator's own `dedicated=gpu:NoExecute`
 /// arrives without one.
 ///
-/// So **N2 can say "cordoned 2 hours ago"** — the timestamp is in the object — and the
-/// `Option` is here for the taint somebody applied by hand, which is the one that has no
-/// time to give.
+/// So **N2 can say "cordoned about 2 hours ago"** — the timestamp is in the object — and
+/// the `Option` is here for the taint somebody applied by hand, which is the one that has
+/// no time to give.
+///
+/// **What it dates is the taint, not the cordon, and the difference is a whole argument.**
+/// Anything that rewrites `node.spec.taints` wholesale — `kubectl edit`, a GitOps
+/// controller reconciling Node objects, a manifest re-apply — drops the mirrored taint,
+/// and the node lifecycle controller puts it straight back with a **fresh** `timeAdded`
+/// while `spec.unschedulable` never moved. The stamp is therefore a *floor*: the node has
+/// been cordoned at least this long, possibly far longer, and a taint that was on the node
+/// before any of this carries a stamp about itself or none at all. So a card may say
+/// *"cordoned about 2 hours ago"* and may not say *"someone's maintenance window has been
+/// open for two hours"* — the accusation `screens/alerts.md` deleted once already for lack
+/// of a number, which a resettable clock does not earn back ([`Finding::timestamp`]
+/// carries the same caveat).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Taint {
     pub key: String,
@@ -1306,7 +1498,6 @@ mod tests {
     use super::*;
     use k8s_openapi::api::core::v1::{Taint as ApiTaint, Toleration as ApiToleration};
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
-    use k8s_openapi::jiff::SignedDuration;
     use std::collections::{BTreeSet, HashSet};
 
     /// The Alerts list is sorted by severity, and that order is nothing but the order
@@ -1406,6 +1597,253 @@ mod tests {
             deployment("9f2c-aaaa"),
             deployment("9f2c-aaaa"),
             "the same object read twice must still compare equal"
+        );
+    }
+
+    // --- THE AGE AT THE RIGHT EDGE ---
+    //
+    // Every case here hands [`age`] a **duration** and compares the answer against the
+    // string a screen draws. Nothing parses English back into a number: a test that read
+    // "4" out of "4 min ago" would agree with an implementation that printed the minutes
+    // of the wall clock, which is the class of bug the whole "timestamps, not phrases"
+    // contract exists to stop.
+
+    /// A moment `secs` seconds before the pinned [`now`]. Negative puts the event in the
+    /// future: D55's *slow* laptop while it is inside [`SKEW_ALLOWANCE`], and past that a
+    /// rule reading a field that was never an event time.
+    ///
+    /// `checked_sub`, because every subtraction in this file that can leave the
+    /// representable range is checked (NOTES § D56); here the failure would be a
+    /// mistyped case rather than a hostile pod, and it names itself either way.
+    fn ago(secs: i64) -> Time {
+        Time(
+            now()
+                .0
+                .checked_sub(SignedDuration::from_secs(secs))
+                .unwrap_or_else(|e| panic!("{secs}s before the pinned now is not a moment: {e}")),
+        )
+    }
+
+    /// **The ladder, at both sides of every boundary it has.** The rungs are not a
+    /// choice: each string below is one a `screens/` file already prints, and the
+    /// boundaries are where one stops being the truth and the next starts.
+    ///
+    /// **43 minutes is the case that is here for the arithmetic and not for the
+    /// wording** — `now.0 - event.0` yields a seconds-only `Span`, so a formatter written
+    /// with `.get_minutes()` reads "0 min ago" for it, and for every gap under an hour.
+    /// The value comes from NOTES § D54, which names the trap and the length it hides.
+    ///
+    /// **The two cases at the top are the [`SKEW_ALLOWANCE`] boundary**, and the far one
+    /// is not a clock story: 25 hours ahead is what a rule pointed at a certificate's
+    /// `notAfter` or at a raw `deletionTimestamp` produces, and the requirement is that it
+    /// draws *nothing* rather than a sentence that reads fine.
+    #[test]
+    fn the_age_ladder_is_the_words_the_screens_print() {
+        for (secs, want) in [
+            (-90_000, None),
+            (-301, None),
+            (-300, Some("just now")),
+            (-1, Some("just now")),
+            (0, Some("just now")),
+            (1, Some("1s ago")),
+            (40, Some("40s ago")),
+            (59, Some("59s ago")),
+            (60, Some("1 min ago")),
+            (60 * 4, Some("4 min ago")),
+            (60 * 43, Some("43 min ago")),
+            (60 * 60 - 1, Some("59 min ago")),
+            (60 * 60, Some("1 hour ago")),
+            (60 * 60 * 2, Some("2 hours ago")),
+            (60 * 60 * 24 - 1, Some("23 hours ago")),
+            (60 * 60 * 24, Some("1 day ago")),
+            (60 * 60 * 24 * 2, Some("2 days ago")),
+            (60 * 60 * 24 * 6, Some("6 days ago")),
+        ] {
+            let got = age(&now(), &ago(secs));
+            println!("{secs:>9}s -> {got:?}");
+            assert_eq!(
+                got.as_deref(),
+                want,
+                "an event {secs}s before now has to read {want:?} — the strings are the \
+                 ones screens/ draws, and the boundaries are where they stop being true"
+            );
+        }
+
+        // The rung the table cannot reach, because its cases are whole seconds: an event
+        // 400ms old is inside the first one. `0s ago` is a string no screen draws and it
+        // reads as a stopped clock, so the sub-second gap says "just now" with the
+        // negative ages — the one place this branch is not about a wrong laptop.
+        let sub_second = age(&now(), &time("2026-08-12T23:59:59.600Z"));
+        println!("     0.4s -> {sub_second:?}");
+        assert_eq!(
+            sub_second.as_deref(),
+            Some("just now"),
+            "an event 400ms old is \"just now\", never \"0s ago\""
+        );
+    }
+
+    /// **One event, four laptops** — the framing NOTES § D55 corrects, and the two things
+    /// the guard does not do.
+    ///
+    /// A laptop a little behind the cluster produces a negative age and draws "just now":
+    /// under-reporting, which harms nobody. Far enough behind and the timestamp stops
+    /// being distinguishable from a rule reading a field that is future-dated by design,
+    /// so [`age`] draws **nothing** and leaves the explaining to the header banner, which
+    /// is its own box. A laptop *ahead* of the cluster inflates the same event into a
+    /// ten-minute-old one, and **that is left visible on purpose** — clamping it would
+    /// hide a wrong clock rather than survive one, and it is the half that manufactures
+    /// findings on a healthy cluster.
+    ///
+    /// A formatter that took `.abs()` of the difference, or clamped both ends, passes the
+    /// ladder test above and fails here.
+    #[test]
+    fn a_laptop_a_little_behind_says_just_now_far_behind_says_nothing_and_ahead_is_not_hidden() {
+        let event = time("2026-08-12T12:00:00Z");
+        let behind = |mins: i64| {
+            Time(
+                event
+                    .0
+                    .checked_sub(SignedDuration::from_mins(mins))
+                    .expect("a moment"),
+            )
+        };
+
+        for (label, laptop, want) in [
+            ("2 min behind the cluster", behind(2), Some("just now")),
+            ("agreeing with the cluster", behind(0), Some("just now")),
+            ("10 min behind the cluster", behind(10), None),
+            (
+                "10 min ahead of the cluster",
+                behind(-10),
+                Some("10 min ago"),
+            ),
+        ] {
+            let got = age(&laptop, &event);
+            println!("event {:?}, laptop {label}: {got:?}", event.0);
+            assert_eq!(got.as_deref(), want, "a laptop {label} must draw {want:?}");
+        }
+    }
+
+    /// **The `Option`, on the two taints the capture actually carries.** N2's card is
+    /// where the field's two states are one keystroke apart: `break-nodes` cordons
+    /// `k8rs-worker`, the node lifecycle controller mirrors that boolean into a taint and
+    /// stamps `timeAdded` on it — so the card can say when — while the operator's own
+    /// `dedicated=gpu:NoExecute` on `k8rs-worker2` was written by `kubectl taint`, which
+    /// is client-side and stamps nothing (NOTES § D64, § D65).
+    ///
+    /// What is asserted is the whole render decision — [`Finding::age`], the one call
+    /// both renderers make: a phrase for the card that has a moment, **nothing at all**
+    /// for the one that has not, which is `screens/alerts.md`'s blank right edge and
+    /// `screens/once.md`'s bare title line.
+    ///
+    /// **And why the field is not a plain `Time`:** the value a non-optional field would
+    /// hold is the epoch, which this formatter dates honestly and uselessly. That
+    /// assertion is deliberately loose about the count — it is 1970 that is being shown,
+    /// not a number worth pinning.
+    #[test]
+    fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_blank() {
+        let nodes: Vec<NodeSnapshot> = items::<Node>("nodes").into_iter().map(Into::into).collect();
+        let taint = |node: &str, key: &str| {
+            nodes
+                .iter()
+                .find(|n| n.id.name == node)
+                .unwrap_or_else(|| panic!("the capture has no {node}"))
+                .taints
+                .iter()
+                .find(|t| t.key == key)
+                .unwrap_or_else(|| panic!("{node} carries no {key} taint"))
+                .clone()
+        };
+        let cordon = taint("k8rs-worker", "node.kubernetes.io/unschedulable");
+        let by_hand = taint("k8rs-worker2", "dedicated");
+
+        // The card N2 files, with the moment the capture gives it and without one. Both
+        // identities are the node itself — `owner == object` for N1–N3 (D39).
+        let node = ObjectId {
+            kind: ObjectKind::Node,
+            namespace: None,
+            name: "k8rs-worker".to_string(),
+            uid: None,
+        };
+        let card = |t: Option<Time>| Finding {
+            severity: Severity::Warn,
+            title: "This node refuses new pods (cordoned)".to_string(),
+            evidence: "2 pods here would still have to move".to_string(),
+            action: "allow new pods once the work is done".to_string(),
+            kubectl_cmd: Some("kubectl describe node k8rs-worker".to_string()),
+            owner: node.clone(),
+            object: node.clone(),
+            timestamp: t,
+        };
+        let dated = card(cordon.added_at.clone());
+        let undated = card(by_hand.added_at.clone());
+        println!(
+            "cordon taint {:?}\n  {} · {:?}\nhand-applied taint {:?}\n  {} · {:?}",
+            cordon.added_at,
+            dated.title,
+            dated.age(&now()),
+            by_hand.added_at,
+            undated.title,
+            undated.age(&now()),
+        );
+
+        // The property the fixture has to keep, and it is asserted at the precision of the
+        // string below rather than looser: the pin is the midnight after the capture day
+        // (D57), so this cordon is two-something hours old. A band of `[1h, 24h)` would let
+        // a recapture at 1h50m past this line and fail on the phrase instead, with a
+        // message about cards saying when — which is the confusion the check exists to
+        // prevent, not to cause.
+        let stamped = cordon.added_at.clone().expect(
+            "the controller stamps timeAdded on the taint it mirrors from spec.unschedulable \
+             — a capture without it is D64's premise back again",
+        );
+        let elapsed = now().0.duration_since(stamped.0);
+        assert_eq!(
+            elapsed.as_hours(),
+            2,
+            "the cordon is {elapsed:?} before the pinned now, and the phrase below says two \
+             hours — if `just fixtures` was re-run, repin `fn now()` (see the note there for \
+             what moves with it) and move both together"
+        );
+        assert_eq!(
+            dated.age(&now()).as_deref(),
+            Some("2 hours ago"),
+            "a cordon the controller stamped has a moment, and the card says when"
+        );
+        assert_eq!(
+            undated.age(&now()),
+            None,
+            "`kubectl taint` stamps no time, so the card has no age to draw and draws \
+             none — never a nearby timestamp that answers a different question"
+        );
+
+        // **The third state, which no capture can hold.** Every committed timestamp is
+        // before the pin by construction — the sweep guarantees it — so the card that was
+        // filled from a field which is future-dated *by design* has to be synthesised, the
+        // same licence D40 gives the taint that carries a value and a stamp at once. The
+        // moment here is C1's shape: `notAfter` on the healthy committed certificate,
+        // which `certs-test.sh` reports as 364 days out. `Finding::age` flattens it to the
+        // same blank the missing field draws — `.map` in place of `.and_then` would print
+        // it, and `Option<Time>` alone cannot tell the two cases apart because the field
+        // is present and perfectly valid.
+        let wrong_field = card(Some(time("2027-08-12T00:00:00Z")));
+        println!(
+            "a rule that filled the timestamp from a certificate's notAfter: {:?}",
+            wrong_field.age(&now())
+        );
+        assert_eq!(
+            wrong_field.age(&now()),
+            None,
+            "a moment a year ahead is a rule reading the wrong field, not a wrong clock, \
+             and it draws nothing rather than a sentence that reads fine"
+        );
+
+        let epoch = age(&now(), &time("1970-01-01T00:00:00Z")).expect("1970 is in the past");
+        println!("what a zero would have drawn: {epoch}");
+        assert!(
+            epoch.ends_with(" days ago") && epoch != "just now",
+            "a zero timestamp draws as 1970 and not as silence — which is why the field is \
+             an Option, and it read {epoch:?}"
         );
     }
 

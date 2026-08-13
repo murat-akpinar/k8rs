@@ -669,14 +669,34 @@ this plan is delivery mechanism for what this phase produces.
       `.get_minutes()` is `0` over 43 minutes, and the grace subtraction is
       `checked_sub` because a real apiserver accepts a grace that overflows it
       ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12))
-- [ ] `Finding` carries **timestamps, not phrases**. "4 min ago" is formatted
+- [x] `Finding` carries **timestamps, not phrases**. "4 min ago" is formatted
       by the renderer, so `ui.rs` and the `--once` printer share one source and
       a test asserts a duration instead of parsing English. A non-positive age
       renders "just now" — the API server's clock and the laptop's disagree.
       **The timestamp is an `Option`**: N2 has no moment to point at, and a
       zero there draws as 1970
-      ([NOTES § D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12))
-- [ ] **Close the one row where `just check` is not CI** — `tester`'s, not
+      ([NOTES § D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)).
+      **The box's own premise moved under it**: D64/D65 falsified D43, so the
+      `Option` survives for the *hand-applied* taint and not for the cordon —
+      the fixture test now asserts both halves off one capture, `2 hours ago`
+      for the taint the controller stamped and nothing at all for the one
+      `kubectl taint` wrote. **The one shared source is `rules::age` in
+      `rules.rs`**, not in a renderer: `ui.rs` is Phase 11 and the `--once`
+      printer is this phase, and the ladder's rungs are the strings `screens/`
+      already prints rather than the formatter's choice. Sub-second ages join
+      the negative ones in "just now" — `0s ago` reads as a stopped clock
+      ([NOTES § D68](NOTES.md#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13)).
+      **Reopened once by the operator review, and it was right to be**: the
+      "just now" branch had no bound on the future side, so a rule filling
+      `timestamp` from a certificate's `notAfter` would have printed a
+      plausible sentence instead of being visibly wrong. `age` answers
+      `Option<String>` and refuses past five minutes of skew; the render
+      decision moved behind `Finding::age(now)` so neither renderer retypes
+      it; and the field now carries the **right source field per rule**,
+      because "the wrong-field class" named no pairs and three of them are one
+      line apart from the right answer
+      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
+- [x] **Close the one row where `just check` is not CI** — `tester`'s, not
       `dev-core`'s, and it touches `justfile` / `.github/workflows/` only, so it
       runs alongside the rules work rather than ahead of it (disjoint trees).
       **It is deliberately not first**: it gates nothing, and the rules work is
@@ -695,7 +715,15 @@ this plan is delivery mechanism for what this phase produces.
       target is missing is only acceptable if the skip is loud enough to survive
       a green run. Found by Phase 2's closing second pass in a Phase 1 artifact,
       which is why it is a box here and not a reopening there
-      ([NOTES § D66](NOTES.md#d66--just-check-is-not-quite-the-whole-of-ci-and-the-gap-is-the-one-ci-was-built-to-watch-2026-08-13))
+      ([NOTES § D66](NOTES.md#d66--just-check-is-not-quite-the-whole-of-ci-and-the-gap-is-the-one-ci-was-built-to-watch-2026-08-13)).
+      **The skip horn won, and this machine forced it** — there is no `rustup`
+      here at all, so "require" means red forever on the machine that closes
+      phases. Paid for three ways so a *green* run still shows it: `cross` runs
+      last, the banner names every skipped target, and it goes to stderr. An
+      unknown triple and an unreadable matrix are **not** skips. `just cross`
+      now reads the target list out of `ci.yml` rather than keeping a second
+      copy — a list in two files is the drift this row was made of
+      ([NOTES § D67](NOTES.md#d67--the-cross-compile-row-closed-with-a-skip-and-what-the-skip-costs-2026-08-13))
 - [ ] Pod rules 1–8 and 12 (stuck Terminating). Rule 9 (no limits) is not an
       Alerts rule — it belongs to the Capacity report in Phase 4; rule 8 fires
       only on the escalated hostPath case. Events-based rule 11 stays deferred.
@@ -758,7 +786,19 @@ this plan is delivery mechanism for what this phase produces.
       `docs/architecture.md` § Error handling already specifies for a 403,
       not a new mechanism. N6 is unaffected (node taints + the Pending pod's
       own spec are in scope by definition)
-      ([NOTES § D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12))
+      ([NOTES § D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)).
+      **Three timestamp traps, all reachable from fields the snapshot already
+      carries:** N3 reads *that condition's* `last_transition`, never `Ready`'s
+      off the same flat `Vec`, or a DiskPressure card is dated the node's boot
+      time; N6's subject is the **pod**, so `scheduled.last_transition`, never
+      the blocking node's taint `added_at`; and N2's age is the age of the
+      *taint*, which anything rewriting `node.spec.taints` re-stamps — so the
+      card says "cordoned about 2 hours ago" and builds no argument on it.
+      **N2 also owes a kubectl line that can show the number it prints**:
+      `kubectl describe node` does not print `timeAdded`, so either the card
+      offers `-o jsonpath='{.spec.taints}'` or it records that the age is the
+      one claim `describe` cannot back
+      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
 - [ ] **Workload rules W1–W2** — W1: the pods were never created
       (`ReplicaSet.status.conditions[ReplicaFailure]`, quota/webhook/PVC
       message shown verbatim); W2: the rollout gave up
@@ -811,6 +851,27 @@ this plan is delivery mechanism for what this phase produces.
       perfect clock has a pod briefly overdue between its deadline and the
       kubelet's SIGKILL landing
       ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12))
+- [ ] **`tui-designer`: the cordon-card round, and it has to close before this
+      phase does.** `screens/alerts.md` § *the cordon card* and
+      `screens/once.md` still argue from
+      [D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)'s
+      falsified premise — quoting `Taint.timeAdded` as *"only written for
+      NoExecute taints"* — while the code already draws `2 hours ago` off the
+      capture. Three things to settle, and **the deadline is structural, not
+      tidiness**: `rules::age`'s rungs were derived from these files and freeze
+      with `rules.rs` at phase close, while its second caller `ui.rs` is Phase
+      11, so a rung this round changes afterwards is a forward-only violation
+      on the phase that can least afford one. (1) What the cordon card says now
+      that it has a number, without turning into the accusation
+      `alerts.md` deleted once — the field dates the *taint*, and anything
+      rewriting `node.spec.taints` re-stamps it. (2) **The day rung**: `1 day
+      ago` covers 24h01m through 47h59m, and `kubectl` deliberately does not
+      truncate there (`HumanDuration` prints `30h`, `47h`, then `2d3h`), so
+      k8rs is coarser than the command it teaches, in the band where "before or
+      after yesterday's change window" is the question. (3) The age column's
+      **width budget** — `alerts.md` right-aligns it with no stated maximum,
+      and the widest string is 14 characters
+      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
 - [ ] Plain-language pass over every string a user will read — the jargon test
       is "would someone in their first month understand this sentence?"
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test
@@ -942,6 +1003,19 @@ public release.
       pruned store actually fits is unmeasured, and an unmeasured number is not
       a design ([NOTES § D25](NOTES.md#d25--what-this-review-did-not-decide))
 - [ ] Startup errors (no kubeconfig / bad context) → stderr + non-zero exit
+- [ ] **The clock-skew line in the header, which D55 declared binding on later
+      boxes and nobody owned.** *"Your computer's clock is 11 minutes behind
+      the cluster — the times on this screen are wrong"*, in plain language,
+      from the API server's own `Date` response header — the only honest source
+      for the half no object timestamp can reveal, and a `k8s.rs` question,
+      which is why the box is here. It is the other half of the bound
+      `rules::age` now carries: past five minutes of skew `age` produces no
+      number at all rather than a plausible one, and a screen that goes blank
+      without saying why is a worse bug than the one it replaced. Needs a state
+      in `screens/states.md` **and** in `screens/once.md`, which has no header
+      to put it in
+      ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) ·
+      [§ D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
 - [ ] Certificate rules that need the wire: C2 (API server serving cert) and
       C3 (pending CSRs)
 - [ ] **The typed lists `analysis.rs` needs**, fetched on demand when a report
