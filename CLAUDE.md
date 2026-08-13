@@ -141,10 +141,18 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     are `--read-only` / `--context` / `--namespace` / `--once`; no `tracing`
     until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
-11. **Eight files, flat.** `main.rs / k8s.rs / ops.rs / rules.rs / analysis.rs /
-    views.rs / ui.rs / theme.rs` — no `mod.rs` pyramid, no trait layer, no
-    plugin system. Exactly one ninth is pre-approved: `dialog.rs`, if `ui.rs`
-    passes ~800 lines ([D11](NOTES.md#d11--the-ninth-file-pre-approved)).
+11. **Eight product files, flat.** `main.rs / k8s.rs / ops.rs / rules.rs /
+    analysis.rs / views.rs / ui.rs / theme.rs` — no `mod.rs` pyramid, no trait
+    layer, no plugin system. Exactly one ninth is pre-approved: `dialog.rs`, if
+    `ui.rs` passes ~800 lines ([D11](NOTES.md#d11--the-ninth-file-pre-approved)).
+    **Tests sit beside the file they test, never inside it.** A product file
+    with tests carries that one declaration —
+    `#[cfg(test)] #[path = "<name>_tests.rs"] mod tests;` — and no test code of
+    its own; the tests live in `src/<name>_tests.rs`. It is still a
+    child module — it sees the private items, and **no `lib.rs` is added**,
+    which is the thing [D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)
+    refused and still refuses. This is a convention, not a per-file judgement
+    call: every product file that has tests splits the same way.
 12. **No per-kind code in the browser.** Resource views come from API discovery
     and server-side `Table` printing; typed structs exist only where the rule
     engine needs them. A hand-written column list for a kind is a design failure.
@@ -329,6 +337,11 @@ Every path in the repo appears in exactly one **Writes** cell.
 | `k8s-admin` | nothing — reads everything, reports | every file |
 | **PM** (main session) | `todo.md` `NOTES.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/`, branches, commits, PRs | `src/` (delegate it) |
 
+**A `<name>_tests.rs` has the same writer as `<name>.rs`** (invariant 11): the
+tests move out of the file, never out of the author's hands — `tester`'s job on
+them is still to attack them, not to write them
+([D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
+
 Phase map, from [`todo.md`](todo.md): **2** → `tester` · **3–7** → `dev-core` ·
 **8–12** → `dev-ui` · **13** → PM. `tui-designer` and `k8s-admin` have no phases
 of their own; they are gates on other people's. `main.rs` is the one file whose
@@ -338,8 +351,9 @@ owner changes
 **`tests/` is fixtures and, from Phase 7, end-to-end tests — not where the rule
 tests live**
 ([D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
-Rule tests live in `#[cfg(test)] mod tests` inside the file they test, written
-by the dev who wrote it; `tester`'s job on those is step 4: attack them.
+Rule tests live in `src/rules_tests.rs` — beside the file they test, still a
+child module of it (invariant 11), written by the dev who wrote it; `tester`'s
+job on those is step 4: attack them.
 
 ### The boxes no agent can run — say so, do not fake them
 

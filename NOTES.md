@@ -2239,6 +2239,12 @@ because the guard reporting green *was* the bug.
 
 ### D50 — the rule tests live in `rules.rs`, and no lib target is added to change that (2026-08-12)
 
+> **Half of this title is out of date, the half that matters is not.** The tests
+> moved to `src/rules_tests.rs` on 2026-08-13
+> ([D80](#d80--the-tests-moved-out-of-rulesrs-and-d50s-ruling-did-not-move-with-them-2026-08-13))
+> — as a `#[path]` child module, still inside the bin crate. **No lib target was
+> added**, which is the thing this entry refused, and it is still refused.
+
 `cargo metadata` reports exactly one target — `k8rs`, kind `bin`, root
 `main.rs` — so a file under `tests/` cannot `use k8rs::rules::PodSnapshot`.
 Every rule test therefore lives inside `src/rules.rs`, which is `dev-core`'s
@@ -4418,6 +4424,77 @@ reader performs across the `Mounts:` and `Volumes:` sections; it never appears a
 one string. And `subPathExpr` is not printed by describe at all, so for that
 shape the path is unfindable in the command offered. Pre-existing, same class as
 the N2 `timeAdded` admission, recorded rather than fixed.
+
+### D80 — the tests moved out of `rules.rs`, and D50's ruling did not move with them (2026-08-13)
+
+`src/rules.rs` was 8913 lines, of which 6584 were `#[cfg(test)] mod tests` — the
+product file was a quarter of its own file. The user asked for the split and then
+asked for it as a **convention**, so it is written as one:
+[invariant 11](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+now says every product file with tests carries the single declaration
+`#[cfg(test)] #[path = "<name>_tests.rs"] mod tests;` and no test code of its own.
+Not a per-file judgement call — `analysis.rs` will split the same way in Phase 4
+without anyone deciding again.
+
+**`#[path]`, not a module directory, and above all not a lib target.**
+[D50](#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)'s
+*title* stopped being true the moment the file moved; its *ruling* is untouched
+and is the reason this shape was chosen. `#[path]` keeps `tests` a child module
+of the bin crate: it still sees the private items, `use super::*;` still resolves,
+the test paths are still `rules::tests::*` — which is why the 97-name test list
+is byte-identical before and after. The thing D50 refused was `src/lib.rs`, a
+ninth file of pure plumbing added so that tests could live in a directory. That
+is still refused. Nothing under `tests/` can reach a product type, and nothing
+here changed that; the tests did not leave the crate, they left the *file*.
+
+**The brief contradicted itself and `dev-core` said so instead of picking
+quietly.** It demanded a pure relocation — "not one test reformatted" — and
+`cargo fmt --check` clean. Both cannot hold: dedenting by four gives thirteen
+sites four more columns and rustfmt wants them unwrapped. It resolved toward fmt,
+proved the pure move *first* against the pre-fmt file with an exact-four-space
+diff — empty — and reported the reflow separately: seven sites of words re-joined
+across a line break, two of them dropping a comma the join made redundant, no
+identifier, literal or assertion text moved. That ordering is the point. Run the
+same dedent diff against the *landed* file and it is not empty; every hunk in it
+is a rustfmt line-join, which is readable only because the move was already
+proven clean underneath. Had fmt run first, no later diff could have told a moved
+test from an edited one.
+
+**The guard that broke is the finding.** `scripts/certs-test.sh` reads the pinned
+instant out of the Rust side with a `sed` range — and `fn now()` is a *test
+helper*, so the file it was reaching into was the one that moved. It needed two
+edits, not one: the path, and the range terminator `/^    }/` → `/^}/`, because a
+dedented `fn now()` closes at column 0. The second is the one that would have been
+missed: with only the path fixed the guard still yields the right instant today,
+by accident, because no other `time("…")` happens to sit before the next
+four-space `}`. **A guard that reads another file's interior by line shape is
+coupled to that file's indentation, and the coupling is invisible until the
+layout moves.** It failed loudly rather than silently only because of the
+existing `-z` "found nothing" branch — the same
+[derived-list rule](CLAUDE.md#code-phase-rules) that put it there.
+`scripts/test-guard.py` needed nothing: it `rglob`s `src/`, so it picked the new
+file up and still reported 97 declared, 97 listed.
+
+**A second drift fell out of the same look, older and unrelated to the move.**
+`docs/maps.md` said `certs-test.sh` asserts "24 / 365 / −3 days at the pinned
+`now`" — those are the certificates' *lengths*, and `now` sits one day into each,
+so the guard asserts 23 / 364 / −4 days **left**. Wrong since the row was
+written, and it survived because both numbers are plausible and neither is
+compared to anything. Fixed to say both, since the pair is what makes it
+checkable.
+
+**The operator review was skipped, and this is the PM saying so in writing.**
+[The cycle](CLAUDE.md#the-cycle--one-todomd-box-is-one-turn-of-it) step 6 is
+blocking for `rules.rs`, but a relocation has no operator surface: no rule
+changed, no card text changed, no kubectl line changed, and the mechanical
+proof — an empty diff on the 97 test *names*, and the dedent diff above — is
+stronger evidence than a read of 6584 lines would have been. What did get
+attacked is the thing a review would not have caught anyway: **a relocated test
+that can no longer fail.** `tester` reverted two implementations and watched the
+tests go red from their new home — `is_runtime_socket` → `false` reddens five,
+`out_of_memory` → `None` reddens three including the whole-capture test — with
+the panic locations naming `src/rules_tests.rs`, and `src/rules.rs` restored to
+the same sha256 afterwards. The failure mode of a move is not a wrong rule.
 
 ## Decisions made
 

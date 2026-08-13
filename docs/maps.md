@@ -37,9 +37,10 @@ step with the other three:
 
 ## `src/` — the product
 
-Eight files, flat, no `mod.rs` pyramid ([invariant 11](../CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)).
+Eight **product** files, flat, no `mod.rs` pyramid ([invariant 11](../CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)).
 Built **bottom-up and forward-only**: a file finished in an earlier step is
-frozen. Layer order is the row order below.
+frozen. Layer order is the row order below. A file's tests sit beside it in
+`<name>_tests.rs`, which is not a ninth file — see under the table.
 
 | File | Owns | Writer | State |
 |---|---|---|---|
@@ -52,10 +53,14 @@ frozen. Layer order is the row order below.
 | `ui.rs` | Drawing, keys, dialogs. A ninth file (`dialog.rs`) is pre-approved if this passes ~800 lines | `dev-ui` | Phase 11 |
 | [main.rs](../src/main.rs) | The event loop and CLI wiring — wired **last** | `dev-core` until Phase 12, then `dev-ui` | placeholder |
 
-**Rule tests live inside the file they test**, in `#[cfg(test)] mod tests` —
-the crate has one `bin` target and no `lib`, so nothing under `tests/` can
-`use` a product type
-([NOTES § D50](../NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
+**Tests sit beside the file they test**, never inside it: `src/rules.rs` carries
+`#[cfg(test)] #[path = "rules_tests.rs"] mod tests;` and no test code of its own;
+the tests live in [`src/rules_tests.rs`](../src/rules_tests.rs), same writer as
+the file they test. Still a **child module**, so it sees the private items — and
+the crate still has one `bin` target and no `lib`, which is why nothing under
+`tests/` can reach a product type and why the tests are not there
+([NOTES § D50](../NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12) ·
+[§ D80](../NOTES.md#d80--the-tests-moved-out-of-rulesrs-and-d50s-ruling-did-not-move-with-them-2026-08-13)).
 
 ## `scripts/` — the guards, and the cluster
 
@@ -74,7 +79,7 @@ is missing is a loud error, never a skipped step.
 | [cluster.sh](../scripts/cluster.sh) | `up` / `break` / `verify` / `down` for the kind test cluster, node image pinned |
 | [broken.yaml](../scripts/broken.yaml) · [healthy.yaml](../scripts/healthy.yaml) | The manifests every rule's positive and negative fixture comes from |
 | [verify-test.sh](../scripts/verify-test.sh) | Proves `cluster.sh verify`'s predicates offline — a predicate that matches the wrong state is a fixture that cannot fail |
-| [make-certs.sh](../scripts/make-certs.sh) · [certs-test.sh](../scripts/certs-test.sh) | C1's certificate fixtures with pinned dates, and the assertion that they still say 24 / 365 / −3 days at the pinned `now` |
+| [make-certs.sh](../scripts/make-certs.sh) · [certs-test.sh](../scripts/certs-test.sh) | C1's certificate fixtures with pinned dates, and the assertion that they still have **23 / 364 / −4** days *left* at the pinned `now` — the certificates are 24 / 365 / −3 days long, and `now` sits one day into each |
 | [make-csr.sh](../scripts/make-csr.sh) | The CertificateSigningRequest fixture |
 
 ## `tests/` — the data
@@ -118,8 +123,8 @@ describes people who have to be in the room. Workflows default to
 
 | I want to | Touch, in this order | Owner |
 |---|---|---|
-| Add or change a **rule** | [`src/rules.rs`](../src/rules.rs) + its tests **in the same file** → a NOTES entry for anything the plan did not decide | `dev-core` → PM |
-| Add a **report** | `src/analysis.rs` + tests in the same file | `dev-core` |
+| Add or change a **rule** | [`src/rules.rs`](../src/rules.rs) + its tests in [`src/rules_tests.rs`](../src/rules_tests.rs), same change → a NOTES entry for anything the plan did not decide | `dev-core` → PM |
+| Add a **report** | `src/analysis.rs` + its tests in `src/analysis_tests.rs` | `dev-core` |
 | Change what a **screen** looks like | `screens/<screen>.md` **first**, then `src/views.rs` / `src/ui.rs` | `tui-designer` → `dev-ui` |
 | Change a **colour** | `src/theme.rs` — and nowhere else | `dev-ui` |
 | Add a **mutation** | `src/ops.rs` only; then the dialog, the dry-run, the audit line, the command log | `dev-core` |
