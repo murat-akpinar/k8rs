@@ -3972,6 +3972,71 @@ case nobody has met yet on a real cluster. Grouping by owner already collapses a
 Deployment's fifty pods into one card. If the wall turns out to be real, it is a
 finding from a real cluster and a later box, not a guess encoded today.
 
+### D75 — the third role nobody asked about, and the card that never cleared (2026-08-13)
+
+The box said *"rules 1–6 read `initContainerStatuses` too"*. `ContainerRole` is
+a **three-way** — a native sidecar is an init container with
+`restartPolicy: Always` and is neither of the other two
+([D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12))
+— and both non-Regular roles live in that array. So the widening covers all
+three: **a crashlooping native sidecar was producing nothing at all**, which is
+the same silence the box exists to end, and nobody had noticed because the box
+named the array rather than the roles inside it. Rule 7 stays `Regular`-only;
+what a not-ready sidecar does to the pod's readiness is a different question.
+
+**The role goes in the evidence's first fact, not in six titles.** One
+`container_fact` means a role added later reaches every rule at once, where a
+per-role title would have multiplied six strings into eighteen. And each
+framing is a **property of that kind of container**, never a claim about this
+pod — *"init container migrate (the app starts only after this one finishes)"* —
+because rules 5 and 6 also reach an init container that finished long ago in a
+pod that is now serving fine, where *"the app has not started"* would be false.
+
+**`doing_its_job` is the shared suppressor, and it is role-aware because
+"serving" is meaningless for an init container.** Running-and-ready for Regular
+and Sidecar; **terminated with exit 0** for Init. Leaving the old expression
+would have shipped the exact false positive rule 6's suppressor exists to
+prevent, arriving through the other array: a wait-for-dependency loop that
+crashes until the database answers and then exits 0 keeps its restart count and
+its failed `lastState` for the pod's whole life, and drew a permanent rule 5
+**CRITICAL** plus a rule 6 WARN on a pod that is working. **Rule 5 is silent
+rather than downgraded** on a finished init container: its count is frozen and
+can never rise again, and *"looks healthy now, but something is wrong"* is a
+sentence about a container that is still running.
+
+**And rule 2 never cleared, which the widening turned up by giving it an init
+door.** A container OOMKilled once and serving ever since drew a permanent
+CRITICAL — a single OOM never reaches rule 5's `>= 3`, so nothing else carried
+it and nothing ever dismissed it. Same class as rule 6's unbounded WARN in
+[D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13),
+one band louder. **`doing_its_job` alone would have been the wrong fix:** a
+container killed five minutes ago and running now is exactly what belongs on
+the screen — the kernel just killed it and the next spike will do it again.
+What was wrong is *permanence*, so rule 2 is silent only when the container is
+doing its job **and** the kill is older than `NOT_READY_GRACE`. The card lost is
+a month-old kill on a container that has been fine since, which is a
+memory-limit question for Phase 4's Capacity report rather than a queue of what
+is broken now.
+
+Two things the dev decided inside that clause, both worth keeping: **an undated
+kill is never suppressed** — `finished_at` is an `Option` and the exemption must
+be *proved*, so `is_some_and` rather than `map_or(true, …)`, which also drops a
+future-dated kill (what clock skew produces) back into the firing branch. And
+the **asymmetry with rule 6 is documented at the rule**, or the next reader
+finds two suppressors that disagree and "fixes" one: a non-zero exit is an
+application error the restart already spent, while a kill by the kernel is a
+resource fact about a container still under the same limit — it predicts the
+next spike, which is what earns the higher band and why it may be dismissed for
+being *old* and never for being *over*.
+
+**A green test that was measuring the wrong thing**, found by the dev's own
+second pass: its control varied the *previous* run's exit code and produced
+nothing, because the suppressor keys on the **current** state — so the test
+passed for a reason unrelated to what it claimed. It is the failure
+[D26](#d26--a-green-build-that-proves-nothing-2026-08-12) describes arriving
+inside a test that had a red run: witnessing red proves the assertion is
+connected to *something*, not that it is connected to the thing named in it.
+
 ## Decisions made
 
 ### Product

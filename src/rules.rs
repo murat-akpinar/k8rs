@@ -1656,8 +1656,14 @@ const FACTS: &str = " · ";
 const RESTARTS_WARN: i32 = 3;
 const RESTARTS_CRITICAL: i32 = 10;
 
-/// **How long a pod may sit `Running` and unready before rule 7 says anything** — ten
-/// minutes, and the number is borrowed rather than tuned.
+/// **How long something may be misbehaving before it counts as a failure** — ten minutes,
+/// and the number is borrowed rather than tuned.
+///
+/// **Two rules read it.** Rule 7 asks how long a pod may sit `Running` and unready before it
+/// says anything; [`out_of_memory`] asks the same question from the other end — how recent an
+/// OOM kill has to be for a container that is serving again to still be news. One threshold
+/// for one question, so changing it moves both, which is the intent: a second hand-picked
+/// number for "how long is too long" is a number nobody can defend against the first.
 ///
 /// It is `progressDeadlineSeconds`' default, which is Kubernetes' own answer to *"how long
 /// may a pod take to become ready before that counts as a failure"*: a Deployment marks its
@@ -1706,16 +1712,29 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and
 /// the only entry point `k8s.rs` and the `--once` printer are given.
 ///
-/// Rules 1–8, 10 and 12. Rules 1–6 over `initContainerStatuses`, rule 13, the N-series,
-/// W-series and C1 are later boxes of this phase and are deliberately not wired here: a
-/// half-built rule is worse than an absent one, because the screen looks complete either
-/// way.
+/// Rules 1–8, 10 and 12. Rule 13, the N-series, W-series and C1 are later boxes of this
+/// phase and are deliberately not wired here: a half-built rule is worse than an absent one,
+/// because the screen looks complete either way.
 ///
-/// **Rules 1–7 read `containerStatuses` only**, which is [`ContainerRole::Regular`] on the
-/// merged list. The init containers are one box away (NOTES § D27) and reading them needs
-/// the finding to name *which* init container, so it is a change to every sentence in those
-/// rules and not a change to this loop. **Rules 8 and 10 are not in that sentence** and must
-/// not be read as if they were: rule 8's input is `spec.volumes` and the mounts against it,
+/// **Rules 1–6 read every container the pod has**, whichever array the kubelet reported it
+/// in — all three of [`ContainerRole`]. `status.initContainerStatuses` is a separate array,
+/// and a pod stuck at `Init:CrashLoopBackOff` produced no finding at all while `kubectl get
+/// pods` showed it plainly; init containers are where migrations and wait-for-dependency
+/// loops live, so that was the first thing to break in a freshly deployed app and the tool
+/// was silent on it (NOTES § D27). The finding says *which* container and what kind it is —
+/// [`container_fact`] — because that is the diagnosis and not a detail.
+///
+/// **A native sidecar is in that widening too, and it is not an afterthought.** It is an
+/// init container with `restartPolicy: Always` ([`ContainerRole::Sidecar`], NOTES § D51), so
+/// it lives in the same array, and a crashlooping mesh proxy is exactly as broken as a
+/// crashlooping app container — under the old filter it produced nothing at all, which is the
+/// same silence D27 is about.
+///
+/// **Rule 7 is the one exception and reads regular containers only.** Its guard is inside the
+/// rule, next to the reason for it, rather than as a second filter here.
+///
+/// **Rules 8 and 10 are not container rules at all** and must not be read as if they were:
+/// rule 8's input is `spec.volumes` and the mounts against it,
 /// which [`host_path_mounts`] walks across the init containers as well — a hostPath is
 /// mounted whatever list the container was declared in, and no status is consulted to know
 /// it. Rule 10's input is a pod condition and it reads no container at all, which is what
@@ -1755,13 +1774,9 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
         }
         findings.extend(escalated_host_path(pod));
         findings.extend(no_node_accepted_it(&snapshot.now, pod));
-        for c in pod
-            .containers
-            .iter()
-            .filter(|c| c.role == ContainerRole::Regular)
-        {
+        for c in &pod.containers {
             findings.extend(crash_looping(pod, c));
-            findings.extend(out_of_memory(pod, c));
+            findings.extend(out_of_memory(&snapshot.now, pod, c));
             findings.extend(image_not_pulled(pod, c));
             findings.extend(container_config_missing(pod, c));
             findings.extend(restarting_repeatedly(pod, c));
@@ -1826,6 +1841,77 @@ fn waiting(c: &ContainerSnapshot) -> Option<(&str, Option<&str>)> {
             Some((reason.as_deref()?, message.as_deref()))
         }
         _ => None,
+    }
+}
+
+/// **Which container this is, in words that also say what kind of container it is** — the
+/// first fact of every card rules 1–6 draw.
+///
+/// A card that names `migrate` and stops reads as an application that will not start, and
+/// sends the reader to the wrong logs. The whole diagnosis of an `Init:CrashLoopBackOff` pod
+/// is *"the app container is fine, the init one is not"* (NOTES § D27), and it runs the other
+/// way for a native sidecar too: `istio-proxy` crashing is not the application crashing.
+///
+/// Each role therefore brings its own sentence, and each one is a **property of that kind of
+/// container, never a claim about this pod**. An init container always runs before the app;
+/// it is *not* always true that the app has not started, because rules 5 and 6 also reach an
+/// init container that finished long ago inside a pod that is serving happily. A bracketed
+/// plain-language gloss beside the jargon is the shape [`exit_fact`] already uses, and
+/// invariant 14 is why both exist.
+///
+/// **A regular container gets no gloss.** It *is* the application, it is the overwhelming
+/// majority of these cards, and a clause repeated on every one of them is noise that teaches
+/// the reader to skip the line where the other two roles say something.
+fn container_fact(c: &ContainerSnapshot) -> String {
+    match c.role {
+        ContainerRole::Regular => format!("container {}", c.name),
+        ContainerRole::Init => format!(
+            "init container {} (the app starts only after this one finishes)",
+            c.name
+        ),
+        ContainerRole::Sidecar => format!(
+            "sidecar container {} (it runs beside the app the whole time)",
+            c.name
+        ),
+    }
+}
+
+/// **Is this container doing the job it was given, right now?** — the suppressor
+/// [`restarting_repeatedly`] and [`previous_run_failed`] share, and the one place the answer
+/// depends on [`ContainerRole`].
+///
+/// For a [`Regular`](ContainerRole::Regular) or a [`Sidecar`](ContainerRole::Sidecar) it is
+/// *running and ready*, which is the expression both rules always used: both run for as long
+/// as the pod does, so "doing its job" and "serving" are the same sentence about them.
+///
+/// **For an [`Init`](ContainerRole::Init) container "serving" means nothing at all.** It is
+/// asked to run once and finish, and success is `exit 0` — it is never running and never
+/// ready in the sense the other two are, so the expression written for them answers *no* for
+/// every init container that ever succeeded. That is not a near miss at the edge: it is the
+/// commonest init container there is. A wait-for-dependency loop that crashes until the
+/// database answers and then exits `0` leaves a restart count and a failed `lastState` on the
+/// pod **for the pod's entire life**, and without this branch every such pod carries a
+/// permanent CRITICAL from rule 5 and a permanent WARN from rule 6 while nothing at all is
+/// wrong with it. That is the same false-positive volume rule 6's own suppressor was written
+/// to stop, arriving through the other status array (NOTES § D2).
+///
+/// **A failed init container is deliberately not settled by this.** `exit 0` and nothing
+/// else: an init container that stopped on a non-zero code is why the pod is not starting,
+/// and it is exactly who rules 5 and 6 are for.
+///
+/// **No committed capture reaches the init branch with anything to suppress.**
+/// `healthy.json`'s `migrate` is precisely this shape — terminated, `exit 0`, `ready: true` —
+/// but it succeeded first time, so it carries no restart count and no `lastState` and both
+/// rules are silent on it whatever this function answers. The branch is exercised on a
+/// *decoded copy* with a retry's history written onto it, the technique this file already
+/// uses for a shape no capture holds (NOTES § D53 — the committed JSON is never touched).
+/// **Capture trip:** an init container in `scripts/healthy.yaml` that fails twice and then
+/// succeeds — one `sh -c` and a counter file in an `emptyDir`.
+fn doing_its_job(c: &ContainerSnapshot) -> bool {
+    match (&c.state, c.role) {
+        (ContainerState::Running { .. }, _) => c.ready,
+        (ContainerState::Terminated(run), ContainerRole::Init) => run.exit_code == 0,
+        _ => false,
     }
 }
 
@@ -1912,7 +1998,7 @@ fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     if reason != "CrashLoopBackOff" {
         return None;
     }
-    let mut facts = vec![format!("container {}", c.name)];
+    let mut facts = vec![container_fact(c)];
     if c.restarts > 0 {
         facts.push(format!("{} restarts", c.restarts));
     }
@@ -1948,12 +2034,58 @@ fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
 /// rather than guessed — a pod-level limit can kill a container that declares none, and
 /// this snapshot does not carry one, so the number genuinely is not here
 /// ([`PodSnapshot::cpu_request`]).
-fn out_of_memory(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+///
+/// **Quiet on an old kill that the container has been fine since — and on nothing weaker
+/// than that.** `lastState.terminated` is kept for the life of the pod, so a container
+/// OOMKilled once and serving ever since would otherwise draw a permanent **CRITICAL**: a
+/// single kill never reaches [`restarting_repeatedly`]'s `>= 3`, so nothing else carries that
+/// pod and nothing ever clears it. That is [`previous_run_failed`]'s permanence problem one
+/// band louder, and it arrives on the ordinary path — no unusual manifest, only uptime
+/// (NOTES § D2).
+///
+/// **What is wrong there is the permanence, not the serving case, so [`doing_its_job`] alone
+/// is the wrong suppressor here.** A container the kernel killed five minutes ago and that is
+/// running now is exactly what an operator wants on this screen: the kill just happened and
+/// it will happen again on the next spike. Both halves are therefore required — the container
+/// is doing its job **and** the kill is old. It still fires, whatever the age, on a container
+/// that is not doing its job, which is every crash loop and every pod still down.
+///
+/// **The age threshold is [`NOT_READY_GRACE`], borrowed the way rule 7 borrows it** rather
+/// than tuned here: ten minutes is `progressDeadlineSeconds`' default, Kubernetes' own answer
+/// to how long a pod may be misbehaving before that counts as a failure, and a second
+/// hand-picked number for the same question is a number nobody can defend. The card an
+/// operator loses is a month-old OOM on a container that has been fine since — which is a
+/// memory-limit question and belongs to the Capacity report in Phase 4, not to a queue of
+/// what is broken *now*.
+///
+/// **An undated kill is never suppressed.** `finished_at` is `Option`, and the exemption has
+/// to be *proved*, not assumed: a kill that cannot be dated might have happened a minute ago,
+/// so the card stays. That is the opposite direction from rule 7's "no condition, no finding"
+/// and deliberately so — there, the missing field is the rule's own trigger; here it is the
+/// evidence for standing down. A kill dated in the *future*, which clock skew produces, fails
+/// the same test and also keeps its card.
+///
+/// **Why this is stricter than [`previous_run_failed`]'s suppressor, which needs no clock.**
+/// That rule stands down on a serving container at any age, and the asymmetry is the
+/// difference between the two subjects rather than an inconsistency. A non-zero exit is an
+/// application error whose meaning the restart exhausted — it ran, it failed, it runs now. A
+/// kill by the kernel is a *resource* fact about a container that is still under the same
+/// limit, so it predicts the next spike; that is what earns it the higher band, and it is
+/// also why it may only be dismissed for being old rather than for being over.
+fn out_of_memory(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     let run = c.last_terminated.as_ref()?;
     if run.reason.as_deref() != Some("OOMKilled") {
         return None;
     }
-    let mut facts = vec![format!("container {}", c.name)];
+    if doing_its_job(c)
+        && run
+            .finished_at
+            .as_ref()
+            .is_some_and(|t| now.0.duration_since(t.0) > NOT_READY_GRACE)
+    {
+        return None;
+    }
+    let mut facts = vec![container_fact(c)];
     if let Some(limit) = &c.memory_limit {
         facts.push(format!("limit {limit}"));
     }
@@ -1992,10 +2124,7 @@ fn image_not_pulled(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding>
     if !matches!(reason, "ErrImagePull" | "ImagePullBackOff") {
         return None;
     }
-    let mut facts = vec![
-        format!("container {}", c.name),
-        format!("image {}", c.image),
-    ];
+    let mut facts = vec![container_fact(c), format!("image {}", c.image)];
     facts.extend(message.map(str::to_string));
     Some(Finding {
         severity: Severity::Critical,
@@ -2022,7 +2151,7 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
     if reason != "CreateContainerConfigError" {
         return None;
     }
-    let mut facts = vec![format!("container {}", c.name)];
+    let mut facts = vec![container_fact(c)];
     facts.extend(message.map(str::to_string));
     Some(Finding {
         severity: Severity::Critical,
@@ -2063,24 +2192,46 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 /// six weeks and forty in an hour are the same integer, and this snapshot cannot tell them
 /// apart. The band stays; what it may reach on a working container does not.
 ///
-/// **That leaves the CRITICAL branch with no capture behind it.** It now needs a container
-/// with ten or more restarts that is neither serving nor in a crash loop — a real but
-/// transient state, caught between restarts or waiting on something else — and no committed
-/// fixture is in it, so a mutation that makes the band unreachable stays green. **Capture
-/// trip:** a pod photographed mid-restart, or one whose many restarts ended in a different
-/// waiting reason such as `ImagePullBackOff` after a tag was moved. The same capture closes
-/// the `&& !serving` half from the other side — `broken-restarts` sits at three, below
-/// `RESTARTS_CRITICAL`, so no fixture can tell the two spellings of this severity apart and
-/// only the constants themselves are asserted.
+/// **That leaves the CRITICAL branch with no *capture* behind it, and it is now reached.**
+/// It needs a container with ten or more restarts that is neither serving nor in a crash
+/// loop — a real but transient state, caught between restarts or waiting on something else —
+/// and no committed fixture is in it. What reaches it is the decoded copy the suppressor
+/// below is proven on, an init container that gave up on a non-zero exit, so a mutation that
+/// makes the band unreachable no longer stays green. **What is still unpinned is the `&&
+/// !serving` half from the other side:** the only *serving* container with a count is
+/// `broken-restarts` at three, below `RESTARTS_CRITICAL`, so nothing distinguishes this
+/// severity from a plain `restarts >= RESTARTS_CRITICAL`, and the constants themselves are
+/// asserted separately. **Capture trip:** a pod photographed mid-restart, or one whose many
+/// restarts ended in a different waiting reason such as `ImagePullBackOff` after a tag was
+/// moved — and, for the half above, a serving container that has passed ten.
+///
+/// **And quiet on an init container that has already finished successfully.** "Looks healthy
+/// now" is a sentence about a container that is still running; an init container that exited
+/// `0` is done, its count can never go up again, and the pod it belongs to is serving. It
+/// would otherwise be a permanent card — a CRITICAL one, since `!serving` is what pushes the
+/// band up — on every pod whose wait-for-dependency loop crashed a few times before the
+/// database answered, which is the commonest init container there is ([`doing_its_job`], and
+/// NOTES § D2 for why a permanent card on a working pod is the expensive kind of wrong).
 ///
 /// The age is when the counter last went up, which is [`Terminated::finished_at`] on the
 /// previous run: the restart is the event this card is about. A container with a count and
 /// no previous run recorded has no such moment and draws none ([`Finding::timestamp`]).
 fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    // An init container that has finished successfully is out of this rule's subject
+    // altogether, not merely a milder case of it: its count is frozen for the life of the
+    // pod, and every sentence below is about a container something is *still* killing
+    // ([`doing_its_job`]).
+    if c.role == ContainerRole::Init && doing_its_job(c) {
+        return None;
+    }
     if c.restarts < RESTARTS_WARN || waiting(c).map(|(r, _)| r) == Some("CrashLoopBackOff") {
         return None;
     }
-    let serving = c.ready && matches!(c.state, ContainerState::Running { .. });
+    // Every container that reaches here is judged by the expression this rule always used:
+    // `doing_its_job` is *running and ready* for a regular and for a sidecar container, and
+    // the one init case that differs returned above — so the title below cannot say "it is
+    // serving now" about a container that has stopped.
+    let serving = doing_its_job(c);
     Some(Finding {
         severity: if c.restarts >= RESTARTS_CRITICAL && !serving {
             Severity::Critical
@@ -2096,7 +2247,7 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
         } else {
             format!("Container has been restarted {} times", c.restarts)
         },
-        evidence: [format!("container {}", c.name), c.image.clone()].join(FACTS),
+        evidence: [container_fact(c), c.image.clone()].join(FACTS),
         action: "check the memory limit and the liveness probe — those are what restart a \
                  container that otherwise runs"
             .to_string(),
@@ -2119,9 +2270,10 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
 /// (NOTES § v1 rule set). Firing on either would put a card on a healthy cluster.
 ///
 /// **Neither exemption has a capture behind it, and that is stated rather than hidden.**
-/// Every regular container in the repository whose previous run is recorded exited `1` or
-/// `137`, so a mutation that deletes these two comparisons stays green — the one place in
-/// this box where the suite cannot tell right from wrong. **Capture trip:** two pods in
+/// Every container in the repository whose previous run is recorded exited `1` or `137` —
+/// the init containers this rule now also reads included — so a mutation that deletes these
+/// two comparisons stays green, and it is the one place in this box where the suite cannot
+/// tell right from wrong. **Capture trip:** two pods in
 /// `scripts/broken.yaml`, both with `restartPolicy: Always` — one whose command exits `0`
 /// and restarts, and one that a failing `livenessProbe` stops, where an unhandled SIGTERM
 /// leaves `143`. Until then the two `if`s are reasoned and unproven.
@@ -2141,6 +2293,14 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
 /// belongs to [`restarting_repeatedly`], which has a threshold under it; a single old
 /// failure has none and never will.
 ///
+/// **"Serving" is the wrong word for an init container, and [`doing_its_job`] is where that
+/// is decided.** An init container is asked to run once and stop, so it is never running and
+/// ready, and the expression written for regular containers exempts none of them — which
+/// would put this permanent WARN on every pod whose init container failed once before it
+/// worked. Read that function before changing this line: the suppressor and the false
+/// positive it removes are the same argument for both roles, and only the test for "it is
+/// doing what it was asked" differs.
+///
 /// **When the kubelet kept the container's last words, they replace the advice.** Telling
 /// someone to go and read a log k8rs is already holding is the shape of a tool that
 /// restates the object instead of answering ([`Terminated::message`]).
@@ -2149,14 +2309,14 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
     if run.exit_code == 0
         || run.exit_code == 143
         || run.reason.as_deref() == Some("OOMKilled")
-        || (c.ready && matches!(c.state, ContainerState::Running { .. }))
+        || doing_its_job(c)
     {
         return None;
     }
     // The kubelet's `reason` for a non-zero exit is the bare word `Error`, which says
     // nothing the title has not already said in a sentence — printing it would be jargon
     // on the card for its own sake (invariant 14).
-    let mut facts = vec![format!("container {}", c.name)];
+    let mut facts = vec![container_fact(c)];
     if let Some(d) = lasted(run) {
         facts.push(format!("ran for {d}"));
     }
@@ -2238,7 +2398,23 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
 /// **No condition, no finding.** A pod whose `Ready` condition has not been written has no
 /// since-when to test against, and the safe answer there is silence rather than the version
 /// of this rule that has no clock at all.
+///
+/// **Regular containers only — the one rule of the seven that is.** Rules 1–6 read every
+/// container the pod has, whichever array it came from (NOTES § D27, [`analyze`]); this one
+/// is deliberately not widened with them. Its sentence is about a pod's place in a Service,
+/// which this rule already approximates per container, and for a **sidecar** that
+/// approximation asks a different question: it is not the container answering the traffic,
+/// and telling the reader to go and check "the readiness probe" while a mesh proxy is the one
+/// failing is a wrong instruction given confidently. An **init** container is not in the
+/// picture at all — it runs *before* the app rather than beside it, and it is not what a
+/// Service ever sends traffic to; it is also never in [`ContainerState::Running`] once it has
+/// done its job, so the state check above already answers for the finished ones and only the
+/// mid-run ones would reach here. What a not-ready sidecar does to the pod's own readiness is
+/// a rule of its own, not a branch of this one (invariant 13).
 fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    if c.role != ContainerRole::Regular {
+        return None;
+    }
     let ContainerState::Running { started_at } = &c.state else {
         return None;
     };
@@ -2259,7 +2435,7 @@ fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
         // Two renderers and one rule already share these strings; the screen spec and the
         // rule that fills it must not be a third place they can drift.
         title: "Running, but not receiving traffic — the readiness check is failing".to_string(),
-        evidence: [format!("container {}", c.name), c.image.clone()].join(FACTS),
+        evidence: [container_fact(c), c.image.clone()].join(FACTS),
         action: "check the readiness probe: the path, the port, and whether the application \
                  answers it yet"
             .to_string(),
@@ -2668,7 +2844,12 @@ fn stuck_terminating(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use k8s_openapi::api::core::v1::{Taint as ApiTaint, Toleration as ApiToleration};
+    // `ContainerStateRunning` is imported here and not beside the decode's own types: no
+    // product code in this file constructs one, and the top-level list is what `rules.rs`
+    // reads off the API.
+    use k8s_openapi::api::core::v1::{
+        ContainerStateRunning, Taint as ApiTaint, Toleration as ApiToleration,
+    };
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
     use std::collections::{BTreeSet, HashSet};
 
@@ -3405,8 +3586,10 @@ mod tests {
         );
     }
 
-    /// D27's blind spot: this pod's app container is fine and the init one is dead, and
-    /// reading only `containerStatuses` produces no finding at all.
+    /// D27's blind spot, at the decode: this pod's app container is fine and the init one is
+    /// dead, and a snapshot built from `containerStatuses` alone would hand the rules nothing
+    /// to fire on. The rules do read both arrays now ([`analyze`]); what this test holds is
+    /// the list they read it off.
     #[test]
     fn the_init_container_is_in_the_list_and_marked_as_one() {
         let raw = fixture("init");
@@ -6443,6 +6626,97 @@ mod tests {
         );
     }
 
+    /// **Rule 2's permanence, and the two directions that separate it from a suppressor that
+    /// would be wrong.**
+    ///
+    /// `lastState.terminated` never expires, so a container the kernel killed once and that
+    /// has served ever since would draw a CRITICAL for the life of the pod — and a single kill
+    /// never reaches [`restarting_repeatedly`]'s `>= 3`, so nothing else carries that pod and
+    /// nothing ever clears it. But *serving* is not what makes it wrong: a container killed
+    /// five minutes ago and running now is exactly what belongs on this screen, because the
+    /// next spike will do it again. Only the two together stand the rule down.
+    ///
+    /// Both directions are asserted, or the clause is half-proven — one of them alone passes
+    /// against `if doing_its_job(c)` on its own, and the other against a rule that has stopped
+    /// firing at all.
+    ///
+    /// The shape is `oom.json`'s own container with the kill moved into its past and the
+    /// restart count set to the `1` of a container that was killed once, written onto a
+    /// **decoded copy** (NOTES § D53 — the committed JSON is not touched). One restart is what
+    /// keeps rule 5 out of the answer, so the silence below is rule 2's own and not a count
+    /// that happened to fall under a threshold.
+    #[test]
+    fn an_old_kill_on_a_container_that_has_been_fine_since_is_not_on_the_broken_now_screen() {
+        /// The captured OOM, still `137 / OOMKilled`, on a container that is running and
+        /// ready again — with the kill placed `mins` before the pinned [`now`].
+        fn killed_and_recovered(mins: i64) -> PodSnapshot {
+            let when = Time(
+                now()
+                    .0
+                    .checked_sub(SignedDuration::from_mins(mins))
+                    .expect("a moment before the pinned now"),
+            );
+            let mut object: Pod =
+                serde_json::from_value(fixture("oom")).expect("oom.json is a Pod");
+            let hog = &mut object
+                .status
+                .as_mut()
+                .expect("the captured pod has a status")
+                .container_statuses
+                .as_mut()
+                .expect("the captured pod has a container status")[0];
+            assert_eq!(hog.name, "hog");
+            hog.restart_count = 1;
+            hog.ready = true;
+            hog.state = Some(ApiContainerState {
+                running: Some(ContainerStateRunning {
+                    started_at: Some(when.clone()),
+                }),
+                ..ApiContainerState::default()
+            });
+            hog.last_state
+                .as_mut()
+                .and_then(|s| s.terminated.as_mut())
+                .expect("the capture's OOM kill")
+                .finished_at = Some(when);
+            PodSnapshot::from(object)
+        }
+
+        let long_ago = killed_and_recovered(60 * 24 * 30);
+        let hog = container(&long_ago, "hog");
+        assert!(
+            doing_its_job(hog)
+                && hog.restarts < RESTARTS_WARN
+                && matches!(&hog.last_terminated, Some(run)
+                    if run.reason.as_deref() == Some("OOMKilled")),
+            "the edit has to leave a serving container that still carries the kill, and a \
+             count below rule 5's band so nothing else answers for this pod: {hog:?}"
+        );
+        nothing(
+            &analyze(&pods_at(vec![long_ago], now())),
+            "the kernel killed this container a month ago and it has been serving ever \
+             since. Nothing is broken *now*, and the card could never be cleared — whether \
+             its limit is right is a memory-limit question for the Capacity report (D2)",
+        );
+
+        // The other direction, and the reason `doing_its_job` alone is the wrong suppressor:
+        // the kill is inside the grace, so it is news.
+        let just_now = killed_and_recovered(5);
+        let all = analyze(&pods_at(vec![just_now], now()));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "a container the kernel killed five minutes ago is running now on borrowed time, \
+             and it will happen again on the next spike: {:?}",
+            titles(&all)
+        );
+        assert_eq!(
+            only(&all, "broken-oom", "OOMKilled").severity,
+            Severity::Critical
+        );
+    }
+
     /// Rule 2, and the one place two rules would otherwise describe a single death.
     #[test]
     fn the_out_of_memory_card_names_the_limit_and_rule_6_stays_out_of_its_way() {
@@ -6966,14 +7240,21 @@ mod tests {
         );
     }
 
-    /// **What this box deliberately does not answer**, asserted so that the next box has a
-    /// test that goes from red to green rather than a claim in a commit message.
+    /// **The pod the rule set could not see** (NOTES § D27), and the card that now names it.
+    ///
+    /// This test is the previous box's guard, turned over rather than deleted: it asserted
+    /// that `broken-init` produced *nothing*, which was true and was the blind spot. What
+    /// makes it worth keeping is its shape — it asserts the capture's preconditions before it
+    /// asserts the outcome, so a capture whose init container had quietly healed cannot pass
+    /// a widened rule set by producing nothing and calling that agreement.
+    ///
+    /// **The diagnosis is which container, not that a container is broken.** `migrate` is in
+    /// `Init:CrashLoopBackOff` with fifteen restarts while `app` sits at `PodInitializing`
+    /// waiting for it, and a card that named `migrate` without saying what an init container
+    /// *is* reads as an application that will not start — sending the reader to the app's
+    /// logs, which are empty, because the app has not run (invariant 14).
     #[test]
-    fn the_rules_this_box_does_not_carry_are_silent_and_not_half_built() {
-        // Rules 1–6 over `initContainerStatuses` is the next box (D27). This pod's
-        // init container is in `Init:CrashLoopBackOff` with fifteen restarts and its app
-        // container is merely waiting on it — so the pod produces nothing today, which is
-        // exactly the blind spot D27 describes and the reason it is a box.
+    fn the_crash_looping_init_container_is_found_and_the_card_says_what_kind_it_is() {
         let init = pod("init");
         let migrate = container(&init, "migrate");
         assert_eq!(migrate.role, ContainerRole::Init);
@@ -6984,10 +7265,286 @@ mod tests {
             "a capture whose init container is healthy proves nothing about the gap: {:?}",
             migrate.state
         );
+        assert!(
+            matches!(&container(&init, "app").state, ContainerState::Waiting { reason, .. }
+                if reason.as_deref() == Some("PodInitializing")),
+            "and the app container has to be the *healthy* half of the diagnosis — a pod \
+             whose app container was broken too would let a card about `app` pass for a card \
+             about `migrate`: {:?}",
+            container(&init, "app").state
+        );
+
+        let all = findings(&["init"]);
+        show(&all);
+        assert_eq!(
+            all.len(),
+            2,
+            "rules 1 and 6 on `migrate`, and nothing on `app`: a container that is waiting \
+             for the init sequence is not itself broken, and a card about it would send the \
+             reader to a log that is empty because the process never ran: {:?}",
+            titles(&all)
+        );
+
+        for f in &all {
+            assert!(
+                f.evidence.contains("init container migrate"),
+                "the finding has to name the init container — 'the app container is fine, \
+                 the one before it is not' is the whole diagnosis (D27): {}",
+                f.evidence
+            );
+            assert!(
+                f.evidence
+                    .contains("the app starts only after this one finishes"),
+                "and it has to say what an init container is, in words that need no \
+                 glossary. `init container migrate` alone reads as an application that \
+                 will not start (invariant 14): {}",
+                f.evidence
+            );
+        }
+
+        let looping = only(&all, "broken-init", "CrashLoopBackOff");
+        assert_eq!(
+            looping.severity,
+            Severity::Critical,
+            "the pod cannot start at all, which is as broken as a pod gets"
+        );
+        assert!(
+            looping.evidence.contains("15 restarts"),
+            "the init container's own count, not the app container's zero: {}",
+            looping.evidence
+        );
+
+        let previous = only(&all, "broken-init", "previous run failed");
+        assert_eq!(
+            previous.severity,
+            Severity::Warn,
+            "rule 6 is the WARN beside rule 1's CRITICAL wherever the container is *also* \
+             broken right now, and it is the exit code that says why"
+        );
+    }
+
+    /// **The sidecar's negative, and the precondition without which it proves nothing.**
+    ///
+    /// `healthy-sidecar.json` is in the healthy set above, and a widened rule set being
+    /// silent on it would be a green line whatever its `proxy` container decoded as — a
+    /// capture whose sidecar came out `Regular` would assert nothing about the role this box
+    /// added. So the role is asserted here, on the object, before the silence is claimed.
+    ///
+    /// A native sidecar *is* reached by rules 1–6 ([`analyze`]) — a crashlooping mesh proxy
+    /// is exactly as broken as a crashlooping app container — so the silence here is the
+    /// rules agreeing that a running, ready proxy with no restarts and no previous run is
+    /// fine, not the rules failing to look.
+    #[test]
+    fn a_healthy_native_sidecar_is_looked_at_by_every_rule_and_still_says_nothing() {
+        let p = pod("healthy-sidecar");
+        let proxy = container(&p, "proxy");
+        assert_eq!(
+            proxy.role,
+            ContainerRole::Sidecar,
+            "`restartPolicy: Always` on an init container is what makes it a sidecar \
+             (D51) — without this the test below is about a regular container"
+        );
+        assert!(
+            proxy.ready
+                && matches!(proxy.state, ContainerState::Running { .. })
+                && proxy.restarts == 0
+                && proxy.last_terminated.is_none(),
+            "and it has to be a *working* sidecar for its silence to mean anything: {proxy:?}"
+        );
         nothing(
-            &findings(&["init"]),
-            "reading `initContainerStatuses` is the next box, and half-building it would \
-             leave a finding that cannot say which container it is about",
+            &findings(&["healthy-sidecar"]),
+            "nothing about this proxy is broken, and the rules that now read its array have \
+             to say so as plainly as they do for a regular container",
+        );
+    }
+
+    /// **Rule 7 did not widen with rules 1–6, and this is the only thing that says so.**
+    ///
+    /// The narrowing is a deliberate silence, and a silence leaves no card to assert — delete
+    /// the role guard in [`running_but_not_ready`] and every committed capture still produces
+    /// exactly what it produced before, because no capture holds a sidecar that is running and
+    /// not ready. So the shape is written onto a decoded copy of `healthy-sidecar.json`: the
+    /// proxy stops passing its readiness check, hours before the pinned [`now`] and well past
+    /// [`NOT_READY_GRACE`] (NOTES § D53 — the committed JSON is not touched).
+    ///
+    /// **The control is the identical edit applied to the regular container beside it**, which
+    /// *must* draw the card. Without it this test would pass against a rule 7 that had stopped
+    /// working altogether, and it would be asserting that a broken rule is quiet rather than
+    /// that a working one is narrow.
+    ///
+    /// Why the narrowing, rather than a card each: rule 7's sentence sends the reader to *the
+    /// readiness probe*, and on a meshed pod the proxy is not the container answering the
+    /// traffic. What a not-ready sidecar does to its pod's own readiness is a rule of its own
+    /// (invariant 13), and it is not this one wearing a wider filter.
+    #[test]
+    fn rule_seven_stays_on_the_container_that_answers_the_traffic() {
+        /// The capture with one container's readiness flipped, and the pod's `Ready`
+        /// condition flipped with it so the object is one the apiserver could have written.
+        /// The condition's `lastTransitionTime` is left where the capture put it — it is the
+        /// since-when rule 7 measures, and moving it would be moving the goalposts.
+        fn unready(name: &str) -> PodSnapshot {
+            let mut object: Pod = serde_json::from_value(fixture("healthy-sidecar"))
+                .expect("healthy-sidecar.json is a Pod");
+            let status = object
+                .status
+                .as_mut()
+                .expect("the captured pod has a status");
+            for c in status
+                .conditions
+                .iter_mut()
+                .flatten()
+                .filter(|c| c.type_ == "Ready" || c.type_ == "ContainersReady")
+            {
+                c.status = "False".to_string();
+            }
+            let found = status
+                .init_container_statuses
+                .iter_mut()
+                .chain(status.container_statuses.iter_mut())
+                .flatten()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("the capture has no container {name}"));
+            found.ready = false;
+            PodSnapshot::from(object)
+        }
+
+        let sidecar = unready("proxy");
+        let proxy = container(&sidecar, "proxy");
+        assert!(
+            proxy.role == ContainerRole::Sidecar
+                && matches!(proxy.state, ContainerState::Running { .. })
+                && !proxy.ready,
+            "the edit has to leave a *running* sidecar that is not ready — every other \
+             condition of rule 7 is already met by the capture: {proxy:?}"
+        );
+        nothing(
+            &analyze(&pods_at(vec![sidecar], now())),
+            "a mesh proxy failing its readiness check is not 'the readiness probe of this \
+             application is failing', and the card would send the reader to the wrong probe",
+        );
+
+        let app = unready("app");
+        assert_eq!(
+            container(&app, "app").role,
+            ContainerRole::Regular,
+            "the control has to be the other role, or it proves nothing"
+        );
+        let all = analyze(&pods_at(vec![app], now()));
+        show(&all);
+        only(&all, "healthy-sidecar", "not receiving traffic");
+        assert_eq!(
+            all.len(),
+            1,
+            "and the identical edit on the regular container beside it does draw the card — \
+             without this the test above would pass against a rule 7 that had stopped firing \
+             at all: {:?}",
+            titles(&all)
+        );
+    }
+
+    /// **The init container that failed twice and then worked** — the commonest init
+    /// container there is, and the one shape that would have turned this box into two
+    /// permanent cards on a healthy pod.
+    ///
+    /// `healthy.json`'s `migrate` is already the settled half of it: terminated, `exit 0`,
+    /// `ready: true`. What no capture holds is the *history* — it succeeded first time, so it
+    /// has no restart count and no `lastState`, and rules 5 and 6 are silent on it whatever
+    /// [`doing_its_job`] answers. The retry is written onto a **decoded copy**, the technique
+    /// this file already uses for a shape no capture holds; the committed JSON is not touched
+    /// (NOTES § D53).
+    ///
+    /// Both numbers are chosen to make the failure loud rather than marginal: fifteen
+    /// restarts is over [`RESTARTS_CRITICAL`], so without the suppressor rule 5 draws a
+    /// **red** card on a pod that is serving, and the failed previous run puts rule 6's
+    /// permanent WARN beside it.
+    ///
+    /// **The control is the same edit with the last attempt still failing**, and it is what
+    /// makes the silence above mean something: the suppressor is about the container having
+    /// *succeeded*, not about it being an init container, so an init container that gave up
+    /// owes both cards. Without this half the test would pass just as well against a rule set
+    /// that had stopped reading init containers altogether.
+    ///
+    /// **It is the container's *current* state that decides, not `lastState`** — the first
+    /// draft of this control varied the previous run's exit code and produced nothing at all,
+    /// because the container was still sitting on the capture's own `exit 0` and was
+    /// correctly suppressed. A control that cannot fail for the right reason is the defect it
+    /// was written to catch, one level up.
+    #[test]
+    fn an_init_container_that_retried_and_then_succeeded_draws_no_card() {
+        /// The retry history written onto the decoded capture — fifteen failures, and a
+        /// *current* run that ended with the given code: `0` is the init container that got
+        /// there in the end, anything else is the one that gave up.
+        fn ended(exit_code: i32) -> PodSnapshot {
+            fn run(exit_code: i32, from: &str, to: &str) -> ApiContainerState {
+                ApiContainerState {
+                    terminated: Some(ContainerStateTerminated {
+                        exit_code,
+                        reason: Some(
+                            if exit_code == 0 { "Completed" } else { "Error" }.to_string(),
+                        ),
+                        started_at: Some(Time(from.parse().expect("a valid time"))),
+                        finished_at: Some(Time(to.parse().expect("a valid time"))),
+                        ..ContainerStateTerminated::default()
+                    }),
+                    ..ApiContainerState::default()
+                }
+            }
+
+            let mut object: Pod =
+                serde_json::from_value(fixture("healthy")).expect("healthy.json is a Pod");
+            let migrate = &mut object
+                .status
+                .as_mut()
+                .expect("the captured pod has a status")
+                .init_container_statuses
+                .as_mut()
+                .expect("this pod declares an init container")[0];
+            assert_eq!(migrate.name, "migrate");
+            migrate.restart_count = 15;
+            migrate.state = Some(run(
+                exit_code,
+                "2026-08-12T20:45:04Z",
+                "2026-08-12T20:45:06Z",
+            ));
+            migrate.last_state = Some(run(1, "2026-08-12T20:45:00Z", "2026-08-12T20:45:02Z"));
+            PodSnapshot::from(object)
+        }
+
+        let succeeded = ended(0);
+        let migrate = container(&succeeded, "migrate");
+        assert_eq!(migrate.role, ContainerRole::Init);
+        assert!(
+            migrate.restarts >= RESTARTS_CRITICAL
+                && matches!(&migrate.state, ContainerState::Terminated(run) if run.exit_code == 0),
+            "the edit has to land on a *finished* init container carrying enough restarts to \
+             reach rule 5's red band, or the silence below is unearned: {migrate:?}"
+        );
+
+        nothing(
+            &analyze(&pods_at(vec![succeeded.clone()], now())),
+            "this init container did what it was asked to do — it finished, and the pod has \
+             been serving ever since. Its restart count is frozen and its failed previous run \
+             is kept for the life of the pod, so a card here is permanent and there is \
+             nothing behind it to act on (D2)",
+        );
+
+        // The other side of the same edit: the suppressor is about *success*, not about the
+        // role. An init container that stopped on a non-zero code is why a pod is not
+        // starting, and both rules owe it a card.
+        let failed = ended(1);
+        let all = analyze(&pods_at(vec![failed], now()));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            2,
+            "rules 5 and 6 on an init container that gave up: {:?}",
+            titles(&all)
+        );
+        assert_eq!(
+            only(&all, "healthy", "restarted 15 times").severity,
+            Severity::Critical,
+            "and the band is the one `!serving` puts it in — which is exactly the red card \
+             the successful run above must not draw"
         );
     }
 
@@ -7446,9 +8003,10 @@ mod tests {
 
         assert_eq!(
             all.len(),
-            12,
+            14,
             "two on the crash loop, two on the OOM, one image, one config, one unplaceable, \
-             two host mounts, one readiness, one restart counter, one terminating: {:?}",
+             two host mounts, one readiness, one restart counter, one terminating — and two \
+             on the init container that was invisible until this box (D27): {:?}",
             titles(&all)
         );
 

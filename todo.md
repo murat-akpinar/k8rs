@@ -770,10 +770,21 @@ this plan is delivery mechanism for what this phase produces.
       down entirely on a pod with a `deletionTimestamp` — true is not the same
       as actionable, and rule 12 owns that pod and names the finalizer
       ([NOTES § D73](NOTES.md#d73--rule-10-and-the-test-that-argued-for-its-own-deletion-2026-08-13))
-- [ ] **Rules 1–6 read `initContainerStatuses` too.** A pod at
+- [x] **Rules 1–6 read `initContainerStatuses` too.** A pod at
       `Init:CrashLoopBackOff` produces no finding otherwise, and the finding
       has to name the init container — "the app container is fine, the init one
-      is not" is the diagnosis
+      is not" is the diagnosis.
+      **Three roles, not two** — a native sidecar is an init container with
+      `restartPolicy: Always` and lives in the same array, and a crashlooping
+      one was producing nothing at all. The role is the evidence's first fact
+      rather than six extra titles, and each framing is a property of that kind
+      of container, never a claim about the pod. `doing_its_job` is role-aware
+      because "serving" is meaningless for an init container: terminated with
+      exit 0. **Rule 2's permanent CRITICAL was fixed here too** — one OOM
+      never reached rule 5's threshold, so nothing carried it and nothing
+      cleared it; it is silent only when the container is doing its job *and*
+      the kill is older than the grace
+      ([NOTES § D75](NOTES.md#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13))
 - [ ] **Rule 13 — placed on a node, but the containers never started.** The
       twelfth Alerts rule, added on 2026-08-13 by an explicit reversal of
       [invariant 13](CLAUDE.md)'s scope guard: the `ContainerCreating` wedge is
@@ -992,6 +1003,17 @@ this plan is delivery mechanism for what this phase produces.
         **network** branch (`False`) needs the sandbox itself to fail and may
         not be reachable on kind without breaking the CNI cluster-wide; if it
         is not, say so in the box rather than leaving it looking untried.
+      - **the two init/sidecar branches with no capture** — an init container
+        in `scripts/healthy.yaml` that fails twice and then **succeeds** (the
+        wait-for-dependency loop, which is what rules 5 and 6 must stay silent
+        on once it has finished), and a **sidecar that is running but not
+        ready**. Both are proven today on decoded copies rather than on
+        committed JSON
+      - **a serving container carrying an OOM kill in `lastState`** — no
+        committed capture has one, because `oom.json`'s container is
+        crashlooping, so both directions of rule 2's recency clause are proven
+        only on a decoded copy. One pod that gets OOMKilled once and then stays
+        up closes it on real JSON.
       - **rule 14's positive side, and it is the cheapest one here** — a pod
         with `schedulerName: does-not-exist`. Nothing picks it up, so no
         `PodScheduled` condition is ever written; no control-plane surgery, and
