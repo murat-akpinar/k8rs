@@ -843,7 +843,7 @@ this plan is delivery mechanism for what this phase produces.
       telling that apart from one bad `schedulerName` needs cross-pod
       reasoning, and that waits for a real cluster to show the wall is real
       ([NOTES § D74](NOTES.md#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13))
-- [ ] Node rules N1–N6 (NotReady · cordoned · pressure · kubelet skew ·
+- [x] Node rules N1–N6 (NotReady · cordoned · pressure · kubelet skew ·
       overcommit · what blocks a Pending pod). **N1's card has to reach the
       pods, not only the node** — every pod rule reads pod *status*, and the
       status of a pod whose kubelet stopped posting is a fossil that never
@@ -853,11 +853,16 @@ this plan is delivery mechanism for what this phase produces.
       the gap was found. Without this, Alerts says "node NotReady" in one place
       and nothing about the thing the user cares about
       ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
-      **N2 reports no duration and
-      fires only when the cordoned node still has pods a drain would move** —
-      nothing records when a cordon happened, so without that narrowing every
-      routine maintenance window raises an alert; a cordoned node with nothing
-      movable left is parked, not broken, and belongs to the Capacity report.
+      **N2's age is optional, and it fires only when the cordoned node still
+      has pods a drain would move** — the narrowing is what stops every routine
+      maintenance window raising an alert; a cordoned node with nothing movable
+      left is parked, not broken, and belongs to the Capacity report.
+      **The "no duration" this box used to require was reversed by
+      [NOTES § D65](NOTES.md#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13)**:
+      the node lifecycle controller stamps `timeAdded` on the `NoSchedule`
+      taint it mirrors from `spec.unschedulable`, so a `kubectl cordon` carries
+      a time and only a hand-applied `kubectl taint` does not. The card is
+      drawn both ways, and the *gate* never depended on the clock.
       The finding names the pod count. **"Still has pods" is not the same as
       "a drain left something behind":** a drain never evicts DaemonSet pods
       or static pods, so counting every pod fires N2 on every correctly
@@ -894,7 +899,17 @@ this plan is delivery mechanism for what this phase produces.
       `kubectl describe node` does not print `timeAdded`, so either the card
       offers `-o jsonpath='{.spec.taints}'` or it records that the age is the
       one claim `describe` cannot back
-      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
+      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+      **Shipped, and four things landed that this box did not ask for**
+      ([NOTES § D81](NOTES.md#d81--the-node-rules-and-the-four-things-a-real-cluster-said-about-them-2026-08-13)):
+      D69's choice above resolved to **`describe node`**, because it backs the
+      title and the count while `jsonpath` backs only the optional age; **N6 is
+      not a card** but the node half of rule 10's, since the two fire on one
+      population and D28 forbids two cards for one pod; **`SUPPORTED_SKEW` is
+      3**, upstream's number, not the 2 this repo had written down; and a
+      **managed-taint translation table** exists because naming those keys raw
+      told the reader to tolerate a cordon, an unreachable node and an
+      autoscaler's own scale-down
 - [ ] **Workload rules W1–W2** — W1: the pods were never created
       (`ReplicaSet.status.conditions[ReplicaFailure]`, quota/webhook/PVC
       message shown verbatim); W2: the rollout gave up
@@ -1088,7 +1103,11 @@ this plan is delivery mechanism for what this phase produces.
       off the printed cards, three actions run 200, 149 and 146 characters
       (rule 10's scheduler advice, rule 1's pull advice, rule 8's socket
       advice), and at `alerts.md`'s 45-column card pane the socket action alone
-      wraps to four lines by itself. Shortening them is not the fix: each is
+      wraps to four lines by itself. **N6's merge made the worst case worse
+      rather than adding a fourth entry**: rule 10's card now carries N6's
+      sentence *and* the scheduler's verbatim message on one `·`-joined
+      evidence line, which `screens/alerts.md` § N6 draws at **twelve** lines
+      and says so rather than pretending it fits. Shortening them is not the fix: each is
       long because it answers a question the reader actually has
       ([NOTES § D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
       for why rule 8's grew). Mitigating, from D3: findings group by owner, so a
@@ -1183,8 +1202,19 @@ Goal: the same findings and reports, from a living cluster — and the first
 public release.
 
 - [ ] `k8s.rs`: kube-rs `watcher` over Pods, Nodes and
-      Deployments/StatefulSets/DaemonSets (the last three: metadata + status
-      only) + prune (drop `managedFields`) → snapshot store
+      Deployments/StatefulSets/DaemonSets + prune (drop `managedFields`) →
+      snapshot store. **The prune line is "the fields the snapshot types in
+      `rules.rs` name, across metadata, spec *and* status" — "metadata + status
+      only" was never true of this design** and this box said it until
+      2026-08-13
+      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+      **And no snapshot is published until every initial LIST has landed.** A
+      rule cannot tell a partial list from a small cluster — invariant 5 leaves
+      it no way to ask — so a snapshot emitted mid-bootstrap makes rule 10 say
+      "none of the 3 nodes have that label" on a 200-node cluster, and makes
+      N2's count and N5's sum confidently wrong. `namespace_scope` covers the
+      *deliberately* partial pod list and nothing covers a *transient* one;
+      this box is where that hole closes, because nowhere above it can
       ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
 - [ ] **Owner name resolution**: a pod's `ownerReferences` names its
       *ReplicaSet*, and the group heading has to read `web`, not

@@ -1777,12 +1777,12 @@ pin moves up, so it is quoted here with its version.)
 The two controllers that cordon most nodes in the wild do stamp the time:
 cluster-autoscaler's `ToBeDeletedByClusterAutoscaler` taint carries *the unix
 second the scale-down began* as its **value** (`utils/taints/taints.go`:
-`Value: fmt.Sprint(time.Now().Unix())`, added by the same call that cordons),
-added by the same call that cordons). **Karpenter is *not* its equivalent, and
+`Value: fmt.Sprint(time.Now().Unix())`, added by the same call that cordons).
+**Karpenter is *not* its equivalent, and
 an earlier version of this entry said it was** — `karpenter.sh/disrupted` is
 declared with a key and an effect and no `Value` field at all
 (`kubernetes-sigs/karpenter/pkg/apis/v1/taints.go`), and it is `NoSchedule`, so
-`Taint::time_added` is empty too. On a Karpenter cluster there is no clock
+`Taint::added_at` is empty too. On a Karpenter cluster there is no clock
 anywhere in the node object. The claim was corrected on the same day it was
 written, by an operator review that went to the source instead of accepting the
 symmetry.
@@ -4496,6 +4496,199 @@ tests go red from their new home — `is_runtime_socket` → `false` reddens fiv
 the panic locations naming `src/rules_tests.rs`, and `src/rules.rs` restored to
 the same sha256 afterwards. The failure mode of a move is not a wrong rule.
 
+### D81 — the node rules, and the four things a real cluster said about them (2026-08-13)
+
+N1–N6 landed together. Four decisions in this entry reverse something this repo
+already said in writing, and three of the four were caught by an operator review
+that went to a live cluster and to upstream source instead of reasoning from the
+documents.
+
+**The gate order is the entry's actual subject, because each gate caught what the
+one before it could not.** The author's own pass produced six rules and 21 tests
+that were green. `k8s-admin` — reading as an operator, against a live cluster —
+found eight, one of them a blocker. The author fixed all eight, witnessed red and
+green on each, and was green again. `tester` then reproduced those eight
+independently and found **six more**, including that the blocker was still live on
+the other branch of the same `if`. Nobody was careless at any step; every finding
+was invisible from where the previous reader was standing. A green build after a
+fix is not evidence the fix was complete
+([D26](#d26--a-green-build-that-proves-nothing-2026-08-12)), and this box is the
+sharpest example the project has produced.
+
+**N6 is not a card. It is rule 10's second half.** `no_node_accepted_it` already
+fires on N6's exact population — `PodScheduled=False`, `reason=Unschedulable` —
+and its own comment, written phases earlier, says the node half "is N6's".
+Shipping both would have put two cards on one screen for one pod, which
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) calls the
+thing that stops the list being believable. So N6 supplies the first half of rule
+10's evidence and its action when the node join can name a cause, and rule 10
+keeps the strings it had when it cannot.
+[D37](#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)
+survives intact: the scheduler's sentence stays on the card, `·`-joined after
+N6's, because it is the only place the *other* refusals appear. The cost is
+geometry — that card is now twelve lines against `widgets.md`'s three-to-five —
+and it is recorded on the open card-geometry box rather than paid for by cutting
+a sentence the reader needs.
+
+**N6 was telling people to defeat Kubernetes' own safety mechanisms, and the
+policy that closes it is a general one.** The first implementation named any
+`NoSchedule`/`NoExecute` taint every candidate node carried. On a single-node
+cluster — kind, minikube, k3s, Docker Desktop, which is most of this tool's
+audience — `kubectl cordon` followed by a deploy produced *"add a toleration for
+`node.kubernetes.io/unschedulable`, or remove the taint"*. The answer is
+`kubectl uncordon`. With `node.kubernetes.io/unreachable` it was worse: the card
+told the reader to schedule onto a dead machine, "remove the taint" is impossible
+because the node controller re-adds it within seconds, and **N1 was drawing "This
+node has stopped responding" three cards up the same screen**. The sharpest
+instance is `ToBeDeletedByClusterAutoscaler`, which N2 is deliberately silent on
+as an operation in progress
+([D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12))
+while rule 10 offered to tolerate it — two rules in one file disagreeing about
+one taint. **The ruling: never tell the reader to tolerate a taint the node
+controller manages.** Those families are translated, not printed raw, which is
+[invariant 14](CLAUDE.md) as well — `node.kubernetes.io/unschedulable` bare is
+the `CrashLoopBackOff`-printed-and-left case. `node-role.kubernetes.io/control-plane`
+is the one where "add a toleration" is genuinely right, so this is a translation
+table and not a suppression list.
+
+**The kubelet skew threshold was ours, was wrong, and the test locked it in.**
+This file said two minors. Upstream's version-skew policy says a kubelet may be
+**three** minors older than `kube-apiserver`, and has since 1.28 — the two-minor
+limit applies only to kubelet < 1.25. The card's title claims a node is *"too far
+behind the control plane to be supported"*, which is a claim about upstream's
+policy rather than about this project's taste, and it was false across a whole
+minor version: every cluster mid-upgrade would have had supported nodes listed as
+unsupported by the Versions report, whose entire product is that list. The test
+planted `v1.33` under `v1.36`, asserted it was unsupported, and pinned the
+constant against this document — so the suite was holding the wrong number in
+place. `SUPPORTED_SKEW` is 3, and the N-series table above now carries upstream's
+number with upstream named.
+
+**N2's kubectl line reversed twice, and the second reversal overturned the PM's
+own ruling.**
+[D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)
+offered two ways to handle `describe node` not printing `timeAdded`: print a
+command that *can* show it, or record that the age is the one claim `describe`
+cannot back. The PM picked the first and put `-o jsonpath='{.spec.taints}'` in
+the brief. Run against a live node, that prints the taint array and nothing else:
+it backs only the **age**, the optional half of the card; it backs *nothing the
+card claims* when `added_at` is `None`; and it hands a beginner raw JSON.
+`describe node` prints `Unschedulable: true` and the `Non-terminated Pods`
+table — the title and the count, and the count *is* the trigger D43 narrowed this
+rule to. So the command is `describe node`, and the screen states that the age is
+the single claim no command behind this card can show. `screens/` keeps the wrong
+turn visible rather than replacing it with the answer, because the next person
+will reach for jsonpath for the same reason.
+
+**The blocker looked like arithmetic. It was a missing test, and believing the
+first diagnosis is what let it survive being fixed.** N5 compared CPU as `f64`:
+`quantity_value` turns `"100m"` into `100.0 * 1e-3`, millicores are not
+representable in binary, and the comparison carried no tolerance. An exactly-full
+node — legal and ordinary, since `noderesources.Fit` admits while
+`request <= allocatable - requested` — summed to `0.30000000000000004 > 0.3` and
+drew a card whose two numbers printed *identically*. Across realistic
+allocatables packed exactly full, 19% fired, and the result was sum-order
+dependent, so a node at the line would flap as watch events reordered the pod
+list. The fix moved the whole rule to integer millicores.
+
+**And the bug survived it.** The boundary test written alongside the fix planted
+`allocatable.cpu` only, so mutating the *memory* comparison to `>=` left all 121
+tests green — the same defect, the same card printing two identical numbers, on
+the branch nobody had stood a test on. Integers did not save the memory branch,
+because integers were never what was wrong: **nothing in the suite was standing
+on the line.** Every committed fixture was comfortably over or comfortably under,
+which is how this survived a review that reproduced it, a fix, and a passing
+build. The lesson `f64` was hiding: **a boundary is a place, not a data type**,
+and a fix aimed at the mechanism rather than at the untested place leaves the
+other half of the same `if` exactly as it was. The rule that follows from it —
+assert the boundary from both sides, on every branch that has one — is worth more
+than the arithmetic story it replaced.
+
+Two more came out of the same pass, both of them things a reader would have
+called impossible. **A pure rule panicked**, on `(numerator + denominator - 1)`
+in the new integer parse: every multiplication around it was `checked_`, that
+addition was not, and `170141183460469231731687303715884105m` reached it through
+an ordinarily decoded pod. Not hypothetical — put to a live apiserver with
+`--dry-run=server`, the string is **accepted and stored verbatim**. In release it
+does not even panic; it wraps to a negative millicore count and feeds the
+comparison. That is [invariant 5](CLAUDE.md) broken by the fix for the blocker.
+And `quantity_milli` refused the exponent form on a doc comment claiming the API
+server canonicalises `1e3` to `1k` before it can arrive — true unquoted, false
+quoted, because `Quantity` caches its original string and Helm charts quote their
+quantities routinely. The measured cost on the project's own capture was one
+whole node silently absent from the Capacity report. `[eE][+-]?[0-9]+` is in
+upstream's Quantity grammar and `ParseQuantity` accepts it, so this was another
+sentence about what the API can hand us that was true of its author's model
+rather than of an apiserver — the [D79](#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
+pattern, third occurrence, and the reason the habit that catches it is putting
+the sentence to a server rather than to a reviewer.
+
+**Four ceilings on the taint table, each one a thing the next reader would
+otherwise re-derive wrongly.** They are in the code's doc comment too, but they
+belong here or the comment is arguing with nobody.
+
+- **No row may promise another card.** The first draft's `not-ready` and
+  `unreachable` actions said *"there is a card for it on this screen"*. N1 waits
+  `NODE_DOWN_GRACE` — five minutes — before it draws anything, and the taints do
+  not wait at all: `nodelifecycle`'s `doNoScheduleTaintingPass` runs off the node
+  informer, so the taint lands a fraction of a second after `Ready` flips. The
+  300 seconds everyone reaches for belongs to the **NoExecute** taint — eviction,
+  not scheduling. A runtime dying at 03:02 and a deploy at 03:03 sent the reader
+  hunting a card that arrives at 03:07; a node with no `Ready` condition at all
+  never gets one. **Aligning N1's grace to the taint was the wrong repair and was
+  refused**: that number is borrowed from
+  `--default-unreachable-toleration-seconds` and is not to be tuned to make a
+  sentence true. The rows point at the machine and stop.
+- **`node-role.kubernetes.io/control-plane` can never join the table, for a
+  structural reason rather than a judgement about that taint.** Every row here is
+  one whose removal is impossible (the controller re-adds it) or pointless (it
+  clears itself). The control-plane taint is neither — nothing changes on its
+  own — so *"wait"* or *"check the machine"* would strand the reader, while both
+  halves of the untranslated wording are the real answers: the documented
+  single-node kubeadm fix is literally
+  `kubectl taint nodes --all node-role.kubernetes.io/control-plane-`.
+- **`network-unavailable` names the network plugin and that is deliberately the
+  only answer it names.** The other producer of `NodeNetworkUnavailable=True` is
+  the cloud **route controller**, waiting on routes to the node's pod CIDR — a
+  control-plane problem, not something on that machine. Route-based networking is
+  legacy now, and cloud jargon does not belong on a card a kind user can see, so
+  the common producer wins the sentence.
+- **`memory-pressure` survives a trap that would have inverted its advice.** The
+  `PodTolerationRestriction` admission plugin adds an `Exists` toleration for it
+  to every non-BestEffort pod, which would have made *"Kubernetes stops placing
+  new pods"* true only of BestEffort ones and *"free up memory"* the wrong advice
+  against *"give this pod a memory request"*. The plugin is **not** default-enabled
+  in 1.36, so the sentence holds on a default cluster; where it is enabled,
+  `tolerated()` matches the auto-toleration and the branch is never reached. Safe
+  in both directions — which is only knowable by checking, and was checked.
+
+**One ceiling on the raw-key guard, recorded so nobody strips the wrong thing.**
+The tests assert no managed taint key reaches the screen. A key can still arrive
+inside the scheduler's own message, which
+[D37](#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)
+requires carried verbatim. The pinned v1.36.1 scheduler summarises — `1 node(s)
+had untolerated taint(s)`, no key — so the assertion is safe today. If a future
+scheduler names keys again the test reddens, and the fix is to narrow the
+assertion to k8rs's own half of the evidence, **never** to edit the quote.
+
+**What the review confirmed is worth as much as what it caught.** N5's sum was
+computed against `kubectl describe node`'s *Allocated resources* on three live
+nodes and matched on all six numbers — the check that matters, because an
+operator will run exactly that command and a disagreement costs the card its
+credibility. `tolerated()` is upstream's `Toleration.ToleratesTaint` field for
+field. All three of D69's timestamp traps are avoided. And the cordon taint
+carries `timeAdded` in the committed capture's real API bytes, so
+[D65](#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13)'s
+claim is evidence rather than inference.
+
+**Three rules ship with no captured positive**, planted on decoded copies
+([D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)):
+N1's `Ready: False` branch (`break-nodes` stops a kubelet, which yields
+`Unknown`), N3 entirely, N4 entirely. Each carries a capture-trip note. The one
+that matters is N3 — its mutation does **not** redden the whole-capture test,
+because no captured node is under pressure, so the planted test is its only
+proof.
+
 ## Decisions made
 
 ### Product
@@ -4721,9 +4914,9 @@ an admin actually reacts to:
 | # | Finding | Source field |
 |---|---|---|
 | N1 | Node NotReady for more than 5 min — the pods on it are dead weight | `status.conditions[Ready]` + `lastTransitionTime` |
-| N2 | **Cordoned with pods a drain would still move** — a drain someone started and did not finish. **No duration** (`kubectl cordon` records no time) and **no finding when nothing movable is left** — that is a parked node and a Capacity row. Not counted: `Succeeded`/`Failed` pods, DaemonSet pods and static pods, none of which a drain ever evicts; and the rule is silent on a node carrying an autoscaler scale-down taint ([D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12) · [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | `spec.unschedulable` + the pod↔node join |
+| N2 | **Cordoned with pods a drain would still move** — a drain someone started and did not finish. **The age is optional, not absent**: the node lifecycle controller stamps `timeAdded` on the `NoSchedule` taint it mirrors from `spec.unschedulable`, so a `kubectl cordon` *does* carry a time and a hand-applied `kubectl taint` does not ([D65](#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13)) — and `kubectl describe node` cannot print it, so the card's command is `-o jsonpath='{.spec.taints}'`. **No finding when nothing movable is left** — that is a parked node and a Capacity row. Not counted: `Succeeded`/`Failed` pods, DaemonSet pods and static pods, none of which a drain ever evicts; and the rule is silent on a node carrying an autoscaler scale-down taint ([D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12) · [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | `spec.unschedulable` + the pod↔node join |
 | N3 | DiskPressure / MemoryPressure / PIDPressure — evictions are coming | `status.conditions` |
-| N4 | kubelet version skew > 2 minor from the control plane = unsupported | `status.nodeInfo.kubeletVersion` |
+| N4 | kubelet version skew **> 3 minor** from the control plane = unsupported. **The number is upstream's, not ours** — the version-skew policy allows a kubelet three minors older than `kube-apiserver` (the two-minor limit applies only to kubelet < 1.25), and this table said 2 until 2026-08-13, which told every cluster mid-upgrade that a supported node was unsupported ([D81](#d81--the-node-rules-and-the-four-things-a-real-cluster-said-about-them-2026-08-13)) | `status.nodeInfo.kubeletVersion` |
 | N5 | Overcommitted: sum of pod requests exceeds allocatable. A native sidecar (`restartPolicy: Always` on an init container) is **added**, not maxed — the scheduler charges `max( max over init prefix , sum(regular) + sum(restartable-init) )` ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | node + pod join |
 | N6 | Which taint / nodeSelector is blocking a Pending pod | node taints + pod spec |
 

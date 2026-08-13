@@ -168,6 +168,7 @@ pub struct Finding {
     /// | 8 | **`None`** — a standing property, not an event (NOTES § D69) | `metadata.creationTimestamp` |
     /// | 12 | `deletionTimestamp − grace` (NOTES § D46) | the `deletionTimestamp` itself, the deadline |
     /// | 14 | `metadata.creationTimestamp` — the one rule whose event never happened (NOTES § D74) | — |
+    /// | N1 | the `Ready` condition's `last_transition` — the node's own, and the one it fires on | — |
     /// | N2 | the cordon taint's [`Taint::added_at`], which dates the taint and not the cordon (NOTES § D65) | — |
     /// | N3 | *that* condition's `last_transition` | `Ready`'s, off the same flat `Vec` |
     /// | N6 | the pod's `scheduled` `last_transition` | the blocking node's taint `added_at` |
@@ -1248,9 +1249,13 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and the only
 /// entry point `k8s.rs` and the `--once` printer are given.
 ///
-/// Rules 1–8, 10 and 12–14. The N-series, W-series and C1 are later boxes of this phase and are
-/// deliberately not wired here: a half-built rule is worse than an absent one, because the screen
-/// looks complete either way.
+/// Rules 1–8, 10 and 12–14, and the node rules that draw a card — N1, N2 and N3. The W-series and
+/// C1 are later boxes of this phase and are deliberately not wired here: a half-built rule is worse
+/// than an absent one, because the screen looks complete either way. **N4 and N5 are not missing,
+/// they are `Info`**: they are the Versions and Capacity reports' input and no `Info` finding
+/// reaches the Alerts list, so `analysis.rs` calls them and this does not (NOTES § D2).
+/// **N6 is not here either, and is not missing**: it is the node half of rule 10's card, which is
+/// why [`no_node_accepted_it`] takes the nodes.
 ///
 /// **Rules 1–6 read every container the pod has**, in either status array and whichever of
 /// [`ContainerRole`] it is (NOTES § D27, § D75). **Rule 7 is the one exception and reads regular
@@ -1264,13 +1269,18 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// still stuck. **No committed capture is in either state** — todo.md's capture-trip box.
 pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
     let mut findings = Vec::new();
+    for node in &snapshot.nodes {
+        findings.extend(node_stopped_being_ready(snapshot, node));
+        findings.extend(cordoned_with_work_left_on_it(snapshot, node));
+        findings.extend(node_running_low(node));
+    }
     for pod in &snapshot.pods {
         findings.extend(stuck_terminating(&snapshot.now, pod));
-        if matches!(pod.phase.as_deref(), Some("Succeeded" | "Failed")) {
+        if finished(pod) {
             continue;
         }
         findings.extend(escalated_host_path(pod));
-        findings.extend(no_node_accepted_it(&snapshot.now, pod));
+        findings.extend(no_node_accepted_it(&snapshot.now, pod, &snapshot.nodes));
         findings.extend(placed_but_never_started(&snapshot.now, pod));
         findings.extend(nothing_has_looked_at_it(&snapshot.now, pod));
         for c in &pod.containers {
@@ -1322,6 +1332,36 @@ fn in_namespace(id: &ObjectId) -> String {
     id.namespace
         .as_deref()
         .map_or_else(String::new, |ns| format!(" -n {ns}"))
+}
+
+/// **`payments/web`, or `node-3` for something cluster-scoped** — how a card names an object in a
+/// line of prose, which is how `screens/alerts.md` writes both. Spelled once because N1's evidence
+/// names owners and the renderers name the same objects in the title (Phase 9).
+fn qualified(id: &ObjectId) -> String {
+    match &id.namespace {
+        Some(ns) => format!("{ns}/{}", id.name),
+        None => id.name.clone(),
+    }
+}
+
+/// **`a` · `a and b` · `a, b and 2 more`** — the list `screens/alerts.md` § N1 spells, and the
+/// only shape a card ever lists names in. Two is the cap on purpose: the third name is worth less
+/// than the sentence's readability, and the count that follows it carries the total anyway.
+fn listed(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first, second] => format!("{first} and {second}"),
+        [first, second, rest @ ..] => format!("{first}, {second} and {} more", rest.len()),
+    }
+}
+
+/// **Is this pod over?** — `Succeeded` or `Failed`, whose restart counts, last exits and requests
+/// belong to the **Waste** report and to nobody's node (NOTES § D2, § D71). Asked by [`analyze`]
+/// before the pod rules and by every node rule that joins pods to a node: a `Succeeded` Job pod
+/// keeps its `nodeName` for as long as nobody collects it ([`PodSnapshot::phase`]).
+fn finished(pod: &PodSnapshot) -> bool {
+    matches!(pod.phase.as_deref(), Some("Succeeded" | "Failed"))
 }
 
 /// The reason and the runtime's own sentence, for a container that is waiting — and `None` for
@@ -1936,7 +1976,14 @@ fn is_runtime_socket(path: &str) -> bool {
 /// the renderers owe it what [`Finding::evidence`] asks. **Nothing here touches a
 /// container**: an unschedulable pod has no `containerStatuses` at all, so a rule shaped like
 /// rules 1–7 would go silent on its own fixture.
-fn no_node_accepted_it(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
+///
+/// **N6 is this card's second half, not a second card.** The node rules answer *which* taint or
+/// label is doing the refusing ([`what_is_blocking_it`]), and that answer lands in the evidence and
+/// the action of this finding — two findings for one pod is what stops the list being believable
+/// (NOTES § D28). The subject stays the pod, so the identity is the pod's and the node is named in
+/// the evidence (NOTES § D37, `screens/alerts.md` § N6). **When the join has no answer — no node
+/// list, or nothing the two halves can be pinned on — the card is exactly what it was.**
+fn no_node_accepted_it(now: &Time, pod: &PodSnapshot, nodes: &[NodeSnapshot]) -> Option<Finding> {
     let scheduled = pod.scheduled.as_ref()?;
     if scheduled.status != "False" || scheduled.reason.as_deref() != Some("Unschedulable") {
         return None;
@@ -1958,6 +2005,7 @@ fn no_node_accepted_it(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
     // No stamp is not "recent": a pod that cannot be shown to have just become
     // unplaceable is read as one that has been that way, which is the safe direction.
     let resolving = since.is_some_and(|t| now.0.duration_since(t.0) <= NOT_READY_GRACE);
+    let blocking = what_is_blocking_it(pod, nodes);
     Some(Finding {
         severity: if resolving {
             Severity::Warn
@@ -1976,21 +2024,36 @@ fn no_node_accepted_it(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
                 ""
             }
         ),
-        // The scheduler's sentence, verbatim and framed (NOTES § D37). The prefix does two
-        // invariant-14 jobs: it says a machine wrote this, and it glosses the one word that
-        // would otherwise split the card into two vocabularies — the title says *machine*, the
-        // scheduler says *node*.
-        evidence: scheduled.message.as_deref().map_or_else(String::new, |m| {
-            format!("the scheduler's own words (a node is one machine): {m}")
-        }),
-        // **Only the half the command can answer.** The node half needs
-        // `kubectl get nodes --show-labels`, which this card does not print, and it is N6's;
-        // asking for work the command beside it cannot start points invariant 4's teaching device
-        // away from itself. No reference to the line above either — it is empty whenever the
-        // message is missing.
-        action: "check what this pod asks for: the node labels it selects, which machines \
+        // **N6's answer first, then the scheduler's sentence, verbatim and framed**
+        // (NOTES § D37). k8rs's own diagnosis leads because it is the plain-language one and it
+        // names the field to change; the quote stays because it is the only place the *other*
+        // refusals appear — this pod's own message counts four nodes and two different reasons.
+        // The prefix does two invariant-14 jobs: it says a machine wrote this, and it glosses the
+        // one word that would otherwise split the card into two vocabularies — the title says
+        // *machine*, the scheduler says *node*.
+        evidence: blocking
+            .iter()
+            .map(|b| b.evidence.clone())
+            .chain(
+                scheduled
+                    .message
+                    .as_deref()
+                    .map(|m| format!("the scheduler's own words (a node is one machine): {m}")),
+            )
+            .collect::<Vec<_>>()
+            .join(FACTS),
+        // **Only the half the command can answer**, when the nodes are not there to answer the
+        // other one: asking for work the command beside it cannot start points invariant 4's
+        // teaching device away from itself. No reference to the line above either — it is empty
+        // whenever the message is missing and there is nothing to blame.
+        action: blocking.map_or_else(
+            || {
+                "check what this pod asks for: the node labels it selects, which machines \
                  it says it can run on, and how much cpu and memory it requests"
-            .to_string(),
+                    .to_string()
+            },
+            |b| b.action,
+        ),
         kubectl_cmd: get_yaml(&pod.id),
         owner: pod.owner.clone(),
         object: pod.id.clone(),
@@ -2325,6 +2388,955 @@ fn stuck_terminating(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
 }
 
 // --- THE POD RULES END ---
+
+// --- THE NODE RULES START ---
+//
+// N1–N6 of NOTES § Node rules. **Three of the six draw a node card** — N1, N2, N3 — and
+// [`analyze`] wires those. **N4 and N5 are `Info`** and are the Versions and Capacity reports'
+// input, so they are computed here and read by `analysis.rs` (Phase 4): a skewed kubelet and an
+// over-promised node are risks, not outages (NOTES § D2). **N6 is not a card at all** —
+// [`what_is_blocking_it`] is the node half of rule 10's, and it files under the pod.
+//
+// **Four of the six join the pods to a node, and a partial pod list makes two of them lie.** N2's
+// count *is* its trigger and N5's sum *is* its verdict, so both go silent under a namespace scope
+// and the screen names the check that did not run — Phase 9's banner, not a finding from here
+// (NOTES § D43, § D46). N1's count is evidence rather than trigger, so it fires either way and
+// drops the line; N6 reads node taints and the pod's own spec, which are in scope by definition.
+
+/// **How long a node may be un-Ready before it is an outage** — five minutes, and the number is
+/// borrowed rather than tuned: it is `--default-unreachable-toleration-seconds`, the 300 seconds
+/// the admission controller writes on to every pod in the cluster, which is Kubernetes' own answer
+/// to *how long do we wait for a node before moving what is on it* (NOTES § Node rules).
+const NODE_DOWN_GRACE: SignedDuration = SignedDuration::from_mins(5);
+
+/// **The taint the node lifecycle controller mirrors from `spec.unschedulable`**, and the only
+/// place a cordon carries a time — `kubectl cordon` writes the boolean, the controller writes this
+/// and stamps it (NOTES § D65, [`Taint::added_at`]).
+const CORDON_TAINT: &str = "node.kubernetes.io/unschedulable";
+
+/// **The two taints that mean an autoscaler is deliberately emptying this node**, on which N2 is
+/// silent: the node is cordoned *with pods on it* for the whole eviction window by design, so a
+/// card here fires repeatedly on a cluster doing exactly what it was configured to do. A
+/// scale-down that never finishes is the **Drain safety** report's row, not an Alerts card
+/// (NOTES § D43).
+const SCALE_DOWN_TAINTS: [&str; 2] = ["ToBeDeletedByClusterAutoscaler", "karpenter.sh/disrupted"];
+
+/// **The three conditions that mean the kubelet is about to start evicting**, each with the noun
+/// N3's title uses and the fix its action asks for (`screens/alerts.md` § N3). One table, because
+/// the three cards differ in nothing else.
+const PRESSURES: [(&str, &str, &str); 3] = [
+    (
+        "DiskPressure",
+        "disk space",
+        "free up disk space on this node",
+    ),
+    ("MemoryPressure", "memory", "free up memory on this node"),
+    (
+        "PIDPressure",
+        "process IDs",
+        "find what is creating so many processes",
+    ),
+];
+
+/// **How many minor versions a kubelet may be behind the control plane and still be supported** —
+/// **three**, which is upstream's own window since 1.28: *"kubelet may be up to three minor
+/// versions older than kube-apiserver"* (NOTES § D81, reversing the two this project first wrote
+/// down; two was the rule for a kubelet older than 1.25).
+///
+/// **The number belongs to upstream and not to us, because the card makes a claim about upstream**
+/// — *"too far behind to be supported"* — and at two it told everybody mid-upgrade that a
+/// supported cluster was unsupported.
+const SUPPORTED_SKEW: u32 = 3;
+
+/// **Only these two effects keep a pod off a node.** `PreferNoSchedule` is a preference the
+/// scheduler will overrule to place a pod, so a card blaming one would name a taint that is not
+/// refusing anything.
+const BLOCKING_EFFECTS: [&str; 2] = ["NoSchedule", "NoExecute"];
+
+/// **The taints Kubernetes writes and Kubernetes removes** — what each one means, and what to do
+/// about it, because *"add a toleration for it"* is the wrong answer to every row here
+/// (NOTES § D81).
+///
+/// **Never tell the reader to tolerate a taint the node controller manages.** On a single-node
+/// cluster — kind, minikube, k3s, Docker Desktop, which is who this tool is for — `kubectl cordon`
+/// followed by a deploy made N6 print *"add a toleration for node.kubernetes.io/unschedulable"*
+/// when the answer is `kubectl uncordon`. `unreachable` is worse: it asks the reader to schedule
+/// onto a dead machine, the taint cannot be removed because the controller re-adds it in seconds,
+/// and N1 is drawing *"this node has stopped responding"* on the same screen. And
+/// `ToBeDeletedByClusterAutoscaler` is one this very file already calls *an operation in progress*
+/// in [`SCALE_DOWN_TAINTS`], so offering to tolerate it is two rules disagreeing about one taint.
+///
+/// It is a **translation**, not a suppression: the card still says which machines and why, in the
+/// words invariant 14 asks for — a bare `node.kubernetes.io/unschedulable` on screen is
+/// `CrashLoopBackOff` printed and left. **A taint that is not here keeps the toleration wording**,
+/// which is right for exactly the case it was written for: `node-role.kubernetes.io/control-plane`
+/// on a single-node kubeadm cluster.
+///
+/// **No row promises a card that may not be there.** N1 waits [`NODE_DOWN_GRACE`] before it draws
+/// anything, and the `not-ready` / `unreachable` taints do not wait at all — `nodelifecycle`'s
+/// `doNoScheduleTaintingPass` runs off the node informer, so the taint lands a fraction of a second
+/// after `Ready` flips, while the card is five minutes away. (The 300 seconds everyone remembers
+/// belongs to the **NoExecute** taint: eviction, not scheduling.) So a runtime that dies at 03:02
+/// and a deploy at 03:03 would have sent the reader hunting a card that arrives at 03:07 — and
+/// a node with no `Ready` condition at all never gets one. The rows point at the machine and stop
+/// there; the evidence line one row up has already named it (NOTES § D81).
+///
+/// **`node-role.kubernetes.io/control-plane` must never join this table**, and the reason is
+/// structural rather than a judgement about that one taint: every row here is a taint whose removal
+/// is either impossible — the controller re-adds it — or pointless, because it clears itself. The
+/// control-plane taint is neither. Nothing changes on its own, so *"wait"* or *"check the machine"*
+/// would strand the reader, and both halves of the untranslated wording are the real answers: the
+/// documented single-node kubeadm fix is literally
+/// `kubectl taint nodes --all node-role.kubernetes.io/control-plane-`.
+///
+/// **`network-unavailable` names the network plugin, and that is the right *single* answer with a
+/// ceiling worth writing down.** The other producer of `NodeNetworkUnavailable=True` is the cloud
+/// **route controller**, waiting for routes to the node's pod CIDR — a control-plane problem, not
+/// something on that machine. Route-based networking is legacy (GKE, EKS and AKS are VPC-native or
+/// CNI-driven now), and cloud jargon does not belong on a card a kind user can see, so the common
+/// producer wins the sentence.
+///
+/// **`memory-pressure` survives one trap worth naming.** The `PodTolerationRestriction` admission
+/// plugin adds an `Exists` toleration for it to every non-BestEffort pod, which would make *"stops
+/// placing new pods"* true only of BestEffort ones. That plugin is **not** default-enabled in 1.36,
+/// so the sentence holds on a default cluster; where it *is* enabled, [`tolerated`] matches the
+/// auto-toleration and this branch is never reached at all. Both directions are safe.
+///
+/// Each middle string reads after *"node-1 is"* / *"node-1 and node-2 are"*, and carries no
+/// pronoun, so one row serves both. **Each action carries [`inflected`]'s tokens** for the same
+/// reason: the case this table exists for is one machine, and six of these rows used to say
+/// *"those machines"* about it. **The two autoscaler taints are not in this table**: they are
+/// [`SCALE_DOWN_TAINTS`], read by [`managed_taint`] straight off the list N2 already uses, so a
+/// third autoscaler arrives in one place rather than two.
+const MANAGED_TAINTS: [(&str, &str, &str); 9] = [
+    (
+        "node.kubernetes.io/unschedulable",
+        "cordoned, and a cordoned machine refuses every new pod",
+        "allow new pods on {machines} again once the work is done ({uncordon})",
+    ),
+    (
+        "node.kubernetes.io/not-ready",
+        "not ready, and nothing is placed on a machine that says it cannot run pods",
+        "check {machines} first — this pod is placed on its own once a machine is ready again",
+    ),
+    (
+        "node.kubernetes.io/unreachable",
+        "not answering, and nothing is placed on a machine the cluster cannot reach",
+        "check {machines} first — this pod is placed on its own once a machine comes back",
+    ),
+    (
+        "node.kubernetes.io/memory-pressure",
+        "low on memory, and Kubernetes stops placing new pods on a machine in that state",
+        "free up memory on {machines}, or add another machine to the cluster",
+    ),
+    (
+        "node.kubernetes.io/disk-pressure",
+        "low on disk space, and Kubernetes stops placing new pods on a machine in that state",
+        "free up disk space on {machines}, or add another machine to the cluster",
+    ),
+    (
+        "node.kubernetes.io/pid-pressure",
+        "low on process IDs, and Kubernetes stops placing new pods on a machine in that state",
+        "find what is creating so many processes on {machines}, or add another machine",
+    ),
+    (
+        "node.kubernetes.io/network-unavailable",
+        "without a working network yet, and nothing is placed on a machine that has none",
+        "check the network plugin on {machines} — nothing can be placed there until it comes up",
+    ),
+    (
+        "node.cloudprovider.kubernetes.io/uninitialized",
+        "still being set up, and nothing is placed on a machine that has not finished joining",
+        "wait for {machines} to finish joining; if that never happens, the cloud controller is \
+         what has not answered",
+    ),
+    (
+        "karpenter.sh/unregistered",
+        "still being set up, and nothing is placed on a machine that has not finished joining",
+        "wait for {machines} to finish joining — a nodepool starting from zero passes through \
+         this on its own",
+    ),
+];
+
+/// What a taint the node controller manages means, and what to do about it — [`MANAGED_TAINTS`]
+/// plus the two [`SCALE_DOWN_TAINTS`], which N2 already holds and which are the sharpest row of
+/// all: this file calls that node *an operation in progress* in one rule, so it may not offer to
+/// tolerate it in another.
+///
+/// `None` is a taint somebody at this cluster wrote themselves, where *"add a toleration, or
+/// remove the taint"* is exactly the right advice.
+fn managed_taint(key: &str) -> Option<(&'static str, &'static str)> {
+    if SCALE_DOWN_TAINTS.contains(&key) {
+        return Some((
+            "being taken out of the cluster on purpose, so nothing new is placed there",
+            "wait for the replacement machine, or find out why the cluster is not adding one",
+        ));
+    }
+    MANAGED_TAINTS
+        .iter()
+        .find(|(managed, _, _)| *managed == key)
+        .map(|&(_, means, action)| (means, action))
+}
+
+/// **One machine or several, in the action as well as in the evidence** — `{machines}` and
+/// `{uncordon}`, filled from the machines the card is about (NOTES § D81).
+///
+/// The evidence line has inflected since it was written ([`listed`] and its `is`/`are`); the
+/// actions said *"those machines"* whatever the count, on a table whose primary case is a
+/// one-machine kind or minikube cluster.
+///
+/// **`{uncordon}` carries the names**, because a command printed without them is the one line in
+/// this file that does not run as written — and *"without memorising long kubectl commands"* is
+/// what this tool is for (invariant 4). `kubectl uncordon` takes any number of nodes, so the same
+/// substitution serves both counts.
+fn inflected(action: &str, names: &[String]) -> String {
+    let machines = if names.len() == 1 {
+        "that machine"
+    } else {
+        "those machines"
+    };
+    action.replace("{machines}", machines).replace(
+        "{uncordon}",
+        &format!("kubectl uncordon {}", names.join(" ")),
+    )
+}
+
+/// `kubectl describe node …` — the command behind every node card. It prints the conditions with
+/// their reasons and messages (N1, N3), `Unschedulable` and the non-terminated pods it is carrying
+/// (N2), and the *Allocated resources* table N5's two numbers come from.
+///
+/// **The one thing it does not print is `timeAdded`**, so N2's age is the single claim on any of
+/// these cards the command cannot show, and that is recorded on N2 rather than paid for with a
+/// command that shows nothing else (NOTES § D69, § D81). A node is cluster-scoped, so there is no
+/// `-n` to append.
+fn describe_node(id: &ObjectId) -> Option<String> {
+    Some(format!("kubectl describe node {}", id.name))
+}
+
+/// One `status.conditions[]` entry of a node, by type — N1 and N3's whole input, and **the reason
+/// both read their own condition's `last_transition`**: the list is flat, `Ready`'s stamp is three
+/// lines from DiskPressure's, and a DiskPressure card dated the node's boot time is what taking
+/// the wrong one produces (NOTES § D69).
+fn node_condition<'a>(node: &'a NodeSnapshot, type_: &str) -> Option<&'a Condition> {
+    node.conditions.iter().find(|c| c.type_ == type_)
+}
+
+/// The pods this node is carrying that are still a going concern — the join N1, N2 and N5 are.
+/// A pod that finished is charged to nobody and was not *running* anywhere ([`finished`]).
+fn pods_on<'a>(snapshot: &'a ClusterSnapshot, node: &NodeSnapshot) -> Vec<&'a PodSnapshot> {
+    snapshot
+        .pods
+        .iter()
+        .filter(|p| p.node.as_deref() == Some(node.id.name.as_str()) && !finished(p))
+        .collect()
+}
+
+/// **Would `kubectl drain` actually move this pod?** — N2's whole narrowing, and the difference
+/// between *"a drain left something behind"* and *"pods run here"*.
+///
+/// `kubectl/pkg/drain/filters.go` skips DaemonSet pods and mirror (static) pods **regardless of
+/// flags**, so a perfectly drained node still runs kindnet and kube-proxy, and a cordoned
+/// control-plane node still runs four static pods. Counting those fires N2 on every node an
+/// operator drained correctly (NOTES § D46).
+///
+/// **And `skipDeletedFilter`, which is the same false positive arriving from the other side**: a
+/// pod already terminating is one the drain has evicted and is waiting on, so counting it puts the
+/// card on a drain that is *running* — the state D43 refused to alarm about for an autoscaler
+/// (NOTES § D81).
+///
+/// The two filters that are deliberately **not** here are `localStorageFilter` and
+/// `unreplicatedFilter`: those make a drain *refuse* rather than skip, which is more reason to
+/// count the pod, not less.
+fn a_drain_would_move(pod: &PodSnapshot) -> bool {
+    !pod.mirror && pod.owner.kind != ObjectKind::DaemonSet && pod.deletion_timestamp.is_none()
+}
+
+/// **N1 — the node stopped saying it is ready, and everything on it is a question mark.**
+/// `conditions[Ready]` at anything but `True` for longer than [`NODE_DOWN_GRACE`]. CRITICAL.
+///
+/// **The card has to reach the pods, not only the node** (NOTES § D71). Every pod rule in this file
+/// reads pod *status*, and the status of a pod whose kubelet stopped posting is a fossil that never
+/// expires — a crash-looping pod on a node that went quiet ten minutes ago still reads `Running`,
+/// so nothing else on the screen mentions the workload that is actually down. So the evidence names
+/// **owners**, up to two alphabetically and then a count, with the total beside it
+/// (`screens/alerts.md` § N1) — a bare number would answer N2's question, not this one.
+///
+/// **Two statuses, two cards, and only one of them is `screens/alerts.md`'s.** `Unknown` is a
+/// kubelet that went quiet, which is the one the fossil argument is about and the one the screen
+/// draws. `False` is a kubelet that answered and said no — a container runtime that will not start,
+/// a full disk, a CNI that never came up — and *"has stopped responding"* is simply false about it,
+/// which invariant 14 does not allow. The condition's own message finishes that card, since the
+/// kubelet's sentence is the diagnosis there and there is no such sentence on a silent node.
+///
+/// **An undated condition still fires**, rule 10's direction and not rule 13's: a node that cannot
+/// be shown to have gone down just now is read as one that has been down, and the card draws no age
+/// rather than no card.
+///
+/// **Under a namespace scope the evidence line is dropped** rather than counted from a fraction of
+/// the pods: *"one pod was running here"* about a node carrying forty reads as complete and is the
+/// wrong number this screen exists not to print (NOTES § D43). The card itself is unaffected — the
+/// node's own condition is not namespaced.
+fn node_stopped_being_ready(snapshot: &ClusterSnapshot, node: &NodeSnapshot) -> Option<Finding> {
+    let ready = node_condition(node, "Ready")?;
+    if ready.status == "True" {
+        return None;
+    }
+    let since = ready.last_transition.as_ref();
+    if since.is_some_and(|t| snapshot.now.0.duration_since(t.0) <= NODE_DOWN_GRACE) {
+        return None;
+    }
+    // The API's tri-state, and anything that is not the two known values is treated as the silent
+    // case: a status this code cannot read is not evidence that the kubelet answered.
+    let answered = ready.status == "False";
+    let mut facts = Vec::new();
+    if snapshot.namespace_scope.is_none() {
+        let pods = pods_on(snapshot, node);
+        // Sorted and de-duplicated in one step, which is what alphabetical *by owner* means when
+        // forty pods share three of them.
+        let owners: Vec<String> = pods
+            .iter()
+            .map(|p| qualified(&p.owner))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if !owners.is_empty() {
+            facts.push(format!(
+                "{} {} running here ({})",
+                listed(&owners),
+                match (answered, owners.len()) {
+                    (false, 1) => "was",
+                    (false, _) => "were",
+                    (true, 1) => "is",
+                    (true, _) => "are",
+                },
+                counted(pods.len() as i64, "pod")
+            ));
+        }
+    }
+    // The kubelet's own sentence, carried verbatim and **framed the way rule 10 frames the
+    // scheduler's** (NOTES § D37, § D81): the prefix says a machine wrote this, and glosses the
+    // one word that would otherwise leave the card in two vocabularies. Only on the branch that
+    // has a sentence to carry — a machine that went quiet wrote nothing.
+    if answered {
+        facts.extend(ready.message.as_deref().map(|m| {
+            format!(
+                "the kubelet's own words (the kubelet is the part of Kubernetes that runs on \
+                 the machine): {m}"
+            )
+        }));
+    }
+    Some(Finding {
+        severity: Severity::Critical,
+        title: if answered {
+            "This node says it cannot run pods — nothing new will start here until it can"
+        } else {
+            "This node has stopped responding — nothing on it can be trusted until it does"
+        }
+        .to_string(),
+        evidence: facts.join(FACTS),
+        action: if answered {
+            "check the machine itself: what the kubelet says is wrong is above, and the \
+             kubelet's own log on that machine says the rest"
+        } else {
+            "check the node itself: is it powered on and reachable?"
+        }
+        .to_string(),
+        kubectl_cmd: describe_node(&node.id),
+        owner: node.id.clone(),
+        object: node.id.clone(),
+        timestamp: ready.last_transition.clone(),
+    })
+}
+
+/// **N2 — somebody cordoned this node and the drain never finished.** `spec.unschedulable`, and
+/// **only while a drain would still have to move something off it**. WARN.
+///
+/// **The count is the trigger, not decoration** (NOTES § D43, § D46). A cordoned node with nothing
+/// movable left is *parked* — a finished drain nobody turned back on — which is a Capacity row and
+/// not an outage. What a drain would move is [`a_drain_would_move`]'s question.
+///
+/// **Silent on a node an autoscaler is retiring** ([`SCALE_DOWN_TAINTS`]) and **silent under a
+/// namespace scope**, where the count comes out of a fraction of the pods and a zero would silence
+/// the rule with nothing on the screen to show it happened.
+///
+/// **The age is the cordon taint's, and it dates the taint rather than the cordon** — anything that
+/// rewrites `spec.taints` wholesale re-stamps it — so the card says *"cordoned about 2 hours ago"*
+/// and builds no argument on it (NOTES § D65, § D69). A hand-applied `kubectl taint` stamps nothing
+/// and the right edge is simply empty.
+///
+/// **`describe node`, and the age is the one thing it cannot back** (NOTES § D69 offered either
+/// this or a `-o jsonpath` that shows `timeAdded`; D81 took this one). `describe` prints
+/// `Unschedulable: true`, which is the title, and the `Non-terminated Pods` table, which is the
+/// count — and the count is the *trigger*, so it is on every one of these cards while the age is
+/// on some. The jsonpath line backs only the age, shows nothing at all when the taint carries no
+/// stamp, and hands a beginner a JSON blob.
+fn cordoned_with_work_left_on_it(
+    snapshot: &ClusterSnapshot,
+    node: &NodeSnapshot,
+) -> Option<Finding> {
+    if !node.unschedulable || snapshot.namespace_scope.is_some() {
+        return None;
+    }
+    if node
+        .taints
+        .iter()
+        .any(|t| SCALE_DOWN_TAINTS.contains(&t.key.as_str()))
+    {
+        return None;
+    }
+    let movable = pods_on(snapshot, node)
+        .into_iter()
+        .filter(|p| a_drain_would_move(p))
+        .count();
+    if movable == 0 {
+        return None;
+    }
+    Some(Finding {
+        severity: Severity::Warn,
+        title: "This node refuses new pods (cordoned)".to_string(),
+        evidence: format!(
+            "{} here would still have to move",
+            counted(movable as i64, "pod")
+        ),
+        // It states the lifecycle and does not accuse: true whether the cordon was five minutes ago
+        // or five months ago, which is what lets the same sentence sit on a card with no age
+        // (`screens/alerts.md`).
+        action: "allow new pods once the work is done".to_string(),
+        kubectl_cmd: describe_node(&node.id),
+        owner: node.id.clone(),
+        object: node.id.clone(),
+        timestamp: node
+            .taints
+            .iter()
+            .find(|t| t.key == CORDON_TAINT)
+            .and_then(|t| t.added_at.clone()),
+    })
+}
+
+/// **N3 — the node is running out of something and the kubelet is about to start evicting.**
+/// Any of [`PRESSURES`] at `True`. WARN: nothing is down yet, and that is the whole point of
+/// arriving before it is.
+///
+/// **`True` and nothing else.** The three pressures read `Unknown` on a node whose kubelet stopped
+/// posting, which is N1's answer and not this one — a rule that read "not False" as a pressure
+/// would file *evictions are coming* on a machine nobody can reach.
+///
+/// **All of them, when more than one is true**, joined into one sentence rather than one card
+/// picking a resource and hiding the other (`screens/alerts.md` § N3).
+///
+/// **The age is that condition's own `last_transition`, never `Ready`'s off the same flat list**,
+/// or a DiskPressure card carries the node's boot time (NOTES § D69). With two pressures at once it
+/// is the **earlier** of them: the card's question is how long this has been going on.
+fn node_running_low(node: &NodeSnapshot) -> Option<Finding> {
+    let low: Vec<(&str, &str, &Condition)> = PRESSURES
+        .iter()
+        .filter_map(|&(type_, noun, fix)| {
+            let c = node_condition(node, type_).filter(|c| c.status == "True")?;
+            Some((noun, fix, c))
+        })
+        .collect();
+    if low.is_empty() {
+        return None;
+    }
+    let nouns: Vec<String> = low.iter().map(|&(noun, _, _)| noun.to_string()).collect();
+    Some(Finding {
+        severity: Severity::Warn,
+        title: format!(
+            "This node is running low on {} — Kubernetes may start evicting pods to free it up",
+            nouns.join(" and ")
+        ),
+        // The condition's reason is `KubeletHasDiskPressure`, which says nothing the title has not
+        // already said in a sentence (invariant 14), and the kubelet writes no message on these.
+        evidence: String::new(),
+        action: format!(
+            "{}, or move some pods elsewhere",
+            low.iter()
+                .map(|&(_, fix, _)| fix)
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ),
+        kubectl_cmd: describe_node(&node.id),
+        owner: node.id.clone(),
+        object: node.id.clone(),
+        timestamp: low
+            .iter()
+            .filter_map(|&(_, _, c)| c.last_transition.clone())
+            .min_by_key(|t| t.0),
+    })
+}
+
+/// **N4 — this machine's kubelet is too far behind the control plane to be supported.**
+/// `status.nodeInfo.kubeletVersion` against [`ClusterSnapshot::server_version`], more than
+/// [`SUPPORTED_SKEW`] minor versions. **`Info`, and it does not reach Alerts**: an unsupported
+/// kubelet is a risk to answer this month, not an outage to answer now — it is the **Versions**
+/// report's input (NOTES § D2).
+///
+/// **No server version, no finding.** Comparing against a guess is the one thing this rule may not
+/// do, and *"the control plane's version could not be read"* is a sentence about the whole cluster
+/// rather than about this node — the Versions report says it, in the slot where its own answer
+/// would have been (`screens/analysis.md`).
+///
+/// **A kubelet *ahead* of the control plane is not this rule's**, and the `checked_sub` is where
+/// that is decided: upstream forbids it outright, NOTES words N4 as *behind*, and inventing the
+/// other card here would be a rule the set does not contain (invariant 13).
+///
+/// **Different majors compare as nothing.** There has only ever been one, and a minor number read
+/// across a major boundary is not a distance.
+///
+/// **`get nodes -o wide` and not `kubectl version`**: the number this card is *about* is this
+/// node's kubelet, which that command prints for every node at once; the control-plane half is
+/// `kubectl version`, and no single command shows both (invariant 4).
+fn kubelet_too_far_behind(server_version: Option<&str>, node: &NodeSnapshot) -> Option<Finding> {
+    let (server_major, server_minor) = minor_version(server_version?)?;
+    let kubelet = node.kubelet_version.as_deref()?;
+    let (major, minor) = minor_version(kubelet)?;
+    if major != server_major {
+        return None;
+    }
+    let behind = server_minor.checked_sub(minor)?;
+    if behind <= SUPPORTED_SKEW {
+        return None;
+    }
+    Some(Finding {
+        severity: Severity::Info,
+        title: "This machine's kubelet is too far behind the control plane to be supported"
+            .to_string(),
+        evidence: [
+            format!("kubelet {kubelet}"),
+            format!("control plane {}", server_version?),
+            format!("{} behind", counted(i64::from(behind), "version")),
+        ]
+        .join(FACTS),
+        // Upstream's window, cited rather than asserted as a number of this project's own
+        // (NOTES § D81).
+        action: format!(
+            "upgrade the kubelet on this machine — Kubernetes supports a kubelet at most {} \
+             older than the control plane",
+            counted(i64::from(SUPPORTED_SKEW), "minor version")
+        ),
+        kubectl_cmd: Some("kubectl get nodes -o wide".to_string()),
+        owner: node.id.clone(),
+        object: node.id.clone(),
+        // Nothing records when this kubelet was installed, and the node's creation time is not it.
+        timestamp: None,
+    })
+}
+
+/// `v1.36.1` → `(1, 36)`, and `v1.29.7-gke.1104000` → `(1, 29)` — the major and minor of a version
+/// string, which is all N4 compares. Anything that does not start with two numbers answers `None`
+/// and N4 says nothing rather than guessing at a distance.
+fn minor_version(version: &str) -> Option<(u32, u32)> {
+    let mut parts = version.trim_start_matches('v').split('.');
+    let number = |part: Option<&str>| -> Option<u32> {
+        let digits: String = part?.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse().ok()
+    };
+    Some((number(parts.next())?, number(parts.next())?))
+}
+
+/// **N5 — more has been promised to the pods on this node than the node has.** The sum of what
+/// they request against `status.allocatable`. **`Info`, and it does not reach Alerts**: it is the
+/// **Capacity** report's input, and nothing here is down — it is why the next thing to start here
+/// will not (NOTES § D2, `screens/analysis.md` § Capacity).
+///
+/// **Silent under a namespace scope**, where the sum is taken over a fraction of the pods: a low
+/// number here does not read as *missing*, it reads as *fine*, which is the one wrong answer this
+/// rule exists to prevent (NOTES § D43, § D46).
+///
+/// **The arithmetic is [`charged`]'s**, and its two traps are what the rule is for: a native
+/// sidecar is *added* rather than maxed, and a pod-level request **replaces** the container sum
+/// rather than adding to it (NOTES § D46, § D51).
+fn node_overcommitted(snapshot: &ClusterSnapshot, node: &NodeSnapshot) -> Option<Finding> {
+    if snapshot.namespace_scope.is_some() {
+        return None;
+    }
+    let pods = pods_on(snapshot, node);
+    let cpu = promised(
+        &pods,
+        node.allocatable_cpu.as_deref(),
+        |p| p.cpu_request.as_deref(),
+        |c| c.cpu_request.as_deref(),
+    );
+    let memory = promised(
+        &pods,
+        node.allocatable_memory.as_deref(),
+        |p| p.memory_request.as_deref(),
+        |c| c.memory_request.as_deref(),
+    );
+    let mut over: Vec<(&str, String, String)> = Vec::new();
+    // **Strictly greater, on integers.** A node packed to exactly its allocatable is legal and
+    // ordinary — `noderesources.Fit` admits while `request <= allocatable - requested`, and
+    // `describe node` prints `cpu 3920m (100%)` without comment (NOTES § D81).
+    if let Some((asked, has)) = cpu.filter(|(asked, has)| asked > has) {
+        over.push((
+            "CPU",
+            format!("{} cpu", cpu_text(asked)),
+            format!("{} cpu", cpu_text(has)),
+        ));
+    }
+    if let Some((asked, has)) = memory.filter(|(asked, has)| asked > has) {
+        over.push(("memory", bytes(asked), bytes(has)));
+    }
+    if over.is_empty() {
+        return None;
+    }
+    Some(Finding {
+        severity: Severity::Info,
+        title: format!(
+            // **Not "nothing new can start here"**, which the reader's own cluster contradicts
+            // the first time they deploy something that requests nothing: a BestEffort pod is
+            // placed on a node at 100% of its requests all day (invariant 14).
+            "This node has promised more {} than it has",
+            over.iter()
+                .map(|&(noun, _, _)| noun)
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ),
+        // The report's own two columns, in the words it heads them with
+        // (`screens/analysis.md` § Capacity): what the pods were promised, and what the machine
+        // actually has to give.
+        evidence: over
+            .iter()
+            .map(|(noun, asked, has)| format!("{noun}: promised {asked} · usable {has}"))
+            .collect::<Vec<_>>()
+            .join(FACTS),
+        action: "move some pods to another node, or lower what they ask for (their requests)"
+            .to_string(),
+        kubectl_cmd: describe_node(&node.id),
+        owner: node.id.clone(),
+        object: node.id.clone(),
+        // A standing arithmetic rather than an event: nothing in either object records when the
+        // sum crossed the line (NOTES § D69, [`Finding::timestamp`]).
+        timestamp: None,
+    })
+}
+
+/// What the pods on this node ask for in total, and what the node has to give, both in
+/// [`quantity_milli`]'s integer unit — `None` when the node does not say what it has, or when any
+/// quantity in the sum does not parse.
+///
+/// **A quantity that cannot be read stops the whole node rather than being skipped.** A skipped
+/// request understates a sum whose entire job is to notice that a node is over-promised, and a
+/// missing card is the safe direction where a wrong number is not (invariant 5). An overflow takes
+/// the same road, which is what `checked_add` is for.
+fn promised(
+    pods: &[&PodSnapshot],
+    allocatable: Option<&str>,
+    of_pod: impl Fn(&PodSnapshot) -> Option<&str>,
+    of_container: impl Fn(&ContainerSnapshot) -> Option<&str>,
+) -> Option<(i64, i64)> {
+    let has = quantity_milli(allocatable?)?;
+    let mut asked: i64 = 0;
+    for pod in pods {
+        asked = asked.checked_add(charged(pod, &of_pod, &of_container)?)?;
+    }
+    Some((asked, has))
+}
+
+/// **What the scheduler charges this pod to the node it is on** —
+/// `max( max over the init containers , sum(regular) + sum(restartable-init) )`, or the pod-level
+/// request where one is declared.
+///
+/// **A native sidecar is additive and an ordinary init container is not** (NOTES § D46): a sidecar
+/// runs beside the app for the whole life of the pod, and dropping 100m per meshed pod is six CPUs
+/// invisible on sixty of them. **A pod-level request replaces the container sum** rather than adding
+/// to it — a pod declaring only `spec.resources.requests` decodes with all-`None` containers, and a
+/// summing rule calls the node healthy with four committed CPUs unaccounted for (NOTES § D51).
+///
+/// **The formula is order-free and upstream's is not** — it carries the sidecar total forward
+/// through the init list in order — so this understates the rare pod that declares a plain init
+/// container *after* a sidecar. [`PodSnapshot::containers`] promises no order, so the exact one is
+/// not computable here ([`ContainerRole`]).
+fn charged(
+    pod: &PodSnapshot,
+    of_pod: impl Fn(&PodSnapshot) -> Option<&str>,
+    of_container: impl Fn(&ContainerSnapshot) -> Option<&str>,
+) -> Option<i64> {
+    if let Some(whole_pod) = of_pod(pod) {
+        return quantity_milli(whole_pod);
+    }
+    let mut running: i64 = 0;
+    let mut init_peak: i64 = 0;
+    for c in &pod.containers {
+        let value = match of_container(c) {
+            // Nothing requested is zero requested — the field is optional and its absence is not a
+            // number that could not be read.
+            None => 0,
+            Some(q) => quantity_milli(q)?,
+        };
+        match c.role {
+            ContainerRole::Init => init_peak = init_peak.max(value),
+            ContainerRole::Regular | ContainerRole::Sidecar => {
+                running = running.checked_add(value)?
+            }
+        }
+    }
+    Some(running.max(init_peak))
+}
+
+/// **A Kubernetes quantity as an integer, in the API's own unit ×1000** — millicores for a cpu
+/// value and milli-bytes for a memory one. `"500m"` → `500`, `"12"` → `12_000`, `"64Mi"` →
+/// `67_108_864_000`. The one place this file turns a quantity string into arithmetic, which is why
+/// [`quantity`] leaves them as strings: N5 is the only rule that needs the number
+/// ([`ContainerSnapshot::cpu_request`]).
+///
+/// **Integer, and that is the whole of why this function exists** (NOTES § D81). `100m` has no
+/// exact binary representation, so an `f64` sum of a node's pods lands a hair above an allocatable
+/// that is the same number — and N5 fired on a node packed *exactly* full, printing `promised
+/// 0.3 cpu · usable 0.3 cpu`, flapping as watch events reordered the pods. The parse is exact as
+/// well as the sum: the mantissa and the scale are multiplied as `i128` and divided once at the
+/// end, so nothing rounds until [`cpu_text`] or [`bytes`] prints it.
+///
+/// **A sub-milli value rounds up**, which is `Quantity::MilliValue`'s own direction — charging a
+/// node the whole milli it cannot subdivide.
+///
+/// **Every arithmetic step is checked, because a rule may not panic** (invariant 5). A quantity is
+/// a string off the API and the apiserver's grammar admits far more than a node ever has:
+/// `170141183460469231731687303715884105m` is **accepted and stored verbatim** by a live v1.36.1
+/// server (`kubectl apply --dry-run=server`), and an unchecked add on it took the rule engine down
+/// in debug and answered a *negative* number of millicores in release, which the comparison then
+/// read as a full node (NOTES § D81).
+///
+/// **The exponent form parses**, and the sentence that used to say otherwise was a claim about
+/// apiserver behaviour that a `--dry-run=server` contradicts: an *unquoted* `1e3` is canonicalised
+/// to `1k`, but a **quoted** `"1e3"` — how every chart that quotes its quantities writes it —
+/// round-trips verbatim, because `Quantity` caches the string it was parsed from. It is in
+/// upstream's own grammar (`[eE][+-]?[0-9]+`) and `ParseQuantity` accepts it; refusing it cost one
+/// whole node, silently absent from the Capacity report. Upstream's grammar puts the exponent
+/// *in place of* a suffix, so `1e3Ki` is not a quantity here either.
+///
+/// `None` for a suffix this does not know, for a negative — a request cannot be one, and the minus
+/// sign is not even scanned — and for a value past `i64`, which is an exabyte node nobody has.
+fn quantity_milli(q: &str) -> Option<i64> {
+    let end = q
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(q.len());
+    let (number, suffix) = q.split_at(end);
+    let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
+    if whole.is_empty() && fraction.is_empty() {
+        return None;
+    }
+    // `"1.5"` is mantissa 15 over one decimal place; `"1.2.3"` leaves a `.` in the fraction and
+    // fails to parse, which is the answer a quantity that is not one deserves.
+    let mantissa: i128 = format!("{whole}{fraction}").parse().ok()?;
+    let places = 10i128.checked_pow(u32::try_from(fraction.len()).ok()?)?;
+    let (multiply, divide): (i128, i128) = match suffix {
+        "" => (1, 1),
+        "n" => (1, 1_000_000_000),
+        "u" => (1, 1_000_000),
+        "m" => (1, 1_000),
+        "k" => (1_000, 1),
+        "M" => (1_000_000, 1),
+        "G" => (1_000_000_000, 1),
+        "T" => (1_000_000_000_000, 1),
+        "P" => (1_000_000_000_000_000, 1),
+        "E" => (1_000_000_000_000_000_000, 1),
+        "Ki" => (1024, 1),
+        "Mi" => (1024 * 1024, 1),
+        "Gi" => (1024 * 1024 * 1024, 1),
+        "Ti" => (1024_i128.pow(4), 1),
+        "Pi" => (1024_i128.pow(5), 1),
+        "Ei" => (1024_i128.pow(6), 1),
+        _ => exponent(suffix)?,
+    };
+    let numerator = mantissa.checked_mul(multiply)?.checked_mul(1000)?;
+    let denominator = places.checked_mul(divide)?;
+    // **Checked, like every other step.** `numerator + denominator` is the one addition here and
+    // it is reachable from a pod the apiserver accepts: unchecked it panicked in debug and wrapped
+    // to a negative in release (NOTES § D81). `div_ceil` is still unstable for signed integers.
+    i64::try_from(numerator.checked_add(denominator - 1)? / denominator).ok()
+}
+
+/// `e3` → ×1000, `E-6` → ÷1000000 — upstream's `decimalExponent`, which sits where a suffix sits
+/// and is why it is reached from the same `match` ([`quantity_milli`]).
+fn exponent(suffix: &str) -> Option<(i128, i128)> {
+    let power: i32 = suffix
+        .strip_prefix('e')
+        .or_else(|| suffix.strip_prefix('E'))?
+        .parse()
+        .ok()?;
+    let scale = 10_i128.checked_pow(power.unsigned_abs())?;
+    // `is_negative()` rather than `power < 0`: at zero the two branches are the same value, so a
+    // comparison here is a line no test can ever distinguish (NOTES § D81).
+    Some(if power.is_negative() {
+        (1, scale)
+    } else {
+        (scale, 1)
+    })
+}
+
+/// A number with its trailing zeros taken off — `9.100` is a screen that looks generated.
+fn trimmed(text: String) -> String {
+    match text.split_once('.') {
+        None => text,
+        Some(_) => text.trim_end_matches('0').trim_end_matches('.').to_string(),
+    }
+}
+
+/// `12`, `9.1`, `0.001` — millicores as the decimal `screens/analysis.md` § Capacity draws, and
+/// the only place a cpu number stops being an integer.
+fn cpu_text(milli: i64) -> String {
+    trimmed(format!("{}.{:03}", milli / 1000, milli % 1000))
+}
+
+/// `23.1Gi` — milli-bytes in the unit the manifest that asked for them was written in, on
+/// Kubernetes' own binary suffixes, largest one that leaves a number above 1.
+///
+/// **Truncated, never rounded up**, so the node's own capacity is never made to look bigger than
+/// it is. **Below a kibibyte it prints the bare number, which is how Kubernetes itself spells
+/// bytes** — and no node's allocatable is ever that small, so the card cannot reach it: it is the
+/// arithmetic's floor, not a case with a screen behind it.
+fn bytes(milli: i64) -> String {
+    let value = milli / 1000;
+    for (unit, scale) in [
+        ("Gi", 1024_i64.pow(3)),
+        ("Mi", 1024_i64.pow(2)),
+        ("Ki", 1024),
+    ] {
+        if value >= scale {
+            return format!(
+                "{}{unit}",
+                trimmed(format!(
+                    "{}.{}",
+                    value / scale,
+                    (value % scale) * 10 / scale
+                ))
+            );
+        }
+    }
+    format!("{value}")
+}
+
+/// The node half of rule 10's card — what a card says instead of guessing, and what it asks the
+/// reader to do about it.
+struct Blocking {
+    evidence: String,
+    action: String,
+}
+
+/// **N6 — which taint or which label is keeping this pod off every machine.** The node half of
+/// [`no_node_accepted_it`]'s card, and `None` whenever the join cannot pin the refusal on one
+/// thing, where rule 10 keeps the strings it has (`screens/alerts.md` § N6).
+///
+/// Two answers, asked in this order:
+///
+/// 1. **A label nothing in the cluster has.** A `nodeSelector` no node satisfies is unconditional —
+///    no taint reasoning can help, and the sentence names the labels rather than the count.
+/// 2. **A taint every remaining machine carries and this pod does not tolerate.** *Every* one, not
+///    the most common: with a taint on two nodes of three, something else is refusing the third and
+///    a card blaming the taint would send the reader to fix half a problem.
+///
+/// **`spec.affinity` is deliberately not read** — NOTES § Node rules names `nodeSelector`, and node
+/// affinity is a term tree no v1 rule walks ([`PodSnapshot::node_selector`]). A pod refused for an
+/// affinity term therefore falls to the `None` branch, which is the honest answer rather than a
+/// wrong one.
+///
+/// **No nodes, no answer.** An empty list is a snapshot that has not been given the node watch, not
+/// a cluster with no machines, and *"none of the 0 nodes"* is the sentence that mistake writes.
+fn what_is_blocking_it(pod: &PodSnapshot, nodes: &[NodeSnapshot]) -> Option<Blocking> {
+    if nodes.is_empty() {
+        return None;
+    }
+    let wanted: Vec<String> = pod
+        .node_selector
+        .iter()
+        .filter(|(key, value)| !nodes.iter().any(|n| n.labels.get(*key) == Some(*value)))
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
+    if let Some(first) = wanted.first() {
+        return Some(Blocking {
+            evidence: format!(
+                "it asks for a node labelled {}, and none of the {} have {}",
+                listed(&wanted),
+                counted(nodes.len() as i64, "node"),
+                if wanted.len() == 1 {
+                    "that label"
+                } else {
+                    "those labels"
+                }
+            ),
+            // One label to add is a command someone can run; a list of them is a decision, and the
+            // first is the one the sentence above led with.
+            action: format!("change the nodeSelector, or label a node {first}"),
+        });
+    }
+    // Every machine whose labels do satisfy the pod. A selector each of whose labels exists
+    // somewhere but on no single node leaves this empty, and that has no one-thing answer either.
+    let candidates: Vec<&NodeSnapshot> = nodes
+        .iter()
+        .filter(|n| {
+            pod.node_selector
+                .iter()
+                .all(|(key, value)| n.labels.get(key) == Some(value))
+        })
+        .collect();
+    let blocking = candidates
+        .iter()
+        .flat_map(|n| &n.taints)
+        .filter(|t| BLOCKING_EFFECTS.contains(&t.effect.as_str()) && !tolerated(pod, t))
+        .find(|t| {
+            candidates.iter().all(|n| {
+                n.taints
+                    .iter()
+                    .any(|u| (&u.key, &u.value, &u.effect) == (&t.key, &t.value, &t.effect))
+            })
+        })?;
+    let names: Vec<String> = candidates.iter().map(|n| n.id.name.clone()).collect();
+    let machines = format!(
+        "{} {}",
+        listed(&names),
+        if names.len() == 1 { "is" } else { "are" }
+    );
+    // A taint Kubernetes put there is translated, never named raw and never offered as something
+    // to tolerate ([`managed_taint`], NOTES § D81).
+    if let Some((means, action)) = managed_taint(&blocking.key) {
+        return Some(Blocking {
+            evidence: format!("{machines} {means}"),
+            action: inflected(action, &names),
+        });
+    }
+    // Somebody at this cluster wrote this one. `gpu=true`, or the bare key for a taint with no
+    // value — the two spellings `kubectl taint` itself accepts, so the action is a line the reader
+    // can type.
+    let named = match &blocking.value {
+        Some(value) => format!("{}={value}", blocking.key),
+        None => blocking.key.clone(),
+    };
+    Some(Blocking {
+        evidence: format!("{machines} tainted {named}, and this pod does not tolerate that taint"),
+        action: format!("add a toleration for {named}, or remove the taint"),
+    })
+}
+
+/// **Does this pod put up with that taint?** — upstream's `Toleration.ToleratesTaint`, field for
+/// field: an empty effect tolerates every effect, an empty key tolerates every key, `Exists`
+/// ignores the value and the default operator is `Equal` ([`Toleration`]).
+///
+/// An operator this code does not know tolerates nothing, which is upstream's answer too — and the
+/// safe direction, since the alternative is a card that stays quiet about a real block.
+fn tolerated(pod: &PodSnapshot, taint: &Taint) -> bool {
+    pod.tolerations.iter().any(|t| {
+        let effect_matches = t
+            .effect
+            .as_deref()
+            .is_none_or(|e| e.is_empty() || e == taint.effect);
+        let key_matches = t
+            .key
+            .as_deref()
+            .is_none_or(|k| k.is_empty() || k == taint.key);
+        effect_matches
+            && key_matches
+            && match t.operator.as_deref().unwrap_or("Equal") {
+                "Exists" => true,
+                "Equal" | "" => {
+                    t.value.as_deref().unwrap_or("") == taint.value.as_deref().unwrap_or("")
+                }
+                _ => false,
+            }
+    })
+}
+
+// --- THE NODE RULES END ---
 
 #[cfg(test)]
 #[path = "rules_tests.rs"]

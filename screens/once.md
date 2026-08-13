@@ -23,7 +23,7 @@ prod-eu · 84 pods · 3 nodes
   Running, but not receiving traffic — the readiness check is failing
   → check the app's /healthz endpoint
 
-▲ node-3
+▲ node-3 · 2 hours ago
   This node refuses new pods (cordoned)
   2 pods here would still have to move
   → allow new pods once the work is done
@@ -40,12 +40,16 @@ screen could ever disagree, one of them is lying
 That includes the ages, which is where the two nearly did disagree. `· 4 min
 ago` is a suffix on the title line here rather than a right-aligned column, but
 it holds the same fact and obeys the same rule: **it is present only when a
-field says when the event happened.** The cordon finding has no such field, so
-`node-3` gets a bare title line in both renderers
-([alerts.md § the cordon card](alerts.md#the-cordon-card-and-what-replaced-its-clock)).
+field says when the event happened.** The cordon finding usually has one now —
+the node lifecycle controller stamps the taint it mirrors from
+`spec.unschedulable`, so a plain `kubectl cordon` leaves a time behind — but
+not always: a taint applied by hand (`kubectl taint`) stamps nothing, and on
+that node `node-3` gets a bare title line in both renderers — drawn, both
+ways, in
+[alerts.md § the cordon card](alerts.md#the-cordon-card-with-and-without-its-clock).
 Without the frame there is no column for a blank to sit in, which makes the
-absence invisible here — one more reason the count moved into the card body
-where both renderers show it.
+absence invisible here — one more reason the pod count stays in the card body
+where both renderers show it, whether or not the age is present beside it.
 
 ## When nothing is broken
 
