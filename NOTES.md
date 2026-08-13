@@ -2488,7 +2488,7 @@ spec requests.
 
 **Right shape, wrong method, and the distinction is the whole of why fixtures
 are trusted here.** `tests/fixtures/*.json` are real captures — that is the
-property [the honest-test rules](CLAUDE.md#code-phase-rules-apply-once-it-starts)
+property [the honest-test rules](CLAUDE.md#code-phase-rules)
 buy by refusing hand-written JSON, and it is a property of the *file*, not of
 any one test. Editing a committed capture so a test goes green spends that
 property for every other fixture in the directory at once, and it spends it
