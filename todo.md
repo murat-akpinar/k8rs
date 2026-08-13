@@ -724,7 +724,7 @@ this plan is delivery mechanism for what this phase produces.
       now reads the target list out of `ci.yml` rather than keeping a second
       copy — a list in two files is the drift this row was made of
       ([NOTES § D67](NOTES.md#d67--the-cross-compile-row-closed-with-a-skip-and-what-the-skip-costs-2026-08-13))
-- [ ] Pod rules 1–8 and 12 (stuck Terminating). Rule 9 (no limits) is not an
+- [x] Pod rules 1–8 and 12 (stuck Terminating). Rule 9 (no limits) is not an
       Alerts rule — it belongs to the Capacity report in Phase 4; rule 8 fires
       only on the escalated hostPath case. Events-based rule 11 stays deferred.
       **Rule 7 needs a "since when" or it fires on every deploy** — `Running`
@@ -735,7 +735,14 @@ this plan is delivery mechanism for what this phase produces.
       below): writable hostPath is the *normal* state of every CNI/CSI/node
       agent, so as specified rule 8 fires CRITICAL on a fresh kind cluster, and
       the discrimination it needs — DaemonSet-owned, in `kube-system` — has no
-      fixture. **Rule 7's "since when" is `ready.last_transition`, never
+      fixture. **Both halves of that sentence moved on 2026-08-13**: the
+      capture landed, and it showed the discrimination is incomplete —
+      `etcd`, `kube-apiserver` and `kube-controller-manager` are `Node`-owned
+      **mirror** pods with writable hostPaths, so DaemonSet alone leaves three
+      CRITICALs on a healthy cluster and `PodSnapshot.mirror` is in the
+      contract for exactly this. The narrowing is namespace-bound and known
+      wrong outside `kube-system` — see *Later*
+      ([NOTES § D70](NOTES.md#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)). **Rule 7's "since when" is `ready.last_transition`, never
       `ContainerStatus.started`** — that field is *always* true once a container
       runs when no `startupProbe` is declared, which is every container in every
       committed fixture, so a rule leaning on it rebuilds the false positive it
@@ -756,8 +763,40 @@ this plan is delivery mechanism for what this phase produces.
       `Init:CrashLoopBackOff` produces no finding otherwise, and the finding
       has to name the init container — "the app container is fine, the init one
       is not" is the diagnosis
+- [ ] **Rule 13 — placed on a node, but the containers never started.** The
+      twelfth Alerts rule, added on 2026-08-13 by an explicit reversal of
+      [invariant 13](CLAUDE.md)'s scope guard: the `ContainerCreating` wedge is
+      a weekly failure that no v1 rule sees, and **rule 10 does not see it
+      either**, because such a pod *is* scheduled. It fires on the **residual**
+      — `conditions[PodScheduled] == True`, no container started, and nothing
+      else already explains it (not rule 3's pull reasons, not rule 4's config
+      error, not rule 1's loop) — after **10 minutes** measured from
+      `scheduled.last_transition`, the same borrow from
+      `progressDeadlineSeconds` rule 7 makes, because a large image can
+      legitimately take minutes to pull and firing under that alerts on every
+      cold start. **WARN, not CRITICAL:** the one healthy thing that still
+      looks like this is a slow pull.
+      **`conditions[PodReadyToStartContainers]` is the evidence line and not
+      the gate** — the review proposed it as the trigger and it is narrower
+      than the case: KEP-3085 defines it as *sandbox created and network
+      configured*, so `FailedAttachVolume`, an unbound PVC and a volume still
+      attached to a dead node all read `True` while the pod sits wedged. It
+      says *why*: `False` = no network yet, `True`/absent = the block is after
+      the sandbox, almost always a volume.
+      **It ships with a negative side only** — every captured pod has the
+      condition `True`, so the positive fixture is a capture-trip item below
+      ([NOTES § D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13))
 - [ ] Node rules N1–N6 (NotReady · cordoned · pressure · kubelet skew ·
-      overcommit · what blocks a Pending pod). **N2 reports no duration and
+      overcommit · what blocks a Pending pod). **N1's card has to reach the
+      pods, not only the node** — every pod rule reads pod *status*, and the
+      status of a pod whose kubelet stopped posting is a fossil that never
+      expires, so on a NotReady node the workload that is actually down
+      produces no card at all. `healthy.json` is exactly that pod (it runs on
+      `k8rs-worker3`, which `break-nodes` made `Ready: Unknown`), which is how
+      the gap was found. Without this, Alerts says "node NotReady" in one place
+      and nothing about the thing the user cares about
+      ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
+      **N2 reports no duration and
       fires only when the cordoned node still has pods a drain would move** —
       nothing records when a cordon happened, so without that narrowing every
       routine maintenance window raises an alert; a cordoned node with nothing
@@ -834,23 +873,65 @@ this plan is delivery mechanism for what this phase produces.
       exactly where a non-expiring CA turns up — the panic would land on
       startup
       ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12))
-- [ ] Exit-code translation table (137/143/1/126/127)
-- [ ] hostPath: `rules.rs` fires **only** on `/`, docker.sock or a writable
+- [x] Exit-code translation table (137/143/1/126/127) — **137 has two meanings and the object says which**: with `reason: OOMKilled` it is memory, without it the container did not stop when asked, which is a failing liveness probe or a hanging shutdown. The old "almost always OOM" row was written before the rule had `reason` beside the code ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
+- [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket or a writable
       host mount. There is no lower severity to escalate from any more — the
       ordinary read-only mount is a Phase 4 posture row, computed there
-- [ ] Rule 5 thresholds (≥3 WARN, ≥10 CRITICAL). **Rule 12 does not add a
+- [x] Rule 5 thresholds (≥3 WARN, ≥10 CRITICAL) — **and CRITICAL only when the container is not serving**, because a red card whose own title says it is serving is what teaches people to ignore red. **Rule 12 does not add a
       second grace period** — the apiserver already wrote *request time +
       grace* into `deletionTimestamp`, and the grace beside it is read for the
       age (`asked_at = deletionTimestamp − grace`, with `checked_sub`), never
       to push the deadline out again
       ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
       **It does get a skew margin**, which is a different thing and was missing:
-      the trigger is `now − deletionTimestamp > max(30s, grace)`, not `> 0`. At
-      `> 0` a laptop ten minutes fast files a finding for every pod a
-      correctly-progressing rollout has just asked to terminate, and even a
-      perfect clock has a pod briefly overdue between its deadline and the
-      kubelet's SIGKILL landing
-      ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12))
+      at `> 0` a laptop ten minutes fast files a finding for every pod a
+      correctly-progressing rollout has just asked to terminate
+      ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12)).
+      **The margin is `> 60s`, flat — the `max(30s, grace)` this box used to
+      specify was wrong** and charged the grace twice, hiding a pod with
+      `terminationGracePeriodSeconds: 3600` for a full hour past its kill
+      deadline, which is the Kafka/Vault case rule 12 exists for. The margin
+      covers kubelet observation, watch latency and skew; none of those scales
+      with a grace the deadline already spent
+      ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
+- [ ] **A capture trip for the branches no committed fixture can reach — you
+      run this one, not an agent** (`just cluster-up` · edit
+      `scripts/broken.yaml` · `just fixtures`). Three rule branches shipped
+      with no test that can fail, and a fourth shape the review asked for.
+      Manifests corrected by the operator review, because the obvious version
+      of each one does not produce the shape on kind:
+      - **rule 6's `exit 0` exemption** — `restartPolicy: Always` with
+        `command: ["sh","-c","sleep 20; exit 0"]`. The sleep matters: an
+        instant-exit container spends its life in `Waiting` and the capture is
+        timing-flaky. The kubelet applies `CrashLoopBackOff` to repeated
+        restarts *regardless of exit code*, so rule 1 co-fires and the test is
+        "only rule 1", never "nothing".
+      - **rule 6's `exit 143` exemption** — `command: ["sleep","3600"]` in
+        **exec form** so `sleep` is PID 1 and dies on SIGTERM's default
+        disposition; `sh -c` risks the shell's own handling and can land 137,
+        proving the opposite. Plus `livenessProbe: {exec: {command:
+        ["false"]}, periodSeconds: 5, failureThreshold: 1}` and
+        `terminationGracePeriodSeconds: 30`.
+      - **rule 8's runtime-socket escalator**, two manifests: `hostPath:
+        /var/run/docker.sock` with `type: FileOrCreate` mounted `readOnly:
+        true` (the `type` is what lets the container start on a kind node,
+        which has no such file, and read-only is the case worth proving —
+        the escalator fires on the path, not the mode); and `hostPath: /run`
+        with `subPath: containerd/containerd.sock`, which proves the join and
+        is the red-then-green case for the widened socket list
+        ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
+        **The originally proposed `/var/run` + `subPath: docker.sock` does not
+        work** — the kubelet's subPath preparation fails and the pod lands in a
+        permanent error state that pollutes the whole-capture test.
+      - **`analyze`'s `Succeeded` skip** — a `restartPolicy: OnFailure` Job
+        whose counter lives in an `emptyDir` (a container restart gives a fresh
+        writable layer, so a naive counter resets): ends `Succeeded` with
+        `restartCount: 2` and `lastState.terminated.exitCode: 1`, which is
+        rules 5 and 6 both firing without the skip. Leave
+        `ttlSecondsAfterFinished` unset so the pod survives to be captured.
+        **Capture the `Failed` sibling on the same trip** — same Job with
+        `backoffLimit: 0` and a command that always exits 1, or a pod evicted
+        by an ephemeral-storage limit.
 - [ ] **`tui-designer`: the cordon-card round, and it has to close before this
       phase does.** `screens/alerts.md` § *the cordon card* and
       `screens/once.md` still argue from
@@ -871,7 +952,17 @@ this plan is delivery mechanism for what this phase produces.
       after yesterday's change window" is the question. (3) The age column's
       **width budget** — `alerts.md` right-aligns it with no stated maximum,
       and the widest string is 14 characters
-      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
+      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+      **(4) A fourth, and it is two rules that cannot both be obeyed:** rule 3's
+      evidence is the runtime's verbatim sentence — ~250 characters on the
+      committed capture — because
+      [D37](NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)
+      requires the message be quoted and not paraphrased, while
+      `screens/widgets.md` § 7 caps a card at 3–5 lines. As built, that card is
+      six. `rules.rs` cannot resolve it without breaking D37, so the answer is
+      geometry: wrap, truncate with the full text on selection, or let one card
+      be tall. Whichever it is, `views.rs` needs it decided before Phase 9, not
+      discovered there
 - [ ] Plain-language pass over every string a user will read — the jargon test
       is "would someone in their first month understand this sentence?"
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test
@@ -1064,8 +1155,14 @@ public release.
 kubeconfig sets `insecure-skip-tls-verify` it is honoured *and surfaced*, not
 swallowed. The token never leaves the kube client — `Debug` is wrapped on
 anything that could hold it. Control characters are stripped at ingest, so no
-downstream code has to remember. Field sizes are bounded: a 50MB annotation
-must not be stored whole.
+downstream code has to remember — **and the field list is not "names and
+messages"**: `metadata.finalizers` reaches `evidence` verbatim through rule 12
+and is settable by anyone with `patch` on pods, which is the shape a generic
+sentence lets an implementer miss. Field sizes are bounded: a 50MB annotation
+must not be stored whole, **and neither must a container's waiting message** —
+rules 3 and 4 put the kubelet's whole `state.waiting.message` on the card, and
+nothing below this phase bounds it
+([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
 
 **Done when:** watching kind live shows findings appear/disappear as pods
 break and heal; discovery lists the CRDs you installed; unplugging the network
@@ -1334,6 +1431,18 @@ without asking us anything.
 
 ## Later (recorded, not planned)
 
+- **Rule 8 outside `kube-system`** — the narrowing that keeps it quiet for
+  node infrastructure is namespace-bound, and every storage operator lives
+  somewhere else: Rook in `rook-ceph`, Longhorn in `longhorn-system`, every
+  CSI node plugin on `/var/lib/kubelet/plugins` writable. On those clusters
+  rule 8 prints a wall of CRITICALs, which fails
+  [invariant 13](CLAUDE.md)'s first half. **Not fixed on purpose:** widening
+  to any DaemonSet anywhere deletes the rule's reason, and an allowlist is
+  configuration this project does not have. It needs evidence from a cluster
+  that has one of these installed — and the answer may be *severity* rather
+  than silence, since the plain hostPath case already belongs to the Analysis
+  posture rows
+  ([NOTES § D70](NOTES.md#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13))
 - **v0.2** — cordon / uncordon / drain, wired to the N-series rules and the
   drain-safety report that already exist by then. Cheaper than it looks:
   kube-rs provides `Api<Node>::cordon` / `uncordon` and `Api::evict`, so the

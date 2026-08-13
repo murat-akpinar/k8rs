@@ -203,9 +203,16 @@ pub struct Finding {
     /// This is the whole spec `views.rs` (Phase 9) gets, so both halves are load-bearing:
     ///
     /// - *distinct objects, not findings*: `tests/fixtures/crashloop.json` is one pod
-    ///   satisfying rules 1, 5, 6 and 7 at once, so counting findings draws "4 of 5
-    ///   pods" for a single sick pod — wrong by 4×, in the direction that teaches a
-    ///   beginner not to believe the screen.
+    ///   satisfying rules 1 and 6 at once — the loop it is in, and how the run before
+    ///   this one ended — so counting findings draws "2 of 5 pods" for a single sick
+    ///   pod, in the direction that teaches a beginner not to believe the screen.
+    ///   `oom.json` is the same shape through rules 1 and 2, and a pod can reach three
+    ///   without being unusual. **The number here was 4 and named rules 1, 5, 6 and 7**;
+    ///   both were wrong, and each in a way worth keeping written down, because the same
+    ///   two mistakes are available to the next rule anyone adds. Rule 7 requires
+    ///   [`ContainerState::Running`] and a container in a crash loop is `Waiting`, so it
+    ///   was never in this list; rule 5 stays quiet on a container rule 1 is already
+    ///   describing, one incident being one card.
     /// - *`Pod` objects only*: W1's object is a ReplicaSet
     ///   (`tests/fixtures/quota-replicasets.json` — `ReplicaFailure`,
     ///   `status.replicas: 0`), so counting it prints "1 of 0 pods", the failure class
@@ -239,7 +246,7 @@ pub struct Finding {
     /// | rule | the field | the one it is not |
     /// |---|---|---|
     /// | 1, 2, 6 | [`Terminated::finished_at`] on [`ContainerSnapshot::last_terminated`] — when the run ended | `started_at`, one line above it in the same struct, which is when that run *began* |
-    /// | 7 | [`PodSnapshot::ready`]'s `last_transition` — when it stopped taking traffic | [`PodSnapshot::scheduled`]'s, three lines away: a pod up six days that went unready four minutes ago would read `6 days ago`, and that is the number someone correlates with a deploy |
+    /// | 7 | the **later** of [`PodSnapshot::ready`]'s `last_transition` and the container's own `started_at` — see below | [`PodSnapshot::scheduled`]'s, three lines away: a pod up six days that went unready four minutes ago would read `6 days ago`, and that is the number someone correlates with a deploy |
     /// | 12 | `deletionTimestamp − grace` — the moment the user asked (NOTES § D46) | the `deletionTimestamp` itself, which is the deadline and is short by exactly one grace period, forever |
     /// | N2 | the cordon taint's [`Taint::added_at`] (NOTES § D65), with the caveat below | — |
     /// | N3 | *that* condition's `last_transition` — DiskPressure's, PIDPressure's | `Ready`'s, off the same flat [`NodeSnapshot::conditions`] `Vec`, which dates the card to the node's boot |
@@ -249,6 +256,17 @@ pub struct Finding {
     /// set. A rule that is not in it owes the same answer — the moment its own event
     /// happened, or `None` — and owes it in a test, which is the only place the
     /// distinction between "the right field" and "a field that renders" is visible.
+    ///
+    /// **Rule 7's row needs two fields, and the second is a floor rather than a
+    /// preference.** `Ready` is a condition of the *pod* and does not move until every
+    /// container is ready, while the rule fires per container — so a container that has
+    /// existed for thirty seconds inside a pod that has been unready for an hour would
+    /// draw `1 hour ago` about a process that cannot have been out of the Service for
+    /// more than thirty seconds. That is this very row's own defect one level down. The
+    /// answer is the later of the two moments: the condition says when the pod left the
+    /// endpoints, [`ContainerState::Running`]'s `started_at` says how much of that this
+    /// container was even alive for, and no container can have been failing its readiness
+    /// probe before it started running.
     ///
     /// **Rule 8 is `None`, and not for the reason it looks like.** `spec.volumes` is
     /// immutable, so the pod's creation time *is* when its mount became dangerous — the
@@ -384,9 +402,9 @@ pub fn age(now: &Time, event: &Time) -> Option<String> {
     } else if elapsed.as_hours() < 1 {
         format!("{} min ago", elapsed.as_mins())
     } else if elapsed.as_hours() < 24 {
-        counted(elapsed.as_hours(), "hour")
+        format!("{} ago", counted(elapsed.as_hours(), "hour"))
     } else {
-        counted(elapsed.as_hours() / 24, "day")
+        format!("{} ago", counted(elapsed.as_hours() / 24, "day"))
     })
 }
 
@@ -401,14 +419,56 @@ pub fn age(now: &Time, event: &Time) -> Option<String> {
 /// thirty minutes out, and those are the values a mis-pointed rule actually produces.
 const SKEW_ALLOWANCE: SignedDuration = SignedDuration::from_mins(5);
 
-/// `1 hour ago` / `2 hours ago` — the two rungs of [`age`] whose unit is a word the
-/// reader pluralises. Not the minutes rung: both screens spell that `4 min ago`.
+/// `1 hour` / `2 hours` — the rungs whose unit is a word the reader pluralises. Not the
+/// minutes rung: both screens spell that `4 min`.
+///
+/// **The ` ago` is the caller's**, because two callers need the same length of time in two
+/// tenses: [`age`] says when something happened and appends it, [`lasted`] says how long
+/// something took and does not. Splitting it here rather than writing the ladder twice is
+/// what keeps the two from ever disagreeing about what 90 minutes is called.
 fn counted(n: i64, unit: &str) -> String {
     if n == 1 {
-        format!("1 {unit} ago")
+        format!("1 {unit}")
     } else {
-        format!("{n} {unit}s ago")
+        format!("{n} {unit}s")
     }
+}
+
+/// **How long one container run lasted** — `2s`, `40 min`, `3 hours`, `6 days`. Rules 1,
+/// 5 and 6 all show it, because *"it runs for about two seconds and then exits 1"* and
+/// *"it ran for forty minutes and then exited 1"* are the first fork of every crashloop
+/// triage and `kubectl describe` leaves the subtraction to a human
+/// ([`Terminated::started_at`], NOTES § D51).
+///
+/// **Not [`age`] with the suffix taken off.** The question is a span between two moments,
+/// so both of `age`'s special rungs are wrong here: `just now` describes a moment and not
+/// a length, and the `None` a far-future timestamp earns there is a wrong-*field* guard —
+/// a run that lasted no measurable time is an ordinary instant crash, and *"under a
+/// second"* is the fact rather than a refusal to answer. The rungs and the pluralisation
+/// are still shared, through [`counted`].
+///
+/// `None` when either end is missing, and when the run ended before it began — a clock
+/// that ran backwards is not a duration this may report as a number.
+fn lasted(run: &Terminated) -> Option<String> {
+    let elapsed = run
+        .finished_at
+        .as_ref()?
+        .0
+        .duration_since(run.started_at.as_ref()?.0);
+    if elapsed < SignedDuration::ZERO {
+        return None;
+    }
+    Some(if elapsed.as_secs() < 1 {
+        "under a second".to_string()
+    } else if elapsed.as_mins() < 1 {
+        format!("{}s", elapsed.as_secs())
+    } else if elapsed.as_hours() < 1 {
+        format!("{} min", elapsed.as_mins())
+    } else if elapsed.as_hours() < 24 {
+        counted(elapsed.as_hours(), "hour")
+    } else {
+        counted(elapsed.as_hours() / 24, "day")
+    })
 }
 
 // --- SNAPSHOT TYPES START ---
@@ -434,6 +494,13 @@ fn counted(n: i64, unit: &str) -> String {
 // gate: "stripped at ingest, so no downstream code has to remember"), which means they
 // must happen on the way *into* these impls. A `From` that receives a raw object is
 // receiving untrusted text.
+//
+// **The fields that carry it are wider than the security gate's own list**, which reads
+// "names, messages, annotations, log lines". Three more reach a card from here and Phase 5's
+// strip has to cover each: `ownerReferences[].kind` and `.apiVersion` (see
+// [`ObjectKind::from_api`]), and **`metadata.finalizers`** — anyone with `patch` on pods can
+// put any string in that array, it is not validated beyond being a qualified name's shape,
+// and rule 12 joins it straight into a `Finding`'s evidence line.
 
 /// One `status.conditions[]` entry, from whichever object carries it.
 ///
@@ -740,6 +807,28 @@ pub struct HostPathMount {
     /// `subPath: docker.sock` records `/var/run` on its own, and rule 8's docker.sock
     /// escalator never sees the socket it is looking for. `None` is the whole path.
     pub sub_path: Option<String>,
+    /// The mount's `subPathExpr` — the same narrowing, written with environment variables
+    /// in it (`$(POD_NAME)`), and **carried deliberately unresolved**.
+    ///
+    /// It cannot be resolved here and should not be: the values sit in
+    /// `spec.containers[].env` and, through `valueFrom`, in ConfigMaps and Secrets that
+    /// k8rs does not read and the security gate does not let it read. So this is a string
+    /// with a `$(…)` in it, and the only fact it carries is the one that matters —
+    /// **something narrows this mount and we cannot say what.**
+    ///
+    /// That fact points one way only. `hostPath: /` with `subPathExpr: $(POD_NAME)` gives
+    /// the container a single directory, and a rule reading `path` alone announces *"has
+    /// the whole filesystem of the machine it runs on mounted inside it"* — CRITICAL,
+    /// false, and the loudest wrong card in the box. Carried, [`mounted_path`] joins it
+    /// like a `subPath` and the escalator stops matching, which is the safe direction:
+    /// the mount can still be reported as writable, and it is never called the node's
+    /// root. The cost is a miss the other way — an expression that expands *to* a socket
+    /// path is not recognised — and there is no way to close that without the env values.
+    ///
+    /// Upstream forbids `subPath` and `subPathExpr` on the same mount
+    /// (`validateVolumeMounts`: they are mutually exclusive), so at most one of these two
+    /// is ever set.
+    pub sub_path_expr: Option<String>,
     pub read_only: bool,
     /// Which container mounts it. Without it the finding cannot say *who* has the node's
     /// root — `kubectl describe pod` can — and two containers mounting one volume produce
@@ -1311,6 +1400,7 @@ fn host_path_mounts(spec: &PodSpec) -> Vec<HostPathMount> {
                 mounts.push(HostPathMount {
                     path: host_path.path.clone(),
                     sub_path: mount.sub_path.clone(),
+                    sub_path_expr: mount.sub_path_expr.clone(),
                     read_only: mount.read_only.unwrap_or(false),
                     container: container.name.clone(),
                 });
@@ -1499,6 +1589,841 @@ impl From<DaemonSet> for WorkloadSnapshot {
 }
 
 // --- SNAPSHOT TYPES END ---
+
+// --- THE POD RULES START ---
+//
+// One function per rule of NOTES § v1 rule set, each one pure and each one returning what
+// it found rather than reporting how it failed: a missing field is `None` and no finding,
+// never a default and never a `Result` (invariant 5). The clock arrives as
+// [`ClusterSnapshot::now`], so a fixture cannot expire.
+//
+// **What is in here is D2's line — broken *now*.** Rule 9 (no limits declared) and the
+// plain read-only hostPath are risks rather than outages and belong to the Analysis
+// reports; rule 11 (probe failures) needs an Events watch this project does not open.
+// Their absence is the design, not a gap.
+//
+// **Every string below is written for someone in their first month** (invariant 14).
+// `CrashLoopBackOff`, `OOMKilled` and an exit code are each explained in a sentence and
+// then named in brackets, so the reader learns the word rather than being handed it.
+
+/// The evidence line's separator, spelled once — `screens/alerts.md` draws
+/// `limit 256Mi · exit 137 · 47 restarts`, and two rules picking different glue is a
+/// screen that looks assembled from two products.
+const FACTS: &str = " · ";
+
+/// Rule 5's two bands (REQUIREMENTS: restarts ≥3 warn, ≥10 critical).
+const RESTARTS_WARN: i32 = 3;
+const RESTARTS_CRITICAL: i32 = 10;
+
+/// **How long a pod may sit `Running` and unready before rule 7 says anything** — ten
+/// minutes, and the number is borrowed rather than tuned.
+///
+/// It is `progressDeadlineSeconds`' default, which is Kubernetes' own answer to *"how long
+/// may a pod take to become ready before that counts as a failure"*: a Deployment marks its
+/// rollout `ProgressDeadlineExceeded` at exactly this point and not before. Rule 7 firing
+/// sooner would put k8rs at odds with the controller that owns the rollout — a card saying
+/// *not receiving traffic* while the cluster still considers the rollout healthy — and
+/// `Running` + `ready: false` is every container between start and its first successful
+/// readiness probe, so a shorter window paints the screen on every deploy, every node
+/// reboot and every scale-up (NOTES § D46, § D51).
+const NOT_READY_GRACE: SignedDuration = SignedDuration::from_mins(10);
+
+/// **The margin on rule 12's deadline** (NOTES § D55). A pod is briefly overdue between
+/// its own deadline and the kubelet's SIGKILL landing even on a perfect clock, and a laptop
+/// running fast makes every pod deleted in the last ten minutes look overdue — the half of
+/// clock skew that manufactures findings and that no object timestamp reveals. Thirty
+/// seconds costs nothing: a pod actually held by a finalizer is held for minutes or forever.
+const OVERDUE_MARGIN: SignedDuration = SignedDuration::from_secs(60);
+
+/// The namespace whose CNI, kube-proxy and control-plane pods mount the node on purpose —
+/// see [`escalated_host_path`].
+const NODE_NAMESPACE: &str = "kube-system";
+
+/// **Every control socket that is the machine.** A process that can talk to one of these
+/// can start a privileged container on the node, so a **read-only** bind of it is still
+/// full root — which is why rule 8 escalates on the path and not on the mode.
+///
+/// **Docker's socket is not the list.** NOTES § v1 rule set names `/var/run/docker.sock`,
+/// which was the whole runtime landscape when that line was written and is now the one
+/// runtime these fixtures' own cluster does *not* run: kind runs **containerd**, and a
+/// list that stops at Docker means the single most common cluster-takeover shape produces
+/// nothing at all on the cluster this project is tested against. Worse than nothing,
+/// actually — a `kube-system` DaemonSet mounting the runtime socket falls through to the
+/// writable branch, which that namespace's exemption then silences.
+///
+/// `/var/run` is a symlink to `/run` on every systemd distribution, so each socket appears
+/// under both spellings and a manifest may use either; the rule may not depend on which one
+/// an author happened to type. CRI-O's default is the `/var/run` form.
+const RUNTIME_SOCKETS: [&str; 5] = [
+    "/var/run/docker.sock",
+    "/run/docker.sock",
+    "/run/containerd/containerd.sock",
+    "/var/run/containerd/containerd.sock",
+    "/var/run/crio/crio.sock",
+];
+
+/// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and
+/// the only entry point `k8s.rs` and the `--once` printer are given.
+///
+/// Rules 1–8 and 12. Rule 10 (Pending, and why), rules 1–6 over `initContainerStatuses`,
+/// the N-series, W-series and C1 are later boxes of this phase and are deliberately not
+/// wired here: a half-built rule is worse than an absent one, because the screen looks
+/// complete either way.
+///
+/// **Rules 1–7 read `containerStatuses` only**, which is [`ContainerRole::Regular`] on the
+/// merged list. The init containers are one box away (NOTES § D27) and reading them needs
+/// the finding to name *which* init container, so it is a change to every sentence in those
+/// rules and not a change to this loop. **Rule 8 is not in that sentence** and must not be
+/// read as if it were: its input is `spec.volumes` and the mounts against it, which
+/// [`host_path_mounts`] walks across the init containers as well — a hostPath is mounted
+/// whatever list the container was declared in, and no status is consulted to know it.
+///
+/// **A pod that finished successfully is not broken now**, so rules 1–8 skip it. `Succeeded`
+/// is the state every `restartPolicy: OnFailure` Job pod ends in, and it keeps its restart
+/// count and its last non-zero exit for as long as nobody collects it — rules 5 and 6 would
+/// then report the history of a job that worked, in the hundreds, on the one screen whose
+/// promise is *only what is broken* (NOTES § D2). Rule 12 is deliberately outside the skip:
+/// a `Succeeded` pod that will not go away is still stuck.
+///
+/// **`Failed` is in the skip for the same reason and it is the commoner half.** An Evicted
+/// pod is `phase: Failed` with its restart count and its last non-zero exit still on it, and
+/// terminated pods are collected only above `--terminated-pod-gc-threshold` — 12500 by
+/// default — so on any cluster that has ever been under memory pressure they pile up, and
+/// each would draw two permanent cards for a pod that will never run again. NOTES routes
+/// Evicted and Completed pileups to the **Waste** report, not here. Nothing is lost: a
+/// `restartPolicy: Never` pod that failed carries `state: Terminated` with an empty
+/// `lastState`, so rules 1–6 read nothing off it either way.
+///
+/// **No committed capture is in either state**, because `scripts/broken.yaml` and
+/// `scripts/healthy.yaml` create no Job and evict nothing — so the skip is reasoned and
+/// unproven in both halves, and deleting it leaves the suite green. **Capture trip:** a
+/// completed `restartPolicy: OnFailure` Job pod with two or more restarts, and a pod evicted
+/// by a `memory.available` pressure threshold.
+pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for pod in &snapshot.pods {
+        findings.extend(stuck_terminating(&snapshot.now, pod));
+        if matches!(pod.phase.as_deref(), Some("Succeeded" | "Failed")) {
+            continue;
+        }
+        findings.extend(escalated_host_path(pod));
+        for c in pod
+            .containers
+            .iter()
+            .filter(|c| c.role == ContainerRole::Regular)
+        {
+            findings.extend(crash_looping(pod, c));
+            findings.extend(out_of_memory(pod, c));
+            findings.extend(image_not_pulled(pod, c));
+            findings.extend(container_config_missing(pod, c));
+            findings.extend(restarting_repeatedly(pod, c));
+            findings.extend(previous_run_failed(pod, c));
+            findings.extend(running_but_not_ready(&snapshot.now, pod, c));
+        }
+    }
+    findings
+}
+
+/// `kubectl describe pod …` — the one command that shows a container's current state, how
+/// its last run ended, its restart count, the limits it is running under and its mounts.
+/// That is what rules 1–8 claim, so it is the command invariant 4 shows beside them.
+///
+/// **Rule 12 does not use it**: `describe` prints no finalizers at all (NOTES § D46), and a
+/// teaching command that does not show what the card says is worse than none.
+fn describe(id: &ObjectId) -> Option<String> {
+    Some(format!(
+        "kubectl describe pod {}{}",
+        id.name,
+        in_namespace(id)
+    ))
+}
+
+/// `kubectl get pod … -o yaml` — for the three cards whose evidence is a field `describe`
+/// does not print at all.
+///
+/// Rule 12's is `metadata.finalizers`, which `describe` has never rendered. **Rules 3 and 4
+/// are the same failure and were missed**: kubectl's `describeStatus` prints a waiting
+/// container's `Reason` and stops, so `state.waiting.message` — which is the *entire*
+/// evidence line of both cards, the sentence naming the registry that refused or the
+/// ConfigMap that is absent — reaches `describe` only indirectly, through an Event that
+/// rewords it and disappears at `--event-ttl`. A teaching command that does not show what
+/// the card says is worse than none (invariant 4).
+fn get_yaml(id: &ObjectId) -> Option<String> {
+    Some(format!(
+        "kubectl get pod {}{} -o yaml",
+        id.name,
+        in_namespace(id)
+    ))
+}
+
+/// ` -n <namespace>`, or nothing at all when there is none. The flag is appended rather
+/// than always written because `-n ""` is a command that does not work, printed in the
+/// record invariant 4 says may not lie ([`ObjectId::namespace`]).
+fn in_namespace(id: &ObjectId) -> String {
+    id.namespace
+        .as_deref()
+        .map_or_else(String::new, |ns| format!(" -n {ns}"))
+}
+
+/// The reason and the runtime's own sentence, for a container that is waiting — and
+/// `None` for one that is running or has stopped, which is what keeps rules 1, 3 and 4
+/// from reading a waiting reason off a container in another state ([`ContainerState`]).
+///
+/// Also `None` for a container that is waiting and has been given no reason, which the
+/// decode produces for an empty `state` (NOTES § D45). Every caller matches on a named
+/// reason, so the two collapse to the same answer: nothing to fire on.
+fn waiting(c: &ContainerSnapshot) -> Option<(&str, Option<&str>)> {
+    match &c.state {
+        ContainerState::Waiting { reason, message } => {
+            Some((reason.as_deref()?, message.as_deref()))
+        }
+        _ => None,
+    }
+}
+
+/// **What an exit code means, in the words a beginner needs** — NOTES § v1 rule set's
+/// translation table, and nothing invented beside it. `None` is a code with no accepted
+/// meaning, where the number alone is the honest answer.
+///
+/// 143 is in the table and is the one entry that says *nothing is wrong*, which is why
+/// [`previous_run_failed`] refuses to fire on it: a container that was asked to stop and
+/// stopped is not a finding. It stays here because rule 1 does print it — a container that
+/// is crash-looping and whose last run was a clean SIGTERM is a real and confusing state,
+/// and the sentence is what unconfuses it.
+///
+/// **137 needs the `reason` beside it, and NOTES' own table is corrected here.** That table
+/// reads *"137 — SIGKILL, almost always OOM"*, which was written for a rule that had no
+/// reason field to consult. It does now, and the two cases are not the same incident: with
+/// [`Terminated::reason`] `OOMKilled` the kernel took the container for using too much
+/// memory; **without it**, 137 is the kubelet's own SIGKILL after a SIGTERM the process did
+/// not answer inside its grace period — a failing `livenessProbe` or a shutdown that hangs.
+/// Printing the memory sentence there sends someone at 3am to raise a limit on a container
+/// whose liveness endpoint is timing out, which is the most expensive kind of wrong because
+/// raising the limit appears to help for a while.
+fn exit_meaning(code: i32, reason: Option<&str>) -> Option<&'static str> {
+    Some(match code {
+        137 if reason == Some("OOMKilled") => {
+            "killed by the kernel for using more memory than it was allowed"
+        }
+        137 => {
+            "killed because it did not stop when it was asked to — a failing liveness probe, \
+             or a shutdown that hangs"
+        }
+        143 => "stopped with SIGTERM, which is an ordinary shutdown and not an error",
+        1 | 2 => "the application's own error",
+        126 => "the command was found but could not be run",
+        127 => "the command was not found",
+        _ => return None,
+    })
+}
+
+/// `exit 137 (killed with SIGKILL, …)` — the number first, because that is what the reader
+/// will search for, and the sentence in brackets like every other piece of jargon on these
+/// cards. Takes the whole [`Terminated`], because [`exit_meaning`] needs the reason that
+/// sits beside the code and a caller passing one without the other is the bug this signature
+/// removes.
+fn exit_fact(run: &Terminated) -> String {
+    match exit_meaning(run.exit_code, run.reason.as_deref()) {
+        Some(meaning) => format!("exit {} ({meaning})", run.exit_code),
+        None => format!("exit {}", run.exit_code),
+    }
+}
+
+/// **The last thing the container actually said**, out of the kubelet's termination
+/// message — `None` when it left none, which is the usual case ([`Terminated::message`]).
+///
+/// **The last non-empty line, not the first.** Under `terminationMessagePolicy:
+/// FallbackToLogsOnError` this field is the *tail* of the container's log, so the first
+/// line is whatever the process printed on the way up — `tests/fixtures/crashloop.json`
+/// starts its with `starting` and ends it with the panic that killed it. Taking the first
+/// line would print the boot banner and call it a cause.
+///
+/// **One line, and this is where that is decided.** A card is three to five lines
+/// (`screens/widgets.md` § 2) and a `Finding`'s fields are each one of them, so a value
+/// with newlines in it does not fit a slot — the choice of *which* line is a rule's, the
+/// same way the choice of which timestamp is. It is not truncation: `screens/widgets.md`
+/// § 7 forbids k8rs shortening a string itself, and bounding a huge value is `k8s.rs`'s job
+/// at ingest, one phase up.
+fn last_log_line(run: &Terminated) -> Option<&str> {
+    run.message
+        .as_deref()?
+        .lines()
+        .map(str::trim_end)
+        .rfind(|l| !l.is_empty())
+}
+
+/// **Rule 1 — the container keeps crashing and Kubernetes has started waiting between
+/// restarts.** `state.waiting.reason == CrashLoopBackOff`, CRITICAL: this container is not
+/// doing its job right now.
+///
+/// The age is [`Terminated::finished_at`] on the previous run — when it last died — and
+/// never `started_at` one line above it, which is when that run began
+/// ([`Finding::timestamp`]).
+fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    let (reason, _) = waiting(c)?;
+    if reason != "CrashLoopBackOff" {
+        return None;
+    }
+    let mut facts = vec![format!("container {}", c.name)];
+    if c.restarts > 0 {
+        facts.push(format!("{} restarts", c.restarts));
+    }
+    if let Some(run) = &c.last_terminated {
+        if let Some(d) = lasted(run) {
+            facts.push(format!("the last run lasted {d}"));
+        }
+        facts.push(exit_fact(run));
+    }
+    Some(Finding {
+        severity: Severity::Critical,
+        title: "Container keeps crashing, and each restart waits longer (CrashLoopBackOff)"
+            .to_string(),
+        evidence: facts.join(FACTS),
+        action: "read the previous run's logs — that is where it says why it exits".to_string(),
+        kubectl_cmd: describe(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: c
+            .last_terminated
+            .as_ref()
+            .and_then(|t| t.finished_at.clone()),
+    })
+}
+
+/// **Rule 2 — the kernel killed the container for using more memory than it was allowed.**
+/// `lastState.terminated.reason == OOMKilled`, CRITICAL.
+///
+/// **The limit named is the one that was enacted**, never the one a pending in-place resize
+/// asked for: [`ContainerSnapshot::memory_limit`] reads `status.resources` first for exactly
+/// this sentence, or the card sends an operator hunting a leak in an application that was
+/// never given the memory (NOTES § D51). When no limit is readable the term is left out
+/// rather than guessed — a pod-level limit can kill a container that declares none, and
+/// this snapshot does not carry one, so the number genuinely is not here
+/// ([`PodSnapshot::cpu_request`]).
+fn out_of_memory(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    let run = c.last_terminated.as_ref()?;
+    if run.reason.as_deref() != Some("OOMKilled") {
+        return None;
+    }
+    let mut facts = vec![format!("container {}", c.name)];
+    if let Some(limit) = &c.memory_limit {
+        facts.push(format!("limit {limit}"));
+    }
+    facts.push(format!("exit {}", run.exit_code));
+    if c.restarts > 0 {
+        facts.push(format!("{} restarts", c.restarts));
+    }
+    Some(Finding {
+        severity: Severity::Critical,
+        title: "Container used more memory than it was allowed and the kernel killed it \
+                (OOMKilled)"
+            .to_string(),
+        evidence: facts.join(FACTS),
+        action: "raise the container's memory limit, or find what is using the memory".to_string(),
+        kubectl_cmd: describe(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: run.finished_at.clone(),
+    })
+}
+
+/// **Rule 3 — the image could not be downloaded, so the container never started.**
+/// `state.waiting.reason` of `ErrImagePull` or `ImagePullBackOff` — the kubelet alternates
+/// between the two as it backs off and retries, and both mean the same thing. CRITICAL.
+///
+/// The runtime's own sentence is quoted verbatim (NOTES § D37) because it is the only place
+/// the actual failure appears — a name typo, a missing tag and a registry that needs
+/// credentials all look identical without it. The resolved image name is printed beside it
+/// from [`ContainerSnapshot::image`] rather than dug out of that sentence, which containerd
+/// and CRI-O word differently.
+///
+/// No age: a failed pull is a state the kubelet is still retrying, and nothing in the
+/// container status records when the first attempt was made.
+fn image_not_pulled(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    let (reason, message) = waiting(c)?;
+    if !matches!(reason, "ErrImagePull" | "ImagePullBackOff") {
+        return None;
+    }
+    let mut facts = vec![
+        format!("container {}", c.name),
+        format!("image {}", c.image),
+    ];
+    facts.extend(message.map(str::to_string));
+    Some(Finding {
+        severity: Severity::Critical,
+        title: format!("Container image could not be downloaded ({reason})"),
+        evidence: facts.join(FACTS),
+        action: "check the image name and tag, and whether this namespace has a pull secret \
+                 for that registry"
+            .to_string(),
+        kubectl_cmd: get_yaml(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: None,
+    })
+}
+
+/// **Rule 4 — the container refers to a ConfigMap or Secret that is not there.**
+/// `state.waiting.reason == CreateContainerConfigError`, CRITICAL.
+///
+/// The kubelet's message names the missing object (`configmap "…" not found`), and that
+/// name is the whole of what the reader has to go and create or correct — so it is quoted
+/// verbatim rather than summarised.
+fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    let (reason, message) = waiting(c)?;
+    if reason != "CreateContainerConfigError" {
+        return None;
+    }
+    let mut facts = vec![format!("container {}", c.name)];
+    facts.extend(message.map(str::to_string));
+    Some(Finding {
+        severity: Severity::Critical,
+        title: "Container needs a ConfigMap or Secret that does not exist \
+                (CreateContainerConfigError)"
+            .to_string(),
+        evidence: facts.join(FACTS),
+        action: "create the missing object, or correct the name the pod refers to".to_string(),
+        kubectl_cmd: get_yaml(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: None,
+    })
+}
+
+/// **Rule 5 — the container has been restarted enough times that something is wrong even
+/// if it looks fine now.** `restartCount`, WARN at [`RESTARTS_WARN`] and CRITICAL at
+/// [`RESTARTS_CRITICAL`].
+///
+/// **Quiet on a container rule 1 is already describing.** `broken-oom` used to draw three
+/// CRITICALs for one incident — *keeps crashing* (whose evidence already reads `15
+/// restarts`), *used more memory*, and *has been restarted 15 times* — and the third
+/// carries nothing the first two do not. That is the principle [`previous_run_failed`]
+/// already applies to rule 2 by name, one step over: one incident, one card. NOTES' *"even
+/// if Running … looks healthy now"* says what this rule is for, and it is the container
+/// that looks fine, not the one visibly in a loop.
+///
+/// **The title changes with the state and the reason is that it would otherwise be false.**
+/// NOTES' wording is the whole point of the rule for a container that is up and serving,
+/// and would be a lie about one that has stopped.
+///
+/// **Severity is WARN whenever the container is serving, whatever the count.** A container
+/// up six weeks with a nightly leak-restart reaches forty while passing every probe, and
+/// `RESTARTS_CRITICAL` would put it in the same red band as `CrashLoopBackOff` — a red card
+/// whose own title says it is serving is what teaches a reader to stop believing red
+/// (NOTES § D2). REQUIREMENTS marks those two numbers *(suggestion)*, and the argument for
+/// bending the top one here is that a lifetime counter carries no *rate*: forty restarts in
+/// six weeks and forty in an hour are the same integer, and this snapshot cannot tell them
+/// apart. The band stays; what it may reach on a working container does not.
+///
+/// **That leaves the CRITICAL branch with no capture behind it.** It now needs a container
+/// with ten or more restarts that is neither serving nor in a crash loop — a real but
+/// transient state, caught between restarts or waiting on something else — and no committed
+/// fixture is in it, so a mutation that makes the band unreachable stays green. **Capture
+/// trip:** a pod photographed mid-restart, or one whose many restarts ended in a different
+/// waiting reason such as `ImagePullBackOff` after a tag was moved. The same capture closes
+/// the `&& !serving` half from the other side — `broken-restarts` sits at three, below
+/// `RESTARTS_CRITICAL`, so no fixture can tell the two spellings of this severity apart and
+/// only the constants themselves are asserted.
+///
+/// The age is when the counter last went up, which is [`Terminated::finished_at`] on the
+/// previous run: the restart is the event this card is about. A container with a count and
+/// no previous run recorded has no such moment and draws none ([`Finding::timestamp`]).
+fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    if c.restarts < RESTARTS_WARN || waiting(c).map(|(r, _)| r) == Some("CrashLoopBackOff") {
+        return None;
+    }
+    let serving = c.ready && matches!(c.state, ContainerState::Running { .. });
+    Some(Finding {
+        severity: if c.restarts >= RESTARTS_CRITICAL && !serving {
+            Severity::Critical
+        } else {
+            Severity::Warn
+        },
+        title: if serving {
+            format!(
+                "Container has been restarted {} times — it is serving now, but something \
+                 keeps killing it",
+                c.restarts
+            )
+        } else {
+            format!("Container has been restarted {} times", c.restarts)
+        },
+        evidence: [format!("container {}", c.name), c.image.clone()].join(FACTS),
+        action: "check the memory limit and the liveness probe — those are what restart a \
+                 container that otherwise runs"
+            .to_string(),
+        kubectl_cmd: describe(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: c
+            .last_terminated
+            .as_ref()
+            .and_then(|t| t.finished_at.clone()),
+    })
+}
+
+/// **Rule 6 — the container's previous run ended badly, and here is what the code means.**
+/// `lastState.terminated.exitCode`, WARN: the run that failed is over, and where the
+/// container is *currently* broken rules 1 to 4 say so as CRITICAL beside this.
+///
+/// **Two exits are not findings.** `0` is a success, and `143` is SIGTERM — a container
+/// that was asked to stop and stopped, which is every rolling update and every scale-down
+/// (NOTES § v1 rule set). Firing on either would put a card on a healthy cluster.
+///
+/// **Neither exemption has a capture behind it, and that is stated rather than hidden.**
+/// Every regular container in the repository whose previous run is recorded exited `1` or
+/// `137`, so a mutation that deletes these two comparisons stays green — the one place in
+/// this box where the suite cannot tell right from wrong. **Capture trip:** two pods in
+/// `scripts/broken.yaml`, both with `restartPolicy: Always` — one whose command exits `0`
+/// and restarts, and one that a failing `livenessProbe` stops, where an unhandled SIGTERM
+/// leaves `143`. Until then the two `if`s are reasoned and unproven.
+///
+/// **`OOMKilled` belongs to rule 2, so this stays quiet on it.** Both would otherwise fire
+/// on one death, and the second card would be the weaker of the two: *"exit 137, almost
+/// always memory"* beside *"used more memory than it was allowed"*, which already names the
+/// limit. One event, one card.
+///
+/// **And quiet on a container that is serving now, because this field never expires.**
+/// `lastState.terminated` is kept for the life of the pod, so a container that restarted
+/// once six months ago and has answered every request since would otherwise draw *"The
+/// container's previous run failed · 180 days ago"* for ever. That is the largest
+/// false-positive *volume* in this box and the cheapest to reach — it needs no unusual
+/// manifest, only uptime — and a permanent card on a healthy workload is exactly what makes
+/// an empty Alerts screen unbelievable (NOTES § D2). A serving container's restart history
+/// belongs to [`restarting_repeatedly`], which has a threshold under it; a single old
+/// failure has none and never will.
+///
+/// **When the kubelet kept the container's last words, they replace the advice.** Telling
+/// someone to go and read a log k8rs is already holding is the shape of a tool that
+/// restates the object instead of answering ([`Terminated::message`]).
+fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    let run = c.last_terminated.as_ref()?;
+    if run.exit_code == 0
+        || run.exit_code == 143
+        || run.reason.as_deref() == Some("OOMKilled")
+        || (c.ready && matches!(c.state, ContainerState::Running { .. }))
+    {
+        return None;
+    }
+    // The kubelet's `reason` for a non-zero exit is the bare word `Error`, which says
+    // nothing the title has not already said in a sentence — printing it would be jargon
+    // on the card for its own sake (invariant 14).
+    let mut facts = vec![format!("container {}", c.name)];
+    if let Some(d) = lasted(run) {
+        facts.push(format!("ran for {d}"));
+    }
+    Some(Finding {
+        severity: Severity::Warn,
+        title: format!("The container's previous run failed — {}", exit_fact(run)),
+        evidence: facts.join(FACTS),
+        action: match (last_log_line(run), run.exit_code) {
+            (Some(line), _) => format!("the last thing it logged was: {line}"),
+            (None, 126 | 127) => {
+                "check the container's command and arguments — what they name is not in the \
+                 image"
+                    .to_string()
+            }
+            (None, _) => {
+                "read the logs of that run to find the application's own error".to_string()
+            }
+        },
+        kubectl_cmd: describe(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: run.finished_at.clone(),
+    })
+}
+
+/// **Rule 7 — the container is up but its readiness check is failing, so the Service has
+/// stopped sending it traffic.** WARN, and the hardest rule in this file to keep quiet.
+///
+/// Four conditions, and every one of them is load-bearing:
+///
+/// - the pod is `Running` ([`PodSnapshot::phase`]),
+/// - **the container is in [`ContainerState::Running`]**, which is what tells this rule
+///   apart from rule 1 — a container waiting in a crash loop is also `ready: false`, and
+///   describing it as *running but not receiving traffic* is a wrong diagnosis printed
+///   confidently,
+/// - it is not ready ([`ContainerSnapshot::ready`]),
+/// - and it has been that way for longer than [`NOT_READY_GRACE`].
+///
+/// **The since-when is [`PodSnapshot::ready`]'s `last_transition` and nothing else.**
+/// `Running && !ready` is *also* every container between start and its first successful
+/// readiness probe, so without a clock the rule fires on every rolling update with an
+/// `initialDelaySeconds`, every node reboot and every scale-up. It is specifically not
+/// [`ContainerSnapshot::started`], which is `true` the instant a container runs wherever no
+/// `startupProbe` is declared — that field discriminates nothing on the overwhelming
+/// majority of real workloads and would rebuild the very false positive this rule was sent
+/// back to remove (NOTES § D51).
+///
+/// **The since-when is floored at the container's own run start**, because `Ready` is a
+/// condition of the *pod* and this rule fires per container. It does not move until every
+/// container is ready, so a container thirty seconds old inside a pod that has been unready
+/// for an hour would be dated `1 hour ago` — and the ten-minute grace would be bypassed
+/// altogether, which is how a crash-looping container caught between restarts fired this
+/// rule instantly on top of rules 5 and 6. A container cannot have been out of the Service
+/// for longer than its current run has existed, so the answer is the **later** of the two
+/// moments ([`Finding::timestamp`]).
+///
+/// **`started` is read here as a suppressor, and that is not what D51 rejected.** D51
+/// rejected it as a *trigger* and that ruling stands: `Running && !ready && started` is
+/// every pod of every rolling update, because the field is always true once a container runs
+/// where no `startupProbe` is declared. Read the other way round it says something the
+/// trigger reading cannot: `Running && !started` is reachable **only** where a
+/// `startupProbe` *is* declared and has not yet passed — and while it has not passed, the
+/// kubelet does not run the readiness probe at all, so `ready: false` there means *not asked
+/// yet*, not *answered wrongly*. Without this, every Cassandra, Elasticsearch and Vault pod
+/// with `failureThreshold: 60, periodSeconds: 30` draws a card at ten minutes while it is
+/// booting exactly as its author intended. A field can discriminate nothing in one direction
+/// and everything in the other; that is the whole distinction, and it is written here
+/// because the next reader will otherwise read this line as D51 being violated.
+///
+/// **Both of those two checks are unproven, and on the committed captures they are
+/// redundant with each other.** No fixture declares a `startupProbe`, so every container in
+/// the repository reports `started: true`, and every container that is not `Running` reports
+/// `false` — so deleting either one leaves the suite green while the other happens to cover
+/// it. The state check is kept for a structural reason rather than a defensive one: it is
+/// where `started_at` comes from, and the floor above cannot be computed without it.
+/// **Capture trip:** one pod with a slow `startupProbe` that has not passed separates all
+/// three readings at once.
+///
+/// **No condition, no finding.** A pod whose `Ready` condition has not been written has no
+/// since-when to test against, and the safe answer there is silence rather than the version
+/// of this rule that has no clock at all.
+fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    let ContainerState::Running { started_at } = &c.state else {
+        return None;
+    };
+    if pod.phase.as_deref() != Some("Running") || c.ready || !c.started {
+        return None;
+    }
+    let unready_since = pod.ready.as_ref()?.last_transition.as_ref()?;
+    let since = match started_at {
+        Some(began) if began.0 > unready_since.0 => began,
+        _ => unready_since,
+    };
+    if now.0.duration_since(since.0) <= NOT_READY_GRACE {
+        return None;
+    }
+    Some(Finding {
+        severity: Severity::Warn,
+        // `screens/alerts.md` and `screens/once.md` both draw this card, word for word.
+        // Two renderers and one rule already share these strings; the screen spec and the
+        // rule that fills it must not be a third place they can drift.
+        title: "Running, but not receiving traffic — the readiness check is failing".to_string(),
+        evidence: [format!("container {}", c.name), c.image.clone()].join(FACTS),
+        action: "check the readiness probe: the path, the port, and whether the application \
+                 answers it yet"
+            .to_string(),
+        kubectl_cmd: describe(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: Some(since.clone()),
+    })
+}
+
+/// **Rule 8 — a mount that hands the container the machine, not a directory.** CRITICAL,
+/// and only the escalated case: `/`, the runtime socket, or a writable host directory
+/// (NOTES § v1 rule set, *Severity escalators*). The plain read-only hostPath is how every
+/// CNI, CSI and node agent is *supposed* to work and belongs to the Analysis posture rows,
+/// not to a work queue (NOTES § D2).
+///
+/// **What the container gets is `path` joined with the mount's `subPath`**, never `path`
+/// alone: `hostPath: /var/run` with `subPath: docker.sock` is a bind of the socket itself
+/// and the escalator has to see it (NOTES § D46). The join cuts both ways and that is
+/// correct — `hostPath: /` with `subPath: run/containerd` is a mount of `/run/containerd`
+/// and is not the node's root.
+///
+/// **Node infrastructure in `kube-system` is silent on the writable escalator alone.**
+/// Every CNI agent, kube-proxy and control-plane component writes to the node by
+/// construction, so the rule as written fires CRITICAL on a healthy cluster — kindnet and
+/// kube-proxy on every node, and `etcd` on every control plane. Narrowing to *DaemonSet-owned*
+/// is not enough on its own: `etcd`, `kube-apiserver` and `kube-controller-manager` are
+/// **mirror pods**, owned by a Node and not by any workload
+/// ([`PodSnapshot::mirror`], NOTES § D39). Both shapes are node infrastructure by
+/// construction, and both are exempted; nothing else is.
+///
+/// **The other two escalators fire straight through that silence**, because neither is
+/// normal even for a node agent: a CNI plugin needs `/etc/cni/net.d`, not `/`, and nothing
+/// in `kube-system` needs the runtime socket.
+///
+/// **The socket escalator has no capture behind it.** Nothing committed mounts
+/// `docker.sock` — `hostpath.json` was photographed with `/` and a `subPath` of
+/// `run/containerd` instead — so deleting that branch leaves the suite green, and it is the
+/// second of the two places in this box where that is true. **Capture trip:** a pod in
+/// `scripts/broken.yaml` with `hostPath: /var/run` and `subPath: docker.sock`, which is
+/// NOTES § D46's own example and would prove the join and the escalator in one object. The
+/// list this branch reads is proven *reachable* — every entry of [`RUNTIME_SOCKETS`] is
+/// asserted to be in the form [`mounted_path`] produces, so none of them is a constant that
+/// could never match — but nothing proves the branch itself fires, which is a different
+/// claim.
+///
+/// **The narrowing is `kube-system` only, and that is a known limit.** A CSI driver in
+/// `longhorn-system` mounts writable host paths just as legitimately and gets a card it has
+/// not earned. Widening it needs a signal this snapshot does not carry — the plan's
+/// narrowing is deliberate and is not quietly extended here.
+///
+/// No age, and not because none could be computed: `spec.volumes` is immutable, so the
+/// pod's creation time *is* when the mount became dangerous. The card describes a standing
+/// property rather than an event, and a date beside it sends the reader looking for a change
+/// that never happened ([`Finding::timestamp`]).
+fn escalated_host_path(pod: &PodSnapshot) -> Vec<Finding> {
+    let node_agent = pod.id.namespace.as_deref() == Some(NODE_NAMESPACE)
+        && (pod.mirror || pod.owner.kind == ObjectKind::DaemonSet);
+    pod.host_path_mounts
+        .iter()
+        .filter_map(|m| {
+            let path = mounted_path(m);
+            // The three escalators, and the order matters: the two that are about *what*
+            // is mounted are asked first, so they answer for a node agent that the
+            // writable one stays quiet about.
+            let (title, action) = if path == "/" {
+                (
+                    "A container has the whole filesystem of the machine it runs on mounted \
+                     inside it",
+                    "mount only the directory the container actually needs, not the root",
+                )
+            } else if RUNTIME_SOCKETS.contains(&path.as_str()) {
+                (
+                    "A container can drive the container runtime, which is full control of \
+                     that machine",
+                    "remove the mount — a read-only bind of this socket is still full control",
+                )
+            } else if !m.read_only && !node_agent {
+                (
+                    "A container can change files on the machine it runs on",
+                    "mount it read-only if the container only needs to read it",
+                )
+            } else {
+                return None;
+            };
+            Some(Finding {
+                severity: Severity::Critical,
+                title: title.to_string(),
+                evidence: [
+                    format!("container {}", m.container),
+                    format!("{path} on the node"),
+                    if m.read_only { "read-only" } else { "writable" }.to_string(),
+                ]
+                .join(FACTS),
+                action: action.to_string(),
+                kubectl_cmd: describe(&pod.id),
+                owner: pod.owner.clone(),
+                object: pod.id.clone(),
+                timestamp: None,
+            })
+        })
+        .collect()
+}
+
+/// The path the container actually receives: the volume's `hostPath.path` narrowed by the
+/// mount's `subPath` — or by its [`sub_path_expr`](HostPathMount::sub_path_expr), which
+/// joins the same way and stays unresolved on purpose, so that `/` narrowed by
+/// `$(POD_NAME)` reads as `/$(POD_NAME)` and stops being the node's root. Upstream forbids
+/// both at once, so the `or` picks whichever exists.
+///
+/// **The result is normalised, and the three string compares above it only mean what they
+/// read as if it is.** `hostPath: {path: "//"}` passes upstream validation — it is
+/// absolute and contains no backsteps — and resolves to `/` on the node, but `"//" == "/"`
+/// is false, so an unnormalised rule drops the node's whole root filesystem into the
+/// writable branch: silenced outright in `kube-system`, and elsewhere advised with *"mount
+/// it read-only if the container only needs to read it"*. `/.` is the same trick. So:
+/// repeated separators collapsed, `.` elements dropped, trailing separator gone.
+///
+/// `..` is deliberately **not** resolved. `ValidatePathNoBacksteps` rejects it in a
+/// hostPath and `validateLocalDescendingPath` rejects it in a subPath, so it cannot arrive;
+/// if it ever did, leaving it in the string matches no escalator and lands in the writable
+/// branch, which is the safe direction for a path this function would have to guess at.
+fn mounted_path(m: &HostPathMount) -> String {
+    let narrowing = m
+        .sub_path
+        .as_deref()
+        .or(m.sub_path_expr.as_deref())
+        .filter(|s| !s.is_empty());
+    let joined = match narrowing {
+        None => m.path.clone(),
+        Some(sub) => format!("{}/{sub}", m.path),
+    };
+    let kept = joined
+        .split('/')
+        .filter(|e| !e.is_empty() && *e != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+    // An absolute path keeps its leading separator and a root that emptied out is `/`.
+    // A relative one cannot come off the API — `hostPath.path` must be absolute — and is
+    // returned as it arrived rather than being given a root it never had.
+    if joined.starts_with('/') {
+        format!("/{kept}")
+    } else {
+        kept
+    }
+}
+
+/// **Rule 12 — the pod was asked to shut down and is still here.** WARN: nothing is down,
+/// but an operation somebody started has not finished, and until it does the replacement
+/// pod does not start and the node does not drain.
+///
+/// **`deletionTimestamp` is a deadline, not a moment.** The API server writes *request time
+/// plus the grace period* (NOTES § D46), so the pod is overdue once `now` passes the field
+/// itself — a rule reading it as the moment of the request would double its own threshold.
+///
+/// **The trigger carries a margin of [`OVERDUE_MARGIN`]**, or the pod's own grace period
+/// where that is longer (NOTES § D55): a pod is briefly overdue between its deadline and
+/// the kubelet's SIGKILL landing, and a laptop running fast makes every recently deleted
+/// pod look stuck.
+///
+/// **The age is the moment the user asked**, `deletionTimestamp − grace`, and the
+/// subtraction is `checked_sub`: a `terminationGracePeriodSeconds` of `i64::MAX` is a value
+/// the live API server accepted in a dry run, and a plain `-` panics on it — anyone with
+/// `create` and `delete` on pods could otherwise kill the TUI through a function invariant 5
+/// says cannot fail (NOTES § D56). It answers `None` there rather than a wrong moment.
+///
+/// **The finalizers are the whole diagnosis.** *"A finalizer is holding it"* and *"the
+/// kubelet has not confirmed it is gone"* are two causes with unrelated fixes, and
+/// `kubectl describe pod` does not print finalizers at all — which is why the command beside
+/// this card is `get -o yaml` and not `describe`.
+fn stuck_terminating(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
+    let deadline = pod.deletion_timestamp.as_ref()?;
+    let grace = pod.grace_period_seconds.map(SignedDuration::from_secs);
+    if now.0.duration_since(deadline.0) <= OVERDUE_MARGIN {
+        return None;
+    }
+    let mut facts = Vec::new();
+    if let Some(node) = &pod.node {
+        facts.push(format!("on node {node}"));
+    }
+    let held = !pod.finalizers.is_empty();
+    if held {
+        facts.push(format!(
+            "held by {}: {}",
+            if pod.finalizers.len() == 1 {
+                "a finalizer"
+            } else {
+                "finalizers"
+            },
+            pod.finalizers.join(", ")
+        ));
+    }
+    Some(Finding {
+        severity: Severity::Warn,
+        title: "This pod was asked to shut down and is still here (it shows as Terminating)"
+            .to_string(),
+        evidence: facts.join(FACTS),
+        action: if held {
+            "nothing can delete this pod while that list has anything in it — find what put \
+             it there"
+                .to_string()
+        } else {
+            "nothing is holding the pod, so check the kubelet on that machine".to_string()
+        },
+        kubectl_cmd: get_yaml(&pod.id),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: grace.and_then(|g| deadline.0.checked_sub(g).ok()).map(Time),
+    })
+}
+
+// --- THE POD RULES END ---
 
 #[cfg(test)]
 mod tests {
@@ -2517,12 +3442,14 @@ mod tests {
                 HostPathMount {
                     path: "/".to_string(),
                     sub_path: Some("run/containerd".to_string()),
+                    sub_path_expr: None,
                     read_only: false,
                     container: "nosy".to_string(),
                 },
                 HostPathMount {
                     path: "/".to_string(),
                     sub_path: None,
+                    sub_path_expr: None,
                     read_only: true,
                     container: "shipper".to_string(),
                 },
@@ -4549,6 +5476,7 @@ mod tests {
             vec![HostPathMount {
                 path: "/var/log".to_string(),
                 sub_path: None,
+                sub_path_expr: None,
                 read_only: true,
                 container: "reader".to_string(),
             }],
@@ -4946,6 +5874,979 @@ mod tests {
             (Some(4), Some(2)),
             "a DaemonSet wants one pod per matching node, and `currentNumberScheduled` \
              is how many exist — not how many are wanted"
+        );
+    }
+
+    // --- THE POD RULES, AGAINST THE COMMITTED CAPTURES ---
+    //
+    // Positive *and* negative for every rule, and the negatives are the half that matters:
+    // a rule with only a positive is a rule nobody has proved quiet. The healthy captures
+    // are asserted **empty**, not "not this one finding" — a false positive from any other
+    // rule reaches the same screen and is the same defect.
+    //
+    // **The clock is the second input, and two tests vary it rather than the capture.**
+    // Rules 7 and 12 both have a threshold, and a threshold nobody crosses is a threshold
+    // nobody has tested. `now` is a field of the snapshot precisely so a rule can be read
+    // at a chosen moment (invariant 5, NOTES § D18), so the same committed pod is analysed
+    // just inside and just outside its window. That is not the "one field changed on a real
+    // capture" technique above — nothing about the capture moves.
+
+    /// The snapshot [`analyze`] is handed below: pods and a moment. No nodes and no
+    /// workloads, because every rule in this box reads a Pod — the joins belong to the
+    /// N-series and W-series, which are later boxes and would only add rules that cannot
+    /// fire to every assertion here.
+    fn pods_at(pods: Vec<PodSnapshot>, now: Time) -> ClusterSnapshot {
+        ClusterSnapshot {
+            now,
+            pods,
+            nodes: Vec::new(),
+            workloads: Vec::new(),
+            server_version: None,
+            context: None,
+            client_certificate: None,
+            namespace_scope: None,
+        }
+    }
+
+    fn findings_at(names: &[&str], now: Time) -> Vec<Finding> {
+        analyze(&pods_at(names.iter().map(|n| pod(n)).collect(), now))
+    }
+
+    fn findings(names: &[&str]) -> Vec<Finding> {
+        findings_at(names, now())
+    }
+
+    /// One finding as `--once` would print it (`screens/once.md`) — so that
+    /// `cargo test -- --nocapture` shows the sentences a user reads and not a `Debug` dump
+    /// of the struct they came in. CLAUDE.md's "green tests are not working software" gate
+    /// is read off this.
+    fn card(f: &Finding, now: &Time) -> String {
+        let mark = match f.severity {
+            Severity::Critical => '●',
+            Severity::Warn => '▲',
+            Severity::Info => '○',
+        };
+        let name = match &f.owner.namespace {
+            Some(ns) => format!("{ns}/{}", f.owner.name),
+            None => f.owner.name.clone(),
+        };
+        let age = f.age(now).map_or(String::new(), |a| format!(" · {a}"));
+        format!(
+            "{mark} {name}{age}\n  {}\n  {}\n  → {}\n  $ {}\n",
+            f.title,
+            f.evidence,
+            f.action,
+            f.kubectl_cmd
+                .as_deref()
+                .unwrap_or("(no command shows this)")
+        )
+    }
+
+    fn titles(all: &[Finding]) -> Vec<&str> {
+        all.iter().map(|f| f.title.as_str()).collect()
+    }
+
+    fn show(all: &[Finding]) {
+        for f in all {
+            println!("{}", card(f, &now()));
+        }
+    }
+
+    /// The one finding on `pod` whose title contains `phrase` — and a failure when there is
+    /// not exactly one. "The rule fired" and "the rule fired twice on one container" print
+    /// the same green line otherwise.
+    fn only<'a>(all: &'a [Finding], pod: &str, phrase: &str) -> &'a Finding {
+        let mut hits = all
+            .iter()
+            .filter(|f| f.object.name == pod && f.title.contains(phrase));
+        let found = hits
+            .next()
+            .unwrap_or_else(|| panic!("nothing on {pod} says {phrase:?} — got {:?}", titles(all)));
+        assert!(
+            hits.next().is_none(),
+            "two findings on {pod} say {phrase:?} — got {:?}",
+            titles(all)
+        );
+        found
+    }
+
+    fn nothing(all: &[Finding], why: &str) {
+        assert!(all.is_empty(), "{why} — got {:?}", titles(all));
+    }
+
+    /// **The numbers and the words that came out of a document, asserted against the
+    /// document.** Everything else below is proved by a capture; these cannot be, because
+    /// no committed capture sits in the bands they draw — no regular container in the
+    /// repository has one or two restarts, and none exited a code outside `1` and `137`.
+    /// A constant transcribed from REQUIREMENTS is still a requirement, and without this
+    /// test lowering rule 5's warn band to a single restart stays green.
+    #[test]
+    fn the_thresholds_and_the_exit_table_are_the_ones_the_documents_write_down() {
+        assert_eq!(
+            (RESTARTS_WARN, RESTARTS_CRITICAL),
+            (3, 10),
+            "REQUIREMENTS: rule 5 warns at three restarts and turns critical at ten"
+        );
+
+        // NOTES § v1 rule set's translation table. Every row has to be a *sentence*: the
+        // reader who has just met `137` for the first time is exactly who rule 6 is
+        // written for (invariant 14).
+        for (code, reason, must_say) in [
+            (137, Some("OOMKilled"), "more memory than it was allowed"),
+            // **The row NOTES got wrong, and the reason it is asserted twice.** A
+            // liveness-probe kill that outlives the grace period lands as exit 137 with
+            // reason `Error`; the memory sentence there sends someone to raise a limit on
+            // a container whose health endpoint is timing out.
+            (137, Some("Error"), "did not stop when it was asked to"),
+            (137, None, "did not stop when it was asked to"),
+            (143, None, "ordinary shutdown"),
+            (1, None, "the application's own error"),
+            (2, None, "the application's own error"),
+            (126, None, "could not be run"),
+            (127, None, "was not found"),
+        ] {
+            let said = exit_meaning(code, reason)
+                .unwrap_or_else(|| panic!("NOTES § v1 rule set translates exit {code}"));
+            assert!(
+                said.contains(must_say),
+                "exit {code} {reason:?} reads {said:?}"
+            );
+        }
+        assert_eq!(
+            exit_meaning(42, None),
+            None,
+            "and a code the table does not cover is not given an invented meaning"
+        );
+
+        // The formatter, over a real captured termination with one field moved — the same
+        // technique the decode tests use, and for the same reason: no capture carries an
+        // exit code outside the table, and this is a string function rather than a rule.
+        let mut run = container(&pod("crashloop"), "quitter")
+            .last_terminated
+            .clone()
+            .expect("the captured crash loop records how its last run ended");
+        assert!(
+            exit_fact(&run).starts_with("exit 1 ("),
+            "the number the reader searched for comes first: {}",
+            exit_fact(&run)
+        );
+        run.exit_code = 42;
+        assert_eq!(
+            exit_fact(&run),
+            "exit 42",
+            "and where the number alone is the honest answer, the number alone is what shows"
+        );
+    }
+
+    /// [`mounted_path`] on the shapes the API can produce and the fixtures do not contain.
+    /// A pure string function, so it is asserted as one — the escalators above it are three
+    /// equality tests and they only mean what they read as if this normalises.
+    #[test]
+    fn what_the_container_actually_gets_is_normalised_before_it_is_compared() {
+        let mount = |path: &str, sub: Option<&str>, expr: Option<&str>| HostPathMount {
+            path: path.to_string(),
+            sub_path: sub.map(str::to_string),
+            sub_path_expr: expr.map(str::to_string),
+            read_only: false,
+            container: "c".to_string(),
+        };
+
+        // `//` and `/.` both pass upstream validation — absolute, no backsteps — and both
+        // resolve to the node's root. Unnormalised they are not `"/"`, so they fall into
+        // the writable branch: silenced in `kube-system`, and elsewhere advised with
+        // "mount it read-only", about the whole machine.
+        for spelling in ["/", "//", "/.", "/./", "///."] {
+            assert_eq!(
+                mounted_path(&mount(spelling, None, None)),
+                "/",
+                "{spelling} is the node's root"
+            );
+        }
+        // NOTES § D46's own example: the socket is only visible once the subPath is joined.
+        assert_eq!(
+            mounted_path(&mount("/var/run", Some("docker.sock"), None)),
+            "/var/run/docker.sock"
+        );
+        // And the join narrows as well as widens — this is `hostpath.json`'s own shape.
+        assert_eq!(
+            mounted_path(&mount("/", Some("run/containerd"), None)),
+            "/run/containerd"
+        );
+        assert_eq!(mounted_path(&mount("/var/log/", None, None)), "/var/log");
+
+        // A `subPathExpr` narrows the mount by something k8rs cannot read, so the path
+        // stops being the root — the safe direction, since the alternative is the loudest
+        // possible false CRITICAL.
+        let expr = mounted_path(&mount("/", None, Some("$(POD_NAME)")));
+        assert_eq!(expr, "/$(POD_NAME)");
+        assert_ne!(
+            expr, "/",
+            "a container given one directory does not have the machine"
+        );
+
+        // A constant nobody can match is a rule that never fires, and every entry here is
+        // compared with `==` against this function's output.
+        for socket in RUNTIME_SOCKETS {
+            assert_eq!(
+                mounted_path(&mount(socket, None, None)),
+                socket,
+                "{socket} is not in the form this function produces, so rule 8 could never \
+                 match it"
+            );
+        }
+        assert!(
+            RUNTIME_SOCKETS.contains(&"/run/containerd/containerd.sock"),
+            "kind — the cluster every fixture here came off — runs containerd, so a list \
+             that stops at Docker's socket is a rule that cannot fire on its own test bed"
+        );
+    }
+
+    /// Rules 1, 5 and 6 on the one pod that earns all three, which is also where every
+    /// piece of invariant 14 is visible at once: the loop is explained, the exit code is
+    /// translated, and the container's own last line replaces "go and read the logs".
+    #[test]
+    fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
+        let raw = fixture("crashloop");
+        let all = findings(&["crashloop"]);
+        show(&all);
+
+        assert_eq!(
+            all.len(),
+            2,
+            "rules 1 and 6, and nothing else — rule 5 stays quiet on a container rule 1 is \
+             already describing, one incident being one card: {:?}",
+            titles(&all)
+        );
+        assert_eq!(
+            all.iter()
+                .filter(|f| f.title.contains("has been restarted"))
+                .count(),
+            0,
+            "and `15 restarts` is already on rule 1's own evidence line: {:?}",
+            titles(&all)
+        );
+
+        let looping = only(&all, "broken-crashloop", "CrashLoopBackOff");
+        assert_eq!(looping.severity, Severity::Critical);
+        assert!(
+            looping.evidence.contains("container quitter"),
+            "the finding names which container: {}",
+            looping.evidence
+        );
+        assert!(
+            looping.evidence.contains("15 restarts"),
+            "{}",
+            looping.evidence
+        );
+        assert!(
+            looping.evidence.contains("the last run lasted 2s"),
+            "D51's first fork of a crashloop triage — how long each run survives, which \
+             `describe` makes a human subtract at 3am: {}",
+            looping.evidence
+        );
+        assert!(
+            looping
+                .evidence
+                .contains("exit 1 (the application's own error)"),
+            "invariant 14: the code is translated, never printed and left: {}",
+            looping.evidence
+        );
+        assert_eq!(
+            looping.kubectl_cmd.as_deref(),
+            Some("kubectl describe pod broken-crashloop -n default"),
+            "and the command shows the state, the last termination and the count the card \
+             just claimed"
+        );
+        assert_eq!(
+            looping.owner, looping.object,
+            "nothing controls this pod, so it files under itself (D3's fallback)"
+        );
+
+        // **The moment the run ended, never the moment it began** — both are in the same
+        // struct one line apart, and this capture keeps them two seconds apart, which is
+        // what makes the second assertion mean anything at all (`Finding::timestamp`).
+        let died = at(
+            captured_status(&raw, "containerStatuses", "quitter"),
+            &["lastState", "terminated"],
+        );
+        assert_eq!(
+            looping.timestamp,
+            Some(captured_time(died, &["finishedAt"]))
+        );
+        assert_ne!(
+            captured_time(died, &["finishedAt"]),
+            captured_time(died, &["startedAt"]),
+            "a capture whose run started and ended in the same second cannot tell the right \
+             field from the wrong one, and is not the fixture for this assertion"
+        );
+        assert_eq!(
+            looping.age(&now()).as_deref(),
+            Some("2 hours ago"),
+            "a duration, not English parsed back into a number"
+        );
+
+        let failed = only(&all, "broken-crashloop", "previous run failed");
+        assert_eq!(failed.severity, Severity::Warn);
+        assert_eq!(
+            failed.action,
+            "the last thing it logged was: panic: dial tcp db.payments.svc:5432: connect: \
+             connection refused",
+            "the kubelet kept the tail of the log, so the card shows it instead of sending \
+             the reader to fetch what k8rs is already holding — and it is the *last* line, \
+             not the `starting` this capture opens with"
+        );
+        assert!(
+            failed.evidence.contains("ran for 2s"),
+            "and how long the run survived, which is the fork between bad configuration and \
+             a leak: {}",
+            failed.evidence
+        );
+    }
+
+    /// Rule 2, and the one place two rules would otherwise describe a single death.
+    #[test]
+    fn the_out_of_memory_card_names_the_limit_and_rule_6_stays_out_of_its_way() {
+        let raw = fixture("oom");
+        let all = findings(&["oom"]);
+        show(&all);
+
+        let killed = only(&all, "broken-oom", "OOMKilled");
+        assert_eq!(killed.severity, Severity::Critical);
+        assert!(
+            killed
+                .title
+                .contains("used more memory than it was allowed")
+                && killed.title.contains("kernel killed it"),
+            "invariant 14: OOMKilled is explained and then named, never printed alone: {}",
+            killed.title
+        );
+        // The limit the kubelet enacted, read back off `status.resources` — the field D51
+        // sent this rule to, so that a pending resize cannot make the card name a figure
+        // the container was never given.
+        let enacted = captured_str(
+            captured_status(&raw, "containerStatuses", "hog"),
+            &["resources", "limits", "memory"],
+        );
+        assert!(
+            killed.evidence.contains(&format!("limit {enacted}")),
+            "the evidence line carries the enacted limit ({enacted}): {}",
+            killed.evidence
+        );
+        assert!(killed.evidence.contains("exit 137"), "{}", killed.evidence);
+        assert_eq!(
+            killed.timestamp,
+            Some(captured_time(
+                at(
+                    captured_status(&raw, "containerStatuses", "hog"),
+                    &["lastState", "terminated"]
+                ),
+                &["finishedAt"]
+            ))
+        );
+
+        assert_eq!(
+            all.iter()
+                .filter(|f| f.title.contains("previous run failed"))
+                .count(),
+            0,
+            "rule 6 owns the exit-code table and rule 2 owns this death; both firing puts \
+             two cards on one event, the weaker of which says 'exit 137, almost always \
+             memory' beside one that already names the limit: {:?}",
+            titles(&all)
+        );
+        assert_eq!(
+            all.len(),
+            2,
+            "rules 1 and 2 — this container is crash-looping *and* was OOM-killed, and that \
+             is one incident with two causes to name, not three cards: {:?}",
+            titles(&all)
+        );
+        // Rule 1 calls the same translator, so the memory sentence survives where the
+        // reason earns it — and this is the only card in the box that still says it.
+        let looping = only(&all, "broken-oom", "CrashLoopBackOff");
+        assert!(
+            looping.evidence.contains("more memory than it was allowed"),
+            "exit 137 *with* `OOMKilled` beside it is the memory kill: {}",
+            looping.evidence
+        );
+    }
+
+    /// Rules 3 and 4. Both are a waiting reason plus the runtime's own sentence, and the
+    /// sentence is the entire diagnosis in each case (NOTES § D37).
+    #[test]
+    fn an_unpullable_image_and_a_missing_configmap_each_name_what_to_go_and_fix() {
+        let all = findings(&["image", "config"]);
+        show(&all);
+        assert_eq!(all.len(), 2, "one card each: {:?}", titles(&all));
+
+        let image = only(&all, "broken-image", "image could not be downloaded");
+        assert_eq!(image.severity, Severity::Critical);
+        assert!(
+            image.title.contains("ErrImagePull") || image.title.contains("ImagePullBackOff"),
+            "the kubelet alternates between the two as it backs off, and whichever this \
+             capture caught is the word the reader sees in `kubectl get pods`: {}",
+            image.title
+        );
+        assert!(
+            image
+                .evidence
+                .contains("image registry.invalid/does-not-exist:v9"),
+            "the resolved name is printed beside the runtime's sentence, because rule 3's \
+             action is 'check the image name': {}",
+            image.evidence
+        );
+        assert!(
+            image.evidence.contains("no such host"),
+            "and the runtime's own sentence is what says the pull actually failed: {}",
+            image.evidence
+        );
+        assert_eq!(
+            image.timestamp, None,
+            "nothing in a container status records when the first pull was attempted, and \
+             `screens/alerts.md` would rather leave the right edge blank than borrow a \
+             nearby moment"
+        );
+
+        // **`describe` never prints `state.waiting.message`.** kubectl's `describeStatus`
+        // renders a waiting container's `Reason` and stops, and that message — the sentence
+        // naming the registry that refused, or the ConfigMap that is absent — *is* the whole
+        // evidence line of both these cards. It reaches `describe` only through an Event,
+        // reworded and gone at `--event-ttl`. A teaching command that does not show what the
+        // card says is worse than none (invariant 4), which is the same argument rule 12 is
+        // already built on.
+        assert_eq!(
+            image.kubectl_cmd.as_deref(),
+            Some("kubectl get pod broken-image -n default -o yaml")
+        );
+
+        let config = only(&all, "broken-config", "ConfigMap or Secret");
+        assert_eq!(config.severity, Severity::Critical);
+        assert!(
+            config
+                .evidence
+                .contains("configmap \"this-configmap-does-not-exist\" not found"),
+            "rule 4's whole value is the name of the object that is missing: {}",
+            config.evidence
+        );
+        assert_eq!(
+            config.kubectl_cmd.as_deref(),
+            Some("kubectl get pod broken-config -n default -o yaml"),
+            "for the same reason as rule 3's above"
+        );
+    }
+
+    /// **`subPathExpr` reaches no capture**, because nothing in `scripts/broken.yaml` uses
+    /// one — and the field it guards against produces the loudest wrong card in the box, a
+    /// CRITICAL claiming a container has the whole machine when it was given one directory.
+    /// So the decode is asserted with the technique the rest of this section uses: one
+    /// field, on a real object, set to a value the API demonstrably produces.
+    ///
+    /// **Capture trip:** a pod in `scripts/broken.yaml` mounting `hostPath: /` with
+    /// `subPathExpr: $(POD_NAME)` and the `fieldRef` env var that resolves it, which is the
+    /// ordinary way this is written.
+    #[test]
+    fn a_mount_narrowed_by_an_environment_variable_is_carried_unresolved() {
+        let mut object: Pod =
+            serde_json::from_value(fixture("hostpath")).expect("hostpath.json is a Pod");
+        let spec = object.spec.as_mut().expect("the captured pod has a spec");
+        let mount = spec
+            .containers
+            .iter_mut()
+            .find(|c| c.name == "nosy")
+            .and_then(|c| c.volume_mounts.as_mut())
+            .into_iter()
+            .flatten()
+            .find(|m| m.name == "root")
+            .expect("the capture mounts the host volume in nosy");
+        // Upstream forbids both on one mount, so the capture's `subPath` goes as the
+        // expression arrives — one edit, not two.
+        mount.sub_path = None;
+        mount.sub_path_expr = Some("$(POD_NAME)".to_string());
+
+        let p = PodSnapshot::from(object);
+        let narrowed = p
+            .host_path_mounts
+            .iter()
+            .find(|m| m.container == "nosy")
+            .expect("the mount survives the decode");
+        println!("{narrowed:?} -> {}", mounted_path(narrowed));
+
+        assert_eq!(
+            narrowed.sub_path_expr.as_deref(),
+            Some("$(POD_NAME)"),
+            "carried verbatim: the values are in env and in the Secrets behind it, and k8rs \
+             reads neither"
+        );
+        assert_eq!(
+            mounted_path(narrowed),
+            "/$(POD_NAME)",
+            "and it joins like a subPath, so the path stops being the node's root"
+        );
+        assert_ne!(
+            mounted_path(narrowed),
+            "/",
+            "which is the whole point — a container handed one directory does not have the \
+             machine, and rule 8 saying so would be its loudest false CRITICAL"
+        );
+    }
+
+    /// Rule 7, both sides of its clock. **Without the window this rule fires on every
+    /// rolling update**, so the window is the rule (NOTES § D46, § D51).
+    #[test]
+    fn a_pod_out_of_the_service_is_only_a_finding_once_it_has_been_that_way_a_while() {
+        let raw = fixture("readiness");
+        let all = findings(&["readiness"]);
+        show(&all);
+        assert_eq!(all.len(), 1, "rule 7 alone: {:?}", titles(&all));
+
+        let unready = only(&all, "broken-readiness", "not receiving traffic");
+        assert_eq!(unready.severity, Severity::Warn);
+        assert!(
+            unready.evidence.contains("container app"),
+            "{}",
+            unready.evidence
+        );
+
+        // **The since-when is floored at the container's own run start.** `Ready` is the
+        // *pod's* condition and does not move until every container is ready, so a
+        // container younger than that condition would be dated to a moment it did not
+        // exist for. This capture separates the two by five seconds, so the wrong field is
+        // visible here rather than hidden behind two equal timestamps.
+        let condition = captured_time(captured_condition(&raw, "Ready"), &["lastTransitionTime"]);
+        let began = captured_time(
+            captured_status(&raw, "containerStatuses", "app"),
+            &["state", "running", "startedAt"],
+        );
+        assert!(
+            began.0 > condition.0,
+            "a capture whose container started before the pod went unready cannot tell the \
+             floor from the condition, and is not the fixture for this assertion"
+        );
+        assert_eq!(
+            unready.timestamp,
+            Some(began.clone()),
+            "the later of the two, because a container cannot have been out of the Service \
+             for longer than its current run has existed"
+        );
+        assert_ne!(
+            unready.timestamp,
+            Some(condition),
+            "the pod's own condition dates this container to before it was running"
+        );
+
+        // Just inside the window: the same captured pod, read at exactly the grace. This is
+        // every pod of every rolling update, and it draws nothing.
+        nothing(
+            &findings_at(&["readiness"], time("2026-08-12T20:55:58Z")),
+            "ten minutes unready is a readiness probe with an `initialDelaySeconds`, not an \
+             outage",
+        );
+        // And one second past it.
+        assert_eq!(
+            findings_at(&["readiness"], time("2026-08-12T20:55:59Z")).len(),
+            1,
+            "past `progressDeadlineSeconds`' own default is where Kubernetes itself stops \
+             calling a rollout healthy"
+        );
+
+        // **`started` is read here as a suppressor, which is not the trigger D51 rejected.**
+        // No container in any capture declares a `startupProbe`, so all of them report
+        // `true`; one that declares a slow startup probe reports `false`, and until it
+        // passes the kubelet does not run the readiness probe at all — `ready: false` there
+        // means *not asked yet*. **Capture trip:** a pod with a `startupProbe` that has not
+        // passed, which is the only object that separates these two readings.
+        assert!(
+            container(&pod("readiness"), "app").started,
+            "the positive fixture has to be past its startup for this rule to reach it"
+        );
+    }
+
+    /// Rule 5's warn band and the sentence that only holds for a container that is
+    /// actually serving — and rule 6's silence beside it, which is the same fixture's
+    /// second job.
+    #[test]
+    fn a_container_that_looks_fine_still_gets_a_card_for_how_often_it_has_died() {
+        let all = findings(&["restarts"]);
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "rule 5 alone. **Rule 6 is deliberately silent here**: `lastState.terminated` \
+             never expires, so a container that failed once and has served ever since would \
+             carry that card for the life of the pod — the largest false-positive volume in \
+             the box, and one that needs nothing unusual but uptime: {:?}",
+            titles(&all)
+        );
+        assert!(
+            container(&pod("restarts"), "flaky")
+                .last_terminated
+                .is_some(),
+            "the capture does carry a failed previous run, so the silence above is the rule \
+             deciding and not the field being absent"
+        );
+
+        let counted = only(&all, "broken-restarts", "restarted 3 times");
+        assert_eq!(
+            counted.severity,
+            Severity::Warn,
+            "3 is rule 5's warn band and 10 is where it becomes critical (REQUIREMENTS)"
+        );
+        assert!(
+            counted.title.contains("it is serving now"),
+            "this container *is* passing its probes, which is the whole of why NOTES words \
+             rule 5 'looks healthy now, but something is wrong': {}",
+            counted.title
+        );
+
+        assert_eq!(
+            counted.severity,
+            Severity::Warn,
+            "and it stays WARN whatever the count while the container is serving: a red card \
+             whose own title says it is serving is what teaches a reader to stop believing \
+             red (NOTES § D2)"
+        );
+    }
+
+    /// Rule 8's positives, both of them, on one captured pod — and the read-only mount of a
+    /// path that is not the node's root, which is the Analysis posture row and not a card.
+    #[test]
+    fn the_two_escalated_host_mounts_both_fire_and_the_ordinary_one_does_not() {
+        let all = findings(&["hostpath"]);
+        show(&all);
+        assert_eq!(all.len(), 2, "one per escalated mount: {:?}", titles(&all));
+
+        // `shipper` mounts `/` and mounts it **read-only**, and it fires anyway: the path
+        // alone is the escalator, because read-only access to the node's whole filesystem
+        // is still every secret on the machine.
+        let root = only(&all, "broken-hostpath", "whole filesystem of the machine");
+        assert_eq!(root.severity, Severity::Critical);
+        assert!(
+            root.evidence.contains("container shipper") && root.evidence.contains("read-only"),
+            "{}",
+            root.evidence
+        );
+
+        // `nosy` mounts the same volume with `subPath: run/containerd`, so what it actually
+        // gets is `/run/containerd` — not the node's root. It fires on the writable
+        // escalator instead, and the path it names is the one the container has.
+        let writable = only(&all, "broken-hostpath", "change files on the machine");
+        assert!(
+            writable.evidence.contains("/run/containerd on the node"),
+            "the subPath narrows what is mounted and the card has to say what the container \
+             really got (D46): {}",
+            writable.evidence
+        );
+        assert!(
+            !writable.evidence.contains("/ on the node"),
+            "a rule reading `path` alone would call this a mount of the node's root: {}",
+            writable.evidence
+        );
+        assert!(
+            writable.evidence.contains("writable"),
+            "{}",
+            writable.evidence
+        );
+
+        for f in &all {
+            assert_eq!(
+                f.timestamp, None,
+                "a hostPath mount is a standing property, not an event, and a date beside it \
+                 sends the reader looking for a change that never happened"
+            );
+        }
+
+        nothing(
+            &findings(&["healthy-hostpath"]),
+            "a read-only mount of /var/log is how a log shipper is supposed to work, and \
+             D2 sends it to the Analysis posture rows",
+        );
+    }
+
+    /// **Rule 8's real negative, and the reason the box could not close without this
+    /// capture.** Writable host mounts are the normal state of every CNI agent, kube-proxy
+    /// and control-plane component, so the rule as specified fires CRITICAL on a healthy
+    /// kind cluster.
+    #[test]
+    fn kube_systems_node_agents_and_static_pods_are_not_host_mount_findings() {
+        let pods: Vec<PodSnapshot> = items::<Pod>("kube-system-pods")
+            .into_iter()
+            .map(PodSnapshot::from)
+            .collect();
+
+        // **The exemption is asserted to be exercised, not assumed.** "Nothing fired"
+        // and "nothing could have fired" print the same green line, and this capture is
+        // the only place either shape exists — so both are counted before the emptiness
+        // below means anything.
+        let writable = |p: &PodSnapshot| {
+            p.host_path_mounts
+                .iter()
+                .any(|m| !m.read_only && mounted_path(m) != "/")
+        };
+        let daemonset_pods = pods
+            .iter()
+            .filter(|p| p.owner.kind == ObjectKind::DaemonSet && writable(p))
+            .count();
+        let mirror_pods = pods.iter().filter(|p| p.mirror && writable(p)).count();
+        println!(
+            "{} pods: {daemonset_pods} DaemonSet-owned and {mirror_pods} mirror pods write \
+             to their node",
+            pods.len()
+        );
+        assert!(
+            daemonset_pods > 0,
+            "kindnet and kube-proxy write to `/etc/cni/net.d`, `/run/xtables.lock` and \
+             `/var/run/nri`; a capture without one is not this rule's negative"
+        );
+        assert!(
+            mirror_pods > 0,
+            "`etcd` writes to `/var/lib/etcd` and is owned by a **Node**, not a DaemonSet — \
+             narrowing rule 8 to DaemonSets alone would still fire on every control plane, \
+             which is why the exemption reads `mirror || DaemonSet`"
+        );
+
+        nothing(
+            &analyze(&pods_at(pods, now())),
+            "a fresh kind cluster's own kube-system is healthy, and every rule in this box \
+             has to be silent on it",
+        );
+    }
+
+    /// Rule 12, both sides of its margin.
+    #[test]
+    fn the_pod_that_will_not_shut_down_says_when_it_was_asked_and_who_is_holding_it() {
+        let raw = fixture("stuck");
+        let all = findings(&["stuck"]);
+        show(&all);
+        assert_eq!(all.len(), 1, "rule 12 alone: {:?}", titles(&all));
+
+        let stuck = only(&all, "broken-stuck", "asked to shut down");
+        assert_eq!(stuck.severity, Severity::Warn);
+        assert!(
+            stuck.evidence.contains("k8rs.test/never-removed"),
+            "'a finalizer is holding it' and 'the kubelet has not confirmed it' are two \
+             causes with unrelated fixes, and the list is the only thing that tells them \
+             apart — `kubectl describe pod` does not print it at all: {}",
+            stuck.evidence
+        );
+        assert!(
+            stuck.evidence.contains("on node k8rs-worker2"),
+            "{}",
+            stuck.evidence
+        );
+        assert_eq!(
+            stuck.kubectl_cmd.as_deref(),
+            Some("kubectl get pod broken-stuck -n default -o yaml"),
+            "and the command is the one that shows a finalizer, which `describe` does not"
+        );
+
+        // **The age is the moment the user asked, not the deadline.** The API server wrote
+        // `deletionTimestamp` as request time *plus* the grace period, so the deadline is
+        // one grace period late, forever (D46).
+        let deadline = captured_time(&raw, &["metadata", "deletionTimestamp"]);
+        let grace = at(&raw, &["metadata", "deletionGracePeriodSeconds"])
+            .as_i64()
+            .expect("the capture carries the grace this delete was granted");
+        assert_eq!(
+            stuck.timestamp,
+            Some(Time(
+                deadline
+                    .0
+                    .checked_sub(SignedDuration::from_secs(grace))
+                    .expect("five seconds off a captured moment is representable")
+            ))
+        );
+        assert_ne!(
+            stuck.timestamp,
+            Some(deadline.clone()),
+            "the deadline itself is the field the rule may not report, and this capture's \
+             {grace}-second grace is what makes the two different values"
+        );
+
+        // **Just inside the margin, and the margin is flat.** `deletionTimestamp` already
+        // is request + grace, so the kubelet's SIGKILL lands *at* it; a margin that added
+        // the grace a second time would leave a StatefulSet pod with a one-hour
+        // `terminationGracePeriodSeconds` invisible a full hour past its kill deadline —
+        // and those are exactly the workloads whose stuck termination blocks the rollout
+        // this rule exists for. Sixty seconds covers kubelet observation, watch latency and
+        // ordinary skew, and is not proportional to a number that was already spent.
+        nothing(
+            &findings_at(&["stuck"], time("2026-08-12T21:44:04Z")),
+            "a minute past the deadline is not yet stuck",
+        );
+        assert_eq!(
+            findings_at(&["stuck"], time("2026-08-12T21:44:05Z")).len(),
+            1,
+            "one second past the margin it is"
+        );
+        assert!(
+            grace < 60,
+            "this capture's grace is smaller than the flat margin, so the two cannot be \
+             told apart by the boundary above — what the margin may not do is *scale* with \
+             it. **Capture trip:** a stuck pod with `terminationGracePeriodSeconds: 3600`, \
+             where the old formula stayed silent for an hour"
+        );
+        nothing(
+            &findings_at(&["stuck"], time("2026-08-12T21:43:00Z")),
+            "and before the deadline the pod is shutting down normally, which is the case a \
+             rule reading `deletionTimestamp` as the request time would flag",
+        );
+    }
+
+    /// **The negatives, as a set.** Seven captured pods that are working, including the
+    /// four shapes this contract was extended for — a native sidecar, pod-level requests, a
+    /// pending in-place resize, a limit declared on the pod and not the container — and one
+    /// with no limits at all, which is rule 9's case and belongs to the Capacity report.
+    #[test]
+    fn every_healthy_capture_produces_no_finding_at_all() {
+        let healthy = [
+            "healthy",
+            "healthy-sidecar",
+            "healthy-podlevel",
+            "healthy-hostpath",
+            "resize",
+            "podlimit",
+            "nolimits",
+        ];
+        for name in healthy {
+            nothing(
+                &findings(&[name]),
+                &format!(
+                    "nothing in {name}.json is broken *now*, which is the only thing Alerts \
+                     holds. Not the same claim as 'this pod is fine': `healthy.json` runs on \
+                     `k8rs-worker3`, a node the capture caught `Ready: Unknown` under the \
+                     node controller's `unreachable` taint, so its status is a fossil the \
+                     kubelet stopped updating. That is N1's finding about the node, and no \
+                     pod rule in this box may invent one from a status that stopped moving"
+                ),
+            );
+        }
+        nothing(
+            &findings(&healthy),
+            "and they are silent together as well as apart",
+        );
+    }
+
+    /// **What this box deliberately does not answer**, asserted so that the next box has a
+    /// test that goes from red to green rather than a claim in a commit message.
+    #[test]
+    fn the_rules_this_box_does_not_carry_are_silent_and_not_half_built() {
+        // Rules 1–6 over `initContainerStatuses` is the box after next (D27). This pod's
+        // init container is in `Init:CrashLoopBackOff` with fifteen restarts and its app
+        // container is merely waiting on it — so the pod produces nothing today, which is
+        // exactly the blind spot D27 describes and the reason it is a box.
+        let init = pod("init");
+        let migrate = container(&init, "migrate");
+        assert_eq!(migrate.role, ContainerRole::Init);
+        assert!(
+            migrate.restarts >= RESTARTS_WARN
+                && matches!(&migrate.state, ContainerState::Waiting { reason, .. }
+                    if reason.as_deref() == Some("CrashLoopBackOff")),
+            "a capture whose init container is healthy proves nothing about the gap: {:?}",
+            migrate.state
+        );
+        nothing(
+            &findings(&["init"]),
+            "reading `initContainerStatuses` is the box after next, and half-building it \
+             would leave a finding that cannot say which container it is about",
+        );
+
+        // Rule 10 (Pending, and why) is the very next box, and its input is already
+        // decoded and already asserted — it is the rule that is missing, not the field.
+        let pending = pod("pending");
+        assert_eq!(
+            pending.scheduled.as_ref().and_then(|c| c.reason.as_deref()),
+            Some("Unschedulable"),
+        );
+        nothing(&findings(&["pending"]), "rule 10 has its own box");
+    }
+
+    /// The whole committed capture through [`analyze`] at once — every card printed, so
+    /// that `cargo test -- --nocapture` shows what a user would actually read, and the
+    /// properties every finding owes regardless of which rule made it.
+    #[test]
+    fn the_whole_capture_through_the_rules_at_once() {
+        let all = findings(&CAPTURED_PODS);
+        show(&all);
+        println!(
+            "{} critical, {} warnings",
+            all.iter()
+                .filter(|f| f.severity == Severity::Critical)
+                .count(),
+            all.iter().filter(|f| f.severity == Severity::Warn).count()
+        );
+
+        assert_eq!(
+            all.len(),
+            11,
+            "two on the crash loop, two on the OOM, one image, one config, two host mounts, \
+             one readiness, one restart counter, one terminating: {:?}",
+            titles(&all)
+        );
+
+        for f in &all {
+            assert_ne!(
+                f.severity,
+                Severity::Info,
+                "no rule reaching the Alerts list produces an Info — D2 sends those to a \
+                 report: {}",
+                f.title
+            );
+            assert!(
+                !f.title.is_empty() && !f.action.is_empty(),
+                "a card is what happened · what it means · what to do, and the third is \
+                 what makes it a work queue rather than a lint report: {f:?}"
+            );
+            let cmd = f
+                .kubectl_cmd
+                .as_deref()
+                .unwrap_or_else(|| panic!("every rule in this box has a command: {}", f.title));
+            assert!(
+                cmd.contains(&f.object.name) && cmd.contains("-n default"),
+                "invariant 4's teaching device points at the object the card is about, in \
+                 its own namespace: {cmd}"
+            );
+            assert_eq!(
+                f.owner, f.object,
+                "`scripts/broken.yaml` creates bare pods, so every one of these files under \
+                 itself — the owned case is asserted below"
+            );
+        }
+    }
+
+    /// **The grouping key on a pod that has a controller**, which is D3's whole premise and
+    /// is not visible in any of the twelve bare captures above. This one is a real capture
+    /// of a Deployment's pod, so nothing is synthesized.
+    #[test]
+    fn a_finding_on_an_owned_pod_files_under_the_controller_and_not_the_pod() {
+        let pods: Vec<PodSnapshot> = items::<Pod>("owned-pods")
+            .into_iter()
+            .map(PodSnapshot::from)
+            .collect();
+        let all = analyze(&pods_at(pods, now()));
+        show(&all);
+
+        let looping = only(&all, "broken-owned-7bdb7645c8-vhwcp", "CrashLoopBackOff");
+        assert_eq!(
+            looping.object.kind,
+            ObjectKind::Pod,
+            "what the rule looked at is the pod"
+        );
+        assert_eq!(
+            looping.owner.kind,
+            ObjectKind::ReplicaSet,
+            "and what it files under is the controller — `k8s.rs` resolves this up to the \
+             Deployment in Phase 5 (D28), and this layer records what the object said"
+        );
+        assert_eq!(looping.owner.name, "broken-owned-7bdb7645c8");
+        assert_ne!(
+            looping.owner, looping.object,
+            "D3 groups by owner, and a card per pod is the failure mode it exists to stop"
+        );
+        assert_eq!(
+            looping.kubectl_cmd.as_deref(),
+            Some("kubectl describe pod broken-owned-7bdb7645c8-vhwcp -n default"),
+            "the command still points at the object, never at the card's title — a \
+             `describe pod broken-owned-7bdb7645c8` is a command that does not work"
         );
     }
 }
