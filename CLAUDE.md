@@ -427,12 +427,27 @@ The box is the unit of work, never a phase and never "the next few boxes".
 | 7 | Land it | PM | see below |
 
 Step 7 in order, one push at the end and not two: [second
-pass](#second-pass--nothing-is-delivered-on-its-first-draft) on the diff, which
-named what it checked · every box of the [Security
+pass](#second-pass--nothing-is-delivered-on-its-first-draft) over the **landed
+tree**, which named what it checked · every box of the [Security
 gate](#security-gate--run-this-list-on-every-change-no-exceptions) · docs sync
 if the change was structural · check the box in `todo.md`, same commit as the
 work · CHANGELOG with git-cliff, committed separately as `chore(changelog):
 update` · commit and push.
+
+**That pass reads the result, not the diffs — and it is never skipped because
+everyone upstream already passed** (2026-08-13, the user's standing
+instruction). Every second pass before it saw one slice: each agent read its own
+diff, the reviewer read the behaviour, and nobody read the file the next person
+will actually open. **A review can even create the defect it could not have
+seen**: the operator review demanded `Finding::age`, the fix added it and
+documented it correctly, and two older paragraphs three lines up went on
+pointing renderers at the function it was built to replace — green build,
+author's own second pass, both clean
+([D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+So: open the changed files whole, read them as someone who was not in the room
+and will follow them literally, and check the PM's own edits with the rest —
+they got no review at all. Findings are fixed **before** the push, in the same
+turn.
 
 Steps 4–6 loop back to 3 on any failure, and nothing is negotiated down to get
 past a gate. **When the reviewer and the author disagree, the PM decides, in
@@ -487,6 +502,13 @@ stays in one voice and it does not become a decision nobody can reconstruct.
 - Docs left stale after a structural change — a failed step, not a follow-up.
 - The second pass skipped because the change was small — small changes are
   where it is cheapest to run and where nobody is watching.
+- **Step 7's pass skipped because every agent already passed one.** They read
+  slices; nobody read the result. Two doc blocks written a turn apart, each
+  correct alone, telling the next reader opposite things is invisible to every
+  review that came before it.
+- **The PM's own edits reviewed by nobody.** `NOTES.md`, `todo.md`, `docs/` and
+  this file are written by the one role with no reviewer above it, so they go
+  through step 7's pass with the agents' work, not around it.
 
 ## Phase close — the ritual at the end of every phase
 
