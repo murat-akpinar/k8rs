@@ -76,6 +76,7 @@
 - *(rules)* The exit table gains its 0 row, and D85 records both rounds ([8e2f2f3](https://github.com/murat-akpinar/k8rs/commit/8e2f2f36c5490493f06bb508e914037eefe946a5)) — The v1 rule set's translation table had no entry for exit 0, so the code printed it bare under a title claiming a crash. Rule 1's row said one sentence where it now produces three, each scoped to the one run a snapshot holds.
 - *(docs)* Add the k9s prior-art review, read as a defect catalogue ([25450be](https://github.com/murat-akpinar/k8rs/commit/25450be1a4a2068a2a23be593f41457a96dc6cbd))
 - *(docs)* Turn the twelve prior-art gaps into boxes ([83306f4](https://github.com/murat-akpinar/k8rs/commit/83306f46fafa5fcef05734a66510a21ad6656580))
+- *(docs)* The tests split by rule family at phase close, the product file does not ([f644828](https://github.com/murat-akpinar/k8rs/commit/f644828c09675c92a973c4812464e1711e7829e5))
 
 ### 🧪 Testing
 
