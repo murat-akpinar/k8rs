@@ -992,6 +992,20 @@ this plan is delivery mechanism for what this phase produces.
       `tests/fixtures/certs/` is a closed set `certs-test.sh` refuses to grow.
       The 30-day boundary is asserted at **both** ends, which neither committed
       fixture can do: 22 and 363 days pass any threshold between them
+- [ ] **Rule 5 has rule 1's defect, one rule over** — its card says *"it is
+      serving now, but something keeps killing it"*, which is false in exactly
+      the way rule 1's *"keeps crashing"* was: over a container whose restarts
+      are **clean exits**, nothing is killing it. Reachable — a container that
+      exits 0 a few times and then blocks is serving, with a restart count — and
+      **no committed capture reaches it**, because every captured restart
+      history exits non-zero, so the test is a synthesis on a decoded copy that
+      names what a future trip owes ([D40](NOTES.md#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)).
+      Cheap now and not before: `fn ending` exists since the rule 1 box, so this
+      is that enum applied one rule over rather than a second place naming
+      `exit 0`. Found by `dev-core` while fixing rule 1 and **reported rather
+      than folded in**, which is the right call — an untested branch invented
+      inside someone else's box is the scope creep CLAUDE.md names
+      ([NOTES § D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14))
 - [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
       in the green line, not an assertion, so nothing fails and that is exactly
       why it will survive. One word, `tester`'s file, and it goes with whichever
@@ -1205,7 +1219,7 @@ this plan is delivery mechanism for what this phase produces.
       rule 6's `exit 0` and `143` exemptions, and rule 7's `started` suppressor.
       The pin moved to `2026-08-14T00:00:00Z` in five places, one of which
       (`docs/maps.md`) nothing had been guarding
-- [ ] **Rule 1 must read how the previous run ended** — it draws *"Container
+- [x] **Rule 1 must read how the previous run ended** — it draws *"Container
       keeps crashing"* over `exit 0` on a batch job that finished, and a
       **CRITICAL** *"keeps crashing"* whose own evidence line reads *"an
       ordinary shutdown and not an error"* over `exit 143`. Rule 6 has exempted
@@ -1217,9 +1231,49 @@ this plan is delivery mechanism for what this phase produces.
       rather than applied silently**
       ([NOTES § D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)):
       it is rule *logic*, so the plain-language pass below is the wrong home for
-      it, and the capture trip above is not unfinished for having found it
+      it, and the capture trip above is not unfinished for having found it.
+      **Shipped in two rounds, and the fix is at the root**: a shared
+      `enum Ending { Finished, Stopped, Failed }` is now the one place a rule
+      *decides* what `exit 0` and `143` mean, so rules 1 and 6 cannot come to
+      disagree again — rule 6's guard was rewritten onto it and proven
+      equivalent over **160 enumerated inputs** by a standalone program rather
+      than by assertion. **The operator review's blocker was inside the fix**:
+      the exit-0 action told the reader to move the container into a Job, which
+      is false twice over on a native sidecar *in* a Job — the object already is
+      one and its `restartPolicy` is `Never`, and
+      `tests/fixtures/healthy-sidecar.json` sits one short run from producing
+      that card. Actions are role-aware now. Three more of the same shape went
+      with it: *"nothing has crashed"* was an absolute built from one sample
+      (backoff accumulates; four crashes then one clean exit is a real state),
+      the card named `restartPolicy` while offering `kubectl describe pod`,
+      which prints no such field, and rule 6's 137 arm named probes without
+      naming memory — which [D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
+      had just shown can arrive with the word `OOMKilled` missing. **The durable
+      lesson is the reviewer's**: the rule reasons past its evidence, claiming
+      *why* a loop exists from one observation of one run, and every branch's
+      wording now stays inside what a single `lastState` can support
 - [ ] Plain-language pass over every string a user will read — the jargon test
       is "would someone in their first month understand this sentence?"
+      **Three sentences are already known wrong and are owed to this box** — all
+      found by an operator review that read the cards rather than the code, and
+      all ruled out of scope where they were found so a fix would not widen
+      someone else's box:
+      **(a) `1 restarts`.** The card prints it, and `healthy-sidecar.json`'s
+      `restartCount: 1` makes it real. The phrase is spelled twice — rule 1 and
+      rule 5 — so the fix belongs in one shared place or the two rules start
+      disagreeing.
+      **(b) rule 6's 137 title asserts one cause while its own action now lists
+      three.** `exit_meaning` says *"killed because it did not stop when it was
+      asked to — a failing liveness probe, or a shutdown that hangs"* and the
+      action under it names memory too, because
+      [D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
+      showed a real OOM can arrive without the word. The two are visibly out of
+      step on one card.
+      **(c) *"read the previous run's logs"* over a `$ kubectl describe pod`
+      line.** The command a first-month reader needs is
+      `kubectl logs <pod> -c <container> --previous`, and `--previous` is
+      exactly the flag they will not know. One `kubectl_cmd` per finding is the
+      constraint, so this is a wording problem or a shape problem, not a bug
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test
 - [ ] `cargo mutants --timeout 90` clean over `rules.rs` — a MISSED mutant is a
       rule change no test objected to, i.e. a hole in the diagnosis; it gets a

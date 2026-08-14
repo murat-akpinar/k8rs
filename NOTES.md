@@ -5028,6 +5028,45 @@ rule 1 silent or re-worded on a clean exit, `exit_meaning` given its `0` row, th
 action stopped from pointing at logs that hold no answer, and both captured
 objects asserted — they exist now, so the test can fail.
 
+**Shipped in two rounds, and the operator review's blocker was inside the fix.**
+The first version's exit-0 action told the reader the container *"belongs in a
+Job or a CronJob rather than a workload that restarts it forever
+(`restartPolicy: Always`)"* — and the reachable set of that branch is *pod-level
+`Always`* **or a restartable init container**, so on a **native sidecar in a
+Job** — KEP-753's headline case — both halves are false: the object already is a
+Job and its `restartPolicy` is `Never`. `tests/fixtures/healthy-sidecar.json` is
+one short run away from producing it. **That is this entry's own defect rebuilt
+inside the fix for it**, which is why the actions are now role-aware.
+
+**Three more things the review found, all one shape.** The title *"nothing has
+crashed"* was an absolute built from one sample: `CrashLoopBackOff` is entered on
+*accumulated* backoff and a clean run does not reset it, so four crashes then one
+clean exit prints "nothing has crashed" beside `4 restarts`. The exit-0 card told
+the reader to check `restartPolicy` while offering `kubectl describe pod`, which
+prints no such field — `describePod` never touches it. And rule 6's new 137 arm
+named probes without naming memory, when [D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
+had just recorded that a genuine cgroup OOM arrives as plain `Error` on a starved
+host — the correlation runs the wrong way, so 137-without-the-word is not proof
+the kill was not for memory.
+
+**The reviewer's own summary is the durable lesson: the rule reasons past its
+evidence.** It makes a three-way claim about *why* a loop exists from a single
+observation of one run, and the snapshot cannot hold a second. Every branch's
+wording now stays inside what one `lastState` can support. **`"Container keeps
+crashing"` is deliberately left as it was** — a *positive* claim of repeated
+failure is carried by the state name plus one failed run, while *nothing has
+crashed* needed a history the snapshot does not have. The asymmetry is the point,
+not an oversight.
+
+**One permanence to watch, recorded rather than fixed:** the "poor man's cron" —
+a program run under `restartPolicy: Always` so the five-minute backoff acts as a
+scheduler — now sits at CRITICAL forever, and nobody will clear it. It is not a
+false positive, the pod genuinely is in backoff; but permanence is the failure
+mode this project has now rediscovered three times
+([D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)
+rule 6, [D75](#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13)
+rule 2, and here).
+
 **Two smaller relatives found in the same read**, for whoever takes the box:
 `broken-startup`'s rule 6 card offers *"read the logs … to find the
 application's own error"* over an exit 137 SIGKILL, where the kill came from
@@ -5286,7 +5325,7 @@ all of them testable.
 
 | # | Finding | Source field | What we tell the user |
 |---|---|---|---|
-| 1 | CrashLoopBackOff | `state.waiting.reason` | "Container keeps crashing and restarting" + exit code |
+| 1 | CrashLoopBackOff | `state.waiting.reason` **and how the previous run ended** | **Three sentences, not one** — the loop is the same, what put the container in it is not ([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)): its last run *crashed* (a failing exit), *finished cleanly* (exit 0 — and the advice is about what keeps restarting it, not about the logs), or was *stopped* (exit 143 — a health check or the node's memory killer, not a crash). **Each sentence is scoped to the one run the snapshot holds**, because `CrashLoopBackOff` is entered on accumulated backoff and a clean run does not reset it: four crashes then one clean exit is a real state, and a title claiming the whole loop would have called it *"nothing has crashed"*. The `Finished` and `Stopped` actions are **role-aware** — a native sidecar in a Job is already a Job, and Kubernetes forbids probes on a plain init container. Plus the exit code, translated below |
 | 2 | OOMKilled | `lastState.terminated.reason` (exit 137) + `resources.limits.memory` | "Exceeded its memory limit and was killed by the kernel" |
 | 3 | **The image is not usable** — the whole family, not just the two: `ErrImagePull`, `ImagePullBackOff`, `InvalidImageName`, `ErrImageNeverPull`, `ImageInspectError`, `RegistryUnavailable`, `SignatureValidationFailed`. All of them mean *this image will never become available* and all carry the kubelet's diagnosis; splitting them sent `nginx:doesnotexist` to rule 3 immediately and `NGINX:::latest` to rule 13 ten minutes later with a card about a disk ([D76](#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)) | `state.waiting.reason` + `.message` | "Container image is not usable, so the container never started" — wrong name or tag, no pull secret for that registry, or a pull policy that forbids fetching it |
 | 4 | CreateContainerConfigError | `state.waiting.reason` + `.message` | "Referenced a ConfigMap/Secret that doesn't exist" |
@@ -5323,6 +5362,7 @@ never needed this watch ([D27](#d27--two-findings-the-open-watch-already-paid-fo
 
 | Code | Meaning |
 |---|---|
+| **0** | **The program finished successfully — nothing crashed.** Added 2026-08-14, when the capture trip produced the first object that reaches it: a container exiting 0 under `restartPolicy: Always` is in `CrashLoopBackOff` like any other, and with no row here the code printed bare under a title claiming a crash ([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)) |
 | 137 **with** `reason: OOMKilled` | SIGKILL after running out of memory |
 | 137 **without** it | SIGKILL — it did not stop when it was asked to, which is what a failing liveness probe or a shutdown timeout does |
 | 143 | SIGTERM — graceful shutdown, not an error |
