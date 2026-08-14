@@ -73,6 +73,8 @@
 - *(rules)* D86 and D87 — the MSRV C1 cost, and the two screens it belongs on ([a35b8e9](https://github.com/murat-akpinar/k8rs/commit/a35b8e953038c7c0ec359190719aad2e0d333116)) — D86 — C1's parser costs three minor Rust versions, and the alternative was an accepted vulnerability. The advisory and its fix are the same release: time 0.3.47 closes RUSTSEC-2026-0009 and is the first that needs Rust 1.88. What a reachability analysis would have said is recorded here rather than in deny.toml, so it informs the next reader without excusing anything.
 - *(docs)* Close phase 2, and record what deferring its trip actually cost ([cc1cff3](https://github.com/murat-akpinar/k8rs/commit/cc1cff36a7d46ec10acc933dfde73bc25bbb44c4))
 - *(rules)* The exit table gains its 0 row, and D85 records both rounds ([8e2f2f3](https://github.com/murat-akpinar/k8rs/commit/8e2f2f36c5490493f06bb508e914037eefe946a5)) — The v1 rule set's translation table had no entry for exit 0, so the code printed it bare under a title claiming a crash. Rule 1's row said one sentence where it now produces three, each scoped to the one run a snapshot holds.
+- *(docs)* Add the k9s prior-art review, read as a defect catalogue ([25450be](https://github.com/murat-akpinar/k8rs/commit/25450be1a4a2068a2a23be593f41457a96dc6cbd))
+- *(docs)* Turn the twelve prior-art gaps into boxes ([83306f4](https://github.com/murat-akpinar/k8rs/commit/83306f46fafa5fcef05734a66510a21ad6656580))
 
 ### 🧪 Testing
 
