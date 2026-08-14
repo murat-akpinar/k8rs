@@ -77,6 +77,7 @@
 - *(docs)* Add the k9s prior-art review, read as a defect catalogue ([25450be](https://github.com/murat-akpinar/k8rs/commit/25450be1a4a2068a2a23be593f41457a96dc6cbd))
 - *(docs)* Turn the twelve prior-art gaps into boxes ([83306f4](https://github.com/murat-akpinar/k8rs/commit/83306f46fafa5fcef05734a66510a21ad6656580))
 - *(docs)* The tests split by rule family at phase close, the product file does not ([f644828](https://github.com/murat-akpinar/k8rs/commit/f644828c09675c92a973c4812464e1711e7829e5))
+- *(docs)* Each phase names the prior-art classes it can ship, and the operator review checks them ([5ced22d](https://github.com/murat-akpinar/k8rs/commit/5ced22d0785a292468099efdeff9a324f16d0d15))
 
 ### 🧪 Testing
 
