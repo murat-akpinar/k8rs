@@ -5036,6 +5036,109 @@ remain correct throughout, so the card is not wholly wrong — only its first
 sentence and its last are, which is the shape that makes a reader distrust the
 parts that were right.
 
+### D86 — C1's parser costs three minor Rust versions, and the alternative was an accepted vulnerability (2026-08-14)
+
+`x509-parser` was pre-approved by [invariant 10](CLAUDE.md) and arrives with C1.
+Adding it turned `cargo deny` red on the first run:
+
+```
+error[vulnerability]: Denial of Service via Stack Exhaustion
+   ├ ID: RUSTSEC-2026-0009
+   ├ time v0.3.45
+     ├── asn1-rs v0.7.2
+     │   ├── der-parser v10.0.0
+     │   │   └── x509-parser v0.18.1
+```
+
+**The fix and the cost are the same release.** The advisory is fixed in `time`
+**0.3.47**, and 0.3.47 is the first release that requires **Rust 1.88** — so
+there is no version that closes it at the 1.85 this repo had declared since
+Phase 1. Nor is the dependency droppable: `asn1-rs` needs `time` to decode a
+certificate's `UTCTime`/`GeneralizedTime`, which is the one thing C1 reads.
+
+**`rust-version` moves to 1.88.** The alternative was a scoped `deny.toml`
+exception, and it was rejected: an exception for a *licence* states a policy,
+while an exception for a *vulnerability* states that somebody analysed
+reachability and accepted the residual risk — a claim that has to be re-made
+every time `x509-parser` moves, by whoever moves it, and which decays silently
+when nobody does. The gate exists to be passable, and here it was.
+
+**What the analysis would have said, recorded because it is the reason this was
+a decision and not a reflex:** the vulnerable path is `time`'s **RFC 2822**
+parser, and a certificate carries ASN.1 `UTCTime`, not RFC 2822 — so k8rs almost
+certainly cannot reach it. *Almost certainly* is exactly the kind of sentence
+that should not be load-bearing in a security gate, and it is written here
+rather than in `deny.toml` so that it informs the next reader without excusing
+anything.
+
+**The cost, stated plainly:** anyone building k8rs from source needs Rust 1.88
+rather than 1.85. It costs the release binaries nothing — those are built by CI
+on current toolchains — and `rust-version` was a claim about who can compile
+this, which is now three minor versions narrower and **true**, where leaving it
+at 1.85 would have been one minor version wider and a lie the moment the lock
+file moved.
+
+### D87 — C1 has two bands and they belong on two screens; D2 only ever ruled on one of them (2026-08-14)
+
+`dev-core` wrote C1 with `Warn` inside the window and `Critical` past it, then
+raised the contradiction rather than burying it: my brief said *"called from
+`analyze`"*, and
+[D2](#d2--the-dividing-line-broken-now-vs-risky-later) says C1 goes to **the
+Certificates report**, with the sidebar badge as its alerting mechanism.
+`screens/alerts.md` draws no C1 card; `screens/analysis.md` draws it exactly.
+Both cannot be obeyed.
+
+**The ruling: `Info` while it is expiring, `Critical` once it has expired.**
+
+**D2 is honoured for the band it ruled on, and no machinery is added to do it.**
+`Severity::Info` already means *this finding lives in a report, not in Alerts* —
+the enum says so in its own doc, and N4 and N5 already use it exactly this way.
+An expiring certificate is D2's "risky later" and takes the same route the
+kubelet-skew rule takes. The `▲` `screens/analysis.md` draws beside the 30-day
+row is **the report's own marker, keyed to the date** — the same sketch draws
+`○` at 210 days and `●` for a pending CSR — so it is not a claim about
+`Finding::severity` and nothing there has to move.
+
+**D2's letter is reversed for the expired band, because D2 never considered it.**
+Read what it argued: it moved C1 out of Alerts as a thing that is *risky later*.
+A certificate that expired five days ago is not risky later — it is **the most
+broken-now object k8rs can see**, and it is the reason every other card on the
+screen is absent. Without it the user gets a 401 and an empty list; with it they
+get *"your kubeconfig certificate expired 5 days ago"*. That is the whole
+dividing line D2 exists to draw, applied to the case it did not have in front of
+it.
+
+**Why this was worth a ruling rather than a default.** The cost of leaving it
+implicit is precise and was named by the author: Phase 9 renders whatever
+`analyze` returns, so an unruled `Warn` would have drawn a C1 card in Alerts
+that `tui-designer` never specified and D2 forbids — a screen nobody designed,
+arriving two phases from now, traceable to nothing. **When the reviewer and the
+brief disagree, the PM decides in writing** ([CLAUDE.md](CLAUDE.md)); this is
+that, and the brief was the thing that was wrong.
+
+**Two sentences the ruling falsified, found by the author's own second pass and
+worth naming as a class.** `Severity::Info`'s enum doc said *"No rule reaching
+the Alerts list produces one"* — after this ruling C1 reaches that list through
+`Critical` and produces an `Info` through the other band, so the sentence was
+literally wrong; it now states the contract Phase 9 must implement instead
+("nothing drawn in the Alerts list is an `Info`"). And `analyze`'s N4/N5 clause
+justified their exclusion with *"no `Info` finding reaches the Alerts list, so
+`analysis.rs` calls them and this does not"* — a causal claim C1 disproves. **A
+decision that changes behaviour also changes what is true elsewhere**, and the
+sentences it falsifies are never in the diff.
+
+**`CERT_EXPIRY_WARN` keeps its name deliberately.** It shares a word with a
+`Severity` variant the rule no longer uses, but it names the *window*, not the
+band, and renaming it would touch the tests and `certs-test.sh` for no
+behaviour.
+
+**One consequence to carry forward:** C1 is now the only rule in `rules.rs` whose
+severity decides which *screen* it appears on rather than only how loud it is.
+Phase 4 owns the Certificates report and will read the `Info` band out of
+`analyze`'s output; it does not need C1 reimplemented in `analysis.rs`, and
+splitting one rule across two files to satisfy a routing question would have
+been the expensive way to obey D2's letter while losing its point.
+
 ## Decisions made
 
 ### Product

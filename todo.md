@@ -126,7 +126,10 @@ Goal: the name is safe and the repo builds, lints and tests empty.
       `Cargo.toml`. **First, not last:** `cargo publish` refuses a crate
       without the field, so the placeholder cannot be claimed before this
       exists ([NOTES § D13](NOTES.md#d13--licence-gpl-30-or-later-reversed-2026-08-12))
-- [x] `cargo init` — edition 2024, `rust-version = "1.85"`, release profile
+- [x] `cargo init` — edition 2024, `rust-version = "1.85"` (**1.88 since
+      2026-08-14** — C1's certificate parser forced it,
+      [NOTES § D86](NOTES.md#d86--c1s-parser-costs-three-minor-rust-versions-and-the-alternative-was-an-accepted-vulnerability-2026-08-14)),
+      release profile
       `lto`/`strip`/`codegen-units = 1`. **No `panic = "abort"`**: the terminal
       is restored by a `Drop` guard as well as a panic hook, and `Drop` does
       not run when a panic aborts instead of unwinding (invariant 8)
@@ -933,7 +936,7 @@ this plan is delivery mechanism for what this phase produces.
       towards *unknown* rather than towards *down*; `FailedDelete` ruled out of
       v1; a counter that may not contradict the severity beside it; and an
       action that may not name a command the object in front of it cannot run
-- [ ] Certificate rule C1 — kubeconfig client certificate expiry, warn at 30
+- [x] Certificate rule C1 — kubeconfig client certificate expiry, warn at 30
       days. Pure — and **its input arrives on `ClusterSnapshot` like every
       other rule's**, not through a second entry point: the context name and
       the client certificate, never the private key and never the token.
@@ -960,7 +963,29 @@ this plan is delivery mechanism for what this phase produces.
       shape is `.unwrap()`, the input is a kubeconfig, and a corporate PKI is
       exactly where a non-expiring CA turns up — the panic would land on
       startup
-      ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12))
+      ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12)).
+      **Shipped, and the box's own "warn at 30 days" turned out to name only
+      half of it** ([NOTES § D87](NOTES.md#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14)):
+      the expiring band is **`Info`** and takes `Severity`'s existing door to
+      the Certificates report that [D2](NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)
+      sent C1 through — the same door N4 and N5 use — while the **expired** band
+      is `Critical` and reaches Alerts, reversing D2's letter for a case D2 never
+      considered: a credential that ran out is not *risky later*, it is why every
+      other card on the screen is missing. `dev-core` raised that contradiction
+      against its own brief rather than burying it, which is what made the ruling
+      possible. **D56's panic was reproduced before it was prevented** — an
+      `.unwrap()` on the 9999 certificate's jiff conversion dies with
+      `not in the required range of -377705023201..=253402207200`. Five
+      malformed shapes return no finding: not PEM at all, a truncated body, a
+      well-formed PEM that is not a certificate, a private key wearing a
+      certificate's name, and empty — each built from bytes in the test, because
+      `tests/fixtures/certs/` is a closed set `certs-test.sh` refuses to grow.
+      The 30-day boundary is asserted at **both** ends, which neither committed
+      fixture can do: 22 and 363 days pass any threshold between them
+- [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
+      in the green line, not an assertion, so nothing fails and that is exactly
+      why it will survive. One word, `tester`'s file, and it goes with whichever
+      of that agent's boxes runs next
 - [x] Exit-code translation table (137/143/1/126/127) — **137 has two meanings and the object says which**: with `reason: OOMKilled` it is memory, without it the container did not stop when asked, which is a failing liveness probe or a hanging shutdown. The old "almost always OOM" row was written before the rule had `reason` beside the code ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
 - [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket
       **or any directory one sits under**, or a writable host mount. There is no
