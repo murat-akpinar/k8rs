@@ -359,10 +359,23 @@ job on those is step 4: attack them.
 ### The boxes no agent can run — say so, do not fake them
 
 Some boxes need a machine, a credential or an account the agents do not have:
-the kind cluster (`just cluster-up`, `just fixtures`, `just e2e`), the crates.io
-publish, GitHub repo settings, anything behind a login. The PM prints the exact
-command for the user and waits for the real output. A box whose evidence is
-"this would work" is an unchecked box.
+the crates.io publish, GitHub repo settings, anything behind a login. The PM
+prints the exact command for the user and waits for the real output. A box whose
+evidence is "this would work" is an unchecked box.
+
+**The cluster is split by what the run produces, not by who runs it**
+([D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)).
+Anything that **produces an artifact** — `just fixtures`, any write into
+`tests/`, and `just e2e` whose green *is* a box's done-when — is the PM's, because
+committed fixtures carry [D53](NOTES.md#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
+and the sanitization gate. An **ephemeral measurement** — bring a cluster up,
+check one claim, tear it down — is `k8s-admin`'s, and nobody else's: a dev with a
+cluster tunes the code until the cluster agrees. It runs under
+**`K8RS_CLUSTER=review`** — the default name is the PM's fixture cluster and
+teardown would delete it, and `review` is additionally a name `scripts/sanitize.jq`
+**refuses**, so a review cluster cannot produce a committed fixture even by
+mistake. One cluster at a time, and its output is evidence for a *finding* — a
+box that needs a cluster to close is still a PM box.
 
 ### The one hard rule of concurrency
 
@@ -370,13 +383,15 @@ command for the user and waits for the real output. A box whose evidence is
 too** — each agent works in its own subdirectory of it, named after itself, and
 re-verifies anything it saved earlier before relying on it
 ([D60](NOTES.md#d60--claudemd-was-compressed-and-four-stories-moved-here-2026-08-12)).
-What may genuinely run at the same time — at most one writer per row:
+**So is the cluster** ([D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)):
+a capture and a review measurement never run at once, whatever the file trees
+say. What may genuinely run at the same time — at most one writer per row:
 
 | Safe together | Because |
 |---|---|
 | one dev writing `src/` · `tester` writing `tests/`, `scripts/` | disjoint trees |
 | one dev writing · `tui-designer` on a **later** phase's screen | `screens/` is not code |
-| two reviewers (`k8s-admin` + `tui-designer`) on the same diff | neither writes |
+| two reviewers (`k8s-admin` + `tui-designer`) on the same diff | neither writes a file — but if `k8s-admin` is measuring, no capture runs beside it |
 | one dev writing · `k8s-admin` auditing an **already merged** phase | the audit lands as findings, not as an edit |
 
 Anything else runs one at a time; worktree isolation (`isolation: "worktree"`)

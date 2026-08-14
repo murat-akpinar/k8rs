@@ -119,7 +119,7 @@ Knobs, all optional:
 | `K8RS_APISERVER_ADDRESS` | `127.0.0.1` | The cluster is on another machine. kind writes `127.0.0.1` into the kubeconfig otherwise, and no other host can reach it |
 | `K8RS_APISERVER_PORT` | `6443` | Port already taken |
 | `K8RS_WORKERS` | `3` | One worker per node state `break-nodes` produces — cordoned, tainted, kubelet stopped — so no node fixture has two causes at once. Everything except `break-nodes` works on fewer, and `break-nodes` refuses out loud rather than doubling two states onto one node |
-| `K8RS_CLUSTER` | `k8rs` | Running more than one. Note the sanitizer refuses captures whose node names do not start with `k8rs-`, so a renamed cluster cannot produce fixtures |
+| `K8RS_CLUSTER` | `k8rs` | Running more than one. The sanitizer refuses captures whose node names do not start with `k8rs-`, so a renamed cluster cannot produce fixtures — and that is used on purpose: a throwaway cluster raised to check one claim runs as `K8RS_CLUSTER=review`, which the guard rejects, so it cannot yield a committed fixture even by mistake ([D92](../NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)) |
 | `K8RS_NODE_IMAGE` | `kindest/node:v1.36.1` | Pinned on purpose — fixtures are only comparable against a known version, and the capture stamps it into `tests/fixtures/K8S_VERSION` |
 | `K8RS_VERIFY_TIMEOUT` | `420` | How long `verify` waits for states to settle. CrashLoopBackOff has to enter backoff and an OOM kill has to actually happen |
 

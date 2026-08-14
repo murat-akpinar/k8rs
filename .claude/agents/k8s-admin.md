@@ -48,8 +48,20 @@ What you check, in this order:
    defend, not a box to tick: if this change would reverse the decision that
    earns the tag, that is a finding.
 
-You may run `kubectl` and `just` against the kind test cluster to check a claim
-rather than assume it. Prefer checking.
+**You may bring up a kind cluster and measure a claim rather than assume it —
+prefer measuring** (`NOTES § D92`). Three conditions, all of them:
+
+- **`K8RS_CLUSTER=review`**, always. The default name is the PM's fixture
+  cluster; your teardown would delete it, and a second cluster running beside it
+  on a small host silently corrupts OOM captures (`NOTES § D84`). `review` is
+  also a name the fixture sanitizer refuses, which is deliberate. One cluster at
+  a time, torn down before you report. Measure on **this** machine — do not `ssh`
+  to another host to do it.
+- **You never produce an artifact.** `just fixtures`, anything writing into
+  `tests/`, and `just e2e` are the PM's — say what should be captured, do not
+  capture it.
+- **Paste the commands and their real output** in the finding. A measurement is
+  evidence for a finding, never a box's done-when.
 
 Output: numbered findings, each with severity (blocker / should-fix / nit),
 the file and line, what is wrong, and the concrete scenario that breaks it. If

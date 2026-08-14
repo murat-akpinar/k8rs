@@ -5701,6 +5701,63 @@ subdirectory is walked with no edit to either — checked, not assumed. The
 177 declared / 177 listed count is the box's own proof that nothing was hidden
 by the move.
 
+### D92 — who may touch a cluster, split by the artifact and not by the agent (2026-08-15)
+
+`k8s-admin` brought up a kind cluster during the [D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)
+review and measured what no fixture holds. That was logged as an *exception*.
+It was not one — it was **two sentences that cannot both be obeyed**, which is
+the second pass's first question and it had never been asked of these two files:
+
+- `.claude/agents/k8s-admin.md` — *"You may run `kubectl` and `just` against the
+  kind test cluster to check a claim rather than assume it. Prefer checking."*
+- `CLAUDE.md` § The boxes no agent can run — *"the kind cluster … the agents do
+  not have"*.
+
+The reviewer followed its own brief. Ruling by what the rule was protecting:
+**fabrication, not access.** "A box whose evidence is *this would work* is an
+unchecked box" guards against an agent claiming a run it could not perform —
+and an agent that pastes real `kubectl` output is not doing that. So the line
+moves off *who* and onto *what is produced*:
+
+| act | who | why |
+|---|---|---|
+| **ephemeral measurement** — bring a cluster up, check a claim, tear it down | `k8s-admin` | the reviewer is the one who knows what to measure; routing it through the PM means the PM guessing the right call from a finding |
+| **artifact production** — `just fixtures`, anything writing into `tests/`, anything whose green *is* a box's done-when (`just e2e`) | **PM only** | a fixture is committed data. [D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12) and the fixture-sanitization gate live on that path; it gets no unreviewed link |
+| **any cluster at all** | `dev-core` / `dev-ui` — **no** | a writer with a cluster tunes the code until the cluster agrees, which is CLAUDE.md's own *"never assert what the implementation happens to return"* failure. The hand that measures is not the hand that writes |
+
+**The hard condition, and it is not a courtesy.** `scripts/cluster.sh` reads
+`CLUSTER="${K8RS_CLUSTER:-k8rs}"`, so a reviewer that takes the default collides
+with the PM's fixture cluster and deletes it on teardown. Worse, a second
+4-node cluster on the 3.8 GiB LAN host is exactly the state
+[D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
+documents:
+every OOM capture comes back `reason: "Error"` instead of `"OOMKilled"` —
+**silent, and semantically inverted**. A concurrent reviewer can therefore
+poison a capture nobody re-reads. Hence **`K8RS_CLUSTER=review`**, one cluster at
+a time, torn down in the same report.
+
+**The name is chosen so the rule is mechanical, not promised.**
+`scripts/sanitize.jq` aborts on any capture whose node names do not
+`startswith("k8rs-")` — so a cluster called `review` produces nodes named
+`review-control-plane` and **physically cannot yield a committed fixture**,
+while `k8rs-review` would have sailed straight through the guard. That was the
+first name written here and it was wrong for exactly the reason invariant 1
+gives for the allowlist: a boundary that depends on everyone remembering it is
+not a boundary. **The cluster is a file tree** in the
+sense [D60](#d60--claudemd-was-compressed-and-four-stories-moved-here-2026-08-12)
+gave the scratchpad — one writer, named per owner.
+
+**What a measurement is worth.** Evidence for a *finding*, never a box's
+done-when. D90 is the shape: the measurement settled the design question, and
+the box still closed on `just check` run by `tester`. A box that needs a cluster
+to *close* stays a PM box, unchanged.
+
+**Why this entry exists at all:** the question was put to the user, and the
+answer was that this class of call is the PM's to make and record. It is —
+CLAUDE.md already says the PM decides in writing when two parties disagree, and
+a contradiction between two committed files is that, with nobody in the room to
+argue it.
+
 ## Decisions made
 
 ### Product
