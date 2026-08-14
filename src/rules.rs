@@ -1407,8 +1407,12 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
 }
 
 /// `kubectl describe pod …` — the one command that shows a container's current state, how its
-/// last run ended, its restart count, the limits it is running under and its mounts. That is
+/// last run ended, its restart count, the limits it is running under and its mounts, and
+/// `Liveness:` / `Readiness:` / `Startup:` per container out of `describeContainers`. That is
 /// what rules 1–8 claim, checked per card (NOTES § D71).
+///
+/// **Rule 1's `exit 0` branch is the exception and takes [`get_yaml`] instead**: it names
+/// `restartPolicy`, and `describePod` prints that field nowhere (NOTES § D85).
 ///
 /// **Rule 13 is here for a different reason**: what finishes its diagnosis is an Event, which
 /// `describe` prints and `get -o yaml` does not. **Rule 12 does not use it**: `describe` prints
@@ -1424,8 +1428,9 @@ fn describe(id: &ObjectId) -> Option<String> {
 
 /// `kubectl get <resource> … -o yaml` — for the cards whose evidence is a field `describe` does
 /// not print at all: rule 12's `metadata.finalizers`, rules 3 and 4's `state.waiting.message`,
-/// which kubectl's `describeStatus` never renders, and **the W-series' condition messages**,
-/// which `describeReplicaSet` and `describeDeployment` both reduce to a
+/// which kubectl's `describeStatus` never renders, **rule 1's `exit 0` branch**, whose subject
+/// is `restartPolicy` on the pod and on the container (NOTES § D85), and **the W-series'
+/// condition messages**, which `describeReplicaSet` and `describeDeployment` both reduce to a
 /// `Type / Status / Reason` table. A teaching command that does not show what the card says is
 /// worse than none (invariant 4, NOTES § D46, § D71).
 ///
@@ -1530,18 +1535,49 @@ fn container_fact(c: &ContainerSnapshot) -> String {
 /// place the answer depends on [`ContainerRole`].
 ///
 /// Running and ready for a [`Regular`](ContainerRole::Regular) or a
-/// [`Sidecar`](ContainerRole::Sidecar); **`exit 0` for an [`Init`](ContainerRole::Init)**, because
-/// "serving" means nothing about a container that runs once and finishes and the other expression
-/// answers *no* for every init container that ever succeeded (NOTES § D75). **A failed init
-/// container is deliberately not settled by this.**
+/// [`Sidecar`](ContainerRole::Sidecar); **[`Ending::Finished`] for an
+/// [`Init`](ContainerRole::Init)**, because "serving" means nothing about a container that runs
+/// once and finishes and the other expression answers *no* for every init container that ever
+/// succeeded (NOTES § D75). **A failed init container is deliberately not settled by this.**
+///
+/// **It asks [`ending`] rather than spelling `exit_code == 0` again**: the two agreed by hand
+/// until 2026-08-14 and nothing held them together, which is the shape of the defect NOTES § D85
+/// exists to close.
 ///
 /// **The init branch is captured**: `healthy-retry.json` is an init container that failed three
 /// times before it exited `0`, so both rules have something to suppress on a real object.
 fn doing_its_job(c: &ContainerSnapshot) -> bool {
     match (&c.state, c.role) {
         (ContainerState::Running { .. }, _) => c.ready,
-        (ContainerState::Terminated(run), ContainerRole::Init) => run.exit_code == 0,
+        (ContainerState::Terminated(run), ContainerRole::Init) => ending(run) == Ending::Finished,
         _ => false,
+    }
+}
+
+/// **How the run before this one ended, in the three shapes the rules have to tell apart** —
+/// and **the one place a rule decides what `exit 0` and `exit 143` mean**; [`exit_meaning`]
+/// translates the codes for the reader, and nothing else in this file branches on them
+/// (NOTES § D85). [`crash_looping`] picks which loop it is looking at from this;
+/// [`previous_run_failed`] asks only whether it is [`Failed`](Ending::Failed);
+/// [`doing_its_job`] asks only whether it is [`Finished`](Ending::Finished).
+///
+/// Both codes were spelled out in rule 6 alone until 2026-08-14, so rule 1 called a batch job
+/// that finished a crash — two rules reading one container and disagreeing one card line apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ending {
+    /// `exit 0` — the program did what it was told to do and stopped.
+    Finished,
+    /// `exit 143` — 128 + SIGTERM: something asked the container to stop and it did.
+    Stopped,
+    /// Everything else, a code with no accepted meaning included.
+    Failed,
+}
+
+fn ending(run: &Terminated) -> Ending {
+    match run.exit_code {
+        0 => Ending::Finished,
+        143 => Ending::Stopped,
+        _ => Ending::Failed,
     }
 }
 
@@ -1549,8 +1585,10 @@ fn doing_its_job(c: &ContainerSnapshot) -> bool {
 /// translation table, and nothing invented beside it. `None` is a code with no accepted meaning,
 /// where the number alone is the honest answer.
 ///
-/// 143 is the one entry that says *nothing is wrong*, which is why [`previous_run_failed`]
-/// refuses to fire on it. It stays here because rule 1 does print it.
+/// **`0` and `143` are the two entries that say *nothing failed***, which is why
+/// [`previous_run_failed`] refuses to fire on either. They stay here because rule 1 does print
+/// them, and printing `exit 0` bare under a card about crashing is what NOTES § D85 is
+/// about — a translation missing is a contradiction shipped.
 ///
 /// **137 needs the `reason` beside it, and NOTES' own table is corrected here** (NOTES § D71):
 /// with [`Terminated::reason`] `OOMKilled` the kernel took the container for using too much
@@ -1558,6 +1596,7 @@ fn doing_its_job(c: &ContainerSnapshot) -> bool {
 /// failing `livenessProbe`, or a shutdown that hangs.
 fn exit_meaning(code: i32, reason: Option<&str>) -> Option<&'static str> {
     Some(match code {
+        0 => "the program finished successfully",
         137 if reason == Some("OOMKilled") => {
             "killed by the kernel for using more memory than it was allowed"
         }
@@ -1603,9 +1642,39 @@ fn last_log_line(run: &Terminated) -> Option<&str> {
         .rfind(|l| !l.is_empty())
 }
 
-/// **Rule 1 — the container keeps crashing and Kubernetes has started waiting between
-/// restarts.** `state.waiting.reason == CrashLoopBackOff`, CRITICAL: this container is not doing
-/// its job right now.
+/// **Rule 1 — the container is going round a restart loop and Kubernetes has started waiting
+/// between the restarts.** `state.waiting.reason == CrashLoopBackOff`, CRITICAL: whatever the
+/// loop is, this container is not doing its job right now and will not start doing it without a
+/// change.
+///
+/// **Which loop it is comes from how the last run ended** ([`ending`], NOTES § D85), and only
+/// [`Failed`](Ending::Failed) is a crash: `exit 0` is a program that finished under a restart
+/// policy that will not let it, and `exit 143` is something outside the container stopping it.
+/// Each branch owes its own action, because *read the previous run's logs* sends the reader of
+/// the other two to a log holding no answer.
+///
+/// **The titles say what one `lastState` can support and no more.** The snapshot holds one run,
+/// so *nothing has crashed* was an absolute drawn from a single sample: a container that failed
+/// four times and then exited `0` stays in `CrashLoopBackOff` with a clean `lastState`. For the
+/// same reason the restart is present tense — `CrashLoopBackOff` is the wait *before* the next
+/// start, and [`ContainerSnapshot::restarts`] can still be `0`, which is why the evidence line
+/// guards it.
+///
+/// **The action then splits on [`ContainerRole`], because the same exit means different things
+/// per role.** `exit 0` on a [`Sidecar`](ContainerRole::Sidecar) is KEP-753's Job — pod
+/// `restartPolicy: Never`, `initContainers[].restartPolicy: Always` — where *move it to a Job*
+/// is advice about the workload it already is; and `exit 143` on an
+/// [`Init`](ContainerRole::Init) cannot be a probe, because `validateInitContainers` forbids all
+/// three probes on an init container that is not restartable.
+///
+/// **The `Finished` branch is the one card whose command is `get -o yaml`**: it names
+/// `restartPolicy`, and `describePod` never prints that field (NOTES § D71's ruling on rules 3
+/// and 4, [`get_yaml`]).
+///
+/// **The severity does not move with the branch.** It answers *is this container serving*, and
+/// on a container the kubelet is backing off from the answer is no in all three — an amber card
+/// beside a red `CrashLoopBackOff` in `kubectl get pods` teaches the reader to trust the other
+/// tool (NOTES § D2).
 ///
 /// The age is [`Terminated::finished_at`] on the previous run ([`Finding::timestamp`]).
 fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
@@ -1623,13 +1692,59 @@ fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
         }
         facts.push(exit_fact(run));
     }
+    // A container in this state with no `lastState` at all takes the crash branch: without the
+    // previous run there is nothing to say the loop is anything else, and *go and read the log*
+    // is the right advice when we do not know.
+    let (title, action, cmd) = match c.last_terminated.as_ref().map(ending) {
+        Some(Ending::Finished) => (
+            "The container's last run finished cleanly, and Kubernetes is restarting it \
+             (CrashLoopBackOff)",
+            match c.role {
+                ContainerRole::Regular => {
+                    "check whether this program is meant to finish — if it is, it belongs in a \
+                     Job or a CronJob rather than a workload that restarts it forever; the pod's \
+                     restartPolicy is what keeps restarting it. If it is not meant to finish, it \
+                     is quitting early and that is the bug"
+                }
+                ContainerRole::Init | ContainerRole::Sidecar => {
+                    "nothing failed in that run, so the question is why it was started again — \
+                     this container's own restartPolicy answers that, and if it is Always the \
+                     container is meant to keep running, which makes even a clean exit the bug"
+                }
+            },
+            get_yaml("pod", &pod.id),
+        ),
+        Some(Ending::Stopped) => (
+            "The container's last run was stopped, and Kubernetes is restarting it \
+             (CrashLoopBackOff)",
+            match c.role {
+                ContainerRole::Regular | ContainerRole::Sidecar => {
+                    "check the liveness and startup probes first — a failing health check is \
+                     what stops a container that has not crashed — then the node, where a memory \
+                     killer such as systemd-oomd or earlyoom sends the same signal; the \
+                     container's own logs will show nothing worse than a shutdown"
+                }
+                ContainerRole::Init => {
+                    "Kubernetes does not allow health checks on this kind of container, so the \
+                     stop came from the node or from the program itself — look in the node's \
+                     system log for a memory killer such as systemd-oomd or earlyoom, and check \
+                     whether the program exits 143 of its own accord"
+                }
+            },
+            describe(&pod.id),
+        ),
+        Some(Ending::Failed) | None => (
+            "Container keeps crashing, and each restart waits longer (CrashLoopBackOff)",
+            "read the previous run's logs — that is where it says why it exits",
+            describe(&pod.id),
+        ),
+    };
     Some(Finding {
         severity: Severity::Critical,
-        title: "Container keeps crashing, and each restart waits longer (CrashLoopBackOff)"
-            .to_string(),
+        title: title.to_string(),
         evidence: facts.join(FACTS),
-        action: "read the previous run's logs — that is where it says why it exits".to_string(),
-        kubectl_cmd: describe(&pod.id),
+        action: action.to_string(),
+        kubectl_cmd: cmd,
         owner: pod.owner.clone(),
         object: pod.id.clone(),
         timestamp: c
@@ -1830,7 +1945,9 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
 /// *currently* broken rules 1 to 4 say so as CRITICAL beside this.
 ///
 /// **Two exits are not findings** — `0` and `143`, every rolling update and every scale-down
-/// (NOTES § v1 rule set) — and **`OOMKilled` belongs to rule 2**: one event, one card.
+/// (NOTES § v1 rule set) — and **`OOMKilled` belongs to rule 2**: one event, one card. The two
+/// codes are [`ending`]'s to name, not this rule's, because rule 1 reads the same container and
+/// has to reach the same verdict about it (NOTES § D85).
 ///
 /// **And quiet on a container that is serving now, because this field never expires** — the
 /// largest false-positive volume in this box, needing no unusual manifest, only uptime
@@ -1843,11 +1960,12 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
 /// `sigterm.json`, on containers that are *not* serving, so the exemption rather than
 /// [`doing_its_job`] is what silences them — and `notfound.json` reaches the `126`/`127` action
 /// with no termination message beside it, which `restarts10.json`'s bare `exit 1` and
-/// `init.json`'s are the general *read the logs* arm beside.
+/// `init.json`'s are the general *read the logs* arm beside. **`startup.json` reaches the `137`
+/// arm**, whose kill came from outside the application: the general arm sent that reader hunting
+/// an error the container never logged (NOTES § D85).
 fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     let run = c.last_terminated.as_ref()?;
-    if run.exit_code == 0
-        || run.exit_code == 143
+    if ending(run) != Ending::Failed
         || run.reason.as_deref() == Some("OOMKilled")
         || doing_its_job(c)
     {
@@ -1868,6 +1986,20 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
             (None, 126 | 127) => {
                 "check the container's command and arguments — what they name is not in the \
                  image"
+                    .to_string()
+            }
+            // `137` reaches this rule only with `reason` something other than `OOMKilled` —
+            // rule 2 owns the other one — so the kill came from outside the application, and
+            // the general arm's *find the application's own error* is a hunt through a log
+            // that does not hold one (NOTES § D85, § D71). **Memory stays on the list even
+            // though rule 2 owns the labelled kill**: on a host without headroom a genuine
+            // cgroup OOM arrives here as `137`/`Error` with the word lost, which is exactly
+            // the condition under which OOM kills happen (NOTES § D84).
+            (None, 137) => {
+                "check the liveness and startup probes, whether the container stops when it is \
+                 asked to, and its memory limit — this kill came from outside the application, \
+                 so its own logs will not say why, and a kill for using too much memory does \
+                 not always arrive labelled as one"
                     .to_string()
             }
             (None, _) => {

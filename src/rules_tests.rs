@@ -3668,6 +3668,11 @@ fn the_thresholds_and_the_exit_table_are_the_ones_the_documents_write_down() {
         (137, Some("Error"), "did not stop when it was asked to"),
         (137, None, "did not stop when it was asked to"),
         (143, None, "ordinary shutdown"),
+        // **The row the table did not have**, which is why `exit 0` reached the screen as a
+        // bare number under a card about crashing (NOTES § D85). The kubelet's own `reason`
+        // beside it is `Completed`, and it changes nothing: 0 is 0.
+        (0, Some("Completed"), "finished successfully"),
+        (0, None, "finished successfully"),
         (1, None, "the application's own error"),
         (2, None, "the application's own error"),
         (126, None, "could not be run"),
@@ -4376,9 +4381,479 @@ fn an_ordinary_exit_is_not_a_previous_run_that_failed() {
     }
 }
 
-/// **Rule 6's third action, on the capture that reaches it.** The arms are: the container's own
-/// last log line if the kubelet kept one, then `126`/`127`'s *"the command is not in the
-/// image"*, then the general *"read the logs"*. The log-line arm answers first whenever a
+/// **The two literal pointers at a log** the rules can put in front of a reader. A card whose
+/// own evidence says nothing failed must not carry either, and the test that says so has to
+/// name them rather than search for the word "log" — the new cards mention logs precisely to
+/// stop somebody going there (NOTES § D85).
+const SENT_TO_THE_LOGS: [&str; 2] = [
+    "read the previous run's logs",
+    "read the logs of that run to find the application's own error",
+];
+
+/// **Three ways into one state, and rule 1 called all three a crash** (NOTES § D85).
+///
+/// `CrashLoopBackOff` is what the kubelet says about *any* container it is backing off from
+/// restarting, and how the previous run ended is the only thing that says which loop it is:
+/// `broken-crashloop` panicked (`exit 1`), `broken-exit0`'s batch program finished (`exit 0`)
+/// and `broken-sigterm` was stopped by something outside it (`exit 143`). Until the trip of
+/// 2026-08-13 only the first of the three existed in this repository, so the one title fitted
+/// every capture there was.
+///
+/// **The control is `broken-crashloop`, asserted word for word**: this box changes what k8rs
+/// says about the two clean exits and nothing about the crash it was already right about.
+#[test]
+fn the_three_ways_into_a_restart_loop_do_not_get_the_same_card() {
+    let loops = [
+        ("crashloop", "broken-crashloop"),
+        ("exit0", "broken-exit0"),
+        ("sigterm", "broken-sigterm"),
+    ];
+    let sets: Vec<Vec<Finding>> = loops.iter().map(|(name, _)| findings(&[name])).collect();
+    let cards: Vec<(&str, &Finding)> = sets
+        .iter()
+        .zip(loops)
+        .map(|(all, (name, pod_name))| {
+            show(all);
+            let capture = pod(name);
+            let c = capture
+                .containers
+                .first()
+                .expect("the capture reports on its container");
+            assert!(
+                matches!(waiting(c), Some(("CrashLoopBackOff", _))),
+                "{name}.json has to be in the state rule 1 fires on, or this is a comparison \
+                 of three cards from three different rules: {c:?}"
+            );
+            (name, only(all, pod_name, "CrashLoopBackOff"))
+        })
+        .collect();
+
+    for (i, (name, card)) in cards.iter().enumerate() {
+        for (other, other_card) in cards.iter().skip(i + 1) {
+            assert_ne!(
+                card.title, other_card.title,
+                "{name} and {other} ended their last run differently, and one sentence \
+                 covering both is the sentence that is false about one of them"
+            );
+            assert_ne!(
+                card.action, other_card.action,
+                "{name} and {other}: the next step differs with the ending, which is the \
+                 whole of why the title does"
+            );
+        }
+        assert_eq!(
+            card.severity,
+            Severity::Critical,
+            "{name}: the colour answers *is this container serving*, and a container the \
+             kubelet is backing off from is not — an amber card beside a red \
+             CrashLoopBackOff in `kubectl get pods` teaches the reader to believe the other \
+             tool (NOTES § D2)"
+        );
+    }
+
+    // By name, not by position: the control is `broken-crashloop` whatever order the list
+    // above is written in.
+    let crash = cards
+        .iter()
+        .find(|(name, _)| *name == "crashloop")
+        .expect("the crash itself is one of the three")
+        .1;
+    assert_eq!(
+        crash.title, "Container keeps crashing, and each restart waits longer (CrashLoopBackOff)",
+        "the control: a container that really is crashing keeps the card it always had"
+    );
+    assert_eq!(
+        crash.action, "read the previous run's logs — that is where it says why it exits",
+        "and it is still the one card of the three that sends the reader to a log holding \
+         the answer"
+    );
+}
+
+/// **A batch program that finished, restarted forever — the commonest way a Job is mis-written,
+/// and the card that told its author their container was crashing** (NOTES § D85).
+///
+/// The kubelet *does* apply `CrashLoopBackOff` to a container that exits `0` under
+/// `restartPolicy: Always`, so the state on the card is real and rule 1 is right to have
+/// noticed. Everything the old card said about it was not: the title claimed a crash over an
+/// evidence line reading `exit 0`, and the action sent the reader to a log that says the
+/// program finished.
+#[test]
+fn a_program_that_finished_is_not_a_container_that_crashed() {
+    let raw = fixture("exit0");
+    let capture = pod("exit0");
+    let c = capture
+        .containers
+        .first()
+        .expect("the capture reports on its container");
+    println!("{c:?}");
+    assert_eq!(
+        c.last_terminated.as_ref().map(|run| run.exit_code),
+        Some(captured_i32(
+            captured_status(&raw, "containerStatuses", &c.name),
+            &["lastState", "terminated", "exitCode"]
+        )),
+        "the exit code comes off the capture, and it is what makes this card's subject a \
+         program that finished rather than one that failed"
+    );
+
+    let all = findings(&["exit0"]);
+    show(&all);
+    assert_eq!(
+        all.len(),
+        1,
+        "rule 1 alone — nothing failed here, so rule 6 has nothing to add: {:?}",
+        titles(&all)
+    );
+    let card = only(&all, "broken-exit0", "CrashLoopBackOff");
+
+    assert!(
+        !card.title.to_lowercase().contains("crashing"),
+        "nothing crashed: this container ran to the end of its program and exited 0, and a \
+         title that says otherwise is contradicted by the evidence line under it: {}",
+        card.title
+    );
+    assert!(
+        card.title.contains("CrashLoopBackOff"),
+        "and the word the reader saw in `kubectl get pods` is still on the card, or the \
+         card is about a pod they cannot find: {}",
+        card.title
+    );
+    // **The absolute the snapshot cannot support.** `CrashLoopBackOff` is entered on
+    // *accumulated* backoff and one clean run does not reset the key, so exit 1 four times
+    // and then a fifth run that exits 0 leaves exactly this shape — and *nothing has crashed*
+    // beside `16 restarts` tells the reader the fifteen restarts before this one were clean
+    // too. One `lastState` is one run.
+    assert!(
+        !card.title.contains("nothing has crashed"),
+        "the snapshot holds one run and the title claimed the whole loop: a container that \
+         failed four times and then exited 0 is in this state with this `lastState`: {}",
+        card.title
+    );
+    assert!(
+        card.title.contains("last run"),
+        "so the title says which run it is talking about: {}",
+        card.title
+    );
+    assert!(
+        card.evidence
+            .contains("exit 0 (the program finished successfully)"),
+        "invariant 14: `0` is translated like every other code, and printing it bare under a \
+         card about crashing is how the contradiction reached the screen unremarked: {}",
+        card.evidence
+    );
+    for pointer in SENT_TO_THE_LOGS {
+        assert!(
+            !card.action.contains(pointer),
+            "the previous run's log says the program finished — twenty minutes of somebody \
+             proving their own tool wrong: {}",
+            card.action
+        );
+    }
+    assert!(
+        card.action.contains("restartPolicy"),
+        "the thing that is actually misconfigured is the restart policy, and the reader has \
+         to be able to search for it: {}",
+        card.action
+    );
+    assert!(
+        card.action.contains("Job") && card.action.contains("CronJob"),
+        "and the fix for a program that is meant to finish is the workload that lets it: {}",
+        card.action
+    );
+    // **The command has to show the field the action names** (invariant 4). `describePod`
+    // never prints `spec.restartPolicy` — this card asserted the one thing it had not read
+    // and then offered the one command that cannot confirm it.
+    let cmd = card
+        .kubectl_cmd
+        .as_deref()
+        .expect("a card naming a field owes the command that shows it");
+    assert!(
+        cmd.ends_with("-o yaml"),
+        "`kubectl describe pod` prints no restartPolicy at all, so the card sent the reader \
+         to a place the answer is not: {cmd}"
+    );
+}
+
+/// **A native sidecar that exits cleanly, and the card that told a Job to become a Job**
+/// (KEP-753, NOTES § D85).
+///
+/// Pod `restartPolicy: Never`, `initContainers[].restartPolicy: Always`: the sidecar exits `0`,
+/// the kubelet restarts it — upstream's `SyncPod` runs init containers through the same
+/// `doBackOff` closure as regular ones — and `Init:CrashLoopBackOff` with
+/// `lastState.terminated.exitCode: 0` is what `kubectl get pods` then shows. The fix for
+/// [`crash_looping`]'s `exit 0` branch was written for the pod-level `Always` disjunct alone,
+/// so on this object it said *it belongs in a Job or a CronJob* one line under an evidence
+/// line reading *it runs beside the app the whole time*, about a pod that already **is** a Job.
+///
+/// **`healthy-sidecar.json` is one state transition from this** — `proxy` is an init container
+/// with `restartPolicy: Always`, `restartCount: 1` and `lastState.terminated.exitCode: 0`,
+/// currently `Running`. The plant moves `state` and the pod's restart policy and touches
+/// nothing else (NOTES § D53).
+#[test]
+fn a_sidecar_that_exits_cleanly_is_not_told_to_move_to_the_workload_it_is_already_in() {
+    let job = capture_but("healthy-sidecar", |pod| {
+        pod.spec
+            .as_mut()
+            .expect("the capture has a spec")
+            .restart_policy = Some("Never".to_string());
+        backing_off(pod, "proxy");
+    });
+    let proxy = container(&job, "proxy");
+    println!("{proxy:?}");
+    assert_eq!(
+        proxy.role,
+        ContainerRole::Sidecar,
+        "the whole card turns on the role, and a capture whose `restartPolicy: Always` had \
+         been dropped would decode as a plain init container and prove nothing"
+    );
+    assert_eq!(
+        proxy.last_terminated.as_ref().map(|run| run.exit_code),
+        Some(captured_i32(
+            captured_status(
+                &fixture("healthy-sidecar"),
+                "initContainerStatuses",
+                "proxy"
+            ),
+            &["lastState", "terminated", "exitCode"]
+        )),
+        "and the clean exit is the capture's own, not the plant's — the plant moved `state`"
+    );
+
+    let all = analyze(&pods_at(vec![job], now()));
+    show(&all);
+    let card = only(&all, "healthy-sidecar", "CrashLoopBackOff");
+    assert!(
+        card.evidence
+            .contains("it runs beside the app the whole time"),
+        "the evidence line the action has to agree with: {}",
+        card.evidence
+    );
+    assert!(
+        !card.action.contains("Job") && !card.action.contains("CronJob"),
+        "this pod is a Job, its restartPolicy is Never, and the container above runs beside \
+         the app for the pod's whole life — telling its author to move it to a Job or a \
+         CronJob is the contradiction this box exists to remove, rebuilt inside the fix \
+         for it: {}",
+        card.action
+    );
+    assert!(
+        card.action.contains("restartPolicy"),
+        "and the reader is still left with somewhere to look — an action that only says \
+         where *not* to look is no action at all: {}",
+        card.action
+    );
+}
+
+/// **A container something outside it keeps stopping, politely** (NOTES § D85) — the same defect
+/// as the capture above with the contradiction fully on the page: a **CRITICAL** headed *"keeps
+/// crashing"* whose own evidence line read *"an ordinary shutdown and not an error"*, one line
+/// apart, both halves written by k8rs.
+///
+/// `broken-sigterm` catches SIGTERM and exits `143`, which is what the kubelet killing a
+/// container looks like when the application handles the signal — a failing liveness probe,
+/// which this capture has. The application that *ignores* it is `broken-startup`'s `exit 137`,
+/// and the two cards send the reader to the same place.
+#[test]
+fn a_container_that_is_stopped_politely_is_not_one_that_keeps_crashing() {
+    let raw = fixture("sigterm");
+    let capture = pod("sigterm");
+    let c = capture
+        .containers
+        .first()
+        .expect("the capture reports on its container");
+    println!("{c:?}");
+    assert_eq!(
+        c.last_terminated.as_ref().map(|run| run.exit_code),
+        Some(captured_i32(
+            captured_status(&raw, "containerStatuses", &c.name),
+            &["lastState", "terminated", "exitCode"]
+        )),
+        "the exit code comes off the capture: 143 is 128 + SIGTERM, and the card below is \
+         about a container that was asked to stop and did"
+    );
+
+    let all = findings(&["sigterm"]);
+    show(&all);
+    let card = only(&all, "broken-sigterm", "CrashLoopBackOff");
+    assert!(
+        !card.title.to_lowercase().contains("crashing"),
+        "the container did not crash — it was stopped, and it stopped: {}",
+        card.title
+    );
+    assert!(
+        card.evidence.contains("ordinary shutdown and not an error"),
+        "the evidence line that made the old title impossible to believe is still there — the \
+         card was fixed by making the title true, not by deleting the sentence that exposed \
+         it: {}",
+        card.evidence
+    );
+    assert!(
+        card.title.contains("stopped"),
+        "and the title now says what the evidence says: this container's last run was \
+         stopped rather than failing: {}",
+        card.title
+    );
+    // **One `lastState` is one run, here too.** *Something keeps stopping this container*
+    // read the whole loop off a single sample, and the same accumulated-backoff shape that
+    // breaks the `exit 0` title breaks this one.
+    assert!(
+        card.title.contains("last run"),
+        "and it says which run it read that off, because the snapshot holds exactly one: {}",
+        card.title
+    );
+    for pointer in SENT_TO_THE_LOGS {
+        assert!(
+            !card.action.contains(pointer),
+            "an application that shut down when it was asked to logs a shutdown, and that is \
+             not why it is being restarted: {}",
+            card.action
+        );
+    }
+    assert!(
+        card.action.contains("liveness"),
+        "a health check that keeps failing is what stops a container that has not crashed, \
+         and this capture's liveness probe is `exec: false`: {}",
+        card.action
+    );
+    // **The producer that loops and is not Kubernetes.** A userspace memory killer sends
+    // SIGTERM, not SIGKILL, so it lands on this card and not on rule 2's — and it comes back
+    // every time the container grows to the same size. `terminationGracePeriodSeconds`
+    // expiry and preemption/eviction/drain do not reach here and are deliberately absent.
+    assert!(
+        card.action.contains("systemd-oomd") || card.action.contains("earlyoom"),
+        "a userspace out-of-memory killer sends SIGTERM and keeps sending it, and an action \
+         that names only the probes leaves that reader restarting a pod forever: {}",
+        card.action
+    );
+}
+
+/// **An init container that is stopped, and the probe the API server would have refused**
+/// (NOTES § D85).
+///
+/// `validateInitContainers` forbids `livenessProbe`, `readinessProbe` and `startupProbe` on an
+/// init container that is not `restartPolicy: Always`, so *check the liveness and startup
+/// probes first* sends this reader to a field `kubectl apply` would have rejected — and the
+/// rest of that action only says where **not** to look, which leaves no next step at all.
+///
+/// No capture holds this shape: `broken-init`'s `migrate` loops on `exit 1`. The plant moves
+/// the exit code and nothing else (NOTES § D53), which is the one field that decides the
+/// branch under test.
+#[test]
+fn an_init_container_that_was_stopped_is_not_sent_to_a_probe_it_may_not_have() {
+    let stopped = capture_but("init", |pod| exited(pod, "migrate", 143));
+    let migrate = container(&stopped, "migrate");
+    println!("{migrate:?}");
+    assert_eq!(
+        migrate.role,
+        ContainerRole::Init,
+        "a restartable init container may have probes, so the arm under test would not be \
+         the one that fires"
+    );
+
+    let all = analyze(&pods_at(vec![stopped], now()));
+    show(&all);
+    let card = only(&all, "broken-init", "CrashLoopBackOff");
+    assert!(
+        card.title.contains("stopped"),
+        "143 on an init container is the same ending as on any other: {}",
+        card.title
+    );
+    for probe in ["liveness", "readiness", "startup"] {
+        assert!(
+            !card.action.contains(probe),
+            "Kubernetes rejects a {probe} probe on this kind of container, so naming one is \
+             advice the reader cannot follow: {}",
+            card.action
+        );
+    }
+    assert!(
+        card.action.contains("systemd-oomd") || card.action.contains("earlyoom"),
+        "and the reader is left with somewhere real to look — a userspace memory killer \
+         sends SIGTERM and reaches an init container like any other process: {}",
+        card.action
+    );
+}
+
+/// **Rule 6's `137` arm, on the capture whose kill came from outside the application**
+/// (NOTES § D85, § D71). `broken-startup` declares a `startupProbe` that never passes, so the
+/// kubelet killed a container that was running perfectly well — and the general arm's *find the
+/// application's own error* is a hunt through a log that does not hold one.
+///
+/// **`OOMKilled` is rule 2's**, so a `137` that reaches this rule is always the other kind.
+#[test]
+fn a_kill_from_outside_the_application_does_not_send_the_reader_to_its_logs() {
+    let capture = pod("startup");
+    let c = container(&capture, "slowboot");
+    let run = c
+        .last_terminated
+        .as_ref()
+        .expect("the capture records how the run before this one ended");
+    println!("{run:?}");
+    assert_eq!(run.exit_code, 137);
+    assert_ne!(
+        run.reason.as_deref(),
+        Some("OOMKilled"),
+        "a kill the kernel took for memory is rule 2's card, and this arm would be \
+         unreachable on a capture carrying that word"
+    );
+    assert_eq!(
+        run.message, None,
+        "the log-line arm answers first whenever a message exists, so this capture has to \
+         carry none or the arm under test is unreachable"
+    );
+
+    let all = findings(&["startup"]);
+    show(&all);
+    let card = only(&all, "broken-startup", "previous run failed");
+    for pointer in SENT_TO_THE_LOGS {
+        assert!(
+            !card.action.contains(pointer),
+            "the application did not fail — something outside it killed the container, and \
+             its own log holds no error to find: {}",
+            card.action
+        );
+    }
+    assert!(
+        card.action.contains("liveness") && card.action.contains("startup"),
+        "the two health checks that kill a container that is otherwise running, and this \
+         capture is killed by the second of them: {}",
+        card.action
+    );
+    // **The cause this repository has written evidence for** (NOTES § D84): on a host without
+    // memory headroom a genuine cgroup OOM arrives here as `exitCode: 137, reason: "Error"`,
+    // the word `OOMKilled` simply lost — so the correlation runs the wrong way. `oom.json`
+    // says `OOMKilled` and reaches rule 2; the same manifest on the capture host did not.
+    assert!(
+        card.action.contains("memory"),
+        "137 without the word is not proof the kill was not for memory — D84 reproduced \
+         exactly that five times running, and this action told that reader to go and look \
+         at probes: {}",
+        card.action
+    );
+
+    // **The canary under [`SENT_TO_THE_LOGS`].** A rule reworded out from under that list
+    // leaves every "must not contain" assertion above passing over a phrase nothing produces
+    // any more — "found nothing" and "there was nothing to find" print the same green line
+    // (CLAUDE.md § Code phase rules). Both sentences are still the right advice on the cards
+    // that keep them: `broken-crashloop` really did crash, and `broken-init` really did fail.
+    let everything = findings(&CAPTURED_PODS);
+    for pointer in SENT_TO_THE_LOGS {
+        assert!(
+            everything.iter().any(|f| f.action.contains(pointer)),
+            "no card in the whole capture says {pointer:?} any more, so the assertions that \
+             forbid it are guarding nothing: {:?}",
+            everything
+                .iter()
+                .map(|f| f.action.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// **Rule 6's `126`/`127` action, on the capture that reaches it.** The arms are: the
+/// container's own last log line if the kubelet kept one, then `126`/`127`'s *"the command is
+/// not in the image"*, then `137`'s *"the kill came from outside the application"* (the test
+/// above), then the general *"read the logs"*. The log-line arm answers first whenever a
 /// message exists, and every committed termination carried one — so `broken-notfound` was
 /// captured with `terminationMessagePolicy` left at its default and a command that is not in
 /// the image, which is `127` with nothing beside it.
@@ -5504,6 +5979,30 @@ fn never_ran(pod: &mut Pod, name: &str, reason: &str, message: Option<&str>) {
     status.state = waiting_at(reason, message);
     status.last_state = None;
     status.restart_count = 0;
+}
+
+/// A captured container moved into the state the kubelet writes while it is waiting to restart
+/// it — **`lastState` kept**, because that is the field rule 1 reads to tell the three loops
+/// apart (NOTES § D85), and a plant that dropped it would take the crash branch by default and
+/// prove nothing about the other two.
+fn backing_off(pod: &mut Pod, name: &str) {
+    let status = container_status(pod, name);
+    status.state = waiting_at("CrashLoopBackOff", None);
+    status.ready = false;
+    status.started = Some(false);
+}
+
+/// The exit code of a captured container's previous run, rewritten — the one field
+/// [`ending`] branches on, for the endings no capture holds on that role.
+fn exited(pod: &mut Pod, name: &str, code: i32) {
+    container_status(pod, name)
+        .last_state
+        .as_mut()
+        .expect("the capture's container has run before")
+        .terminated
+        .as_mut()
+        .expect("and it exited rather than being killed while waiting")
+        .exit_code = code;
 }
 
 /// **Rule 10, and the fixture that would break a rule shaped like its neighbours.**
