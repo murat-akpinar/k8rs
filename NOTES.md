@@ -5208,6 +5208,12 @@ What shipped is four arms, each owning its claim, its action **and its command**
   $ kubectl describe pod broken-restarts10serving -n default
 ```
 
+> **The first card above is a transcript of what shipped on 2026-08-14 and is no
+> longer what the code draws** — its evidence line and its action were both
+> replaced by [D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15).
+> The second is unchanged. Kept as written because this entry is a record of a
+> decision, not a description of the current code.
+
 **The blocker: `exit 0` is the exit status of a process, not a statement about
 who ended it.** The first draft's action read *"nothing killed that run — the
 program ended on its own"*. A container that traps `SIGTERM` and shuts down
@@ -5231,7 +5237,12 @@ the bug"* — which offers two readings where the true one is a third, and which
 has its own box for that reason.
 
 **Rule 1 and rule 5 now answer the same `exit 0` with different kubectl
-commands, deliberately.** Rule 1 names `restartPolicy` and takes
+commands, deliberately.** *(Reversed a day later by
+[D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15):
+both rules now take `describe`, because `CrashLoopBackOff` behind a clean exit
+already fixes `restartPolicy` to `Always` while the events remain the only
+discriminator. The paragraph stands as the reasoning that was made at the time.)*
+Rule 1 names `restartPolicy` and takes
 `kubectl get pod -o yaml`; rule 5 names the pod's events and takes
 `kubectl describe pod`. Invariant 4 allows one command per card, so each card
 gets **one family of facts**, and which family follows from the question its own
@@ -5486,6 +5497,152 @@ stream — the thread never identifies what grew. Both were assertions about
 something the reviewer had not opened: one our code, one their thread. That is the
 same defect twice, and it is the one this file's own second pass exists to catch.
 
+### D90 — the third door, and the command trade D88 made a day earlier (2026-08-15)
+
+[D88](#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)
+closed rule 5 and named its own leftover: rule 1's clean-exit action *asks* first
+and then **closes** with an assertion — *"if it is not meant to finish, it is
+quitting early and that is the bug"* — an exhaustive pair whose true third
+reading is missing. This is that box. It took five rounds, four `tester` passes
+and three operator reviews; the review that settled it brought up a kind cluster
+and reproduced the object no fixture in this repo holds.
+
+What ships, all three arms of one shared `finished_action`, drawn by rules 1
+and 5 alike:
+
+```
+● default/broken-exit0 · 29 min ago
+  The container's last run finished cleanly, and Kubernetes is restarting it (CrashLoopBackOff)
+  container batch · 16 restarts · the last run lasted 2s · exit 0 (the run ended without an error)
+  → exit 0 says the run ended, not who stopped it — check the pod's events for a Killing
+    line and the node for a memory killer. If nothing stopped it, it ends itself: if that
+    is meant, it belongs in a Job or a CronJob; if not, it is quitting early
+  $ kubectl describe pod broken-exit0 -n default
+```
+
+**D88's command trade is reversed, and the reversal is the box's other half.**
+Rule 1's `Finished` arm named `restartPolicy` and therefore took
+`kubectl get pod -o yaml`, which prints no events at all — so the `Killing` line
+that would correct the card was exactly what its own command could not show. The
+field turned out to be **implied by the state**: `ShouldContainerBeRestarted`
+returns `false` under `restartPolicy: Never`, and under `OnFailure` when
+`exitCode == 0`, so a plain container sitting in `CrashLoopBackOff` behind a
+clean exit can only be under `Always`. D88 bought a command to print a field the
+state already fixes and paid for it with the only discriminator the object has.
+For a `Sidecar` it is the container's **own**
+`initContainers[].restartPolicy: Always` — the field that made it a sidecar in
+the first place — which is why the shipped sentence names a policy and not the
+pod's. **No card in `rules.rs` names `restartPolicy` any more**; `get_yaml`
+stays for rules 3, 4, 12 and the W-series.
+
+**One helper, two rules.** `finished_action(role)` joins `stopped_action` and
+`failed_action`: two byte-identical copies of a sentence is
+[D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)'s
+defect with a delay on it.
+
+**`Init` + `CrashLoopBackOff` + `exit 0` is reachable, and that is the second
+"unreachable" in this area that was not.** `doBackOff` selects by container name
+and `ContainerStateExited` and **never reads the exit code**; `SyncPod` runs init
+containers through the same `start` closure; a sandbox rebuild re-runs every init
+container while `restartCount` and `lastState` persist on the same pod object.
+**A node reboot is not a producer for rule 1** — `kl.backOff` is built in-process
+by `NewMainKubelet`, so a restarted kubelet has an empty map and nothing to make
+the re-run wait — while it **is** one for rule 5, which gates on the count alone.
+That asymmetry is why the two rules' doc comments differ, and it is written down
+so the next reader does not tidy it away.
+
+**The blocker: the first fix permuted the doors instead of completing them.** It
+dropped *quitting early* while adding *something stopped it*, so an `nginx` with
+the stock entrypoint and no `daemon off;`, a `sh -c './server &'`, a Java `main`
+that returns while its daemon threads die — all `exit 0` in under a second on the
+shape `exit0.json` holds — were sent to events that hold nothing and then offered
+a CronJob. **D88's own blocker sentence, rebuilt inside the fix for the box D88
+opened for it**, and the third time a repair in this area reconstructed the
+defect it was sent to remove. What ships is three branches, none of them a
+verdict: something stopped it · it stopped itself and is meant to · it stopped
+itself and is not.
+
+**Door 1 is the killer, not the probe** — measured on kind v1.36.1, not argued.
+Every kubelet-initiated stop goes through `killContainer`, which records a
+`Killing` event whatever asked for it, and its message names the probe itself:
+`Container app failed liveness probe, will be restarted`. So the card names
+`Killing` and drops the words *liveness* and *startup* — `describe` hands them
+back on the same row. **`Unhealthy` is deliberately not named**: a failing
+*readiness* probe writes it with nothing killed behind it, and a reader who greps
+the word the card gave them would close the door on the wrong evidence. The node
+is named beside it for the killer that writes no event at all, and whether an
+outside killer arrives as `143` or as `0` is decided by the application's own
+SIGTERM handler, not by who sent the signal.
+
+**The `Init` arm's events clause is hedged, because the commonest rebuild writes
+no event.** `SandboxChanged` is emitted only where the kubelet finds a sandbox
+that *changed* (`podContainerChanges.SandboxID` non-empty); where the sandbox is
+simply **gone** — `crictl rmp`, a runtime restart, a node reboot — it re-runs
+every init container while logging at V(4) and emitting nothing. Both paths were
+run on kind: the removed-sandbox pod came back with `Restart Count: 1`, `exit 0`
+and `Pulled` / `Created` / `Started` `(x2)` and no line saying why. So the card
+says the events *often do not say why* and points at the node without an *after
+that* in front of it — the answer for the reader who is late **and** for the one
+whose events never carried the reason.
+
+**`exit_meaning`'s `0` row named an agent one line above an action whose whole
+subject is that the code names none.** *"The program finished successfully"* is
+false of every graceful shutdown a probe asked for, and it printed directly under
+this card. It is now *"the run ended without an error"*. The row reaches the
+screen from rules 1 and 5 only — rule 6 exempts `0` and `143` — which is why it
+was settled here rather than in the open `137` box; that box keeps `137` and the
+role question, and gains what the same cluster trip measured: a sandbox rebuild
+gives a healthy container `137` with `reason: ContainerStatusUnknown` or `Error`,
+which the current `137` sentence is wrong about for every role.
+
+**`screens/alerts.md`'s five-line action cap became a `rules.rs` test.** That
+file already said an over-budget action is a rule defect and not a layout
+problem; nothing enforced it. The three arms went **9 / 8 / 9 wrapped lines to
+5 / 5 / 5** at 49 columns, and
+`the_clean_exit_actions_fit_the_card_they_are_drawn_on` holds them there —
+including a self-test of its own wrapper, which under-measured a token wider than
+the line until it was made to break one by character the way the renderer does.
+**The doors were never what cost the space**: three readings fit in five lines,
+the preamble and the restatements did not. Four sibling actions still break the
+cap and have their own box.
+
+**Two compressions and one divergence, recorded rather than discovered later.**
+*The program ends itself* → *it ends itself* on the `Regular` arm bought the
+subject back for *if that is meant* (invariant 14: an elided subject heading a
+clause is a telegram); the `Sidecar` arm keeps the longer wording, so the two
+word one shared clause differently, which is accepted — neither is defective and
+the budget is per arm. On `Init`, the second *again* paid for the hedge, and the
+question one clause earlier keeps *runs them all* a re-run.
+
+**D88's per-caller pin rule was kept at arm granularity and rebuilt one level
+down.** Deleting a *clause* from a shared arm took only rule 5's tests red twice
+over, and a card could lose the conditional framing on the `Sidecar` arm with all
+177 tests green. Four rounds of mutation found what four rounds of reading did
+not; the pins are now two shared assertion helpers called once per caller.
+Accepted costs, so they are not rediscovered as bugs: the literal
+*If nothing stopped* is pinned at several sites, so a faithful rewording is a red
+build; positive substring pins cannot catch a door that is *negated* rather than
+deleted; and the 49 columns and the five-line cap live in the test as transcribed
+constants, because the only stronger option is parsing `screens/alerts.md`.
+
+**What could not be proven, and what the next capture trip owes.** No committed
+capture reaches any ending but `Failed` on these arms, so every other arm is
+tested on a decoded copy ([D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)).
+The object that would retire most of that is one word away in
+`scripts/broken.yaml` — `trap 'exit 0' TERM` instead of `exit 143` on
+`broken-sigterm` gives a real probe kill that reports `0`. `Init:CrashLoopBackOff`
+with a clean run behind it needs `crictl rmp` inside a live backoff window, and
+the `restartCount`-across-a-reboot half of the asymmetry above needs a restarted
+node.
+
+**The boundary, since D88 set it and this box tested it:** three findings were
+folded in — the missing third door, `Unhealthy` vs `Killing`, and the `0` row —
+because each sat inside the string this box was already rewriting and each fix
+made the card *shorter*. Four were filed as boxes, because each crosses into
+another rule's action or another agent's file. A found defect is folded in when
+fixing it is smaller than describing it; it gets a box when closing it would need
+a decision the current box has not made.
+
 ## Decisions made
 
 ### Product
@@ -5633,7 +5790,7 @@ all of them testable.
 
 | # | Finding | Source field | What we tell the user |
 |---|---|---|---|
-| 1 | CrashLoopBackOff | `state.waiting.reason` **and how the previous run ended** | **Three sentences, not one** — the loop is the same, what put the container in it is not ([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)): its last run *crashed* (a failing exit), *finished cleanly* (exit 0 — and the advice is about what keeps restarting it, not about the logs), or was *stopped* (exit 143 — a health check or the node's memory killer, not a crash). **Each sentence is scoped to the one run the snapshot holds**, because `CrashLoopBackOff` is entered on accumulated backoff and a clean run does not reset it: four crashes then one clean exit is a real state, and a title claiming the whole loop would have called it *"nothing has crashed"*. The `Finished` and `Stopped` actions are **role-aware** — a native sidecar in a Job is already a Job, and Kubernetes forbids probes on a plain init container. Plus the exit code, translated below |
+| 1 | CrashLoopBackOff | `state.waiting.reason` **and how the previous run ended** | **Three sentences, not one** — the loop is the same, what put the container in it is not ([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)): its last run *crashed* (a failing exit), *finished cleanly* (exit 0 — **three doors, because the code says how the run ended and never who ended it**: the events and the node for a killer, a Job or a CronJob for a program that is meant to finish, and a bug in the program for one that is not ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15))), or was *stopped* (exit 143 — a health check or the node's memory killer, not a crash). **Each sentence is scoped to the one run the snapshot holds**, because `CrashLoopBackOff` is entered on accumulated backoff and a clean run does not reset it: four crashes then one clean exit is a real state, and a title claiming the whole loop would have called it *"nothing has crashed"*. The `Finished` and `Stopped` actions are **role-aware** — a native sidecar in a Job is already a Job, and Kubernetes forbids probes on a plain init container. Plus the exit code, translated below |
 | 2 | OOMKilled | `lastState.terminated.reason` (exit 137) + `resources.limits.memory` | "Exceeded its memory limit and was killed by the kernel" |
 | 3 | **The image is not usable** — the whole family, not just the two: `ErrImagePull`, `ImagePullBackOff`, `InvalidImageName`, `ErrImageNeverPull`, `ImageInspectError`, `RegistryUnavailable`, `SignatureValidationFailed`. All of them mean *this image will never become available* and all carry the kubelet's diagnosis; splitting them sent `nginx:doesnotexist` to rule 3 immediately and `NGINX:::latest` to rule 13 ten minutes later with a card about a disk ([D76](#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)) | `state.waiting.reason` + `.message` | "Container image is not usable, so the container never started" — wrong name or tag, no pull secret for that registry, or a pull policy that forbids fetching it |
 | 4 | CreateContainerConfigError | `state.waiting.reason` + `.message` | "Referenced a ConfigMap/Secret that doesn't exist" |
@@ -5670,7 +5827,7 @@ never needed this watch ([D27](#d27--two-findings-the-open-watch-already-paid-fo
 
 | Code | Meaning |
 |---|---|
-| **0** | **The program finished successfully — nothing crashed.** Added 2026-08-14, when the capture trip produced the first object that reaches it: a container exiting 0 under `restartPolicy: Always` is in `CrashLoopBackOff` like any other, and with no row here the code printed bare under a title claiming a crash ([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)) |
+| **0** | **The run ended without an error.** It says *how* the run ended and never *who* ended it — a program that traps SIGTERM and shuts down tidily reports `0` whether it chose to stop or a liveness probe asked it to, so the first wording, *"the program finished successfully"*, named an agent one line above an action whose whole subject is that the code names none ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)). Added 2026-08-14, when the capture trip produced the first object that reaches it: a container exiting 0 under `restartPolicy: Always` is in `CrashLoopBackOff` like any other, and with no row here the code printed bare under a title claiming a crash ([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)) |
 | 137 **with** `reason: OOMKilled` | SIGKILL after running out of memory |
 | 137 **without** it | SIGKILL — it did not stop when it was asked to, which is what a failing liveness probe or a shutdown timeout does |
 | 143 | SIGTERM — graceful shutdown, not an error |

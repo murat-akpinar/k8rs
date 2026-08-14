@@ -1030,7 +1030,7 @@ this plan is delivery mechanism for what this phase produces.
       and the trip is named in the test doc comments. **What it opened:** four
       boxes above and below this line, one of them for a card that ships today
       with a visible self-contradiction
-- [ ] **Rule 1's clean-exit action offers two readings and the true one is
+- [x] **Rule 1's clean-exit action offers two readings and the true one is
       missing** — found by the operator review of the rule 5 box, and left to
       its own box by the boundary that box established: it crosses into another
       rule. The action closes *"If it is not meant to finish, it is quitting
@@ -1046,7 +1046,37 @@ this plan is delivery mechanism for what this phase produces.
       prints no events at all, so the `Unhealthy` / `Killing` lines that would
       correct the card are exactly what its command cannot show. One clause and
       one command, and the two cannot be decided apart
-      ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14))
+      ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)).
+      **Shipped in five rounds, four `tester` passes and three operator
+      reviews** ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
+      The clause and the command were decided together, in the direction D88 had
+      ruled the other way a day earlier: `CrashLoopBackOff` behind a clean exit
+      already fixes `restartPolicy` to `Always` (`ShouldContainerBeRestarted`
+      refuses `Never`, and `OnFailure` on `exit 0`), so the field D88 bought a
+      command for is implied by the state while the events stay the only
+      discriminator — **both rules now take `describe`, and no card in `rules.rs`
+      names `restartPolicy` any more**. One shared `finished_action(role)` joins
+      `stopped_action` and `failed_action`, so the two rules cannot drift on one
+      container. **The first fix permuted the doors instead of completing them** —
+      it deleted *quitting early* while adding *something stopped it*, which
+      offers a CronJob to every `nginx` that exits `0` in under a second: D88's
+      own blocker rebuilt inside the fix for it, caught by the operator review.
+      Three branches ship, none of them a verdict. **Door 1 names the `Killing`
+      event and the node, not the probes** — measured on a kind v1.36.1 cluster
+      the reviewer brought up: `killContainer` writes `Killing` whatever asked and
+      its message names the probe itself, while `Unhealthy` is also what a failing
+      *readiness* probe writes with nothing killed behind it. The `Init` arm's
+      events clause is hedged for the same trip's second measurement: where the
+      sandbox is **gone** rather than changed, the kubelet re-runs every init
+      container and emits no event at all. **`exit_meaning`'s `0` row was settled
+      here** — *"the program finished successfully"* named an agent one line above
+      an action whose whole subject is that the code names none; it now reads
+      *"the run ended without an error"*. `Init` + `CrashLoopBackOff` + `exit 0`
+      is reachable, and the "unreachable" claim was wrong for the second time in
+      this area. Actions came **from 9 / 8 / 9 wrapped lines to 5 / 5 / 5** and a
+      test holds them there. **What it could not prove:** no committed capture
+      reaches any ending but `Failed` on these arms — those debts are the capture
+      box below
 - [ ] **The `137` story is role-blind in both places it is told, and they print
       on one screen** — decided once here, or the two are decided differently.
       **(i) `exit_meaning`'s `137` line names a probe the container may not be
@@ -1097,7 +1127,19 @@ this plan is delivery mechanism for what this phase produces.
       same question — *what does `137` mean for a container that may not have a
       probe* — and answering it twice is how the two drift
       ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)
-      on why that boundary sits where it does)
+      on why that boundary sits where it does).
+      **(iii) and a third meaning was measured on a cluster after this box was
+      written**, so decide all three at once: on kind v1.36.1 a **sandbox rebuild
+      on a perfectly healthy container** produced `137` with
+      `reason: ContainerStatusUnknown` (sandbox removed) and `137` with
+      `reason: Error` (sandbox stopped) — nothing was asked to stop, nothing
+      hung, and no probe was involved, on any role
+      ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
+      **The `0` row of the same table is already settled and is not this box's**:
+      it printed *"the program finished successfully"*, which named an agent, and
+      now reads *"the run ended without an error"* — it reaches the screen from
+      rules 1 and 5 only, which is why it could be decided inside their box while
+      `137`, printed by rules 1, 5 **and** 6, could not
 - [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
       in the green line, not an assertion, so nothing fails and that is exactly
       why it will survive. One word, `tester`'s file, and it goes with whichever
@@ -1139,7 +1181,102 @@ this plan is delivery mechanism for what this phase produces.
       past the answer to two places that hold nothing. `describe` prints the
       resize conditions, so it costs nothing in invariant-4 terms — only in the
       line budget this box exists to settle. The string is shared by rules 1 and
-      5, so one edit fixes both cards
+      5, so one edit fixes both cards.
+      **Re-measured after the rule-1 clean-exit box, which took its own three
+      arms from 9 / 8 / 9 wrapped lines to 5 / 5 / 5 and put a `rules.rs` test
+      under them** — `the_clean_exit_actions_fit_the_card_they_are_drawn_on`,
+      which measures those three strings and no others
+      ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
+      **Exactly five actions in the file still exceed the cap**, with the same
+      wrap at 49 columns: `stopped_action`'s two arms at 6 lines each,
+      `failed_action(Init)` at **8** — a 14-row card, which is the one that
+      breaks the ten-line cap outright — rule 5's `None` arm at 6, and rule 6's
+      action at 6. That is the whole list; the count fell from nine because two
+      rule 1 strings were folded away, not because anything was shortened.
+      **The doors are not what costs the space**: three readings fit in five
+      lines once the preamble and the restatements come out, which is what the
+      rewrite above proved on the hardest of them. **One correction to carry into
+      the same rewrite:** `stopped_action` names `systemd-oomd` beside `earlyoom`
+      as a producer of a *polite* stop, and `systemd-oomd` kills with
+      `cgroup.kill` / SIGKILL and offers no graceful signal — it can only ever
+      produce `137`, never `143`, so on that card it sends the reader after a
+      tool they will never find in their logs. Only `earlyoom` belongs in that
+      sentence, and the doc comment repeats the error. **And the enforcement is
+      transcribed, not derived:** the 49 columns and the five-line cap live as
+      constants in the test, so this file moving does not turn a build red —
+      parsing `alerts.md` is the only stronger option and is bigger than either
+      box
+- [ ] **The clean-exit arms teach that events expire on one role and not on the
+      other two, and rule 5 is where that costs something** — the `Init` arm
+      says *"the events … last about an hour"* and then names the node; the
+      `Regular` and `Sidecar` arms send the reader to the same events with no
+      window at all. On **rule 1** that is harmless: `CrashLoopBackOff` caps
+      backoff at five minutes, so a `Killing` line is always minutes old. On
+      **rule 5** the container is *serving* with ten restarts and the last run
+      may have ended hours ago, so `Events: <none>` reads to a beginner as
+      *nothing stopped it* — which walks them into door 3, *it belongs in a Job
+      or a CronJob*, for the healthy Deployment two operator reviews already
+      blocked to protect. Inherited rather than introduced: the pre-rewrite
+      string had the same exposure. **It is not free**: those two arms have four
+      to six characters of slack at the five-line cap, so closing it costs a door
+      unless the budget box above moves the cap first — the two are decided in
+      that order ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15))
+- [ ] **Rule 1's `Failed | None` arm sends the reader to a log no command can
+      reach** — *"read the previous run's logs — that is where it says why it
+      exits"*, with `kubectl describe pod` on the card, which prints no logs at
+      all. That is invariant 4 in the small. The `None` half is worse and is
+      rule 5's own fixed defect left standing one rule over: with no `lastState`
+      there is no `lastState.terminated.containerID`, and the kubelet gates
+      `kubectl logs --previous` on exactly that field — so the card is in that
+      arm *because* the flag it implies cannot work. Rule 5's `None` arm was
+      rewritten for this in its own box; rule 1's, ten lines below the code the
+      clean-exit box touched, was not, and the boundary that left it there is
+      [D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)'s.
+      Found by `k8s-admin` while checking invariant 4 across the whole match
+- [ ] **The first instruction on a clean-exit card can be dead on the shape the
+      card is most often drawn about** — the action opens *"check the pod's
+      events for a `Killing` line"*, and with stock probe settings
+      (`initialDelaySeconds: 0`, `periodSeconds: 10`, `failureThreshold: 3`) the
+      earliest a liveness or startup probe can kill a container is about twenty
+      seconds after it starts. `exit0.json`, the fixture this whole line of boxes
+      descends from, has *"the last run lasted 2s"* on the evidence line one row
+      above. Nothing on the card is false — it says *check* — but the reader
+      spends their first move proving the first door shut, and `lasted` is
+      already in the snapshot and already on the screen. Whether a rule may
+      **order** its doors by a fact it holds is the decision here, and it is a
+      new one: no rule reorders its own action today
+- [ ] **The clean-exit boxes left three objects no cluster has produced for us**,
+      and two of them are one command each. **(a)** A probe kill that reports
+      `exit 0` — the premise of the first clause on two arms of two rules, and
+      nothing in the repo holds one. `scripts/broken.yaml`'s `broken-sigterm` is
+      one word away: `trap 'exit 0' TERM` instead of `exit 143`. **(b)**
+      `Init:CrashLoopBackOff` with a clean run behind it — `crictl rmp` on the
+      kind worker while a retrying init container's backoff window is still live;
+      it is what makes both `Init` arms reachable and it currently ships on a
+      plant plus a source read. **(c)** `restartCount` across a node reboot
+      (`docker restart kind-worker`), which is the half of the rule-1-versus-rule-5
+      producer asymmetry that is argued rather than seen. All three are `k8s-admin`
+      or a capture trip, not a dev
+      ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15))
+- [ ] **`crash_looping`'s `if c.restarts > 0` is the one surviving mutant in
+      `rules.rs`** — `cargo mutants` reports it MISSED at HEAD and in every round
+      of the clean-exit box, in three different line positions, so it is neither
+      new nor drifting: flipping it to `>= 0` ships `0 restarts` on a real card
+      and nothing goes red, because `CrashLoopBackOff` *before* the first restart
+      is a state no committed fixture reaches. It is ~15 lines against
+      `healthy-retry` with the count zeroed. **Two smaller test-side residues go
+      with it**, both declared rather than found later: the budget guard iterates
+      a literal three-element array of `ContainerRole` instead of a `match`, so a
+      fourth variant would be silently unmeasured while `finished_action`'s own
+      `match` would refuse to compile; and every clause pin is a positive
+      substring, which catches a door that is **deleted** and not one that is
+      **negated** in place. **A third, and it is the one that will be
+      "fixed" wrongly:** both ordering helpers use `str::find`, so they read the
+      **first** occurrence — a future arm that names the node both before and
+      after the hour, or the verdict on both sides of the conditional, goes red
+      although the requirement is met. The bias is toward a false red and never a
+      false green, which is the safe direction; whoever meets that failure fixes
+      the helper, not the assertion
 - [x] Exit-code translation table (137/143/1/126/127) — **137 has two meanings and the object says which**: with `reason: OOMKilled` it is memory, without it the container did not stop when asked, which is a failing liveness probe or a hanging shutdown. The old "almost always OOM" row was written before the rule had `reason` beside the code ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
 - [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket
       **or any directory one sits under**, or a writable host mount. There is no
