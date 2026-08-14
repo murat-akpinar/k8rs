@@ -612,6 +612,8 @@ unable to do what the justfile itself instructs it to.
 
 ## Phase 3 — The product: rules · **milestone M1**
 
+*Also read: [PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended) (never divide by an incomplete denominator) and [§ F3](PRIOR-ART.md#f3--container-semantics-moved-underneath-them) (container semantics move under a rule that pairs by position, or assumes a status has a declaration).*
+
 Goal: k8rs diagnoses correctly, headless. Still the core — everything else in
 this plan is delivery mechanism for what this phase produces.
 
@@ -1641,6 +1643,8 @@ not `analyze`
 
 ## Phase 4 — Analysis reports
 
+*Also read: [PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended) — a report is where a number with no complete denominator gets printed.*
+
 Goal: the cluster-wide answers no per-object rule can give. Pure functions
 over a `ClusterSnapshot`, so this phase is as testable as Phase 3 and needs no
 cluster either.
@@ -1685,6 +1689,8 @@ the temporary main can print any of them.
 **Frozen after:** `analysis.rs`.
 
 ## Phase 5 — Live reads · **milestone M1.5**
+
+*Also read, before the first box: [PRIOR-ART § A](PRIOR-ART.md#a-scale--the-largest-single-complaint-class) (scale, and the initial list), [§ B](PRIOR-ART.md#b-connecting--kubeconfig-auth-and-the-network) (kubeconfig, expiry, reconnect, RBAC) and [§ C](PRIOR-ART.md#c-errors-that-lie) (errors that lie). Seven of the twelve gaps that review opened land in this phase, and [§ L2](PRIOR-ART.md#l-two-observations-about-the-tracker-itself) says why: the loudest threads in k9s's tracker are all regressions in the startup path.*
 
 Goal: the same findings and reports, from a living cluster — and the first
 public release.
@@ -1922,6 +1928,8 @@ which adds the remaining read paths to the same file. It freezes there.
 
 ## Phase 6 — Logs and read-only detail
 
+*Also read: [PRIOR-ART § E](PRIOR-ART.md#e-logs) (a stream ends for many reasons; the log view is where CPU dies), [§ D1](PRIOR-ART.md#d1--cluster-data-as-markup) (sanitising for the screen is not emitting for a consumer) and [§ H](PRIOR-ART.md#h-secrets--the-pressure-is-constant-and-it-is-all-in-one-direction) (seven years of pressure to decode secrets by default).*
+
 Goal: the whole beginner debugging loop, still headless, still read-only.
 
 - [ ] `l` logs: fetch and follow, container picker, `--previous` for a
@@ -1983,6 +1991,8 @@ Analysis reports, the browser, and the detail tabs. A read path missed here is
 a frozen-file problem in Phase 11, not a small addition.
 
 ## Phase 7 — Operations · **milestone M2**
+
+*Also read: [PRIOR-ART § G](PRIOR-ART.md#g-destructive-actions) — three classes k8rs is immune to by design, and each is the ending of a thread that took k9s years. They are the invariants this phase must not negotiate down.*
 
 Goal: every write works and is safe, **before a single key is bound to one**.
 This is the phase where the reversal actually happens, and it is deliberately
@@ -2071,6 +2081,8 @@ Goal: learn the ratatui event loop without touching product files.
 
 ## Phase 9 — Theme
 
+*Also read: [PRIOR-ART § D2](PRIOR-ART.md#d2--do-not-fight-the-users-terminal) (the user's own 16 colours win; bold is a per-emulator setting) and [§ K](PRIOR-ART.md#k-accessibility) (colour is never the only carrier of meaning — every state, not just severity).*
+
 - [ ] `theme.rs`: 10 Catppuccin Mocha constants + `COLORTERM` check with a
       16-color fallback
 - [ ] Severity symbols `● ▲ ○` — never colour alone, **and the same rule for
@@ -2095,6 +2107,8 @@ looking broken.
 **Frozen after:** `theme.rs`.
 
 ## Phase 10 — View state
+
+*Also read: [PRIOR-ART § F1](PRIOR-ART.md#f1--sorting) (sorting the rendered string instead of the value — a defect class k9s has never closed) and [§ F4](PRIOR-ART.md#f4--the-api-surface-is-not-a-constant) (a resource is group + version + resource, always all three).*
 
 Goal: `ui.rs` can be a pure function of state, which is the only thing that
 keeps TUI code from rotting.
@@ -2136,6 +2150,8 @@ terminal involved.
 **Frozen after:** `views.rs`.
 
 ## Phase 11 — The console
+
+*Also read: [PRIOR-ART § C2](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens) (loading, empty and denied are three screens) and [§ D3](PRIOR-ART.md#d3--wrapping-and-resizing-must-be-pure-functions) (a wrap that leaks into the data).*
 
 Goal: the screens in [`screens/`](screens/README.md) — the lazygit-shaped
 product. Nothing on this list is a design decision any more; every layout,
@@ -2193,6 +2209,8 @@ Secret is redrawn after the reveal is dismissed.
 
 ## Phase 12 — Final wiring · **milestone M3**
 
+*Also read: [PRIOR-ART § A5](PRIOR-ART.md#a5--the-perf-fix-that-got-reverted) — k9s's own "skip the cycle when nothing changed" was merged and reverted a month later, and invariant 7 is the same manoeuvre. Also [§ D4](PRIOR-ART.md#d4--the-terminal-after-a-subprocess): leaving raw mode and re-entering it is one function, not one per path.*
+
 Goal: one binary, live and safe.
 
 - [ ] `main.rs`: single `tokio::select!` (watch streams · crossterm events ·
@@ -2235,6 +2253,8 @@ on purpose.
 behaves as specified.
 
 ## Phase 13 — Ship v0.1 · **milestone M4**
+
+*Also read: [PRIOR-ART § J](PRIOR-ART.md#j-distribution) (every packaging channel is a support queue) and [§ L1](PRIOR-ART.md#l-two-observations-about-the-tracker-itself) (most reports are about the environment — the README answers kubeconfig and RBAC plainly, or the tracker becomes a support desk).*
 
 - [ ] `README.md` (EN): what/why, screenshot or asciinema, install, **both**
       RBAC examples, the `--read-only` flag, "no telemetry" statement, and an

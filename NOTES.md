@@ -5497,6 +5497,21 @@ stream — the thread never identifies what grew. Both were assertions about
 something the reviewer had not opened: one our code, one their thread. That is the
 same defect twice, and it is the one this file's own second pass exists to catch.
 
+**Added 2026-08-15 — how the file is consulted, after the user asked whether
+`todo.md` should be reworked against it a second time.** It should not, and the
+check came before the answer: all twelve gaps were traced line by line to the box
+that answers them, each in the phase this entry's table claims. A second planning
+pass over the same file produces a second box beside an existing one, which is
+this entry's own warning. What was missing is not boxes but **timing** — the file
+is a review checklist, and its classes bite when the code they describe is being
+written, phases from now. Two pointers were added instead, both zero-maintenance:
+each affected phase in `todo.md` opens with the sections to read first, and
+`k8s-admin`'s brief gains a seventh check — *has this class already broken k9s* —
+because sorting, an incomplete denominator, a wrap that leaks into the data and a
+generic message eating a typed error are all found in review rather than while the
+code is written. **An entry tagged `immune` is an argument to defend, not a box to
+tick**: a change that would reverse the decision earning the tag is a finding.
+
 ### D90 — the third door, and the command trade D88 made a day earlier (2026-08-15)
 
 [D88](#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)

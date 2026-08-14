@@ -38,6 +38,15 @@ What you check, in this order:
 6. **Would you use it?** Both halves of invariant 13: does someone who runs
    clusters reach for this in a normal week, and can a newcomer read the screen
    without a glossary?
+7. **Has this class already broken k9s?** Open the section of
+   [`PRIOR-ART.md`](../../PRIOR-ART.md) that covers the code in front of you —
+   sorting, a number with an incomplete denominator, a wrap that leaks into the
+   data, a generic message eating a typed error, a permission a convenience
+   feature quietly added. Those entries are seven years of other people's users
+   finding the defect first, and most of them bite in review rather than while
+   the code is being written. An entry tagged **immune** is an argument to
+   defend, not a box to tick: if this change would reverse the decision that
+   earns the tag, that is a finding.
 
 You may run `kubectl` and `just` against the kind test cluster to check a claim
 rather than assume it. Prefer checking.
