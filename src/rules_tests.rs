@@ -191,7 +191,17 @@ fn the_age_ladder_is_the_words_the_screens_print() {
     // 400ms old is inside the first one. `0s ago` is a string no screen draws and it
     // reads as a stopped clock, so the sub-second gap says "just now" with the
     // negative ages — the one place this branch is not about a wrong laptop.
-    let sub_second = age(&now(), &time("2026-08-12T23:59:59.600Z"));
+    // Derived from the pin rather than transcribed beside it: `ago` is whole seconds, and
+    // a literal here is a fifth place the pin would have to move (NOTES § D57).
+    let sub_second = age(
+        &now(),
+        &Time(
+            now()
+                .0
+                .checked_sub(SignedDuration::from_millis(400))
+                .expect("400ms before the pinned now is a moment"),
+        ),
+    );
     println!("     0.4s -> {sub_second:?}");
     assert_eq!(
         sub_second.as_deref(),
@@ -307,9 +317,10 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
 
     // The property the fixture has to keep, and it is asserted at the precision of the
     // string below rather than looser: the pin is the midnight after the capture day
-    // (D57), so this cordon is two-something hours old. A band of `[1h, 24h)` would let
-    // a recapture at 1h50m past this line and fail on the phrase instead, with a
-    // message about cards saying when — which is the confusion the check exists to
+    // (D57), so the cordon is as old as the gap between `break-nodes` and midnight — the
+    // 2026-08-13 trip ran at 23:35 UTC, which puts it on the minutes rung. A band of
+    // `[1m, 24h)` would let a recapture past this line and fail on the phrase instead,
+    // with a message about cards saying when — which is the confusion the check exists to
     // prevent, not to cause.
     let stamped = cordon.added_at.clone().expect(
         "the controller stamps timeAdded on the taint it mirrors from spec.unschedulable \
@@ -317,15 +328,15 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
     );
     let elapsed = now().0.duration_since(stamped.0);
     assert_eq!(
-        elapsed.as_hours(),
-        2,
-        "the cordon is {elapsed:?} before the pinned now, and the phrase below says two \
-         hours — if `just fixtures` was re-run, repin `fn now()` (see the note there for \
+        elapsed.as_mins(),
+        24,
+        "the cordon is {elapsed:?} before the pinned now, and the phrase below says 24 \
+         minutes — if `just fixtures` was re-run, repin `fn now()` (see the note there for \
          what moves with it) and move both together"
     );
     assert_eq!(
         dated.age(&now()).as_deref(),
-        Some("2 hours ago"),
+        Some("24 min ago"),
         "a cordon the controller stamped has a moment, and the card says when"
     );
     assert_eq!(
@@ -340,7 +351,7 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
     // filled from a field which is future-dated *by design* has to be synthesised, the
     // same licence D40 gives the taint that carries a value and a stamp at once. The
     // moment here is C1's shape: `notAfter` on the healthy committed certificate,
-    // which `certs-test.sh` reports as 364 days out. `Finding::age` flattens it to the
+    // which `certs-test.sh` reports as 363 days out. `Finding::age` flattens it to the
     // same blank the missing field draws — `.map` in place of `.and_then` would print
     // it, and `Option<Time>` alone cannot tell the two cases apart because the field
     // is present and perfectly valid.
@@ -529,7 +540,7 @@ fn captured_item<'a>(list: &'a serde_json::Value, name: &str) -> &'a serde_json:
 /// fixture's age is one an operator would recognise, and round enough to be repeated in
 /// three other files without transcription error.
 fn now() -> Time {
-    time("2026-08-13T00:00:00Z")
+    time("2026-08-14T00:00:00Z")
 }
 
 fn container<'a>(pod: &'a PodSnapshot, name: &str) -> &'a ContainerSnapshot {
@@ -1215,8 +1226,36 @@ fn the_healthy_pod_offers_no_rule_anything_to_fire_on() {
             )),
         }
     );
-    assert_eq!(app.restarts, 0);
-    assert_eq!(app.last_terminated, None, "it has never died");
+    // **The negative fixture is not a pod nothing has ever happened to.** `healthy.yaml`
+    // ends on a `sleep 3600`, so a capture taken more than an hour into the cluster's
+    // life photographs the shell exiting 0 and the kubelet restarting it — which is the
+    // ordinary shape of a long-lived pod, and the one rule 5 and rule 6 have to stay
+    // silent about. Read off the capture rather than transcribed: the count is however
+    // many hours the trip ran, and the requirement is only that it is under
+    // `RESTARTS_WARN` and that the run it records ended cleanly.
+    let app_status = captured_status(&raw, "containerStatuses", "app");
+    assert_eq!(app.restarts, captured_i32(app_status, &["restartCount"]));
+    assert!(
+        app.restarts < RESTARTS_WARN,
+        "the negative fixture has to stay under rule 5's band, or its silence is the \
+         threshold's doing and not the pod's: {} restarts",
+        app.restarts
+    );
+    let last = app
+        .last_terminated
+        .as_ref()
+        .expect("a container the kubelet has restarted records how the run before it ended");
+    assert_eq!(
+        last.exit_code, 0,
+        "and the run it records ended cleanly, which is rule 6's first exemption — the \
+         one `exit0.json` proves fires on a container that is *not* serving"
+    );
+    // The absent case, on the container of this same pod that has never been restarted:
+    // `lastState: {}` decodes to `None` and not to a zero-filled `Terminated`.
+    assert_eq!(
+        migrate.last_terminated, None,
+        "an init container that succeeded on its first try has no previous run"
+    );
     assert_eq!(app.memory_limit.as_deref(), Some("64Mi"));
     assert_eq!(app.cpu_request.as_deref(), Some("10m"));
     // The only container in any capture whose request and limit differ, so it is the
@@ -1740,24 +1779,90 @@ fn deployments_and_daemonsets_decode_their_own_desired_and_ready() {
         ),
         "a DaemonSet has no spec.replicas: both numbers come from its status"
     );
+
+    // **The third kind, and it had no object at all until the 2026-08-13 trip.**
+    // `statefulsets.json` was an empty list, so `From<StatefulSet>` shipped with no test that
+    // could fail and synthesizing a whole StatefulSet would have been the hand-written JSON
+    // CLAUDE.md forbids (NOTES § D40). `broken-sts` is partially ready, which is the one state
+    // that separates `spec.replicas` from `status.readyReplicas` — an all-ready object reads
+    // the same whichever field either number came from.
+    let statefulsets: Vec<WorkloadSnapshot> = items::<StatefulSet>("statefulsets")
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    let sts = statefulsets
+        .iter()
+        .find(|w| w.id.name == "broken-sts")
+        .expect("the partially ready StatefulSet is in the capture");
+    println!(
+        "broken-sts: desired={:?} ready={:?}",
+        sts.desired, sts.ready
+    );
+    assert_eq!(sts.id.kind, ObjectKind::StatefulSet);
+    assert_eq!(
+        sts.owner, sts.id,
+        "nothing controls a StatefulSet, so it is its own card"
+    );
+    let sts_json = fixture("statefulsets");
+    let sts_raw = captured_item(&sts_json, "broken-sts");
+    assert_eq!(
+        (sts.desired, sts.ready),
+        (
+            Some(captured_i32(sts_raw, &["spec", "replicas"])),
+            Some(captured_i32(sts_raw, &["status", "readyReplicas"])),
+        ),
+        "a StatefulSet wants what its spec says and reports what its status says, and the two \
+         disagree on this object — which is what makes reading either from the other visible"
+    );
+    assert_ne!(
+        sts.desired, sts.ready,
+        "a capture where every replica is ready cannot tell the two fields apart, and is not \
+         the fixture for this assertion"
+    );
 }
 
-/// Every pod capture in the repository. Named once because two tests read the same
-/// set — the join below and the pin guard — and a second copy is a second list to
-/// keep in step with `tests/fixtures`.
-const CAPTURED_PODS: [&str; 12] = [
-    "crashloop",
-    "oom",
-    "image",
+/// **Every pod capture in the repository**, and the claim is checked rather than assumed:
+/// `just fixtures` guards each file, and `the_whole_capture_through_the_rules_at_once` names
+/// which of these are allowed to draw nothing, so a fixture added to `tests/fixtures` and not
+/// to this list shows up as a capture no test reads.
+///
+/// Named once because four things read the same set — the join, the pin guard, the whole-capture
+/// run and every node-rule join through [`every_captured_pod`] — and a second copy is a second
+/// list to keep in step. **The pin guard is why completeness matters**: it walks only what is in
+/// this snapshot, so a capture left out of it is a capture whose timestamps were never compared
+/// against [`now`].
+const CAPTURED_PODS: [&str; 31] = [
     "config",
-    "pending",
-    "hostpath",
-    "readiness",
-    "restarts",
-    "nolimits",
-    "stuck",
-    "init",
+    "crashloop",
+    "exit0",
+    "failed",
+    "healthy-hostpath",
+    "healthy-podlevel",
+    "healthy-retry",
+    "healthy-sidecar",
+    "healthy-unreadysidecar",
     "healthy",
+    "hostpath",
+    "image",
+    "init",
+    "nolimits",
+    "notfound",
+    "oom",
+    "oomserving",
+    "pending",
+    "podlimit",
+    "readiness",
+    "resize",
+    "restarts",
+    "restarts10",
+    "restarts10serving",
+    "sigterm",
+    "socket",
+    "startup",
+    "stuck",
+    "succeeded",
+    "unjudged",
+    "wedged",
 ];
 
 /// The snapshot a rule would be handed if it ran over the whole committed capture at
@@ -1809,20 +1914,24 @@ fn a_cluster_snapshot_joins_its_pods_to_the_nodes_they_run_on() {
         "N4 compares the kubelets against this"
     );
 
-    let mut scheduled = 0;
+    let mut unplaced = Vec::new();
     for p in &snapshot.pods {
-        let Some(node) = &p.node else { continue };
-        scheduled += 1;
+        let Some(node) = &p.node else {
+            unplaced.push(p.id.name.as_str());
+            continue;
+        };
         assert!(
             snapshot.nodes.iter().any(|n| &n.id.name == node),
             "{} says it runs on {node}, which is in no NodeSnapshot — N5 and N6 cannot join",
             p.id.name
         );
     }
-    assert_eq!(
-        scheduled,
-        CAPTURED_PODS.len() - 1,
-        "every captured pod but broken-pending was scheduled onto a node"
+    println!("no machine took: {unplaced:?}");
+    assert!(
+        !unplaced.is_empty() && unplaced.len() < snapshot.pods.len(),
+        "the capture has to hold both kinds — a pod with no `nodeName` is what makes the \
+         join's `else` reachable, and a capture of nothing but those would make the join \
+         itself untested: {unplaced:?}"
     );
 }
 
@@ -2291,8 +2400,8 @@ fn the_api_group_decides_which_kind_an_owner_reference_names() {
 // Everything below starts from a committed capture and changes exactly one field, or
 // one group of fields that a single `kubectl` action changes together, to a value the
 // API demonstrably produces and the kind cluster did not happen to be in when it was
-// photographed. Each test says which value, why the API produces it, and which object
-// the open Phase 2 capture trip should bring back to retire the synthesis.
+// photographed. Each test says which value, why the API produces it, and — since the
+// 2026-08-13 trip — either the object that retired it or the reason no trip can bring one.
 //
 // These are **decode** tests. A rule's positive fixture stays a real capture — this
 // technique never becomes one.
@@ -3733,7 +3842,7 @@ fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
             .filter(|f| f.title.contains("has been restarted"))
             .count(),
         0,
-        "and `15 restarts` is already on rule 1's own evidence line: {:?}",
+        "and the count is already on rule 1's own evidence line: {:?}",
         titles(&all)
     );
 
@@ -3744,8 +3853,15 @@ fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
         "the finding names which container: {}",
         looping.evidence
     );
+    // The count comes off the capture: how many times a crash loop has gone round by the
+    // time the trip photographs it belongs to the cluster, and a literal here reddens on
+    // every `just fixtures` for a requirement that never moved.
+    let quitter = captured_status(&raw, "containerStatuses", "quitter");
     assert!(
-        looping.evidence.contains("15 restarts"),
+        looping.evidence.contains(&format!(
+            "{} restarts",
+            captured_i32(quitter, &["restartCount"])
+        )),
         "{}",
         looping.evidence
     );
@@ -3792,7 +3908,7 @@ fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
     );
     assert_eq!(
         looping.age(&now()).as_deref(),
-        Some("2 hours ago"),
+        Some("28 min ago"),
         "a duration, not English parsed back into a number"
     );
 
@@ -3828,59 +3944,39 @@ fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
 /// against `if doing_its_job(c)` on its own, and the other against a rule that has stopped
 /// firing at all.
 ///
-/// The shape is `oom.json`'s own container with the kill moved into its past and the
-/// restart count set to the `1` of a container that was killed once, written onto a
-/// **decoded copy** (NOTES § D53 — the committed JSON is not touched). One restart is what
-/// keeps rule 5 out of the answer, so the silence below is rule 2's own and not a count
-/// that happened to fall under a threshold.
+/// **Captured, and nothing is edited at all.** This was `oom.json` with the kill moved into
+/// its past and the container written back up for as long as no committed object held both
+/// halves; `broken-oomserving` is that object — one OOM kill in `lastState`, one restart, and a
+/// container that is running and ready again — so the two directions are the *same bytes* read
+/// at two moments, which is what [`ClusterSnapshot::now`] being an input is for (D18).
 #[test]
 fn an_old_kill_on_a_container_that_has_been_fine_since_is_not_on_the_broken_now_screen() {
-    /// The captured OOM, still `137 / OOMKilled`, on a container that is running and
-    /// ready again — with the kill placed `mins` before the pinned [`now`].
-    fn killed_and_recovered(mins: i64) -> PodSnapshot {
-        let when = Time(
-            now()
-                .0
-                .checked_sub(SignedDuration::from_mins(mins))
-                .expect("a moment before the pinned now"),
-        );
-        let mut object: Pod = serde_json::from_value(fixture("oom")).expect("oom.json is a Pod");
-        let hog = &mut object
-            .status
-            .as_mut()
-            .expect("the captured pod has a status")
-            .container_statuses
-            .as_mut()
-            .expect("the captured pod has a container status")[0];
-        assert_eq!(hog.name, "hog");
-        hog.restart_count = 1;
-        hog.ready = true;
-        hog.state = Some(ApiContainerState {
-            running: Some(ContainerStateRunning {
-                started_at: Some(when.clone()),
-            }),
-            ..ApiContainerState::default()
-        });
-        hog.last_state
-            .as_mut()
-            .and_then(|s| s.terminated.as_mut())
-            .expect("the capture's OOM kill")
-            .finished_at = Some(when);
-        PodSnapshot::from(object)
-    }
-
-    let long_ago = killed_and_recovered(60 * 24 * 30);
-    let hog = container(&long_ago, "hog");
+    let recovered = pod("oomserving");
+    let app = container(&recovered, "app");
+    let killed_at = app
+        .last_terminated
+        .as_ref()
+        .and_then(|run| run.finished_at.clone())
+        .expect("the capture records when the kernel took it");
     assert!(
-        doing_its_job(hog)
-            && hog.restarts < RESTARTS_WARN
-            && matches!(&hog.last_terminated, Some(run)
+        doing_its_job(app)
+            && app.restarts < RESTARTS_WARN
+            && matches!(&app.last_terminated, Some(run)
                 if run.reason.as_deref() == Some("OOMKilled")),
-        "the edit has to leave a serving container that still carries the kill, and a \
-         count below rule 5's band so nothing else answers for this pod: {hog:?}"
+        "the capture has to be a serving container that still carries the kill, with a \
+         count below rule 5's band so nothing else answers for this pod: {app:?}"
     );
+    let after = |mins: i64| {
+        Time(
+            killed_at
+                .0
+                .checked_add(SignedDuration::from_mins(mins))
+                .expect("a moment after the captured kill"),
+        )
+    };
+
     nothing(
-        &analyze(&pods_at(vec![long_ago], now())),
+        &findings_at(&["oomserving"], after(60 * 24 * 30)),
         "the kernel killed this container a month ago and it has been serving ever \
          since. Nothing is broken *now*, and the card could never be cleared — whether \
          its limit is right is a memory-limit question for the Capacity report (D2)",
@@ -3888,8 +3984,7 @@ fn an_old_kill_on_a_container_that_has_been_fine_since_is_not_on_the_broken_now_
 
     // The other direction, and the reason `doing_its_job` alone is the wrong suppressor:
     // the kill is inside the grace, so it is news.
-    let just_now = killed_and_recovered(5);
-    let all = analyze(&pods_at(vec![just_now], now()));
+    let all = findings_at(&["oomserving"], after(5));
     show(&all);
     assert_eq!(
         all.len(),
@@ -3899,8 +3994,15 @@ fn an_old_kill_on_a_container_that_has_been_fine_since_is_not_on_the_broken_now_
         titles(&all)
     );
     assert_eq!(
-        only(&all, "broken-oom", "OOMKilled").severity,
+        only(&all, "broken-oomserving", "OOMKilled").severity,
         Severity::Critical
+    );
+
+    // And the pinned `now` is already past the window, so the committed object as it stands is
+    // the silent half — the capture itself, with no moment chosen for it.
+    nothing(
+        &findings(&["oomserving"]),
+        "an hour after the kill, read at the pin, the same bytes draw nothing",
     );
 }
 
@@ -4137,25 +4239,38 @@ fn a_pod_out_of_the_service_is_only_a_finding_once_it_has_been_that_way_a_while(
 
     // Just inside the window: the same captured pod, read at exactly the grace. This is
     // every pod of every rolling update, and it draws nothing.
+    //
+    // **The ten minutes are written out here and not read from [`NOT_READY_GRACE`]** — a
+    // boundary computed from the constant under test agrees with every value that
+    // constant could hold, and no other test pins it. The *moment* is the capture's, so
+    // the pair survives the next `just fixtures` without being repinned.
+    let after = |mins: i64, secs: i64| {
+        Time(
+            began
+                .0
+                .checked_add(SignedDuration::from_mins(mins) + SignedDuration::from_secs(secs))
+                .expect("ten minutes after a captured container started is a moment"),
+        )
+    };
     nothing(
-        &findings_at(&["readiness"], time("2026-08-12T20:55:58Z")),
+        &findings_at(&["readiness"], after(10, 0)),
         "ten minutes unready is a readiness probe with an `initialDelaySeconds`, not an \
          outage",
     );
     // And one second past it.
     assert_eq!(
-        findings_at(&["readiness"], time("2026-08-12T20:55:59Z")).len(),
+        findings_at(&["readiness"], after(10, 1)).len(),
         1,
         "past `progressDeadlineSeconds`' own default is where Kubernetes itself stops \
          calling a rollout healthy"
     );
 
     // **`started` is read here as a suppressor, which is not the trigger D51 rejected.**
-    // No container in any capture declares a `startupProbe`, so all of them report
-    // `true`; one that declares a slow startup probe reports `false`, and until it
-    // passes the kubelet does not run the readiness probe at all — `ready: false` there
-    // means *not asked yet*. **Capture trip:** a pod with a `startupProbe` that has not
-    // passed, which is the only object that separates these two readings.
+    // This capture declares no `startupProbe`, so it reports `true`; one that declares a
+    // slow startup probe reports `false`, and until it passes the kubelet does not run the
+    // readiness probe at all — `ready: false` there means *not asked yet*. **That object is
+    // captured**: `startup.json`, read by
+    // `a_container_still_inside_its_startup_probe_is_not_one_failing_its_readiness_check`.
     assert!(
         container(&pod("readiness"), "app").started,
         "the positive fixture has to be past its startup for this rule to reach it"
@@ -4205,6 +4320,177 @@ fn a_container_that_looks_fine_still_gets_a_card_for_how_often_it_has_died() {
         "and it stays WARN whatever the count while the container is serving: a red card \
          whose own title says it is serving is what teaches a reader to stop believing \
          red (NOTES § D2)"
+    );
+}
+
+/// **Rule 6's two exemptions, on the two captures the 2026-08-13 trip was sent for.**
+///
+/// `exit_code == 0 || exit_code == 143` is the clause, and until those objects existed neither
+/// half had a fixture: every committed previous run ended `1` or `137`, so deleting either
+/// term left the suite green. `broken-exit0`'s batch job finishes cleanly and is restarted
+/// forever by a `restartPolicy: Always` it should never have had — every CronJob written as a
+/// Deployment — and `broken-sigterm` catches its SIGTERM and exits `143`, which is what a
+/// rolling update and every scale-down look like.
+///
+/// **The container is not serving in either capture**, which is the half that matters: with a
+/// running, ready container [`doing_its_job`] would be the clause doing the silencing and
+/// these two would prove nothing about the exit codes (NOTES § D71).
+#[test]
+fn an_ordinary_exit_is_not_a_previous_run_that_failed() {
+    for (name, pod_name, code) in [
+        ("exit0", "broken-exit0", 0),
+        ("sigterm", "broken-sigterm", 143),
+    ] {
+        let capture = pod(name);
+        let c = capture
+            .containers
+            .first()
+            .expect("the capture reports on its container");
+        println!("{name}: {c:?}");
+        assert_eq!(
+            c.last_terminated.as_ref().map(|run| run.exit_code),
+            Some(code),
+            "{name}.json is the capture whose previous run ended {code}, or this test is \
+             about a different exemption"
+        );
+        assert!(
+            !doing_its_job(c),
+            "{name}: and the container is not serving, so the silence below is the exit \
+             code and not the suppressor beside it: {c:?}"
+        );
+
+        let all = findings(&[name]);
+        show(&all);
+        assert_eq!(
+            all.iter()
+                .filter(|f| f.title.contains("previous run failed"))
+                .count(),
+            0,
+            "{name}: exit {code} is what an ordinary shutdown looks like — a card here \
+             fires on every rolling update in the cluster: {:?}",
+            titles(&all)
+        );
+        // And the pod is not invisible meanwhile: the loop it is in is rule 1's card, so
+        // the silence above is one rule standing down rather than a pod nothing looks at.
+        only(&all, pod_name, "CrashLoopBackOff");
+    }
+}
+
+/// **Rule 6's third action, on the capture that reaches it.** The arms are: the container's own
+/// last log line if the kubelet kept one, then `126`/`127`'s *"the command is not in the
+/// image"*, then the general *"read the logs"*. The log-line arm answers first whenever a
+/// message exists, and every committed termination carried one — so `broken-notfound` was
+/// captured with `terminationMessagePolicy` left at its default and a command that is not in
+/// the image, which is `127` with nothing beside it.
+#[test]
+fn a_command_that_is_not_in_the_image_says_so_instead_of_sending_the_reader_to_the_logs() {
+    let capture = pod("notfound");
+    let c = capture
+        .containers
+        .first()
+        .expect("the capture reports on its container");
+    let run = c
+        .last_terminated
+        .as_ref()
+        .expect("the capture records how the run before this one ended");
+    println!("{c:?}");
+    assert_eq!(run.exit_code, 127);
+    assert_eq!(
+        run.message, None,
+        "the log-line arm answers first whenever a message exists, so this capture has to \
+         carry none or the arm under test is unreachable"
+    );
+
+    let all = findings(&["notfound"]);
+    show(&all);
+    let failed = only(&all, "broken-notfound", "previous run failed");
+    assert!(
+        failed.title.contains("was not found"),
+        "invariant 14: 127 is translated, never printed and left: {}",
+        failed.title
+    );
+    assert_eq!(
+        failed.action,
+        "check the container's command and arguments — what they name is not in the image",
+        "and the action points at the manifest, not at a log that says the same word the \
+         card already said"
+    );
+}
+
+/// **Rule 7's `started` suppressor, on the capture that separates it from the state gate.**
+///
+/// `Running && !started` is reachable only where a `startupProbe` is declared and has not
+/// passed yet, and until it does the kubelet does not run the readiness probe at all — so
+/// `ready: false` there means *not asked yet*, not *failing*. Every other capture reports
+/// `started: true`, which left the suppressor and the `ContainerState::Running` gate
+/// indistinguishable (NOTES § D71): deleting either one kept the suite green.
+///
+/// `broken-startup` declares a `startupProbe` that never passes. **The control is the same
+/// capture with the flag turned on**, which is the pod once its startup probe finally passes
+/// and the readiness probe starts being asked — and that pod *is* rule 7's.
+#[test]
+fn a_container_still_inside_its_startup_probe_is_not_one_failing_its_readiness_check() {
+    let slow = pod("startup");
+    let c = container(&slow, "slowboot");
+    println!("{c:?}");
+    assert!(
+        matches!(c.state, ContainerState::Running { .. }) && !c.ready && !c.started,
+        "the capture has to be running, unready and not yet started, or the suppressor is \
+         not what the silence below is about: {c:?}"
+    );
+    assert!(
+        !findings(&["startup"])
+            .iter()
+            .any(|f| f.title.contains("not receiving traffic")),
+        "the kubelet has not asked this container whether it is ready yet, so *the \
+         readiness check is failing* is a sentence about a probe that has not run: {:?}",
+        titles(&findings(&["startup"]))
+    );
+
+    let past_startup = capture_but("startup", |p| {
+        container_status(p, "slowboot").started = Some(true);
+    });
+    let all = analyze(&pods_at(vec![past_startup], now()));
+    show(&all);
+    only(&all, "broken-startup", "not receiving traffic");
+}
+
+/// **A runtime socket, mounted by an ordinary pod, under the spelling the fold exists for.**
+///
+/// `hostpath.json` reaches neither half: it mounts the node's root and a subdirectory, so the
+/// exact match against [`RUNTIME_SOCKETS`] and the `/var/run` → `/run` fold were only ever
+/// exercised on planted mounts (NOTES § D78). `broken-socket` mounts `/var/run/docker.sock`
+/// **read-only**, which is the posture a reader is most likely to believe is safe.
+#[test]
+fn the_captured_runtime_socket_is_a_card_even_though_it_is_read_only() {
+    let mounted = pod("socket");
+    println!("{:?}", mounted.host_path_mounts);
+    assert!(
+        mounted
+            .host_path_mounts
+            .iter()
+            .all(|m| m.read_only && m.path.starts_with("/var/run/")),
+        "the capture has to be a read-only mount written the `/var/run` way, or neither the \
+         fold nor the mode is being tested: {:?}",
+        mounted.host_path_mounts
+    );
+    assert!(
+        !mounted.mirror && mounted.owner.kind != ObjectKind::DaemonSet,
+        "and it is an ordinary pod, so D70's narrowing is not what would have to be \
+         overridden for this card to appear"
+    );
+
+    let all = findings(&["socket"]);
+    show(&all);
+    let card = only(&all, "broken-socket", "drive the container runtime");
+    assert_eq!(card.severity, Severity::Critical);
+    assert!(
+        card.evidence.contains("/var/run/docker.sock on the node")
+            && card.evidence.contains("read-only"),
+        "the card names the path the manifest wrote — the fold belongs to the compare, not \
+         to the reader who has to find this mount in their own YAML — and says that \
+         read-only did not save it: {}",
+        card.evidence
     );
 }
 
@@ -4423,10 +4709,22 @@ fn a_runtime_socket_is_the_same_socket_under_either_of_its_two_spellings() {
 #[test]
 fn a_read_only_runtime_socket_on_a_node_agent_is_still_the_whole_machine() {
     let mut pods = items::<Pod>("kube-system-pods");
+    // Found by its controller, not by its name: a DaemonSet's pod carries a generated
+    // suffix that is minted fresh on every `just fixtures`, and the property this test
+    // needs is "owned by a DaemonSet", which is exactly what the reference says.
     let agent = pods
         .iter_mut()
-        .find(|p| p.metadata.name.as_deref() == Some("kube-proxy-88dlk"))
+        .find(|p| {
+            p.metadata.owner_references.iter().flatten().any(|o| {
+                o.controller == Some(true) && o.kind == "DaemonSet" && o.name == "kube-proxy"
+            })
+        })
         .expect("the capture carries kube-proxy, a DaemonSet D70's narrowing silences");
+    let name = agent
+        .metadata
+        .name
+        .clone()
+        .expect("a captured pod has a name");
     let spec = agent.spec.as_mut().expect("a captured pod has a spec");
     spec.volumes.get_or_insert_with(Vec::new).push(Volume {
         name: "runtime".to_string(),
@@ -4459,7 +4757,7 @@ fn a_read_only_runtime_socket_on_a_node_agent_is_still_the_whole_machine() {
         titles(&all)
     );
 
-    let card = only(&all, "kube-proxy-88dlk", "drive the container runtime");
+    let card = only(&all, &name, "drive the container runtime");
     assert_eq!(card.severity, Severity::Critical);
     assert_eq!(card.owner.kind, ObjectKind::DaemonSet);
     assert!(
@@ -4651,8 +4949,13 @@ fn the_pod_that_will_not_shut_down_says_when_it_was_asked_and_who_is_holding_it(
          apart — `kubectl describe pod` does not print it at all: {}",
         stuck.evidence
     );
+    // Which machine is the scheduler's business and moves on every capture, so the name
+    // is read out of the pod the card is about rather than transcribed beside it.
     assert!(
-        stuck.evidence.contains("on node k8rs-worker2"),
+        stuck.evidence.contains(&format!(
+            "on node {}",
+            captured_str(&raw, &["spec", "nodeName"])
+        )),
         "{}",
         stuck.evidence
     );
@@ -4692,12 +4995,23 @@ fn the_pod_that_will_not_shut_down_says_when_it_was_asked_and_who_is_holding_it(
     // and those are exactly the workloads whose stuck termination blocks the rollout
     // this rule exists for. Sixty seconds covers kubelet observation, watch latency and
     // ordinary skew, and is not proportional to a number that was already spent.
+    // **The sixty seconds are written out and not read from [`OVERDUE_MARGIN`]** — a
+    // boundary computed from the constant under test agrees with every value it could
+    // hold — while the moment they are added to comes off the capture.
+    let past_deadline = |secs: i64| {
+        Time(
+            deadline
+                .0
+                .checked_add(SignedDuration::from_secs(secs))
+                .expect("a minute past a captured deadline is a moment"),
+        )
+    };
     nothing(
-        &findings_at(&["stuck"], time("2026-08-12T21:44:04Z")),
+        &findings_at(&["stuck"], past_deadline(60)),
         "a minute past the deadline is not yet stuck",
     );
     assert_eq!(
-        findings_at(&["stuck"], time("2026-08-12T21:44:05Z")).len(),
+        findings_at(&["stuck"], past_deadline(61)).len(),
         1,
         "one second past the margin it is"
     );
@@ -4709,16 +5023,17 @@ fn the_pod_that_will_not_shut_down_says_when_it_was_asked_and_who_is_holding_it(
          where the old formula stayed silent for an hour"
     );
     nothing(
-        &findings_at(&["stuck"], time("2026-08-12T21:43:00Z")),
+        &findings_at(&["stuck"], past_deadline(-1)),
         "and before the deadline the pod is shutting down normally, which is the case a \
          rule reading `deletionTimestamp` as the request time would flag",
     );
 }
 
-/// **The negatives, as a set.** Seven captured pods that are working, including the
-/// four shapes this contract was extended for — a native sidecar, pod-level requests, a
-/// pending in-place resize, a limit declared on the pod and not the container — and one
-/// with no limits at all, which is rule 9's case and belongs to the Capacity report.
+/// **The negatives, as a set.** Nine captured pods that are working, including the six shapes
+/// this contract was extended for — a native sidecar, a sidecar that is up and not ready, an
+/// init container that retried before it succeeded, pod-level requests, a pending in-place
+/// resize, a limit declared on the pod and not the container — and one with no limits at all,
+/// which is rule 9's case and belongs to the Capacity report.
 #[test]
 fn every_healthy_capture_produces_no_finding_at_all() {
     let healthy = [
@@ -4726,20 +5041,37 @@ fn every_healthy_capture_produces_no_finding_at_all() {
         "healthy-sidecar",
         "healthy-podlevel",
         "healthy-hostpath",
+        "healthy-retry",
+        "healthy-unreadysidecar",
         "resize",
         "podlimit",
         "nolimits",
     ];
+    // **Which of them the scheduler put on the broken node is not fixed**, so the claim
+    // below is read off the capture instead of naming a file: at least one of these runs
+    // on the node caught `Ready: Unknown` under the node controller's `unreachable`
+    // taint, and its status is a fossil the kubelet stopped updating. That is N1's
+    // finding about the *node*, and no pod rule in this box may invent one from a status
+    // that stopped moving.
+    let quiet = the_quiet_node(&fixture("nodes")).to_string();
+    let fossils: Vec<&str> = healthy
+        .iter()
+        .copied()
+        .filter(|n| pod(n).node.as_deref() == Some(quiet.as_str()))
+        .collect();
+    println!("on {quiet}, the node that stopped answering: {fossils:?}");
+    assert!(
+        !fossils.is_empty(),
+        "no healthy capture landed on {quiet}, so the silence below says nothing about a \
+         status that stopped moving — which is half of what this test is for (D71)"
+    );
     for name in healthy {
         nothing(
             &findings(&[name]),
             &format!(
                 "nothing in {name}.json is broken *now*, which is the only thing Alerts \
-                 holds. Not the same claim as 'this pod is fine': `healthy.json` runs on \
-                 `k8rs-worker3`, a node the capture caught `Ready: Unknown` under the \
-                 node controller's `unreachable` taint, so its status is a fossil the \
-                 kubelet stopped updating. That is N1's finding about the node, and no \
-                 pod rule in this box may invent one from a status that stopped moving"
+                 holds. Not the same claim as 'this pod is fine': {fossils:?} run on \
+                 {quiet}, whose kubelet stopped posting"
             ),
         );
     }
@@ -4758,7 +5090,7 @@ fn every_healthy_capture_produces_no_finding_at_all() {
 /// a widened rule set by producing nothing and calling that agreement.
 ///
 /// **The diagnosis is which container, not that a container is broken.** `migrate` is in
-/// `Init:CrashLoopBackOff` with fifteen restarts while `app` sits at `PodInitializing`
+/// `Init:CrashLoopBackOff` with a restart count in the double figures while `app` sits at `PodInitializing`
 /// waiting for it, and a card that named `migrate` without saying what an init container
 /// *is* reads as an application that will not start — sending the reader to the app's
 /// logs, which are empty, because the app has not run (invariant 14).
@@ -4817,8 +5149,16 @@ fn the_crash_looping_init_container_is_found_and_the_card_says_what_kind_it_is()
         Severity::Critical,
         "the pod cannot start at all, which is as broken as a pod gets"
     );
+    // Read off `initContainerStatuses` — which array the number came from is half of
+    // this assertion, and the app container's own count is zero one array away.
+    let migrate_count = captured_i32(
+        captured_status(&fixture("init"), "initContainerStatuses", "migrate"),
+        &["restartCount"],
+    );
     assert!(
-        looping.evidence.contains("15 restarts"),
+        looping
+            .evidence
+            .contains(&format!("{migrate_count} restarts")),
         "the init container's own count, not the app container's zero: {}",
         looping.evidence
     );
@@ -4841,8 +5181,8 @@ fn the_crash_looping_init_container_is_found_and_the_card_says_what_kind_it_is()
 ///
 /// A native sidecar *is* reached by rules 1–6 ([`analyze`]) — a crashlooping mesh proxy
 /// is exactly as broken as a crashlooping app container — so the silence here is the
-/// rules agreeing that a running, ready proxy with no restarts and no previous run is
-/// fine, not the rules failing to look.
+/// rules agreeing that a running, ready proxy whose restarts stay under the band and
+/// whose last run ended cleanly is fine, not the rules failing to look.
 #[test]
 fn a_healthy_native_sidecar_is_looked_at_by_every_rule_and_still_says_nothing() {
     let p = pod("healthy-sidecar");
@@ -4853,11 +5193,18 @@ fn a_healthy_native_sidecar_is_looked_at_by_every_rule_and_still_says_nothing() 
         "`restartPolicy: Always` on an init container is what makes it a sidecar \
          (D51) — without this the test below is about a regular container"
     );
+    // A sidecar that has been up for hours has restarted its `sleep 3600` a few times,
+    // the same way `healthy.json`'s app container has — what makes it *working* is that
+    // it is serving, that the count is under rule 5's band, and that the run it records
+    // ended with exit 0, not that nothing has ever happened to it.
     assert!(
         proxy.ready
             && matches!(proxy.state, ContainerState::Running { .. })
-            && proxy.restarts == 0
-            && proxy.last_terminated.is_none(),
+            && proxy.restarts < RESTARTS_WARN
+            && proxy
+                .last_terminated
+                .as_ref()
+                .is_none_or(|run| run.exit_code == 0),
         "and it has to be a *working* sidecar for its silence to mean anything: {proxy:?}"
     );
     nothing(
@@ -4870,16 +5217,17 @@ fn a_healthy_native_sidecar_is_looked_at_by_every_rule_and_still_says_nothing() 
 /// **Rule 7 did not widen with rules 1–6, and this is the only thing that says so.**
 ///
 /// The narrowing is a deliberate silence, and a silence leaves no card to assert — delete
-/// the role guard in [`running_but_not_ready`] and every committed capture still produces
-/// exactly what it produced before, because no capture holds a sidecar that is running and
-/// not ready. So the shape is written onto a decoded copy of `healthy-sidecar.json`: the
-/// proxy stops passing its readiness check, hours before the pinned [`now`] and well past
-/// [`NOT_READY_GRACE`] (NOTES § D53 — the committed JSON is not touched).
+/// the role guard in [`running_but_not_ready`] and the whole suite still passes unless
+/// something holds a sidecar that is running and not ready. **`healthy-unreadysidecar.json`
+/// is that object**, captured on 2026-08-13: a `proxy` with `restartPolicy: Always` whose
+/// readiness probe never passes, beside an `app` container that is serving — the third
+/// container role in the one state no capture held before (NOTES § D75). It was a decoded
+/// copy of `healthy-sidecar.json` until then.
 ///
-/// **The control is the identical edit applied to the regular container beside it**, which
-/// *must* draw the card. Without it this test would pass against a rule 7 that had stopped
-/// working altogether, and it would be asserting that a broken rule is quiet rather than
-/// that a working one is narrow.
+/// **The control is the same capture with the regular container beside it made unready**,
+/// which *must* draw the card. Without it this test would pass against a rule 7 that had
+/// stopped working altogether, and it would be asserting that a broken rule is quiet rather
+/// than that a working one is narrow.
 ///
 /// Why the narrowing, rather than a card each: rule 7's sentence sends the reader to *the
 /// readiness probe*, and on a meshed pod the proxy is not the container answering the
@@ -4887,64 +5235,50 @@ fn a_healthy_native_sidecar_is_looked_at_by_every_rule_and_still_says_nothing() 
 /// (invariant 13), and it is not this one wearing a wider filter.
 #[test]
 fn rule_seven_stays_on_the_container_that_answers_the_traffic() {
-    /// The capture with one container's readiness flipped, and the pod's `Ready`
-    /// condition flipped with it so the object is one the apiserver could have written.
-    /// The condition's `lastTransitionTime` is left where the capture put it — it is the
-    /// since-when rule 7 measures, and moving it would be moving the goalposts.
-    fn unready(name: &str) -> PodSnapshot {
-        let mut object: Pod = serde_json::from_value(fixture("healthy-sidecar"))
-            .expect("healthy-sidecar.json is a Pod");
-        let status = object
-            .status
-            .as_mut()
-            .expect("the captured pod has a status");
-        for c in status
-            .conditions
-            .iter_mut()
-            .flatten()
-            .filter(|c| c.type_ == "Ready" || c.type_ == "ContainersReady")
-        {
-            c.status = "False".to_string();
-        }
-        let found = status
-            .init_container_statuses
-            .iter_mut()
-            .chain(status.container_statuses.iter_mut())
-            .flatten()
-            .find(|c| c.name == name)
-            .unwrap_or_else(|| panic!("the capture has no container {name}"));
-        found.ready = false;
-        PodSnapshot::from(object)
-    }
-
-    let sidecar = unready("proxy");
+    let sidecar = pod("healthy-unreadysidecar");
     let proxy = container(&sidecar, "proxy");
+    let app = container(&sidecar, "app");
+    println!("proxy={proxy:?}\n  app={app:?}");
     assert!(
         proxy.role == ContainerRole::Sidecar
             && matches!(proxy.state, ContainerState::Running { .. })
             && !proxy.ready,
-        "the edit has to leave a *running* sidecar that is not ready — every other \
-         condition of rule 7 is already met by the capture: {proxy:?}"
+        "the capture has to carry a *running* sidecar that is not ready — every other \
+         condition of rule 7 is met by it: {proxy:?}"
+    );
+    assert!(
+        app.ready && app.role == ContainerRole::Regular,
+        "and the container beside it has to be serving, or the pod is broken for some \
+         other reason and the silence below is not the narrowing's: {app:?}"
+    );
+    assert!(
+        sidecar.ready.as_ref().is_some_and(|c| c.status == "False"
+            && c.last_transition
+                .as_ref()
+                .is_some_and(|t| now().0.duration_since(t.0) > NOT_READY_GRACE)),
+        "and the pod has been unready for longer than the grace, or the clock is what is \
+         silencing the rule rather than the role: {:?}",
+        sidecar.ready
     );
     nothing(
-        &analyze(&pods_at(vec![sidecar], now())),
+        &findings(&["healthy-unreadysidecar"]),
         "a mesh proxy failing its readiness check is not 'the readiness probe of this \
          application is failing', and the card would send the reader to the wrong probe",
     );
 
-    let app = unready("app");
-    assert_eq!(
-        container(&app, "app").role,
-        ContainerRole::Regular,
-        "the control has to be the other role, or it proves nothing"
-    );
-    let all = analyze(&pods_at(vec![app], now()));
+    // The control: the identical state on the regular container of the same capture. Its
+    // `Ready` condition is already `False` and already old enough, so the one field that
+    // moves is the container's own flag (NOTES § D53 — the committed JSON is not touched).
+    let broken_app = capture_but("healthy-unreadysidecar", |p| {
+        container_status(p, "app").ready = false;
+    });
+    let all = analyze(&pods_at(vec![broken_app], now()));
     show(&all);
-    only(&all, "healthy-sidecar", "not receiving traffic");
+    only(&all, "healthy-unreadysidecar", "not receiving traffic");
     assert_eq!(
         all.len(),
         1,
-        "and the identical edit on the regular container beside it does draw the card — \
+        "and the same state on the regular container beside it does draw the card — \
          without this the test above would pass against a rule 7 that had stopped firing \
          at all: {:?}",
         titles(&all)
@@ -4955,91 +5289,64 @@ fn rule_seven_stays_on_the_container_that_answers_the_traffic() {
 /// container there is, and the one shape that would have turned this box into two
 /// permanent cards on a healthy pod.
 ///
-/// `healthy.json`'s `migrate` is already the settled half of it: terminated, `exit 0`,
-/// `ready: true`. What no capture holds is the *history* — it succeeded first time, so it
-/// has no restart count and no `lastState`, and rules 5 and 6 are silent on it whatever
-/// [`doing_its_job`] answers. The retry is written onto a **decoded copy**, the technique
-/// this file already uses for a shape no capture holds; the committed JSON is not touched
-/// (NOTES § D53).
+/// **Captured.** `healthy-retry.json` is that pod: a `wait-for-db` init container that failed
+/// three times before it exited `0`, beside an `app` that has been serving since. Until the
+/// 2026-08-13 trip this was a retry history written onto `healthy.json`'s `migrate`, which
+/// succeeded first time and so had neither a restart count nor a `lastState` — the two fields
+/// rules 5 and 6 read, and the reason [`doing_its_job`]'s init branch had nothing to suppress
+/// on any committed object.
 ///
-/// Both numbers are chosen to make the failure loud rather than marginal: fifteen
-/// restarts is over [`RESTARTS_CRITICAL`], so without the suppressor rule 5 draws a
-/// **red** card on a pod that is serving, and the failed previous run puts rule 6's
-/// permanent WARN beside it.
+/// The count is what makes the silence mean something: it is at [`RESTARTS_WARN`], so without
+/// the suppressor rule 5 draws a card on a pod that is serving, and the failed previous run
+/// puts rule 6's permanent WARN beside it. The **red** band is proved on its own captures,
+/// `restarts10.json` and `restarts10serving.json`.
 ///
-/// **The control is the same edit with the last attempt still failing**, and it is what
-/// makes the silence above mean something: the suppressor is about the container having
-/// *succeeded*, not about it being an init container, so an init container that gave up
-/// owes both cards. Without this half the test would pass just as well against a rule set
-/// that had stopped reading init containers altogether.
+/// **The control is the same capture with the last attempt still failing**, and it is what
+/// makes the silence mean something: the suppressor is about the container having
+/// *succeeded*, not about it being an init container, so an init container that gave up owes
+/// both cards. Without this half the test would pass just as well against a rule set that had
+/// stopped reading init containers altogether.
 ///
-/// **It is the container's *current* state that decides, not `lastState`** — the first
-/// draft of this control varied the previous run's exit code and produced nothing at all,
-/// because the container was still sitting on the capture's own `exit 0` and was
-/// correctly suppressed. A control that cannot fail for the right reason is the defect it
-/// was written to catch, one level up.
+/// **It is the container's *current* state that decides, not `lastState`** — the first draft
+/// of this control varied the previous run's exit code and produced nothing at all, because
+/// the container was still sitting on the capture's own `exit 0` and was correctly
+/// suppressed. A control that cannot fail for the right reason is the defect it was written
+/// to catch, one level up.
 #[test]
 fn an_init_container_that_retried_and_then_succeeded_draws_no_card() {
-    /// The retry history written onto the decoded capture — fifteen failures, and a
-    /// *current* run that ended with the given code: `0` is the init container that got
-    /// there in the end, anything else is the one that gave up.
-    fn ended(exit_code: i32) -> PodSnapshot {
-        fn run(exit_code: i32, from: &str, to: &str) -> ApiContainerState {
-            ApiContainerState {
-                terminated: Some(ContainerStateTerminated {
-                    exit_code,
-                    reason: Some(if exit_code == 0 { "Completed" } else { "Error" }.to_string()),
-                    started_at: Some(Time(from.parse().expect("a valid time"))),
-                    finished_at: Some(Time(to.parse().expect("a valid time"))),
-                    ..ContainerStateTerminated::default()
-                }),
-                ..ApiContainerState::default()
-            }
-        }
-
-        let mut object: Pod =
-            serde_json::from_value(fixture("healthy")).expect("healthy.json is a Pod");
-        let migrate = &mut object
-            .status
-            .as_mut()
-            .expect("the captured pod has a status")
-            .init_container_statuses
-            .as_mut()
-            .expect("this pod declares an init container")[0];
-        assert_eq!(migrate.name, "migrate");
-        migrate.restart_count = 15;
-        migrate.state = Some(run(
-            exit_code,
-            "2026-08-12T20:45:04Z",
-            "2026-08-12T20:45:06Z",
-        ));
-        migrate.last_state = Some(run(1, "2026-08-12T20:45:00Z", "2026-08-12T20:45:02Z"));
-        PodSnapshot::from(object)
-    }
-
-    let succeeded = ended(0);
-    let migrate = container(&succeeded, "migrate");
-    assert_eq!(migrate.role, ContainerRole::Init);
+    let retried = pod("healthy-retry");
+    let waiter = container(&retried, "wait-for-db");
+    println!("{waiter:?}");
+    assert_eq!(waiter.role, ContainerRole::Init);
     assert!(
-        migrate.restarts >= RESTARTS_CRITICAL
-            && matches!(&migrate.state, ContainerState::Terminated(run) if run.exit_code == 0),
-        "the edit has to land on a *finished* init container carrying enough restarts to \
-         reach rule 5's red band, or the silence below is unearned: {migrate:?}"
+        waiter.restarts >= RESTARTS_WARN
+            && matches!(&waiter.state, ContainerState::Terminated(run) if run.exit_code == 0)
+            && matches!(&waiter.last_terminated, Some(run) if run.exit_code != 0),
+        "the capture has to be a *finished* init container carrying enough restarts to reach \
+         rule 5's band and a previous run rule 6 would fire on, or the silence below is \
+         unearned: {waiter:?}"
     );
 
     nothing(
-        &analyze(&pods_at(vec![succeeded.clone()], now())),
+        &findings(&["healthy-retry"]),
         "this init container did what it was asked to do — it finished, and the pod has \
          been serving ever since. Its restart count is frozen and its failed previous run \
          is kept for the life of the pod, so a card here is permanent and there is \
          nothing behind it to act on (D2)",
     );
 
-    // The other side of the same edit: the suppressor is about *success*, not about the
-    // role. An init container that stopped on a non-zero code is why a pod is not
-    // starting, and both rules owe it a card.
-    let failed = ended(1);
-    let all = analyze(&pods_at(vec![failed], now()));
+    // The other side of the same capture: the suppressor is about *success*, not about the
+    // role. An init container that stopped on a non-zero code is why a pod is not starting,
+    // and both rules owe it a card. One field moves, on a decoded copy (NOTES § D53).
+    let gave_up = capture_but("healthy-retry", |p| {
+        container_status(p, "wait-for-db")
+            .state
+            .as_mut()
+            .and_then(|s| s.terminated.as_mut())
+            .expect("the captured init container ended in a terminated state")
+            .exit_code = 1;
+    });
+    let all = analyze(&pods_at(vec![gave_up], now()));
     show(&all);
     assert_eq!(
         all.len(),
@@ -5048,10 +5355,80 @@ fn an_init_container_that_retried_and_then_succeeded_draws_no_card() {
         titles(&all)
     );
     assert_eq!(
-        only(&all, "healthy", "restarted 15 times").severity,
+        only(
+            &all,
+            "healthy-retry",
+            &format!("restarted {} times", waiter.restarts)
+        )
+        .severity,
+        Severity::Warn,
+        "and the band is the one the count puts it in — the card the successful run above \
+         must not draw at all"
+    );
+}
+
+/// **Rule 5's red band, and the half of it that stays amber** — on the two captures the
+/// 2026-08-13 trip was sent for. The whole expression is
+/// `restarts >= RESTARTS_CRITICAL && !serving`, and until those objects existed the
+/// `&& !serving` half had never been read off a real one: no committed capture reached ten
+/// restarts at all, so both directions were decided-copy-only.
+///
+/// `broken-restarts10` and `broken-restarts10serving` are the same manifest but for the
+/// readiness probe, so what separates the two cards below is the one field the clause names.
+#[test]
+fn ten_restarts_is_red_unless_the_container_is_still_answering() {
+    let down = container(&pod("restarts10"), "flaky").clone();
+    let serving = container(&pod("restarts10serving"), "flaky").clone();
+    println!("not serving: {down:?}\nserving:     {serving:?}");
+    assert!(
+        down.restarts >= RESTARTS_CRITICAL && serving.restarts >= RESTARTS_CRITICAL,
+        "both captures have to be past the red band, or neither card below is about it: \
+         {} and {}",
+        down.restarts,
+        serving.restarts
+    );
+    assert!(
+        !doing_its_job(&down) && doing_its_job(&serving),
+        "and the pair has to differ in exactly the field the clause reads, or the two \
+         severities below are not being told apart by it"
+    );
+
+    let red = only(
+        &findings(&["restarts10"]),
+        "broken-restarts10",
+        &format!("restarted {} times", down.restarts),
+    )
+    .clone();
+    show(std::slice::from_ref(&red));
+    assert_eq!(
+        red.severity,
         Severity::Critical,
-        "and the band is the one `!serving` puts it in — which is exactly the red card \
-         the successful run above must not draw"
+        "ten restarts on a container that is not answering is broken now (REQUIREMENTS)"
+    );
+    assert!(
+        !red.title.contains("it is serving now"),
+        "and the sentence that is only true of a working container is not on it: {}",
+        red.title
+    );
+
+    let amber = only(
+        &findings(&["restarts10serving"]),
+        "broken-restarts10serving",
+        &format!("restarted {} times", serving.restarts),
+    )
+    .clone();
+    show(std::slice::from_ref(&amber));
+    assert_eq!(
+        amber.severity,
+        Severity::Warn,
+        "the same count on a container that is passing its probes stays amber: a red card \
+         whose own title says it is serving is what teaches a reader to stop believing red \
+         (NOTES § D2)"
+    );
+    assert!(
+        amber.title.contains("it is serving now"),
+        "and the title says so: {}",
+        amber.title
     );
 }
 
@@ -5109,6 +5486,24 @@ fn waiting_at(reason: &str, message: Option<&str>) -> Option<ApiContainerState> 
         }),
         ..ApiContainerState::default()
     })
+}
+
+/// **One named container rewritten to a container that has never run** — waiting on the
+/// kubelet's reason, with the previous run and the restart count cleared beside it.
+///
+/// The three fields are one coherent group and are moved together (NOTES § D40):
+/// `lastState` is precisely what tells [`stuck_at_the_starting_line`] that a container has
+/// run before, so a plant that moved `state` alone would be a container that has both never
+/// started and a previous run — a shape no kubelet writes, and one the rule under test is
+/// right to be silent on. The 2026-08-13 capture is what made that visible: the trip ran long
+/// enough for `hostpath.json`'s and `healthy-sidecar.json`'s containers to finish their
+/// `sleep 3600` and be restarted, so the bases these plants sit on grew a `lastState` the
+/// first capture's did not have.
+fn never_ran(pod: &mut Pod, name: &str, reason: &str, message: Option<&str>) {
+    let status = container_status(pod, name);
+    status.state = waiting_at(reason, message);
+    status.last_state = None;
+    status.restart_count = 0;
 }
 
 /// **Rule 10, and the fixture that would break a rule shaped like its neighbours.**
@@ -5180,7 +5575,7 @@ fn the_pending_pod_carries_the_schedulers_verdict_and_the_sentence_behind_it() {
     );
     assert_eq!(
         unplaced.age(&now()).as_deref(),
-        Some("3 hours ago"),
+        Some("1 hour ago"),
         "a duration, not English parsed back into a number"
     );
 
@@ -5213,9 +5608,27 @@ fn the_pending_pod_carries_the_schedulers_verdict_and_the_sentence_behind_it() {
 /// does not wait. Only the colour does.
 #[test]
 fn a_refusal_the_cluster_may_still_fix_itself_is_amber_until_it_has_had_ten_minutes() {
-    // The captured refusal is at 20:45:53Z. Exactly [`NOT_READY_GRACE`] later, which is
-    // an autoscaler that has not finished bringing a node up.
-    let early = findings_at(&["pending"], time("2026-08-12T20:55:53Z"));
+    // **The two moments are the capture's own refusal plus ten minutes, and plus ten
+    // minutes and a second.** The offset is written out rather than read from
+    // [`NOT_READY_GRACE`] — a boundary computed from the constant under test agrees with
+    // every value it could hold — while the moment it is added to comes off the capture,
+    // so a recapture moves them together.
+    let refused = pod("pending")
+        .scheduled
+        .as_ref()
+        .and_then(|c| c.last_transition.clone())
+        .expect("the captured refusal says when the scheduler first gave up");
+    let after = |secs: i64| {
+        Time(
+            refused
+                .0
+                .checked_add(SignedDuration::from_mins(10) + SignedDuration::from_secs(secs))
+                .expect("ten minutes after a captured refusal is a moment"),
+        )
+    };
+    // Exactly ten minutes on, which is an autoscaler that has not finished bringing a
+    // node up.
+    let early = findings_at(&["pending"], after(0));
     show(&early);
     assert_eq!(
         early.len(),
@@ -5233,7 +5646,7 @@ fn a_refusal_the_cluster_may_still_fix_itself_is_amber_until_it_has_had_ten_minu
     );
 
     // One second past it.
-    let late = findings_at(&["pending"], time("2026-08-12T20:55:54Z"));
+    let late = findings_at(&["pending"], after(1));
     assert_eq!(
         late[0].severity,
         Severity::Critical,
@@ -5249,7 +5662,13 @@ fn a_refusal_the_cluster_may_still_fix_itself_is_amber_until_it_has_had_ten_minu
     let stampless = pending_but(|p| {
         scheduled_condition(p).last_transition_time = None;
     });
-    let all = analyze(&pods_at(vec![stampless], time("2026-08-12T20:45:54Z")));
+    let one_second_on = Time(
+        refused
+            .0
+            .checked_add(SignedDuration::from_secs(1))
+            .expect("a second after a captured refusal is a moment"),
+    );
+    let all = analyze(&pods_at(vec![stampless], one_second_on));
     show(&all);
     assert_eq!(
         all.len(),
@@ -5675,8 +6094,12 @@ fn an_init_container_still_doing_its_work_is_not_a_pod_that_never_started() {
 }
 
 /// **The wedge itself, in the two shapes a real kubelet produces** — the rule's only
-/// positives, and they are decoded copies because no committed capture is in either
-/// state (NOTES § D72, and the capture-trip item on [`placed_but_never_started`]).
+/// positives. **The first is captured**: `broken-wedged` asks for a `configMap` volume that
+/// does not exist, so the kubelet never gets as far as the sandbox and the pod sits at
+/// `ContainerCreating` with `PodReadyToStartContainers: False` — D72's own proposed shape,
+/// which the 2026-08-13 trip brought back and which was a decoded copy until then. The
+/// second shape has no capture behind it: on this cluster nothing reaches the sandbox and
+/// then stops, so `True` and the absent condition stay decoded copies.
 ///
 /// **What the card has to say is decided by the order the kubelet does its work, not by
 /// what this rule happens to return.** `kubelet.SyncPod` waits for volumes to attach and
@@ -5695,14 +6118,14 @@ fn an_init_container_still_doing_its_work_is_not_a_pod_that_never_started() {
 /// sentence it must **not** carry: a swap of the two branches has to fail here, and
 /// "contains the right words" alone would survive it.
 ///
-/// `config.json` is the base rather than a hand-written pod: it is already a scheduled,
-/// three-hour-old pod whose single container has never run, which is every clause of the
-/// gate (D40, D53 — the committed JSON is untouched).
+/// `config.json` is the base for the copies rather than a hand-written pod: it is already a
+/// scheduled pod whose single container has never run, which is every clause of the gate
+/// (D40, D53 — the committed JSON is untouched).
 #[test]
 fn the_wedged_pod_names_the_side_of_the_sandbox_the_kubelet_actually_stopped_on() {
     let wedged = |reason: &'static str, condition: Option<&'static str>| {
         capture_but("config", move |pod| {
-            container_status(pod, "app").state = waiting_at(reason, None);
+            never_ran(pod, "app", reason, None);
             match condition {
                 Some(status) => {
                     pod_condition(pod, "PodReadyToStartContainers").status = status.to_string();
@@ -5717,6 +6140,7 @@ fn the_wedged_pod_names_the_side_of_the_sandbox_the_kubelet_actually_stopped_on(
         })
     };
     let one_card = |p: PodSnapshot| {
+        let name = p.id.name.clone();
         let all = analyze(&pods_at(vec![p], now()));
         show(&all);
         assert_eq!(
@@ -5726,11 +6150,28 @@ fn the_wedged_pod_names_the_side_of_the_sandbox_the_kubelet_actually_stopped_on(
              reason no rule owns: {:?}",
             titles(&all)
         );
-        only(&all, "broken-config", "not been able to start").clone()
+        only(&all, &name, "not been able to start").clone()
     };
 
     // --- BEFORE THE SANDBOX: the volume wedge, which is what `False` means ---
-    let card = one_card(wedged("ContainerCreating", Some("False")));
+    // The captured one. Its preconditions are asserted off the JSON first: a capture whose
+    // kubelet had got past the sandbox would satisfy the *other* branch and pass this half
+    // by drawing the sentence it is supposed to prove absent.
+    let raw = fixture("wedged");
+    assert_eq!(
+        captured_condition(&raw, "PodReadyToStartContainers")["status"],
+        "False",
+        "this capture is the before-the-sandbox side, and without that it is the other test"
+    );
+    assert_eq!(
+        captured_str(
+            captured_status(&raw, "containerStatuses", "app"),
+            &["state", "waiting", "reason"]
+        ),
+        "ContainerCreating",
+        "and the container is still waiting on the kubelet, not on a registry"
+    );
+    let card = one_card(pod("wedged"));
     assert_eq!(
         card.severity,
         Severity::Warn,
@@ -5758,17 +6199,17 @@ fn the_wedged_pod_names_the_side_of_the_sandbox_the_kubelet_actually_stopped_on(
         card.evidence
     );
     assert_eq!(
-        card.timestamp.as_ref(),
-        pod("config")
-            .scheduled
-            .as_ref()
-            .and_then(|c| c.last_transition.as_ref()),
+        card.timestamp,
+        Some(captured_time(
+            captured_condition(&raw, "PodScheduled"),
+            &["lastTransitionTime"]
+        )),
         "the since-when is the moment the scheduler placed it, which is when the machine \
          became responsible for starting it"
     );
     assert_eq!(
         card.kubectl_cmd.as_deref(),
-        Some("kubectl describe pod broken-config -n default"),
+        Some("kubectl describe pod broken-wedged -n default"),
         "and the command is `describe` and not `-o yaml`, unlike every other card whose \
          evidence is a field: what finishes this diagnosis is a `FailedMount` Event, \
          which only `describe` prints"
@@ -5883,7 +6324,9 @@ fn a_pod_that_only_ever_says_podinitializing_is_the_wedge_the_rule_was_added_for
 #[test]
 fn a_pod_with_something_already_serving_gets_no_card_saying_it_never_started() {
     let half_up = capture_but("healthy-sidecar", |pod| {
-        container_status(pod, "app").state = waiting_at(
+        never_ran(
+            pod,
+            "app",
             "CreateContainerError",
             Some("failed to create containerd task"),
         );
@@ -5917,8 +6360,8 @@ fn a_pod_with_something_already_serving_gets_no_card_saying_it_never_started() {
 #[test]
 fn two_containers_stuck_for_different_reasons_are_both_named() {
     let mixed = capture_but("hostpath", |pod| {
-        container_status(pod, "nosy").state = waiting_at("CreateContainerError", None);
-        container_status(pod, "shipper").state = waiting_at("RunContainerError", None);
+        never_ran(pod, "nosy", "CreateContainerError", None);
+        never_ran(pod, "shipper", "RunContainerError", None);
     });
     let all = analyze(&pods_at(vec![mixed], now()));
     show(&all);
@@ -5953,8 +6396,7 @@ fn every_unusable_image_reason_is_rule_threes_card_and_arrives_at_once() {
     let just_placed = time("2026-08-12T20:46:00Z");
     for reason in UNUSABLE_IMAGE {
         let broken = capture_but("config", |pod| {
-            container_status(pod, "app").state =
-                waiting_at(reason, Some("the runtime's own sentence"));
+            never_ran(pod, "app", reason, Some("the runtime's own sentence"));
         });
         let all = analyze(&pods_at(vec![broken.clone()], just_placed.clone()));
         show(&all);
@@ -6003,7 +6445,7 @@ fn every_unusable_image_reason_is_rule_threes_card_and_arrives_at_once() {
 #[test]
 fn a_wedged_pod_someone_has_already_deleted_is_rule_twelves_alone() {
     let abandoned = capture_but("config", |pod| {
-        container_status(pod, "app").state = waiting_at("ContainerCreating", None);
+        never_ran(pod, "app", "ContainerCreating", None);
         pod.metadata.deletion_timestamp = Some(time("2026-08-12T21:00:00Z"));
         pod.metadata.deletion_grace_period_seconds = Some(30);
         pod.metadata.finalizers = Some(vec!["k8rs.test/never-removed".to_string()]);
@@ -6047,7 +6489,7 @@ fn a_wedged_pod_someone_has_already_deleted_is_rule_twelves_alone() {
 fn two_containers_stuck_on_the_same_node_are_one_card_with_a_count() {
     let wedged = capture_but("hostpath", |pod| {
         for name in ["nosy", "shipper"] {
-            container_status(pod, name).state = waiting_at("ContainerCreating", None);
+            never_ran(pod, name, "ContainerCreating", None);
         }
         pod_condition(pod, "PodReadyToStartContainers").status = "False".to_string();
     });
@@ -6091,28 +6533,38 @@ fn two_containers_stuck_on_the_same_node_are_one_card_with_a_count() {
 /// threshold nobody has tested, and this one is the whole difference between rule 13 and
 /// a card on every cold start of a large image.
 ///
-/// The moment is the pod's own `PodScheduled` transition — `20:45:53Z` in the capture —
-/// so the two readings below are the same wedge at `+10:00` and at `+10:01`.
+/// **On the captured wedge and not a planted one** — `broken-wedged` mounts a `configMap`
+/// that does not exist, so the kubelet leaves it at `ContainerCreating` with the sandbox
+/// never created. The two readings below are that pod's own `PodScheduled` transition at
+/// `+10:00` and at `+10:01`, so the pair survives a recapture without being repinned; the
+/// **ten minutes are written out rather than read from [`NOT_READY_GRACE`]**, since a
+/// boundary computed from the constant under test agrees with every value it could hold.
 #[test]
 fn a_pod_only_just_placed_is_a_slow_pull_and_not_a_wedge() {
-    let wedged = capture_but("config", |pod| {
-        container_status(pod, "app").state = waiting_at("ContainerCreating", None);
-    });
+    let wedged = pod("wedged");
     let placed = wedged
         .scheduled
         .as_ref()
         .and_then(|c| c.last_transition.clone())
         .expect("the capture says when it was placed");
     println!("placed at {placed:?}");
+    let after = |secs: i64| {
+        Time(
+            placed
+                .0
+                .checked_add(SignedDuration::from_mins(10) + SignedDuration::from_secs(secs))
+                .expect("ten minutes after a captured placement is a moment"),
+        )
+    };
 
     nothing(
-        &analyze(&pods_at(vec![wedged.clone()], time("2026-08-12T20:55:53Z"))),
+        &analyze(&pods_at(vec![wedged.clone()], after(0))),
         "ten minutes to the second is inside the window, not past it: pulling a large \
          image onto a cold node legitimately takes minutes, and a rule firing under \
          `progressDeadlineSeconds`' own default alerts on every cold start",
     );
 
-    let all = analyze(&pods_at(vec![wedged], time("2026-08-12T20:55:54Z")));
+    let all = analyze(&pods_at(vec![wedged], after(1)));
     show(&all);
     assert_eq!(
         all.len(),
@@ -6208,37 +6660,34 @@ fn a_container_that_ran_and_died_is_not_one_that_never_started() {
          other rule owns, or this passes for the wrong reason: {quitter:?}"
     );
 
+    let restarts = quitter.restarts;
     let all = analyze(&pods_at(vec![recreating], now()));
     show(&all);
     assert!(
         !all.iter()
             .any(|f| f.title.contains("not been able to start")),
-        "this container started fifteen times — *never started* would be a plain lie \
+        "this container started {restarts} times — *never started* would be a plain lie \
          about it, and the card that is true here is the restart count: {:?}",
         titles(&all)
     );
-    only(&all, "broken-crashloop", "restarted 15 times");
+    only(
+        &all,
+        "broken-crashloop",
+        &format!("restarted {restarts} times"),
+    );
 }
 
-/// **The captured Pending pod with the verdict taken *off* it** — rule 14's shape, built
-/// on a real capture by removing a field rather than by writing one (NOTES § D40, § D53:
-/// the committed JSON is never touched, the decoded copy is).
+/// **The captured pod nothing has judged** — rule 14's shape, and it is a capture now rather
+/// than a removal. `broken-unjudged` names `schedulerName: does-not-exist`, so nothing in the
+/// cluster ever looked at it and the API server wrote no `conditions` key at all: `phase:
+/// Pending`, no container statuses, and the `creationTimestamp` the grace is measured from.
 ///
-/// **Removal is the only route to this shape from what is committed, and that is a fact
-/// about clusters rather than about these captures.** Every pod in the repository carries
-/// a `PodScheduled` condition — including the four static pods in `kube-system-pods.json`
-/// that no scheduler ever saw, because the kubelet writes the condition itself for a pod
-/// handed straight to it. Everything else here is what the cluster produced:
-/// `phase: Pending`, no container statuses at all, and a `creationTimestamp` two hours
-/// before the pinned [`now`](now).
+/// Until the 2026-08-13 trip this was `pending.json` with its verdict deleted, because every
+/// committed pod carried a `PodScheduled` condition — including the static pods in
+/// `kube-system-pods.json` that no scheduler ever saw, since the kubelet writes the condition
+/// itself for a pod handed straight to it.
 fn never_judged(edit: impl FnOnce(&mut Pod)) -> PodSnapshot {
-    pending_but(|pod| {
-        pod.status
-            .as_mut()
-            .expect("the captured pod has a status")
-            .conditions = None;
-        edit(pod);
-    })
+    capture_but("unjudged", edit)
 }
 
 /// **Rule 14, and the pod it must not be confused with** — the same capture with and
@@ -6275,13 +6724,20 @@ fn the_pod_nothing_has_judged_is_not_the_pod_something_refused() {
     );
     only(&refused, "broken-pending", "will take this pod");
 
-    let created = captured_time(&fixture("pending"), &["metadata", "creationTimestamp"]);
+    // **Both framings of the absence, and only one of them is a cluster's.** The API server
+    // writes no `conditions` key at all for a pod nothing has judged — which is `unjudged.json`
+    // exactly as captured — while a client or a prune can leave an empty array behind. `From<Pod>`
+    // collapses them and no rule may depend on which arrived, so the second is written onto a
+    // decoded copy of the first (NOTES § D53).
+    let created = captured_time(&fixture("unjudged"), &["metadata", "creationTimestamp"]);
     for shape in [None, Some(Vec::new())] {
-        let unjudged = pending_but(|pod| {
-            pod.status
-                .as_mut()
-                .expect("the captured pod has a status")
-                .conditions = shape;
+        let unjudged = capture_but("unjudged", |pod| {
+            if shape.is_some() {
+                pod.status
+                    .as_mut()
+                    .expect("the captured pod has a status")
+                    .conditions = shape;
+            }
         });
         assert_eq!(
             (unjudged.scheduled.as_ref(), unjudged.phase.as_deref()),
@@ -6308,7 +6764,7 @@ fn the_pod_nothing_has_judged_is_not_the_pod_something_refused() {
         );
         let unlooked = only(
             &all,
-            "broken-pending",
+            "broken-unjudged",
             "Nothing has even looked at this pod",
         );
         assert!(
@@ -6340,7 +6796,7 @@ fn the_pod_nothing_has_judged_is_not_the_pod_something_refused() {
         );
         assert_eq!(
             unlooked.kubectl_cmd.as_deref(),
-            Some("kubectl get pod broken-pending -n default -o yaml"),
+            Some("kubectl get pod broken-unjudged -n default -o yaml"),
             "`get -o yaml` and not `describe`: an absent condition is visible in the yaml, \
              and `spec.schedulerName` — the field that separates the two causes — is \
              printed by neither `describe` nor any Event"
@@ -6490,8 +6946,16 @@ fn a_running_pod_missing_its_conditions_is_not_one_nothing_has_looked_at() {
 /// are one decision in two places, and this is the test that fails if either goes.
 #[test]
 fn the_unjudged_pod_someone_deleted_is_rule_twelves_alone() {
+    // The delete lands a minute after the capture's own creation, so the moment moves with the
+    // fixture rather than being transcribed beside it.
+    let asked_at = Time(
+        captured_time(&fixture("unjudged"), &["metadata", "creationTimestamp"])
+            .0
+            .checked_add(SignedDuration::from_mins(1))
+            .expect("a minute after a captured creation is a moment"),
+    );
     let deleted = never_judged(|pod| {
-        pod.metadata.deletion_timestamp = Some(time("2026-08-12T20:46:23Z"));
+        pod.metadata.deletion_timestamp = Some(asked_at);
         pod.metadata.deletion_grace_period_seconds = Some(30);
         pod.metadata.finalizers = Some(vec!["k8rs.test/never-removed".to_string()]);
     });
@@ -6505,7 +6969,7 @@ fn the_unjudged_pod_someone_deleted_is_rule_twelves_alone() {
     let all = analyze(&pods_at(vec![deleted], now()));
     show(&all);
     assert_eq!(all.len(), 1, "rule 12 alone: {:?}", titles(&all));
-    let terminating = only(&all, "broken-pending", "asked to shut down");
+    let terminating = only(&all, "broken-unjudged", "asked to shut down");
     assert!(
         terminating.title.contains("Terminating"),
         "and the one card left names the word `kubectl get pods` actually prints — the \
@@ -6531,12 +6995,58 @@ fn the_whole_capture_through_the_rules_at_once() {
 
     assert_eq!(
         all.len(),
-        14,
-        "two on the crash loop, two on the OOM, one image, one config, one unplaceable, \
-         two host mounts, one readiness, one restart counter, one terminating — and two \
-         on the init container that was invisible until this box (D27): {:?}",
+        26,
+        "one card per thing that is broken across every pod the repository has captured, \
+         counted rather than described: the list is long enough now that a sentence naming \
+         each one would be a second copy of the tests above, and a number that moves when a \
+         rule starts firing twice is what this assertion is for: {:?}",
         titles(&all)
     );
+
+    // **Which captures are allowed to say nothing, named — and everything else has to speak.**
+    // A count alone passes just as well if one rule went silent and another started firing
+    // twice. The silent set is the healthy fixtures, the three that are only an Analysis
+    // posture row, the two pods that are *over* — a finished pod's restart counts and last exits
+    // belong to the Waste report and not to the screen that holds what is broken now (D2) — and
+    // the one whose fault is real but old.
+    let silent = [
+        // The kill in this one is an hour old and its container has been serving since, which
+        // is rule 2's recency clause deciding — read at a `now` five minutes after the kill it
+        // is a CRITICAL, and `an_old_kill_on_a_container_that_has_been_fine_since_…` reads it
+        // both ways off these same bytes.
+        "oomserving",
+        "healthy",
+        "healthy-hostpath",
+        "healthy-podlevel",
+        "healthy-retry",
+        "healthy-sidecar",
+        "healthy-unreadysidecar",
+        "nolimits",
+        "podlimit",
+        "resize",
+        "succeeded",
+        "failed",
+    ];
+    for name in CAPTURED_PODS {
+        let object = pod(name);
+        let mine: Vec<&str> = all
+            .iter()
+            .filter(|f| f.object.name == object.id.name)
+            .map(|f| f.title.as_str())
+            .collect();
+        if silent.contains(&name) {
+            assert!(
+                mine.is_empty(),
+                "{name}.json is one of the captures Alerts must not draw at all: {mine:?}"
+            );
+        } else {
+            assert!(
+                !mine.is_empty(),
+                "{name}.json was captured because something is wrong with it, and this \
+                 screen says nothing about it"
+            );
+        }
+    }
 
     for f in &all {
         assert_ne!(
@@ -6568,6 +7078,24 @@ fn the_whole_capture_through_the_rules_at_once() {
     }
 }
 
+/// **The one pod of `owned-pods.json`, by the name the capture gives it.** A ReplicaSet's
+/// pods carry a generated five-character suffix minted fresh on every `just fixtures`,
+/// while the ReplicaSet's own name is a hash of the pod template and does not move — so
+/// the suffix is read out of the capture and the hash is written down.
+fn owned_pod_name() -> String {
+    let pods = items::<Pod>("owned-pods");
+    assert_eq!(
+        pods.len(),
+        1,
+        "`broken-owned` runs one replica, and every assertion below names *the* pod"
+    );
+    pods[0]
+        .metadata
+        .name
+        .clone()
+        .expect("a captured pod has a name")
+}
+
 /// **The grouping key on a pod that has a controller**, which is D3's whole premise and
 /// is not visible in any of the twelve bare captures above. This one is a real capture
 /// of a Deployment's pod, so nothing is synthesized.
@@ -6580,7 +7108,8 @@ fn a_finding_on_an_owned_pod_files_under_the_controller_and_not_the_pod() {
     let all = analyze(&pods_at(pods, now()));
     show(&all);
 
-    let looping = only(&all, "broken-owned-7bdb7645c8-vhwcp", "CrashLoopBackOff");
+    let name = owned_pod_name();
+    let looping = only(&all, &name, "CrashLoopBackOff");
     assert_eq!(
         looping.object.kind,
         ObjectKind::Pod,
@@ -6599,7 +7128,7 @@ fn a_finding_on_an_owned_pod_files_under_the_controller_and_not_the_pod() {
     );
     assert_eq!(
         looping.kubectl_cmd.as_deref(),
-        Some("kubectl describe pod broken-owned-7bdb7645c8-vhwcp -n default"),
+        Some(format!("kubectl describe pod {name} -n default").as_str()),
         "the command still points at the object, never at the card's title — a \
          `describe pod broken-owned-7bdb7645c8` is a command that does not work"
     );
@@ -6670,10 +7199,29 @@ fn node_condition_mut<'a>(node: &'a mut Node, type_: &str) -> &'a mut NodeCondit
         .unwrap_or_else(|| panic!("the capture carries no {type_} condition"))
 }
 
-/// The pods of a snapshot that sit on one node, by the field the join is made on.
+/// **One captured pod on `node` that a drain would still have to move** — the live half of the
+/// N2 counts below, read out of the capture rather than named. Which worker the scheduler put a
+/// pod on is its business and moves on every `just fixtures`, so a name here asserts the trip
+/// that happened rather than the requirement.
+fn a_pod_a_drain_would_move_on(node: &str) -> PodSnapshot {
+    CAPTURED_PODS
+        .iter()
+        .map(|n| pod(n))
+        .find(|p| p.node.as_deref() == Some(node) && a_drain_would_move(p) && !finished(p))
+        .unwrap_or_else(|| {
+            panic!(
+                "no captured pod on {node} that a drain would move, so the count below is untested"
+            )
+        })
+}
+
+/// The pods of a snapshot that are **running** on one node, by the field the join is made on —
+/// [`pods_on`]'s expectation, re-derived. A pod that has finished keeps its `nodeName` until
+/// something collects it (`succeeded.json`, `failed.json`), and every N-series count is about
+/// work the machine is still doing, so the phase filter belongs on both sides of the comparison.
 fn on_node<'a>(pods: &'a [PodSnapshot], node: &str) -> Vec<&'a PodSnapshot> {
     pods.iter()
-        .filter(|p| p.node.as_deref() == Some(node))
+        .filter(|p| p.node.as_deref() == Some(node) && !finished(p))
         .collect()
 }
 
@@ -6720,10 +7268,17 @@ fn the_node_that_went_quiet_names_the_workloads_that_went_with_it() {
          proved on an empty machine: {}",
         here.len()
     );
+    // **Which pod is the fossil belongs to the scheduler**, so it is found by the property
+    // rather than by name: still `Running`, every container still `ready`, on a machine the
+    // control plane has given up on. A capture where the scheduler happened to place things
+    // differently must not redden a requirement that never moved (NOTES § D65).
     let fossil = here
         .iter()
-        .find(|p| p.id.name == "healthy")
-        .expect("`healthy.json` is the pod that runs on the node break-nodes stopped");
+        .find(|p| p.phase.as_deref() == Some("Running") && p.containers.iter().all(|c| c.ready))
+        .expect(
+            "the node break-nodes stopped is carrying a pod whose status still reads healthy — \
+             without one, D71's premise is not in the capture at all",
+        );
     println!(
         "{} on {quiet}: phase {:?}, ready {:?}",
         fossil.id.name,
@@ -6733,12 +7288,6 @@ fn the_node_that_went_quiet_names_the_workloads_that_went_with_it() {
             .iter()
             .map(|c| c.ready)
             .collect::<Vec<_>>()
-    );
-    assert_eq!(
-        fossil.phase.as_deref(),
-        Some("Running"),
-        "the status of a pod whose kubelet stopped posting never expires — this one still \
-         reads Running on a machine the control plane has given up on"
     );
     assert!(
         !all.iter()
@@ -6803,7 +7352,7 @@ fn the_node_that_went_quiet_names_the_workloads_that_went_with_it() {
     );
     assert_eq!(
         card.age(&now()).as_deref(),
-        Some("2 hours ago"),
+        Some("23 min ago"),
         "a duration off the pinned now, not English parsed back into a number"
     );
     assert_eq!(
@@ -6970,10 +7519,12 @@ fn a_node_whose_condition_carries_no_stamp_still_draws_the_card_without_an_age()
     );
 }
 
-/// **N2, and the count that is its trigger.** The cordoned node in the capture is carrying six
-/// pods and a drain would move four of them: `kubectl drain` never evicts a DaemonSet pod or a
-/// static pod, whatever flags it is given, so counting what runs there would put this card on
-/// every node an operator drained perfectly (NOTES § D46).
+/// **N2, and the count that is its trigger.** The cordoned node in the capture carries a mix of
+/// ordinary pods and node agents, and a drain would move only the first kind: `kubectl drain`
+/// never evicts a DaemonSet pod or a static pod, whatever flags it is given, so counting what
+/// runs there would put this card on every node an operator drained perfectly (NOTES § D46).
+/// Both counts are re-derived from the capture below rather than written down, because which
+/// pods the scheduler put on the cordoned node is its business and moves on every trip.
 #[test]
 fn the_cordoned_node_counts_only_the_pods_a_drain_would_actually_move() {
     let raw = fixture("nodes");
@@ -6989,9 +7540,14 @@ fn the_cordoned_node_counts_only_the_pods_a_drain_would_actually_move() {
     show(&all);
 
     let here = on_node(&pods, cordoned);
+    // Re-derived from the pod's own fields rather than by calling [`a_drain_would_move`], which
+    // would agree with any narrowing it happened to have: the three `kubectl drain` skips are a
+    // static pod, a DaemonSet's pod, and one the drain has already evicted.
     let skipped: Vec<&str> = here
         .iter()
-        .filter(|p| p.mirror || p.owner.kind == ObjectKind::DaemonSet)
+        .filter(|p| {
+            p.mirror || p.owner.kind == ObjectKind::DaemonSet || p.deletion_timestamp.is_some()
+        })
         .map(|p| p.id.name.as_str())
         .collect();
     println!("{} pods on {cordoned}, drain skips {skipped:?}", here.len());
@@ -7043,7 +7599,7 @@ fn the_cordoned_node_counts_only_the_pods_a_drain_would_actually_move() {
         "the age is the taint's, which the controller stamps — never `Ready`'s, which does \
          not move when a node is cordoned (D65)"
     );
-    assert_eq!(card.age(&now()).as_deref(), Some("2 hours ago"));
+    assert_eq!(card.age(&now()).as_deref(), Some("24 min ago"));
 }
 
 /// **A node a drain finished with is parked, not broken** — and both of the two shapes a drain
@@ -8324,7 +8880,12 @@ fn the_whole_capture_including_its_nodes_through_the_rules_at_once() {
     }
 }
 
-/// The node the capture puts the most pods on, and what those pods are charged in millicores.
+/// The node the capture works hardest, and what the pods on it are charged in millicores.
+///
+/// **Busiest by what N5 actually sums, not by pod count** — the rule adds one number per
+/// container that asks for cpu, so a node carrying twelve pods that ask for nothing stresses the
+/// arithmetic less than one carrying four that do, and the float control in the ordering test
+/// needs values that differ before it discriminates at all.
 fn busiest() -> (NodeSnapshot, Vec<PodSnapshot>, i64) {
     let all = every_captured_pod();
     let (node, here) = captured_nodes()
@@ -8337,7 +8898,12 @@ fn busiest() -> (NodeSnapshot, Vec<PodSnapshot>, i64) {
                 .collect();
             (n, here)
         })
-        .max_by_key(|(_, here)| here.len())
+        .max_by_key(|(_, here)| {
+            here.iter()
+                .flat_map(|p| &p.containers)
+                .filter(|c| c.cpu_request.is_some())
+                .count()
+        })
         .expect("the capture has nodes");
     let borrowed: Vec<&PodSnapshot> = here.iter().collect();
     let (asked, _) = promised(
@@ -8845,17 +9411,18 @@ fn n2_does_not_count_a_pod_the_drain_has_already_evicted() {
         "`stuck.json` is the captured pod somebody asked to shut down, which is what a drain \
          leaves behind while it waits"
     );
-    let draining = node_but("k8rs-worker2", |n| {
+    // The machine is the one the capture put the pod on — the join has to close, and which
+    // worker the scheduler picked moves on every trip.
+    let machine = terminating
+        .node
+        .clone()
+        .expect("the captured pod names the machine it is terminating on");
+    let draining = node_but(&machine, |n| {
         n.spec
             .as_mut()
             .expect("a captured node has a spec")
             .unschedulable = Some(true);
     });
-    assert_eq!(
-        terminating.node.as_deref(),
-        Some(draining.id.name.as_str()),
-        "the pod and the cordoned node have to be the same machine for the join to close"
-    );
 
     let all = analyze(&cluster(vec![terminating.clone()], vec![draining.clone()]));
     show(&all);
@@ -8867,13 +9434,13 @@ fn n2_does_not_count_a_pod_the_drain_has_already_evicted() {
     );
 
     // And the pod beside it that a drain has *not* reached is still counted, so the silence
-    // above is the filter and not an empty join.
-    let all = analyze(&cluster(
-        vec![terminating, pod("crashloop")],
-        vec![draining],
-    ));
+    // above is the filter and not an empty join. Its neighbour is read out of the capture for
+    // the reason the machine is.
+    let neighbour = a_pod_a_drain_would_move_on(&machine);
+    println!("beside it on {machine}: {}", neighbour.id.name);
+    let all = analyze(&cluster(vec![terminating, neighbour], vec![draining]));
     show(&all);
-    let card = only(&all, "k8rs-worker2", "refuses new pods");
+    let card = only(&all, &machine, "refuses new pods");
     assert_eq!(
         card.evidence, "1 pod here would still have to move",
         "one of the two, and the count is what `kubectl drain` would actually still move"
@@ -8885,30 +9452,45 @@ fn n2_does_not_count_a_pod_the_drain_has_already_evicted() {
 /// all run through it. Deleting it left the suite green (NOTES § D81): the plant that existed was
 /// on a *healthy* capture, where skipping and not skipping produce the same silence.
 ///
-/// **Planted, and a capture-trip item:** no committed capture is `Succeeded` or `Failed` — 28
-/// `Running`, 4 `Pending`. A completed Job pod keeping its `nodeName` until something collects it
-/// is exactly what this function exists for, and it is what `just fixtures` should bring back.
+/// **Captured, not planted.** This was a phase written onto a decoded copy for as long as no
+/// committed object was over; the 2026-08-13 trip brought both — `succeeded.json` is a pod whose
+/// container ran to `exit 0` after three failed attempts, `failed.json` one that never got there
+/// and carries `exit 137` beside four restarts. Both keep their `nodeName`, which is the whole
+/// reason [`finished`] exists, and both are loud enough underneath to draw two cards apiece the
+/// moment their phase says they are still running — which is the control below.
 #[test]
 fn a_pod_that_finished_is_charged_to_nobody_and_alarms_about_nothing() {
-    // A capture that is loudly broken, so "no findings" is the skip and not the pod.
-    let noisy = analyze(&pods_at(vec![pod("crashloop")], now()));
-    assert!(
-        noisy.len() >= 2,
-        "this capture draws cards while it is running, or the silence below proves nothing: {:?}",
-        titles(&noisy)
-    );
+    for name in ["succeeded", "failed"] {
+        let done = pod(name);
+        let phase = done
+            .phase
+            .clone()
+            .expect("the capture says which way this pod ended");
+        assert!(
+            finished(&done),
+            "{name}.json is a pod that is over, whatever it did on the way: {phase}"
+        );
 
-    for phase in ["Succeeded", "Failed"] {
-        let done = capture_but("crashloop", |p| {
+        // **The control, and it is the same object.** A restart count and a failed previous run
+        // are what rules 5 and 6 read, and both captures carry them — so the same bytes with the
+        // phase moved back to `Running` are loud, and the silence below is the skip rather than a
+        // pod nothing was ever wrong with. Deleting `finished` left the suite green once already
+        // (NOTES § D81) because the plant that stood here was on a *healthy* capture.
+        let still_running = capture_but(name, |p| {
             p.status
                 .as_mut()
                 .expect("a captured pod has a status")
-                .phase = Some(phase.to_string());
+                .phase = Some("Running".to_string());
         });
+        let noisy = analyze(&pods_at(vec![still_running], now()));
+        show(&noisy);
         assert!(
-            finished(&done),
-            "{phase} is a pod that is over, whatever it did on the way"
+            noisy.len() >= 2,
+            "{name}.json draws cards while it is running, or the silence below proves nothing: \
+             {:?}",
+            titles(&noisy)
         );
+
         nothing(
             &analyze(&pods_at(vec![done.clone()], now())),
             format!(
@@ -8919,19 +9501,18 @@ fn a_pod_that_finished_is_charged_to_nobody_and_alarms_about_nothing() {
         );
 
         // The node half: it keeps its `nodeName`, and neither the drain count nor the node's
-        // own pod list may include it.
-        let cordoned = node_but("k8rs-worker2", |n| {
+        // own pod list may include it. Which machine that is belongs to the scheduler, so the
+        // cordon is applied to whichever node the capture names.
+        let machine = done.node.clone().expect(
+            "a finished pod keeps the node it ran on, which is the whole reason this \
+                     filter is needed",
+        );
+        let cordoned = node_but(&machine, |n| {
             n.spec
                 .as_mut()
                 .expect("a captured node has a spec")
                 .unschedulable = Some(true);
         });
-        assert_eq!(
-            done.node.as_deref(),
-            Some(cordoned.id.name.as_str()),
-            "a finished pod keeps the node it ran on, which is the whole reason this filter is \
-             needed"
-        );
         let alone = analyze(&cluster(vec![done.clone()], vec![cordoned.clone()]));
         show(&alone);
         assert!(
@@ -8941,17 +9522,20 @@ fn a_pod_that_finished_is_charged_to_nobody_and_alarms_about_nothing() {
         );
 
         // Beside a live pod, the count is one — so the silence above is the filter and not an
-        // empty join, and N1's total is the same number from the other rule.
-        // Not `stuck`: that capture is already terminating, which the drain filter also skips —
-        // one exclusion at a time, or neither is being tested.
-        let both = cluster(vec![done, pod("config")], vec![cordoned]);
+        // empty join, and N1's total is the same number from the other rule. The neighbour is
+        // picked by [`a_drain_would_move`] so it cannot be a pod that is already terminating,
+        // which the same filter skips for its own reason — one exclusion at a time, or neither
+        // is being tested.
+        let live = a_pod_a_drain_would_move_on(&machine);
+        println!("beside it on {machine}: {}", live.id.name);
+        let both = cluster(vec![done, live], vec![cordoned]);
         let all = analyze(&both);
         assert_eq!(
-            only(&all, "k8rs-worker2", "refuses new pods").evidence,
+            only(&all, &machine, "refuses new pods").evidence,
             "1 pod here would still have to move",
             "one of the two: {phase} is not work a drain has left to do"
         );
-        let down = node_but("k8rs-worker2", |n| {
+        let down = node_but(&machine, |n| {
             node_condition_mut(n, "Ready").status = "Unknown".to_string();
         });
         let all = analyze(&ClusterSnapshot {
@@ -8959,11 +9543,11 @@ fn a_pod_that_finished_is_charged_to_nobody_and_alarms_about_nothing() {
             ..both
         });
         assert!(
-            only(&all, "k8rs-worker2", "stopped responding")
+            only(&all, &machine, "stopped responding")
                 .evidence
                 .contains("(1 pod)"),
             "and N1 counts what was running there, which a {phase} pod was not: {}",
-            only(&all, "k8rs-worker2", "stopped responding").evidence
+            only(&all, &machine, "stopped responding").evidence
         );
     }
 }
@@ -9050,7 +9634,7 @@ fn n6_reads_the_taints_of_the_machines_the_pod_would_accept_and_not_the_others()
 // Deployment that timed out *and* has a failing pod under it — and on this cluster the one
 // Deployment that timed out has no pods at all, which is the entire point of it. Those go
 // through the one-field-on-a-decoded-copy technique the rest of this file uses (NOTES § D40,
-// § D53), and each names the object the capture trip owes.
+// § D53), and each names why the 2026-08-13 trip could not bring the object.
 //
 // **The negatives are the half that matters again**, and for a new reason: W2's gate is a
 // *query over the findings already made*, so it can fail in two opposite directions — a
@@ -9267,8 +9851,10 @@ fn the_replicaset_that_was_refused_says_so_in_the_api_servers_own_words() {
 /// **The ReplicaSet here is the committed capture, untouched**: `spec.replicas: 1`,
 /// `status.replicas: 0`, no `readyReplicas` at all. Only the Deployment above it is moved, and
 /// as one coherent story — three wanted, two of them still answering, the third refused
-/// (NOTES § D40, § D53). **What the capture trip owes: a quota refusing a scale-up on a
-/// workload that is already running.**
+/// **The 2026-08-13 trip did not bring the other half, and this is why:** `scripts/broken.yaml`'s
+/// quota denies every pod in `k8rs-quota` from the moment the namespace exists, so nothing there
+/// is ever running to be scaled *up*. That shape needs a quota tightened under a Deployment that
+/// is already serving, which is a second sequence rather than a second manifest.
 ///
 /// The control is the same ReplicaSet under the captured Deployment, which really is down.
 #[test]
@@ -9352,8 +9938,11 @@ fn a_refused_rollout_is_amber_while_the_deployment_above_it_is_still_serving() {
 /// on `deployments` with `replicasets` still readable is the second way in, and it needs no CRD at
 /// all.
 ///
-/// **What the capture trip owes: a ReplicaSet owned by something k8rs does not decode.** Nothing
-/// on this cluster has one, so the reference is moved on a decoded copy (NOTES § D53).
+/// **The 2026-08-13 trip did not bring it, and no trip will:** an owner k8rs does not decode means
+/// a third-party controller installed on the fixture cluster, which is a cluster change rather
+/// than a fixture — the argument
+/// `the_api_group_decides_which_kind_an_owner_reference_names` already records against
+/// OpenKruise. So the reference is moved on a decoded copy (NOTES § D53).
 ///
 /// The control is the same untouched capture under an owner the snapshot *does* carry, which
 /// really is down — the half that makes the band above able to fail.
@@ -9462,9 +10051,11 @@ fn a_condition_with_nothing_to_quote_still_says_something() {
 /// this card is wrong about it: nothing was refused creation, the service is up, and the counters
 /// would read *"2 of 1 pod"*. **No card in v1**; a card for it is a new rule (invariant 13).
 ///
-/// **What the capture trip owes: a scale-down a webhook refused.** Nothing on this cluster has
-/// one, so the whole story is written onto a decoded copy at once — reason, message and both
-/// counters (NOTES § D53). They move **together** because upstream writes them together: a
+/// **The 2026-08-13 trip did not bring it, and this is why:** a refused scale-down needs a
+/// validating admission webhook, which is a second workload deployed into the fixture cluster for
+/// no purpose but to reject one request — a cluster change rather than a fixture. So the whole
+/// story is written onto a decoded copy at once — reason, message and both counters
+/// (NOTES § D53). They move **together** because upstream writes them together: a
 /// creation refusal's message left standing under a deletion's reason is a shape no cluster
 /// emits, and a test built on it proves nothing about the real one.
 ///
@@ -9630,10 +10221,11 @@ fn the_rollout_card_stands_down_when_the_replicaset_has_already_said_why() {
 /// snapshot that is missing the ReplicaSet cannot walk it, and the third case below is what
 /// that does.
 ///
-/// **What the capture trip owes: a Deployment whose rollout timed out and whose pods exist
-/// and are failing.** `broken-owned` is that Deployment in every respect but its
-/// `Progressing` reason — its pod is in `CrashLoopBackOff` and its ReplicaSet is captured
-/// beside it — so the one field the cluster never produced is moved on a decoded copy
+/// **The 2026-08-13 trip did not bring it, and `deployments.json` says why.** `broken-owned` ran
+/// for over an hour with its only pod in `CrashLoopBackOff`, and its `Progressing` condition still
+/// reads `True / NewReplicaSetAvailable` beside `Available: False` — the deadline never trips once
+/// the ReplicaSet has managed to *create* its pod, whatever that pod then does. So `broken-owned`
+/// is that Deployment in every respect but that one reason, and it is moved on a decoded copy
 /// (NOTES § D40, § D53).
 #[test]
 fn a_crash_loop_two_steps_under_the_deployment_is_the_same_problem_and_not_a_second_card() {
@@ -9649,9 +10241,10 @@ fn a_crash_loop_two_steps_under_the_deployment_is_the_same_problem_and_not_a_sec
         .chain([gave_up.clone()])
         .collect();
 
+    let name = owned_pod_name();
     let whole = analyze(&with_workloads(pods.clone(), chain.clone()));
     show(&whole);
-    only(&whole, "broken-owned-7bdb7645c8-vhwcp", "CrashLoopBackOff");
+    only(&whole, &name, "CrashLoopBackOff");
     assert!(
         whole.iter().all(|f| !f.title.contains("gave up")),
         "the pod under it already says why the rollout never finished: {:?}",
@@ -9672,11 +10265,7 @@ fn a_crash_loop_two_steps_under_the_deployment_is_the_same_problem_and_not_a_sec
     let no_link = analyze(&with_workloads(pods, vec![gave_up]));
     show(&no_link);
     only(&no_link, "broken-owned", "gave up");
-    only(
-        &no_link,
-        "broken-owned-7bdb7645c8-vhwcp",
-        "CrashLoopBackOff",
-    );
+    only(&no_link, &name, "CrashLoopBackOff");
 }
 
 /// **A card about a pod that is answering requests does not explain why a rollout has none**
@@ -9689,8 +10278,9 @@ fn a_crash_loop_two_steps_under_the_deployment_is_the_same_problem_and_not_a_sec
 /// hostPath card, rule 12's and rule 14's are the same shape.
 ///
 /// **The two directions are asserted against the same Deployment**, so the difference between
-/// them is the pod and nothing else. **What the capture trip owes: a serving pod and a dead
-/// rollout under one owner** — this cluster's serving pod has no controller, so the
+/// them is the pod and nothing else. **The 2026-08-13 trip did not bring it:** a rollout only
+/// times out while its pods are *failing*, so a serving pod under a dead rollout is a pair the
+/// cluster will not hold at once — this cluster's serving pod has no controller at all, and the
 /// `ownerReference` is the one field moved (NOTES § D53).
 #[test]
 fn a_pod_that_is_serving_does_not_explain_a_rollout_that_has_no_pods() {
@@ -9724,11 +10314,7 @@ fn a_pod_that_is_serving_does_not_explain_a_rollout_that_has_no_pods() {
         .collect();
     let with_failing = analyze(&with_workloads(failing, chain));
     show(&with_failing);
-    only(
-        &with_failing,
-        "broken-owned-7bdb7645c8-vhwcp",
-        "CrashLoopBackOff",
-    );
+    only(&with_failing, &owned_pod_name(), "CrashLoopBackOff");
     assert!(
         with_failing.iter().all(|f| !f.title.contains("gave up")),
         "a pod that is not ready is exactly the shortfall, so this stays one card: {:?}",
@@ -9746,9 +10332,10 @@ fn a_pod_that_is_serving_does_not_explain_a_rollout_that_has_no_pods() {
 /// elsewhere in this file. It is also the shape that matters most rather than the leftover — an
 /// unschedulable pod is the most common true explanation of a rollout that never finished.
 ///
-/// **What the capture trip owes: an unschedulable pod under a Deployment that timed out.** This
-/// cluster's Pending pod has no controller at all, so the `ownerReference` is the one field moved
-/// ([`adopted_by_broken_owned`], NOTES § D53).
+/// **The 2026-08-13 trip did not bring it:** `broken-pending` is refused by a `nodeSelector` no
+/// node carries, and `scripts/broken.yaml` puts that selector on a bare pod rather than under a
+/// Deployment — so this cluster's unschedulable pod has no controller at all, and the
+/// `ownerReference` is the one field moved ([`adopted_by_broken_owned`], NOTES § D53).
 ///
 /// The control is the same chain with no pod, which draws the card.
 #[test]
@@ -9796,8 +10383,9 @@ fn a_pod_no_node_would_take_explains_the_rollout_that_is_waiting_for_it() {
 /// stops matching, and one quota refusal draws two Criticals whose second card is headed with a
 /// name its own `$ kubectl` line does not mention.
 ///
-/// **What the capture trip owes: a Deployment emitted by an operator.** Nothing on this cluster
-/// has one, so the reference is added on a decoded copy (NOTES § D53).
+/// **The 2026-08-13 trip did not bring it, and no trip will:** a Deployment emitted by an operator
+/// means a third-party controller installed on the fixture cluster, which is a cluster change
+/// rather than a fixture. So the reference is added on a decoded copy (NOTES § D53).
 #[test]
 fn a_deployment_an_operator_owns_is_still_where_the_chain_stops() {
     let owned = deployment_but("broken-quota", |d| {
@@ -9929,8 +10517,10 @@ fn a_rollout_stuck_behind_maxunavailable_zero_still_reports_its_shortfall() {
 /// `spec.replicas: 1`, `updatedReplicas: 1`, `unavailableReplicas: 1`. Two are moved — the old
 /// pod's `readyReplicas`, and the `status.replicas: 2` that goes with a surge of one, because a
 /// capture where one pod exists and one is ready and one is unavailable is not a shape any cluster
-/// emits (NOTES § D40, § D53). **What the capture trip owes: a second revision of a one-replica
-/// Deployment that cannot start.**
+/// emits (NOTES § D40, § D53). **The 2026-08-13 trip did not bring it:** `broken-rollout` is the
+/// mid-rollout Deployment `scripts/broken.yaml` grows, and it runs two replicas — the one-replica
+/// variant, where the surge and the shortfall land on the same single pod, is a manifest the file
+/// does not have.
 ///
 /// **The mitigation, so this is not read as bigger than it is:** in the ordinary version of this
 /// shape the new pod has a card of its own — a bad image, a crash loop — and `explained` suppresses
@@ -10029,9 +10619,9 @@ fn a_rollout_of_one_replica_is_short_where_both_other_counters_read_whole() {
 /// **One field moved on a decoded copy.** `broken-owned` is captured as the whole shape but for the
 /// replica count — `unavailableReplicas: 1`, no `readyReplicas` at all — so only `spec.replicas`
 /// moves, plus the `Progressing` condition every W2 test has to write (NOTES § D40, § D53).
-/// **What the capture trip owes: `kubectl scale --replicas=0` against a Deployment whose deadline
-/// has passed, read before the controller has scaled its ReplicaSets down and written the status
-/// back.**
+/// **The 2026-08-13 trip did not bring it, and a trip cannot:** the shape exists only between the
+/// `scale` call and the controller writing the status back, so capturing it means winning a race
+/// against a controller — not something `just fixtures` can be asked to do repeatably.
 #[test]
 fn a_deployment_scaled_to_zero_is_not_short_of_the_pods_it_no_longer_wants() {
     let deployments = fixture("deployments");

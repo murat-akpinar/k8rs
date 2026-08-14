@@ -1195,10 +1195,10 @@ impl From<Deployment> for WorkloadSnapshot {
     }
 }
 
-/// **No test covers this impl, and none can yet**: `tests/fixtures/statefulsets.json` is an
-/// empty list, and synthesizing a whole StatefulSet would be the hand-written JSON CLAUDE.md
-/// forbids. The impl stays because `k8s.rs` watches the kind (NOTES § D28) and this file freezes
-/// at the end of Phase 3; the open Phase 2 capture trip owns closing the gap (NOTES § D40).
+/// **Covered from the 2026-08-13 capture on.** `tests/fixtures/statefulsets.json` was an empty
+/// list until the trip and this impl shipped with no test that could fail; `broken-sts` is
+/// partially ready, which is the one state that tells `spec.replicas` from
+/// `status.readyReplicas` (NOTES § D40).
 impl From<StatefulSet> for WorkloadSnapshot {
     fn from(s: StatefulSet) -> Self {
         let status = s.status.unwrap_or_default();
@@ -1350,7 +1350,8 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// **A pod that finished is not broken now**, so rules 1–8, 10, 13 and 14 skip `Succeeded` and
 /// `Failed`, whose restart counts and last exits belong to the **Waste** report (NOTES § D2,
 /// § D71). Rule 12 is deliberately outside the skip: a `Succeeded` pod that will not go away is
-/// still stuck. **No committed capture is in either state** — todo.md's capture-trip box.
+/// still stuck. **Both phases are captured** — `succeeded.json` and `failed.json`, each carrying
+/// the restart count and the failed previous run the skip has to swallow.
 pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
     let mut findings = Vec::new();
     for node in &snapshot.nodes {
@@ -1528,8 +1529,8 @@ fn container_fact(c: &ContainerSnapshot) -> String {
 /// answers *no* for every init container that ever succeeded (NOTES § D75). **A failed init
 /// container is deliberately not settled by this.**
 ///
-/// **No committed capture reaches the init branch with anything to suppress**; it is exercised on
-/// a decoded copy (NOTES § D53), and todo.md's capture-trip box owns closing it.
+/// **The init branch is captured**: `healthy-retry.json` is an init container that failed three
+/// times before it exited `0`, so both rules have something to suppress on a real object.
 fn doing_its_job(c: &ContainerSnapshot) -> bool {
     match (&c.state, c.role) {
         (ContainerState::Running { .. }, _) => c.ready,
@@ -1645,8 +1646,8 @@ fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
 /// be *proved*, which also drops a future-dated kill back into the firing branch — and this is
 /// **stricter than [`previous_run_failed`]'s suppressor, which needs no clock** (NOTES § D75).
 ///
-/// **No committed capture carries an OOM kill on a serving container** — todo.md's capture-trip
-/// box.
+/// **Captured**: `oomserving.json` is an OOM kill in `lastState` on a container that is running
+/// and ready again, and both directions of the recency clause are read off it at two moments.
 fn out_of_memory(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     let run = c.last_terminated.as_ref()?;
     if run.reason.as_deref() != Some("OOMKilled") {
@@ -1773,8 +1774,8 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 /// carries no *rate*, and REQUIREMENTS marks the two numbers *(suggestion)* (NOTES § D71). The age
 /// is when the counter last went up.
 ///
-/// **The CRITICAL branch and the `&& !serving` half have no capture behind them** — todo.md's
-/// capture-trip box.
+/// **Both halves are captured**: `restarts10.json` is past ten restarts and not serving, and
+/// `restarts10serving.json` is the same count on a container that is.
 fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     // An init container that has finished successfully is out of this rule's subject altogether,
     // not merely a milder case of it: its count is frozen for the life of the pod, and every
@@ -1832,8 +1833,11 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
 /// decided.**
 ///
 /// **When the kubelet kept the container's last words, they replace the advice**
-/// ([`Terminated::message`]). **Neither exit exemption has a capture behind it, and nor do two of
-/// the three actions** — todo.md's capture-trip box.
+/// ([`Terminated::message`]). **Both exit exemptions are captured** — `exit0.json` and
+/// `sigterm.json`, on containers that are *not* serving, so the exemption rather than
+/// [`doing_its_job`] is what silences them — and `notfound.json` reaches the `126`/`127` action
+/// with no termination message beside it, which `restarts10.json`'s bare `exit 1` and
+/// `init.json`'s are the general *read the logs* arm beside.
 fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     let run = c.last_terminated.as_ref()?;
     if run.exit_code == 0
@@ -1891,8 +1895,8 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
 /// **No condition, no finding.** **Regular containers only — the one rule of the seven that is**;
 /// what a not-ready sidecar does to the pod's own readiness is a rule of its own (invariant 13).
 ///
-/// **The state check and the `started` suppressor are unproven and mutually redundant on the
-/// committed captures** — todo.md's capture-trip box.
+/// **The `started` suppressor is captured**: `startup.json` declares a `startupProbe` that never
+/// passes, which is the only object that separates it from the [`ContainerState::Running`] gate.
 fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     if c.role != ContainerRole::Regular {
         return None;
@@ -1946,10 +1950,12 @@ fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 /// **The `kube-system` narrowing is a known limit**: a CSI driver in `longhorn-system` gets a card
 /// it has not earned (NOTES § D70).
 ///
-/// No age ([`Finding::timestamp`]). **One captured shape reaches the socket escalator** —
-/// `hostpath.json`'s `nosy` is handed `/run/containerd`. The named sockets themselves are planted
-/// into decoded copies and stay that way: the fixtures' cluster runs containerd, so no capture off
-/// it can carry a Docker or CRI-O socket at all (NOTES § D40, § D78).
+/// No age ([`Finding::timestamp`]). **Two captured shapes reach the socket escalator** —
+/// `hostpath.json`'s `nosy` is handed `/run/containerd`, and `socket.json` binds
+/// `/var/run/docker.sock` read-only, which is the `/var/run` fold and the exact match. The
+/// *sockets themselves* are still planted for the sweep over the whole list: the fixtures' cluster
+/// runs containerd, so no capture off it can carry a live Docker or CRI-O socket — `socket.json`'s
+/// is a `FileOrCreate` mount of the path and nothing is listening on it (NOTES § D40, § D78).
 fn escalated_host_path(pod: &PodSnapshot) -> Vec<Finding> {
     let node_agent = pod.id.namespace.as_deref() == Some(NODE_NAMESPACE)
         && (pod.mirror || pod.owner.kind == ObjectKind::DaemonSet);
@@ -2279,7 +2285,10 @@ fn stuck_at_the_starting_line(c: &ContainerSnapshot, bare: bool) -> Option<(&str
 /// exists only as an Event — re-emitted continuously for a wedged pod, so the `--event-ttl`
 /// argument does not reach this rule.
 ///
-/// **It ships with a negative side only** — todo.md's capture-trip box.
+/// **Its positive is captured**: `wedged.json` asks for a `configMap` that does not exist, so the
+/// kubelet never reaches the sandbox — `ContainerCreating` with `PodReadyToStartContainers: False`,
+/// which is the storage branch of the evidence line. The `True` and absent branches stay decoded
+/// copies: nothing on this cluster reaches the sandbox and then stops.
 fn placed_but_never_started(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
     let scheduled = pod.scheduled.as_ref()?;
     if scheduled.status != "True" {
@@ -2405,7 +2414,9 @@ fn placed_but_never_started(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
 /// pointed one component away, and narrowing on `pod.node.is_none()` would trade it for silence on
 /// a broken pod. The node half is N1's.
 ///
-/// **Its positive side has no capture** — todo.md's capture-trip box.
+/// **Its positive is captured**: `unjudged.json` names `schedulerName: does-not-exist`, so the API
+/// server wrote no `PodScheduled` condition at all. The empty-array framing of the same absence
+/// stays a decoded copy — no server produces it.
 fn nothing_has_looked_at_it(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
     if pod.phase.as_deref() != Some("Pending") || pod.scheduled.is_some() {
         return None;
