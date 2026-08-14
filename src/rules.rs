@@ -20,8 +20,9 @@ use k8s_openapi::api::core::v1::{
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
-use k8s_openapi::jiff::SignedDuration;
+use k8s_openapi::jiff::{SignedDuration, Timestamp};
 use std::collections::BTreeMap;
+use x509_parser::pem::parse_x509_pem;
 
 /// How bad it is. **Declaration order is severity order** — the derived `Ord` sorts the
 /// Alerts list and `--once`, and a test asserts it (NOTES § D35).
@@ -31,9 +32,10 @@ pub enum Severity {
     Critical,
     /// Wrong now, broken soon. It still needs an answer, just not this minute.
     Warn,
-    /// Worth knowing; nothing here is broken. No rule reaching the Alerts list produces one
-    /// (NOTES § D2) — but a rule can live in this file and still be `Info` (N4's kubelet
-    /// skew → the Versions report). Both files share this scale.
+    /// Worth knowing; nothing here is broken. **Nothing drawn in the Alerts list is an `Info`**
+    /// (NOTES § D2) — a rule can live in this file and still be `Info` (N4's kubelet skew → the
+    /// Versions report), and C1's expiring band is one [`analyze`] itself returns for a report to
+    /// read (NOTES § D87). Both files share this scale.
     Info,
 }
 
@@ -1333,13 +1335,14 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and the only
 /// entry point `k8s.rs` and the `--once` printer are given.
 ///
-/// Rules 1–8, 10 and 12–14, the node rules that draw a card — N1, N2 and N3 — and the W-series,
-/// W1 and W2. C1 is a later box of this phase and is deliberately not wired here: a half-built rule
-/// is worse than an absent one, because the screen looks complete either way. **N4 and N5 are not
-/// missing, they are `Info`**: they are the Versions and Capacity reports' input and no `Info`
-/// finding reaches the Alerts list, so `analysis.rs` calls them and this does not (NOTES § D2).
-/// **N6 is not here either, and is not missing**: it is the node half of rule 10's card, which is
-/// why [`no_node_accepted_it`] takes the nodes.
+/// Rules 1–8, 10 and 12–14, the node rules that draw a card — N1, N2 and N3 — the W-series, W1 and
+/// W2, and **C1, whose two bands leave here through different doors** (NOTES § D87): the expiring
+/// half is `Info` and is the Certificates report's input, the expired half is `Critical` and is an
+/// Alerts card, and C1 is called from here — where N4 and N5 are not — because that second half has
+/// to be. **N4 and N5 are not missing, they are `Info`**: they are the Versions and Capacity
+/// reports' input and have no second band that is a card, so `analysis.rs` calls them and this does
+/// not (NOTES § D2). **N6 is not here either, and is not missing**: it is the node half of
+/// rule 10's card, which is why [`no_node_accepted_it`] takes the nodes.
 ///
 /// **Rules 1–6 read every container the pod has**, in either status array and whichever of
 /// [`ContainerRole`] it is (NOTES § D27, § D75). **Rule 7 is the one exception and reads regular
@@ -1354,6 +1357,9 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// the restart count and the failed previous run the skip has to swallow.
 pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
     let mut findings = Vec::new();
+    // First, because it is the one finding that explains why every other one might be missing: a
+    // credential that has run out reaches nothing to iterate.
+    findings.extend(kubeconfig_certificate_expiring(snapshot));
     for node in &snapshot.nodes {
         findings.extend(node_stopped_being_ready(snapshot, node));
         findings.extend(cordoned_with_work_left_on_it(snapshot, node));
@@ -3789,6 +3795,157 @@ fn rollout_gave_up(w: &WorkloadSnapshot, explained: &[&ObjectId]) -> Option<Find
     })
 }
 // --- THE WORKLOAD RULES END ---
+
+// --- THE CERTIFICATE RULES START ---
+//
+// The C-series of NOTES § Certificate rules. **C1 is the only one that needs no cluster at all** —
+// its whole input is the kubeconfig, which is why it is the one rule that still answers when every
+// other one has nothing to read.
+//
+// **It is also the one finding with no API object behind it**, so its identity is spelled out
+// rather than decoded: `Other("kubeconfig")`, no namespace, the context name, and the only `None`
+// uid in the product (NOTES § D39, § D51).
+//
+// **Nothing off the certificate reaches a string here except a moment this file formatted
+// itself.** The subject, the issuer and the extensions are never read, so the only untrusted text
+// on this card is the context name — which arrives from the kubeconfig through `k8s.rs` and is
+// stripped there with every other name (invariant 9, Phase 5).
+
+/// **How close to running out the kubeconfig's client certificate has to be before C1 says
+/// so** — thirty days (NOTES § Certificate rules), which is a working notice period rather than a
+/// tuned number: long enough to ask a human who is on holiday, short enough not to sit on the
+/// screen for a quarter.
+///
+/// Spelled in hours because that is what a `const SignedDuration` counts in.
+const CERT_EXPIRY_WARN: SignedDuration = SignedDuration::from_hours(30 * 24);
+
+/// **When this certificate stops being accepted, or nothing at all** — the whole of C1's parsing,
+/// and every way it can fail answers the same way (invariant 5: no `Result`, and a panic in here
+/// takes the tool down at startup).
+///
+/// Three of those ways are ordinary — the field is not a certificate, it is a truncated one, the
+/// PEM is something else wearing a certificate's file name — and **the fourth is a decision**:
+/// RFC 5280 §4.1.2.5 spells *"no well-defined expiry"* as `99991231235959Z`, which is past the end
+/// of jiff's `Timestamp` range, so the conversion answers `Err`. **A certificate that never expires
+/// has no expiry to warn about, so it produces no finding** (NOTES § D56).
+///
+/// **The label is checked rather than trusted to fail later.** A `PRIVATE KEY` block would not
+/// parse as a certificate anyway, but *would not parse* is an accident of the parser, where
+/// **this file reads certificates and nothing else** is the property invariant 8 wants — and the
+/// file that carries the certificate is the file the key sits beside.
+///
+/// **The bytes are assumed to be bounded already.** This reads whatever slice it is handed;
+/// refusing a kubeconfig big enough to matter belongs to the read, which is `k8s.rs`'s in Phase 5
+/// (CLAUDE.md § Security gate — *sizes are bounded*).
+fn expires_at(pem: &[u8]) -> Option<Timestamp> {
+    // Only the first block, which is the leaf: a kubeconfig that carries a chain writes the
+    // client's own certificate first, and it is the one whose expiry locks the user out.
+    let (_, block) = parse_x509_pem(pem).ok()?;
+    if block.label != "CERTIFICATE" {
+        return None;
+    }
+    let certificate = block.parse_x509().ok()?;
+    Timestamp::from_second(certificate.validity().not_after.timestamp()).ok()
+}
+
+/// **Whole days, in the words this card prints** — `22 days`, `1 day`, and **`less than a day`
+/// where a truncated `0 days` would be both wrong and the most urgent thing C1 ever says**.
+///
+/// The sign is dropped: the caller's sentence carries the direction — *expires in* one way,
+/// *expired … ago* the other — and the same length has to read correctly in both.
+fn in_days(span: SignedDuration) -> String {
+    let days = span.as_hours().abs() / 24;
+    if days == 0 {
+        "less than a day".to_string()
+    } else {
+        counted(days, "day")
+    }
+}
+
+/// **C1 — the login on this machine is running out, or has run out.** The kubeconfig's client
+/// certificate, reported from [`CERT_EXPIRY_WARN`] onward and as a failure once it is past
+/// (NOTES § Certificate rules, § D51).
+///
+/// **The one rule in this file whose severity decides which *screen* the card appears on rather
+/// than only how loud it is** (NOTES § D87). [`Severity::Info`] already means *this finding lives
+/// in a report, not in Alerts* — N4 and N5 use it exactly that way — so the expiring band takes
+/// that door to the Certificates report D2 sent it to, and only the expired band reaches Alerts,
+/// as `Critical`, because being locked out this second is broken-now by D2's own dividing line.
+/// Collapsing the two into one band is the change D87 forbids.
+///
+/// **The one card whose subject is the reader's own laptop**, and the evidence line says so:
+/// nothing in the cluster is broken, and no amount of looking at the cluster will show this. It is
+/// also **the one card no `kubectl` command teaches** — `kubectl config view` prints the
+/// certificate's *path*, never its dates, and `kubeadm certs check-expiration` reads files on a
+/// control-plane node's disk that a laptop does not have (NOTES § Certificate rules). So
+/// `kubectl_cmd` is `None` in its documented sense — *no such command exists* — rather than as an
+/// omission (invariant 4, [`Finding::kubectl_cmd`]).
+///
+/// **`timestamp` is `None`, and `notAfter` is the field it is not.** The field is the moment the
+/// event on the card happened; a certificate's expiry is a deadline, future-dated by nature, and
+/// [`age`] refuses it on purpose (NOTES § D69). The past-dated half is refused for the same
+/// reason it is refused on rule 8: an expired credential is a standing property of a file, and the
+/// two bands of one rule may not draw a right edge on one card and a blank on the other.
+///
+/// **`None` with no current context, which is a real state rather than a defensive one**
+/// (NOTES § D51): the name on this card is the one the user recognises, and there is no second
+/// name to fall back to that would not be invented. A kubeconfig with no current context is also
+/// one k8rs cannot connect with at all, so the screen the reader is on says so already.
+///
+/// **A certificate that is not valid *yet* is deliberately not modelled** — that is a third state
+/// with its own sentence, no fixture reaches it, and `scripts/certs-test.sh` asserts the committed
+/// three are all past their `notBefore` so it cannot arrive by accident.
+fn kubeconfig_certificate_expiring(snapshot: &ClusterSnapshot) -> Option<Finding> {
+    let context = snapshot.context.as_deref()?;
+    let expires_at = expires_at(snapshot.client_certificate.as_deref()?)?;
+    let left = expires_at.duration_since(snapshot.now.0);
+    if left > CERT_EXPIRY_WARN {
+        return None;
+    }
+    // RFC 5280 §4.1.2.5: the certificate is valid *through* `notAfter`, so the deadline itself is
+    // still inside the window and only what is past it has run out.
+    let expired = left < SignedDuration::ZERO;
+    let id = ObjectId {
+        kind: ObjectKind::Other("kubeconfig".to_string()),
+        namespace: None,
+        name: context.to_string(),
+        uid: None,
+    };
+    Some(Finding {
+        severity: if expired {
+            Severity::Critical
+        } else {
+            Severity::Info
+        },
+        title: if expired {
+            format!(
+                "Your kubeconfig certificate expired {} ago — the cluster is refusing you",
+                in_days(left)
+            )
+        } else {
+            format!("Your kubeconfig certificate expires in {}", in_days(left))
+        },
+        evidence: format!(
+            "{} until {expires_at}{FACTS}this is the file on your own machine that proves who you \
+             are — nothing in the cluster is broken",
+            // Tense, because *valid until 2026-08-09* on a red card reads as though it still is.
+            if expired { "was valid" } else { "valid" }
+        ),
+        action: if expired {
+            "ask whoever gave you access for a new kubeconfig — k8rs cannot renew it, and kubectl \
+             has stopped working for you too"
+        } else {
+            "ask whoever gave you access for a new kubeconfig before that date — k8rs cannot renew \
+             it, and after it kubectl stops working for you too"
+        }
+        .to_string(),
+        kubectl_cmd: None,
+        owner: id.clone(),
+        object: id,
+        timestamp: None,
+    })
+}
+// --- THE CERTIFICATE RULES END ---
 
 #[cfg(test)]
 #[path = "rules_tests.rs"]
