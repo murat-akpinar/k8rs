@@ -5643,6 +5643,49 @@ another rule's action or another agent's file. A found defect is folded in when
 fixing it is smaller than describing it; it gets a box when closing it would need
 a decision the current box has not made.
 
+### D91 — the tests split, and the product file does not (2026-08-15)
+
+The user asked whether the `.rs` files can be made modular. Measured before
+answering, because the file that felt biggest is not the one that is:
+
+| file | lines | of which code | doc/comment |
+|---|---|---|---|
+| `src/rules.rs` | 4 339 | **2 097** | 2 100 (48%) |
+| `src/rules_tests.rs` | 13 105 | **9 663** | 2 863 |
+
+**Half of `rules.rs` is the documentation this repo requires** — every rule
+citing the decision that shaped it — so the product file is 2 000 lines of code
+across 79 functions, which is an ordinary Rust module. The test file is three
+times its size and is what every agent turn pages through.
+
+**Ruling: split `src/rules_tests.rs` by rule family, leave the product file
+whole.** `rules.rs` keeps its single `#[cfg(test)] #[path = …] mod tests;`
+declaration; `rules_tests.rs` becomes a few `#[path]` lines, one module per
+`// --- … START ---` region of `rules.rs` — snapshot, pod, node, workload,
+certificate — so the two trees keep the same shape and a reader who knows where
+a rule lives knows where its tests live. **Invariant 11's eight flat product
+files stand**; what deviates is its test clause, which named exactly one
+`<name>_tests.rs` file, and that deviation is this entry.
+
+**Why the product file stays whole**, and it is not conservatism: every defect
+this phase lost days to was two rules reading one container and disagreeing —
+[D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14),
+[D88](#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14),
+[D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15) —
+and the fix each time was **one shared helper in one file**. `exit_meaning`,
+`ending`, `describe`, `finished_action` are single readings that two rules must
+not diverge on; a module boundary is where the second copy grows back.
+
+**Why at Phase 3 close and not now:** eight boxes are open against `rules.rs`
+and its tests. Moving the tests under them lands every open box in a file that
+has just moved, which is the forward-only rule read backwards.
+
+**What it does not cost:** `scripts/test-guard.py` and `scripts/write-guard.py`
+both `rglob("*.rs")` over `src` / `tests` / `examples` / `benches`, so a
+subdirectory is walked with no edit to either — checked, not assumed. The
+177 declared / 177 listed count is the box's own proof that nothing was hidden
+by the move.
+
 ## Decisions made
 
 ### Product

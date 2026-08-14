@@ -1598,6 +1598,28 @@ this plan is delivery mechanism for what this phase produces.
       invariant 9 broken for the length of two phases, and "the fixtures are
       ours" is an argument about today's inputs, not about the code
 
+- [ ] **Split `rules_tests.rs` into one file per rule family — at phase close,
+      after the last rule box and not before it.** 13 105 lines against the
+      product file's 4 339, of which only 2 097 are code: **the test file is the
+      one that actually grew**, and it is what every agent turn pages through.
+      `src/rules_tests.rs` keeps `rules.rs`'s single
+      `#[cfg(test)] #[path = …] mod tests;` declaration and becomes a few lines
+      of `#[path = "rules_tests/<family>.rs"] mod <family>;`, one per marked
+      region of `rules.rs` — snapshot · pod · node · workload · certificate.
+      **Product code does not move**: invariant 11's eight flat files stand, and
+      the seams are `rules.rs`'s own `// --- … START ---` markers, so the two
+      trees keep the same shape. **The guards survive it as written** —
+      `test-guard.py` and `write-guard.py` both `rglob` over `src`, so a
+      subdirectory is walked without an edit; the count must still read
+      177 declared / 177 listed, and that is the box's own proof. **Why not the
+      product file too:** every defect this phase has cost days for was two
+      rules reading one container and disagreeing, and the fix each time was one
+      shared helper in one file — a module boundary makes a second copy easier
+      to grow, which is the thing being defended against. **Why at close:** eight
+      boxes are open against `rules.rs` and its tests; moving the tests under
+      them lands every open box in a file that just moved. The user ruled on
+      2026-08-15 ([NOTES § D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15))
+
 **🔒 Security gate:** no finding text may quote an env value or a Secret —
 findings name *fields*, not payloads. The certificate parser is fed malformed
 and truncated PEM in a test and must return "no finding", never panic:
