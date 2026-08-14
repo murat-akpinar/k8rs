@@ -78,6 +78,7 @@
 - *(docs)* Turn the twelve prior-art gaps into boxes ([83306f4](https://github.com/murat-akpinar/k8rs/commit/83306f46fafa5fcef05734a66510a21ad6656580))
 - *(docs)* The tests split by rule family at phase close, the product file does not ([f644828](https://github.com/murat-akpinar/k8rs/commit/f644828c09675c92a973c4812464e1711e7829e5))
 - *(docs)* Each phase names the prior-art classes it can ship, and the operator review checks them ([5ced22d](https://github.com/murat-akpinar/k8rs/commit/5ced22d0785a292468099efdeff9a324f16d0d15))
+- *(docs)* The cluster splits by what a run produces, not by who runs it ([3de4b81](https://github.com/murat-akpinar/k8rs/commit/3de4b81903e778bf0dc1db9899feeb759ba5e483)) — k8s-admin's brief said "prefer checking" against the kind cluster while CLAUDE.md said the agents do not have one. The reviewer followed its brief; the contradiction was never asked. Rule by what the rule protected — fabrication, not access:
 
 ### 🧪 Testing
 
