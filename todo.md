@@ -218,13 +218,23 @@ Goal: real cluster JSON, safe to commit, reproducible with one command.
 Wider than the old plan — the rule set now covers nodes and certificates, and
 `analysis.rs` needs a whole-cluster snapshot, not a handful of pods.
 
-> **This phase is OPEN and Phase 3 is running ahead of it — deliberately, and
-> at a cost that is now measured.** Its four remaining boxes are all one thing:
-> the kind cluster trip. Deferring it was the user's call on 2026-08-12 and the
-> reasoning is [NOTES § D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12).
-> **Phase 3 cannot close before Phase 2 does** — twelve of its tests currently
-> stand on hand-set fields waiting for an object this trip brings back, and a
-> phase does not close with a known gap in it.
+> **This phase is CLOSED (2026-08-14), and it ran open underneath Phase 3 for
+> two days on purpose.** Deferring the kind cluster trip was the user's call on
+> 2026-08-12 and the reasoning is
+> [NOTES § D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12);
+> its own boxes closed on 2026-08-13 with the first trip.
+> **What kept it quotable after that was the debt it left in Phase 3**: twelve
+> tests stood on hand-set fields waiting for objects no capture had. The second
+> trip brought them back on 2026-08-14 and all twelve were retired onto real
+> JSON, so the sentence *"Phase 3 cannot close before Phase 2 does"* has been
+> satisfied rather than deleted. **What the deferral actually cost is now
+> measured and is worth reading before deferring anything again**: the trip
+> found three defects no green build could see — a rule that contradicts itself
+> on a clean exit ([D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)),
+> a capture host that silently rewrites one field
+> ([D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)),
+> and a pinned-clock guard walking a third of what it named. Every one of those
+> had been shipping for two days.
 
 - [x] Fixture sanitization — [`scripts/sanitize.jq`](scripts/sanitize.jq),
       **landed before any fixture file** (REQUIREMENTS G-5; a leak never leaves
