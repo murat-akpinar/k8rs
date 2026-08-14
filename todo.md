@@ -998,7 +998,7 @@ this plan is delivery mechanism for what this phase produces.
       covers kubelet observation, watch latency and skew; none of those scales
       with a grace the deadline already spent
       ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
-- [ ] **A capture trip for the branches no committed fixture can reach — you
+- [x] **A capture trip for the branches no committed fixture can reach — you
       run this one, not an agent** (`just cluster-up` · edit
       `scripts/broken.yaml` · `just fixtures`). **Seven branches shipped with
       no test that can fail** — the mutation sweep leaves them green because no
@@ -1147,6 +1147,42 @@ this plan is delivery mechanism for what this phase produces.
       evidence is **347** characters, not ~250, and the longest unbreakable
       token is 58 columns — wide enough that wrapping alone cannot fit it and
       only a character break can
+      **The trip ran on 2026-08-14 and this box closes with it: 48 fixtures
+      from `kindest/node:v1.36.1`, `verify` 37/37, twelve of the thirteen shapes
+      on the first attempt.** Four things it settled that reading could not
+      ([NOTES § D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14),
+      [§ D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)):
+      **the capture host must have memory headroom** — a starved one reports
+      every memory-limit kill as `reason: "Error"`, which is the word D71 uses
+      for the *opposite* rule, and `cluster.sh verify` refusing on the wrong
+      host before a byte is written is what saved rule 2's positive fixture.
+      **`broken-oomserving` shipped with `count=1`** on a `dd`, and a short read
+      from `/dev/zero` satisfies a count without allocating, so the container
+      exited 0 and the shape never appeared; `exec tail /dev/zero` has no
+      newline to stop at and no short read to end on. **`CAPTURED_PODS` claimed
+      "every pod capture in the repository" and held 12 of 31**, so the pin
+      guard walked a third of what it named and nineteen captures — every new
+      one among them — had their timestamps compared against `now` by nothing.
+      And **rule 1 draws a card that argues with itself** on the two objects the
+      trip brought back for rule 6, which is D85's own box below.
+      **Twelve syntheses retired onto real objects**, three of them branches
+      that had no test at all and could be deleted with the suite still green:
+      rule 6's `exit 0` and `143` exemptions, and rule 7's `started` suppressor.
+      The pin moved to `2026-08-14T00:00:00Z` in five places, one of which
+      (`docs/maps.md`) nothing had been guarding
+- [ ] **Rule 1 must read how the previous run ended** — it draws *"Container
+      keeps crashing"* over `exit 0` on a batch job that finished, and a
+      **CRITICAL** *"keeps crashing"* whose own evidence line reads *"an
+      ordinary shutdown and not an error"* over `exit 143`. Rule 6 has exempted
+      both codes since it was written; rule 1 never looks, and `exit_meaning`
+      has no row for `0`. Owed: the title true on a clean exit, the `0` row, an
+      action that stops pointing at logs holding no answer, and both captured
+      objects asserted — `exit0.json` and `sigterm.json` exist now, so the test
+      can fail. **A box rather than a footnote, and a plan change recorded
+      rather than applied silently**
+      ([NOTES § D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)):
+      it is rule *logic*, so the plain-language pass below is the wrong home for
+      it, and the capture trip above is not unfinished for having found it
 - [ ] Plain-language pass over every string a user will read — the jargon test
       is "would someone in their first month understand this sentence?"
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test

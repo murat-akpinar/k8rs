@@ -2717,7 +2717,19 @@ in Rust, not code.
 > mechanism above is unchanged, only the instant. All four places moved
 > together. The certificates were **not** regenerated: their `notBefore` and
 > `notAfter` bytes are untouched, so the day counts shifted instead — 23 / 364
-> / −4 where this entry says 24 / 365 / −3. Each fixture still exercises the
+> / −4 where this entry says 24 / 365 / −3, **and 22 / 363 / −5 since the
+> 2026-08-14 capture moved the pin a second time, to `2026-08-14T00:00:00Z`.**
+> That second move is the mechanism working rather than a surprise, and it cost
+> five places rather than four: this file, `certs-test.sh`, `make-certs.sh`'s
+> header, `src/rules_tests.rs` and **`docs/maps.md`**, which had gone stale
+> unnoticed because nothing compares its three numbers to the script's — and
+> **that stays unguarded, deliberately.** A guard would mean `check-docs.py`
+> parsing a bash array to compare three integers in one table row that moves
+> once per capture trip, and the row now tells its reader to check it against
+> `certs-test.sh` rather than trust it. The pin-drift that *is* guarded is the
+> one that silently changes what a test means; a stale doc row is read by a
+> human who can be told where the truth lives. Each
+> fixture still exercises the
 > case it exists for (inside C1's 30-day window, far outside it, already
 > expired), and regenerating would have written fresh key material into the
 > repo to buy nothing. One relationship changed quietly with it and is worth
@@ -3265,7 +3277,8 @@ must. `screens/alerts.md`'s cordon card is `tui-designer`'s round.
 
 **The certificates were not regenerated.** Their `notBefore`/`notAfter` bytes
 are committed evidence; moving `now` past them changes only what the arithmetic
-says — 23 / 364 / −4 where it used to say 24 / 365 / −3. Each fixture still
+says — 23 / 364 / −4 where it used to say 24 / 365 / −3 (and 22 / 363 / −5
+since the 2026-08-14 capture, [D57](#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)). Each fixture still
 exercises the case it exists for, and regeneration would have written fresh key
 material into the repo to buy nothing. One relationship ended quietly with it:
 `now` used to equal the certificates' `notBefore` exactly and now sits a day
@@ -4477,8 +4490,10 @@ file up and still reported 97 declared, 97 listed.
 
 **A second drift fell out of the same look, older and unrelated to the move.**
 `docs/maps.md` said `certs-test.sh` asserts "24 / 365 / −3 days at the pinned
-`now`" — those are the certificates' *lengths*, and `now` sits one day into each,
-so the guard asserts 23 / 364 / −4 days **left**. Wrong since the row was
+`now`" — those are the certificates' *lengths*, and `now` sat one day into each,
+so the guard asserted 23 / 364 / −4 days **left** (22 / 363 / −5 since the
+2026-08-14 capture moved the pin again — and that row went stale a *second*
+time, which is the same drift wearing the same coat). Wrong since the row was
 written, and it survived because both numbers are plausible and neither is
 compared to anything. Fixed to say both, since the pair is what makes it
 checkable.
@@ -4959,6 +4974,67 @@ shipped with `count=1` while the command validated here had no `count`: the two
 differed by exactly the token that mattered, and `cluster.sh verify` was what
 caught it. The manifest now uses `exec tail /dev/zero`, which has no newline to
 stop at and therefore no short read to end on.
+
+### D85 — rule 1 contradicts itself on a clean exit, and it gets its own box (2026-08-14)
+
+The capture trip's third finding, and the one that justifies the trip on its
+own: **two of the twelve new fixtures make rule 1 print a card that argues with
+itself.** Neither object could exist in this repository before the trip, so no
+test could fail and no review could see it — the rule shipped, was reviewed
+twice, and was wrong the whole time.
+
+```
+● default/broken-exit0 · 29 min ago
+  Container keeps crashing, and each restart waits longer (CrashLoopBackOff)
+  container batch · 16 restarts · the last run lasted 2s · exit 0
+  → read the previous run's logs — that is where it says why it exits
+
+● default/broken-sigterm · 28 min ago
+  Container keeps crashing, and each restart waits longer (CrashLoopBackOff)
+  container app · 27 restarts · the last run lasted 4s · exit 143 (stopped with
+  SIGTERM, which is an ordinary shutdown and not an error)
+```
+
+The first is a batch job that finishes cleanly under `restartPolicy: Always` —
+the commonest way a beginner mis-writes a Job, and the kubelet does apply
+`CrashLoopBackOff` to it, so the *state* is real. What is false is the sentence:
+nothing crashed. The action is worse than the title, because it sends the reader
+to logs that will say nothing is wrong, which is how somebody spends twenty
+minutes proving their own tool wrong.
+
+The second is the same defect with the contradiction fully on the page: a
+**CRITICAL** card headed *"keeps crashing"* whose own evidence line says the exit
+was *"an ordinary shutdown and not an error"*. Both halves are generated by
+k8rs, one line apart.
+
+**The knowledge already exists in the file and is not shared.** `previous_run_failed`
+(rule 6) has exempted `exit 0` and `143` since it was written — that is the
+clause the trip captured `exit0.json` and `sigterm.json` to prove. `crash_looping`
+(rule 1) reads the waiting reason and never looks at how the last run ended, and
+`exit_meaning` has no row for `0` at all, so it prints the code bare. Two rules
+looking at one container disagree about whether anything is wrong.
+
+**This is not the plain-language pass, and filing it there would mis-place it.**
+The wording is a symptom; the fix is that rule 1 must consult how the previous
+run ended, which is rule *logic* and needs its own tests, its own red-and-green
+and an operator review. Nor is it the capture trip's box: that box's contract is
+to bring the objects back, and it did — finding this is the trip paying off, not
+the trip being unfinished.
+
+**So the plan gets a box rather than a footnote**, inserted in Phase 3 ahead of
+the plain-language pass ([CLAUDE.md](CLAUDE.md): if a step turns out to need
+something the order does not give it, fix the order and record it). What it owes:
+rule 1 silent or re-worded on a clean exit, `exit_meaning` given its `0` row, the
+action stopped from pointing at logs that hold no answer, and both captured
+objects asserted — they exist now, so the test can fail.
+
+**Two smaller relatives found in the same read**, for whoever takes the box:
+`broken-startup`'s rule 6 card offers *"read the logs … to find the
+application's own error"* over an exit 137 SIGKILL, where the kill came from
+outside the application; and rule 1's own `restarts` count and `lasted` line
+remain correct throughout, so the card is not wholly wrong — only its first
+sentence and its last are, which is the shape that makes a reader distrust the
+parts that were right.
 
 ## Decisions made
 

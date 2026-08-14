@@ -79,7 +79,7 @@ is missing is a loud error, never a skipped step.
 | [cluster.sh](../scripts/cluster.sh) | `up` / `break` / `verify` / `down` for the kind test cluster, node image pinned |
 | [broken.yaml](../scripts/broken.yaml) · [healthy.yaml](../scripts/healthy.yaml) | The manifests every rule's positive and negative fixture comes from |
 | [verify-test.sh](../scripts/verify-test.sh) | Proves `cluster.sh verify`'s predicates offline — a predicate that matches the wrong state is a fixture that cannot fail |
-| [make-certs.sh](../scripts/make-certs.sh) · [certs-test.sh](../scripts/certs-test.sh) | C1's certificate fixtures with pinned dates, and the assertion that they still have **23 / 364 / −4** days *left* at the pinned `now` — the certificates are 24 / 365 / −3 days long, and `now` sits one day into each |
+| [make-certs.sh](../scripts/make-certs.sh) · [certs-test.sh](../scripts/certs-test.sh) | C1's certificate fixtures with pinned dates, and the assertion that they still have **22 / 363 / −5** days *left* at the pinned `now` — the certificates are 24 / 365 / −3 days long, and `now` sits two days into each. Both numbers move whenever a capture moves the pin, and nothing compares this row to the script: check it against `certs-test.sh`'s `pinned[]` rather than trusting it |
 | [make-csr.sh](../scripts/make-csr.sh) | The CertificateSigningRequest fixture |
 
 ## `tests/` — the data
