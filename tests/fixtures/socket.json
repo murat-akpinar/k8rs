@@ -3,37 +3,37 @@
   "kind": "Pod",
   "metadata": {
     "creationTimestamp": "2026-08-13T22:32:57Z",
-    "deletionGracePeriodSeconds": 5,
-    "deletionTimestamp": "2026-08-13T23:35:30Z",
-    "finalizers": [
-      "k8rs.test/never-removed"
-    ],
-    "generation": 2,
+    "generation": 1,
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-stuck",
+    "name": "broken-socket",
     "namespace": "default",
-    "resourceVersion": "10202",
-    "uid": "b27cc18d-ffdc-4e39-ae9b-ab249ada885e"
+    "resourceVersion": "1003",
+    "uid": "84adbbfd-5d82-4a8e-80d1-6b9a32009aa1"
   },
   "spec": {
     "containers": [
       {
         "command": [
           "sleep",
-          "3600"
+          "86400"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
-        "name": "app",
+        "name": "watcher",
         "resources": {},
         "terminationMessagePath": "/dev/termination-log",
         "terminationMessagePolicy": "File",
         "volumeMounts": [
           {
+            "mountPath": "/var/run/docker.sock",
+            "name": "runtime",
+            "readOnly": true
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-2b28f",
             "readOnly": true
           }
         ]
@@ -41,7 +41,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -49,7 +49,7 @@
     "securityContext": {},
     "serviceAccount": "default",
     "serviceAccountName": "default",
-    "terminationGracePeriodSeconds": 5,
+    "terminationGracePeriodSeconds": 30,
     "tolerations": [
       {
         "effect": "NoExecute",
@@ -66,7 +66,14 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-bdgxh",
+        "hostPath": {
+          "path": "/var/run/docker.sock",
+          "type": "FileOrCreate"
+        },
+        "name": "runtime"
+      },
+      {
+        "name": "kube-api-access-2b28f",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -110,61 +117,53 @@
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:58Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
+        "lastTransitionTime": "2026-08-13T22:33:05Z",
+        "observedGeneration": 1,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
+        "lastTransitionTime": "2026-08-13T22:33:05Z",
+        "observedGeneration": 1,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
       }
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://15d96afc6d64508bb667180690507adccd537c73ba11bc5bb8269eedd85af454",
+        "containerID": "containerd://f160dfd1c930c5eab4d5217237855e2b9277b18ebaaefb1ff068f2d80e17aaef",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
-        "lastState": {
-          "terminated": {
-            "containerID": "containerd://d3e8762400d9b6cff5f61a29dddea7241fc2193e6d2d620c304d9165c7301b92",
-            "exitCode": 0,
-            "finishedAt": "2026-08-13T23:33:07Z",
-            "reason": "Completed",
-            "startedAt": "2026-08-13T22:33:07Z"
-          }
-        },
-        "name": "app",
+        "lastState": {},
+        "name": "watcher",
         "ready": true,
         "resources": {},
-        "restartCount": 1,
+        "restartCount": 0,
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-13T23:33:08Z"
+            "startedAt": "2026-08-13T22:33:05Z"
           }
         },
         "user": {
@@ -179,8 +178,14 @@
         },
         "volumeMounts": [
           {
+            "mountPath": "/var/run/docker.sock",
+            "name": "runtime",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-2b28f",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -193,7 +198,7 @@
         "ip": "REDACTED-IP"
       }
     ],
-    "observedGeneration": 2,
+    "observedGeneration": 1,
     "phase": "Running",
     "podIP": "REDACTED-IP",
     "podIPs": [

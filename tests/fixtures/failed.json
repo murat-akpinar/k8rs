@@ -3,26 +3,23 @@
   "kind": "Pod",
   "metadata": {
     "creationTimestamp": "2026-08-13T22:32:57Z",
-    "deletionGracePeriodSeconds": 5,
-    "deletionTimestamp": "2026-08-13T23:35:30Z",
-    "finalizers": [
-      "k8rs.test/never-removed"
-    ],
-    "generation": 2,
+    "generation": 1,
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-stuck",
+    "name": "broken-failed",
     "namespace": "default",
-    "resourceVersion": "10202",
-    "uid": "b27cc18d-ffdc-4e39-ae9b-ab249ada885e"
+    "resourceVersion": "2114",
+    "uid": "ffd6c8f7-0566-4668-b2f2-4dff648eb83e"
   },
   "spec": {
+    "activeDeadlineSeconds": 120,
     "containers": [
       {
         "command": [
-          "sleep",
-          "3600"
+          "sh",
+          "-c",
+          "echo cannot connect to the database >&2; exit 1"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
@@ -33,7 +30,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-688w4",
             "readOnly": true
           }
         ]
@@ -44,12 +41,12 @@
     "nodeName": "k8rs-worker3",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
-    "restartPolicy": "Always",
+    "restartPolicy": "OnFailure",
     "schedulerName": "default-scheduler",
     "securityContext": {},
     "serviceAccount": "default",
     "serviceAccountName": "default",
-    "terminationGracePeriodSeconds": 5,
+    "terminationGracePeriodSeconds": 30,
     "tolerations": [
       {
         "effect": "NoExecute",
@@ -66,7 +63,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-bdgxh",
+        "name": "kube-api-access-688w4",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -109,62 +106,68 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:58Z",
-        "observedGeneration": 2,
-        "status": "True",
+        "lastTransitionTime": "2026-08-13T22:34:57Z",
+        "observedGeneration": 1,
+        "status": "False",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
-        "status": "True",
+        "lastTransitionTime": "2026-08-13T22:34:52Z",
+        "observedGeneration": 1,
+        "reason": "PodFailed",
+        "status": "False",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
-        "status": "True",
+        "lastTransitionTime": "2026-08-13T22:34:52Z",
+        "observedGeneration": 1,
+        "reason": "PodFailed",
+        "status": "False",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
       }
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://15d96afc6d64508bb667180690507adccd537c73ba11bc5bb8269eedd85af454",
+        "containerID": "containerd://7bfda2997cfd487b109037c26bb62a99857a581efc125c21d243d619776e0bf3",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://d3e8762400d9b6cff5f61a29dddea7241fc2193e6d2d620c304d9165c7301b92",
-            "exitCode": 0,
-            "finishedAt": "2026-08-13T23:33:07Z",
-            "reason": "Completed",
-            "startedAt": "2026-08-13T22:33:07Z"
+            "containerID": "containerd://7bfda2997cfd487b109037c26bb62a99857a581efc125c21d243d619776e0bf3",
+            "exitCode": 1,
+            "finishedAt": "2026-08-13T22:34:52Z",
+            "reason": "Error",
+            "startedAt": "2026-08-13T22:34:52Z"
           }
         },
         "name": "app",
-        "ready": true,
+        "ready": false,
         "resources": {},
-        "restartCount": 1,
-        "started": true,
+        "restartCount": 4,
+        "started": false,
         "state": {
-          "running": {
-            "startedAt": "2026-08-13T23:33:08Z"
+          "terminated": {
+            "exitCode": 137,
+            "finishedAt": null,
+            "message": "The container could not be located when the pod was terminated",
+            "reason": "ContainerStatusUnknown",
+            "startedAt": null
           }
         },
         "user": {
@@ -180,7 +183,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-688w4",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -193,8 +196,9 @@
         "ip": "REDACTED-IP"
       }
     ],
-    "observedGeneration": 2,
-    "phase": "Running",
+    "message": "Pod was active on the node longer than the specified deadline",
+    "observedGeneration": 1,
+    "phase": "Failed",
     "podIP": "REDACTED-IP",
     "podIPs": [
       {
@@ -202,6 +206,7 @@
       }
     ],
     "qosClass": "BestEffort",
+    "reason": "DeadlineExceeded",
     "resources": {},
     "startTime": "2026-08-13T22:32:57Z"
   }

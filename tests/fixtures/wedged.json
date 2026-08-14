@@ -3,26 +3,21 @@
   "kind": "Pod",
   "metadata": {
     "creationTimestamp": "2026-08-13T22:32:57Z",
-    "deletionGracePeriodSeconds": 5,
-    "deletionTimestamp": "2026-08-13T23:35:30Z",
-    "finalizers": [
-      "k8rs.test/never-removed"
-    ],
-    "generation": 2,
+    "generation": 1,
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-stuck",
+    "name": "broken-wedged",
     "namespace": "default",
-    "resourceVersion": "10202",
-    "uid": "b27cc18d-ffdc-4e39-ae9b-ab249ada885e"
+    "resourceVersion": "791",
+    "uid": "0823046c-7596-452c-8a97-a59e18a9c78d"
   },
   "spec": {
     "containers": [
       {
         "command": [
           "sleep",
-          "3600"
+          "86400"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
@@ -32,8 +27,12 @@
         "terminationMessagePolicy": "File",
         "volumeMounts": [
           {
+            "mountPath": "/etc/app",
+            "name": "config"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-6flgr",
             "readOnly": true
           }
         ]
@@ -41,7 +40,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -49,7 +48,7 @@
     "securityContext": {},
     "serviceAccount": "default",
     "serviceAccountName": "default",
-    "terminationGracePeriodSeconds": 5,
+    "terminationGracePeriodSeconds": 30,
     "tolerations": [
       {
         "effect": "NoExecute",
@@ -66,7 +65,14 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-bdgxh",
+        "configMap": {
+          "defaultMode": 420,
+          "name": "this-configmap-does-not-exist"
+        },
+        "name": "config"
+      },
+      {
+        "name": "kube-api-access-6flgr",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -109,78 +115,66 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:58Z",
-        "observedGeneration": 2,
-        "status": "True",
+        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "observedGeneration": 1,
+        "status": "False",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
-        "status": "True",
+        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "message": "containers with unready status: [app]",
+        "observedGeneration": 1,
+        "reason": "ContainersNotReady",
+        "status": "False",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
-        "status": "True",
+        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "message": "containers with unready status: [app]",
+        "observedGeneration": 1,
+        "reason": "ContainersNotReady",
+        "status": "False",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
       }
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://15d96afc6d64508bb667180690507adccd537c73ba11bc5bb8269eedd85af454",
-        "image": "docker.io/library/busybox:latest",
-        "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
-        "lastState": {
-          "terminated": {
-            "containerID": "containerd://d3e8762400d9b6cff5f61a29dddea7241fc2193e6d2d620c304d9165c7301b92",
-            "exitCode": 0,
-            "finishedAt": "2026-08-13T23:33:07Z",
-            "reason": "Completed",
-            "startedAt": "2026-08-13T22:33:07Z"
-          }
-        },
+        "image": "busybox",
+        "imageID": "",
+        "lastState": {},
         "name": "app",
-        "ready": true,
-        "resources": {},
-        "restartCount": 1,
-        "started": true,
+        "ready": false,
+        "restartCount": 0,
+        "started": false,
         "state": {
-          "running": {
-            "startedAt": "2026-08-13T23:33:08Z"
-          }
-        },
-        "user": {
-          "linux": {
-            "gid": 0,
-            "supplementalGroups": [
-              0,
-              10
-            ],
-            "uid": 0
+          "waiting": {
+            "reason": "ContainerCreating"
           }
         },
         "volumeMounts": [
           {
+            "mountPath": "/etc/app",
+            "name": "config"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-6flgr",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -193,14 +187,8 @@
         "ip": "REDACTED-IP"
       }
     ],
-    "observedGeneration": 2,
-    "phase": "Running",
-    "podIP": "REDACTED-IP",
-    "podIPs": [
-      {
-        "ip": "REDACTED-IP"
-      }
-    ],
+    "observedGeneration": 1,
+    "phase": "Pending",
     "qosClass": "BestEffort",
     "resources": {},
     "startTime": "2026-08-13T22:32:57Z"

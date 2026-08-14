@@ -287,6 +287,12 @@ break_it() {
   echo "States need a few minutes to settle — CrashLoopBackOff has to enter"
   echo "backoff and the OOM kill has to actually happen. Check with: $0 status"
   echo
+  echo "Two of them need about 26 minutes, not a few: broken-restarts10 and"
+  echo "broken-restarts10serving have to climb past ten restarts, and the kubelet's"
+  echo "backoff caps at 5 minutes a restart. '$0 verify' waits for them in a second"
+  echo "pass after every other fixture has reported, so run it now rather than later —"
+  echo "the wait is the same clock either way."
+  echo
   echo "Rule 12 (stuck Terminating) is not applied by this script; it is a"
   echo "capture step: kubectl delete pod broken-stuck --wait=false"
 }
@@ -331,6 +337,25 @@ unbreak() {
     fi
     if jq -e '[.spec.taints[]? | select(.key == "dedicated")] | length > 0' >/dev/null <<<"$state"; then
       "${kc[@]}" taint node "$w" dedicated-; undone=$((undone + 1))
+    fi
+    # The one thing a *manifest* leaves behind on a machine, and the only undo
+    # here that is not `break-nodes`': `broken-socket` mounts
+    # /var/run/docker.sock with `type: FileOrCreate`, so the kubelet creates an
+    # empty file on whichever worker that pod landed on, and deleting the pod
+    # does not take it away. Read first and removed only where there is
+    # something to remove, like the undos around it, so the output can say which
+    # it was. The read is quiet — a node this login cannot reach through docker
+    # is skipped, and the file it leaves is empty and on a tmpfs — but the
+    # removal itself is not swallowed, because a `rm` that fails on a node we
+    # *can* reach is a different fact and has to be readable as one.
+    if docker exec "$w" test -e /var/run/docker.sock 2>/dev/null; then
+      if docker exec "$w" rm -f /var/run/docker.sock; then
+        echo "  removed the empty docker.sock broken-socket had the kubelet create on $w"
+        undone=$((undone + 1))
+      else
+        echo "  could not remove /var/run/docker.sock on $w — an empty file on a tmpfs, harmless," >&2
+        echo "  but still there: docker exec $w rm -f /var/run/docker.sock" >&2
+      fi
     fi
     # The kubelet is stopped inside the node's own container, so this is the one
     # undo that does not go through the API server — and it must not be skipped
@@ -377,7 +402,15 @@ workers() {
 # `verify` runs the pod set, `break-nodes` runs the node set after it.
 POD_STATES=(oom crashloop image config pending hostpath readiness restarts
             nolimits stuck init quota w2 owned resize podlimit sts rollout ds
-            healthy_init healthy_sidecar healthy_hostpath healthy_podlevel)
+            healthy_init healthy_sidecar healthy_hostpath healthy_podlevel
+            exit0 sigterm socket succeeded failed startup notfound wedged
+            unjudged oomserving healthy_retry healthy_unreadysidecar)
+# The two fixtures that cost more than every other one put together, split out
+# so that a failure in the fast set is reported in the usual few minutes instead
+# of behind a half-hour wait. See `verify` for the arithmetic — there is no
+# mechanism that raises a restart count faster than the kubelet's own backoff
+# lets it rise.
+SLOW_POD_STATES=(restarts10 restarts10serving)
 NODE_STATES=(cordoned tainted notready)
 
 declare -A want=(
@@ -505,6 +538,59 @@ declare -A want=(
   # taint it adds. Nobody types this one, which is exactly why a decode of the
   # field can be proven against it and not against `dedicated=gpu`.
   [notready]='[.items[]|select(([.status.conditions[]|select(.type=="Ready" and .status=="Unknown")]|length)>0 and ([.spec.taints[]?|select(.key=="node.kubernetes.io/unreachable" and .effect=="NoExecute" and .timeAdded!=null)]|length)>0)]|length>0'
+  # --- THE BRANCHES NO COMMITTED FIXTURE COULD REACH ---
+  # Every predicate below asserts `ready` or `started` as well as the field its
+  # branch is about, and that is not padding: the rule these fixtures are for is
+  # silenced by several clauses `or`-ed together, so a capture taken while the
+  # container happened to be up would satisfy a *different* clause and the one
+  # under test could be deleted without a red run (NOTES § D71).
+  [exit0]='.status.containerStatuses[0] | .restartCount>=1 and .ready==false and .lastState.terminated.exitCode==0 and .lastState.terminated.reason=="Completed"'
+  # 143 and not 137, which is the same kill after the grace period ran out on a
+  # PID 1 that had no handler for it — the shape D71 says rule 6 must print the
+  # memory sentence about, i.e. this fixture inverted.
+  [sigterm]='.status.containerStatuses[0] | .restartCount>=1 and .ready==false and .lastState.terminated.exitCode==143'
+  # Exactly one mount of the socket volume and it is read-only: rule 8 escalates
+  # on the path and not on the mode, so a writable mount would satisfy the same
+  # predicate through the branch this fixture is not for (NOTES § D78).
+  [socket]='.status.phase=="Running" and ([.spec.volumes[]?|select(.hostPath.path=="/var/run/docker.sock")|.name] as $hp | [.spec.containers[].volumeMounts[]?|select(.name as $n|$hp|index($n))] | length==1 and all(.readOnly==true))'
+  # Three restarts and not two: RESTARTS_WARN is 3, so a pod with two would be
+  # below rule 5's own threshold and the skip would be proven for rule 6 alone.
+  [succeeded]='.status.phase=="Succeeded" and (.status.containerStatuses[0] | .restartCount>=3 and .state.terminated.exitCode==0 and .lastState.terminated.exitCode==1)'
+  [failed]='.status.phase=="Failed" and (.status.containerStatuses[0] | .restartCount>=3 and .lastState.terminated.exitCode==1)'
+  # Rule 5's CRITICAL band, and the `&& !serving` half beside it: the same
+  # history on the same image, told apart by whether the container is serving at
+  # the end of it. `.state.running` as well as the count, because a container in
+  # backoff is not what either card is about.
+  [restarts10]='.status.phase=="Running" and (.status.containerStatuses[0] | .restartCount>=10 and .ready==false and .state.running!=null)'
+  [restarts10serving]='.status.phase=="Running" and (.status.containerStatuses[0] | .restartCount>=10 and .ready==true and .state.running!=null)'
+  # All three readings at once, which is the only way to tell rule 7's state
+  # gate from its `started` suppressor: up, not ready, and not started.
+  [startup]='.status.phase=="Running" and (.status.containerStatuses[0] | .started==false and .ready==false and .state.running!=null) and (.spec.containers[0].startupProbe != null)'
+  # The message clause is the fixture: rule 6 has three actions and the log-line
+  # one answers first whenever a message exists, so this arm needs a termination
+  # with none.
+  [notfound]='.status.containerStatuses[0] | .ready==false and .lastState.terminated.exitCode==127 and ((.lastState.terminated.message // null) == null)'
+  # Scheduled and stuck before the sandbox: the condition reads False for a
+  # volume failure because the kubelet mounts before it creates the sandbox
+  # (NOTES § D76). `ContainerCreating` is what separates it from broken-config,
+  # whose envFrom is resolved one step later and belongs to rule 4.
+  [wedged]='.status.phase=="Pending" and ([.status.conditions[]?|select(.type=="PodScheduled" and .status=="True")]|length)>0 and ([.status.conditions[]?|select(.type=="PodReadyToStartContainers" and .status=="False")]|length)>0 and .status.containerStatuses[0].state.waiting.reason=="ContainerCreating"'
+  # The absence *is* the signal, so the predicate counts a condition rather than
+  # reading one: a pod refused a machine carries PodScheduled False, and this
+  # one has no such line at all. creationTimestamp is asserted because it is the
+  # only clock rule 14 has.
+  [unjudged]='.status.phase=="Pending" and ([.status.conditions[]?|select(.type=="PodScheduled")]|length)==0 and .metadata.creationTimestamp != null'
+  # Serving *and* carrying the kill, which is the pair no capture holds: oom.json
+  # is crashlooping, so rule 2 stays quiet on it for the state rather than for
+  # the age.
+  [oomserving]='.status.phase=="Running" and (.status.containerStatuses[0] | .ready==true and .state.running!=null and .restartCount>=1 and .lastState.terminated.reason=="OOMKilled" and .lastState.terminated.exitCode==137)'
+  # The wait-for-dependency loop, finished: the failed history is in lastState,
+  # the successful exit is in state, and the pod is serving. Nothing may fire.
+  [healthy_retry]='.status.phase=="Running" and ([.status.containerStatuses[].ready]|all) and (.status.initContainerStatuses[0] | .restartCount>=3 and .state.terminated.exitCode==0 and .lastState.terminated.exitCode==1)'
+  # A sidecar that is running and not ready, with the workload container serving
+  # beside it — started, because a restartable init container must start before
+  # the next one runs, and only ready is missing.
+  [healthy_unreadysidecar]='.status.phase=="Running" and ([.status.containerStatuses[].ready]|all) and ([.spec.initContainers[]?|select(.restartPolicy=="Always")]|length)>0 and (.status.initContainerStatuses[0] | .ready==false and .started==true and .state.running!=null)'
 )
 
 declare -A why=(
@@ -534,6 +620,20 @@ declare -A why=(
   [cordoned]="N2 — a worker cordoned, still healthy, still carrying pods a drain would move"
   [tainted]="N6 — dedicated=gpu:NoExecute, a taint with a value (kubectl stamps no time on it)"
   [notready]="N1 — a worker whose kubelet stopped posting, and the taint the controller timestamps"
+  [exit0]="rule 6 — a program that finished, restarted forever: exit 0 is not a failure"
+  [sigterm]="rule 6 — killed by SIGTERM (143), which is every rolling update and not a failure"
+  [socket]="rule 8 — the runtime socket itself, read-only, under its /var/run name (D78)"
+  [succeeded]="D71 — a pod that finished, carrying the restarts analyze() must skip"
+  [failed]="D71 — the Failed half of that skip, which Evicted pods arrive in"
+  [restarts10]="rule 5 — past ten restarts and not serving: the CRITICAL band"
+  [restarts10serving]="rule 5 — past ten restarts and serving: WARN, because red must mean broken"
+  [startup]="rule 7 — a startup probe still failing, so readiness has not been asked (D71)"
+  [notfound]="rule 6 — exit 127 with no termination message: the command-not-in-the-image action"
+  [wedged]="rule 13 — placed, and stuck before the sandbox on a ConfigMap that does not exist (D72/D76)"
+  [unjudged]="rule 14 — no PodScheduled line at all: nothing has looked at this pod (D74)"
+  [oomserving]="rule 2 — OOMKilled once and serving since, which is the recency clause (D75)"
+  [healthy_retry]="D75 — the wait-for-dependency init loop that finished: rules 5 and 6 must be silent"
+  [healthy_unreadysidecar]="D75 — a sidecar running but not ready: rule 7 is regular containers only"
 )
 # --- PREDICATES END ---
 
@@ -594,7 +694,10 @@ diagnose() {
 # the object actually was underneath any failure.
 assert_states() {
   need kubectl; need jq
-  local deadline=$(( SECONDS + ${K8RS_VERIFY_TIMEOUT:-420} ))
+  # $SETTLE is `verify`'s second pass asking for a longer deadline than the
+  # fixtures that settle in seconds get. It is a caller's `local`, so it cannot
+  # outlive the call and cannot reach `break-nodes`.
+  local deadline=$(( SECONDS + ${SETTLE:-${K8RS_VERIFY_TIMEOUT:-420}} ))
   local names=("$@") pending_list=("$@") still fail=0 got n
 
   while [ ${#pending_list[@]} -gt 0 ] && [ $SECONDS -lt $deadline ]; do
@@ -621,7 +724,34 @@ assert_states() {
   return $fail
 }
 
-verify() { assert_states "${POD_STATES[@]}"; }
+# Two passes, fast first, and the split is arithmetic rather than taste.
+#
+# Every fixture but two reaches its state in seconds to a couple of minutes. The
+# two restart-count pods have to climb past ten restarts, and a restart count is
+# only raised by the kubelet restarting a container — which it does on a backoff
+# that doubles from 10s and caps at 5 minutes. (Not read off a doc: `init.json`
+# carries the kubelet's own sentence, "back-off 5m0s restarting failed
+# container", and `restarts.json` shows three restarts taking 50 seconds.) Ten
+# restarts is therefore 10+20+40+80+160+300+300+300+300 = 1510 seconds of
+# backoff plus about four seconds per container start: **just over 26 minutes**,
+# and nothing shortens it. Running the container for longer between exits only
+# makes it worse — the backoff resets after ten idle minutes, so a slow loop
+# costs more, not less.
+#
+# So the slow pair gets its own deadline (35 minutes, which is the 26 plus room
+# for a cold image pull and a busy machine), and it runs *second* so that a
+# fixture that is genuinely wrong is on screen in the usual few minutes instead
+# of behind a half-hour wait. `set -e` ends the run at the first pass's failure,
+# which is the point of the ordering.
+verify() {
+  assert_states "${POD_STATES[@]}"
+  echo
+  echo "  the two restart-count fixtures need ten CrashLoopBackOff restarts, which is about"
+  echo "  26 minutes of the kubelet's own backoff from the moment 'break' created them. Waiting"
+  echo "  (this pass exits as soon as they arrive; K8RS_SLOW_TIMEOUT is the ceiling)."
+  local SETTLE="${K8RS_SLOW_TIMEOUT:-2100}"
+  assert_states "${SLOW_POD_STATES[@]}"
+}
 
 # The three node states, and the only step here that damages what is already
 # running: one worker stops taking new pods, a second evicts everything that

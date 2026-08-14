@@ -5,7 +5,7 @@
       "apiVersion": "apps/v1",
       "kind": "ReplicaSet",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "creationTimestamp": "2026-08-13T22:32:57Z",
         "generation": 1,
         "labels": {
           "app": "broken-quota",
@@ -21,11 +21,11 @@
             "controller": true,
             "kind": "Deployment",
             "name": "broken-quota",
-            "uid": "81c3660a-deb1-41ec-830e-ee8ea448e338"
+            "uid": "c04caac7-4381-4755-8ca1-c117452fb3a2"
           }
         ],
-        "resourceVersion": "695",
-        "uid": "18d04433-11ec-4922-bee7-9258c34fc73e"
+        "resourceVersion": "676",
+        "uid": "20b9f608-804a-47b5-b14e-6fbf744a58d3"
       },
       "spec": {
         "replicas": 1,
@@ -69,8 +69,8 @@
       "status": {
         "conditions": [
           {
-            "lastTransitionTime": "2026-08-12T20:45:53Z",
-            "message": "pods \"broken-quota-59654c756-2fvgv\" is forbidden: exceeded quota: deny-all-pods, requested: pods=1, used: pods=0, limited: pods=0",
+            "lastTransitionTime": "2026-08-13T22:32:57Z",
+            "message": "pods \"broken-quota-59654c756-qplgv\" is forbidden: exceeded quota: deny-all-pods, requested: pods=1, used: pods=0, limited: pods=0",
             "reason": "FailedCreate",
             "status": "True",
             "type": "ReplicaFailure"

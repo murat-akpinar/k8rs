@@ -5,15 +5,15 @@
       "apiVersion": "apps/v1",
       "kind": "StatefulSet",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:53Z",
-        "generation": 4,
+        "creationTimestamp": "2026-08-13T22:32:57Z",
+        "generation": 8,
         "labels": {
           "demo": "broken"
         },
         "name": "broken-sts",
         "namespace": "default",
-        "resourceVersion": "8233",
-        "uid": "64e3b8e2-1d33-47c8-85e5-78efad6110cd"
+        "resourceVersion": "9876",
+        "uid": "b1f48c33-bbdb-49c0-b81d-3ac8fa649344"
       },
       "spec": {
         "persistentVolumeClaimRetentionPolicy": {
@@ -70,7 +70,7 @@
         "collisionCount": 0,
         "currentReplicas": 1,
         "currentRevision": "broken-sts-77687dd68f",
-        "observedGeneration": 4,
+        "observedGeneration": 8,
         "readyReplicas": 1,
         "replicas": 2,
         "updateRevision": "broken-sts-594b6699f8",

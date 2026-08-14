@@ -5,7 +5,7 @@
       "apiVersion": "v1",
       "kind": "Node",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:25Z",
+        "creationTimestamp": "2026-08-13T22:32:33Z",
         "labels": {
           "beta.kubernetes.io/arch": "amd64",
           "beta.kubernetes.io/os": "linux",
@@ -16,8 +16,8 @@
           "node.kubernetes.io/exclude-from-external-load-balancers": ""
         },
         "name": "k8rs-control-plane",
-        "resourceVersion": "7786",
-        "uid": "8509ca55-7dc5-49b3-acde-38744962673c"
+        "resourceVersion": "10173",
+        "uid": "0a592f93-1202-411e-9a3f-ef403f5ff70a"
       },
       "spec": {
         "podCIDR": "REDACTED-IP/24",
@@ -48,7 +48,7 @@
           "ephemeral-storage": "999678260Ki",
           "hugepages-1Gi": "0",
           "hugepages-2Mi": "0",
-          "memory": "24277408Ki",
+          "memory": "24277412Ki",
           "pods": "110"
         },
         "capacity": {
@@ -56,37 +56,37 @@
           "ephemeral-storage": "999678260Ki",
           "hugepages-1Gi": "0",
           "hugepages-2Mi": "0",
-          "memory": "24277408Ki",
+          "memory": "24277412Ki",
           "pods": "110"
         },
         "conditions": [
           {
-            "lastHeartbeatTime": "2026-08-12T21:38:50Z",
-            "lastTransitionTime": "2026-08-12T20:45:25Z",
+            "lastHeartbeatTime": "2026-08-13T23:35:12Z",
+            "lastTransitionTime": "2026-08-13T22:32:33Z",
             "message": "kubelet has sufficient memory available",
             "reason": "KubeletHasSufficientMemory",
             "status": "False",
             "type": "MemoryPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:38:50Z",
-            "lastTransitionTime": "2026-08-12T20:45:25Z",
+            "lastHeartbeatTime": "2026-08-13T23:35:12Z",
+            "lastTransitionTime": "2026-08-13T22:32:33Z",
             "message": "kubelet has no disk pressure",
             "reason": "KubeletHasNoDiskPressure",
             "status": "False",
             "type": "DiskPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:38:50Z",
-            "lastTransitionTime": "2026-08-12T20:45:25Z",
+            "lastHeartbeatTime": "2026-08-13T23:35:12Z",
+            "lastTransitionTime": "2026-08-13T22:32:33Z",
             "message": "kubelet has sufficient PID available",
             "reason": "KubeletHasSufficientPID",
             "status": "False",
             "type": "PIDPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:38:50Z",
-            "lastTransitionTime": "2026-08-12T20:45:45Z",
+            "lastHeartbeatTime": "2026-08-13T23:35:12Z",
+            "lastTransitionTime": "2026-08-13T22:32:54Z",
             "message": "kubelet is posting ready status",
             "reason": "KubeletReady",
             "status": "True",
@@ -114,7 +114,7 @@
               "registry.k8s.io/kube-apiserver-amd64:v1.36.1",
               "registry.k8s.io/kube-apiserver:v1.36.1"
             ],
-            "sizeBytes": 96683252
+            "sizeBytes": 96682870
           },
           {
             "names": [
@@ -122,7 +122,7 @@
               "registry.k8s.io/kube-controller-manager-amd64:v1.36.1",
               "registry.k8s.io/kube-controller-manager:v1.36.1"
             ],
-            "sizeBytes": 85870692
+            "sizeBytes": 85870301
           },
           {
             "names": [
@@ -179,18 +179,18 @@
         ],
         "nodeInfo": {
           "architecture": "amd64",
-          "bootID": "363b536d-8229-44f3-af67-1fe65ff911c4",
+          "bootID": "0d0510b6-41e1-41f7-8c73-c91dc95782ff",
           "containerRuntimeVersion": "containerd://2.3.1",
           "kernelVersion": "7.1.6-1-cachyos",
           "kubeProxyVersion": "",
           "kubeletVersion": "v1.36.1",
-          "machineID": "452e8d00165d4bd98d8db7a47ea310c5",
+          "machineID": "7348985975f04b20b535a8affe5d4653",
           "operatingSystem": "linux",
           "osImage": "Debian GNU/Linux 13 (trixie)",
           "swap": {
             "capacity": 24859635712
           },
-          "systemUUID": "e79b2809-2d1d-4cd6-9a9a-184a3b905fdd"
+          "systemUUID": "6189d2bd-4613-4c66-a623-6d01e32240d4"
         },
         "runtimeHandlers": [
           {
@@ -221,7 +221,7 @@
       "apiVersion": "v1",
       "kind": "Node",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:34Z",
+        "creationTimestamp": "2026-08-13T22:32:43Z",
         "labels": {
           "beta.kubernetes.io/arch": "amd64",
           "beta.kubernetes.io/os": "linux",
@@ -230,8 +230,8 @@
           "kubernetes.io/os": "linux"
         },
         "name": "k8rs-worker",
-        "resourceVersion": "8312",
-        "uid": "47badd61-a97c-4b55-b03c-983f1f68a369"
+        "resourceVersion": "10210",
+        "uid": "4052f9d6-f654-4d13-9131-9c3e42c98ad6"
       },
       "spec": {
         "podCIDR": "REDACTED-IP/24",
@@ -243,7 +243,7 @@
           {
             "effect": "NoSchedule",
             "key": "node.kubernetes.io/unschedulable",
-            "timeAdded": "2026-08-12T21:43:02Z"
+            "timeAdded": "2026-08-13T23:35:29Z"
           }
         ],
         "unschedulable": true
@@ -264,7 +264,7 @@
           "ephemeral-storage": "999678260Ki",
           "hugepages-1Gi": "0",
           "hugepages-2Mi": "0",
-          "memory": "24277408Ki",
+          "memory": "24277412Ki",
           "pods": "110"
         },
         "capacity": {
@@ -272,37 +272,37 @@
           "ephemeral-storage": "999678260Ki",
           "hugepages-1Gi": "0",
           "hugepages-2Mi": "0",
-          "memory": "24277408Ki",
+          "memory": "24277412Ki",
           "pods": "110"
         },
         "conditions": [
           {
-            "lastHeartbeatTime": "2026-08-12T21:42:35Z",
-            "lastTransitionTime": "2026-08-12T20:45:34Z",
+            "lastHeartbeatTime": "2026-08-13T23:35:00Z",
+            "lastTransitionTime": "2026-08-13T22:32:43Z",
             "message": "kubelet has sufficient memory available",
             "reason": "KubeletHasSufficientMemory",
             "status": "False",
             "type": "MemoryPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:42:35Z",
-            "lastTransitionTime": "2026-08-12T20:45:34Z",
+            "lastHeartbeatTime": "2026-08-13T23:35:00Z",
+            "lastTransitionTime": "2026-08-13T22:32:43Z",
             "message": "kubelet has no disk pressure",
             "reason": "KubeletHasNoDiskPressure",
             "status": "False",
             "type": "DiskPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:42:35Z",
-            "lastTransitionTime": "2026-08-12T20:45:34Z",
+            "lastHeartbeatTime": "2026-08-13T23:35:00Z",
+            "lastTransitionTime": "2026-08-13T22:32:43Z",
             "message": "kubelet has sufficient PID available",
             "reason": "KubeletHasSufficientPID",
             "status": "False",
             "type": "PIDPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:42:35Z",
-            "lastTransitionTime": "2026-08-12T20:45:47Z",
+            "lastHeartbeatTime": "2026-08-13T23:35:00Z",
+            "lastTransitionTime": "2026-08-13T22:32:56Z",
             "message": "kubelet is posting ready status",
             "reason": "KubeletReady",
             "status": "True",
@@ -402,18 +402,18 @@
         ],
         "nodeInfo": {
           "architecture": "amd64",
-          "bootID": "363b536d-8229-44f3-af67-1fe65ff911c4",
+          "bootID": "0d0510b6-41e1-41f7-8c73-c91dc95782ff",
           "containerRuntimeVersion": "containerd://2.3.1",
           "kernelVersion": "7.1.6-1-cachyos",
           "kubeProxyVersion": "",
           "kubeletVersion": "v1.36.1",
-          "machineID": "af3cd4816f734e1b820213b254a51447",
+          "machineID": "6bbd7aaab65442a9bf3135fb55c856e2",
           "operatingSystem": "linux",
           "osImage": "Debian GNU/Linux 13 (trixie)",
           "swap": {
             "capacity": 24859635712
           },
-          "systemUUID": "e2a9bb60-a90d-4231-91cf-84214dc50b0d"
+          "systemUUID": "f5226db9-dc5b-4577-906a-6830879464d3"
         },
         "runtimeHandlers": [
           {
@@ -444,7 +444,7 @@
       "apiVersion": "v1",
       "kind": "Node",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:35Z",
+        "creationTimestamp": "2026-08-13T22:32:43Z",
         "labels": {
           "beta.kubernetes.io/arch": "amd64",
           "beta.kubernetes.io/os": "linux",
@@ -453,8 +453,8 @@
           "kubernetes.io/os": "linux"
         },
         "name": "k8rs-worker2",
-        "resourceVersion": "8315",
-        "uid": "07bc4fff-b66d-41c0-9ce7-27bafd0fd622"
+        "resourceVersion": "10213",
+        "uid": "bbbaa398-df73-499d-9b4d-a26d657ffb31"
       },
       "spec": {
         "podCIDR": "REDACTED-IP/24",
@@ -486,7 +486,7 @@
           "ephemeral-storage": "999678260Ki",
           "hugepages-1Gi": "0",
           "hugepages-2Mi": "0",
-          "memory": "24277408Ki",
+          "memory": "24277412Ki",
           "pods": "110"
         },
         "capacity": {
@@ -494,37 +494,37 @@
           "ephemeral-storage": "999678260Ki",
           "hugepages-1Gi": "0",
           "hugepages-2Mi": "0",
-          "memory": "24277408Ki",
+          "memory": "24277412Ki",
           "pods": "110"
         },
         "conditions": [
           {
-            "lastHeartbeatTime": "2026-08-12T21:42:54Z",
-            "lastTransitionTime": "2026-08-12T20:45:35Z",
+            "lastHeartbeatTime": "2026-08-13T23:32:54Z",
+            "lastTransitionTime": "2026-08-13T22:32:43Z",
             "message": "kubelet has sufficient memory available",
             "reason": "KubeletHasSufficientMemory",
             "status": "False",
             "type": "MemoryPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:42:54Z",
-            "lastTransitionTime": "2026-08-12T20:45:35Z",
+            "lastHeartbeatTime": "2026-08-13T23:32:54Z",
+            "lastTransitionTime": "2026-08-13T22:32:43Z",
             "message": "kubelet has no disk pressure",
             "reason": "KubeletHasNoDiskPressure",
             "status": "False",
             "type": "DiskPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:42:54Z",
-            "lastTransitionTime": "2026-08-12T20:45:35Z",
+            "lastHeartbeatTime": "2026-08-13T23:32:54Z",
+            "lastTransitionTime": "2026-08-13T22:32:43Z",
             "message": "kubelet has sufficient PID available",
             "reason": "KubeletHasSufficientPID",
             "status": "False",
             "type": "PIDPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:42:54Z",
-            "lastTransitionTime": "2026-08-12T20:45:47Z",
+            "lastHeartbeatTime": "2026-08-13T23:32:54Z",
+            "lastTransitionTime": "2026-08-13T22:32:55Z",
             "message": "kubelet is posting ready status",
             "reason": "KubeletReady",
             "status": "True",
@@ -552,7 +552,7 @@
               "registry.k8s.io/kube-apiserver-amd64:v1.36.1",
               "registry.k8s.io/kube-apiserver:v1.36.1"
             ],
-            "sizeBytes": 96682870
+            "sizeBytes": 96683252
           },
           {
             "names": [
@@ -624,18 +624,18 @@
         ],
         "nodeInfo": {
           "architecture": "amd64",
-          "bootID": "363b536d-8229-44f3-af67-1fe65ff911c4",
+          "bootID": "0d0510b6-41e1-41f7-8c73-c91dc95782ff",
           "containerRuntimeVersion": "containerd://2.3.1",
           "kernelVersion": "7.1.6-1-cachyos",
           "kubeProxyVersion": "",
           "kubeletVersion": "v1.36.1",
-          "machineID": "7800edc765f44727a6d39a337c77b0b6",
+          "machineID": "025f66c2b2c14c2f82cea41fbb7a1838",
           "operatingSystem": "linux",
           "osImage": "Debian GNU/Linux 13 (trixie)",
           "swap": {
             "capacity": 24859635712
           },
-          "systemUUID": "4ec032e7-5365-4501-9c2e-98bdb90000e2"
+          "systemUUID": "90e38e33-98af-4868-a282-1e1b4df98346"
         },
         "runtimeHandlers": [
           {
@@ -666,7 +666,7 @@
       "apiVersion": "v1",
       "kind": "Node",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:34Z",
+        "creationTimestamp": "2026-08-13T22:32:43Z",
         "labels": {
           "beta.kubernetes.io/arch": "amd64",
           "beta.kubernetes.io/os": "linux",
@@ -675,8 +675,8 @@
           "kubernetes.io/os": "linux"
         },
         "name": "k8rs-worker3",
-        "resourceVersion": "8540",
-        "uid": "cbf4cd74-0f14-4c0f-857d-8562fde66161"
+        "resourceVersion": "10443",
+        "uid": "28a860ff-eec9-4744-81a7-b49d9caa4901"
       },
       "spec": {
         "podCIDR": "REDACTED-IP/24",
@@ -688,12 +688,12 @@
           {
             "effect": "NoSchedule",
             "key": "node.kubernetes.io/unreachable",
-            "timeAdded": "2026-08-12T21:43:53Z"
+            "timeAdded": "2026-08-13T23:36:22Z"
           },
           {
             "effect": "NoExecute",
             "key": "node.kubernetes.io/unreachable",
-            "timeAdded": "2026-08-12T21:43:53Z"
+            "timeAdded": "2026-08-13T23:36:22Z"
           }
         ]
       },
@@ -713,7 +713,7 @@
           "ephemeral-storage": "999678260Ki",
           "hugepages-1Gi": "0",
           "hugepages-2Mi": "0",
-          "memory": "24277408Ki",
+          "memory": "24277412Ki",
           "pods": "110"
         },
         "capacity": {
@@ -721,37 +721,37 @@
           "ephemeral-storage": "999678260Ki",
           "hugepages-1Gi": "0",
           "hugepages-2Mi": "0",
-          "memory": "24277408Ki",
+          "memory": "24277412Ki",
           "pods": "110"
         },
         "conditions": [
           {
-            "lastHeartbeatTime": "2026-08-12T21:39:06Z",
-            "lastTransitionTime": "2026-08-12T21:43:53Z",
+            "lastHeartbeatTime": "2026-08-13T23:34:55Z",
+            "lastTransitionTime": "2026-08-13T23:36:22Z",
             "message": "Kubelet stopped posting node status.",
             "reason": "NodeStatusUnknown",
             "status": "Unknown",
             "type": "MemoryPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:39:06Z",
-            "lastTransitionTime": "2026-08-12T21:43:53Z",
+            "lastHeartbeatTime": "2026-08-13T23:34:55Z",
+            "lastTransitionTime": "2026-08-13T23:36:22Z",
             "message": "Kubelet stopped posting node status.",
             "reason": "NodeStatusUnknown",
             "status": "Unknown",
             "type": "DiskPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:39:06Z",
-            "lastTransitionTime": "2026-08-12T21:43:53Z",
+            "lastHeartbeatTime": "2026-08-13T23:34:55Z",
+            "lastTransitionTime": "2026-08-13T23:36:22Z",
             "message": "Kubelet stopped posting node status.",
             "reason": "NodeStatusUnknown",
             "status": "Unknown",
             "type": "PIDPressure"
           },
           {
-            "lastHeartbeatTime": "2026-08-12T21:39:06Z",
-            "lastTransitionTime": "2026-08-12T21:43:53Z",
+            "lastHeartbeatTime": "2026-08-13T23:34:55Z",
+            "lastTransitionTime": "2026-08-13T23:36:22Z",
             "message": "Kubelet stopped posting node status.",
             "reason": "NodeStatusUnknown",
             "status": "Unknown",
@@ -803,7 +803,7 @@
               "registry.k8s.io/kube-scheduler-amd64:v1.36.1",
               "registry.k8s.io/kube-scheduler:v1.36.1"
             ],
-            "sizeBytes": 60684379
+            "sizeBytes": 60683997
           },
           {
             "names": [
@@ -858,18 +858,18 @@
         ],
         "nodeInfo": {
           "architecture": "amd64",
-          "bootID": "363b536d-8229-44f3-af67-1fe65ff911c4",
+          "bootID": "0d0510b6-41e1-41f7-8c73-c91dc95782ff",
           "containerRuntimeVersion": "containerd://2.3.1",
           "kernelVersion": "7.1.6-1-cachyos",
           "kubeProxyVersion": "",
           "kubeletVersion": "v1.36.1",
-          "machineID": "dde37fd641034f69984e649eb4fda4c6",
+          "machineID": "a8353754d39d41cc91ca128ea765ca51",
           "operatingSystem": "linux",
           "osImage": "Debian GNU/Linux 13 (trixie)",
           "swap": {
             "capacity": 24859635712
           },
-          "systemUUID": "ccd88421-86e5-41d4-a9c2-3b72500c9624"
+          "systemUUID": "b5570d2e-8cef-4ef8-a4c4-af8c2b5eff9a"
         },
         "runtimeHandlers": [
           {

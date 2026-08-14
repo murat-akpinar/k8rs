@@ -3,37 +3,39 @@
   "kind": "Pod",
   "metadata": {
     "creationTimestamp": "2026-08-13T22:32:57Z",
-    "deletionGracePeriodSeconds": 5,
-    "deletionTimestamp": "2026-08-13T23:35:30Z",
-    "finalizers": [
-      "k8rs.test/never-removed"
-    ],
-    "generation": 2,
+    "generation": 1,
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-stuck",
+    "name": "broken-restarts10serving",
     "namespace": "default",
-    "resourceVersion": "10202",
-    "uid": "b27cc18d-ffdc-4e39-ae9b-ab249ada885e"
+    "resourceVersion": "5713",
+    "uid": "ce5b2499-db2e-4cef-82ec-0caeab76204b"
   },
   "spec": {
     "containers": [
       {
+        "args": [
+          "n=$(cat /state/n 2>/dev/null || echo 0)\nn=$((n + 1))\necho \"$n\" > /state/n\n[ \"$n\" -le 10 ] && exit 1\nsleep 86400\n"
+        ],
         "command": [
-          "sleep",
-          "3600"
+          "sh",
+          "-c"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
-        "name": "app",
+        "name": "flaky",
         "resources": {},
         "terminationMessagePath": "/dev/termination-log",
         "terminationMessagePolicy": "File",
         "volumeMounts": [
           {
+            "mountPath": "/state",
+            "name": "state"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-5sxs8",
             "readOnly": true
           }
         ]
@@ -41,7 +43,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker2",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -49,7 +51,7 @@
     "securityContext": {},
     "serviceAccount": "default",
     "serviceAccountName": "default",
-    "terminationGracePeriodSeconds": 5,
+    "terminationGracePeriodSeconds": 30,
     "tolerations": [
       {
         "effect": "NoExecute",
@@ -66,7 +68,11 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-bdgxh",
+        "emptyDir": {},
+        "name": "state"
+      },
+      {
+        "name": "kube-api-access-5sxs8",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -110,61 +116,61 @@
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:58Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
+        "lastTransitionTime": "2026-08-13T22:59:26Z",
+        "observedGeneration": 1,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
+        "lastTransitionTime": "2026-08-13T22:59:26Z",
+        "observedGeneration": 1,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
       }
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://15d96afc6d64508bb667180690507adccd537c73ba11bc5bb8269eedd85af454",
+        "containerID": "containerd://d4c41517f7eb1ef1e31beea81f5ae68c94a56981578d6c8425cea615b0f8b55d",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://d3e8762400d9b6cff5f61a29dddea7241fc2193e6d2d620c304d9165c7301b92",
-            "exitCode": 0,
-            "finishedAt": "2026-08-13T23:33:07Z",
-            "reason": "Completed",
-            "startedAt": "2026-08-13T22:33:07Z"
+            "containerID": "containerd://81c12d88a7f0b749748f2b2184ccd3e8d27c8ed66e946da6b1658ac42c62b16d",
+            "exitCode": 1,
+            "finishedAt": "2026-08-13T22:54:14Z",
+            "reason": "Error",
+            "startedAt": "2026-08-13T22:54:14Z"
           }
         },
-        "name": "app",
+        "name": "flaky",
         "ready": true,
         "resources": {},
-        "restartCount": 1,
+        "restartCount": 10,
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-13T23:33:08Z"
+            "startedAt": "2026-08-13T22:59:26Z"
           }
         },
         "user": {
@@ -179,8 +185,12 @@
         },
         "volumeMounts": [
           {
+            "mountPath": "/state",
+            "name": "state"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-5sxs8",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -193,7 +203,7 @@
         "ip": "REDACTED-IP"
       }
     ],
-    "observedGeneration": 2,
+    "observedGeneration": 1,
     "phase": "Running",
     "podIP": "REDACTED-IP",
     "podIPs": [

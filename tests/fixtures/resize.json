@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-12T20:45:53Z",
-    "generation": 4,
+    "creationTimestamp": "2026-08-13T22:32:57Z",
+    "generation": 8,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-resize",
     "namespace": "default",
-    "resourceVersion": "8240",
-    "uid": "7eb0c459-3f6b-4031-bf17-b654a5c68332"
+    "resourceVersion": "9889",
+    "uid": "77ff1499-e5aa-4c19-ae19-28e51991a164"
   },
   "spec": {
     "containers": [
@@ -24,10 +24,10 @@
         "name": "app",
         "resources": {
           "limits": {
-            "memory": "24277408Ki"
+            "memory": "24277412Ki"
           },
           "requests": {
-            "memory": "24277408Ki"
+            "memory": "24277412Ki"
           }
         },
         "terminationMessagePath": "/dev/termination-log",
@@ -35,7 +35,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-wd4j2",
+            "name": "kube-api-access-jmdxx",
             "readOnly": true
           }
         ]
@@ -68,7 +68,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-wd4j2",
+        "name": "kube-api-access-jmdxx",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -113,46 +113,46 @@
     },
     "conditions": [
       {
-        "lastProbeTime": "2026-08-12T21:42:34Z",
-        "lastTransitionTime": "2026-08-12T21:42:34Z",
-        "message": "Node didn't have enough resource: memory, requested: 24860065792, used: 136314880, capacity: 24860065792",
-        "observedGeneration": 4,
+        "lastProbeTime": "2026-08-13T23:32:58Z",
+        "lastTransitionTime": "2026-08-13T23:11:58Z",
+        "message": "Node didn't have enough resource: memory, requested: 24860069888, used: 220200960, capacity: 24860069888",
+        "observedGeneration": 8,
         "reason": "Deferred",
         "status": "True",
         "type": "PodResizePending"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:45:54Z",
-        "observedGeneration": 4,
+        "lastTransitionTime": "2026-08-13T22:32:58Z",
+        "observedGeneration": 8,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:45:53Z",
-        "observedGeneration": 4,
+        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "observedGeneration": 8,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:46:08Z",
-        "observedGeneration": 4,
+        "lastTransitionTime": "2026-08-13T23:33:10Z",
+        "observedGeneration": 8,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:46:08Z",
-        "observedGeneration": 4,
+        "lastTransitionTime": "2026-08-13T23:33:10Z",
+        "observedGeneration": 8,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:45:53Z",
-        "observedGeneration": 4,
+        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "observedGeneration": 8,
         "status": "True",
         "type": "PodScheduled"
       }
@@ -162,10 +162,18 @@
         "allocatedResources": {
           "memory": "64Mi"
         },
-        "containerID": "containerd://46db07cef8acb8f9a8253d2d0ed0deb76c4f1ed3d09561a7035a286914dbbc09",
+        "containerID": "containerd://4d1371d479ff669da7a8d4bec2f2767dd8ba0a02502da9029e0015728e4fbb52",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
-        "lastState": {},
+        "lastState": {
+          "terminated": {
+            "containerID": "containerd://5327b74f90f21e4bde630fac441ce469e221112008cb03349ef5170a85f9f558",
+            "exitCode": 0,
+            "finishedAt": "2026-08-13T23:33:09Z",
+            "reason": "Completed",
+            "startedAt": "2026-08-13T22:33:09Z"
+          }
+        },
         "name": "app",
         "ready": true,
         "resources": {
@@ -176,11 +184,11 @@
             "memory": "64Mi"
           }
         },
-        "restartCount": 0,
+        "restartCount": 1,
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-12T20:46:08Z"
+            "startedAt": "2026-08-13T23:33:10Z"
           }
         },
         "user": {
@@ -196,7 +204,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-wd4j2",
+            "name": "kube-api-access-jmdxx",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -209,7 +217,7 @@
         "ip": "REDACTED-IP"
       }
     ],
-    "observedGeneration": 4,
+    "observedGeneration": 8,
     "phase": "Running",
     "podIP": "REDACTED-IP",
     "podIPs": [
@@ -226,6 +234,6 @@
         "memory": "64Mi"
       }
     },
-    "startTime": "2026-08-12T20:45:53Z"
+    "startTime": "2026-08-13T22:32:57Z"
   }
 }

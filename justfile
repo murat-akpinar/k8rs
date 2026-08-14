@@ -195,7 +195,9 @@ fixtures:
       || { echo "fixtures: broken-stuck is not Terminating behind a finalizer — rule 12 has no fixture" >&2; exit 1; }
 
     for p in oom crashloop image config pending hostpath readiness restarts nolimits stuck init \
-             resize podlimit; do
+             resize podlimit \
+             exit0 sigterm socket succeeded failed restarts10 restarts10serving startup \
+             notfound wedged unjudged oomserving; do
       "${kc[@]}" get pod "broken-$p" -o json | "${jqs[@]}" > "tests/fixtures/$p.json"
     done
 
@@ -224,6 +226,50 @@ fixtures:
       '.status.containerStatuses[0].resources.limits.memory != .spec.containers[0].resources.limits.memory and (.status.containerStatuses[0].resources.limits.memory | . != null)'
     guard podlimit.json "memory limit in the container status that its spec never declared (D53)" \
       '((.spec.containers[0].resources.limits // {}) | has("memory") | not) and ((.status.containerStatuses[0].resources.limits // {}) | has("memory"))'
+
+    # The fixture this trip can damage without touching it. `broken-restarts`
+    # ends on `sleep 3600`: an hour after that sleep starts the shell exits 0,
+    # the container restarts, and rule 5's WARN-boundary fixture quietly becomes
+    # a four. The two restart-count pods added for this box make the trip a good
+    # half-hour longer, which is what brings that hour within reach — so the
+    # number is asserted rather than trusted. If this fires, the fixture is not
+    # wrong, the clock is: unbreak, break, and capture without the long pause.
+    guard restarts.json "container at exactly three restarts — rule 5's WARN boundary, and a trip that idled past broken-restarts' own hour would have moved it" \
+      '.status.containerStatuses[0].restartCount == 3'
+
+    # --- THE BRANCHES THAT SHIPPED WITH NO TEST THAT COULD FAIL ---
+    # Every guard below names the field the *rule* reads, not the file, for the
+    # reason the guards above it do: a capture of the wrong object writes
+    # perfectly valid JSON, and "found none" reads exactly like "there were
+    # none". Each also asserts the *state* the container is in, which is the
+    # half that is easy to leave out — the rules these fixtures are for are
+    # silenced by several clauses at once, so a capture taken while the
+    # container happened to be up would satisfy a different clause and the
+    # branch under test would still have nothing behind it (NOTES § D71).
+    guard exit0.json "previous run that ended with exit 0, on a container that is not serving — rule 6's exemption, which doing_its_job would otherwise be the one silencing (D71)" \
+      '[.status.containerStatuses[]? | select(.ready == false and .lastState.terminated.exitCode == 0)] | length > 0'
+    guard sigterm.json "termination carrying exit 143 — a SIGTERM the container received, and not the 137 a PID 1 with no handler for it produces after the grace period" \
+      '[.status.containerStatuses[]? | select(.ready == false and .lastState.terminated.exitCode == 143)] | length > 0'
+    guard socket.json "read-only mount of the runtime socket under its /var/run spelling — the fold and the exact match, neither of which hostpath.json reaches (D78)" \
+      '[.spec.volumes[]? | select(.hostPath.path == "/var/run/docker.sock") | .name] as $s | [.spec.containers[].volumeMounts[]? | select(.name as $n | $s | index($n))] | length == 1 and all(.readOnly == true)'
+    guard succeeded.json "Succeeded pod whose container still carries three restarts and a failed previous run — the two cards analyze() must skip" \
+      '.status.phase == "Succeeded" and ([.status.containerStatuses[]? | select(.restartCount >= 3 and .lastState.terminated.exitCode == 1)] | length > 0)'
+    guard failed.json "Failed pod carrying the same restarts and the same failed run — the half of that skip D71 records as missed, and the phase an Evicted pod arrives in" \
+      '.status.phase == "Failed" and ([.status.containerStatuses[]? | select(.restartCount >= 3 and .lastState.terminated.exitCode == 1)] | length > 0)'
+    guard restarts10.json "container past ten restarts, up and not serving — rule 5's CRITICAL band" \
+      '[.status.containerStatuses[]? | select(.restartCount >= 10 and .ready == false and .state.running != null)] | length > 0'
+    guard restarts10serving.json "container past ten restarts that is serving — the && !serving half of the same branch, which stays WARN" \
+      '[.status.containerStatuses[]? | select(.restartCount >= 10 and .ready == true and .state.running != null)] | length > 0'
+    guard startup.json "container reporting started: false while it runs — the only field that tells rule 7's suppressor from its state gate (D71)" \
+      '[.status.containerStatuses[]? | select(.started == false and .ready == false and .state.running != null)] | length > 0'
+    guard notfound.json "exit 127 with no termination message — rule 6's command-not-in-the-image action, which the log-line arm answers first whenever a message exists" \
+      '[.status.containerStatuses[]? | select(.lastState.terminated.exitCode == 127 and ((.lastState.terminated.message // null) == null))] | length > 0'
+    guard wedged.json "scheduled pod stuck at ContainerCreating with PodReadyToStartContainers False — rule 13's positive, and the storage branch of its evidence line (D72/D76)" \
+      '([.status.conditions[]? | select(.type == "PodScheduled" and .status == "True")] | length) > 0 and ([.status.conditions[]? | select(.type == "PodReadyToStartContainers" and .status == "False")] | length) > 0 and ([.status.containerStatuses[]? | select(.state.waiting.reason == "ContainerCreating")] | length) > 0'
+    guard unjudged.json "Pending pod with no PodScheduled condition at all, and the creationTimestamp rule 14 measures its grace from" \
+      '.status.phase == "Pending" and (([.status.conditions[]? | select(.type == "PodScheduled")] | length) == 0) and .metadata.creationTimestamp != null'
+    guard oomserving.json "OOM kill in lastState on a container that is serving now — rule 2's recency clause, whose two directions are both read off this one object" \
+      '[.status.containerStatuses[]? | select(.ready == true and .state.running != null and .lastState.terminated.reason == "OOMKilled")] | length > 0'
 
     # D36: the one broken pod that has an owner — every other pod capture above
     # is a bare pod, so the grouping key's workload branches have no positive
@@ -287,7 +333,8 @@ fixtures:
     # `healthy`, which is the negative fixture for every rule at once: a host
     # mount on it would leave rule 8 with two positives and no negative, and an
     # init container that restarts forever would end its "never restarted".
-    for h in healthy healthy-hostpath healthy-sidecar healthy-podlevel; do
+    for h in healthy healthy-hostpath healthy-sidecar healthy-podlevel \
+             healthy-retry healthy-unreadysidecar; do
       "${kc[@]}" get pod "$h" -o json | "${jqs[@]}" > "tests/fixtures/$h.json"
     done
     guard healthy.json "resources on its init container — the list the spec lookup would otherwise never read (D40)" \
@@ -298,6 +345,15 @@ fixtures:
       '[.spec.initContainers[]? | select(.restartPolicy == "Always")] | length > 0'
     guard healthy-podlevel.json "pod-level request beside the container's own (KEP-2837, D51)" \
       '.spec.resources.requests.cpu != null and .spec.containers[0].resources.requests.cpu != null'
+    # The two silences D75 asks for, and both are on the healthy side because the
+    # assertion is that **nothing** fires: a wait-for-dependency loop that
+    # finished keeps its restart count and its failed lastState for the life of
+    # the pod, and a sidecar that is up and not ready is not rule 7's — that
+    # rule reads regular containers only.
+    guard healthy-retry.json "init container that failed three times and then succeeded — the count is what makes rule 5's silence mean something (RESTARTS_WARN is 3)" \
+      '[.status.initContainerStatuses[]? | select(.restartCount >= 3 and .state.terminated.exitCode == 0 and .lastState.terminated.exitCode == 1)] | length > 0'
+    guard healthy-unreadysidecar.json "sidecar that is running and not ready, beside a workload container that is serving — the third container role in the state no capture holds (D75)" \
+      '([.spec.initContainers[]? | select(.restartPolicy == "Always")] | length) > 0 and ([.status.initContainerStatuses[]? | select(.ready == false and .started == true and .state.running != null)] | length > 0) and ([.status.containerStatuses[].ready] | all)'
     # W1 and W2 read a ReplicaSet, so their negative has to be one too — the
     # healthy Deployment in deployments.json cannot show the absence of a
     # ReplicaFailure condition that only ever appears on the ReplicaSet.

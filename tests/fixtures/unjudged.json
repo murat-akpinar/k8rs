@@ -7,17 +7,17 @@
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-pending",
+    "name": "broken-unjudged",
     "namespace": "default",
-    "resourceVersion": "637",
-    "uid": "84d34990-8b59-4db2-8baa-f58e0c803376"
+    "resourceVersion": "788",
+    "uid": "3ab11ff4-d872-459e-b1d2-6135a526e835"
   },
   "spec": {
     "containers": [
       {
         "command": [
           "sleep",
-          "3600"
+          "86400"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
@@ -28,7 +28,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-fkt7s",
+            "name": "kube-api-access-r7s4j",
             "readOnly": true
           }
         ]
@@ -36,25 +36,15 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeSelector": {
-      "disktype": "ssd",
-      "kubernetes.io/os": "linux"
-    },
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
-    "schedulerName": "default-scheduler",
+    "schedulerName": "does-not-exist",
     "securityContext": {},
     "serviceAccount": "default",
     "serviceAccountName": "default",
     "terminationGracePeriodSeconds": 30,
     "tolerations": [
-      {
-        "effect": "NoExecute",
-        "key": "dedicated",
-        "operator": "Equal",
-        "value": "gpu"
-      },
       {
         "effect": "NoExecute",
         "key": "node.kubernetes.io/not-ready",
@@ -70,7 +60,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-fkt7s",
+        "name": "kube-api-access-r7s4j",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -110,17 +100,6 @@
     ]
   },
   "status": {
-    "conditions": [
-      {
-        "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "message": "0/4 nodes are available: 1 node(s) had untolerated taint(s), 3 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/4 nodes are available: 4 Preemption is not helpful for scheduling.",
-        "observedGeneration": 1,
-        "reason": "Unschedulable",
-        "status": "False",
-        "type": "PodScheduled"
-      }
-    ],
     "phase": "Pending",
     "qosClass": "BestEffort"
   }

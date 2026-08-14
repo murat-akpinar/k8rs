@@ -3,37 +3,39 @@
   "kind": "Pod",
   "metadata": {
     "creationTimestamp": "2026-08-13T22:32:57Z",
-    "deletionGracePeriodSeconds": 5,
-    "deletionTimestamp": "2026-08-13T23:35:30Z",
-    "finalizers": [
-      "k8rs.test/never-removed"
-    ],
-    "generation": 2,
+    "generation": 1,
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-stuck",
+    "name": "broken-succeeded",
     "namespace": "default",
-    "resourceVersion": "10202",
-    "uid": "b27cc18d-ffdc-4e39-ae9b-ab249ada885e"
+    "resourceVersion": "1682",
+    "uid": "ec5ba2fe-da91-4520-ad31-96337b9dab7b"
   },
   "spec": {
     "containers": [
       {
+        "args": [
+          "n=$(cat /state/n 2>/dev/null || echo 0)\nn=$((n + 1))\necho \"$n\" > /state/n\n[ \"$n\" -le 3 ] && exit 1\necho done\n"
+        ],
         "command": [
-          "sleep",
-          "3600"
+          "sh",
+          "-c"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
-        "name": "app",
+        "name": "migrate",
         "resources": {},
         "terminationMessagePath": "/dev/termination-log",
         "terminationMessagePolicy": "File",
         "volumeMounts": [
           {
+            "mountPath": "/state",
+            "name": "state"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-2vh8d",
             "readOnly": true
           }
         ]
@@ -41,15 +43,15 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker2",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
-    "restartPolicy": "Always",
+    "restartPolicy": "OnFailure",
     "schedulerName": "default-scheduler",
     "securityContext": {},
     "serviceAccount": "default",
     "serviceAccountName": "default",
-    "terminationGracePeriodSeconds": 5,
+    "terminationGracePeriodSeconds": 30,
     "tolerations": [
       {
         "effect": "NoExecute",
@@ -66,7 +68,11 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-bdgxh",
+        "emptyDir": {},
+        "name": "state"
+      },
+      {
+        "name": "kube-api-access-2vh8d",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -109,62 +115,69 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:58Z",
-        "observedGeneration": 2,
-        "status": "True",
+        "lastTransitionTime": "2026-08-13T22:33:54Z",
+        "observedGeneration": 1,
+        "status": "False",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
+        "reason": "PodCompleted",
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
-        "status": "True",
+        "lastTransitionTime": "2026-08-13T22:33:53Z",
+        "observedGeneration": 1,
+        "reason": "PodCompleted",
+        "status": "False",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:08Z",
-        "observedGeneration": 2,
-        "status": "True",
+        "lastTransitionTime": "2026-08-13T22:33:53Z",
+        "observedGeneration": 1,
+        "reason": "PodCompleted",
+        "status": "False",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
         "lastTransitionTime": "2026-08-13T22:32:57Z",
-        "observedGeneration": 2,
+        "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
       }
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://15d96afc6d64508bb667180690507adccd537c73ba11bc5bb8269eedd85af454",
+        "containerID": "containerd://28f87432c8c3dc6436df006acc2d0b9664ebed2820576cc6f9bed8d28d0a5621",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://d3e8762400d9b6cff5f61a29dddea7241fc2193e6d2d620c304d9165c7301b92",
-            "exitCode": 0,
-            "finishedAt": "2026-08-13T23:33:07Z",
-            "reason": "Completed",
-            "startedAt": "2026-08-13T22:33:07Z"
+            "containerID": "containerd://4b2dd4f934555ae17bc257c31f1b1d042fece60d6a16a3976c6dd215b98be3f0",
+            "exitCode": 1,
+            "finishedAt": "2026-08-13T22:33:24Z",
+            "reason": "Error",
+            "startedAt": "2026-08-13T22:33:24Z"
           }
         },
-        "name": "app",
-        "ready": true,
+        "name": "migrate",
+        "ready": false,
         "resources": {},
-        "restartCount": 1,
-        "started": true,
+        "restartCount": 3,
+        "started": false,
         "state": {
-          "running": {
-            "startedAt": "2026-08-13T23:33:08Z"
+          "terminated": {
+            "containerID": "containerd://28f87432c8c3dc6436df006acc2d0b9664ebed2820576cc6f9bed8d28d0a5621",
+            "exitCode": 0,
+            "finishedAt": "2026-08-13T22:33:53Z",
+            "reason": "Completed",
+            "startedAt": "2026-08-13T22:33:53Z"
           }
         },
         "user": {
@@ -179,8 +192,12 @@
         },
         "volumeMounts": [
           {
+            "mountPath": "/state",
+            "name": "state"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-bdgxh",
+            "name": "kube-api-access-2vh8d",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -193,8 +210,8 @@
         "ip": "REDACTED-IP"
       }
     ],
-    "observedGeneration": 2,
-    "phase": "Running",
+    "observedGeneration": 1,
+    "phase": "Succeeded",
     "podIP": "REDACTED-IP",
     "podIPs": [
       {

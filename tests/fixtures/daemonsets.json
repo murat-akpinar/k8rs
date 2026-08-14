@@ -5,15 +5,15 @@
       "apiVersion": "apps/v1",
       "kind": "DaemonSet",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "creationTimestamp": "2026-08-13T22:32:57Z",
         "generation": 1,
         "labels": {
           "demo": "broken"
         },
         "name": "broken-ds",
         "namespace": "default",
-        "resourceVersion": "759",
-        "uid": "ce441cf6-d1d2-4544-be9b-764cbd1b1ee6"
+        "resourceVersion": "745",
+        "uid": "4abe80f8-5538-4635-91a3-a972df292fb6"
       },
       "spec": {
         "revisionHistoryLimit": 10,
@@ -69,7 +69,7 @@
       "apiVersion": "apps/v1",
       "kind": "DaemonSet",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:28Z",
+        "creationTimestamp": "2026-08-13T22:32:37Z",
         "generation": 1,
         "labels": {
           "app": "kindnet",
@@ -78,8 +78,8 @@
         },
         "name": "kindnet",
         "namespace": "kube-system",
-        "resourceVersion": "543",
-        "uid": "f499cc6b-3252-4a1e-8dcf-1fe794dabcda"
+        "resourceVersion": "530",
+        "uid": "e06f9325-2bcb-4a3c-b884-a6f6bdfff29c"
       },
       "spec": {
         "revisionHistoryLimit": 10,
@@ -243,15 +243,15 @@
       "apiVersion": "apps/v1",
       "kind": "DaemonSet",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:27Z",
+        "creationTimestamp": "2026-08-13T22:32:36Z",
         "generation": 1,
         "labels": {
           "k8s-app": "kube-proxy"
         },
         "name": "kube-proxy",
         "namespace": "kube-system",
-        "resourceVersion": "528",
-        "uid": "4c6bccdf-ad8f-49ff-9ed8-cf30ab5711b6"
+        "resourceVersion": "523",
+        "uid": "50ebf8b6-2997-4903-a5af-3cd40509c015"
       },
       "spec": {
         "revisionHistoryLimit": 10,

@@ -134,3 +134,85 @@ spec:
       resources:
         requests: { cpu: "10m", memory: "16Mi" }
         limits: { cpu: "100m", memory: "64Mi" }
+---
+# D75 — the wait-for-dependency loop, and the false positive `doing_its_job`
+# exists to stop. An init container that crashes until the database answers and
+# then exits 0 keeps its restart count and its failed `lastState` for the whole
+# life of the pod, so rules 5 and 6 would draw a permanent CRITICAL and a
+# permanent WARN on a pod that is working perfectly. Both are proven today only
+# on a decoded copy; this is the object.
+#
+# **Three failures and not two**: `RESTARTS_WARN` is 3, so a container with two
+# restarts is below rule 5's threshold and the fixture would prove the
+# suppressor for rule 6 alone.
+#
+# Its own pod rather than a second init container on `healthy`, for the reason
+# `healthy-sidecar` is its own pod: `healthy` is the negative fixture for every
+# rule at once, and a restart count on it would end the "never restarted" half
+# of that. It is on the healthy side because **nothing may fire on it** — that
+# is the assertion.
+apiVersion: v1
+kind: Pod
+metadata: { name: healthy-retry, labels: { demo: healthy } }
+spec:
+  initContainers:
+    - name: wait-for-db
+      image: busybox
+      command: ["sh", "-c"]
+      args:
+        - |
+          n=$(cat /state/n 2>/dev/null || echo 0)
+          n=$((n + 1))
+          echo "$n" > /state/n
+          [ "$n" -le 3 ] && { echo "the database is not answering yet" >&2; exit 1; }
+          echo "the database answered"
+      volumeMounts:
+        - { name: state, mountPath: /state }
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "86400"]
+      resources:
+        requests: { cpu: "10m", memory: "16Mi" }
+        limits: { cpu: "100m", memory: "64Mi" }
+  volumes:
+    - name: state
+      emptyDir: {}
+---
+# D75 — a native sidecar that is **running but not ready**, which is the third
+# container role in the one state no capture holds. `healthy-sidecar`'s proxy is
+# ready, so rule 7's `Regular`-only gate could be deleted and nothing would
+# notice: what a not-ready sidecar does to the pod's own readiness is a
+# different question and a rule this project does not have (invariant 13).
+#
+# The regular container starts anyway, and that is the mechanism rather than
+# luck: a restartable init container must be **started** before the next
+# container runs, never *ready* (KEP-753). So the pod is up, the app is serving,
+# and the proxy beside it is not ready — the shape a mesh sidecar spends its
+# first minutes in.
+#
+# On the healthy side because nothing may fire on it. A readiness probe that
+# never passes rather than a slow one: this state has to hold for the whole
+# trip.
+apiVersion: v1
+kind: Pod
+metadata: { name: healthy-unreadysidecar, labels: { demo: healthy } }
+spec:
+  initContainers:
+    - name: proxy
+      image: busybox
+      command: ["sleep", "86400"]
+      restartPolicy: Always
+      readinessProbe:
+        exec: { command: ["false"] }
+        periodSeconds: 5
+      resources:
+        requests: { cpu: "10m", memory: "16Mi" }
+        limits: { cpu: "100m", memory: "64Mi" }
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "86400"]
+      resources:
+        requests: { cpu: "10m", memory: "16Mi" }
+        limits: { cpu: "100m", memory: "64Mi" }

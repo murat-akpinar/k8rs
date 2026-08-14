@@ -5,8 +5,8 @@
       "apiVersion": "apps/v1",
       "kind": "ReplicaSet",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:46:08Z",
-        "generation": 5,
+        "creationTimestamp": "2026-08-13T22:33:05Z",
+        "generation": 7,
         "labels": {
           "app": "broken-rollout",
           "demo": "broken",
@@ -21,11 +21,11 @@
             "controller": true,
             "kind": "Deployment",
             "name": "broken-rollout",
-            "uid": "6ec89466-2ef5-4d35-b79d-b88c164b17e4"
+            "uid": "eafbc9dd-4476-4d3e-9c29-f464a5d52de6"
           }
         ],
-        "resourceVersion": "8228",
-        "uid": "7c9ee2b3-db84-4fb7-bbcc-da818ea07675"
+        "resourceVersion": "7260",
+        "uid": "747c2d38-20a3-4e25-90ea-afad55fad482"
       },
       "spec": {
         "replicas": 1,
@@ -68,7 +68,7 @@
       },
       "status": {
         "fullyLabeledReplicas": 1,
-        "observedGeneration": 5,
+        "observedGeneration": 7,
         "replicas": 1,
         "terminatingReplicas": 0
       }
@@ -77,7 +77,7 @@
       "apiVersion": "apps/v1",
       "kind": "ReplicaSet",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "creationTimestamp": "2026-08-13T22:32:57Z",
         "generation": 1,
         "labels": {
           "app": "broken-rollout",
@@ -93,11 +93,11 @@
             "controller": true,
             "kind": "Deployment",
             "name": "broken-rollout",
-            "uid": "6ec89466-2ef5-4d35-b79d-b88c164b17e4"
+            "uid": "eafbc9dd-4476-4d3e-9c29-f464a5d52de6"
           }
         ],
-        "resourceVersion": "8198",
-        "uid": "a570958b-7d98-4329-b8d5-284ac8cf6bc9"
+        "resourceVersion": "9836",
+        "uid": "c515e3f3-ed19-4afe-b22c-6587fba5822e"
       },
       "spec": {
         "replicas": 2,

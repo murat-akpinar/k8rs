@@ -5,14 +5,14 @@
       "apiVersion": "v1",
       "kind": "Service",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "creationTimestamp": "2026-08-13T22:32:57Z",
         "labels": {
           "demo": "broken"
         },
         "name": "broken-sts",
         "namespace": "default",
-        "resourceVersion": "698",
-        "uid": "3b66eea6-11e3-48a4-8daa-288e3d0d63d4"
+        "resourceVersion": "679",
+        "uid": "7bff487e-49a7-490f-b44c-01cbb7a3387f"
       },
       "spec": {
         "clusterIP": "None",
@@ -46,15 +46,15 @@
       "apiVersion": "v1",
       "kind": "Service",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:26Z",
+        "creationTimestamp": "2026-08-13T22:32:35Z",
         "labels": {
           "component": "apiserver",
           "provider": "kubernetes"
         },
         "name": "kubernetes",
         "namespace": "default",
-        "resourceVersion": "204",
-        "uid": "8ee9d417-27e1-479d-ad39-ed5e64655ba0"
+        "resourceVersion": "203",
+        "uid": "10720552-8867-41b3-9619-7a5f3cc9b62a"
       },
       "spec": {
         "clusterIP": "REDACTED-IP",
@@ -85,7 +85,7 @@
       "apiVersion": "v1",
       "kind": "Service",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:27Z",
+        "creationTimestamp": "2026-08-13T22:32:36Z",
         "labels": {
           "k8s-app": "kube-dns",
           "kubernetes.io/cluster-service": "true",
@@ -93,8 +93,8 @@
         },
         "name": "kube-dns",
         "namespace": "kube-system",
-        "resourceVersion": "249",
-        "uid": "24cd0f91-c4d6-4b69-b8cc-a67ae6f65573"
+        "resourceVersion": "242",
+        "uid": "1409544d-89eb-4532-a97b-f022e3867d5d"
       },
       "spec": {
         "clusterIP": "REDACTED-IP",

@@ -5,7 +5,7 @@
       "apiVersion": "apps/v1",
       "kind": "ReplicaSet",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:54Z",
+        "creationTimestamp": "2026-08-13T22:32:58Z",
         "generation": 1,
         "labels": {
           "app": "healthy-deploy",
@@ -21,11 +21,11 @@
             "controller": true,
             "kind": "Deployment",
             "name": "healthy-deploy",
-            "uid": "0887135d-1025-44cb-b2c9-b168b935e674"
+            "uid": "851c57bb-9486-4cf2-9e81-006b672ac748"
           }
         ],
-        "resourceVersion": "993",
-        "uid": "0e7eb0ae-c8af-499c-8275-7d15b8416d3d"
+        "resourceVersion": "9948",
+        "uid": "6c94f59c-045c-40e6-b304-e6d7313a23f5"
       },
       "spec": {
         "replicas": 2,
