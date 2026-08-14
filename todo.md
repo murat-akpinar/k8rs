@@ -1422,6 +1422,27 @@ this plan is delivery mechanism for what this phase produces.
       the thing making the claim true survives a rewrite; a pin on a token from
       the sentence does not, and every one of the latter in this file is listed
       above
+- [ ] **A container can have a status and no declaration, and the decode's own
+      comment says it cannot** — `container_snapshots` explains its missing test
+      with *"the API cannot produce the object: both container lists are
+      immutable after create"*. Immutability is not the thing that breaks it: a
+      node implementation that is not a kubelet is. k9s carries the field report
+      ([#4145](https://github.com/derailed/k9s/issues/4145), open) — on Tencent
+      TKE **virtual nodes** the provider injects a managed logging container into
+      `status.containerStatuses` with no entry in `spec.containers`: two declared
+      containers, three ready statuses, pod `Ready: True`. Virtual-kubelet,
+      serverless nodes and sandboxed runtimes all sit in that gap. **What this
+      code does with one today, asserted nowhere:** `declared` is `None`, so the
+      container decodes with no requests and no limits, `Regular` from the main
+      list and `Init` from the init list — the role whose cards tell the reader
+      Kubernetes allows it no health checks, about a container whose manifest we
+      never saw. Rule 9's "no limits" column and any count of a pod's containers
+      inherit it too. **Done when** a fixture carries a status with no
+      declaration, every rule's behaviour on it is asserted rather than
+      inherited, and the comment states what is actually true. **The pairing
+      itself is not in question** — it is by name, and that is exactly why the
+      index-out-of-range panic k9s shipped in `initContainerStats` has no shape
+      here ([PRIOR-ART § F3](PRIOR-ART.md#f3--container-semantics-moved-underneath-them))
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test
 - [ ] `cargo mutants --timeout 90` clean over `rules.rs` — a MISSED mutant is a
       rule change no test objected to, i.e. a hole in the diagnosis; it gets a
@@ -1536,6 +1557,48 @@ public release.
       claim load-bearing; this is D69's shape a second time, caught before the
       code instead of after
       ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14))
+- [ ] **How the initial LIST arrives is a decision, not a default** — the box
+      above forbids publishing a snapshot until every initial LIST has landed,
+      which makes the shape of that LIST load-bearing. An unpaginated
+      `LIST pods -A` on a 10 000-pod cluster is one response the API server has
+      to build whole, and it is the single call most likely to time out, while
+      `REQUIREMENTS.md` budgets first paint at under a second. Decide
+      `limit`/`continue` and the page size, read what kube-rs's `watcher` does by
+      default rather than assuming, and write the number down. k9s took six years
+      to paginate one call and carried "slow on a large cluster" the whole time
+      ([#663](https://github.com/derailed/k9s/issues/663) 2020 →
+      [#3987](https://github.com/derailed/k9s/pull/3987) 2026 ·
+      [PRIOR-ART § A2](PRIOR-ART.md#a2--the-initial-list-must-be-paginated-and-the-page-size-is-a-decision))
+- [ ] **Find out whether kube-rs rate-limits us, and if it does, put it on
+      screen** — client-go ships a client-side QPS limiter, so for years a k9s
+      user reporting "slow" was partly reporting a queue inside their own binary
+      with nothing to see it by; the repair was a default raised from 5 to 50
+      ([#3988](https://github.com/derailed/k9s/pull/3988)). Read kube-rs's own
+      docs in `tmp/` for this — "it probably does nothing" is the assumption that
+      makes it invisible. Whatever it turns out to be: a documented number, and,
+      if requests are ever queued, a state the header can show rather than a
+      silent default
+      ([PRIOR-ART § A3](PRIOR-ART.md#a3--client-side-throttling-is-invisible-and-that-is-the-bug))
+- [ ] **Name the oldest API server k8rs supports, enforce it at connect, and put
+      a deadline on the first watch sync** — `Cargo.toml` pins `k8s-openapi` to
+      `v1_32` and calls it *"the oldest supported version"*, which is a statement
+      about the types we compile against and is enforced nowhere at runtime.
+      Nothing stops a stranger pointing v0.0.1 at a v1.24 cluster, and nothing
+      would tell them that is what went wrong. The shape to design against is
+      k9s's [#4044](https://github.com/derailed/k9s/issues/4044): client-go's
+      WatchList default asks for `sendInitialEvents`, an API server older than
+      v1.27 **ignores the parameter instead of rejecting it**, the promised
+      `BOOKMARK` carrying `initial-events-end` never arrives, and the informer
+      waits for it forever — no error, no log line, a spinner that never stops
+      while `kubectl get` on the same context returns instantly. Because the
+      server returned no error, the documented fallback to LIST+WATCH never
+      fires. **This is the way a watch-first design hangs that a polling one
+      cannot**, and it is worth knowing before switching kube-rs's own streaming
+      list strategy on for speed. **Done when** the version floor is written
+      down, the connect path says so in plain language for a cluster below it,
+      and a first sync that does not complete becomes a state on screen instead
+      of a wait
+      ([PRIOR-ART § A7](PRIOR-ART.md#a7--the-watchs-own-initial-list-strategy-can-hang-forever))
 - [ ] **Owner name resolution**: a pod's `ownerReferences` names its
       *ReplicaSet*, and the group heading has to read `web`, not
       `web-7d4f5c6b8`. Fetch the ReplicaSet on demand, cache by UID, never
@@ -1557,7 +1620,21 @@ public release.
 - [ ] Capability probe from the same discovery call: `metrics.k8s.io`,
       `policy`, `cert-manager.io`, `monitoring.coreos.com`, Istio/Linkerd/
       Cilium. Absent capability = the feature says why it is off, never hides
-- [ ] Reconnect/backoff surfaced as a state the UI can show
+- [ ] Reconnect/backoff surfaced as a state the UI can show — **and the tool
+      never exits because the cluster went away.** A connectivity failure is a
+      banner, retried for as long as the user leaves it open; there is no retry
+      budget after which k8rs quits. k9s had the opposite of each half
+      ([#3922](https://github.com/derailed/k9s/issues/3922)): its updater ran the
+      first refresh *outside* the retry loop, so the first failure killed the
+      reconnector permanently · it called `BailOut` after five retries, so a VPN
+      blip over lunch meant the tool was gone on return · each failed check held
+      the 120-second call timeout, making recovery slower than the outage. The
+      lesson under all three: k9s survived disconnects during *active* use, where
+      navigation restarts the watches by accident, and only the **idle** path was
+      broken — the path nobody tests. So this box is proven idle: leave it
+      running against kind, `docker stop` the node, wait past any timeout, start
+      it again, and the findings must come back on their own
+      ([PRIOR-ART § B3](PRIOR-ART.md#b3--reconnect-logic-dies-quietly))
 - [ ] **Connecting is a function, not a step in `main`** — `connect(context)`
       builds the client, runs discovery and the capability probe and starts the
       watches, and can be called again after everything from the previous
@@ -1569,11 +1646,44 @@ public release.
       case on EKS/GKE/AKS — and it names the renewal command from the user's
       own kubeconfig `exec` block rather than guessing a cloud
       ([NOTES § D19](NOTES.md#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program))
+- [ ] **A generic message may never stand in for an error we were handed** — the
+      three variants above are worth little without it. Whatever failed, the
+      screen names *what* failed and *why*; a fallback string is printed only for
+      the case it actually describes. k9s tells these errors apart internally and
+      still shows `Ruroh? 'v1/pods' command not found` when a credential expires,
+      because a generic handler between the call and the screen swallowed the
+      typed error — its own log had the truth three lines earlier
+      ([#3730](https://github.com/derailed/k9s/issues/3730),
+      [#3132](https://github.com/derailed/k9s/issues/3132)). Invariant 14 governs
+      the *wording* of what a user reads; this governs where it is allowed to
+      come from. **It updates `docs/architecture.md § Error handling`**, which
+      today covers the three startup errors and not the general rule
+      ([PRIOR-ART § C1](PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error))
 - [ ] **Measure resident memory against 10 000 pods** (kind + a generator)
       **plus the three workload watches**, and write the number down. Pruning `managedFields` is agreed; whether the
       pruned store actually fits is unmeasured, and an unmeasured number is not
       a design ([NOTES § D25](NOTES.md#d25--what-this-review-did-not-decide))
 - [ ] Startup errors (no kubeconfig / bad context) → stderr + non-zero exit
+- [ ] **The six kubeconfig shapes, each with a fixture** — the largest class in
+      k9s's tracker is not the cluster, it is the file that describes it, and
+      every shape below is a separate closed issue there. **No file** · **a file
+      with no current context** — a *panic* in
+      [#2465](https://github.com/derailed/k9s/issues/2465) (33 comments) and the
+      same cause wearing a different symptom four years later in
+      [#2651](https://github.com/derailed/k9s/issues/2651) · **`KUBECONFIG`
+      holding several paths** ([#829](https://github.com/derailed/k9s/issues/829),
+      and token refresh across them,
+      [#620](https://github.com/derailed/k9s/issues/620)) · **a context whose
+      name contains a space** ([#3815](https://github.com/derailed/k9s/issues/3815),
+      still open) · **a context that names its own namespace**, which is the
+      namespace k8rs must then start in — a regression k9s shipped twice
+      ([#1397](https://github.com/derailed/k9s/issues/1397),
+      [#1444](https://github.com/derailed/k9s/issues/1444)) · **a context whose
+      `exec` credential plugin is missing or fails**, which is
+      [D19](NOTES.md#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program)
+      already. They sit beside the box above because they *are* startup errors —
+      the ones a stranger meets before they ever see a finding
+      ([PRIOR-ART § B1](PRIOR-ART.md#b1--kubeconfig-is-harder-than-it-looks))
 - [ ] **The clock-skew line in the header, which D55 declared binding on later
       boxes and nobody owned.** *"Your computer's clock is 11 minutes behind
       the cluster — the times on this screen are wrong"*, in plain language,
@@ -1665,6 +1775,40 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
 - [ ] `d` describe: object plus those events, assembled from what we now have
 - [ ] `y` YAML view, with Secret values hidden behind an explicit reveal
 - [ ] Control-character stripping on every free-text field from the API
+- [ ] **The log buffer's bound is a number, and a dropped line is counted out
+      loud** — this phase's gate below says "bounded buffer, no unbounded growth"
+      and names no figure, which is how a bound stays unbuilt. Pick the line
+      count, drop the oldest past it, and when lines are dropped because the
+      stream outruns the reader, **say how many on screen**. k9s widened its log
+      channel and added a drop counter in the same change
+      ([#3978](https://github.com/derailed/k9s/pull/3978)): silently losing log
+      lines in a debugging tool is worse than showing fewer of them. What an
+      unmeasured process costs is on record without a named cause — a k9s left
+      running grew to 21.5 GB resident over eight days and invoked the node's OOM
+      killer, which then killed the pods it was there to watch
+      ([#871](https://github.com/derailed/k9s/issues/871) ·
+      [PRIOR-ART § A6](PRIOR-ART.md#a6--unbounded-memory-in-the-field-for-8-days))
+- [ ] **Sanitising for the screen and emitting for a consumer are two different
+      functions** — the box above strips control characters on the way in, which
+      is half of it. Whatever the *display* does to a string has to be undone
+      before that text leaves k8rs through `y`, a copy, a saved file or `--once`.
+      k9s learned this across four follow-up PRs to one bug: a secret containing
+      `match[]`, copied out, produced different bytes than the secret
+      ([#3051](https://github.com/derailed/k9s/issues/3051)); the fix left escape
+      residue in input fields ([#3885](https://github.com/derailed/k9s/issues/3885));
+      the regex handled one occurrence per line instead of all of them
+      ([#4043](https://github.com/derailed/k9s/pull/4043)); and the save/copy path
+      needed a de-escape of its own
+      ([#3945](https://github.com/derailed/k9s/pull/3945)). ratatui has no markup
+      language, so that *mechanism* cannot repeat here — the shape can, the
+      moment a renderer clips, wraps or marks a string and something downstream
+      emits the marked copy, which is the open half of
+      [#4123](https://github.com/derailed/k9s/issues/4123) too (wrapped log lines
+      that no longer parse as JSON when copied). **Done when** a fixture line
+      carrying control characters, brackets and a wrap-width boundary comes out
+      of every emit path with exactly one transformation on it — the documented
+      ingest strip — and nothing the renderer added
+      ([PRIOR-ART § D1](PRIOR-ART.md#d1--cluster-data-as-markup))
 
 **🔒 Security gate:** log streams are attacker-controlled text — bounded
 buffer, control characters stripped, no unbounded growth. Secret values are
@@ -1770,7 +1914,22 @@ Goal: learn the ratatui event loop without touching product files.
 
 - [ ] `theme.rs`: 10 Catppuccin Mocha constants + `COLORTERM` check with a
       16-color fallback
-- [ ] Severity symbols `● ▲ ○` — never colour alone
+- [ ] Severity symbols `● ▲ ○` — never colour alone, **and the same rule for
+      every other meaning on the screen.** Selection, focus, the `changing…`
+      state, the disconnected banner and the `--read-only` marker each carry a
+      symbol, reverse video or a word beside their colour. It belongs here rather
+      than in each screen because `theme.rs` is the single point of change, and
+      [screens/alerts.md](screens/alerts.md) is today the only file that promises
+      it — about findings only. k9s marks its selected column with a foreground
+      colour and nothing else, invisible to a reader with a colour vision
+      deficiency or on a skin where that colour does not contrast
+      ([#3955](https://github.com/derailed/k9s/issues/3955), open); and its
+      highlight leans on `SGR 1`, which Windows Terminal renders as a *bright
+      colour* by default, turning the selected row into grey on grey
+      ([#3598](https://github.com/derailed/k9s/issues/3598), open — it took a
+      thread in microsoft/terminal to find out why). Bold is a per-emulator
+      setting, so bold is not a signal either
+      ([PRIOR-ART § K](PRIOR-ART.md#k-accessibility))
 
 **Done when:** both palettes render; `COLORTERM` unset degrades instead of
 looking broken.
@@ -1792,6 +1951,23 @@ keeps TUI code from rotting.
       current list, `n` namespace substring. **No severity filter** — grouping
       by owner made the list short, and severity is already the sort order
       ([NOTES § D12](NOTES.md#d12--the-key-map-and-two-keys-deleted))
+- [ ] **The browser's columns are strings, so decide now whether they sort at
+      all** — the sort above is typed and ours. The Resources view is not:
+      invariant 12 builds it from the API server's own `Table` output, which is
+      **display text**, so a column sort there compares `1Gi` against `999Mi`,
+      `2d` against `10h`, `<none>` and `""`. Sorting the rendered string instead
+      of the value is the single cause under a defect class k9s has never closed:
+      CPU and memory sort silently doing nothing
+      ([#3793](https://github.com/derailed/k9s/issues/3793), 29 comments, open
+      since January), age sort broken for CRDs, empty capacities, a **panic**
+      when a row has fewer fields than the sort index
+      ([#3926](https://github.com/derailed/k9s/pull/3926)), and a comparator that
+      was not a strict weak ordering
+      ([#4070](https://github.com/derailed/k9s/pull/4070)). Two honest answers:
+      the browser offers no column sort in v1, or each column type gets a named
+      parse with the unparseable pinned last and a test of its own. Choosing
+      neither is how #3793 stays open for a year
+      ([PRIOR-ART § F1](PRIOR-ART.md#f1--sorting))
 - [ ] Modal state: confirm dialog, typed-name confirmation, help overlay
 - [ ] Unit tests — selection and filtering are logic, and logic gets tests
       even when it is "just UI"
@@ -1862,6 +2038,18 @@ Goal: one binary, live and safe.
 
 - [ ] `main.rs`: single `tokio::select!` (watch streams · crossterm events ·
       Ctrl-C), draw-on-change with ~100ms coalescing, block when idle
+- [ ] **A coalescing test that ends quiet and asserts the final state** — the
+      loop above draws on change with ~100 ms coalescing, which is invariant 7
+      and also the exact manoeuvre k9s merged and reverted a month later
+      ([#3989](https://github.com/derailed/k9s/pull/3989) →
+      [#4033](https://github.com/derailed/k9s/pull/4033), *"skip reconcile cycle
+      when informer data is unchanged"*). A coalescer that drops the **last**
+      event of a burst shows stale data forever, and it passes every test that
+      only checks that events arrived. Feed a storm, stop feeding it, and assert
+      the screen equals the last event once the debounce window has expired — the
+      defect is a redraw that never comes, so the assertion has to be made after
+      the quiet, not during the noise
+      ([PRIOR-ART § A5](PRIOR-ART.md#a5--the-perf-fix-that-got-reverted))
 - [ ] **Ctrl-Z (SIGTSTP) hands the terminal back properly** — leave raw mode
       and the alternate screen on suspend, re-enter on resume. Without it the
       shell gets a raw-mode terminal and `fg` returns to a dead screen. It is

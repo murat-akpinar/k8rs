@@ -5421,6 +5421,71 @@ The budget has been false since before this box, so it is a
 the same boundary the `Failed` arm was tested against and lands on the other side
 of it.
 
+### D89 — k9s's tracker is read as prior art, and twelve of its classes become boxes (2026-08-14)
+
+**What happened.** The user asked for the k9s issue tracker to be read and
+compiled — *"dikkat edeceğimiz yerler"*, the places to be careful. It is the one
+body of evidence this project has that was not produced by this project: 2324
+closed and 48 open issues, seven years of other people's users telling a
+Kubernetes TUI where it hurts. The result is [PRIOR-ART.md](PRIOR-ART.md), and
+the user then ruled that its twelve open gaps become boxes.
+
+**PRIOR-ART.md is evidence, not a plan, and the distinction is load-bearing.**
+Nothing in it is a request to build what k9s built —
+[§ Out of scope](#out-of-scope-the-most-important-section) and invariant 13 still
+decide that, and the file says so in its second paragraph. Three k9s features
+were looked at and *not* adopted, the closest call being API-server `Warning:`
+headers (k9s [#4106](https://github.com/derailed/k9s/issues/4106)): free,
+authoritative, exactly our subject matter — and if it is ever built it is a rule,
+not a UI feature, so it waits for the rule set rather than jumping the queue.
+
+**What the ruling did not decide, and this entry does.**
+
+- **Two gaps were folded into boxes that already existed, not added beside
+  them.** The reconnect gap joined *"Reconnect/backoff surfaced as a state"*, and
+  the colour-is-not-a-signal gap joined *"Severity symbols `● ▲ ○` — never colour
+  alone"*. A new box next to an existing one covering the same ground is exactly
+  the cross-box defect the phase-close pass exists to catch: two boxes, solved
+  differently, both true. Ten new boxes, two amendments, twelve gaps.
+- **The coalescing test moved from Phase 10/11 to Phase 12.** The file guessed at
+  the view layer; the coalescer is in `main.rs`'s `tokio::select!`, so the test
+  belongs beside it or it tests something else.
+- **The typed-error rule lands as a Phase 5 box that also edits
+  `docs/architecture.md`**, rather than as a docs-only change. A rule about where
+  a message may come from has to be built, not only written down.
+- **The emit-path gap lands once, in Phase 6**, not once there and once in Phase
+  11. It defines two functions; the later phase uses them.
+
+**The finding that came out of reading the code rather than the tracker.** The
+first draft of § F3 said `containerStatuses` and `spec.containers` are not
+guaranteed to match in length or order, so *"index-by-position is a panic"* — the
+defect k9s shipped in `initContainerStats`. `container_snapshots` already pairs by
+**name**, and says why in a comment, so that half was never ours. What the
+comment also says is that a status with no declaration **cannot exist**, because
+*"both container lists are immutable after create"* — and it uses that to explain
+why the miss has no test. k9s
+[#4145](https://github.com/derailed/k9s/issues/4145) is a field report of the
+object: on Tencent TKE **virtual nodes** the provider injects a managed logging
+container into `status.containerStatuses` with no entry in `spec.containers` —
+two declared containers, three ready statuses, pod `Ready: True`. Immutability is
+not what breaks the assumption; a node implementation that is not a kubelet is,
+and virtual-kubelet, serverless nodes and sandboxed runtimes all sit there. The
+gap shrank from a panic we do not have to an assumption we do have, which is the
+smaller and truer box — and it is in **Phase 3**, the open phase, not a later one.
+
+**Cost, stated.** A thirteenth file at the repo root, listed in
+[CLAUDE.md](CLAUDE.md)'s map. It is the only file here whose subject is another
+project, and it dates: every issue number is a claim about a tracker that moves.
+It is a snapshot taken on 2026-08-14 with the queries printed at the top of it, so
+it can be re-run rather than trusted.
+
+**Two claims in the file were wrong on its first draft and are named here so the
+pattern is visible**: the F3 one above, and § A6, which said the 21.5 GB k9s
+process ([#871](https://github.com/derailed/k9s/issues/871)) grew because of a log
+stream — the thread never identifies what grew. Both were assertions about
+something the reviewer had not opened: one our code, one their thread. That is the
+same defect twice, and it is the one this file's own second pass exists to catch.
+
 ## Decisions made
 
 ### Product

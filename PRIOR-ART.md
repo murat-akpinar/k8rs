@@ -123,10 +123,11 @@ launched it, grew to **21.5 GB resident**, and invoked the kernel OOM killer,
 which then killed the node's real pods. A monitoring tool took down what it was
 monitoring.
 
-**covered / gap.** The security gate already says "sizes are bounded"; Phase 5
-measures resident memory once, against 10 000 pods. Neither covers a *log stream*
-running for hours — the thing that actually grew here. Phase 6 needs a stated
-bound on the log buffer with an explicit drop policy (see E1).
+**covered / gap.** The thread never identifies what grew, and that is the point:
+nobody was measuring anything over time. The security gate says "sizes are
+bounded" and Phase 5 measures resident memory once, against 10 000 pods — a
+single reading of a fresh process. The buffer that runs for hours is the log
+stream, and Phase 6's gate bounds it in words with no number attached (see E1).
 
 ### A7 — the watch's own initial-list strategy can hang forever ★
 
@@ -452,14 +453,31 @@ containers) · [#3866](https://github.com/derailed/k9s/issues/3866) /
 (open — a pod is marked unhealthy when `containerStatuses` has more entries than
 the spec has containers).
 
-**Directly aimed at `rules.rs`.** k8rs's rules read container statuses and decide
-what a pod's state means. Three facts from this thread: an init container with
-`restartPolicy: Always` is a **sidecar** and its "not finished" is normal ·
-`containerStatuses` and `spec.containers` are not guaranteed to be the same length
-or order, so **index-by-position is a panic** · the semantics changed in a minor
-Kubernetes release, so a rule that hardcodes today's meaning ages badly.
+**Directly aimed at `rules.rs`** — and it lands half covered, half not.
 
-**gap** — worth an explicit check against the rule set, and a fixture.
+**Covered, and worth knowing it was not luck.** `container_snapshots` pairs a
+status to its declaration **by name**, never by position, and says why in a
+comment; the native sidecar already has its own `ContainerRole::Sidecar`, decided
+from `spec.initContainers[].restartPolicy`. The panic k9s shipped in
+`initContainerStats` has no shape to take here.
+
+**Not covered: the assumption underneath that pairing.** The same comment states
+that a status with no declaration *cannot exist* — *"both container lists are
+immutable after create"* — and uses it to explain why the miss has no test.
+[#4145](https://github.com/derailed/k9s/issues/4145) ★ is a field report of
+exactly that object: on Tencent TKE **virtual nodes**, the provider injects a
+managed logging container into `status.containerStatuses` with no entry in
+`spec.containers`. Two declared containers, three ready statuses, pod `Ready:
+True`. The reporter's ask is the interesting half — *keep* showing `3/2`, because
+the extra container is real, but judge health only from statuses that match the
+spec.
+
+Immutability is not what breaks the assumption; a node implementation that is not
+a kubelet is. Virtual-kubelet, serverless nodes and sandboxed runtimes all sit in
+that gap.
+
+**gap** — what a status-only container decodes to, and what every rule then says
+about it, is undecided and untested.
 
 ### F4 — the API surface is not a constant
 
@@ -631,24 +649,28 @@ the repo, and it is the one path our rule fixtures do not touch at all.
 
 ## Open gaps this review found
 
-Twelve items with no home in `todo.md` today. They are **candidates**, not
-decisions — each needs a PM ruling and, where it changes behaviour, a NOTES entry.
-Ordered by the phase they would land in.
+Twelve items the review found with no home in `todo.md`. **All twelve are boxes
+now** — the user ruled on 2026-08-14, and where each one landed is
+[D89](NOTES.md#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14).
+Ten are new boxes; two were folded into boxes that already covered the ground,
+because a second box beside an existing one is how the same problem gets solved
+twice, differently. The table is the trace from a k9s thread to the box that
+answers it.
 
-| # | Gap | From | Lands in |
+| # | Gap | From | Box |
 |---|---|---|---|
-| 1 | Check the rule set against native sidecars, and against `containerStatuses` being a different length or order than `spec.containers` | F3 | Phase 3 (open now) |
-| 2 | Decide `limit`/`continue` paging for the initial LIST, and record the page size | A2 | Phase 5 |
-| 3 | Confirm whether kube-rs applies client-side rate limiting; if it does, the number is documented and visible | A3 | Phase 5 |
-| 4 | Name the oldest apiserver k8rs supports, enforce it at connect, and put a deadline on first watch sync | A7 | Phase 5 |
-| 5 | kubeconfig fixture matrix — the six named shapes, each with a test | B1 | Phase 5 |
-| 6 | Write down that a connectivity failure is a banner and never an exit, retried forever | B3 | Phase 5 · REQUIREMENTS |
-| 7 | A fallback message may never replace a typed error | C1 | `docs/architecture.md § Error handling` |
-| 8 | Log buffer: a stated bound, a drop policy, and a visible dropped-line count | A6 · E1 | Phase 6 |
-| 9 | Sanitise-for-display and emit-for-consumption are separate functions; copy / `y` / `--once` emit the original bytes | D1.2 | Phase 6 · Phase 11 |
-| 10 | `theme.rs`: colour is never the only carrier of meaning | K | Phase 9 |
-| 11 | Coalescing test that ends quiet and asserts the *final* state | A5 | Phase 10/11 |
-| 12 | Browser column sorting: refuse it, or decide how a `Table` string becomes a sort key | F1 | Phase 11 |
+| 1 | A container can carry a status with no declaration — what it decodes to, and what every rule then says about it | F3 | Phase 3, new |
+| 2 | Decide `limit`/`continue` paging for the initial LIST, and record the page size | A2 | Phase 5, new |
+| 3 | Find out whether kube-rs rate-limits us; if it does, the number is documented and the queue is visible | A3 | Phase 5, new |
+| 4 | Name the oldest API server k8rs supports, enforce it at connect, deadline the first watch sync | A7 | Phase 5, new |
+| 5 | The six kubeconfig shapes, each with a fixture | B1 | Phase 5, new |
+| 6 | A connectivity failure is a banner and never an exit, retried forever — and proven on the *idle* path | B3 | Phase 5, folded into the reconnect box |
+| 7 | A generic message may never stand in for a typed error | C1 | Phase 5, new — and it edits `docs/architecture.md § Error handling` |
+| 8 | Log buffer: a stated number, a drop policy, and a visible dropped-line count | A6 · E1 | Phase 6, new |
+| 9 | Sanitise-for-display and emit-for-consumption are two functions; `y` / copy / save / `--once` emit what came in | D1.2 | Phase 6, new |
+| 10 | Colour is never the only carrier of meaning — every state, not just severity | K | Phase 9, folded into the severity-symbols box |
+| 11 | Coalescing test that ends quiet and asserts the *final* state | A5 | Phase 12, new — the coalescer lives in `main.rs`, not the view layer |
+| 12 | Browser column sorting: refuse it, or decide how a `Table` string becomes a sort key | F1 | Phase 10, new |
 
 ## What k8rs already refuses, and what that is worth
 
