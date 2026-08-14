@@ -5178,6 +5178,249 @@ Phase 4 owns the Certificates report and will read the `Info` band out of
 splitting one rule across two files to satisfy a routing question would have
 been the expensive way to obey D2's letter while losing its point.
 
+### D88 — an exit code names an ending, never an agent, and the boundary for folding a found defect in (2026-08-14)
+
+The box [D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)
+opened for rule 5, and it looked like the cheapest box in the phase: `fn ending`
+already existed, so this was one enum applied one rule over. It took **nine
+rounds and three operator reviews, every one of which blocked**, and the defects
+that mattered were found by mutation and by reading the shipped strings — not by
+reading the diff.
+
+What shipped is four arms, each owning its claim, its action **and its command**:
+
+```
+▲ default/broken-restarts10serving · 1 hour ago
+  Container has been restarted 10 times — it is serving now, and its last run finished cleanly
+  container flaky · exit 0 (the program finished successfully) · docker.io/library/busybox:latest
+  → a clean exit says the program stopped without an error, not who stopped it — check the pod's
+    events for a liveness or startup probe kill. If nothing stopped it the program is finishing on
+    its own, and a program that is meant to finish belongs in a Job or a CronJob rather than a
+    workload that restarts it forever
+  $ kubectl describe pod broken-restarts10serving -n default
+
+▲ default/broken-restarts10serving
+  Container has been restarted 10 times — it is serving now
+  container flaky · docker.io/library/busybox:latest
+  → the pod has kept the count but not the run that ended, so nothing here says why. Check the
+    pod's events, which may still name what stopped it — and if they have expired too, the next
+    restart will write the run back into the pod, so watch it rather than guess
+  $ kubectl describe pod broken-restarts10serving -n default
+```
+
+**The blocker: `exit 0` is the exit status of a process, not a statement about
+who ended it.** The first draft's action read *"nothing killed that run — the
+program ended on its own"*. A container that traps `SIGTERM` and shuts down
+gracefully reports `0`, and the kubelet writes `0`/`Completed` regardless of who
+ended it — so a failing liveness or startup probe on any application with a
+graceful shutdown lands in that arm, and the card told its owner that nothing
+killed a container something is killing every few minutes, then recommended
+restructuring a healthy Deployment into a CronJob. **That is this entry's parent
+charge — *the rule reasons past its evidence* — rebuilt inside the fix for it**,
+and the second time a review has caught a repair reconstructing the defect it was
+sent to remove
+([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)
+was the first; [D79](#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
+is its neighbour — the door *beside* the one just closed, not the same door
+rebuilt). The tell was available and missed: **rule 1 does not open with that
+claim.** Its title states the exit and its action *asks* — *"check whether this
+program is meant to finish"*. The fix went past the ruling it cited while citing
+it. Rule 1 is not clean, and this entry should not be read as saying so: it asks
+first and then **closes** with an assertion — *"it is quitting early and that is
+the bug"* — which offers two readings where the true one is a third, and which
+has its own box for that reason.
+
+**Rule 1 and rule 5 now answer the same `exit 0` with different kubectl
+commands, deliberately.** Rule 1 names `restartPolicy` and takes
+`kubectl get pod -o yaml`; rule 5 names the pod's events and takes
+`kubectl describe pod`. Invariant 4 allows one command per card, so each card
+gets **one family of facts**, and which family follows from the question its own
+state leaves open: rule 1's container is in `CrashLoopBackOff` and the open
+question is *why it is being started again*, which `restartPolicy` answers; rule
+5's is **serving**, and the open question is *what ended the last run*, which
+only the `Unhealthy` / `Killing` events can separate from *it finished on its
+own*. `restartPolicy` lost the seat, and rule 5's sidecar arm had to make the
+same point without naming the field. A card whose command cannot show what its
+action names is the failure this trade exists to avoid, not a corner of it.
+
+**`Init` + `Finished` was reported unreachable and is not.** The exemption is
+`role == Init && doing_its_job(c)`, and `doing_its_job` reads the **current**
+state: a plain init container that is running is `ready: false`, so the guard
+never fires whatever `lastState` holds. The producer is **pod sandbox
+recreation** — Kubernetes re-runs every init container when it rebuilds the
+sandbox (a node reboot, a container-runtime restart), while `restartCount` and
+`lastState` persist on the same pod object, so three generations reach the band
+with a clean exit behind them. The card that came out told an init container to
+check a probe `validateInitContainers` forbids it having — the sentence rule 5's
+*own* `Stopped` arm exists to refuse — and called finishing its bug, one line
+under an evidence line reading *"the app starts only after this one finishes"*.
+**The author's own lesson, reported rather than buried: it reasoned about the arm
+it had written instead of the guard that gates it.** A guard is what a reviewer
+reads last and what decides whether any of the wording is ever seen.
+
+**When a defect found mid-box folds into it, and when it gets its own box.** The
+`Failed` arm turned out to hand every role the probe advice, `Init` included —
+[D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)'s
+defect one arm over, on a shape a cluster produces daily and no committed capture
+holds, so the test synthesizes it. It was escalated, not
+fixed, which was right; the ruling was to **fold it in**, and the boundary is
+this: D85 crossed **into another rule**, where an untested branch invented inside
+someone else's box is the scope creep CLAUDE.md names, so it earned a box of its
+own. This crossed nothing — same rule, same function, same class of defect, and
+this box is what turned it from a cross-rule disagreement into a **self**-
+contradiction, with `stopped_action` refusing the probe sentence two arms below
+the one still handing it out. The test is not *how big is the fix* but *does
+closing it require inventing behaviour in somebody else's subject*. A second
+thing was true and worth separating: the PM had cleared that arm twice, but only
+its **claim** — role-blindness was a question nobody had asked, so answering it
+reversed no ruling.
+
+**The sharper form of that boundary, which the box then applied three times:**
+escalate when closing the finding would **invent behaviour** in another rule's
+subject; fold it in when it only **records a fact already true** of a card that
+has shipped. The `Failed` arm's role split records a fact (init containers may
+not have probes) — folded in. Rule 1's own test lacking a pin records a fact
+about a string this box merged — folded in. Rule 1's clean-exit action offering
+two readings where the true one is a third *invents* the missing reading and
+reopens which command that card carries — its own box. Size is not the test, and
+"it is only one line" is the argument that gets a rule rewritten inside somebody
+else's box.
+
+**`stopped_action` and `failed_action` exist because copying rule 1's strings
+verbatim is exactly how two rules drift apart.** The second round reused rule 1's
+wording by pasting it, leaving two byte-identical four-line strings in one file —
+against CLAUDE.md's *never write the same code twice*, and against this entry's
+whole subject. They are shared now and deliberately **not** merged with each
+other. The evidence that the sharing is real rather than a function wrapped round
+one copy: a single mutation of `stopped_action` kills a test in **both** rules.
+**And sharing a sentence hid something the first time: coverage can be shared by
+accident.** Once the string was merged, rule 1's init branch was pinned only
+*through* the helper and rule 5's test — a mutation that gutted that sentence
+left rule 1's own test green. That is the failure this box removed, rebuilt one
+level up: merge the sentence, leave the coverage as a single copy somewhere else,
+and splitting the helper again silently strips a rule's only pin with nothing
+going red. It was closed with one assertion in rule 1's own test, which now dies
+beside rule 5's to the same mutation. The rule: **a shared string owes each
+caller its own pin**, or the sharing is load-bearing in a way nobody wrote down.
+
+**The arm that claims nothing.** With no `lastState` at all — container GC
+dropping the dead container, a runtime that lost its container store while
+`/var/log/pods` survived to feed `calcRestartCountByLogDir`, a manual
+`crictl rm`; **not** a kubelet restart, which re-derives the status from a
+runtime that still holds the container — `restartCount` survives the run that
+produced it. A count says
+restarts happened, not that anything killed them, so that arm's title stops after
+*"it is serving now"*.
+
+**Its first command could never have worked, and the operator review is what
+caught it.** The arm offered `kubectl logs … --previous` — and the kubelet gates
+`--previous` on `lastState.terminated.containerID`, *the same field whose absence
+puts a card in this arm*. Not "usually fails": there is no state in which the
+branch fires and the command succeeds, by construction, off the bytes the branch
+itself read. The hedge written to cover it — *the log is the only record left,
+for as long as it is kept* — had the dependency backwards: the pod's record is
+what makes the log reachable through the API at all, and kubelet's GC deletes
+both in one call. The arm now carries `describe` like its siblings and tells the
+reader something to **do** — the next restart writes the run back into the pod,
+so watch rather than guess. **The general form, worth more than the fix:** a
+branch that reads a field to decide it exists must not then offer a command the
+API gates on that same field. Nothing in a pure rules file can discover this;
+it took someone who knew where the kubelet checks. **One consequence recorded for
+whoever writes the Alerts renderer:** this card carries
+**no age**, because `Finding::timestamp` reads `last_terminated.finished_at`.
+That was already true of any container past the band with no previous run; this
+box makes it a named, worded state rather than an accident.
+
+**The test hole that only a mutation could find.** The same arm was pinned with
+`action.contains("log")` — loose on prose, tight on the command, and defended as
+deliberate. `tester` mutated the action to send the reader to the node's system
+log while leaving `kubectl logs --previous` as the command: **every test stayed
+green**, shipping invariant 4 broken in the exact direction this box was closing.
+The replacement pin then failed the author's own shipped caveat, which named the
+node in passing, and the caveat was reworded. **A pin that needs an exception for
+its own author's sentence is not a pin** — and reading the test would never have
+shown either, which is what [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)
+buys.
+
+**Then the same hole turned up three more times, and its shape is now nameable:
+an arm pinned only by what it must *not* say, where the sibling arm's shipped
+sentence satisfies every one of those negatives.** A sidecar card could print the
+init arm's real sentence — about Kubernetes rebuilding the pod's sandbox — and
+stay green, because its test asked only that the words *Job* and *CronJob* were
+absent. Two more arms were pinned by a phrase both siblings share. Each is one
+positive assertion away from closed, and each proves the split it belongs to in
+one direction only: regrouping `Init` with `Sidecar` died, the reverse did not.
+The rule that comes out of it, beyond this file: **a negative assertion cannot
+pin a branch whose sibling would also pass it** — name the one thing only this
+arm says. The comment reasoning this out for the `Regular` arm was already in the
+test file when the other three arms shipped without it, which is the ordinary way
+a lesson fails to travel the eighty lines to its neighbour.
+
+**Then a third coat, and with it the shape underneath all of them.** The fix that
+qualified `137` — memory *only* with `OOMKilled` beside it — was pinned by one of
+its two conjuncts, so deleting the qualifier and tidying the leftover prose left
+the card asserting flatly that `137` is memory, with the suite green. Three
+instances, one failure: **a pin that proves a sentence contains the right words,
+against a mutation that keeps the words and drops the logic.** `contains("log")`
+under a command that could never run; three negatives a sibling arm also
+satisfied; a conjunction held up by one conjunct. The rule that closes all three
+is the same one each time, and it was re-learned one arm over each time: **assert
+the thing that makes the claim true, never a token from the sentence carrying
+it.** The author wrote that line themselves after the third, which is the only
+reason it is here rather than waiting for a fourth.
+
+**And then the lesson ate its own tail, which is the durable half of it.** That
+same line went into a comment claiming both new pins were requirement-shaped —
+while one of them was still a token pin, as the reviewer proved by rewriting the
+sentence faithfully and watching it red. Every hole in this box survived its
+review the same way: a comment or a report said the coverage was stronger than it
+was, and everybody downstream believed it. **The claim about a test is part of
+the test, and it needs the same standard of proof as the assertion under it.**
+
+**The last defect in the box was the same mistake twice, in opposite directions,
+and the fix was to stop choosing.** The init arm's `137` sentence first said the
+kernel took it for memory — true only with `reason: OOMKilled` beside it
+([D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
+Corrected, it said a `137` without the word was a program that would not stop
+when asked — which
+[D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
+refutes, because a starved host delivers real cgroup kills as plain `Error`. Each
+version was a **branch on evidence the object does not carry**, and the second
+was worse than the first: it ruled memory out exactly when a memory-starved node
+made memory likeliest, with rule 2 silent because it keys on the word. The
+sentence became correct only when it stopped branching and named the limit
+without making the word's absence mean anything. **The general rule, which
+reaches past this card: where two readings are indistinguishable from the
+snapshot, a card that picks one is wrong half the time and the reader cannot tell
+which half.** That is invariant 5's *a missing field means no finding*, carried
+into the wording — and the proof it is a requirement rather than a preference is
+the mutation that put the recital back **correctly qualified in both directions**
+and still went red.
+
+**One word kept as jargon, against the usual reflex.** The init arm says
+Kubernetes *"rebuilds the pod's sandbox"*. Invariant 14 would translate it away;
+it stays because the reader is being sent to the pod's events, where the word
+they must match is `SandboxChanged`. Explaining a term in place beats hiding a
+term they have to recognise.
+
+**What a capture trip still owes here**, written into the test doc comments
+rather than left in a head: no committed capture reaches any ending but
+`Failed` on this rule. Wanted — a container that reaches the band by *finishing*
+(`exit 0`, and a second on `kill -TERM`) while running and out of
+`CrashLoopBackOff`, and the `Init` + `Finished` shape a rebuilt sandbox produces.
+`restarts10.json`'s own `spec` is one character from the first
+([D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12),
+[D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)).
+
+**And one finding this box deliberately did not absorb:** `screens/alerts.md`
+caps a card's action at five lines and says an action past that is a `rules.rs`
+finding — but wrapped at that file's own 49 columns, **9 of the 52 distinct
+actions the rules print exceed it**, six to nine lines, across rules 1, 5 and 6.
+The budget has been false since before this box, so it is a
+`screens/` question for `tui-designer` and has its own box in `todo.md`, which is
+the same boundary the `Failed` arm was tested against and lands on the other side
+of it.
+
 ## Decisions made
 
 ### Product

@@ -992,7 +992,7 @@ this plan is delivery mechanism for what this phase produces.
       `tests/fixtures/certs/` is a closed set `certs-test.sh` refuses to grow.
       The 30-day boundary is asserted at **both** ends, which neither committed
       fixture can do: 22 and 363 days pass any threshold between them
-- [ ] **Rule 5 has rule 1's defect, one rule over** — its card says *"it is
+- [x] **Rule 5 has rule 1's defect, one rule over** — its card says *"it is
       serving now, but something keeps killing it"*, which is false in exactly
       the way rule 1's *"keeps crashing"* was: over a container whose restarts
       are **clean exits**, nothing is killing it. Reachable — a container that
@@ -1005,11 +1005,141 @@ this plan is delivery mechanism for what this phase produces.
       `exit 0`. Found by `dev-core` while fixing rule 1 and **reported rather
       than folded in**, which is the right call — an untested branch invented
       inside someone else's box is the scope creep CLAUDE.md names
-      ([NOTES § D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14))
+      ([NOTES § D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)).
+      **Shipped in nine rounds and three operator reviews, every one of which
+      blocked, and almost nothing about it was the one-line change the box
+      predicted**
+      ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)).
+      The rule now has four arms on `ending`, each owning its claim, its action
+      **and its command**. The first draft answered the box by asserting the
+      opposite cause — *"nothing killed that run"* — which is false of any
+      container that traps SIGTERM and exits 0, so a probe kill landed there and
+      was told to move a healthy Deployment into a CronJob: **D85's own charge,
+      rebuilt inside the fix for D85**. `Init` + `Finished` was reported
+      unreachable, and was not — the exemption reads the *current* state, and a
+      rebuilt pod sandbox re-runs every init container while the count survives.
+      The `Failed` arm had the same role-blindness and was folded in; rule 1's
+      matching defect was not, and that boundary is D88's. Two helpers came out
+      of it — `stopped_action`, `failed_action` — because the second round had
+      pasted rule 1's strings verbatim. The `None` arm's first command **could
+      never have worked**: `--previous` is gated on the same field whose absence
+      puts a card in that arm. Its last clause was wrong twice in opposite
+      directions before it stopped branching on evidence the object does not
+      carry. **What it could not prove:** no committed capture reaches any
+      ending but `Failed` here, so every other arm is tested on a decoded copy
+      and the trip is named in the test doc comments. **What it opened:** four
+      boxes above and below this line, one of them for a card that ships today
+      with a visible self-contradiction
+- [ ] **Rule 1's clean-exit action offers two readings and the true one is
+      missing** — found by the operator review of the rule 5 box, and left to
+      its own box by the boundary that box established: it crosses into another
+      rule. The action closes *"If it is not meant to finish, it is quitting
+      early and that is the bug"* — an exhaustive pair (meant to finish /
+      quitting early) with no third door. The third is the commonest loop in a
+      real cluster: liveness probe fails → kubelet sends SIGTERM → the app traps
+      it and shuts down tidily → `exit 0`, repeat, `CrashLoopBackOff` with
+      `lastState.exitCode: 0`. Rule 5 already says the true sentence one state
+      over — *"a clean exit says the program stopped without an error, not who
+      stopped it"* — so this is that reading applied one rule back, not a new
+      idea. **It reopens the command question with it:** rule 1's arm names
+      `restartPolicy` and therefore carries `kubectl get pod -o yaml`, which
+      prints no events at all, so the `Unhealthy` / `Killing` lines that would
+      correct the card are exactly what its command cannot show. One clause and
+      one command, and the two cannot be decided apart
+      ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14))
+- [ ] **The `137` story is role-blind in both places it is told, and they print
+      on one screen** — decided once here, or the two are decided differently.
+      **(i) `exit_meaning`'s `137` line names a probe the container may not be
+      allowed to have** — *"killed because it did not stop when it was asked to
+      — a failing liveness probe, or a shutdown that hangs"*, printed for `137`
+      without `OOMKilled`. On a plain init container the first half is
+      impossible: `validateInitContainers` rejects all three probes on one that
+      is not restartable, which is the fact rules 1 and 5 both now state in their
+      own actions. So the evidence line and the action one row apart can
+      disagree on the same card, which is
+      [D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)'s
+      shape with the translator on the wrong side of it. **It crosses the rule 5
+      box** and gets its own for that reason: `exit_meaning` takes a code and a
+      reason and **no role**, and it is printed by rules 1, 5 and 6, so a role
+      argument changes three rules' cards and
+      [D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)'s
+      table with them. Decide it once: either the translation becomes
+      role-aware, or the `137` line drops the probe and names only what is true
+      of every role. **And the same line is wrong a second way, which is why it
+      is one decision and not two:** *"did not stop when it was asked to"* is
+      asserted for every `137` that lacks the word, but
+      [D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
+      recorded this project's own capture host delivering five consecutive
+      genuine cgroup kills as `137` with `reason: "Error"` — so the word's
+      absence proves nothing, and the sentence rules out memory precisely when a
+      starved node makes memory most likely. The rule 5 box shipped an action
+      that repeated this and it was caught in review; the translation underneath
+      still says it. **Reachable today** — an init container that ignores
+      SIGTERM is SIGKILLed after the grace period and comes back `137` with no
+      `OOMKilled`. **And a card ships with the disagreement visible on it right
+      now**, which is why this box is worded as a defect and not a tidy-up: rule
+      5's init action says *"no health check is behind any of them — Kubernetes
+      allows this kind of container none"* one row under an evidence line
+      offering a failing liveness probe. That denial is deliberate — dropping it
+      would leave the wrong suggestion as the only voice on the card — and it is
+      a correction printed beside the thing it corrects, which is not where a
+      correction belongs. **There is no test asserting the card is internally
+      coherent**, because that test is red today for a reason living in this box
+      rather than in rule 5; it is owed here, with the fix.
+      **(ii) rule 6's own `137` arm has no role split at all.**
+      `previous_run_failed`'s `(None, 137)` action opens *"check the liveness and
+      startup probes"* for every role — the same defect rules 1 and 5 have now
+      had removed twice each, in the one rule that was not looked at. It reaches
+      the screen **beside** rule 5's card on the same container: two k8rs cards,
+      one object, one telling the reader to check a probe and the other saying
+      Kubernetes allows none. Found by `tester` while replaying the rule 5 box's
+      matrix. It joins (i) rather than taking its own box because both answer the
+      same question — *what does `137` mean for a container that may not have a
+      probe* — and answering it twice is how the two drift
+      ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)
+      on why that boundary sits where it does)
 - [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
       in the green line, not an assertion, so nothing fails and that is exactly
       why it will survive. One word, `tester`'s file, and it goes with whichever
       of that agent's boxes runs next
+- [ ] **`screens/alerts.md`'s action budget is false of four shipped cards, and
+      the file says that is a `rules.rs` finding** — it caps a card's action at
+      two to five lines, never cut ([alerts.md](screens/alerts.md)), and states
+      that an action wrapping past five is a rule defect rather than a layout
+      problem. **Measured, not estimated:** every distinct action the rules print
+      was wrapped at that file's own 49-column width — **9 of 52 exceed the
+      budget**, at six to nine lines, and they are spread across rules 1, 5 and
+      6 rather than clustered in the newest one. The worst is nine lines, which
+      with its title and evidence fills 15 of the 16 body rows, breaking the
+      ten-line card cap `alerts.md` sets so the pane can always show a second
+      finding — *"a screen that can show only one finding is not a list"*. The
+      budget has been wrong since before either rule-5 box; `k8s-admin` found it
+      while reviewing this one, so nothing here is new breakage. Re-measure
+      before deciding: the command is one `textwrap.wrap(s, 49)` over the `→`
+      lines of `cargo test -- --nocapture`. **The evidence cap is in the same
+      state**: three wrapped lines, and rule 5's init cards measure four on the
+      committed captures — a digest-pinned image spends a whole line on its own.
+      Rule 5 answered that by putting the load-bearing fact ahead of the image so
+      the *image* is what gets cut, which is the right order and not a fix for
+      the cap. Either the budget is wrong or four
+      actions are, and that is a `tui-designer` call on `screens/`, not a
+      `rules.rs` one; whichever way it goes, it decides what the plain-language
+      pass below has to shorten. **Same file, same box:** `alerts.md` quotes
+      rule 5's *"it is serving now, but something keeps killing it"* as the
+      example of a serving card that does not silence W2. Still true — that is
+      the `Failed` arm — but it is one arm of four now, and the passage reads as
+      if it were the whole rule.
+      **One requirement to carry into whatever rewrite this box produces**,
+      deferred here rather than lengthening a sentence already over the cap:
+      `stopped_action` names two producers of a repeated polite stop — a health
+      check, and a node memory killer — and at this repo's target version
+      (`tests/fixtures/K8S_VERSION`) there is a third the kubelet performs
+      itself, **in-place pod resize with `resizePolicy: RestartContainer`**,
+      which VPA drives on a loop. A reader whose pod is being resized is sent
+      past the answer to two places that hold nothing. `describe` prints the
+      resize conditions, so it costs nothing in invariant-4 terms — only in the
+      line budget this box exists to settle. The string is shared by rules 1 and
+      5, so one edit fixes both cards
 - [x] Exit-code translation table (137/143/1/126/127) — **137 has two meanings and the object says which**: with `reason: OOMKilled` it is memory, without it the container did not stop when asked, which is a failing liveness probe or a hanging shutdown. The old "almost always OOM" row was written before the rule had `reason` beside the code ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
 - [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket
       **or any directory one sits under**, or a writable host mount. There is no
@@ -1273,7 +1403,25 @@ this plan is delivery mechanism for what this phase produces.
       line.** The command a first-month reader needs is
       `kubectl logs <pod> -c <container> --previous`, and `--previous` is
       exactly the flag they will not know. One `kubectl_cmd` per finding is the
-      constraint, so this is a wording problem or a shape problem, not a bug
+      constraint, so this is a wording problem or a shape problem, not a bug.
+      **Half of this is already built:** rule 5's no-previous-run arm needed the
+      same command and `previous_logs` now emits exactly that line, so this item
+      is a call site away rather than a design question
+      ([D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)).
+      **One warning for whoever runs this box, so a red is not misread:** the
+      rule tests pin prose, and one pin — `"finishing at all is the bug"` on rule
+      5's sidecar arm — sits in exactly the register this pass exists to rewrite.
+      `tester` expects it to break here, and that break is **cosmetic**: the
+      assertion messages are written as requirements, so read the message, not
+      the string. **Two more on that list**, found by `k8s-admin` mutating a
+      faithful rewrite: `"without saying so"` and the `"exit code"` token in rule
+      5's init-arm loop both red on a pure rephrasing. The other prose pins are
+      short load-bearing clauses (`"of its own accord"`, `"does not allow health
+      checks"`) where a red means the card's *claim* changed and is a real
+      finding. **The distinction is worth keeping as you go:** a pin that names
+      the thing making the claim true survives a rewrite; a pin on a token from
+      the sentence does not, and every one of the latter in this file is listed
+      above
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test
 - [ ] `cargo mutants --timeout 90` clean over `rules.rs` — a MISSED mutant is a
       rule change no test objected to, i.e. a hole in the diagnosis; it gets a
@@ -1375,7 +1523,19 @@ public release.
       N2's count and N5's sum confidently wrong. `namespace_scope` covers the
       *deliberately* partial pod list and nothing covers a *transient* one;
       this box is where that hole closes, because nowhere above it can
-      ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12))
+      ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)).
+      **One field the prune line will drop if it is read literally, and two
+      shipped cards depend on it:** `spec.initContainers[].restartPolicy`.
+      `ContainerSnapshot` names no `restart_policy` — the field is read during
+      the decode, to tell a native sidecar from a plain init container — so
+      "the fields the snapshot **types** name" does not cover it. Drop it and
+      every Istio/Linkerd sidecar decodes as `Init`, where rules 1 and 5 both
+      tell its owner that *"Kubernetes does not allow health checks on this kind
+      of container"* — about a container whose manifest has a liveness probe in
+      it. Found by the operator review of the rule 5 box, which is what made the
+      claim load-bearing; this is D69's shape a second time, caught before the
+      code instead of after
+      ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14))
 - [ ] **Owner name resolution**: a pod's `ownerReferences` names its
       *ReplicaSet*, and the group heading has to read `web`, not
       `web-7d4f5c6b8`. Fetch the ReplicaSet on demand, cache by UID, never

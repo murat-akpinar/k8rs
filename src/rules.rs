@@ -1414,6 +1414,11 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
 /// **Rule 1's `exit 0` branch is the exception and takes [`get_yaml`] instead**: it names
 /// `restartPolicy`, and `describePod` prints that field nowhere (NOTES § D85).
 ///
+/// **It is also what rule 5's endings are worded against** (NOTES § D85): a clean or polite
+/// ending is told apart from a probe kill by the `Unhealthy` / `Killing` events and the probe
+/// lines, both of which are here and neither of which is in `get -o yaml` — so those arms name
+/// what this command shows and leave `restartPolicy` to rule 1, where the command carries it.
+///
 /// **Rule 13 is here for a different reason**: what finishes its diagnosis is an Event, which
 /// `describe` prints and `get -o yaml` does not. **Rule 12 does not use it**: `describe` prints
 /// no finalizers at all (NOTES § D46), and a teaching command that does not show what the card
@@ -1557,7 +1562,8 @@ fn doing_its_job(c: &ContainerSnapshot) -> bool {
 /// **How the run before this one ended, in the three shapes the rules have to tell apart** —
 /// and **the one place a rule decides what `exit 0` and `exit 143` mean**; [`exit_meaning`]
 /// translates the codes for the reader, and nothing else in this file branches on them
-/// (NOTES § D85). [`crash_looping`] picks which loop it is looking at from this;
+/// (NOTES § D85). [`crash_looping`] picks which loop it is looking at from this and
+/// [`restarting_repeatedly`] picks what it may claim about the restarts;
 /// [`previous_run_failed`] asks only whether it is [`Failed`](Ending::Failed);
 /// [`doing_its_job`] asks only whether it is [`Finished`](Ending::Finished).
 ///
@@ -1642,6 +1648,71 @@ fn last_log_line(run: &Terminated) -> Option<&str> {
         .rfind(|l| !l.is_empty())
 }
 
+/// **What to do about an [`Ending::Stopped`], per role — one reading of `exit 143` for the whole
+/// file.** Rules 1 and 5 both reach it and must not disagree about one container, which is the
+/// defect NOTES § D85 opens with; the sentences were byte-identical in both until they were
+/// lifted here.
+///
+/// **[`Init`](ContainerRole::Init) is told the opposite of the other two on purpose**:
+/// `validateInitContainers` forbids all three probes on an init container that is not
+/// restartable, so *check the liveness probe* is advice it cannot follow.
+///
+/// Both are worded against [`describe`], which prints the probes and the events; the node's
+/// system log is outside kubectl either way.
+fn stopped_action(role: ContainerRole) -> &'static str {
+    match role {
+        ContainerRole::Regular | ContainerRole::Sidecar => {
+            "check the liveness and startup probes first — a failing health check is what stops \
+             a container that has not crashed — then the node, where a memory killer such as \
+             systemd-oomd or earlyoom sends the same signal; the container's own logs will show \
+             nothing worse than a shutdown"
+        }
+        ContainerRole::Init => {
+            "Kubernetes does not allow health checks on this kind of container, so the stop came \
+             from the node or from the program itself — look in the node's system log for a \
+             memory killer such as systemd-oomd or earlyoom, and check whether the program exits \
+             143 of its own accord"
+        }
+    }
+}
+
+/// **What to do about an [`Ending::Failed`], per role** — [`restarting_repeatedly`]'s only, and
+/// **deliberately not merged with [`stopped_action`]**: a container that failed and one that was
+/// asked to stop are different questions, and one sentence answering both would answer neither.
+///
+/// **The memory limit is in both**, because every role carries limits and the kernel takes any
+/// of them. **The probe is not**, for [`stopped_action`]'s reason — `validateInitContainers`
+/// forbids all three on an init container that is not restartable, and this rule handing one out
+/// two arms above the one that refuses it was the same rule contradicting itself
+/// (NOTES § D85). **What replaces it is not a second reading of the code**: [`exit_fact`] has
+/// already translated the reader's own exit code one line above, so an action reciting what each
+/// code *might* have been spends four wrapped lines telling them about numbers they cannot see,
+/// then restates the one they can.
+///
+/// **The `Init` sentence therefore branches on nothing, and that is the requirement rather than
+/// a shortening.** Neither direction of `137` is decidable from the object: it is memory only
+/// with `reason: OOMKilled` beside it (NOTES § D71) — *and* a genuine cgroup kill arrives as
+/// plain `Error` on a host that is itself short of memory (NOTES § D84), which is the case where
+/// memory is likeliest and rule 2 is silent, because it keys on the word. **The false branch
+/// would be selected by the same node condition that caused the kill.** So the card sends the
+/// reader to the limit either way and says why the word may be missing, which is true under both
+/// readings and was true of the sentence this replaced.
+fn failed_action(role: ContainerRole) -> &'static str {
+    match role {
+        ContainerRole::Regular | ContainerRole::Sidecar => {
+            "check the memory limit and the liveness probe — those are what restart a container \
+             that otherwise runs"
+        }
+        ContainerRole::Init => {
+            "check the memory limit against what it really needs — the kernel takes a container \
+             that goes over, and a node short on memory can take one without saying so, so the \
+             word is not always on the card. No health check is behind any of it — Kubernetes \
+             allows this kind of container none, and the app cannot start until one of these \
+             runs succeeds"
+        }
+    }
+}
+
 /// **Rule 1 — the container is going round a restart loop and Kubernetes has started waiting
 /// between the restarts.** `state.waiting.reason == CrashLoopBackOff`, CRITICAL: whatever the
 /// loop is, this container is not doing its job right now and will not start doing it without a
@@ -1717,20 +1788,7 @@ fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
         Some(Ending::Stopped) => (
             "The container's last run was stopped, and Kubernetes is restarting it \
              (CrashLoopBackOff)",
-            match c.role {
-                ContainerRole::Regular | ContainerRole::Sidecar => {
-                    "check the liveness and startup probes first — a failing health check is \
-                     what stops a container that has not crashed — then the node, where a memory \
-                     killer such as systemd-oomd or earlyoom sends the same signal; the \
-                     container's own logs will show nothing worse than a shutdown"
-                }
-                ContainerRole::Init => {
-                    "Kubernetes does not allow health checks on this kind of container, so the \
-                     stop came from the node or from the program itself — look in the node's \
-                     system log for a memory killer such as systemd-oomd or earlyoom, and check \
-                     whether the program exits 143 of its own accord"
-                }
-            },
+            stopped_action(c.role),
             describe(&pod.id),
         ),
         Some(Ending::Failed) | None => (
@@ -1891,16 +1949,72 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 /// ([`doing_its_job`], NOTES § D71, § D75). **The title changes with the state**, because NOTES'
 /// wording would be a lie about a container that has stopped.
 ///
-/// **Severity is WARN whenever the container is serving, whatever the count**: a lifetime counter
+/// **And it changes with how the last run ended, for the reason rule 1's did** ([`ending`],
+/// NOTES § D85): *something keeps killing it* is not what `exit 0` says, and *check the memory
+/// limit and the liveness probe* is the same sentence one line down — a container cannot breach
+/// its memory limit and come back as `143`, because a cgroup breach is a `SIGKILL`. So each
+/// ending owns its own action, and the claim that something is killing this container is left to
+/// [`Failed`](Ending::Failed).
+///
+/// **A clean ending names no agent, because one exit code cannot carry one**: an application
+/// that traps SIGTERM and shuts down tidily reports `0`, and the kubelet writes `0` /
+/// `Completed` whether the program chose to stop or a liveness probe asked it to. The asymmetry
+/// is NOTES § D85's own — a *positive* claim of repeated killing survives on a non-zero exit
+/// beside a count, while *nothing killed it* needs to know who did, and one code does not say.
+/// So the [`Finished`](Ending::Finished) arm leaves both readings open and sends
+/// the reader to the `Unhealthy` / `Killing` events, which is the place that tells them apart —
+/// **and [`describe`] is therefore its command, not [`get_yaml`]**: `restartPolicy` and the
+/// events are in different outputs, and an action may only name what its own command prints
+/// (invariant 4). Rule 1 makes the other choice on the same ending because the reachable set of
+/// *its* branch is a container the kubelet is already backing off from.
+///
+/// **The claim also stays inside one `lastState`, which is all the snapshot holds.** Each arm
+/// describes *that run*, not the whole count — *nothing is killing it* over ten restarts and one
+/// clean sample would be NOTES § D85's own absolute rebuilt here — and **the arm with no
+/// previous run at all claims nothing**: `restartCount` outlives a `lastState` the kubelet has
+/// dropped, and a count on its own supports the count. **It offers [`describe`] like its
+/// siblings, and deliberately not `kubectl logs --previous`**: the kubelet gates that flag on
+/// `lastState.terminated.containerID` — the very field whose absence puts a card in this arm —
+/// so there is no state in which this arm fires and that command returns a log. The events are
+/// what may still hold something, and they are in `describe`.
+///
+/// **Each role is told what is true of it, and the endings do not all split the same way**
+/// ([`ContainerRole`]). [`Stopped`](Ending::Stopped) and [`Failed`](Ending::Failed) split two
+/// ways, in [`stopped_action`] and [`failed_action`] — the same line, because
+/// `validateInitContainers` forbids all three probes on an init container that is not
+/// restartable, so any sentence naming one is a dead end there. [`stopped_action`] is *shared*
+/// with rule 1 rather than copied beside it: two rules reading one container and disagreeing is
+/// where NOTES § D85 starts, and two byte-identical copies are that defect with a delay on it.
+///
+/// **On [`Finished`](Ending::Finished) the split is three ways where rule 1's is two, and the
+/// difference is load-bearing rather than an inconsistency to tidy up.** Rule 1 reaches that arm
+/// only through `CrashLoopBackOff`, which the kubelet never applies to a plain init container
+/// that exited `0` — it moves on to the next one — so grouping `Init` with `Sidecar` is safe
+/// *behind that state gate*. **This rule has no gate.** A plain init container whose pod's
+/// sandbox was rebuilt — a node reboot, a containerd restart, a killed sandbox — is re-run from
+/// the start while `restartCount` and `lastState` persist on the same pod object, so it arrives
+/// here `Running`, `ready: false`, past the band, with a clean previous run behind it. Given the
+/// sidecar's sentence it would be told *finishing is the bug* under an evidence line reading
+/// *the app starts only after this one finishes*, and sent after a probe its own
+/// [`Stopped`](Ending::Stopped) arm refuses to name. [`Sidecar`](ContainerRole::Sidecar) is not
+/// meant to finish; [`Init`](ContainerRole::Init) is, and is asked what re-ran it instead.
+///
+/// **Severity is WARN whenever the container is serving, whatever the count**, and **the ending
+/// does not move it**: the band answers *is this container serving*, and a container that keeps
+/// finishing early and is not ready now is as down as one that keeps crashing. A lifetime counter
 /// carries no *rate*, and REQUIREMENTS marks the two numbers *(suggestion)* (NOTES § D71). The age
 /// is when the counter last went up.
 ///
-/// **Both halves are captured**: `restarts10.json` is past ten restarts and not serving, and
-/// `restarts10serving.json` is the same count on a container that is.
+/// **Both halves of the band are captured**: `restarts10.json` is past ten restarts and not
+/// serving, and `restarts10serving.json` is the same count on a container that is. **No ending
+/// but [`Failed`](Ending::Failed) is**, and no committed capture reaches one: every captured
+/// restart history exits non-zero, and the two objects that do end cleanly — `exit0.json` and
+/// `sigterm.json` — are in `CrashLoopBackOff`, which is this rule's own exemption. The others are
+/// synthesized on decoded copies (NOTES § D40).
 fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     // An init container that has finished successfully is out of this rule's subject altogether,
     // not merely a milder case of it: its count is frozen for the life of the pod, and every
-    // sentence below is about a container something is *still* killing (NOTES § D75).
+    // sentence below is about a container that is *still* being restarted (NOTES § D75).
     if c.role == ContainerRole::Init && doing_its_job(c) {
         return None;
     }
@@ -1911,6 +2025,63 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
     // the one init case that differs returned above — so the title below cannot say "it is
     // serving now" about a container that has stopped.
     let serving = doing_its_job(c);
+    // `claim` carries its own leading comma so the last arm can add nothing at all, and every
+    // arm's action names only what its own command prints (invariant 4).
+    let (claim, action, cmd) = match c.last_terminated.as_ref().map(ending) {
+        Some(Ending::Finished) => (
+            ", and its last run finished cleanly",
+            match c.role {
+                ContainerRole::Regular => {
+                    "a clean exit says the program stopped without an error, not who stopped \
+                     it — check the pod's events for a liveness or startup probe kill. If \
+                     nothing stopped it the program is finishing on its own, and a program that \
+                     is meant to finish belongs in a Job or a CronJob rather than a workload \
+                     that restarts it forever"
+                }
+                ContainerRole::Sidecar => {
+                    "a clean exit says the program stopped without an error, not who stopped \
+                     it — check the pod's events for a liveness or startup probe kill. If \
+                     nothing stopped it the program is finishing on its own and being started \
+                     again each time, and this container is meant to run beside the app for as \
+                     long as the app does, so finishing at all is the bug"
+                }
+                ContainerRole::Init => {
+                    "this container finished its work, which is what an init container is meant \
+                     to do — so the question is what ran it again, and the answer is not inside \
+                     it: Kubernetes re-runs every init container when it rebuilds the pod's \
+                     sandbox. The pod's events say so for about an hour after it happens, and \
+                     this count outlives them — if they are already gone, the node the pod is \
+                     on is where the reason is"
+                }
+            },
+            describe(&pod.id),
+        ),
+        Some(Ending::Stopped) => (
+            ", and its last run was stopped",
+            stopped_action(c.role),
+            describe(&pod.id),
+        ),
+        Some(Ending::Failed) => (
+            ", but something keeps killing it",
+            failed_action(c.role),
+            describe(&pod.id),
+        ),
+        None => (
+            "",
+            "the pod has kept the count but not the run that ended, so nothing here says why. \
+             Check the pod's events, which may still name what stopped it — and if they have \
+             expired too, the next restart will write the run back into the pod, so watch it \
+             rather than guess",
+            describe(&pod.id),
+        ),
+    };
+    // The exit code goes ahead of the image: the two clean-ending titles are read off it, and
+    // evidence is the one card line the screen may cut (`screens/alerts.md` § The height).
+    let mut facts = vec![container_fact(c)];
+    if let Some(run) = &c.last_terminated {
+        facts.push(exit_fact(run));
+    }
+    facts.push(c.image.clone());
     Some(Finding {
         severity: if c.restarts >= RESTARTS_CRITICAL && !serving {
             Severity::Critical
@@ -1919,18 +2090,15 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
         },
         title: if serving {
             format!(
-                "Container has been restarted {} times — it is serving now, but something \
-                 keeps killing it",
+                "Container has been restarted {} times — it is serving now{claim}",
                 c.restarts
             )
         } else {
             format!("Container has been restarted {} times", c.restarts)
         },
-        evidence: [container_fact(c), c.image.clone()].join(FACTS),
-        action: "check the memory limit and the liveness probe — those are what restart a \
-                 container that otherwise runs"
-            .to_string(),
-        kubectl_cmd: describe(&pod.id),
+        evidence: facts.join(FACTS),
+        action: action.to_string(),
+        kubectl_cmd: cmd,
         owner: pod.owner.clone(),
         object: pod.id.clone(),
         timestamp: c

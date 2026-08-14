@@ -4772,6 +4772,18 @@ fn an_init_container_that_was_stopped_is_not_sent_to_a_probe_it_may_not_have() {
          sends SIGTERM and reaches an init container like any other process: {}",
         card.action
     );
+    // **This rule's own pin on [`stopped_action`]'s init arm, and it is not a duplicate of rule
+    // 5's.** The sentence is shared, so a card here is one merge away from being covered by
+    // nothing but another rule's test — and the day somebody splits the helper again, that
+    // coverage leaves with it and nothing goes red. Everything above this line survives wording
+    // that keeps the killer's name and loses the rest; the *reason* no probe is named is what
+    // only this arm says.
+    assert!(
+        card.action.contains("does not allow health checks"),
+        "the reader is told why no probe is named, or this branch is indistinguishable from one \
+         that merely forgot to mention them: {}",
+        card.action
+    );
 }
 
 /// **Rule 6's `137` arm, on the capture whose kill came from outside the application**
@@ -5907,6 +5919,748 @@ fn ten_restarts_is_red_unless_the_container_is_still_answering() {
     );
 }
 
+/// `restarts10.json` / `restarts10serving.json` with the previous run's **ending** replaced —
+/// the shapes no capture in this repository holds (NOTES § D40). [`exited`] moves the code and
+/// the reason together, because the kubelet writes the pair.
+///
+/// **What a future capture trip owes, exactly:** a pod whose container reaches
+/// [`RESTARTS_WARN`] by *finishing* — `exit 0`, and a second one on `exit 143` — and is then
+/// **running** and out of `CrashLoopBackOff`, captured at that moment. **The manifest is one
+/// character away and is in the capture's own `spec`** — `restarts10.json`'s container counts its
+/// attempts through a `/state` volume and runs
+/// `[ "$n" -le 10 ] && exit 1` before `sleep 86400`, so `exit 0` there produces this shape on a
+/// real cluster, and `kill -TERM` in place of it produces the other. Nothing committed reaches
+/// them today — every captured restart history exits non-zero, and the two objects that do end
+/// cleanly are in `CrashLoopBackOff`, which is this rule's own exemption.
+fn restarts10_ending(name: &str, exit_code: i32) -> PodSnapshot {
+    capture_but(name, |p| exited(p, "flaky", exit_code))
+}
+
+/// **Rule 1's defect, one rule over** (NOTES § D85). *"It is serving now, but something keeps
+/// killing it"* is not what a clean ending says, and *"check the memory limit and the liveness
+/// probe"* is the same sentence one line down: a container cannot breach its memory limit and
+/// come back as `143`, because a cgroup breach is a `SIGKILL`.
+///
+/// Reachable without an unusual manifest: a program that exits `0` a few times and then blocks
+/// is serving, with a restart count, and out of `CrashLoopBackOff` — so rule 5 is the only rule
+/// left holding it. Rule 6 exempts `0` and `143` outright, and rule 1 needs the backoff state.
+///
+/// The control is the capture as it stands, `exit 1`, which keeps the sentence: the wording is
+/// not being removed, it is being made conditional on the thing it claims.
+#[test]
+fn a_serving_container_that_finished_cleanly_is_not_one_something_keeps_killing() {
+    let killed = only(
+        &findings(&["restarts10serving"]),
+        "broken-restarts10serving",
+        "restarted 10 times",
+    )
+    .clone();
+    show(std::slice::from_ref(&killed));
+    assert!(
+        killed.title.contains("something keeps killing it")
+            && killed.action.contains("memory limit")
+            && killed.action.contains("liveness probe"),
+        "the control is the committed capture — a serving container whose last run exited 1, \
+         where both sentences are true and stay: {} / {}",
+        killed.title,
+        killed.action
+    );
+
+    for (exit_code, said, printed) in [
+        (
+            0,
+            ", and its last run finished cleanly",
+            "exit 0 (the program finished successfully)",
+        ),
+        (
+            143,
+            ", and its last run was stopped",
+            "exit 143 (stopped with SIGTERM, which is an ordinary shutdown and not an error)",
+        ),
+    ] {
+        let plant = restarts10_ending("restarts10serving", exit_code);
+        let c = container(&plant, "flaky");
+        println!("{c:?}");
+        assert!(
+            c.restarts >= RESTARTS_WARN
+                && doing_its_job(c)
+                && c.last_terminated.as_ref().map(|r| r.exit_code) == Some(exit_code),
+            "the plant has to stay a *serving* container past the band, or the title below is \
+             not the one being tested: {c:?}"
+        );
+        let image = c.image.clone();
+
+        let all = analyze(&pods_at(vec![plant], now()));
+        show(&all);
+        assert_eq!(
+            all.len(),
+            1,
+            "rule 5 alone — rule 6 exempts both of these codes, so nothing else speaks for \
+             this container: {:?}",
+            titles(&all)
+        );
+        let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+
+        assert!(
+            !card.title.contains("killing"),
+            "exit {exit_code}: one exit code names an ending, never an agent, and the card \
+             that names one is contradicted by the object it was drawn from: {}",
+            card.title
+        );
+        assert!(
+            card.title.contains("it is serving now") && card.title.contains(said),
+            "the container is still up and the reader is still told which run this is about — \
+             one `lastState` is one run, and a claim over all ten restarts is the absolute \
+             NOTES § D85 removed from rule 1: {}",
+            card.title
+        );
+        assert!(
+            !card.action.contains("memory limit"),
+            "and the action goes with it: a memory-limit breach is a SIGKILL and arrives as \
+             137, never as {exit_code}: {}",
+            card.action
+        );
+        // **The title now claims how the run ended, so the code it claims it from is on the
+        // card** — and rule 6 is silent on exactly these two endings, so without this line the
+        // number appears nowhere on the screen (invariant 4, NOTES § D85).
+        assert!(
+            card.evidence.contains(printed),
+            "the reader is shown what the title was read off, in the words rule 6 would have \
+             used: {}",
+            card.evidence
+        );
+        // **And it is shown *before* the image, because evidence is the one card line the screen
+        // is allowed to cut** (`screens/alerts.md` § The height: three lines, wrapped at 51
+        // columns). Behind a digest-pinned image the exit code is what falls off the bottom —
+        // leaving a title that says how the run ended above evidence that no longer says it.
+        let (at_code, at_image) = (
+            card.evidence
+                .find(printed)
+                .expect("the exit code is on the card"),
+            card.evidence
+                .find(&image)
+                .expect("and so is the image it ran"),
+        );
+        assert!(
+            at_code < at_image,
+            "the fact the title rests on goes ahead of the one it does not: {}",
+            card.evidence
+        );
+        assert_eq!(
+            card.severity,
+            Severity::Warn,
+            "the band still answers *is this container serving*, and this one is"
+        );
+    }
+}
+
+/// **The arms' actions, and the command each owes** — the half of the box that is not the title
+/// (NOTES § D85, invariant 4).
+///
+/// **`kubectl describe pod` and `kubectl get pod -o yaml` do not overlap where this rule needs
+/// them to:** describe prints the probes and the `Unhealthy` / `Killing` events and no
+/// `restartPolicy`; `get -o yaml` prints `restartPolicy` and no events at all. A clean ending is
+/// told from a probe kill by the events, so these arms name the events and leave `restartPolicy`
+/// to rule 1, whose branch offers the command that shows it. **An action naming a field its own
+/// card cannot display is the defect this box is fixing, not a smaller version of it.**
+#[test]
+fn each_ending_sends_the_reader_somewhere_the_answer_can_be() {
+    let finished = restarts10_ending("restarts10serving", 0);
+    assert_eq!(
+        container(&finished, "flaky").role,
+        ContainerRole::Regular,
+        "this is the *plain container* half of the role split, and the assertion below is only \
+         about it — the sidecar half is the test after this one"
+    );
+    let all = analyze(&pods_at(vec![finished], now()));
+    show(&all);
+    let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    // **Both readings stay open.** An application that traps SIGTERM and shuts down tidily
+    // reports `0`, and the kubelet writes `0` / `Completed` whichever of the two happened — so
+    // an action that says nothing killed it is wrong about every gracefully-stopping program in
+    // the cluster.
+    assert!(
+        !card.action.contains("nothing killed"),
+        "an application that traps SIGTERM and shuts down tidily reports 0, and the kubelet \
+         writes 0 / Completed whichever of the two happened — so *nothing killed that run* is \
+         wrong about every gracefully-stopping program in the cluster: {}",
+        card.action
+    );
+    assert!(
+        card.action.contains("not who stopped it") && card.action.contains("If nothing stopped"),
+        "both readings have to stay live — the program finished, or something asked it to stop \
+         and was obeyed — and the sentence that picks one is the blocker this round is fixing: {}",
+        card.action
+    );
+    assert!(
+        card.action.contains("events"),
+        "and it has to send the reader where the two are told apart — a probe kill is written \
+         into the pod's events and nowhere else this card can reach: {}",
+        card.action
+    );
+    // **The positive half of the split, which its negative cannot stand in for.** The events
+    // above are in *both* arms' sentences, so they hold just as well over a rule that lost the
+    // split and gave every role the sidecar wording. The workload named here is the one thing
+    // only the plain-container arm says — and the one thing the sidecar test after this asserts
+    // is absent (rule 1 carries the same pair).
+    assert!(
+        card.action.contains("Job") && card.action.contains("CronJob"),
+        "a plain container whose program is meant to finish belongs in the workload built for \
+         that, and naming it is the whole of this arm — an action that only says where to look \
+         leaves the reader where they started: {}",
+        card.action
+    );
+    assert!(
+        !card.action.contains("restartPolicy"),
+        "and it may not name the field rule 1 names here: the command below prints the events \
+         and not that, and a card that sends the reader to a field its own command hides is \
+         invariant 4 broken in the direction this box is closing: {}",
+        card.action
+    );
+    // **The whole string, because the command is display text the reader retypes**: a wrong verb
+    // and a wrong object are the same failure, and `kubectl get deployment <pod-name>` compiles
+    // just as well while returning `NotFound`.
+    assert_eq!(
+        card.kubectl_cmd.as_deref(),
+        Some("kubectl describe pod broken-restarts10serving -n default"),
+        "an action naming the events owes the one command that prints them"
+    );
+
+    let stopped = restarts10_ending("restarts10serving", 143);
+    let all = analyze(&pods_at(vec![stopped], now()));
+    show(&all);
+    let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    assert!(
+        card.action.contains("probes") && card.action.contains("systemd-oomd"),
+        "143 is a container that was asked to stop and stopped: a health check, or a memory \
+         killer on the node that sends the same signal — the two places the answer is: {}",
+        card.action
+    );
+    assert_eq!(
+        card.kubectl_cmd.as_deref(),
+        Some("kubectl describe pod broken-restarts10serving -n default"),
+        "and `describe` does print the probes, so this arm keeps it"
+    );
+
+    // **The arm with no previous run at all.** `restartCount` survives a `lastState` the status
+    // no longer carries, and a count on its own supports the count. Rule 1's fall-through may
+    // still say *keeps crashing* because it has `CrashLoopBackOff` printed beside it; this rule
+    // has nothing beside it.
+    //
+    // **A kubelet restart is not one of the producers**, though it reads like one: the kubelet
+    // re-derives status from the runtime, the dead container is still there, and `lastState`
+    // comes back. The real ones are container GC — the node-wide dead-container cap pushing a
+    // container below the per-container keep of 1 — a runtime that lost its container store
+    // while `/var/log/pods` survived to feed `calcRestartCountByLogDir`, and a hand-run
+    // `crictl rm`.
+    let forgotten = capture_but("restarts10serving", |p| {
+        container_status(p, "flaky").last_state = None;
+    });
+    assert!(
+        container(&forgotten, "flaky").last_terminated.is_none(),
+        "the plant has to actually remove the previous run"
+    );
+    let all = analyze(&pods_at(vec![forgotten], now()));
+    show(&all);
+    let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    assert_eq!(
+        card.title, "Container has been restarted 10 times — it is serving now",
+        "a count with no run to read it against supports the count and not a word more — \
+         *something keeps killing it* here rests on a number that says only how often the \
+         container started"
+    );
+    // **What this arm may say, pinned as the requirement and not as a word.** `contains("log")`
+    // was a hole: it stayed green over *"look in the node's system log for a memory killer"*,
+    // an action pointing somewhere its own command does not print. These are the claims a bare
+    // count cannot carry.
+    for absent in ["killing", "memory limit", "probe", "node"] {
+        assert!(
+            !card.action.contains(absent),
+            "with no previous run to read, *{absent}* is either a claim the count cannot carry \
+             or a place this card's command does not print: {}",
+            card.action
+        );
+    }
+    // **And the thing it must still give the reader: a move.** Claiming nothing is only half an
+    // arm — a card that says the pod forgot and stops there is a shrug. The next restart writes
+    // the run back, which is a real instruction and one nothing else on this rule says.
+    assert!(
+        card.action.contains("the next restart will"),
+        "an arm with nothing to claim still owes the reader something to do: {}",
+        card.action
+    );
+    // **`kubectl logs --previous` may never be offered here, and the reason is the branch
+    // condition itself.** The kubelet gates that flag on `lastState.terminated.containerID`
+    // (`validateContainerLogStatus`) — the field whose absence is what put this card in this
+    // arm — so the command it used to carry returns `BadRequest` on every object that can reach
+    // it, with no exception to test for. A green test asserting a command that always fails is
+    // worse than no test, and this file shipped one (invariant 4).
+    assert_eq!(
+        card.kubectl_cmd.as_deref(),
+        Some("kubectl describe pod broken-restarts10serving -n default"),
+        "the events are the only record that may survive the one the pod dropped, and they are \
+         in `describe` — which is also the one command this arm can offer that runs at all"
+    );
+}
+
+/// **The sidecar that keeps finishing, one rule over** — the blocker NOTES § D85 found inside
+/// the fix for rule 1, and the one this rule's first draft rebuilt: *a program that is meant to
+/// finish belongs in a Job or a CronJob*, printed one line under an evidence line reading *it
+/// runs beside the app the whole time*, about a container whose pod may already **be** a Job.
+///
+/// **`healthy-sidecar.json` is one number away from it** — `proxy` is an init container with
+/// `restartPolicy: Always`, running, ready, and already carrying
+/// `lastState.terminated.exitCode: 0`. Only its `restartCount: 1` keeps it under the band, and a
+/// count is the one field every cluster produces at every value (NOTES § D40, § D53).
+///
+/// **What a future trip owes here too:** the same pod left alone for three hours, so its
+/// `sleep 3600` finishes three times. Nothing was captured at that count because nothing waited.
+#[test]
+fn a_sidecar_that_keeps_finishing_is_not_told_to_move_to_a_job() {
+    let restarted = capture_but("healthy-sidecar", |p| {
+        container_status(p, "proxy").restart_count = RESTARTS_WARN;
+    });
+    let proxy = container(&restarted, "proxy");
+    println!("{proxy:?}");
+    assert!(
+        proxy.role == ContainerRole::Sidecar
+            && doing_its_job(proxy)
+            && proxy.last_terminated.as_ref().map(|r| r.exit_code) == Some(0),
+        "the plant moved the count and nothing else — the role, the readiness and the clean \
+         previous run are all the capture's own, and without them this is not the card: {proxy:?}"
+    );
+
+    let all = analyze(&pods_at(vec![restarted], now()));
+    show(&all);
+    let card = only(&all, "healthy-sidecar", "restarted 3 times");
+    assert!(
+        card.evidence
+            .contains("it runs beside the app the whole time"),
+        "the evidence line the action has to agree with: {}",
+        card.evidence
+    );
+    assert!(
+        !card.action.contains("Job") && !card.action.contains("CronJob"),
+        "this container runs beside the app for the pod's whole life and its pod may already \
+         be a Job — telling its author to move it to one is the contradiction D85 removed from \
+         rule 1, rebuilt here: {}",
+        card.action
+    );
+    assert!(
+        card.action.contains("events"),
+        "and the reader is still left somewhere to look — an action that only says where *not* \
+         to look is no action at all: {}",
+        card.action
+    );
+    // **The positive half of the split, which none of its negatives can stand in for.** Every
+    // assertion above is satisfied word for word by the *init* arm's sentence — it names no Job,
+    // and it does name the events — so all three survive the split collapsing in the one
+    // direction the F1 test cannot see. This is the sentence only this arm carries, and it is
+    // the arm's whole point: a container that runs beside the app for the pod's whole life is
+    // not finishing early, it is finishing at all.
+    assert!(
+        card.action.contains("finishing at all is the bug"),
+        "a sidecar is the one role where ending cleanly is itself the fault, and a card that \
+         stops short of saying so has told the reader only what the problem is not: {}",
+        card.action
+    );
+}
+
+/// **`healthy-retry.json`'s init container run again from the start**, which is what pod sandbox
+/// recreation does — a node reboot, a containerd restart, a killed sandbox. Kubernetes re-runs
+/// every init container while `restartCount` and `lastState` persist on the same pod object, so
+/// the container is `Running` and `ready: false` with its previous generation behind it, and the
+/// app is back on `PodInitializing`.
+///
+/// **What this plant actually moves**, and no more: the previous run's exit code and reason
+/// ([`exited`]), the init container's `state` to `Running` and its `ready` to `false`, and the
+/// app container to waiting on `PodInitializing`. `restartCount` is the capture's own, which is
+/// the point of using this capture (NOTES § D40, § D53), and the app's count and `lastState`
+/// writes inside [`never_ran`] change nothing the snapshot reads — that capture's app has never
+/// restarted, and its `lastState` is an empty object either way. The ending is the parameter: it
+/// is the only thing separating this rule's two init arms.
+///
+/// **It is deliberately left inconsistent in three places, and each one is inert.** A real
+/// rebuild would put the pod back to `phase: Pending` with `Initialized: False`, and the init
+/// container's `started` would be `true` beside a running state; this plant keeps `Running`,
+/// `True` and the capture's `started: false`. Nothing in `rules.rs` reads the `Initialized`
+/// condition at all; [`running_but_not_ready`] returns on `role != Regular` before it reaches
+/// the `started` gate; and **`phase` is the one that would not be inert** — `Pending` is what
+/// [`no_node_accepted_it`] and [`nothing_has_looked_at_it`] gate on, so writing it would pull
+/// two rules with nothing to say here into a test that is about one card.
+///
+/// **A running plain init container is therefore something a capture trip still owes** — the
+/// whole shape at once, from a cluster, rather than the part of it these two cards read.
+fn init_run_again(exit_code: i32) -> PodSnapshot {
+    capture_but("healthy-retry", |p| {
+        exited(p, "wait-for-db", exit_code);
+        let init = container_status(p, "wait-for-db");
+        init.state = Some(ApiContainerState {
+            running: Some(ContainerStateRunning {
+                started_at: Some(time("2026-08-13T23:34:00Z")),
+            }),
+            ..ApiContainerState::default()
+        });
+        init.ready = false;
+        // The app goes back behind it, which is what a rebuilt sandbox does to the whole pod —
+        // an init container running again beside a *ready* app is a shape no kubelet writes.
+        never_ran(p, "app", "PodInitializing", None);
+    })
+}
+
+/// **A plain init container that finished its work and was run again** — the third role on the
+/// clean ending, and the arm rule 1 does not need because `CrashLoopBackOff` gates its own: the
+/// kubelet never applies that state to an init container that exited `0`, it moves on to the
+/// next one. This rule has no such gate.
+///
+/// **The producer is pod sandbox recreation** — a node reboot, a containerd restart, a killed
+/// sandbox. Kubernetes re-runs every init container from the start while `restartCount` and
+/// `lastState` persist on the same pod object, so three generations reach [`RESTARTS_WARN`] with
+/// a clean `exit 0` behind them and the container `Running`, `ready: false`, with the app back
+/// behind it on `PodInitializing`.
+///
+/// **Given the sidecar's sentence this card is wrong twice**, and both are NOTES § D85's own
+/// shape: it sends the reader after a probe that [`stopped_action`] refuses to name on this very
+/// container — one rule contradicting itself between two of its own arms — and it calls
+/// finishing a bug one line under an evidence line reading *the app starts only after this one
+/// finishes*. A plain init container **is** meant to finish.
+#[test]
+fn a_plain_init_container_that_was_re_run_is_not_told_that_finishing_is_its_bug() {
+    let rerun = init_run_again(0);
+    let waiter = container(&rerun, "wait-for-db");
+    println!("{waiter:?}");
+    assert!(
+        waiter.role == ContainerRole::Init
+            && !doing_its_job(waiter)
+            && waiter.restarts >= RESTARTS_WARN
+            && waiter.last_terminated.as_ref().map(|r| r.exit_code) == Some(0),
+        "the exemption at the top of this rule reads the *current* state, so a plain init \
+         container that is running again is not exempt whatever its previous run says — that is \
+         what makes this arm reachable at all: {waiter:?}"
+    );
+
+    let all = analyze(&pods_at(vec![rerun], now()));
+    show(&all);
+    let card = only(&all, "healthy-retry", "restarted 3 times");
+    assert!(
+        card.evidence
+            .contains("the app starts only after this one finishes"),
+        "the evidence line the action has to agree with — this container finishing is the \
+         contract, not the fault: {}",
+        card.evidence
+    );
+    assert!(
+        !card.action.contains("bug"),
+        "a plain init container is *meant* to finish, and a card calling that the bug argues \
+         with its own evidence line: {}",
+        card.action
+    );
+    for probe in ["liveness", "readiness", "startup"] {
+        assert!(
+            !card.action.contains(probe),
+            "and this rule's own {probe}-refusing arms are right beside it — one rule \
+             contradicting itself about one container is the disagreement NOTES § D85 opens \
+             with, not a smaller version of it: {}",
+            card.action
+        );
+    }
+    assert!(
+        card.action.contains("sandbox"),
+        "what re-ran a container that had already finished is the question, and the answer is \
+         at the pod and the node, not inside it — an action that only says where *not* to look \
+         is no action at all: {}",
+        card.action
+    );
+    // **The one arm whose evidence expires on a clock, and it has to say so.** `--event-ttl`
+    // defaults to an hour while `restartCount` never decreases, so a card drawn from three
+    // rebuilds during a 22:00 node reboot still prints at 09:00 — and `describe` then shows
+    // `Events: <none>`. Sending a reader to an empty list without warning them is how a tool
+    // teaches them to stop believing it.
+    assert!(
+        card.action.contains("about an hour"),
+        "this count outlives the events it points at, and the card that does not say so has \
+         promised a record that is routinely gone by the time it is read: {}",
+        card.action
+    );
+    assert_eq!(
+        card.kubectl_cmd.as_deref(),
+        Some("kubectl describe pod healthy-retry -n default"),
+        "and the events that record a rebuilt sandbox, and the node the pod sits on, are both \
+         in that one output (invariant 4)"
+    );
+}
+
+/// **The same init container on the ending it reaches most often** — and the arm that was
+/// role-blind until this box: *check the memory limit and the liveness probe* was handed to every
+/// role, one arm above [`stopped_action`] refusing to name a probe on this very container.
+/// One card contradicting itself is what NOTES § D85 opens with, so the claim survives the split
+/// and the probe does not.
+///
+/// **The failure is the capture's own** — `wait-for-db` failed three times before it succeeded,
+/// and that `exit 1` is asserted against the committed JSON below rather than planted, so only
+/// the *current* state is synthesized (NOTES § D53).
+#[test]
+fn a_failing_init_container_is_not_sent_to_a_probe_it_may_not_have() {
+    let captured_code = captured_i32(
+        captured_status(
+            &fixture("healthy-retry"),
+            "initContainerStatuses",
+            "wait-for-db",
+        ),
+        &["lastState", "terminated", "exitCode"],
+    );
+    let failing = init_run_again(captured_code);
+    let waiter = container(&failing, "wait-for-db");
+    println!("{waiter:?}");
+    assert!(
+        waiter.role == ContainerRole::Init
+            && !doing_its_job(waiter)
+            && waiter.restarts >= RESTARTS_WARN
+            && waiter.last_terminated.as_ref().map(|r| r.exit_code) == Some(captured_code),
+        "the ending has to be a *failure* and the container an init one, or the arm under test \
+         is not the one that fires: {waiter:?}"
+    );
+    assert!(
+        ![0, 143].contains(&captured_code),
+        "an ending this rule reads as clean would take one of the other two arms, and the \
+         capture's own {captured_code} is what puts this card on the failure arm"
+    );
+
+    let all = analyze(&pods_at(vec![failing], now()));
+    show(&all);
+    let card = only(&all, "healthy-retry", "restarted 3 times");
+    // **The claim is untouched by the split** — a non-zero exit beside a count carries it
+    // (NOTES § D85's asymmetry), and only the advice underneath was ever role-blind. The title
+    // is the bare one because this container is not serving, which is the band's own reading.
+    assert_eq!(
+        card.title, "Container has been restarted 3 times",
+        "the split is under the title, not in it"
+    );
+    assert_eq!(
+        card.severity,
+        Severity::Warn,
+        "and the band does not move with the role either — three restarts is amber whoever is \
+         counting them"
+    );
+    assert!(
+        card.action.contains("memory limit"),
+        "the half that is true of every role stays: an init container carries limits like any \
+         other, and the kernel takes it the same way: {}",
+        card.action
+    );
+    for probe in ["liveness", "readiness", "startup"] {
+        assert!(
+            !card.action.contains(probe),
+            "and the half that is not goes — `validateInitContainers` rejects a {probe} probe \
+             on this kind of container, so this rule would be sending the reader after a thing \
+             its own next arm says cannot exist: {}",
+            card.action
+        );
+    }
+    // **What replaced the probe, asserted to exist.** `memory limit` is in both arms' sentences,
+    // so with only the negatives above, deleting the second half of this one is invisible — and
+    // an init container whose limit is fine would be left with a card that names nothing else to
+    // check.
+    //
+    // **This pin and the loop below replaced two that pinned tokens of a recital** — *"with a
+    // memory reason beside it"* and *"would not stop when it was asked to"* — which is D88's own
+    // lesson arriving late on the pins that shipped with it. Both are gone with the sentence
+    // they quoted.
+    //
+    // **The requirement they now hold, in two halves:** the reader is sent to the memory limit,
+    // and the absence of the kernel's word is never allowed to mean anything. Neither direction
+    // of `137` is decidable from the object — it is memory only with `reason: OOMKilled` beside
+    // it (NOTES § D71), *and* a real cgroup kill arrives as plain `Error` on a host that is
+    // itself short of memory (NOTES § D84). A card that branches picks the wrong branch exactly
+    // when the node is the cause and rule 2 is silent, which is when the reader needs it most.
+    //
+    // **The two pins are not equally strong, and saying otherwise is how the earlier holes in
+    // this box survived their reviews.** The negative loop underneath is requirement-shaped: it
+    // rejects a recital however it is worded, so a rewrite passes it on merit. **This positive
+    // one is still a token pin** — *"without recording why"* would satisfy the requirement word
+    // for word and turn it red. It fails *closed*, which is the safe direction and why it stays,
+    // but a faithful rewrite of this sentence must expect to edit this line, and editing it is a
+    // decision to re-read the requirement above rather than a formality.
+    assert!(
+        card.action.contains("without saying so"),
+        "the card has to say the kernel's word may be missing — an action that reads anything \
+         into its absence rules memory out on the one shape where memory is likeliest, and \
+         `OOMKilled` is what rule 2 keys on, so nothing else on the screen says it either: {}",
+        card.action
+    );
+    for decided in ["137", "exit code", "any other code"] {
+        assert!(
+            !card.action.contains(decided),
+            "and it may not recite what *{decided}* might have meant: the reader's own code is \
+             translated one line above by `exit_meaning`, so a branch here is four wrapped lines \
+             about numbers they cannot see, ending in a restatement of the one they can: {}",
+            card.action
+        );
+    }
+    assert_eq!(
+        card.kubectl_cmd.as_deref(),
+        Some("kubectl describe pod healthy-retry -n default"),
+        "the command does not move with the split — `describe` prints the limit and the last \
+         run's exit code, which is all this arm now names (invariant 4)"
+    );
+}
+
+/// **A container something keeps stopping, on the two roles that read the stop differently** —
+/// rule 1 splits `Init` out here and tells it the opposite of what it tells the other two, and
+/// two rules reading one container and disagreeing is where NOTES § D85 starts. Both rules now
+/// read the same [`stopped_action`], so there is one reading of `143` in this file and not two.
+///
+/// **`healthy-retry.json` is the init half with two fields moved and both real**:
+/// `wait-for-db` is a plain init container that failed three times before it succeeded, so the
+/// count is the capture's. A container the kubelet keeps stopping sits `Terminated` with the
+/// same code its `lastState` holds, between restarts under the pod's `restartPolicy: Always` —
+/// and its current state has to move too, or the successful run exempts it from this rule
+/// altogether ([`doing_its_job`], NOTES § D75).
+#[test]
+fn a_stopped_container_reads_the_same_on_this_rule_as_it_does_on_rule_one() {
+    let sidecar = capture_but("healthy-sidecar", |p| {
+        container_status(p, "proxy").restart_count = RESTARTS_WARN;
+        exited(p, "proxy", 143);
+    });
+    let all = analyze(&pods_at(vec![sidecar], now()));
+    show(&all);
+    let card = only(&all, "healthy-sidecar", "restarted 3 times");
+    assert!(
+        card.action.contains("probes"),
+        "a native sidecar may carry all three probes, so it is on the same side of the split \
+         as a plain container — rule 1 divides them the same way: {}",
+        card.action
+    );
+
+    let stopped = capture_but("healthy-retry", |p| {
+        exited(p, "wait-for-db", 143);
+        let status = container_status(p, "wait-for-db");
+        // `ready` moves with the state, because the kubelet writes them together: an init
+        // container's `ready` is true only where it completed successfully, so leaving the
+        // capture's `true` beside a `143` builds an object no API server emits — the objection
+        // [`exited`]'s own comment makes about `reason`, one field over (NOTES § D40, § D53).
+        status.ready = false;
+        let run = status
+            .state
+            .as_mut()
+            .and_then(|s| s.terminated.as_mut())
+            .expect("the capture's init container has finished");
+        run.exit_code = 143;
+        run.reason = Some("Error".to_string());
+    });
+    let migrate = container(&stopped, "wait-for-db");
+    println!("{migrate:?}");
+    assert!(
+        migrate.role == ContainerRole::Init
+            && !doing_its_job(migrate)
+            && migrate.restarts >= RESTARTS_WARN,
+        "a restartable init container may have probes, so the arm under test would not be the \
+         one that fires — and a successful one is not this rule's subject at all: {migrate:?}"
+    );
+
+    let all = analyze(&pods_at(vec![stopped], now()));
+    show(&all);
+    let card = only(&all, "healthy-retry", "restarted 3 times");
+    for probe in ["liveness", "readiness", "startup"] {
+        assert!(
+            !card.action.contains(probe),
+            "Kubernetes rejects a {probe} probe on this kind of container, so naming one is \
+             advice the reader cannot follow — and rule 1 tells the same container the \
+             opposite, which is the disagreement this box exists to stop: {}",
+            card.action
+        );
+    }
+    assert!(
+        card.action.contains("systemd-oomd") || card.action.contains("earlyoom"),
+        "and the reader is left with somewhere real to look — a userspace memory killer sends \
+         SIGTERM and reaches an init container like any other process: {}",
+        card.action
+    );
+    // **The two things only this arm says.** The memory killer above is in the sibling arm's
+    // sentence too, so it and the probe negatives together are satisfied by wording that has
+    // lost everything this branch exists for. These two are not: the reason no probe is named,
+    // and the reading a signal number cannot rule out — a program may raise SIGTERM on itself,
+    // which is what the first round of this box was blocked for asserting away.
+    assert!(
+        card.action.contains("does not allow health checks"),
+        "the reader is told *why* no probe is named here, or the branch is indistinguishable \
+         from one that simply forgot to mention them: {}",
+        card.action
+    );
+    assert!(
+        card.action.contains("of its own accord"),
+        "and 143 leaves the program itself on the list — an action that names only outside \
+         causes asserts an agent the exit code cannot carry: {}",
+        card.action
+    );
+}
+
+/// **An ending on a container that is *not* serving** — the half of the split the tests above
+/// cannot reach. The title says nothing about the ending here, so the action is the only thing
+/// on the card that can be wrong, and the band is the one thing that must not move
+/// (NOTES § D71): a container that keeps finishing early and is not ready now is as down as one
+/// that keeps crashing.
+#[test]
+fn a_container_that_is_down_keeps_its_band_whatever_the_last_run_did() {
+    for (exit_code, said) in [(0, "Job"), (143, "systemd-oomd")] {
+        let plant = restarts10_ending("restarts10", exit_code);
+        let c = container(&plant, "flaky");
+        println!("{c:?}");
+        assert!(
+            !doing_its_job(c) && c.restarts >= RESTARTS_CRITICAL,
+            "the plant has to stay past the red band and not serving: {c:?}"
+        );
+
+        let all = analyze(&pods_at(vec![plant], now()));
+        show(&all);
+        assert!(
+            !titles(&all).iter().any(|t| t.contains("previous run")),
+            "rule 6 exempts both of these codes, so it drops out where the committed capture \
+             below draws it — rule 7 stays either way, this container is up and not ready: {:?}",
+            titles(&all)
+        );
+        let card = only(&all, "broken-restarts10", "restarted 10 times");
+        assert_eq!(
+            card.severity,
+            Severity::Critical,
+            "a container that keeps finishing early and is not ready now is as down as one \
+             that keeps crashing — the band reads whether it is serving, and how the run ended \
+             does not move it"
+        );
+        // **The whole title, not a phrase out of it.** The sentence that must not be here is
+        // *appended*, so `!contains("it is serving now")` stays green over a title that grew a
+        // clean-ending claim it has no room for — the card is two lines at 51 columns and the
+        // title is never cut (`screens/alerts.md` § The height).
+        assert_eq!(
+            card.title, "Container has been restarted 10 times",
+            "a container that is not serving is told the count and nothing else: the ending is \
+             the action's subject, and the title has no room to repeat it"
+        );
+        assert!(
+            !card.action.contains("memory limit") && card.action.contains(said),
+            "the action is the one the ending decides, not the one the state does: {}",
+            card.action
+        );
+    }
+
+    // The control: the committed capture, unmoved, where both the count and the failure are
+    // real and the old sentence is still the right one.
+    let both = findings(&["restarts10"]);
+    show(&both);
+    assert!(
+        titles(&both).iter().any(|t| t.contains("previous run")),
+        "rule 6 on the capture as it stands — an `exit 1` this rule may still call a kill, and \
+         the card the plants above removed: {:?}",
+        titles(&both)
+    );
+    assert!(
+        only(&both, "broken-restarts10", "restarted 10 times")
+            .action
+            .contains("memory limit"),
+        "and the arm that was there all along is untouched"
+    );
+}
+
 /// A committed capture with one field moved — the technique the rest of this file uses
 /// for a shape no capture holds. The committed JSON is never touched (NOTES § D53); the
 /// decoded copy is.
@@ -5994,15 +6748,22 @@ fn backing_off(pod: &mut Pod, name: &str) {
 
 /// The exit code of a captured container's previous run, rewritten — the one field
 /// [`ending`] branches on, for the endings no capture holds on that role.
+///
+/// **The reason moves with the code, because the API emits them as a pair**: the kubelet writes
+/// `Completed` beside `0` and `Error` beside everything else, which is what `exit0.json` and
+/// `sigterm.json` show. A plant that moved the code alone would build
+/// `exitCode: 0, reason: Error` — an object no API server produces, and a plant is only worth
+/// what its shape is (NOTES § D40, § D53).
 fn exited(pod: &mut Pod, name: &str, code: i32) {
-    container_status(pod, name)
+    let run = container_status(pod, name)
         .last_state
         .as_mut()
         .expect("the capture's container has run before")
         .terminated
         .as_mut()
-        .expect("and it exited rather than being killed while waiting")
-        .exit_code = code;
+        .expect("and it exited rather than being killed while waiting");
+    run.exit_code = code;
+    run.reason = Some(if code == 0 { "Completed" } else { "Error" }.to_string());
 }
 
 /// **Rule 10, and the fixture that would break a rule shaped like its neighbours.**
