@@ -46,6 +46,7 @@ a file finished in an earlier step is frozen.
 | Crates, versions, toolchain, build targets, colours | [docs/tech-stack.md](docs/tech-stack.md) · [NOTES § Dependencies](NOTES.md#dependencies) |
 | Data flow (watch → prune → store → rules → UI) | [docs/architecture § Data flow](docs/architecture.md#data-flow) |
 | The broken-pod test manifest for kind | [NOTES § kind test manifest](NOTES.md#kind-test-manifest) |
+| How a tool of this shape breaks — k9s's tracker read as a defect catalogue, and the gaps it opens here | [PRIOR-ART.md](PRIOR-ART.md) — evidence, never a plan; its gaps become boxes only by a PM ruling |
 
 `tmp/` holds downloaded upstream docs (kube-rs, ratatui, k8s) and is never
 committed.
