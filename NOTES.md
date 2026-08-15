@@ -126,6 +126,7 @@ its line moving with it.
 - [D102](#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15) — the second copy of a shared sentence is dropped, by `analyze` and not by a rule
 - [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15) — the process was measured, and what it lacked was a rule that makes something smaller
 - [D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15) — the second agent was re-running the first agent's commands, and a tool does it better
+- [D105](#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16) — the security gate splits into what a script can decide today, and what is waiting for code
 
 ## Why it exists — where the gap is
 
@@ -7404,6 +7405,67 @@ second-copy defect [D103](#d103--the-process-was-measured-and-what-it-lacked-was
 found in `todo.md`, one layer down. `src/rules_tests/pod.rs` is the same shape at
 9 809 lines, and it already carries the section markers a further split would cut
 along.
+
+### D105 — the security gate splits into what a script can decide today, and what is waiting for code (2026-08-16)
+
+`CLAUDE.md` § *Security gate* is run by a human on every diff, and a checklist
+item is the thing that gets skipped — every other list in this repo that mattered
+became a script. `scripts/security-guard.py` is that script for the half a
+script can answer **on this tree**, and the split is the decision, not the code.
+
+**Mechanical now, six checks, 17 planted violations in its `--self-test`.**
+Workflow hygiene — a top-level `permissions:` that defaults to read, every
+third-party `uses:` pinned to a 40-hex SHA, no `pull_request_target` beside
+secrets — which nothing checked before and which the CI file now checks about
+itself. No shell spawned from `src/`. No dependency or hostname outside the ten
+(invariant 10). No `Debug` derived over a type that can hold a token. No door
+into the in-cluster ServiceAccount environment. No TLS verification knob turned
+off by us.
+
+**Two of those guard a class that is empty today, and that is the point.**
+`src/` spawns no process and holds no client, so checks 2, 5 and 6 pass over
+nothing — they exist so the class *stays* empty when `$EDITOR` lands in v0.4 and
+`kube` in Phase 5. That is the honest version of an early guard, and it is the
+opposite of the vacuous one: **a guard over an empty class is a guard; a guard
+over an unwritten feature is a pass that means nothing.** None was written for
+the second kind.
+
+**They ban the call and never the word.** `Config::infer` and
+`Client::try_default` are in the ban list beside `Config::incluster*` because
+they are the *convenient* doors — both try the ServiceAccount environment
+first — while `Config::from_kubeconfig` stays legal. The TLS ban needs a literal
+`true`, so `accept_invalid_certs = user_said_insecure` is still writable: Phase 5
+has to **honour** a kubeconfig that sets `insecure-skip-tls-verify` and Phase 11
+has to show it in the header, and a guard that made either unimplementable would
+have been enforcing the opposite of the rule. Both negatives are asserted in the
+self-test, in those words.
+
+**Still human-checked, with what each one needs and the phase that brings it.**
+Deferred because the code to check does not exist — not because it is hard:
+dry-run before the real call · the resourceVersion carried and the 409 re-read ·
+the typed object name on destructive actions · no bulk mutation · every attempt
+reaching the audit log · that log's `0600` and append-only-ness · `--read-only`
+being structurally unreachable (Phase 7, some of it e2e) · control-character
+stripping on every free-text field, which is the most valuable of them and needs
+a renderer to feed `\x1b[2J` through · env values and Secret reveal · bounded
+sizes (Phases 5–6, 9–11) · the edit temp file at `0600` and `../` in a name
+(v0.4) · `SHA256SUMS` at release, which extends check 1 the day the release
+workflow exists (Phase 13).
+
+**Two rows split rather than deferred whole**, and that shape is worth copying:
+the panic path's static half — no derived `Debug` over a config holder — is check
+4 today while its pty half waits for Phase 11; TLS splits the same way, *us*
+disabling verification is mechanical now, *honouring and displaying* the user's
+flag is not.
+
+**What it cost to get honest output.** The guard's own second pass found two
+silent-green defects in itself, both of the class this repo keeps paying for: a
+`#[derive(...)]` wrapped across lines matched nothing and read as *derives no
+Debug*, and a field typed `HashMap<String, Client>` was cut at the comma, so the
+half carrying the token was the half the pattern never saw. Both were found by
+running it against `src/rules.rs` rather than against its own fixtures — the same
+rule as [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12),
+applied to the guard.
 
 ## Decisions made
 

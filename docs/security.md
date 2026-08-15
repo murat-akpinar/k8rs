@@ -186,6 +186,18 @@ resource.
   exception announces itself at the top of the file that owns it.
 - The e2e job runs under `--read-only` against kind and fails if any mutating
   request reaches the API server.
+- **The mechanizable half of the review checklist is a script**, not a list
+  somebody re-reads:
+  [`scripts/security-guard.py`](../scripts/security-guard.py) fails the build on
+  a workflow that grants write or names an action by tag, a shell spawned from
+  `src/`, a dependency or a hostname outside the ten, a `Debug` derived over a
+  type that can hold a token, a call into the in-cluster ServiceAccount
+  environment, or a TLS verification knob turned off by us. It bans the **call**
+  and never the word, so a kubeconfig that itself sets
+  `insecure-skip-tls-verify` is still honoured and still shown in the header.
+  What it cannot decide yet is decided by a human, and
+  [NOTES § D105](../NOTES.md#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16)
+  lists every one of those with the phase that makes it mechanical.
 - Rules and analysis reports are pure functions with no I/O — the only code
   touching the network is `k8s.rs` (reads) and `ops.rs` (writes).
 

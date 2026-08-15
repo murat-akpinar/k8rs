@@ -48,6 +48,15 @@ jobs:
           python3 scripts/write-guard.py --self-test
           python3 scripts/write-guard.py
 
+      # The mechanizable half of CLAUDE.md § Security gate — including this
+      # file: the pins below and the permissions above are checked by it, so a
+      # "quick CI fix" that unpins an action or grants a write is a red build
+      # rather than a line nobody re-reads.
+      - name: security gate
+        run: |
+          python3 scripts/security-guard.py --self-test
+          python3 scripts/security-guard.py
+
       # Every fixture is trusted because a jq predicate in cluster.sh said it
       # reached the state its rule is about. Those predicates only ever ran
       # against a live cluster, where too-loose and too-tight look identical.

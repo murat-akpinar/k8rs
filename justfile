@@ -43,6 +43,8 @@ check:
     python3 scripts/test-guard.py
     python3 scripts/write-guard.py --self-test
     python3 scripts/write-guard.py
+    python3 scripts/security-guard.py --self-test
+    python3 scripts/security-guard.py
     bash scripts/verify-test.sh
     bash scripts/sanitize-test.sh
     bash scripts/certs-test.sh
