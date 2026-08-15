@@ -7067,6 +7067,50 @@ after the code is a spec of what was built.
   asserted — and the reader's own arithmetic is not a claim k8rs has to justify at
   03:00.
 
+### D102 — the second copy of a shared sentence is dropped, by `analyze` and not by a rule (2026-08-15)
+
+Rules 5 and 6 draw the same four-line `unwatched_action` on one container: 26
+lines about one thing in a 16-row pane. Silencing rule 6 is not the fix:
+[D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)
+already drew the line at removing a card only where it was never the one that
+diagnosed the failure, and here it is — its card is what keeps a reader off
+`logs --previous`, which the API will not serve for that record. So the cheap
+half is that the *second* copy of a sentence says nothing new.
+
+**The fold lives in `analyze`, beside `explains_a_shortfall`, and not in a
+rule.** No rule may be made to know what its neighbour drew, or the two grow a
+dependency `rules.rs`'s purity does not survive. A rule owes a true card;
+`analyze` owes that two true cards about one container do not tell one story
+twice.
+
+**The scope is the container, and that is load-bearing.** `Finding::object` is
+the *pod*, so the same fold over a pod would drop the card about a second
+container that lost its status too — a pod-wide silence produced out of a
+per-container fact. The caller's `for c in &pod.containers` supplies the scope;
+no new `Finding` field, no matching on evidence text.
+
+**The more severe survives** — `Severity`'s derived `Ord` declares `Critical`
+first, so the fold keeps the *smaller* value, and a comparison written the
+natural way round drops exactly the card that matters while passing every other
+assertion. A tie goes to the rule that ran first, which is the order `analyze`
+already calls them in; survivors keep their emission order, because a `sort`
+would reorder every card in the file to settle two.
+
+**A shared sentence is not enough on its own — the card that goes has to add
+nothing**, and this is checked rather than assumed: every fact on it, its
+evidence split on `FACTS`, must already be on the card that beats it, and it may
+carry no `timestamp` the survivor lacks. A duplicated sentence is a cheap
+failure; a fact deleted off the screen because a neighbour worded its advice the
+same way is not.
+
+**Today it fires on exactly two pairs**, both against `previous_run_failed` on
+`Ending::Unwatched`: `crash_looping` beside it, and `restarting_repeatedly`
+beside it. Every other action in the file is distinct per container.
+
+**Cost:** O(n²) over at most eight cards, which is why the drops are picked
+rather than sorted for. It applies to every shared action, not to this one pair
+— which is what the box asked for.
+
 ## Decisions made
 
 ### Product

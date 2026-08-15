@@ -5998,7 +5998,21 @@ fn a_run_kubernetes_lost_track_of_is_not_read_as_a_kill() {
     for (capture, name, role) in roles {
         for message in messages {
             let lost = match role {
-                ContainerRole::Init => init_previous_run(137, Some(STATUS_LOST), message, false),
+                // **Under [`RESTARTS_WARN`], which is what leaves rule 6 the card that speaks**
+                // (NOTES § D102). The other two rows are already there — `startup.json` is
+                // captured at one restart and `healthy-unreadysidecar.json` at none, which
+                // [`ended_as`] takes to one — while `healthy-retry.json` is a retry loop captured
+                // at three, so this role alone has to say the number. Past the band rule 5 draws
+                // the same sentence and rule 6's card collapses into it, which is
+                // [`one_card_per_action_leaves_the_more_severe_card_standing`]'s subject and not
+                // this test's: here the requirement is rule 6's own title, on every role.
+                ContainerRole::Init => init_previous_run_counting(
+                    137,
+                    Some(STATUS_LOST),
+                    message,
+                    false,
+                    Some(RESTARTS_WARN - 1),
+                ),
                 _ => capture_but(capture, |p| {
                     ended_as(p, name, 137, Some(STATUS_LOST), message)
                 }),
@@ -6387,7 +6401,8 @@ fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
                 subject.role, role,
                 "the role under test, or the shapes below are three copies of one card"
             );
-            let all = analyze(&pods_at(vec![planted], now()));
+            let snapshot = pods_at(vec![planted], now());
+            let all = analyze(&snapshot);
             show(&all);
             let about = cards_about(&all, name);
             // **The whole set is counted, not searched.** The wrong cards this box removes were
@@ -6395,11 +6410,15 @@ fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
             // them — and a rule that goes silent takes its own negatives with it
             // (NOTES § D26, § D93).
             let expected = match (role, looping) {
-                // rule 5 and rule 6 — plus rule 7 on the one base that is running and unready,
-                // which is a card about the readiness check now and not about the ending.
-                (ContainerRole::Regular, false) => 3,
-                // rule 1 and rule 6 when it is backing off; rule 5 and rule 6 when it is not.
-                _ => 2,
+                // rule 5, plus rule 7 on the one base that is running and unready, which is a
+                // card about the readiness check now and not about the ending. **This is the
+                // shape the box was opened on**: three cards, 26 lines about one container in a
+                // 16-row pane, two of them carrying the same four-line action.
+                (ContainerRole::Regular, false) => 2,
+                // rule 1 on the wait and rule 5 on the re-run, each alone: rule 6 answers this
+                // ending with the same sentence they do, so its card is folded into whichever of
+                // the two drew (NOTES § D102). Both numbers were one higher until 2026-08-15.
+                _ => 1,
             };
             assert_eq!(
                 about.len(),
@@ -6460,14 +6479,35 @@ fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
                 describe(&counted.object).as_deref(),
                 "{object} {role:?}: the card offers the output its own action names"
             );
-            // **And rule 6's card is still beside it, unchanged** — the one card this shape
-            // always had right, which is why the neighbours went unread (NOTES § D93).
-            let lost = only(&all, &object, "exit 137");
+            // **Rule 6 still draws, and [`analyze`] is what takes the card off the screen**
+            // (NOTES § D102). Until 2026-08-15 its card stood here unchanged — the one card this
+            // shape always had right, which is why the neighbours went unread — and once the
+            // neighbours were fixed the two carried one sentence twice.
+            //
+            // **Asked of the rule directly, because searching the list cannot tell the two
+            // failures apart**: a rule that stopped firing and a card that was folded into its
+            // neighbour print the same missing title (NOTES § D26, and the same reason the
+            // `RestartAllContainers` exemption is asserted this way one test down).
+            let pod = &snapshot.pods[0];
+            let folded = previous_run_failed(pod, container(pod, name))
+                .expect("rule 6 draws this card; the fold is analyze's and not the rule's");
             assert!(
-                lost.title
+                folded
+                    .title
                     .starts_with("No record of how the container's last run ended"),
                 "rule 6 ships what it shipped: {}",
-                lost.title
+                folded.title
+            );
+            assert_eq!(
+                folded.action, counted.action,
+                "{object} {role:?}: the two cards carry one sentence, which is what makes the \
+                 second copy of it worth nothing to a reader"
+            );
+            assert!(
+                !about.iter().any(|f| f.title == folded.title),
+                "{object} {role:?}: and the second copy is the one that goes — the survivor's \
+                 own evidence still carries the exit code and its translation: {:?}",
+                titles(&all)
             );
         }
     }
@@ -6574,6 +6614,354 @@ fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
              guard nothing (CLAUDE.md § Code phase rules): {kept:?}"
         );
     }
+}
+
+/// **Which of two cards carrying one sentence is the one left standing** — [`one_card_per_action`]
+/// keeps the **more severe** of them, and a tie goes to the rule [`analyze`] ran first
+/// (NOTES § D102).
+///
+/// **Both orders are fed, and that is the whole of the first half.** Rule 5 runs before rule 6 and
+/// rule 1 before both, so on every shape a cluster can produce the severe card is *also* the first
+/// one: over this rule set *keep the more severe* and *keep the first* cannot be told apart by
+/// running [`analyze`], and a test that only ran it would prove neither. The fold is called
+/// directly with the pair the other way round rather than by inventing a pod that cannot exist
+/// (NOTES § D29, § D40).
+///
+/// **Both cards are real ones** — rule 5's and rule 6's, drawn by the rules themselves off a
+/// planted capture. Nothing here asserts against a `Finding` this file typed out.
+#[test]
+fn one_card_per_action_leaves_the_more_severe_card_standing() {
+    // **The band that differs.** `restarts10.json` is a container past ten restarts and down, so
+    // rule 5 is CRITICAL while rule 6 is WARN whatever it draws.
+    let down = capture_but("restarts10", |p| {
+        ended_as(p, "flaky", 137, Some(STATUS_LOST), None)
+    });
+    let c = container(&down, "flaky");
+    let counted = restarting_repeatedly(&now(), &down, c).expect("rule 5 draws on the count");
+    let lost = previous_run_failed(&down, c).expect("rule 6 draws on the ending");
+    println!(
+        "rule 5: {:?} | {}\nrule 6: {:?} | {}\nboth: {}",
+        counted.severity, counted.title, lost.severity, lost.title, counted.action
+    );
+    assert_eq!(
+        (counted.severity, lost.severity),
+        (Severity::Critical, Severity::Warn),
+        "the two bands this half is about — equal severities and the fold below has nothing to \
+         choose between"
+    );
+    assert_eq!(
+        counted.action, lost.action,
+        "and the one sentence that makes them one story told twice"
+    );
+    for (order, pair) in [
+        ("as analyze runs them", vec![counted.clone(), lost.clone()]),
+        (
+            "with the milder card first",
+            vec![lost.clone(), counted.clone()],
+        ),
+    ] {
+        let kept = one_card_per_action(pair);
+        assert_eq!(
+            titles(&kept),
+            vec![counted.title.as_str()],
+            "{order}: the severe card is the survivor. `Severity`'s derived `Ord` puts `Critical` \
+             first, so the fold keeps the *smaller* of the two — a comparison written the natural \
+             way round drops exactly the card that matters and passes every other assertion here"
+        );
+        assert_eq!(kept[0].severity, Severity::Critical, "{order}");
+    }
+
+    // **The tie, and it goes to the rule that ran first.** A sidecar four restarts in sits in
+    // rule 5's WARN band, so both cards are WARN and the order [`analyze`] calls them in is all
+    // that is left to separate them.
+    let tied = capture_but("healthy-unreadysidecar", |p| {
+        ended_as(p, "proxy", 137, Some(STATUS_LOST), None);
+        container_status(p, "proxy").restart_count = RESTARTS_WARN + 1;
+    });
+    let c = container(&tied, "proxy");
+    let first = restarting_repeatedly(&now(), &tied, c).expect("rule 5 draws past the band");
+    let second = previous_run_failed(&tied, c).expect("rule 6 draws on the ending");
+    println!("tied: {:?} / {:?}", first.severity, second.severity);
+    assert_eq!(
+        (first.severity, second.severity),
+        (Severity::Warn, Severity::Warn),
+        "the tie this half is about"
+    );
+    assert_eq!(
+        titles(&one_card_per_action(vec![first.clone(), second])),
+        vec![first.title.as_str()],
+        "an equal pair keeps the one that came first, which is the order the rules already run in \
+         — and rule 5's card carries the count, which rule 6's does not"
+    );
+}
+
+/// **The three shapes the fold may not touch** (NOTES § D102). Each of them draws two cards that
+/// stay two cards, and each is a different way the drop could be scoped too widely.
+///
+/// **(i) is the one that costs a reader a container.** [`Finding::object`] is the *pod* for every
+/// card in this file, so a fold keyed on it would silence the second container's card out of the
+/// first container's fact — a per-pod silence drawn from a per-container reason. The scope is the
+/// `for c in &pod.containers` loop and nothing weaker.
+///
+/// **(iii) is the sentence half**: two cards about one container that answer different questions
+/// are two questions, and the fold is keyed on the action for exactly that reason.
+#[test]
+fn one_card_per_action_is_scoped_to_one_container_and_to_one_sentence() {
+    // --- (i) TWO CONTAINERS IN ONE POD, BOTH RUNS LOST ---
+    // `hostpath.json` is the one committed capture with two regular containers. A rebuilt sandbox
+    // takes both of them, so both draw rule 6 and neither may take the other's card with it. Both
+    // are captured at one restart with a previous run already on them, so [`ended_as`] rewrites
+    // that run rather than counting a new one and rule 5 stays under its band on each.
+    let both = capture_but("hostpath", |p| {
+        for name in ["nosy", "shipper"] {
+            ended_as(p, name, 137, Some(STATUS_LOST), None);
+            container_status(p, name).ready = false;
+        }
+    });
+    let all = analyze(&pods_at(vec![both], now()));
+    show(&all);
+    for name in ["nosy", "shipper"] {
+        let said = cards_about(&all, name)
+            .into_iter()
+            .filter(|f| f.action == unwatched_action())
+            .count();
+        assert_eq!(
+            said,
+            1,
+            "{name} lost a status of its own and gets its own card — a pod-wide fold would leave \
+             the second container's run unreported out of the first one's: {:?}",
+            titles(&all)
+        );
+    }
+
+    // --- (ii) TWO PODS, ONE SENTENCE EACH ---
+    let one = capture_but("startup", |p| {
+        ended_as(p, "slowboot", 137, Some(STATUS_LOST), None)
+    });
+    let other = capture_but("healthy-unreadysidecar", |p| {
+        ended_as(p, "proxy", 137, Some(STATUS_LOST), None)
+    });
+    let all = analyze(&pods_at(vec![one, other], now()));
+    show(&all);
+    let lost: Vec<&Finding> = all
+        .iter()
+        .filter(|f| f.action == unwatched_action())
+        .collect();
+    assert_eq!(
+        lost.len(),
+        2,
+        "one sandbox rebuild per pod is two cards — the fold never reaches across pods: {:?}",
+        titles(&all)
+    );
+    assert_ne!(
+        lost[0].object.name, lost[1].object.name,
+        "and they are about different pods, or the shape above is one pod twice"
+    );
+
+    // --- (iii) ONE CONTAINER, TWO CARDS, TWO SENTENCES ---
+    // Rule 2 beside rule 5: a labelled memory kill on a container past ten restarts. Rule 6 is
+    // silent here (`OOMKilled` is rule 2's card), and rule 7 draws about the readiness check.
+    let starved = capture_but("restarts10", |p| {
+        ended_as(p, "flaky", 137, Some("OOMKilled"), None)
+    });
+    let c = container(&starved, "flaky");
+    let killed = out_of_memory(&now(), &starved, c).expect("rule 2 draws on the labelled kill");
+    let counted = restarting_repeatedly(&now(), &starved, c).expect("rule 5 draws on the count");
+    assert_ne!(
+        killed.action, counted.action,
+        "two questions, two sentences — with one sentence this shape is the positive case wearing \
+         a negative's name"
+    );
+    let all = analyze(&pods_at(vec![starved], now()));
+    show(&all);
+    let about = cards_about(&all, "flaky");
+    // Written down rather than derived: a rule that goes quiet here would otherwise shrink the
+    // set and pass the distinctness claim below by having less to be distinct about (NOTES § D26).
+    assert_eq!(
+        about.iter().map(|f| f.title.as_str()).collect::<Vec<_>>(),
+        vec![
+            killed.title.as_str(),
+            counted.title.as_str(),
+            "Running, but not receiving traffic — the readiness check is failing",
+        ],
+        "rules 2, 5 and 7 about one container, in the order analyze runs them"
+    );
+    let sentences: HashSet<&str> = about.iter().map(|f| f.action.as_str()).collect();
+    assert_eq!(
+        sentences.len(),
+        about.len(),
+        "three cards, three sentences, nothing folded — the fold is keyed on what a card tells \
+         the reader to do and not on how many cards a container has: {sentences:?}"
+    );
+
+    // **And the pair where every *other* clause of the condition is satisfied** — same container,
+    // rule 5 the more severe, rule 6's single fact already the survivor's first, both cards
+    // undated. Only the sentences differ, so only the action check keeps them apart: with it
+    // deleted this pair collapses and a reader loses *read the logs of that run* under a card
+    // that says to check the memory limit (NOTES § D102).
+    //
+    // **Stripped rather than captured**: the kubelet stamps a run it watched, so an ordinary
+    // `exit 1` with no times is a plant, and [`lasted`] going quiet is what makes rule 6's
+    // evidence a subset at all (NOTES § D40).
+    let undated = capture_but("restarts10", |p| {
+        ended_as(p, "flaky", 1, None, None);
+        let run = container_status(p, "flaky")
+            .last_state
+            .as_mut()
+            .and_then(|s| s.terminated.as_mut())
+            .expect("ended_as wrote the run this plant is stripping");
+        run.started_at = None;
+        run.finished_at = None;
+    });
+    let c = container(&undated, "flaky");
+    let severe = restarting_repeatedly(&now(), &undated, c).expect("rule 5 draws on the count");
+    let mild = previous_run_failed(&undated, c).expect("rule 6 draws on the failed run");
+    println!(
+        "rule 5: {:?} | {} | {}\nrule 6: {:?} | {} | {}",
+        severe.severity, severe.evidence, severe.action, mild.severity, mild.evidence, mild.action
+    );
+    assert!(
+        severe.severity < mild.severity
+            && severe.timestamp.is_none()
+            && mild.timestamp.is_none()
+            && mild
+                .evidence
+                .split(FACTS)
+                .all(|fact| severe.evidence.split(FACTS).any(|kept| kept == fact))
+            && severe.action != mild.action,
+        "every clause but the action satisfied, or the assertion below is not about the action"
+    );
+    assert_eq!(
+        one_card_per_action(vec![severe, mild]).len(),
+        2,
+        "two sentences are two cards however alike the rest of them is — the fold folds a repeated \
+         sentence and nothing else"
+    );
+}
+
+/// **A shared sentence is not enough on its own — the card that goes has to add nothing**
+/// (NOTES § D102). Same action, every fact already on the survivor, and no timestamp the survivor
+/// lacks; anything else stays its own card.
+///
+/// **Why it is a condition and not a comment.** The pair the fold was written for is lossless
+/// because [`lasted`] answers `None` on a record with no stamps — three inferences away from the
+/// fold, asserted two tests over, and nothing held the two together. Put the stamps back and rule
+/// 6's card carries `ran for 30s` and an age that rule 5's does not, so dropping it deletes a fact
+/// off the screen to save a repeated sentence. A duplicated sentence is a cheap failure; a
+/// silently deleted fact is not.
+///
+/// **Both stamps are planted, and the shape is deliberately not one the kubelet writes** —
+/// `kubelet_pods.go` fills in three fields for this reason and no times ([`ended_as`] strips them
+/// for that reason). The subject here is the *fold's* condition, not a cluster's object: what is
+/// being proved is that the drop is decided by what the cards carry rather than by a property of
+/// one ending that happens to hold today (NOTES § D29, § D40).
+///
+/// **And the second half is the over-fire.** With only `finishedAt` on the record [`lasted`] is
+/// `None` again, both cards date from the same field, and the pair collapses exactly as before —
+/// so the condition is not a way of quietly switching the fold off.
+#[test]
+fn a_card_is_dropped_only_when_it_adds_nothing_to_the_one_that_beats_it() {
+    // `restarts10.json` is rule 5's CRITICAL band, so rule 5 is the card that beats rule 6's WARN
+    // either way and only the evidence and the stamps move between the two halves below.
+    fn lost_run_stamped(started: Option<&str>) -> PodSnapshot {
+        capture_but("restarts10", |p| {
+            ended_as(p, "flaky", 137, Some(STATUS_LOST), None);
+            let run = container_status(p, "flaky")
+                .last_state
+                .as_mut()
+                .and_then(|s| s.terminated.as_mut())
+                .expect("ended_as wrote the run this plant is stamping");
+            run.started_at = started.map(time);
+            run.finished_at = Some(time("2026-08-13T22:33:00Z"));
+        })
+    }
+
+    // --- BOTH STAMPS: RULE 6 CARRIES A FACT AND AN AGE RULE 5 DOES NOT ---
+    let whole = lost_run_stamped(Some("2026-08-13T22:32:30Z"));
+    let c = container(&whole, "flaky");
+    let counted = restarting_repeatedly(&now(), &whole, c).expect("rule 5 draws on the count");
+    let lost = previous_run_failed(&whole, c).expect("rule 6 draws on the ending");
+    println!(
+        "rule 5: {} | {:?}\nrule 6: {} | {:?}",
+        counted.evidence, counted.timestamp, lost.evidence, lost.timestamp
+    );
+    assert_eq!(
+        counted.action, lost.action,
+        "the shared sentence, or this shape is not the one the fold would look at"
+    );
+    assert!(
+        lost.evidence.contains("ran for")
+            && !counted.evidence.contains("ran for")
+            && lost.timestamp.is_some(),
+        "the plant has to give rule 6 something rule 5 has not, or the assertion below passes \
+         for the wrong reason: {} / {}",
+        lost.evidence,
+        counted.evidence
+    );
+    let all = analyze(&pods_at(vec![whole], now()));
+    show(&all);
+    assert_eq!(
+        cards_about(&all, "flaky")
+            .into_iter()
+            .filter(|f| f.action == unwatched_action())
+            .count(),
+        2,
+        "both cards stand: one of them is carrying a fact and an age the other does not, and a \
+         repeated sentence is the cheaper of the two failures: {:?}",
+        titles(&all)
+    );
+
+    // --- FINISHED ONLY: NOTHING EXTRA, AND THE PAIR COLLAPSES AS BEFORE ---
+    // `lasted` needs both ends, so rule 6 is back to one fact — the survivor's first — while both
+    // cards now date from the same `finishedAt`. That is the `timestamp == timestamp` branch of
+    // the condition, which every other collapse in this file reaches through `None`.
+    let half = lost_run_stamped(None);
+    let c = container(&half, "flaky");
+    let counted = restarting_repeatedly(&now(), &half, c).expect("rule 5 draws on the count");
+    let lost = previous_run_failed(&half, c).expect("rule 6 draws on the ending");
+    println!(
+        "rule 5: {} | {:?}\nrule 6: {} | {:?}",
+        counted.evidence, counted.timestamp, lost.evidence, lost.timestamp
+    );
+    assert!(
+        !lost.evidence.contains("ran for")
+            && lost.timestamp.is_some()
+            && lost.timestamp == counted.timestamp,
+        "one fact, and an age both cards read off the same field: {lost:?} / {counted:?}"
+    );
+    let all = analyze(&pods_at(vec![half], now()));
+    show(&all);
+    assert_eq!(
+        cards_about(&all, "flaky")
+            .into_iter()
+            .filter(|f| f.action == unwatched_action())
+            .count(),
+        1,
+        "and here the second copy still goes — a condition that kept every card would be the \
+         fold switched off in the shape of a guard: {:?}",
+        titles(&all)
+    );
+
+    // --- THE STAMP HALF, WHICH NO OBJECT SEPARATES FROM THE FACT HALF ---
+    // **The pair is assembled and this is not a fixture.** Every rule that draws this ending dates
+    // its card from the same `lastState.terminated.finishedAt`, so a survivor whose stamp is
+    // missing while the card it beats has one is a pair the API cannot hand [`analyze`] today —
+    // and the clause exists for the *next* shared action, not for this one (NOTES § D29, § D40).
+    // What is fed to the fold is still two real cards with one field cleared, which is the same
+    // move [`one_card_per_action_leaves_the_more_severe_card_standing`] makes to prove a direction
+    // that running `analyze` cannot show.
+    let mut undated = counted.clone();
+    undated.timestamp = None;
+    assert!(
+        lost.timestamp.is_some() && undated.action == lost.action,
+        "the shared sentence, and an age on the card that would be dropped"
+    );
+    assert_eq!(
+        titles(&one_card_per_action(vec![undated.clone(), lost.clone()])).len(),
+        2,
+        "a card carrying an age the survivor has not got is not a second copy of it — dropping it \
+         takes the *when* off the screen to save a repeated sentence"
+    );
 }
 
 /// **Every card k8rs draws about a container the pod's own restart rule removed** — rule 6's half
@@ -7232,7 +7620,11 @@ fn no_card_about_an_init_container_ever_names_a_probe() {
         (42, None, None, 2),
         (137, None, None, 2),
         (137, Some("OOMKilled"), None, 2),
-        (137, Some(STATUS_LOST), None, 2),
+        // **One card, and it was two until 2026-08-15.** Rule 6 draws on this reason and answers
+        // it with the sentence rules 1 and 5 answer it with, so the second copy is folded away —
+        // by `analyze` and not by any exemption of rule 6's, which is what separates this row
+        // from the `RestartAllContainers` pair below (NOTES § D102).
+        (137, Some(STATUS_LOST), None, 1),
         // The same reason with the kubelet's own sentence beside it, which is the pair a cluster
         // actually writes and the one that decides whether rule 6 reads the reason or the
         // message (NOTES § D90).
@@ -7240,7 +7632,7 @@ fn no_card_about_an_init_container_ever_names_a_probe() {
             137,
             Some(STATUS_LOST),
             Some("The container could not be located when the pod was terminated"),
-            2,
+            1,
         ),
         // **The fourth `137` reason, both ways round.** It is beta-on-by-default at the pinned
         // version, so it is a shape the real pipeline hands these rules today — and the kubelet
@@ -7259,7 +7651,7 @@ fn no_card_about_an_init_container_ever_names_a_probe() {
     ];
     // Written down rather than summed, so a row that is deleted along with the array's length
     // takes this line red with it.
-    const INIT_CARDS: usize = 40;
+    const INIT_CARDS: usize = 36;
     let mut cards = 0usize;
     for looping in [false, true] {
         for (code, reason, message, expected) in runs {
@@ -8879,6 +9271,25 @@ fn init_previous_run(
     message: Option<&str>,
     looping: bool,
 ) -> PodSnapshot {
+    init_previous_run_counting(exit_code, reason, message, looping, None)
+}
+
+/// **The same, with the restart count named rather than inherited** — `None` keeps the count
+/// [`init_previous_run`] builds, which is `healthy-retry.json`'s own three plus the one
+/// `startContainer` adds.
+///
+/// **The count is the field that decides which of two cards is left on the screen** (NOTES § D102):
+/// past [`RESTARTS_WARN`] rule 5 draws beside rule 6, both answer this ending with
+/// [`unwatched_action`], and the pair collapses onto rule 5's card. Under the band rule 5 stands
+/// down and rule 6's own card is the one drawn — which is the shape a sandbox rebuild under a
+/// *young* init container writes, and the only one that can prove rule 6's title on this role.
+fn init_previous_run_counting(
+    exit_code: i32,
+    reason: Option<&str>,
+    message: Option<&str>,
+    looping: bool,
+    restarts: Option<i32>,
+) -> PodSnapshot {
     capture_but("healthy-retry", |p| {
         ended_as(p, "wait-for-db", exit_code, reason, message);
         if looping {
@@ -8894,6 +9305,11 @@ fn init_previous_run(
             init.ready = false;
             init.started = Some(true);
             init.restart_count += 1;
+        }
+        // Last, so the number named is the one the card is drawn from — the branch above adds the
+        // restart `startContainer` counts, and an override placed before it would land one out.
+        if let Some(n) = restarts {
+            container_status(p, "wait-for-db").restart_count = n;
         }
         never_ran(p, "app", "PodInitializing", None);
         sandbox_rebuilt(p);

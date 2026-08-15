@@ -1681,7 +1681,7 @@ this plan is delivery mechanism for what this phase produces.
       caught the load-bearing one**: the first draft dated the row off
       `last_terminated.finished_at`, which the two synthesized `137`s leave
       `null` — blank on the exact shape the box is named after
-- [ ] **Rules 5 and 6 print the identical four-line action on two adjacent cards,
+- [x] **Rules 5 and 6 print the identical four-line action on two adjacent cards,
       and no `CrashLoopBackOff` is needed to see it** — on a container past the
       restart band whose last recorded run is a lost status, rule 5 draws the
       count and rule 6 draws *No record of how the container's last run ended*,
@@ -1699,7 +1699,9 @@ this plan is delivery mechanism for what this phase produces.
       the decision is whether a rule may know that a neighbour already said it,
       which is an `analyze` decision and not a rule's, beside
       `explains_a_shortfall`. Whatever it decides applies to every shared action,
-      not to this one pair
+      not to this one pair.
+      **Closed by `one_card_per_action` in `analyze`, scoped to the container**
+      ([D102](NOTES.md#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15))
 - [ ] **A lost init-container status reads as *finished successfully*, and then
       two rules stand down** — `kubelet_pods.go:2714-2718` synthesizes
       `Terminated { reason: "Completed", exitCode: 0 }` for an init container

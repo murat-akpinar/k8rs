@@ -1430,14 +1430,19 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
         findings.extend(placed_but_never_started(&snapshot.now, pod));
         findings.extend(nothing_has_looked_at_it(&snapshot.now, pod));
         for c in &pod.containers {
-            findings.extend(crash_looping(pod, c));
-            findings.extend(out_of_memory(&snapshot.now, pod, c));
-            findings.extend(image_not_pulled(pod, c));
-            findings.extend(container_config_missing(pod, c));
-            findings.extend(restarting_repeatedly(&snapshot.now, pod, c));
-            findings.extend(previous_run_failed(pod, c));
-            findings.extend(running_but_not_ready(&snapshot.now, pod, c));
-            findings.extend(stopped_for_good(pod, c));
+            // Collected per container rather than appended straight to the list, because
+            // [`one_card_per_action`] is scoped to the container and this loop is where that
+            // scope exists (NOTES § D102).
+            let mut cards = Vec::new();
+            cards.extend(crash_looping(pod, c));
+            cards.extend(out_of_memory(&snapshot.now, pod, c));
+            cards.extend(image_not_pulled(pod, c));
+            cards.extend(container_config_missing(pod, c));
+            cards.extend(restarting_repeatedly(&snapshot.now, pod, c));
+            cards.extend(previous_run_failed(pod, c));
+            cards.extend(running_but_not_ready(&snapshot.now, pod, c));
+            cards.extend(stopped_for_good(pod, c));
+            findings.extend(one_card_per_action(cards));
         }
     }
     // **The W-series runs last, and in two passes rather than one.** W2 asks whether anything
@@ -1460,6 +1465,62 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
         .collect();
     findings.extend(gave_up);
     findings
+}
+
+/// **One card per action string, about one container** — the second copy of a shared sentence
+/// says nothing new, so the card carrying it goes (NOTES § D102).
+///
+/// **This is [`analyze`]'s decision and not a rule's**, for [`explains_a_shortfall`]'s reason: no
+/// rule may be made to know what its neighbour drew, or the two grow a dependency the file's
+/// purity does not survive. What a rule owes is a true card; what this owes is that two true cards
+/// about one container do not tell one story twice.
+///
+/// **The scope is the container and that is load-bearing.** [`Finding::object`] is the *pod*, so
+/// the same fold over a pod would drop the card about a second container that lost its status too
+/// — a pod-wide silence out of a per-container fact. The caller's `for c in &pod.containers` is
+/// what supplies the scope; there is no new [`Finding`] field and no matching on evidence.
+///
+/// **The more severe survives** — `Critical` is declared first, so the smaller [`Severity`] wins —
+/// **and a tie goes to the rule that ran first**, which is the order [`analyze`] already calls them
+/// in. Nothing else moves: the survivors keep their emission order, because a `sort` would reorder
+/// every card in the file to settle two.
+///
+/// **A shared sentence is not enough on its own: the card that goes has to add nothing.** Every
+/// fact on it — its evidence split on [`FACTS`] — must already be on the card that beats it, and it
+/// may carry no [`Finding::timestamp`] the survivor lacks. **This is checked and not assumed.** A
+/// duplicated sentence is a cheap failure; a fact deleted off the screen because a neighbour
+/// happened to word its advice the same way is not, and the drop is one function away from the
+/// rules whose evidence decides it. The pair this fold was written for passes because rule 6's
+/// only fact is [`container_fact`], which is the survivor's first — and because [`lasted`] is
+/// `None` on a record with no stamps, which is three inferences away from here and is exactly the
+/// kind of thing that stops being true without anyone noticing.
+///
+/// **Today this fires on exactly two pairs**, both against [`previous_run_failed`] on
+/// [`Ending::Unwatched`], where [`unwatched_action`] is drawn verbatim by two rules at once:
+/// [`crash_looping`] beside it, and [`restarting_repeatedly`] beside it. Every other action in
+/// this file is distinct per container, [`failed_action`] against every arm of rule 6's `Failed`
+/// branch included.
+fn one_card_per_action(cards: Vec<Finding>) -> Vec<Finding> {
+    // O(n²) over at most eight cards, which is why the drops are picked rather than sorted for.
+    let beaten: Vec<bool> = cards
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            cards.iter().enumerate().any(|(j, g)| {
+                g.action == f.action
+                    && (g.severity, j) < (f.severity, i)
+                    && (f.timestamp.is_none() || f.timestamp == g.timestamp)
+                    && f.evidence
+                        .split(FACTS)
+                        .all(|fact| g.evidence.split(FACTS).any(|kept| kept == fact))
+            })
+        })
+        .collect();
+    cards
+        .into_iter()
+        .zip(beaten)
+        .filter_map(|(f, beaten)| (!beaten).then_some(f))
+        .collect()
 }
 
 /// `kubectl describe pod …` — the one command that shows a container's current state, how its
