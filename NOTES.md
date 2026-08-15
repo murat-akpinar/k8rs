@@ -132,6 +132,7 @@ its line moving with it.
 - [D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16) — work with no phase gets a file, and measurements get a directory
 - [D109](#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16) — the family is the unit of work, and the commit stays per turn
 - [D110](#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16) — the brief names the regions, because a cold dispatch reads fifteen thousand lines
+- [D111](#d111--the-guard-list-exists-once-and-ci-gets-no-new-action-for-it-2026-08-16) — the guard list exists once, and CI gets no new action for it
 
 ## Why it exists — where the gap is
 
@@ -7753,6 +7754,51 @@ applies — a module boundary is where the second copy of a shared helper grows
 back, and the defects this repo has paid most for were two rules reading one
 container and disagreeing. A split there is a decision with evidence behind it,
 not a reflex against a line count. Recorded in [`backlog.md`](backlog.md).
+
+### D111 — the guard list exists once, and CI gets no new action for it (2026-08-16)
+
+`scripts/todo-guard.py` landed in `just check` on 2026-08-16 and **did not run on
+a push**, because `.github/workflows/ci.yml` kept its own hand-written list of
+guard steps. The justfile's header has said *`just check` is the whole of CI, or
+it is a lie* since Phase 1; the lie was seventeen lines long and nothing could
+have reported it. Found by `tester` in its own report on the box that created it,
+which is why it is that box's defect and not a new one
+([CLAUDE.md § What to do next](CLAUDE.md#what-to-do-next)).
+
+**The fix is the class, not the instance:** the guards live in one list, CI
+invokes it by name, and adding a guard is one edit. A third copy existed in
+`todo.md`'s Phase 1 CI box, enumerating the same steps in prose — removed in the
+same change, because it is the next thing that drifts.
+
+**What is asserted rather than trusted.** *CI runs every guard* is true by
+construction once CI stops enumerating them. *No guard is added to the wrong
+place* is not, so the list asserts that `just check` calls it and names no
+`scripts/` guard directly — a guard reachable only from `check` would never run
+on a push, which is the original bug wearing a new coat. Proven red three ways
+against the final bytes: a guard line added to `check`, `check` no longer calling
+the list, and `check` renamed away. The middle one doubles as the extraction's
+canary — an empty read fails it rather than vetting nothing, which is the
+degrade-in-silence shape `write-guard.py`'s `CANARIES` exists for.
+
+**The single CI step is safe to leave unnamed because `set -x` names the failing
+guard.** The last traced `+ python3 scripts/…` line is the culprit, proven by
+running in a tree with no `scripts/`. Nine named steps bought a label that the
+trace already gives at 3am.
+
+**And the reversal, which is the part worth recording.** The first version
+reached for `taiki-e/install-action` so CI could call `just`, pinned to a 40-hex
+SHA and correctly flagged by `tester` as a supply-chain decision the PM owns.
+**It was refused.** `just` had no other use in CI — `run: just guards` was its
+only appearance — so a fourth third-party action would have been bought purely to
+reach an entry point, against a rule that says a dependency is asked for and not
+reflexed (invariant 10, and the security gate's line on third-party actions).
+The list moved into `scripts/guards.sh` instead: `just guards` calls it, CI calls
+it, one list, no new trust. **The canary moved into the script rather than staying
+in the justfile recipe** — CI would not have run it there, and a local-only
+assertion about CI coverage is the same hole again.
+
+**The rule this leaves behind:** when a fix needs a new dependency to reach an
+entry point, the entry point is the thing to change.
 
 ## Decisions made
 

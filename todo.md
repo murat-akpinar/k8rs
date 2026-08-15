@@ -154,10 +154,15 @@ Goal: the name is safe and the repo builds, lints and tests empty.
       ([NOTES § D14](NOTES.md#d14--three-plan-corrections) ·
       [§ D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12))
 - [x] `.gitignore` (`/target`, `/tmp`, `/.agent`, `/.vscode`)
-- [x] CI: fmt → clippy `-D warnings` → test → `scripts/check-docs.py` ·
-      rust-cache · cargo-deny · `cargo check --target` matrix
-      (musl x86_64/aarch64, darwin). Top-level `permissions: contents: read`,
-      every third-party action pinned to a commit SHA, no `pull_request_target`
+- [x] CI: fmt → clippy `-D warnings` → test → **the guards, as one list neither
+      this box nor CI enumerates** · rust-cache · cargo-deny · `cargo check
+      --target` matrix (musl x86_64/aarch64, darwin). Top-level
+      `permissions: contents: read`, every third-party action pinned to a commit
+      SHA, no `pull_request_target`. **Naming the guards here was a third copy of
+      a list that had already drifted once** — `todo-guard.py` reached `just
+      check` and never ran on a push — so the list lives in one place and this
+      box points at it
+      ([D111](NOTES.md#d111--the-guard-list-exists-once-and-ci-gets-no-new-action-for-it-2026-08-16))
 - [x] CI: **the honest-test guards** — [`scripts/test-guard.py`](scripts/test-guard.py).
       It compares tests *declared in the source* against tests *listed by the
       runner* (zero-versus-zero passes honestly on an empty crate; a test

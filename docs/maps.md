@@ -141,7 +141,7 @@ describes people who have to be in the room. Workflows default to
 | Change a **colour** | `src/theme.rs` — and nowhere else | `dev-ui` |
 | Add a **mutation** | `src/ops.rs` only; then the dialog, the dry-run, the audit line, the command log | `dev-core` |
 | Add a **fixture** | [`scripts/broken.yaml`](../scripts/broken.yaml) → `cluster.sh verify` → `just fixtures`. Never write the JSON by hand | `tester` writes the manifest and the sanitizer; **the PM runs the capture** ([D92](../NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)) |
-| Add a **guard** | `scripts/` + a line in [`justfile`](../justfile) + the same step in CI | `tester` |
+| Add a **guard** | the script in `scripts/`, then **one line** in [`scripts/guards.sh`](../scripts/guards.sh) — the list `just check` and CI both run, so there is no second place to add it ([D111](../NOTES.md#d111--the-guard-list-exists-once-and-ci-gets-no-new-action-for-it-2026-08-16)) | `tester` |
 | Add a **dependency** | Ask first. Then [`Cargo.toml`](../Cargo.toml) + a NOTES decision | PM only |
 | Record a **decision** | [`NOTES.md`](../NOTES.md), numbered, dated | PM |
 | Check off a **step** | [`todo.md`](../todo.md) — same commit as the work | PM |

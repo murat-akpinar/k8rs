@@ -19,13 +19,18 @@ default:
 # --- the loop you run all day ---
 
 # fmt + clippy + tests + the guards + the cross-compile matrix. Every step CI
-# runs is here, and nothing here is skipped by CI. The two drifted twice already
-# (the self-test below and cargo-deny were CI-only, so `cargo deny` first failed
-# on a push nobody could have caught locally; then the cross matrix was CI-only
-# for a phase and a half, NOTES § D66).
+# runs is here, and nothing here is skipped by CI. The two drifted three times
+# already (the self-test below and cargo-deny were CI-only, so `cargo deny`
+# first failed on a push nobody could have caught locally; then the cross matrix
+# was CI-only for a phase and a half, NOTES § D66; then `todo-guard.py` was
+# local-only, because CI kept a second hand-written copy of the guard list).
+# Each was one list written twice, and each was closed by deleting the copy
+# rather than by re-syncing it: the guards live in `scripts/guards.sh` and both
+# this file and CI call it, the release targets live in CI's matrix and `cross`
+# reads that.
 # The last two run last because they are the two that need something `cargo`
 # alone does not give you — `cargo install cargo-deny`, and a cross std — and
-# when either is missing you still want the fifteen checks above them to have
+# when either is missing you still want everything above them to have
 # reported. `cross` is after `deny` because on a green run its report is the
 # last thing on screen, which is the entire reason a skipped target stays
 # visible: see the recipe.
@@ -35,23 +40,27 @@ check:
     cargo fmt --all -- --check
     cargo clippy --locked --all-targets --all-features -- -D warnings
     cargo test --locked --all-targets
-    python3 scripts/check-docs.py --self-test
-    python3 scripts/check-docs.py
-    python3 scripts/screens-check.py --self-test
-    python3 scripts/screens-check.py
-    python3 scripts/test-guard.py --self-test
-    python3 scripts/test-guard.py
-    python3 scripts/write-guard.py --self-test
-    python3 scripts/write-guard.py
-    python3 scripts/security-guard.py --self-test
-    python3 scripts/security-guard.py
-    bash scripts/verify-test.sh
-    bash scripts/sanitize-test.sh
-    bash scripts/certs-test.sh
-    bash scripts/fixture-audit.sh --self-test
-    bash scripts/fixture-audit.sh
+    {{just_executable()}} guards
     cargo deny check advisories licenses sources bans
     {{just_executable()}} cross
+
+# The guard list exists exactly once, in `scripts/guards.sh`, and every caller
+# names the file rather than its contents: this recipe, and CI's single
+# `bash scripts/guards.sh` step. `todo-guard.py` was in `check` and not in CI for
+# exactly as long as CI kept a second hand-written copy of that list, so the
+# guard that had just been proved red-then-green did not run on a push
+# (NOTES § D26, D111). Adding a guard is one edit: one line in the script.
+#
+# The list is a script and not the body of this recipe so that CI needs no
+# `just` on the runner — installing it would have been a fourth third-party
+# action bought purely to reach an entry point (NOTES § D111). The script also
+# carries the assertion that `check` still calls this recipe and names no
+# `scripts/` guard of its own; it lives there and not here because CI runs the
+# script, and a local-only assertion about CI's coverage is the same hole again.
+#
+# Every scripts/ guard: its --self-test where it has one, then its real run
+guards:
+    bash scripts/guards.sh
 
 # The row where `just check` was not CI (NOTES § D66). CI runs
 # `cargo check --locked --target <t> --all-targets` over a four-way matrix and
