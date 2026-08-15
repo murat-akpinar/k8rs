@@ -413,6 +413,28 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       Phase 2 owns capture, and it lands *before* the trip, not after
       ([NOTES § D52](NOTES.md#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12)).
       Closed — [D52](NOTES.md#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12) · [D58](NOTES.md#d58--a-phase-2-box-was-passed-over-and-the-order-it-comes-back-in-2026-08-12) · [D59](NOTES.md#d59--the-sanitizer-refuses-a-requester-and-an-exit-status-guard-cannot-see-a-deletion-2026-08-12) · [D29](NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) · [D31](NOTES.md#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12) · [D57](NOTES.md#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)
+
+**Done when:** `just fixtures` regenerates the captured fixtures from scratch
+and they are committed. **It does not regenerate the certificates or the CSR**,
+and that is deliberate rather than an omission: their dates are pinned, so there
+is nothing for a re-capture to refresh, and re-running the generator writes
+private key material into the repo for no gain. `just fixtures` runs
+[`scripts/certs-test.sh`](scripts/certs-test.sh) over the committed ones
+instead, which is the assertion that matters.
+**Frozen after:** the data layer (fixtures change only via re-capture, never by
+hand) **and the justfile — with one declared exception**: the `e2e` recipe
+carries a placeholder body and the file says so at its declaration, because the
+write path it drives does not exist until Phase 7. Phase 7 writes that body and
+nothing else in the file. Reading the freeze as absolute would leave Phase 7
+unable to do what the justfile itself instructs it to.
+
+## Phase 3 — The product: rules · **milestone M1**
+
+*Also read: [PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended) (never divide by an incomplete denominator) and [§ F3](PRIOR-ART.md#f3--container-semantics-moved-underneath-them) (container semantics move under a rule that pairs by position, or assumes a status has a declaration).*
+
+Goal: k8rs diagnoses correctly, headless. Still the core — everything else in
+this plan is delivery mechanism for what this phase produces.
+
 - [x] `Finding` struct (severity · title · evidence · action · kubectl_cmd ·
       **owner** — the grouping key: Deployment/StatefulSet/DaemonSet/Job, or
       the bare pod when it has no owner. Grouping itself happens in `views.rs`;
