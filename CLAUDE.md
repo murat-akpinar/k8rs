@@ -576,18 +576,42 @@ of a phase in [`todo.md`](todo.md) is about to be checked, run this whole list,
 in order, no skipping:
 
 1. **`just check` green**, and the code actually exercised.
-2. **Every box of the phase is checked, and every check is true.** If something
+2. **Build it and run it on the test host, and paste what it printed.** A phase
+   whose only evidence is `cargo test` has never left the fixture. `ssh ubuntu`
+   (`murat@192.168.1.130`): build the real binary there and run it — against a
+   committed fixture while the temporary `main.rs` is the driver, against kind
+   from Phase 5 on, breaking pods by hand and watching the screen answer. **Run
+   there, never capture there**: that host has 3.8 GiB and silently reports a
+   memory-limit kill as `Error` instead of `OOMKilled`, which is how a capture
+   taken on it destroys rule 2's fixture
+   ([D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)).
+3. **Every box of the phase is checked, and every check is true.** If something
    could not be proven, leave the box open and say why in the item — an honest
    open box beats a false tick.
-3. **The phase's own security gate** in todo.md, item by item.
-4. **[Second pass](#second-pass--nothing-is-delivered-on-its-first-draft) over
+4. **The family code review** — `k8s-admin` reads the phase's rules together,
+   with the helpers they share, not one box at a time
+   ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+   It runs *after* step 2, because reviewing code nobody has run spends the
+   review on questions the run answers for free.
+5. **The phase's own security gate** in todo.md, item by item, plus the
+   [Security gate](#security-gate--run-this-list-on-every-change-no-exceptions)
+   above read against the phase as a whole — `cargo deny` is already inside
+   `just check` and is not this step.
+6. **Triage, and this is what stops the loop.** A **blocker** — wrong output, a
+   crash, anything the security pass rules exploitable — is fixed and steps 1–5
+   run again over what the fix could have broken: always the run and the
+   security pass, and the family review too if the fix touched a shared helper.
+   **Everything else is boxed in a later phase and the phase still closes.** An
+   unbounded *go back to the start* means the last nit found is the one that
+   decides whether the phase ever ends, and there is always one more nit.
+7. **[Second pass](#second-pass--nothing-is-delivered-on-its-first-draft) over
    the whole phase, not box by box** — the only place cross-box defects live:
    two boxes that solved the same problem differently, a decision made in box 3
    that box 9 quietly violated, a gate that stopped being passable halfway
    through.
-5. **Docs sync:** `docs/`, `README.md`, `README_TR.md` for anything structural.
-6. **CHANGELOG** with git-cliff, committed separately.
-7. **Commit, push, PR `development` → `main`, and merge it — the PM does this.**
+8. **Docs sync:** `docs/`, `README.md`, `README_TR.md` for anything structural.
+9. **CHANGELOG** with git-cliff, committed separately.
+10. **Commit, push, PR `development` → `main`, and merge it — the PM does this.**
    Standing authorisation: nobody is asked before a green PR closing the current
    phase is merged. In order: push `development` · open the PR · wait until
    **every** check has *reported* (a pending check is not a green one) · merge
@@ -595,9 +619,9 @@ in order, no skipping:
    red, never mid-run, never force past a conflict — a conflict is a question to
    answer, not an obstacle to push through. If the tooling refuses a step, print
    the exact command for the user rather than leaving the phase half-merged.
-8. **Then say, in the reply, that the phase is closed and the context should be
-   cleared** — name the phase, name what the next one starts with. Clearing is
-   the user's command (`/clear`); the agent cannot issue it.
+11. **Then say, in the reply, that the phase is closed and the context should be
+    cleared** — name the phase, name what the next one starts with. Clearing is
+    the user's command (`/clear`); the agent cannot issue it.
 
 ## Git rules
 
