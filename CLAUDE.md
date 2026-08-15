@@ -384,9 +384,10 @@ Every path in the repo appears in exactly one **Writes** cell.
 | `k8s-admin` | nothing — reads everything, reports | every file |
 | **PM** (main session) | `todo.md` `NOTES.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/` `.claude/commands/`, branches, commits, PRs | `src/` (delegate it) |
 
-**A `<name>_tests.rs` has the same writer as `<name>.rs`** (invariant 11): the
-tests move out of the file, never out of the author's hands — `tester`'s job on
-them is still to attack them, not to write them
+**A `<name>_tests.rs`, and every module under `<name>_tests/`, has the same
+writer as `<name>.rs`** (invariant 11): the tests move out of the file, never out
+of the author's hands — `tester`'s job on them is still to attack them, not to
+write them
 ([D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
 
 Phase map, from [`todo.md`](todo.md): **2** → `tester` · **3–7** → `dev-core` ·
@@ -398,9 +399,11 @@ owner changes
 **`tests/` is fixtures and, from Phase 7, end-to-end tests — not where the rule
 tests live**
 ([D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
-Rule tests live in `src/rules_tests.rs` — beside the file they test, still a
-child module of it (invariant 11), written by the dev who wrote it; `tester`'s
-job on those is step 4: attack them.
+Rule tests live in `src/rules_tests.rs` and the `src/rules_tests/` modules under
+it — beside the file they test, still child modules of it (invariant 11),
+written by the dev who wrote it. **`tester` does not write them and does not
+re-run their red; it attacks them** (step 5): is this expected number derived
+from the requirement, or was it updated to match the output?
 
 ### The PM does not wait for approval — the boxes run back to back
 
@@ -496,7 +499,7 @@ time.
 | 1 | Read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking |
 | 2 | Screen spec, **only if a screen changes** | `tui-designer` | the mockup covers every state, not just the happy one |
 | 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
-| 4 | Prove the tests can fail | `cargo mutants --in-diff` | over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
+| 4 | Prove the tests can fail | the author, before reporting | `cargo mutants --in-diff` over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
 | 5 | Attack it, then the full run | `tester` | the assertions attacked and the unfed shapes fed · `just check` green **and** the code exercised for real |
 | 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting. **Batched by rule family, not by rule** — see below |
 | 7 | Land it | PM | see below |
@@ -583,7 +586,14 @@ decision, and the PM writes it into `NOTES.md` before committing.
 ### Where a leak would actually happen — the PM checks these by hand
 
 - A box checked for work that was written but never *run*.
-- A test that has only ever been green — step 4 skipped as "obviously works".
+- A test that has only ever been green — step 4's mutation run skipped because
+  the diff looked small. It is `--in-diff` and it costs a minute.
+- **A number written from an estimate instead of a run.** The first two drafts of
+  the mutation gate both put a wrong figure in `CLAUDE.md` — *hours per box* for
+  something that is nineteen minutes whole — and each was written by reasoning
+  about the tool rather than reading its output
+  ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
+  If a rule here rests on a number, run the thing first.
 - The security gate skipped because "this diff is only UI".
 - An agent editing outside its ownership row, quietly. PM reads the diff before
   committing, every time.

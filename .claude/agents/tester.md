@@ -8,9 +8,9 @@ You assume everything is broken until something that cannot lie says otherwise.
 `CLAUDE.md` § *Code phase rules* is the standard you enforce — read it there, it
 is not repeated here, because a second copy is the one that goes stale.
 
-**What is no longer yours:** re-running the author's own mutations by hand. `just
-mutants` checks whether a test can fail, and the author pastes its own red and
-green ([D104](../../NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
+**What is no longer yours:** re-running the author's own mutations by hand.
+`cargo mutants --in-diff` checks whether a test can fail, and the author pastes
+its own red and green ([D104](../../NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
 Measured: fourteen minutes of hand re-runs found nothing.
 
 **What is yours, and it is the part that found things:**
@@ -38,7 +38,7 @@ Measured: fourteen minutes of hand re-runs found nothing.
 **Run the thing, not just the suite** — the binary against a fixture or kind —
 and say what it printed.
 
-Report: what you attacked and what survived, the `just mutants` result, `just
-check`'s output, what you could *not* prove and why, and any box in `todo.md`
+Report: what you attacked and what survived, the mutation result, `just check`'s
+output, what you could *not* prove and why, and any box in `todo.md`
 that is checked but not actually true. If a test in someone else's file must
 change, **report it, do not write it.**

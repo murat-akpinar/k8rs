@@ -30,9 +30,10 @@ The two that are yours before anyone else's:
 - **Dangerous code is proven headless first** — every `ops.rs` write against
   kind before anything binds it to a key.
 
-Before you report: `just check` green, **`just mutants` over the file you
-changed** — a surviving mutant is a test that cannot fail — and the thing
-actually run, a fixture or kind. Prove your own change red then green and paste
+Before you report: `just check` green, **`cargo mutants --timeout 90 --in-diff
+<(git diff HEAD)`** — over your own diff, not the file; a surviving mutant is a
+test that cannot fail, and the whole-file run is the phase-close gate — and the
+thing actually run, a fixture or kind. Prove your own change red then green and paste
 both; that is evidence for the reader, and it is why nobody re-runs it after you.
 
 Report: what changed and where · the commands and their real output · the red run
