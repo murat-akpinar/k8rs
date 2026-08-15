@@ -130,6 +130,7 @@ its line moving with it.
 - [D106](#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16) — Phase 3's twenty-three open boxes are two families, six foreign boxes and one already done
 - [D107](#d107--claudemd-grew-back-past-the-size-that-made-d60-compress-it-2026-08-16) — CLAUDE.md grew back past the size that made D60 compress it
 - [D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16) — work with no phase gets a file, and measurements get a directory
+- [D109](#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16) — the family is the unit of work, and the commit stays per turn
 
 ## Why it exists — where the gap is
 
@@ -2380,7 +2381,7 @@ plumbing to relocate tests that already work is the trade this project keeps
 refusing.
 
 **What actually needed saying is who does what, and the model already had it
-right.** [The cycle](CLAUDE.md#the-cycle--one-todomd-box-is-one-turn-of-it)
+right.** [The cycle](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it)
 step 3 is "write the code **and its tests together**" and names the dev; step 4
 is `tester` witnessing red then green. So on rules, `tester`'s job was never to
 author the tests — it is to *attack* them, and on this box it reproduced the
@@ -4632,7 +4633,7 @@ compared to anything. Fixed to say both, since the pair is what makes it
 checkable.
 
 **The operator review was skipped, and this is the PM saying so in writing.**
-[The cycle](CLAUDE.md#the-cycle--one-todomd-box-is-one-turn-of-it) step 6 is
+[The cycle](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it) step 6 is
 blocking for `rules.rs`, but a relocation has no operator surface: no rule
 changed, no card text changed, no kubectl line changed, and the mechanical
 proof — an empty diff on the 97 test *names*, and the dedent diff above — is
@@ -7329,7 +7330,7 @@ box already links to, sitting in the file whose job is to say *what is next*.
    `scripts/check-docs.py` already fails on a broken one, so a renamed or deleted
    heading is caught by the guard that exists.
 4. **`k8s-admin` reviews a rule *family*, not a rule** — see
-   [CLAUDE.md § The cycle](CLAUDE.md#the-cycle--one-todomd-box-is-one-turn-of-it).
+   [CLAUDE.md § The cycle](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it).
    The 137 chain above is what per-rule review costs: the reviewer that could
    have seen all four at once never saw two.
 
@@ -7570,11 +7571,40 @@ dropped**, which is the same guarantee D60 gave and the thing to check this
 against: the count of each is the test, and it is stated in the box that lands
 this.
 
-**The agent files are measured too and are not the problem.** `.claude/agents/`
-is 42–75 lines per file, each one saying in its own words that `CLAUDE.md` is
-binding and is not restated there, each citing `D##` rather than re-arguing —
-`540b87e` already removed the copies. They are left alone. The file that grew is
-the file every session loads in full.
+**What the compression actually returned, measured after the fact: 702 → 680
+lines, 3%.** The target written into this entry before it ran was ~450, and it
+was wrong — an estimate about a file rather than a reading of it, which is the
+error this file already has a rule against. § *Agent workflow* went 244 → 224,
+§ *Security gate* went **up** 76 → 85 because six of its lines now carry the
+`[auto]` marker and the sentence saying what the script does and does not cover.
+The count was held: 14 invariants, 7 cycle steps, 6 ownership rows, every
+security-gate item present.
+
+**The reason it resisted is the finding, and it reverses the premise of this
+entry.** [D60](#d60--claudemd-was-compressed-and-four-stories-moved-here-2026-08-12)
+already took the stories out. What grew back was not narrative fat but *rules* —
+D92's cluster split, D96's resume-is-a-dispatch, D98's standing authorisation,
+D103's family review, D104's mutation gate, D105's `[auto]` split, D108's two new
+trees. Every one is load-bearing and none can be cited away, because a rule
+cannot live in `NOTES.md` and be obeyed from `CLAUDE.md`. **`CLAUDE.md` grows
+because the process grows**, and the only honest lever on it is having fewer
+rules, not shorter ones.
+
+**So the file was not the cause of the slow box, and saying otherwise would have
+been the third estimate in a row.** The measured cause is
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+— cold dispatches re-reading everything — and the lever that actually moved it
+was batching:
+[D106](#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16)
+took Phase 3 from twenty-three units to six turns, roughly 4×, on the same day.
+
+**One real duplicate was found and removed, and it was not in `CLAUDE.md`.**
+Measured across the six agent-facing files: **invariants were restated in five of
+them** — `dev-ui` five, `dev-core` three, `tui-designer` two, `k8s-admin` two —
+each file opening by declaring that `CLAUDE.md` is binding and not repeated
+there, and then repeating it. `540b87e` is what that costs: the agent files were
+carrying a copy of the rule that had changed. They now cite invariant *numbers*.
+The line saving is six; the point is that there is one copy to edit.
 
 ### D108 — work with no phase gets a file, and measurements get a directory (2026-08-16)
 
@@ -7639,6 +7669,39 @@ put project data on an outbound connection
 [docs/security.md](docs/security.md) says does not exist. Recorded in
 [`backlog.md`](backlog.md) § Ruled out so the idea does not arrive a second time
 without the reason attached.
+
+### D109 — the family is the unit of work, and the commit stays per turn (2026-08-16)
+
+The user asked for a phase-based cycle on 2026-08-16, with one reason: **a box
+takes hours.** The reason is real and
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+measured it — cost per box is a function of the boxes already closed, because
+every agent re-reads this file, `todo.md` and `CLAUDE.md` on every cold dispatch.
+The proposed fix does not address that cause: batching the *review* to a whole
+phase makes nothing faster, it makes a defect in box 3 surface after box 16 was
+built on it.
+
+**What was granted, because it is the same instinct at a granularity that
+works:** the **family** becomes the unit of the cycle rather than an exception
+inside it, and the same change already paid on the day it was made —
+[D106](#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16)
+turned Phase 3's twenty-three open boxes into six turns. That is the reduction
+being asked for, without the *find out at the end* failure. `ops.rs` and shared
+helpers stay per-box, unchanged from D103: their blast radius is not a family.
+
+**What was refused, and the user's own reason is what refuses it:** the commit
+does not batch. A commit costs no time at all, so moving it to phase close buys
+nothing against *hours per box* and pays for it with the recovery point — sixteen
+boxes of work, one changelog line, and no way back to box eleven. Conventional
+commits are also what git-cliff reads
+([CLAUDE.md § Git rules](CLAUDE.md#git-rules)), so a phase-sized commit collapses
+a phase of history into a single entry.
+
+**The two levers that do address hours per box are elsewhere and both are
+running:** [D107](#d107--claudemd-grew-back-past-the-size-that-made-d60-compress-it-2026-08-16)
+cuts what every agent reads before it starts, and
+[D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)
+already removed a whole dispatch's worth of re-run from every box.
 
 ## Decisions made
 

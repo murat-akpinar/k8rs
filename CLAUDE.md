@@ -218,15 +218,23 @@ Every diff, including "just a UI tweak". Anything unchecked here is a red build,
 not a follow-up ticket. Reasoning: [docs/security.md](docs/security.md),
 [REQUIREMENTS § DevSecOps](REQUIREMENTS.md#devsecops-requirements).
 
+**Six of these are `scripts/security-guard.py` and `just check` runs it**
+([D105](NOTES.md#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16)):
+workflow hygiene, no shell spawned from `src/`, no dependency or hostname outside
+the ten, no `Debug` over a type that can hold a token, no in-cluster
+ServiceAccount door, no TLS knob turned off by us. They are marked **`[auto]`**
+below and are not re-read by hand. **Everything unmarked is yours**, and a script
+that goes green says nothing about those.
+
 **Identity and transport**
 
-- [ ] Credentials come from the kubeconfig current context and nowhere else. No
-      in-cluster ServiceAccount path exists — do not open one.
-- [ ] TLS verification is never disabled by us. A kubeconfig that sets
-      `insecure-skip-tls-verify` is honoured *and shown in the header*.
-- [ ] The token is never copied out of the kube client into our own structs,
-      never logged, never rendered, never put in an error message. Any type that
-      can hold config has a wrapped `Debug`.
+- [auto] Credentials come from the kubeconfig current context and nowhere else.
+      No in-cluster ServiceAccount path exists — do not open one.
+- [auto] TLS verification is never disabled **by us**; the guard reads the code.
+      That a kubeconfig setting `insecure-skip-tls-verify` is honoured *and shown
+      in the header* is **yours** — no script can see the header.
+- [auto] No `Debug` is derived over a type that can hold config. That the token
+      is never logged, rendered or put in an error message is **yours**.
 
 **Authorization**
 
@@ -249,9 +257,9 @@ not a follow-up ticket. Reasoning: [docs/security.md](docs/security.md),
 
 - [ ] Every free-text field (names, messages, annotations, log lines) is
       stripped of control characters before it reaches the screen.
-- [ ] **No API string is ever interpolated into a shell.** `$EDITOR` is spawned
-      with an argument vector, never a command string — a pod named `; rm -rf ~`
-      must be boring.
+- [auto] **No API string is ever interpolated into a shell** — the guard proves
+      nothing in `src/` spawns a process at all. When `$EDITOR` lands it is an
+      argument vector, never a command string; a pod named `; rm -rf ~` is boring.
 - [ ] The command log is display text. k8rs does not execute it, and nothing in
       it is fed back into a process.
 - [ ] Object names are sanitised before they build a filesystem path — `../` in
@@ -269,16 +277,17 @@ not a follow-up ticket. Reasoning: [docs/security.md](docs/security.md),
 - [ ] The audit log is mode 0600 and append-only.
 - [ ] The panic path leaks nothing: no credential in a stderr backtrace, and the
       terminal is restored.
-- [ ] No telemetry. The only outbound connection is the API server in the user's
-      kubeconfig (plus, later, an endpoint the user typed themselves — never one
-      discovered from cluster annotations).
+- [auto] No telemetry — the guard counts the outbound paths and the dependency
+      list. The only connection is the API server in the user's kubeconfig (plus,
+      later, an endpoint the user typed themselves — never one discovered from
+      cluster annotations, which is **yours** to check).
 
 **Supply chain and release**
 
-- [ ] `cargo deny check` passes (advisories, licenses, sources); `Cargo.lock`
+- [auto] `cargo deny check` passes (advisories, licenses, sources); `Cargo.lock`
       committed; no non-crates.io source.
 - [ ] A new dependency is a recorded decision (invariant 10), not a reflex.
-- [ ] Workflows default to `permissions: contents: read`; third-party actions
+- [auto] Workflows default to `permissions: contents: read`; third-party actions
       pinned to commit SHAs; no `pull_request_target` with secrets.
 - [ ] Releases ship `SHA256SUMS`.
 
@@ -387,9 +396,10 @@ Every path in the repo appears in exactly one **Writes** cell.
 | **PM** (main session) | `todo.md` `NOTES.md` `backlog.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/` `.claude/commands/`, branches, commits, PRs | `src/` (delegate it) |
 
 **A `<name>_tests.rs`, and every module under `<name>_tests/`, has the same
-writer as `<name>.rs`** (invariant 11): the tests move out of the file, never out
-of the author's hands — `tester`'s job on them is still to attack them, not to
-write them
+writer as `<name>.rs`** (invariant 11, which says where they live): the tests
+move out of the file, never out of the author's hands. **`tester` does not write
+them and does not re-run their red; it attacks them** (step 5). `tests/` is
+fixtures and, from Phase 7, end-to-end tests — never the rule tests
 ([D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
 
 Phase map, from [`todo.md`](todo.md): **2** → `tester` · **3–7** → `dev-core` ·
@@ -398,29 +408,16 @@ of their own; they are gates on other people's. `main.rs` is the one file whose
 owner changes
 ([D34](NOTES.md#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)).
 
-**`tests/` is fixtures and, from Phase 7, end-to-end tests — not where the rule
-tests live**
-([D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)).
-Rule tests live in `src/rules_tests.rs` and the `src/rules_tests/` modules under
-it — beside the file they test, still child modules of it (invariant 11),
-written by the dev who wrote it. **`tester` does not write them and does not
-re-run their red; it attacks them** (step 5): is this expected number derived
-from the requirement, or was it updated to match the output?
-
 ### The PM does not wait for approval — the boxes run back to back
 
-**Standing authorisation, 2026-08-15
+**Standing authorisation
 ([D98](NOTES.md#d98--the-user-leaves-the-room-and-the-pm-stops-asking-2026-08-15)):
-the user is not in the room.** The PM picks the next box, briefs it, runs the
-cycle, lands it, and starts the next one — no "shall I continue", no approval
-between boxes, no question the repo already answers. The box was never the
-user's to choose: [`todo.md`](todo.md) decides it.
-
-Nothing else loosens. Every gate below stops the PM exactly as it stopped an
-agent, and the one person who could have caught a skipped gate has left — so a
-gate skipped now is never found. The stops that remain are the section below, a
-red build, and any reversal of a design decision, which is written into
-[NOTES.md](NOTES.md) before it is acted on.
+the user is not in the room.** The PM picks the next family, briefs it, runs the
+cycle, lands it, and starts the next — no "shall I continue", no question
+[`todo.md`](todo.md) already answers. **Nothing else loosens**, and the person who
+could have caught a skipped gate has left, so a gate skipped now is never found.
+The only stops: the section below, a red build, and any reversal of a design
+decision — written into [NOTES.md](NOTES.md) before it is acted on.
 
 ### The boxes no agent can run — say so, do not fake them
 
@@ -470,36 +467,31 @@ exists if two writers are ever unavoidable, but reach for the plan fix first.
 **Review is not one of these slots** — nothing is built on top of a box until
 `k8s-admin` reports, and the dev idles meanwhile.
 
-**Sending a finished agent another message is a new dispatch, and it is the
-easiest way to break the rule above.** An agent that has reported still owns its
-files the moment it is resumed — so a follow-up to `dev-core` while `tester` is
-attacking the same tree puts two writers on it, and the second one's *restore
-from backup* silently reverts the first one's edits. Seen 2026-08-15, by the PM,
-one box after writing the paragraph below. Before resuming an agent, check that
-nobody else is holding its files; if someone is, either wait or tell the holder
-what landed under it
+**Sending a finished agent another message is a new dispatch**, and a resumed
+agent owns its files again the moment it wakes — so a follow-up while someone
+else holds that tree puts two writers on it, and the second one's restore from
+backup silently reverts the first
 ([D96](NOTES.md#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)).
+Check who holds the files before resuming; if someone does, wait or tell them
+what landed underneath.
 
 **The gate is not split by tree, so the PM is a writer too.** `just check` reads
-`docs/`, `todo.md`, `NOTES.md` and `screens/` as well as `src/` — a PM edit that
-lands mid-run turns up as a red build in somebody else's report, and a link to an
-anchor written one edit later is red until the second edit lands. Two rules,
-both cheap: **every PM edit is self-consistent on its own** — never a link to an
-anchor that does not exist yet — and while an agent is running the gate, the PM
-either waits or expects to explain the red. Seen 2026-08-15: `dev-core` had to
-prove a failure in two files it does not own before it could report.
+`docs/`, `todo.md`, `NOTES.md` and `screens/` as well as `src/`. Two rules, both
+cheap: **every PM edit is self-consistent on its own** — never a link to an
+anchor a later edit will add — and while an agent is running the gate, the PM
+either waits or expects to explain the red in somebody else's report.
 
-### The cycle — one `todo.md` box is one turn of it
+### The cycle — one **family** of `todo.md` boxes is one turn of it
 
-The box is the unit of work, never a phase and never "the next few boxes" —
-**with one exception, and it is the one that pays**: boxes of the same **family**
-that touch the same code are briefed, written and reviewed **together**, in one
-turn of the cycle. Four boxes fixing `137` one rule at a time cost 27 hours and
-the fourth found what the first three could not see
-([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
-A family is what step 6 already reviews as one; splitting it for the dev and
-merging it for the reviewer is the worst of both. Unrelated boxes stay one at a
-time.
+**The family is the unit of work — briefed, written, reviewed and committed as
+one turn** ([D109](NOTES.md#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)).
+A family is the boxes that touch the same code and answer the same question; the
+PM names it at the phase's head in [`todo.md`](todo.md). Boxes with no family
+stay one at a time, and **`ops.rs` is never batched** — see step 6.
+
+**The commit does not batch with it.** Every turn commits, never a phase: a
+commit costs nothing and is the recovery point, and a phase that commits once
+gives sixteen boxes of work one changelog line and no way back to box eleven.
 
 | # | Step | Who | Gate to pass |
 |---|---|---|---|
@@ -511,16 +503,13 @@ time.
 | 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting. **Batched by rule family, not by rule** — see below |
 | 7 | Land it | PM | see below |
 
-**Step 6 reviews a family, not a rule** ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
-A reviewer shown one rule finds the defect in that one rule; every expensive
+**Step 6 reads the family together, with the shared helpers they all call**
+([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)):
+a reviewer shown one rule finds the defect in that one rule, and every expensive
 defect this repo has had was two rules reading one container and disagreeing,
-which is invisible from inside either. So the review runs when a **family** is
-complete — the pod rules, the node rules, the workload rules, the certificate
-rules — and it reads them together, with the shared helpers they all call. Four
-boxes over 27 hours fixing `137` one rule at a time is what the per-rule version
-cost. Two exceptions stay per-box, because the blast radius is not a family:
-**anything in `ops.rs`, and any change to a shared helper** — a helper is the
-thing every rule in the family already agreed on.
+which is invisible from inside either. **Two things stay per-box, because their
+blast radius is not a family: anything in `ops.rs`, and any change to a shared
+helper** — a helper is the thing every rule in the family already agreed on.
 
 Step 7 in order, one push at the end and not two: [second
 pass](#second-pass--nothing-is-delivered-on-its-first-draft) over the **landed
@@ -551,28 +540,24 @@ phase — a fix, a docs change, this file — goes on `development` too.
 
 ### Step 4 is the anti-leak mechanism, so a machine runs it
 
-"I saw it fail" is a claim, and
-[D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12) exists because
-a green build once proved nothing. **The author still proves its own change red
-then green and pastes both outputs** — that is step 3's, not a separate turn.
-What checks the *claim* is a mutation run: a surviving mutant is a test that
-cannot fail, stated by a tool that has no incentive
+"I saw it fail" is a claim
+([D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12)). **The author
+still proves its own change red then green and pastes both** — that is step 3's,
+not a separate turn. What checks the *claim* is a mutation run, because a
+surviving mutant is a test that cannot fail, stated by a tool with no incentive
 ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
-**Per box it is scoped to the diff** —
-`cargo mutants --timeout 90 --in-diff <(git diff HEAD)` — because `just mutants`
-over the whole file is **519 mutants at ~2s each**, twenty-odd minutes, and a
-box that changed one function has no business re-proving the other five hundred.
-`just mutants` whole is the *phase-close* gate it always was, and `--iterate`
-skips what an earlier run already caught.
+**Per turn it is scoped to the diff** —
+`cargo mutants --timeout 90 --in-diff <(git diff HEAD)` — because the whole file
+is 519 mutants at ~2s each. `just mutants` whole is the *phase-close* gate, and
+`--iterate` skips what an earlier run already caught.
 
-**So `tester` no longer re-runs the author's mutations by hand.** Measured on
-2026-08-15, the fold box: fourteen minutes and 120k tokens re-running four
-mutations that were already red, and **zero** defects found by the re-run. Its
-work is the part that did find things — attack the assertions (is this expected
-number derived from the requirement, or updated to match the output?), feed the
-shapes the author did not, read what the screen actually prints, and `just
-check`. Guards in `scripts/` keep the hand `--self-test`, which is their
-equivalent.
+**So `tester` no longer re-runs the author's mutations by hand** — measured, it
+found zero defects for fourteen minutes and 120k tokens
+([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
+Its work is the part that did find things: attack the assertions (is this
+expected number derived from the requirement, or updated to match the output?),
+feed the shapes the author did not, read what the screen actually prints, and
+`just check`. Guards in `scripts/` keep the hand `--self-test`, their equivalent.
 
 ### The brief the PM hands out, and the report it gets back
 
@@ -595,10 +580,9 @@ decision, and the PM writes it into `NOTES.md` before committing.
 - A box checked for work that was written but never *run*.
 - A test that has only ever been green — step 4's mutation run skipped because
   the diff looked small. It is `--in-diff` and it costs a minute.
-- **A number written from an estimate instead of a run.** The first two drafts of
-  the mutation gate both put a wrong figure in `CLAUDE.md` — *hours per box* for
-  something that is nineteen minutes whole — and each was written by reasoning
-  about the tool rather than reading its output
+- **A number written from an estimate instead of a run.** Two drafts of the
+  mutation gate put a wrong figure in this file, each reasoned about the tool
+  rather than read off it
   ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
   If a rule here rests on a number, run the thing first.
 - The security gate skipped because "this diff is only UI".

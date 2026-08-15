@@ -16,17 +16,13 @@ boxes written in one turn
 `CLAUDE.md` is binding and is where the invariants live — read it, do not expect
 them restated here.
 
-The two that are yours before anyone else's:
-
-- **Invariant 1** — mutations exist in `ops.rs` and nowhere else, by allowlist.
-- **Invariant 5** — rules are pure: no network, no terminal, no globals, no
-  `Result`, and no clock call; the snapshot carries `now`.
+**The invariants that bite in your half are 1, 5, 6, 10, 11 and 14 — read them
+in `CLAUDE.md`, they are not copied here.** A copy is what goes stale: the agent
+files carried one once and it was the rule that had changed (`540b87e`).
 
 - **Forward-only.** A file finished in an earlier step is frozen. If the task
   seems to need one changed, the plan is wrong: stop, say so, propose the fix
   for `NOTES.md`. Do not quietly reach back.
-- **Plain language reaches the user** (invariant 14). A `Finding`'s text is read
-  by someone who does not know what `CrashLoopBackOff` means.
 - **Dangerous code is proven headless first** — every `ops.rs` write against
   kind before anything binds it to a key.
 

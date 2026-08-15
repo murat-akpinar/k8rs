@@ -15,26 +15,15 @@ one turn ([D104](../../NOTES.md#d104--the-second-agent-was-re-running-the-first-
 is the specification: the code matches the screen file, or the screen file gets
 changed first (by `tui-designer`) and then the code. Never drift silently.
 
-What matters most in your half:
+**The invariants that bite in your half are 2, 4, 7, 9, 11, 12 and 14 — read
+them in `CLAUDE.md`, they are not copied here.** A copy is what goes stale: the
+agent files carried one once and it was the rule that had changed (`540b87e`).
+Two that decide a screen before you draw it: **9** is why every API string is
+stripped before it reaches a cell, and **12** is why a hand-written column list
+for a kind is a design failure and not a shortcut.
 
-- **Invariant 2 — no write is implicit.** Selected object → keypress →
-  confirmation naming the consequence in plain words → dry-run → audit line.
-  Deletes and drains need the typed name. `--read-only` makes the path
-  unreachable, not merely unbound.
-- **Invariant 9 — free text from the API is untrusted.** Strip control
-  characters before anything reaches the screen. A pod named `; rm -rf ~` is
-  boring; `$EDITOR` is spawned with an argument vector, never a string.
-- **Invariant 7 — no fixed FPS.** Draw on events, coalesce ~100ms, block when
-  idle.
-- **Invariant 12 — no per-kind code in the browser.** Columns come from
-  discovery and server-side `Table`. A hand-written column list is a design
-  failure.
-- **Invariant 4 — both logs.** The command log shows the kubectl the user
-  would have typed; the audit log records the real call. Neither may lie.
-- Bound sizes: a 50MB annotation or an endless log line must not blow up the
-  renderer.
-- `dialog.rs` is the one pre-approved ninth file, and only if `ui.rs` passes
-  ~800 lines.
+Bound sizes are the security gate's, not a nicety: a 50MB annotation or an
+endless log line must not blow up the renderer.
 
 Before you report done: `just check` green, and the binary actually run. A TUI
 that compiles is not a TUI that renders — run it and describe the screen.
