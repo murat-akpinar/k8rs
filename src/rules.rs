@@ -1475,10 +1475,16 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
 /// purity does not survive. What a rule owes is a true card; what this owes is that two true cards
 /// about one container do not tell one story twice.
 ///
-/// **The scope is the container and that is load-bearing.** [`Finding::object`] is the *pod*, so
-/// the same fold over a pod would drop the card about a second container that lost its status too
-/// — a pod-wide silence out of a per-container fact. The caller's `for c in &pod.containers` is
-/// what supplies the scope; there is no new [`Finding`] field and no matching on evidence.
+/// **The scope is the container, and the reason is the converse of the obvious one.** A pod-wide
+/// fold cannot eat the neighbour's card *today* — measured, not argued: moving the fold out of the
+/// caller's loop leaves the suite green, because every card the container rules draw leads with
+/// [`container_fact`] and no two containers share one, so the subset clause below refuses every
+/// cross-container pair on the first fact. **That is a property of eight rules, not of this
+/// function**: the day one of them draws a card whose evidence does not lead with the container —
+/// or leads with a fact that came off the API as free text, which [`restarting_repeatedly`]'s
+/// image already is — a pod-wide fold starts deleting the neighbour's card, silently. The
+/// caller's `for c in &pod.containers` costs nothing and is the insurance;
+/// [`Finding::object`] is the pod, so nothing on a card would have said otherwise.
 ///
 /// **The more severe survives** — `Critical` is declared first, so the smaller [`Severity`] wins —
 /// **and a tie goes to the rule that ran first**, which is the order [`analyze`] already calls them
@@ -1499,7 +1505,16 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
 /// [`Ending::Unwatched`], where [`unwatched_action`] is drawn verbatim by two rules at once:
 /// [`crash_looping`] beside it, and [`restarting_repeatedly`] beside it. Every other action in
 /// this file is distinct per container, [`failed_action`] against every arm of rule 6's `Failed`
-/// branch included.
+/// branch included. **The inventory is asserted over the corpus and not left here as a claim** —
+/// a rule that starts wording its advice like a neighbour would otherwise begin deleting cards
+/// with nothing going red.
+///
+/// **One of the keys is free text from the API and that is not an oversight.** Rule 6's `Failed`
+/// arm hands [`last_words`] a `Terminated::message` the workload wrote, so a crafted message is
+/// matched against every other rule's action. It is safe because [`last_words`] frames the quote
+/// with a constant prefix no static action begins with, which makes the frame a guard rather than
+/// a wording choice (invariant 9) — pinned by a test, because a guard nobody wrote down is one the
+/// next edit removes.
 fn one_card_per_action(cards: Vec<Finding>) -> Vec<Finding> {
     // O(n²) over at most eight cards, which is why the drops are picked rather than sorted for.
     let beaten: Vec<bool> = cards
@@ -2675,6 +2690,15 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
     }
     // `claim` carries its own leading comma so the last arm can add nothing at all, and every
     // arm's action names only what its own command prints (invariant 4).
+    //
+    // **It goes on both titles and not only the serving one** (NOTES § D102). It was the serving
+    // branch's alone until 2026-08-16, which put the diagnosis on the *only* card that never
+    // co-fires with rule 6 — [`previous_run_failed`] leaves on [`doing_its_job`], so the pair the
+    // fold collapses is always the *non*-serving one and every fold left the bare count behind.
+    // What went with rule 6's card was a title-line sentence, and the evidence line that was left
+    // holding it is the one line `screens/alerts.md` § The height may cut. This is not a rule
+    // knowing what its neighbour drew: [`ending`] already told this rule how the run ended, and
+    // the title is where a rule says what it read.
     let (claim, action, cmd) = match c.last_terminated.as_ref().map(ending) {
         Some(Ending::Finished) => (
             ", and its last run finished cleanly",
@@ -2730,7 +2754,7 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
                 c.restarts
             )
         } else {
-            format!("Container has been restarted {} times", c.restarts)
+            format!("Container has been restarted {} times{claim}", c.restarts)
         },
         evidence: facts.join(FACTS),
         action: action.to_string(),

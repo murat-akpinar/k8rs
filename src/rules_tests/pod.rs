@@ -2963,31 +2963,272 @@ fn one_card_per_action_leaves_the_more_severe_card_standing() {
     );
 }
 
+/// **The eight rules [`analyze`] runs per container, each with its number** — the inventory below
+/// is about *which* rules may share a sentence, so the list has to say which one drew what. It is
+/// a second copy of the caller's list on purpose: that is what this test polices, and a rule added
+/// there and not here shows up as a rule no sweep reads (NOTES § D102).
+fn every_container_rule(
+    now: &Time,
+    pod: &PodSnapshot,
+    c: &ContainerSnapshot,
+) -> Vec<(&'static str, Finding)> {
+    [
+        ("rule 1", crash_looping(pod, c)),
+        ("rule 2", out_of_memory(now, pod, c)),
+        ("rule 3", image_not_pulled(pod, c)),
+        ("rule 4", container_config_missing(pod, c)),
+        ("rule 5", restarting_repeatedly(now, pod, c)),
+        ("rule 6", previous_run_failed(pod, c)),
+        ("rule 7", running_but_not_ready(now, pod, c)),
+        ("rule 15", stopped_for_good(pod, c)),
+    ]
+    .into_iter()
+    .filter_map(|(rule, f)| f.map(|f| (rule, f)))
+    .collect()
+}
+
+/// **Every container in the corpus, planted shapes included** — the committed captures, plus the
+/// whole `(exit code, reason)` table on all three roles in both states rules 1 and 5 reach.
+/// The endings are where a shared sentence can come from at all, so a sweep that read only the
+/// captures would read a corpus with no [`Ending::Unwatched`] in it.
+fn every_shape_a_container_reaches() -> Vec<PodSnapshot> {
+    let mut all = fixture_snapshot().pods;
+    for looping in [false, true] {
+        for (code, reason) in [
+            (0, None),
+            (143, None),
+            (1, None),
+            (126, None),
+            (127, None),
+            (42, None),
+            (137, None),
+            (137, Some("OOMKilled")),
+            (137, Some(STATUS_LOST)),
+            (137, Some(RESTART_ALL)),
+        ] {
+            all.extend(
+                every_role_with(code, reason, looping)
+                    .into_iter()
+                    .map(|t| t.2),
+            );
+        }
+    }
+    all
+}
+
+/// **Which pairs the fold is allowed to collapse, counted over the corpus rather than claimed in a
+/// comment** (NOTES § D102). [`one_card_per_action`] deletes a card whenever two rules about one
+/// container word their advice the same way, and nothing else in this file says which rules those
+/// may be — so the next rule that happens to reach for a neighbour's sentence would start deleting
+/// cards with the suite green.
+///
+/// **The inventory is asserted as a set and the count is printed**, because the two failures look
+/// alike from here: a pair that appears is a rule that started sharing, and *no* pairs at all is a
+/// sweep that stopped reaching the shapes (CLAUDE.md § A derived list asserts it found something).
+///
+/// **And the one key that is not ours** — rule 6's `Failed` arm hands [`last_words`] a
+/// `Terminated::message` the workload wrote, so a crafted message is compared against every other
+/// rule's action. The frame [`last_words`] wraps the quote in is what stops that being a way to
+/// impersonate one; here it is pinned as *no other rule's action begins with the frame*, and
+/// [`a_crafted_termination_message_cannot_delete_another_rules_card`] drives it end to end
+/// (invariant 9).
+#[test]
+fn only_rule_6_shares_a_sentence_with_a_neighbour_and_only_on_a_lost_status() {
+    let mut pairs: BTreeSet<(&str, &str, String)> = BTreeSet::new();
+    let mut shared = 0usize;
+    let mut framed = 0usize;
+    for pod in every_shape_a_container_reaches() {
+        for c in &pod.containers {
+            let drawn = every_container_rule(&now(), &pod, c);
+            for (i, (rule, f)) in drawn.iter().enumerate() {
+                if f.action.starts_with(QUOTE_FRAME) {
+                    assert_eq!(
+                        *rule, "rule 6",
+                        "only the arm that quotes the container may open with the frame — a \
+                         static action that began with it would be impersonable by a crafted \
+                         termination message: {}",
+                        f.action
+                    );
+                    framed += 1;
+                }
+                for (other, g) in drawn.iter().skip(i + 1) {
+                    if g.action == f.action {
+                        pairs.insert((rule, other, f.action.clone()));
+                        shared += 1;
+                    }
+                }
+            }
+        }
+    }
+    for p in &pairs {
+        println!("{} + {}\n  → {}", p.0, p.1, p.2);
+    }
+    println!("{shared} co-firing pairs with one sentence, {framed} quoted actions");
+    assert_eq!(
+        pairs,
+        [
+            ("rule 1", "rule 6", unwatched_action().to_string()),
+            ("rule 5", "rule 6", unwatched_action().to_string()),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>(),
+        "the whole inventory of what the fold may collapse — rule 6 against whichever of rules 1 \
+         and 5 is speaking, on the one ending all three answer with the same sentence. Anything \
+         else here is a card being deleted that nobody decided to delete"
+    );
+    assert!(
+        shared > 0 && framed > 0,
+        "the sweep has to reach both — {shared} pairs and {framed} quoted actions means it read a \
+         corpus without the shapes it exists for, and every assertion above is decoration"
+    );
+}
+
+/// **A termination message is free text from the API, and it is one of the fold's keys**
+/// (invariant 9, NOTES § D102). Rule 6's `Failed` arm makes its whole action out of
+/// `lastState.terminated.message`, so a workload that writes another rule's advice into it is
+/// writing into the value [`one_card_per_action`] matches on — and a match deletes a card.
+///
+/// **[`last_words`]' frame is the guard, and it was an accident until it was written down.** The
+/// quote is wrapped in a constant prefix no static action in the file opens with (asserted over
+/// the corpus in [`only_rule_6_shares_a_sentence_with_a_neighbour_and_only_on_a_lost_status`]), so
+/// a crafted message cannot equal one however exactly it is copied.
+///
+/// **`restarts10.json` at `exit 1`**: rule 5 draws [`failed_action`] and rule 6 the quote, on one
+/// container, which is the pair a crafted message would be trying to collapse.
+#[test]
+fn a_crafted_termination_message_cannot_delete_another_rules_card() {
+    // **Two runs of the same plant, and the second is where the impersonation would actually
+    // delete something.** With the capture's stamps rule 6's evidence carries `ran for …`, which
+    // rule 5's card has not got, so the subset clause blocks the fold whatever the sentences say —
+    // the frame is only stopping the *impersonation* there. Strip the stamps and [`lasted`] goes
+    // quiet: one fact, both cards undated, and a message that copies rule 5's advice takes rule
+    // 6's card off the screen. Both are driven, because a guard is proven only for the shapes it
+    // was fed (NOTES § D29).
+    let plant = |target: Option<&str>, stamped: bool| {
+        capture_but("restarts10", |p| {
+            ended_as(p, "flaky", 1, None, target);
+            if !stamped {
+                let run = container_status(p, "flaky")
+                    .last_state
+                    .as_mut()
+                    .and_then(|s| s.terminated.as_mut())
+                    .expect("ended_as wrote the run this plant is stripping");
+                run.started_at = None;
+                run.finished_at = None;
+            }
+        })
+    };
+    for stamped in [true, false] {
+        // The card set with nothing written into the message — what every crafted run below is
+        // compared against, so what is asserted is *no card went* rather than a count typed out
+        // here (NOTES § D26).
+        let plain = analyze(&pods_at(vec![plant(None, stamped)], now()));
+        let unaimed: Vec<&str> = cards_about(&plain, "flaky")
+            .into_iter()
+            .map(|f| f.title.as_str())
+            .collect();
+        assert!(
+            unaimed.len() > 1,
+            "stamped={stamped}: more than one card about this container, or there is nothing for \
+             a crafted message to delete and every run below passes for free: {unaimed:?}"
+        );
+        for target in [
+            failed_action(ContainerRole::Regular),
+            failed_action(ContainerRole::Init),
+            killed_action(ContainerRole::Regular),
+            unwatched_action(),
+            restart_rule_action(),
+            "read the previous run's logs — that is where it says why it exits",
+            "check the readiness probe: the path, the port, and whether the application answers \
+             it yet",
+        ] {
+            let all = analyze(&pods_at(vec![plant(Some(target), stamped)], now()));
+            let about = cards_about(&all, "flaky");
+            for f in &about {
+                println!("stamped={stamped} | {} | {}", f.title, f.action);
+            }
+            let quoted = about
+                .iter()
+                .find(|f| f.action.starts_with(QUOTE_FRAME))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "stamped={stamped}: rule 6 quotes the message, or the plant never reached \
+                         the arm: {about:?}"
+                    )
+                });
+            assert_eq!(
+                quoted.action,
+                last_words(target),
+                "stamped={stamped}: the container's words reach the card framed, which is the \
+                 whole of the guard"
+            );
+            // **The card set, against the same pod with no message at all.** What a crafted
+            // message may change is rule 6's own action; what it may not change is how many cards
+            // the container has. Comparing titles rather than counting says *which* card went.
+            assert_eq!(
+                about.iter().map(|f| f.title.as_str()).collect::<Vec<_>>(),
+                unaimed,
+                "stamped={stamped}: a message the workload wrote has deleted a card — the value \
+                 it reached is the fold's key, and that is the whole of why the frame has to be a \
+                 guard and not a wording choice (invariant 9)"
+            );
+        }
+    }
+}
+
+/// The frame [`last_words`] wraps a container's own words in — spelled here so the test that pins
+/// it does not re-type the thing it is checking (NOTES § D102).
+const QUOTE_FRAME: &str = "the last thing it logged was: ";
+
 /// **The three shapes the fold may not touch** (NOTES § D102). Each of them draws two cards that
 /// stay two cards, and each is a different way the drop could be scoped too widely.
 ///
-/// **(i) is the one that costs a reader a container.** [`Finding::object`] is the *pod* for every
-/// card in this file, so a fold keyed on it would silence the second container's card out of the
-/// first container's fact — a per-pod silence drawn from a per-container reason. The scope is the
-/// `for c in &pod.containers` loop and nothing weaker.
+/// **(i) is the one that costs a reader a container**, and it is the half that was decoration
+/// until 2026-08-16. Two containers each losing a status is *not* a pair a pod-wide fold can eat:
+/// every card the container rules draw leads with [`container_fact`], and no two containers share
+/// one, so the subset clause refuses the pair on the first fact — `k8s-admin` moved the fold out
+/// of the loop and the suite stayed green. **What makes the scope load-bearing is a fact that did
+/// not come from the container**: [`restarting_repeatedly`] puts `status.containerStatuses[].image`
+/// on its evidence line verbatim, so a pod whose image string reads back as its *neighbour's*
+/// [`container_fact`] builds the cross-container subset the clause cannot see — and a pod-wide fold
+/// deletes the neighbour's card. The loop is what makes that unreachable, and this is the shape
+/// that proves it (NOTES § D102, invariant 9).
 ///
 /// **(iii) is the sentence half**: two cards about one container that answer different questions
 /// are two questions, and the fold is keyed on the action for exactly that reason.
 #[test]
 fn one_card_per_action_is_scoped_to_one_container_and_to_one_sentence() {
-    // --- (i) TWO CONTAINERS IN ONE POD, BOTH RUNS LOST ---
-    // `hostpath.json` is the one committed capture with two regular containers. A rebuilt sandbox
-    // takes both of them, so both draw rule 6 and neither may take the other's card with it. Both
-    // are captured at one restart with a previous run already on them, so [`ended_as`] rewrites
-    // that run rather than counting a new one and rule 5 stays under its band on each.
+    // --- (i) TWO CONTAINERS IN ONE POD, AND ONE OF THEM QUOTES THE OTHER ---
+    // `hostpath.json` is the one committed capture with two regular containers. Both lose a
+    // status; `shipper` is additionally pushed past the red band so rule 5 draws the CRITICAL
+    // card that would do the beating, and its image is the string the API would have to carry for
+    // the pair to be foldable at all. Both are captured at one restart with a previous run
+    // already on them, so [`ended_as`] rewrites that run rather than counting a new one.
     let both = capture_but("hostpath", |p| {
         for name in ["nosy", "shipper"] {
             ended_as(p, name, 137, Some(STATUS_LOST), None);
             container_status(p, name).ready = false;
         }
+        let beater = container_status(p, "shipper");
+        beater.restart_count = RESTARTS_CRITICAL;
+        // Free text, and the rule prints it unchanged. A registry would refuse this reference;
+        // the API stores whatever the object says, and `rules.rs` never validates it.
+        beater.image = "container nosy".to_string();
     });
     let all = analyze(&pods_at(vec![both], now()));
     show(&all);
+    // The construction is asserted before what it proves: without the quote on the beating card
+    // the subset clause blocks the pair anyway and the scope below is guarded by nothing.
+    let beater = only(&all, "broken-hostpath", "restarted 10 times");
+    let quoted = container_fact(container(&pod("hostpath"), "nosy"));
+    assert!(
+        beater.severity == Severity::Critical
+            && beater.action == unwatched_action()
+            && beater.evidence.split(FACTS).any(|fact| fact == quoted),
+        "the beating card has to carry the *other* container's fact, or a pod-wide fold has \
+         nothing to eat and this half is decoration again: {}",
+        beater.evidence
+    );
     for name in ["nosy", "shipper"] {
         let said = cards_about(&all, name)
             .into_iter()
@@ -3516,9 +3757,10 @@ fn no_card_about_a_container_the_pods_own_restart_rule_removed_says_it_crashed()
 /// that re-typed the title would measure itself, and the wording it is guarding lives in a match
 /// arm that no function exposes.
 ///
-/// **It measures the four cards this box ships and no others.** Five actions elsewhere in this
-/// file are over the cap already; they are boxed, and widening this test to catch them would make
-/// it fail for something it cannot fix (NOTES § D88).
+/// **It measures the cards these boxes ship and no others** — rule 1's, and rule 5's in both of
+/// its branches, the second of which arrived with the clause on 2026-08-16 (NOTES § D102). Five
+/// actions elsewhere in this file are over the cap already; they are boxed, and widening this test
+/// to catch them would make it fail for something it cannot fix (NOTES § D88).
 #[test]
 fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
     // `screens/alerts.md` § The columns: body text 51, action continuations 49 — and § The
@@ -3549,11 +3791,19 @@ fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
             ended_as(p, "flaky", 137, Some(reason), None);
             container_status(p, "flaky").restart_count = count;
         });
+        // **Rule 5's *down* card, which is the one every fold leaves standing** and the one whose
+        // title took the clause on 2026-08-16 (NOTES § D102). It is measured here because that
+        // change is a title-line change and this test is where a title-line change is priced —
+        // the argument for making it was the height, so the height is checked and not asserted.
+        let down = capture_but("restarts10", |p| {
+            ended_as(p, "flaky", 137, Some(reason), None);
+            container_status(p, "flaky").restart_count = count;
+        });
         // The serving card is measured inside the run it is drawn on, because it ages out at
         // `NOT_READY_GRACE` (NOTES § D100); the looping container is waiting, and rule 1's card
         // never ages out. The height is a property of the wording either way.
         let serving_moment = into_the_run(&serving, "flaky", 5);
-        for (pod, moment) in [(looping, now()), (serving, serving_moment)] {
+        for (pod, moment) in [(looping, now()), (serving, serving_moment), (down, now())] {
             let object = pod.id.name.clone();
             for card in analyze(&pods_at(vec![pod], moment)) {
                 // Rules 1 and 5 put the ending in the evidence; this box's other card is rule
@@ -3589,8 +3839,9 @@ fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
     // with it and subtracts from a total nobody reads (NOTES § D26).
     assert_eq!(
         measured,
-        2 * COUNTS.len() * 2,
-        "the two cards this box ships — rule 1's and rule 5's — on each reason at each count"
+        2 * COUNTS.len() * 3,
+        "the three cards this box ships — rule 1's, and rule 5's in both of its branches — on \
+         each reason at each count"
     );
 }
 
@@ -5796,9 +6047,10 @@ fn a_failing_init_container_is_not_sent_to_a_probe_it_may_not_have() {
     let card = only(&all, "healthy-retry", "restarted 4 times");
     // **The claim is untouched by the split** — a non-zero exit beside a count carries it
     // (NOTES § D85's asymmetry), and only the advice underneath was ever role-blind. The title
-    // is the bare one because this container is not serving, which is the band's own reading.
+    // says the same thing to every role, which is what *the split is under the title* means; the
+    // clause on the end of it is the ending this rule read and is role-blind too (NOTES § D102).
     assert_eq!(
-        card.title, "Container has been restarted 4 times",
+        card.title, "Container has been restarted 4 times, but something keeps killing it",
         "the split is under the title, not in it"
     );
     assert_eq!(
@@ -5962,13 +6214,17 @@ fn a_stopped_container_reads_the_same_on_this_rule_as_it_does_on_rule_one() {
 }
 
 /// **An ending on a container that is *not* serving** — the half of the split the tests above
-/// cannot reach. The title says nothing about the ending here, so the action is the only thing
-/// on the card that can be wrong, and the band is the one thing that must not move
-/// (NOTES § D71): a container that keeps finishing early and is not ready now is as down as one
-/// that keeps crashing.
+/// cannot reach, and the band is the one thing that must not move (NOTES § D71): a container that
+/// keeps finishing early and is not ready now is as down as one that keeps crashing.
+///
+/// **This title carries the ending too, since 2026-08-16** (NOTES § D102) — it read the count and
+/// nothing else until then, which is the branch every [`one_card_per_action`] fold leaves standing.
 #[test]
 fn a_container_that_is_down_keeps_its_band_whatever_the_last_run_did() {
-    for (exit_code, said) in [(0, "Job"), (143, "systemd-oomd")] {
+    for (exit_code, said, said_ending) in [
+        (0, "Job", "finished cleanly"),
+        (143, "systemd-oomd", "was stopped"),
+    ] {
         let plant = restarts10_ending("restarts10", exit_code);
         let c = container(&plant, "flaky");
         println!("{c:?}");
@@ -5993,14 +6249,21 @@ fn a_container_that_is_down_keeps_its_band_whatever_the_last_run_did() {
              that keeps crashing — the band reads whether it is serving, and how the run ended \
              does not move it"
         );
-        // **The whole title, not a phrase out of it.** The sentence that must not be here is
-        // *appended*, so `!contains("it is serving now")` stays green over a title that grew a
-        // clean-ending claim it has no room for — the card is two lines at 51 columns and the
-        // title is never cut (`screens/alerts.md` § The height).
+        // **The whole title, not a phrase out of it**, so a clause that grew or went is read
+        // here rather than inferred from a `contains` that survives both.
+        //
+        // **The clause is on this title too, and it was the serving branch's alone until
+        // 2026-08-16** (NOTES § D102). It is the *non*-serving card that [`one_card_per_action`]
+        // leaves standing — rule 6 leaves on [`doing_its_job`], so the pair only ever collapses
+        // here — and without the clause every fold took the diagnosis off the title line, which
+        // `screens/alerts.md` § The height never cuts, and left it to the evidence line, which is
+        // the one line it does. The height that argument turns on is measured in
+        // [`the_cards_this_box_ships_fit_the_height_they_are_drawn_at`] and not asserted here.
         assert_eq!(
-            card.title, "Container has been restarted 10 times",
-            "a container that is not serving is told the count and nothing else: the ending is \
-             the action's subject, and the title has no room to repeat it"
+            card.title,
+            format!("Container has been restarted 10 times, and its last run {said_ending}"),
+            "the count and what the record says ended the run — the two facts this rule read, \
+             both on the line the pane may not cut"
         );
         assert!(
             !card.action.contains("memory limit") && card.action.contains(said),

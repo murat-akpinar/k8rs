@@ -7239,7 +7239,21 @@ the strings disjoint.
 
 **Today it fires on exactly two pairs**, both against `previous_run_failed` on
 `Ending::Unwatched`: `crash_looping` beside it, and `restarting_repeatedly`
-beside it. Every other action in the file is distinct per container.
+beside it. Every other action in the file is distinct per container, and the
+inventory is **asserted over the corpus** rather than left here as a claim — a
+rule that starts wording its advice like a neighbour would otherwise begin
+deleting cards with nothing going red.
+
+**The fold moved a sentence off the card, so rule 5 had to say it itself.**
+`restarting_repeatedly` appended its `claim` clause — *, and the record names no
+ending* — only in the *serving* branch, and rule 6 leaves on `doing_its_job`: so
+the pair the fold collapses is always the **non**-serving one, and every fold
+left the bare count behind. What went with rule 6's card was a title-line
+sentence, and the line left holding it is the evidence, the one line
+`screens/alerts.md` § The height may cut — measured, two of three roles overflow
+at 51 columns. The clause is on both titles now. That is not a rule knowing what
+its neighbour drew: `ending` had already told rule 5 how the run ended, and the
+title is where a rule says what it read.
 
 **Cost:** O(n²) over at most eight cards, which is why the drops are picked
 rather than sorted for. It applies to every shared action, not to this one pair
