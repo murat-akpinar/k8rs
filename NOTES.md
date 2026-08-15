@@ -6234,6 +6234,148 @@ could not produce. Silence is not the fix (D93 refused it); knowing that a
 neighbour already said it is an `analyze` decision, beside `explains_a_shortfall`.
 All three are boxed, with their measurements.
 
+### D96 — the run a container is sitting in is no rule's subject, and the one reader may only suppress (2026-08-15)
+
+`state.terminated` — the run a container is stopped in **right now**, as opposed
+to `lastState`, the run before this one — is read by exactly one function in
+`rules.rs` and draws no card at all. The box asked whether that is a decision or
+an omission. **It is a decision**, and the reader that exists is a *suppressor*:
+`doing_its_job` asks `ending()` whether an **init** container finished, and
+answering yes takes rules 2, 5 and 6 away. Nothing may put a sentence on the
+screen from this field, change one, or date one.
+
+**Leg 1 — a pod that is over is already gone from this screen, and it lands
+nowhere else yet.** `analyze` skips every pod rule except rule 12 when the phase
+is `Succeeded` or `Failed`: `stuck_terminating` runs *before* the `finished(pod)`
+gate, and that ordering is load-bearing rather than incidental — a pod held by a
+finalizer after it completed is squarely rule 12's subject and would be invisible
+from inside the gate. **`analyze`'s own doc said so all along** — *"Rule 12 is
+deliberately outside the skip: a `Succeeded` pod that will not go away is still
+stuck"* — and the leg was still written as *every pod rule*, by a PM reading the
+code, in a brief a dev built prose from, and it took an operator review with a
+cluster to catch it. A doc comment three lines above the loop is not a place
+anybody looked. Rule 12's own doc now carries it too, where a reader of the rule
+will meet it. That covers the *stable* majority: a
+single-container pod whose container dies under `Never` or `OnFailure` goes
+terminal and leaves. **The first draft of this leg said those pods "belong to the
+Waste report", and that is a promise rather than a destination**: `analysis.rs`
+does not exist, the Waste report's charter is Evicted/Completed *pileups* rather
+than a diagnosis of a Job pod that died a minute ago, and Jobs are not watched at
+all (invariant 6). So the honest sentence is that such a pod leaves the Alerts
+screen by [D2](#d2--the-dividing-line-broken-now-vs-risky-later)'s
+rule and is visible on no k8rs screen today. The ruling holds either way; the
+claim is smaller than it was written.
+
+**Leg 2 — this field's normal state is a healthy object.** Every container any
+committed capture holds in `state.terminated` inside a pod that is *not* over is
+a finished init container at `exit 0` — two of them, swept over the whole corpus
+rather than asserted about two files. A reader keyed on this field starts from a
+haystack of healthy objects and zero positives, which is why the one reader there
+is asks only the init question.
+
+**Leg 3 — the reason is redundancy, not transience, and the first draft had the
+weaker half.** *A transient a watch will see and `--once` may not* is measurably
+false of a backing-off container: `state.terminated exit 3` was the visible state
+across tens of seconds while kubectl's own STATUS column read `Error`. What
+survives measurement is that **the same record is in `lastState` in the same
+snapshot** — `state.terminated {exit 3}` and `lastState {exit 3, Error}` observed
+together, with rule 6 already firing off the second copy and rule 1's card
+following from the backoff. So refusing the current terminated state **loses
+nothing about any container that comes back**, not merely earliness. And the
+obvious reply — *then debounce it* — is answered by
+[invariant 5](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision): a pure `analyze(&Snapshot)` has nowhere to hold *I
+saw an exit 3 four seconds ago*, so a card drawn from this field would be a
+function of when the sampler happened to look, permanently, by construction.
+
+**Leg 4 — the one exception, and it is the cost this ruling accepts.** On the
+gang-restart loop the trigger's own `exit 3` never reaches `lastState`: **0 of 80
+samples across two clusters and two manifests**, while the synthesized `137` was
+in `lastState` in every one. It is visible in `state.terminated` in 10–30% of
+samples — the ratio of restart latency to container lifetime, 4 of 40 on a
+20-second container and 12 of 40 on a shorter one, which is why the figure is a
+range and not a property of the feature. So that container is **never nameable by
+any rule**, and rule 5's card keeps its denial that the record says which one went
+first. Three other candidates for *the current state is the only record there will
+ever be* were hunted and none of them is one: a pod being deleted publishes no
+per-container `terminated` at all during the grace window; a container removed
+from the runtime under `Never` is **restarted anyway** and its synthesized record
+lands in `lastState`; eviction and graceful node shutdown set the phase to
+`Failed` and leave through leg 1's door.
+
+**Would the flicker be worth it at 3am?** No — and the reviewer who watched the
+pod thrash is the one who answered. Rule 5 is already drawing on that pod and its
+action already says the record does not name the container that exited and where
+the rule that did it is declared; what a `state.terminated` card would add is one
+container name that is right 10% of the time and absent 90%, on a screen where
+absence means *not broken*. **Two things would reopen it**: lowering rule 5's
+restart band, since this argument depends on rule 5 covering the loud case; and
+the kubelet ever keeping the trigger's own record somewhere durable, which it does
+not today.
+
+**What the ruling does not cover, and the correction that scoped it.** A
+container that **cannot come back** inside a pod that is **not** over is permanent
+rather than transient, and no rule reads it: measured, two such pods sat at
+`1/2 Error`, `Ready: False`, `phase: Running` for fourteen minutes with
+`restartCount: 0` and an empty `lastState`, with every k8rs rule silent — while
+`kubectl get pods`, the tool the reader already has open, printed `Error` in its
+STATUS column. That is [D2](#d2--the-dividing-line-broken-now-vs-risky-later)'s
+own argument about teaching the reader to trust the other tool, pointing the other
+way. It is boxed rather than built, and **the truth table it was first scoped on
+does not survive v1.36.1**:
+
+- `ContainerRestartRules` is **beta and on by default**, so a **regular**
+  container may override the pod — a container declaring `restartPolicy: Never`
+  under an `Always` pod stayed dead at `restartCount: 0` after fourteen minutes.
+  *Always restarts everything* is a 1.28 sentence.
+- **The rules can only add restarts.** The API rejects a `DoNotRestart` action
+  outright — `supported values: "Restart", "RestartAllContainers"` — which is what
+  makes *will this container come back* decidable at all.
+- There is **no `pod.spec.restartPolicyRules`**; the field is
+  `spec.containers[].restartPolicyRules`, per container, with a pod-wide effect
+  only when the action is `RestartAllContainers`. Doc comments in `rules.rs` said
+  otherwise and were corrected; no user-visible string was wrong, because the card
+  names the field it means.
+- So the condition is `container.restartPolicy ?? pod.restartPolicy`, with any
+  matching rule overriding it upward — and a rule that reads the policy **and not
+  the rules beside it** ships the KEP's headline use case as a false positive:
+  measured, a pod `Never` / container `Never` with one retry rule on exit `3` was
+  in `CrashLoopBackOff` at five restarts, which a policy-only reader would have
+  called *stopped for good*.
+
+**The Waste-report promise had four readers and only two of them were found by
+looking.** Retiring one sentence meant retiring it in `analyze`'s doc,
+`finished`'s doc, a comment in the whole-capture test — and, the one that
+matters, **the assert message of the test that proves the skip**. That last one
+is the sentence a *failing* run prints, so the stale promise would have been the
+last thing a reader saw before going to look for a report that does not exist. A
+claim removed from a doc comment is not removed from the build until the
+assertions that repeat it are checked too; the sweep that found the other two was
+`grep` across `.rs` **and** `.md`, and it is the step that turns "I fixed the
+doc" into "the claim is gone".
+
+**A process note, second instance.** The reviewer again ran its cluster as
+`k8rs-review` where the brief said `review` — and this time the cluster really
+came up under that name, whose nodes
+[D94](#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)
+proved `sanitize.jq` waves through. Nothing leaked, because a review takes no
+captures — but the refusal was defeated in practice for the second time in two
+days, by the second agent to touch it, which is the whole argument for anchoring
+the guard rather than repeating the name. Also worth stating precisely, since
+`CLAUDE.md` blurs it: the sanitizer refuses a **node-name prefix**, not a cluster
+name; `review` is refused because kind names its node `review-control-plane`.
+
+**And one the PM broke itself, one box after writing the rule.** The concurrency
+paragraph added in the previous box says the gate is not split by tree; what it
+did not say is that **resuming a finished agent is a new dispatch**. `dev-core`
+had reported, `tester` was dispatched to attack the same two files, and then
+`dev-core` was resumed for a six-line citation fix — two writers on one tree, and
+`tester`'s method is *copy, mutate, restore from copy*, so a restore taken before
+those edits would have reverted them with both agents reporting green. It did not
+happen: the citations were still in the tree when checked, and the holder was told
+what had landed under it. The general shape is the one this file keeps finding —
+**a rule is broken first by the person who just wrote it**, because they are the
+one acting on the assumption it was written to correct.
+
 ## Decisions made
 
 ### Product
@@ -6420,7 +6562,7 @@ never needed this watch ([D27](#d27--two-findings-the-open-watch-already-paid-fo
 |---|---|
 | **0** | **The run ended without an error.** It says *how* the run ended and never *who* ended it — a program that traps SIGTERM and shuts down tidily reports `0` whether it chose to stop or a liveness probe asked it to, so the first wording, *"the program finished successfully"*, named an agent one line above an action whose whole subject is that the code names none ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)). Added 2026-08-14, when the capture trip produced the first object that reaches it: a container exiting 0 under `restartPolicy: Always` is in `CrashLoopBackOff` like any other, and with no row here the code printed bare under a title claiming a crash ([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)) |
 | 137 **with** `reason: OOMKilled` | SIGKILL after running out of memory |
-| 137 **with** `reason: RestartingAllContainers` | **Not a failure at all** — the pod's own `restartPolicyRules` asked for every container to be restarted, and the kubelet removed this one to do it. `RestartAllContainersOnContainerExits` is `{1.36, Default: true, Beta}` at the pinned version, so this needs no unusual cluster, only a pod that declares the rules. **Rule 6 is exempt from it**, beside `exit 0`, `exit 143` and `OOMKilled`: the container that actually failed is the sibling ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
+| 137 **with** `reason: RestartingAllContainers` | **Not a failure at all** — a `restartPolicyRules` entry asked for every container to be restarted, and the kubelet removed this one to do it. The rules are declared **per container** (`spec.containers[].restartPolicyRules`, no pod-level field exists at v1.36.1) and only their `RestartAllContainers` action reaches the whole pod ([D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)). `RestartAllContainersOnContainerExits` is `{1.36, Default: true, Beta}` at the pinned version, so this needs no unusual cluster, only a pod that declares the rules. **Rule 6 is exempt from it**, beside `exit 0`, `exit 143` and `OOMKilled`: the container that actually failed is the sibling ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
 | 137 **with** `reason: ContainerStatusUnknown` | **Not a kill at all** — the number the kubelet writes where it could not read a status. `convertToAPIContainerStatuses` fills in `exitCode: 137` for a container the runtime reports `Unknown` or has dropped from its list, with `// this code indicates an error` beside the number in its own source ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
 | 137 **with none of those** | SIGKILL — a stop the program cannot refuse, **and the code does not say what sent it.** It named a cause until 2026-08-15 — *did not stop when it was asked to, a failing liveness probe or a shutdown timeout* — which is three claims the object cannot support: an init container may hold no probe at all, a genuine cgroup kill arrives without the word on a starved host ([D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)), and a rebuilt sandbox kills a container nothing asked to stop ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)). Who sent it is the **action's** question, because only the action knows the role ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
 | 143 | SIGTERM — graceful shutdown, not an error |

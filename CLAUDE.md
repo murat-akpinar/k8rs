@@ -399,6 +399,16 @@ exists if two writers are ever unavoidable, but reach for the plan fix first.
 **Review is not one of these slots** — nothing is built on top of a box until
 `k8s-admin` reports, and the dev idles meanwhile.
 
+**Sending a finished agent another message is a new dispatch, and it is the
+easiest way to break the rule above.** An agent that has reported still owns its
+files the moment it is resumed — so a follow-up to `dev-core` while `tester` is
+attacking the same tree puts two writers on it, and the second one's *restore
+from backup* silently reverts the first one's edits. Seen 2026-08-15, by the PM,
+one box after writing the paragraph below. Before resuming an agent, check that
+nobody else is holding its files; if someone is, either wait or tell the holder
+what landed under it
+([D96](NOTES.md#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)).
+
 **The gate is not split by tree, so the PM is a writer too.** `just check` reads
 `docs/`, `todo.md`, `NOTES.md` and `screens/` as well as `src/` — a PM edit that
 lands mid-run turns up as a red build in somebody else's report, and a link to an

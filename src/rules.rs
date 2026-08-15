@@ -1351,9 +1351,18 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// third shape**: one card about the *pod*, reached by walking its containers.
 ///
 /// **A pod that finished is not broken now**, so rules 1–8, 10, 13 and 14 skip `Succeeded` and
-/// `Failed`, whose restart counts and last exits belong to the **Waste** report (NOTES § D2,
-/// § D71). Rule 12 is deliberately outside the skip: a `Succeeded` pod that will not go away is
-/// still stuck. **Both phases are captured** — `succeeded.json` and `failed.json`, each carrying
+/// `Failed`: this screen holds what is broken *now*, and their restart counts and last exits are
+/// not that (NOTES § D2, § D71).
+///
+/// **And that is where those pods stop — they are on no k8rs screen today** (NOTES § D96). This
+/// said their counts *belong to the Waste report* until 2026-08-15, which is a promise and not a
+/// destination: `analysis.rs` does not exist, the Waste report's charter is Evicted/Completed
+/// **pileups** rather than a per-pod diagnosis of a Job pod that died a minute ago, and Jobs are
+/// not watched at all. The skip is still right; what it hands the pod to is nothing.
+///
+/// **Rule 12 is deliberately outside the skip** and is the one pod rule called *before* the
+/// gate: a `Succeeded` pod that will not go away is still stuck ([`stuck_terminating`]).
+/// **Both phases are captured** — `succeeded.json` and `failed.json`, each carrying
 /// the restart count and the failed previous run the skip has to swallow.
 pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
     let mut findings = Vec::new();
@@ -1488,10 +1497,17 @@ fn listed(names: &[String]) -> String {
     }
 }
 
-/// **Is this pod over?** — `Succeeded` or `Failed`, whose restart counts, last exits and requests
-/// belong to the **Waste** report and to nobody's node (NOTES § D2, § D71). Asked by [`analyze`]
-/// before the pod rules and by every node rule that joins pods to a node: a `Succeeded` Job pod
-/// keeps its `nodeName` for as long as nobody collects it ([`PodSnapshot::phase`]).
+/// **Is this pod over?** — `Succeeded` or `Failed`, whose restart counts and last exits are not
+/// what is broken *now* (NOTES § D2, § D71), and whose requests belong **to nobody's node**.
+/// Asked by [`analyze`] before the pod rules and by every node rule that joins pods to a node: a
+/// `Succeeded` Job pod keeps its `nodeName` for as long as nobody collects it
+/// ([`PodSnapshot::phase`]).
+///
+/// **The two halves have different fates and the sentence used to blur them** (NOTES § D96). The
+/// node half is a live claim — N5 must not charge a machine for a pod that has stopped running,
+/// and it does not. The Alerts half named the **Waste** report as where those counts go, and that
+/// report does not exist and would not hold them: its charter is Evicted/Completed *pileups*, not
+/// a per-pod diagnosis. What is true is that the pod leaves this screen and reaches no other.
 fn finished(pod: &PodSnapshot) -> bool {
     matches!(pod.phase.as_deref(), Some("Succeeded" | "Failed"))
 }
@@ -1606,8 +1622,10 @@ enum Ending {
     /// kubelet gates that flag on the `containerID` this record does not carry.
     Unwatched,
     /// **The pod's own restart rule removed the container** — `137` beside [`RESTART_ALL`].
-    /// Nothing failed here that this record names: a container exited, the pod's
-    /// `restartPolicyRules` said restart them all, and the kubelet did.
+    /// Nothing failed here that this record names: a container exited, the `restartPolicyRules`
+    /// **declared on that container** said restart them all, and the kubelet did. The *effect*
+    /// is pod-wide and the declaration is not — see [`RESTART_ALL`], which carries where the
+    /// field actually lives (NOTES § D96).
     RestartRule,
     /// Everything else, a code with no accepted meaning included.
     Failed,
@@ -1664,11 +1682,20 @@ const STATUS_LOST: &str = "ContainerStatusUnknown";
 
 /// **The fourth meaning of `137`, and the only one that is the pod getting what it asked for.**
 /// `RestartAllContainersOnContainerExits` is `{Version: 1.36, Default: true, Beta}` — on by
-/// default at the version `tests/fixtures/K8S_VERSION` pins — and under a pod's own
-/// `restartPolicyRules` the kubelet removes the other containers to restart them together,
-/// writing `Terminated { reason: RestartingAllContainers, exitCode: 137 }` with the same three
-/// fields and no more. Verified in `kube_features.go` and `kubelet_pods.go` at v1.36.1, not taken
-/// on report (NOTES § D93).
+/// default at the version `tests/fixtures/K8S_VERSION` pins — and when a container that declares
+/// `restartPolicyRules` exits into a matching rule, the kubelet removes the other containers to
+/// restart them together, writing
+/// `Terminated { reason: RestartingAllContainers, exitCode: 137 }` with the same three fields and
+/// no more. Verified in `kube_features.go` and `kubelet_pods.go` at v1.36.1, not taken on report
+/// (NOTES § D93).
+///
+/// **The rules are declared on a *container*, and only the effect is pod-wide.** There is no
+/// `pod.spec.restartPolicyRules` at v1.36.1 — `kubectl explain` answers that the field does not
+/// exist — it is `spec.containers[].restartPolicyRules`. That is why
+/// [`restart_rule_action`] sends the reader to *the container whose spec declares the rule*
+/// rather than to the pod, and it is the field the boxed rule that would name the trigger has to
+/// look at. **Confirmed against a live v1.36.1 cluster** (NOTES § D96), which carries the rest of
+/// the corrected restart-policy table with it rather than repeating it here.
 ///
 /// **"The other containers" is what the kubelet *does*, and not who ends up carrying the
 /// record.** The second operator review measured the record landing in **every** container's
@@ -2511,10 +2538,11 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
 /// has to reach the same verdict about it (NOTES § D85).
 ///
 /// **[`RESTART_ALL`] is the third exemption, and it is an exemption rather than a wording
-/// problem** (NOTES § D93). The pod declared `restartPolicyRules`; the kubelet removed this
-/// container because those rules said to. Nothing failed and nothing was killed from outside, so
-/// a WARN card is the false-positive class this rule's whole design exists to remove — one per
-/// restart-rule firing, forever, on a field that never expires (NOTES § D71).
+/// problem** (NOTES § D93). A container in this pod declared `restartPolicyRules`
+/// ([`RESTART_ALL`] — the field is a container's, the effect is the pod's, NOTES § D96); the
+/// kubelet removed this one because those rules said to. Nothing failed and nothing was killed
+/// from outside, so a WARN card is the false-positive class this rule's whole design exists to
+/// remove — one per restart-rule firing, forever, on a field that never expires (NOTES § D71).
 ///
 /// **What the exemption costs, stated for both phases rather than the convenient one.** The
 /// container whose own bad exit triggered the restart draws its card **once its record has landed
@@ -2597,9 +2625,10 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
     // three pairs no kubelet writes changed answer. [`ending`] carries which and why.
     //
     // **The silences.** `exit 0` and `exit 143` are every rolling update and every scale-down;
-    // [`RestartRule`](Ending::RestartRule) is the pod's own `restartPolicyRules` doing what they
-    // were declared to do. Nothing failed in any of the three, and a WARN card for a policy
-    // working correctly is the false-positive class this rule is designed around (NOTES § D71).
+    // [`RestartRule`](Ending::RestartRule) is a container's `restartPolicyRules` doing what they
+    // were declared to do (NOTES § D96). Nothing failed in any of the three, and a WARN card for
+    // a policy working correctly is the false-positive class this rule is designed around
+    // (NOTES § D71).
     //
     // **[`Unwatched`](Ending::Unwatched) gets its own opening, because *failed* is false of the
     // object.** The run was never watched to an end, so the rule's own subject is the one thing
@@ -3285,6 +3314,13 @@ fn nothing_has_looked_at_it(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
 /// **The finalizers are the whole diagnosis** — two causes with unrelated fixes — and
 /// `kubectl describe pod` does not print them at all, which is why the command beside this card
 /// is `get -o yaml` (NOTES § D46).
+///
+/// **It is the one pod rule [`analyze`] calls *before* the [`finished`] gate, and that ordering
+/// is deliberate** (NOTES § D96). Every other pod rule asks *is this broken now* and a pod that
+/// is over is not; this one asks *did an operation somebody started finish*, and a pod held by a
+/// finalizer **after** it completed is squarely its subject. From inside the gate that pod is
+/// invisible — `Succeeded` plus a `deletionTimestamp` is exactly the shape a stuck finalizer
+/// leaves behind.
 fn stuck_terminating(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
     let deadline = pod.deletion_timestamp.as_ref()?;
     let grace = pod.grace_period_seconds.map(SignedDuration::from_secs);

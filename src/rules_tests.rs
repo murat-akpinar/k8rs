@@ -1865,6 +1865,71 @@ const CAPTURED_PODS: [&str; 31] = [
     "wedged",
 ];
 
+/// **[`CAPTURED_PODS`] against the directory, in both directions** — the coupling the list never
+/// had, and without which *"over the whole committed corpus"* means *over the 31 names somebody
+/// remembered to type*.
+///
+/// **It was not a theoretical hole.** `tester` committed a fixture derived from `restarts10.json`
+/// — a `Running` pod with a **Regular** container in `state.terminated` at `exit 3`, which
+/// directly falsifies what
+/// [`every_captured_container_sitting_in_a_terminated_run_is_a_finished_init_container`] claims
+/// about the corpus — and the suite stayed green at 188, because nothing read the directory.
+/// `scripts/fixture-audit.sh` counted 51 files instead of 50 and passed, correctly: it audits
+/// sanitization, not membership.
+///
+/// **Both directions.** A capture that lands and is not listed is a capture no test reads; a name
+/// left behind after its file goes is a `CAPTURED_PODS` entry that panics in [`fixture`] the next
+/// time anyone touches it.
+///
+/// **`kind: Pod` and not "a file with pods in it"**, which is what excludes `owned-pods.json` and
+/// `kube-system-pods.json` structurally rather than by name: those are `List`s, read through
+/// [`items`], and a `List` in this array would not decode. **There is no exclusion list, because
+/// nothing is excluded** — if a Pod capture ever has to stay out, it goes in a named list with
+/// its reason beside it, never in the gap between this assertion and the array.
+#[test]
+fn every_committed_pod_capture_is_named_in_the_list_that_claims_to_hold_them_all() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+    let mut on_disk: Vec<String> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{dir} could not be read: {e}"))
+        .map(|entry| entry.expect("a readable directory entry").path())
+        .filter(|path| path.extension().is_some_and(|x| x == "json"))
+        .map(|path| {
+            path.file_stem()
+                .expect("a .json path has a stem")
+                .to_string_lossy()
+                .into_owned()
+        })
+        // [`fixture`] does the read and the parse, and panics with the path on either.
+        .filter(|stem| fixture(stem)["kind"] == "Pod")
+        .collect();
+    on_disk.sort();
+    let mut listed: Vec<String> = CAPTURED_PODS.iter().map(|n| (*n).to_string()).collect();
+    listed.sort();
+    println!(
+        "{} Pod captures on disk, {} named",
+        on_disk.len(),
+        listed.len()
+    );
+    // A found-nothing sweep and a nothing-to-find sweep print the same line, and a `read_dir`
+    // that returned nothing would satisfy the equality below against an emptied array. Canaries
+    // rather than a count, so a capture legitimately retired does not redden this line with a
+    // message about the wrong thing (CLAUDE.md § Code phase rules).
+    for canary in ["healthy", "healthy-retry", "failed"] {
+        assert!(
+            on_disk.iter().any(|n| n == canary),
+            "{canary}.json is a Pod capture this file reads by name and the sweep did not find \
+             it, so the sweep is not reading {dir}: {on_disk:?}"
+        );
+    }
+    assert_eq!(
+        on_disk, listed,
+        "`tests/fixtures` and `CAPTURED_PODS` disagree. A capture on disk and not in the array is \
+         one no test reads — and it can falsify a claim this file makes about the corpus without \
+         reddening anything (NOTES § D96). A name in the array with no file is an entry that \
+         panics the moment it is read."
+    );
+}
+
 /// The snapshot a rule would be handed if it ran over the whole committed capture at
 /// once: every pod, every node, the Deployments, and the pinned [`now`](now).
 fn fixture_snapshot() -> ClusterSnapshot {
@@ -3681,8 +3746,11 @@ fn the_thresholds_and_the_exit_table_are_the_ones_the_documents_write_down() {
         (137, Some(STATUS_LOST), "lost track of the container"),
         // **The fourth meaning, and it is beta-on-by-default at the version the fixtures pin.**
         // `RestartAllContainersOnContainerExits` is `{1.36, Default: true, Beta}` in
-        // `kube_features.go`, and under a pod's own `restartPolicyRules` the kubelet removes the
-        // other containers to restart them together — `exitCode: 137`, this reason, and the
+        // `kube_features.go`, and when a container that declares `restartPolicyRules` exits into
+        // a matching rule the kubelet removes the other containers to restart them together —
+        // the field is a container's and the effect is the pod's
+        // ([`RESTART_ALL`], NOTES § D96) — with
+        // `exitCode: 137`, this reason, and the
         // message *the container is removed because RestartAllContainers in place*. Nothing
         // failed and nothing was killed: the pod asked for it (NOTES § D93, [`RESTART_ALL`]).
         (137, Some(RESTART_ALL), "restart every container in the pod"),
@@ -6551,7 +6619,9 @@ fn the_reason_and_not_the_number_alone_decides_which_ending_it_is() {
     // capture holds it. Spelled out here so a typo in the constant has one place that disagrees.
     assert_eq!(
         RESTART_ALL, "RestartingAllContainers",
-        "the reason the kubelet writes when a pod's own `restartPolicyRules` remove a container"
+        "the reason the kubelet writes when a container's own `restartPolicyRules` remove the \
+         containers of its pod — the field is a container's and the effect is the pod's \
+         (NOTES § D96)"
     );
 
     for (code, reason, expected) in [
@@ -10483,8 +10553,8 @@ fn the_whole_capture_through_the_rules_at_once() {
     // A count alone passes just as well if one rule went silent and another started firing
     // twice. The silent set is the healthy fixtures, the three that are only an Analysis
     // posture row, the two pods that are *over* — a finished pod's restart counts and last exits
-    // belong to the Waste report and not to the screen that holds what is broken now (D2) — and
-    // the one whose fault is real but old.
+    // are not what is broken now, which is all this screen holds (D2), and they reach no other
+    // screen either (D96) — and the one whose fault is real but old.
     let silent = [
         // The kill in this one is an hour old and its container has been serving since, which
         // is rule 2's recency clause deciding — read at a `now` five minutes after the kill it
@@ -12975,8 +13045,10 @@ fn a_pod_that_finished_is_charged_to_nobody_and_alarms_about_nothing() {
         nothing(
             &analyze(&pods_at(vec![done.clone()], now())),
             format!(
-                "a {phase} pod's restart counts and last exits belong to the Waste report, not \
-                 to the screen that holds what is broken now (D2)"
+                "a {phase} pod's restart counts and last exits are not what is broken *now*, \
+                 which is the whole of what this screen holds (D2). They do not go anywhere \
+                 else either — the Waste report does not exist and its charter is \
+                 Evicted/Completed pileups rather than a per-pod diagnosis (D96)"
             )
             .as_str(),
         );
@@ -14749,3 +14821,712 @@ fn the_kubeconfig_card_is_the_only_finding_with_no_object_behind_it() {
         titles(&healthy)
     );
 }
+
+// --- THE RUN A CONTAINER IS SITTING IN RIGHT NOW START ---
+//
+// **`state.terminated` is no rule's subject, and this section is the ruling and not a
+// description of what the code happens to do today** (NOTES § D96). One function reads the field —
+// [`doing_its_job`] — and it reads it as a *suppressor*: it asks [`ending`] whether an **init**
+// container finished, and answering *yes* takes rules 2, 5 and 6 away. **No card is ever drawn
+// from it**, which is the thing this section pins: the run a container is sitting in cannot put
+// a sentence on the screen, cannot change one, and cannot date one. Four things decide it, and
+// none of them is re-argued here:
+//
+// 1. **A pod that is over is already out.** [`analyze`] skips **every pod rule except rule 12**
+//    when [`finished`] — `Succeeded` or `Failed`. Rule 12 sits outside the gate on purpose: a
+//    pod that will not go away is still stuck. The skip is proved on `failed.json`, this
+//    repository's one capture with a bad exit in this field, by
+//    [`a_pod_that_finished_is_charged_to_nobody_and_alarms_about_nothing`]. It covers the
+//    *stable* majority of the containers that sit here with a bad exit: a single-container pod
+//    whose container dies under `restartPolicy: Never` or `OnFailure` goes terminal and leaves
+//    the Alerts screen.
+//
+//    **And that is where it stops — it does not arrive anywhere else.** *Belongs to the Waste
+//    report* is D2's rule for keeping Alerts to what is broken *now*; it is not a destination
+//    that exists. `analysis.rs` is unwritten, the Waste report's charter is Evicted/Completed
+//    **pileups** rather than a diagnosis of a Job pod that died a minute ago, and Jobs are not
+//    watched at all. The honest sentence is that such a pod leaves this screen by D2 and **has
+//    no other screen yet**. Still the ruling — but a smaller claim than *something else covers
+//    it*.
+// 2. **A finished init container is this field's normal state.** Every container any
+//    committed capture holds in `state.terminated` inside a pod that is *not* over is an
+//    init container at `exit 0` — asserted below, over the whole corpus, rather than
+//    asserted about two files. Any reader of this field starts from a haystack of healthy
+//    objects, which is why the one reader there is asks only the init question.
+// 3. **What is left inside a non-terminal pod is redundant, and a card off it could never be
+//    debounced.** *A transient a watch sees and `--once` may not* is the weaker argument and it
+//    is measurably wrong: on a backing-off container `state.terminated {exit 3}` was the
+//    **visible state across tens of seconds**, while kubectl's own STATUS column read `Error`.
+//    **What survives is redundancy**, from the same sample: `state.terminated {exit 3}` and
+//    `lastState {exit 3, Error}` were present *simultaneously* — rule 6 fires off the `lastState`
+//    copy from restart 1, and rule 1's card follows from the backoff. So refusing the current
+//    terminated state loses **nothing** about a container that comes back; not earliness, not a
+//    corner, nothing.
+//    **And the obvious reply — then debounce it — is closed by invariant 5.** A pure
+//    `analyze(&Snapshot)` has nowhere to hold *I saw an exit 3 four seconds ago*: no globals, no
+//    clock call, one snapshot in. A card drawn off this field is therefore a function of when
+//    the sampler happened to look, permanently and by construction, and no care inside the rule
+//    can make it otherwise.
+// 4. **The cost is real and is not hidden.** The part that is a property of the feature, and is
+//    now confirmed on two clusters: the trigger's own exit **never reaches `lastState`** — 0 of
+//    80 samples — while the synthesized `137` was in every one of them. How often the trigger is
+//    *visible* in `state.terminated` is a property of the **manifest** and not of the feature —
+//    12 of 40 one-second samples on one cluster, 4 of 40 on another whose container lived
+//    longer, so **10–30% depending on how long the container runs between exits**. Either way,
+//    refusing to read the current terminated state means that container is never nameable by any
+//    rule, and rule 5's card keeps its denial that the record says which container went first.
+//    That silence is pinned below by name, on the shape that opened this box.
+//
+// **What the ruling does not cover is boxed, not forgotten**: a container that *cannot* come
+// back inside a pod that is *not* over — `restartPolicy: Never`, or `OnFailure` with a clean
+// exit, beside a sibling still running — is permanent rather than transient, and leg 3's
+// redundancy does not hold for it, because there is no next restart to write a `lastState`.
+//
+// **Reading it takes more than one field, which is part of why it is a box and not a line.**
+// `spec.restartPolicy` is the pod's, and at the pinned version it is no longer the whole answer:
+// `ContainerRestartRules` is beta-on-by-default, so a **regular** container may override the pod
+// with `restartPolicy: Never` and stay dead inside an `Always` pod — measured, `restartCount: 0`
+// after fourteen minutes. NOTES § D96 carries the corrected table whole.
+//
+// **What is actually missing is narrower than *no plumbing*, and saying otherwise sends the next
+// reader to write code that is already there.** [`container_snapshots`] reads
+// `spec.containers[].restartPolicy` today — it is what tells a native sidecar from an init
+// container — so the decode already reaches the field. What it does **not** do is *carry* it: the
+// value is collapsed into [`ContainerRole`], and the regular list is deliberately not asked at
+// all, because a regular container answers `Regular` either way. So the three genuinely unreached
+// things are the pod's own `spec.restartPolicy`, the `restartPolicyRules` list, and a **regular**
+// container's own override — the last of which the decode currently throws away rather than never
+// having seen. **Scoping that box is the PM's and none of it is done here.**
+
+/// **Every ending the current terminated state can hold** (NOTES § D29). `3` is the gang
+/// trigger's own code — measured in `state.terminated` and never in `lastState` — and the two
+/// `137` reasons are here because they are the pair that *does* move a card when it sits in
+/// `lastState` ([`ending`], NOTES § D95): if anything read this field, those two would move one
+/// from here too.
+///
+/// **The two `137` rows are load-bearing for a second reason, and trimming them costs it.** They
+/// are the only endings [`terminated_now`] leaves **stamp-less** — the kubelet writes those two
+/// with three fields and no more — so they are the only rows on which a reader that dated a card
+/// from `state.terminated.finishedAt` produces a *different* age from one that did not. Delete
+/// them and that reader survives all three tests: `tester` measured it. The age dimension is in
+/// [`whole_card`]; these rows are what give it something to see.
+///
+/// **`0` is the row the reader that exists answers differently**, and it is kept in the same
+/// table rather than tested apart, because the claim is about the *whole* set of endings and
+/// not about the bad ones.
+const CURRENT_RUNS: [(i32, Option<&str>); 6] = [
+    (0, None),
+    (1, None),
+    (3, None),
+    (143, None),
+    (137, Some(STATUS_LOST)),
+    (137, Some(RESTART_ALL)),
+];
+
+/// One shape the real pipeline hands the rules with a container sitting in `state.terminated`:
+/// a label, the role under test, the container's name, the plant, and **how many cards the pod
+/// draws about that container on a clean ending and on a bad one**.
+///
+/// **The two counts are written down rather than derived.** An equality between two empty sets
+/// is exactly the silence this section could otherwise pass by producing — a plant that stopped
+/// building the state, a helper that stopped matching the name (NOTES § D26, CLAUDE.md § Code
+/// phase rules).
+type Sitting = (
+    &'static str,
+    ContainerRole,
+    &'static str,
+    fn(i32, Option<&str>) -> PodSnapshot,
+    usize,
+    usize,
+);
+
+/// **All three roles, both states of the field's neighbour, a pod with one container and a pod
+/// with two, and one pod that has a controller** (NOTES § D29). Every shape leaves the pod *not*
+/// over, because a pod that is over never reaches a pod rule at all.
+///
+/// **Two of the seven draw nothing about the subject at any ending, and that zero is the
+/// ruling's cost written down** rather than a shape that failed to be interesting: a container
+/// on its **first** run has no count and no `lastState`, so this field is the only record of it
+/// there is — and nothing reads it. It is the same silence the gang trigger gets, reached from
+/// the other direction.
+const SITTING: [Sitting; 8] = [
+    (
+        "owned regular",
+        ContainerRole::Regular,
+        "quitter",
+        owned_regular,
+        2,
+        2,
+    ),
+    (
+        "gang-restart trigger",
+        ContainerRole::Regular,
+        "nosy",
+        gang_restart_trigger,
+        2,
+        2,
+    ),
+    (
+        "crashing regular",
+        ContainerRole::Regular,
+        "flaky",
+        crashing_regular,
+        2,
+        2,
+    ),
+    (
+        "regular, first run",
+        ContainerRole::Regular,
+        "nosy",
+        regular_first_run,
+        1,
+        1,
+    ),
+    (
+        "sidecar between restarts",
+        ContainerRole::Sidecar,
+        "proxy",
+        sidecar_down,
+        2,
+        2,
+    ),
+    (
+        "sidecar, first run",
+        ContainerRole::Sidecar,
+        "proxy",
+        sidecar_first_run,
+        0,
+        0,
+    ),
+    (
+        "init that finished",
+        ContainerRole::Init,
+        "wait-for-db",
+        init_finished,
+        0,
+        2,
+    ),
+    (
+        "init, first run",
+        ContainerRole::Init,
+        "migrate",
+        init_first_run,
+        0,
+        0,
+    ),
+];
+
+/// **The run a container is in *right now*, rewritten** — `state.terminated`, where
+/// [`ended_as`] writes `lastState.terminated`.
+///
+/// **Where the capture is already sitting in one the plant only moves the ending**, which is
+/// the init shapes: `healthy.json` and `healthy-retry.json` were captured with a finished init
+/// container, `ready: true` and `started: false`, and that is the kubelet's own shape for a
+/// container that is *done* rather than *down*. Where the container was up, the run now ending
+/// **is** the one that was running, so it keeps that run's `startedAt` and gains a `finishedAt`
+/// after it — a record whose run began after the one it replaced is a timeline no cluster
+/// writes — and both flags go to `false`, which is `failed.json`'s captured shape for a
+/// container that is down (NOTES § D40).
+///
+/// **The reason moves with the code**, [`exited`]'s pairing: `Completed` beside `0`, `Error`
+/// beside everything else, unless the row names one of the two the kubelet writes itself — and
+/// those two carry three fields and no more, so the stamps go with them
+/// ([`ended_as`], NOTES § D93).
+fn terminated_now(pod: &mut Pod, name: &str, code: i32, reason: Option<&str>) {
+    let status = container_status(pod, name);
+    if status
+        .state
+        .as_ref()
+        .and_then(|s| s.terminated.as_ref())
+        .is_none()
+    {
+        let began = status
+            .state
+            .as_ref()
+            .and_then(|s| s.running.as_ref())
+            .and_then(|r| r.started_at.clone());
+        assert!(
+            began.is_some(),
+            "{name} was neither terminated nor running in the capture, so this plant cannot say \
+             when the run it is ending began"
+        );
+        status.state = Some(ApiContainerState {
+            terminated: Some(ContainerStateTerminated {
+                started_at: began,
+                finished_at: Some(time("2026-08-13T23:40:00Z")),
+                ..ContainerStateTerminated::default()
+            }),
+            ..ApiContainerState::default()
+        });
+        status.ready = false;
+        status.started = Some(false);
+    }
+    let run = container_status(pod, name)
+        .state
+        .as_mut()
+        .and_then(|s| s.terminated.as_mut())
+        .expect("the run above is either the capture's or this plant's");
+    run.exit_code = code;
+    run.reason = Some(
+        reason
+            .unwrap_or(if code == 0 { "Completed" } else { "Error" })
+            .to_string(),
+    );
+    if matches!(run.reason.as_deref(), Some(STATUS_LOST | RESTART_ALL)) {
+        run.started_at = None;
+        run.finished_at = None;
+        run.container_id = None;
+    }
+}
+
+/// **The container beside the subject, made loud** — a previous run that failed and a count
+/// inside rule 5's band, so a working rule set always has something to say about this pod.
+/// Without one, a shape whose subject is silent proves nothing: *the rules read this field and
+/// said nothing* and *the rules said nothing* print the same green line (NOTES § D26).
+fn noisy_neighbour(pod: &mut Pod, name: &str) {
+    ended_as(pod, name, 1, None, None);
+    container_status(pod, name).restart_count = RESTARTS_WARN + 1;
+}
+
+/// **The shape that opened this box** (NOTES § D93). One gang restart writes the synthesized
+/// `137` into *every* container's `lastState`, the trigger's included, while the trigger's own
+/// exit sits in `state.terminated` and never reaches `lastState` at all. `broken-hostpath` is
+/// the committed capture with two regular containers; `shipper` stays up and carries the record,
+/// `nosy` is the one that went first.
+fn gang_restart_trigger(code: i32, reason: Option<&str>) -> PodSnapshot {
+    capture_but("hostpath", |p| {
+        for name in ["nosy", "shipper"] {
+            ended_as(p, name, 137, Some(RESTART_ALL), None);
+            container_status(p, name).restart_count = RESTARTS_WARN + 1;
+        }
+        terminated_now(p, "nosy", code, reason);
+    })
+}
+
+/// **A single-container pod, down between restarts** — the shape the operator review flagged,
+/// because there is no sibling for a card to send the reader to and none of the comparisons the
+/// two-container pod above allows. Its history is an ordinary crash history and not a gang
+/// record: `restarts10` is captured `Running` and not ready at ten restarts, and here it has
+/// just exited again.
+fn crashing_regular(code: i32, reason: Option<&str>) -> PodSnapshot {
+    capture_but("restarts10", |p| terminated_now(p, "flaky", code, reason))
+}
+
+/// **The same container on its first run**, so there is no `lastState` beside the field and no
+/// count — the pair the kubelet writes together, moved together ([`never_ran`], NOTES § D40).
+///
+/// **Not the gang shape**: one restart-all firing writes the record into every container, so a
+/// container with none of it did not live through one. Its sibling here has an ordinary crash
+/// history, and that is what draws.
+fn regular_first_run(code: i32, reason: Option<&str>) -> PodSnapshot {
+    capture_but("hostpath", |p| {
+        noisy_neighbour(p, "shipper");
+        terminated_now(p, "nosy", code, reason);
+        let subject = container_status(p, "nosy");
+        subject.last_state = None;
+        subject.restart_count = 0;
+    })
+}
+
+/// **A native sidecar down between restarts.** `restartPolicy: Always` on an init container is
+/// what makes it one, and it is what puts it back here every time it exits.
+fn sidecar_down(code: i32, reason: Option<&str>) -> PodSnapshot {
+    capture_but("healthy-unreadysidecar", |p| {
+        noisy_neighbour(p, "proxy");
+        terminated_now(p, "proxy", code, reason);
+    })
+}
+
+/// The same sidecar on its **first** run, with nothing in `lastState` — so nothing but this
+/// field says anything happened. The regular container beside it is what draws.
+fn sidecar_first_run(code: i32, reason: Option<&str>) -> PodSnapshot {
+    capture_but("healthy-unreadysidecar", |p| {
+        noisy_neighbour(p, "app");
+        terminated_now(p, "proxy", code, reason);
+    })
+}
+
+/// **The field's normal state, over every ending it could hold instead.** `healthy-retry.json`
+/// was captured here — a `wait-for-db` that failed three times and then exited `0` — so the
+/// clean row is the committed object and the rest are the endings it did not have.
+fn init_finished(code: i32, reason: Option<&str>) -> PodSnapshot {
+    capture_but("healthy-retry", |p| {
+        noisy_neighbour(p, "app");
+        terminated_now(p, "wait-for-db", code, reason);
+    })
+}
+
+/// The same, **first time**: `healthy.json`'s `migrate` succeeded on its first run, so it has
+/// no count and no previous run — this field is the only record of it there is.
+fn init_first_run(code: i32, reason: Option<&str>) -> PodSnapshot {
+    capture_but("healthy", |p| {
+        noisy_neighbour(p, "app");
+        terminated_now(p, "migrate", code, reason);
+    })
+}
+
+/// **The one shape whose [`Finding::owner`] is not its [`Finding::object`]** — a real capture of
+/// a Deployment's pod, so the heading [`whole_card`] now compares has something to separate it
+/// from the object underneath (NOTES § D29, § D96). Every other base here is a bare pod, where
+/// the two are equal and a reader that rewrote either would be invisible.
+///
+/// `owned-pods.json` is a `List` rather than a single object, so this decodes it the way
+/// [`a_finding_on_an_owned_pod_files_under_the_controller_and_not_the_pod`] does instead of
+/// going through [`capture_but`].
+///
+/// **The capture is mid-backoff, so the run this shape is about is the *next* one.** The kubelet
+/// starts `quitter` again — `startContainer` writes `RestartCount + 1`, and the backoff's own
+/// record is already sitting in `lastState` as the run before it — and then it exits. The two
+/// fields move together, the way every other plant in this file moves them (NOTES § D40);
+/// [`terminated_now`] refuses a container that is neither running nor terminated rather than
+/// inventing a moment for it, which is what caught the first draft of this shape.
+fn owned_regular(code: i32, reason: Option<&str>) -> PodSnapshot {
+    let mut object = items::<Pod>("owned-pods")
+        .pop()
+        .expect("the capture holds the Deployment's pod");
+    let status = container_status(&mut object, "quitter");
+    status.state = Some(ApiContainerState {
+        running: Some(ContainerStateRunning {
+            // After the `lastState` run's `finishedAt`, which is what makes this the run after it.
+            started_at: Some(time("2026-08-13T23:31:10Z")),
+        }),
+        ..ApiContainerState::default()
+    });
+    status.restart_count += 1;
+    terminated_now(&mut object, "quitter", code, reason);
+    PodSnapshot::from(object)
+}
+
+/// One card, **whole — all eight fields of [`Finding`], counted against the struct and not
+/// against the ones a card's body happens to print.** The equalities below are between cards and
+/// not between titles: two cards that differ only in an age are two different cards, and an age
+/// is precisely what a reader of `finishedAt` on this field would move
+/// ([`Finding::timestamp`]).
+///
+/// **[`Finding::owner`] and [`Finding::object`] are in it because the heading is a card too.**
+/// They were left out of the first draft, on the reading that the six below are *what a reader
+/// sees* — and `card()` renders `owner` as the name at the top, so a reader of this field that
+/// rewrote the owner would have moved a line on the screen with every equality here still green.
+/// `tester` shipped exactly that mutation past 188 tests (NOTES § D26, § D96).
+fn whole_card(f: &Finding) -> String {
+    // Destructured rather than read field by field, so a **ninth** field on `Finding` stops this
+    // file compiling instead of quietly falling outside every comparison in this section — which
+    // is how `owner` and `object` came to be outside them.
+    let Finding {
+        severity,
+        title,
+        evidence,
+        action,
+        kubectl_cmd,
+        owner,
+        object,
+        timestamp,
+    } = f;
+    format!(
+        "{severity:?} | {title} | {evidence} | {action} | {kubectl_cmd:?} | {owner:?} | \
+         {object:?} | {timestamp:?}"
+    )
+}
+
+fn whole_cards(cards: &[&Finding]) -> Vec<String> {
+    let mut out: Vec<String> = cards.iter().map(|f| whole_card(f)).collect();
+    out.sort();
+    out
+}
+
+/// **The ruling, as the suite can hold it: the cards a pod draws do not move when the run its
+/// container is sitting in changes.**
+///
+/// Four properties, over every shape in [`SITTING`] and every ending in [`CURRENT_RUNS`]:
+///
+/// - **Every bad ending draws the identical set of cards** — **all eight fields** of each,
+///   [`whole_card`], over **the whole pod** and not over the cards this test went looking for.
+///   Two of the shapes below have a second container, so a reader that moved a card onto a
+///   *sibling* is caught by the same equality; one has a **controller**, so a reader that moved
+///   the heading is caught too (NOTES § D93, § D95, § D96).
+/// - **The clean ending's set is a subset of it.** The one reader can *silence* a card and may
+///   never write one, which is what makes it a suppressor rather than a subject.
+/// - **A card does draw, at every row**, and where the container has a previous run one of them
+///   is about *that* — so the silence is about the current run specifically and not about the
+///   container (NOTES § D26).
+/// - **The counts are written down** ([`Sitting`]), so a helper that stopped matching the
+///   container's name cannot turn every equality above into `[] == []`.
+///
+/// And the cost this ruling accepts is pinned by name: on the gang shape the trigger's own
+/// `exit 3` is nameable by nothing.
+#[test]
+fn no_card_is_drawn_about_the_run_a_container_is_sitting_in_right_now() {
+    for (label, role, name, build, clean_cards, bad_cards) in SITTING {
+        let mut clean: Option<Vec<String>> = None;
+        let mut bad: Option<(String, Vec<String>)> = None;
+        for (code, reason) in CURRENT_RUNS {
+            let planted = build(code, reason);
+            let object = planted.id.name.clone();
+            let subject = container(&planted, name).clone();
+            assert_eq!(
+                subject.role, role,
+                "{label}: the role under test, or these seven shapes are fewer than seven"
+            );
+            let ContainerState::Terminated(run) = &subject.state else {
+                panic!("{label}: the plant leaves {name} sitting in a terminated run: {subject:?}")
+            };
+            assert_eq!(
+                (run.exit_code, run.reason.as_deref()),
+                (
+                    code,
+                    Some(reason.unwrap_or(if code == 0 { "Completed" } else { "Error" }))
+                ),
+                "{label}: and it is sitting in *this* row's run — a plant that stopped writing \
+                 the ending would make every equality below an equality between two copies of \
+                 one object"
+            );
+            assert!(
+                !finished(&planted),
+                "{label}: the pod is not over, or no pod rule looks at it at all and the \
+                 silence below is `analyze`'s skip rather than this ruling (NOTES § D2)"
+            );
+
+            let all = analyze(&pods_at(vec![planted], now()));
+            let about = cards_about(&all, name);
+            println!(
+                "=== {label} ({role:?} {name} on {object}) — exit {code} {reason:?}: {} cards, \
+                 {} about {name}\n    {:?}",
+                all.len(),
+                about.len(),
+                titles(&all)
+            );
+            // **The rules are alive on this object.** [`exit_fact`] reaches the screen from
+            // rules 1, 5 and 6 only, so a card carrying it is a card some rule drew by reading
+            // an ending — the very family this section says is silent about the current one.
+            assert!(
+                all.iter()
+                    .any(|f| f.title.contains("exit ") || f.evidence.contains("exit ")),
+                "{label} exit {code}: no rule that reads an ending drew anything on this pod, so \
+                 the silence about {name}'s current run is a silence about everything: {:?}",
+                titles(&all)
+            );
+
+            // **The whole pod's card set, not the subject's.** A reader of this field could
+            // file its card under a sibling — the gang shape has one, and it is the container
+            // the fan-out already draws about (NOTES § D95). The written-down count below is
+            // what keeps [`cards_about`] honest at the same time.
+            let whole = whole_cards(&all.iter().collect::<Vec<&Finding>>());
+            let expected_about = if code == 0 { clean_cards } else { bad_cards };
+            assert_eq!(
+                about.len(),
+                expected_about,
+                "{label} exit {code}: {expected_about} cards about {name}: {:#?}",
+                whole_cards(&about)
+            );
+            if code == 0 {
+                clean = Some(whole);
+            } else {
+                match &bad {
+                    None => bad = Some((format!("exit {code} {reason:?}"), whole)),
+                    Some((first, expected)) => assert_eq!(
+                        &whole, expected,
+                        "{label}: exit {code} {reason:?} draws a different screen from {first} \
+                         — the run a container is sitting in is no rule's subject, so nothing \
+                         about how it ended may reach a card"
+                    ),
+                }
+            }
+
+            // **The silence is about the current run and not about the container.** Where there
+            // is a previous run, some card names *it* — so a rule set that had gone quiet about
+            // this container altogether could not pass the equalities above by drawing nothing
+            // (NOTES § D26).
+            //
+            // **Not on the clean row, and that exception is the suppressor doing its job**: an
+            // init container that finished takes rules 5 and 6 with it, which is the one thing
+            // this field is allowed to decide ([`doing_its_job`]). The subset check below is
+            // what holds that direction.
+            match (code, &subject.last_terminated) {
+                (0, _) | (_, None) => {}
+                (_, Some(previous)) => {
+                    let previous = exit_fact(previous);
+                    assert!(
+                        about
+                            .iter()
+                            .any(|f| f.title.contains(&previous) || f.evidence.contains(&previous)),
+                        "{label} exit {code}: no card about {name} names its previous run \
+                         ({previous}), so the rules have nothing to say about this container at \
+                         all and the silence above is not the current run's: {:#?}",
+                        whole_cards(&about)
+                    );
+                }
+            }
+
+            // **The cost, named on the shape that produced it** (NOTES § D93). The trigger's
+            // own code is in this field and in no other, so on this row no card anywhere on
+            // the pod can carry it — and the reader who wants to know which container went
+            // first is not told.
+            if code == 3 {
+                show(&all);
+                for f in &all {
+                    let said = format!("{} {} {}", f.title, f.evidence, f.action);
+                    assert!(
+                        !said.contains("exit 3"),
+                        "{label}: {name} exited 3 and this rule set does not read that field — \
+                         a card naming it is a decision, and it is one this section rules \
+                         against: {said}"
+                    );
+                }
+            }
+        }
+
+        // Both halves of [`CURRENT_RUNS`] were reached — a table that lost its clean row, or its
+        // bad ones, would make the subset below a comparison with nothing.
+        let clean = clean.expect("the endings under test include a clean one");
+        let (row, bad) = bad.expect("and at least one bad one");
+        for card in &clean {
+            assert!(
+                bad.contains(card),
+                "{label}: a clean ending draws a card that {row} does not. The one reader of \
+                 this field is a *suppressor* — it may take rules 5 and 6 away from an init \
+                 container that finished, and it may never put a card on the screen that a bad \
+                 ending would not also have drawn: {card}"
+            );
+        }
+        println!(
+            "--- {label}: the screen is {} cards on a clean ending and {} on a bad one — \
+             {:#?}",
+            clean.len(),
+            bad.len(),
+            bad
+        );
+    }
+}
+
+/// **The one reader, asserted to be the only question it asks** — [`doing_its_job`] reads the
+/// current terminated state to decide whether an *init* container finished, and nothing else
+/// about the run reaches its answer (NOTES § D75, § D95).
+///
+/// The claim is an equality against the question rather than a table of expected booleans: the
+/// answer is `role == Init && ending == Finished`, so `143` and `3` and the two synthesized
+/// `137`s are all the same to it, and a `Regular` or `Sidecar` container sitting in this state
+/// is *not doing its job* whatever its exit code says.
+///
+/// **What this test cannot say is that nobody else reads the field** — that is the test above,
+/// which watches the cards rather than the function.
+#[test]
+fn the_one_reader_of_the_current_terminated_state_asks_only_whether_an_init_container_finished() {
+    let mut answered = (0usize, 0usize);
+    for (label, role, name, build, _, _) in SITTING {
+        for (code, reason) in CURRENT_RUNS {
+            let planted = build(code, reason);
+            let subject = container(&planted, name);
+            let ContainerState::Terminated(run) = &subject.state else {
+                panic!("{label}: the plant leaves {name} sitting in a terminated run")
+            };
+            let expected = role == ContainerRole::Init && ending(run) == Ending::Finished;
+            println!(
+                "{label} {role:?} exit {code} {reason:?}: ending {:?}, doing its job {}",
+                ending(run),
+                doing_its_job(subject)
+            );
+            assert_eq!(
+                doing_its_job(subject),
+                expected,
+                "{label}: a container sitting in a terminated run is doing the job it was given \
+                 only when it is an init container that finished — {:?} beside {role:?}",
+                ending(run)
+            );
+            if expected {
+                answered.0 += 1;
+            } else {
+                answered.1 += 1;
+            }
+        }
+    }
+    // Both answers are reached, or the equality above is satisfied by one constant
+    // (CLAUDE.md § Code phase rules, *a derived list asserts it found something*).
+    assert_eq!(
+        answered,
+        (2, 46),
+        "the two init shapes on the clean row say yes and the other forty-six rows say no"
+    );
+}
+
+/// **What the field actually holds on a real cluster, over the whole committed corpus** — the
+/// haystack any reader of it would start from, and reasoning (1) and (2) of this section
+/// checked rather than asserted about two files.
+///
+/// Two claims, and the split between them is the ruling's first half:
+///
+/// - Inside a pod that is **not** over, every captured container in `state.terminated` is an
+///   **init container that finished** — `exit 0`, permanently, on a pod that is serving. Two of
+///   them, and neither may become a finding.
+/// - The captures that hold a **bad** exit in this field hold it on a pod that is **over**, and
+///   [`analyze`] never looks at those (NOTES § D2) — proved, on these same two objects, by
+///   [`a_pod_that_finished_is_charged_to_nobody_and_alarms_about_nothing`], which is why the
+///   skip is cited here and not re-asserted. `failed.json`'s `exit 137` is the one bad exit
+///   this repository has in this field, and it is the reason no capture can prove a rule about
+///   it: the shape a rule would fire on is the shape the skip removes.
+///
+/// **A derived list, so it asserts what it found** — the sweep names both containers rather
+/// than counting them, or a decode that stopped producing [`ContainerState::Terminated`] would
+/// print the same green line as a corpus with nothing in it.
+#[test]
+fn every_captured_container_sitting_in_a_terminated_run_is_a_finished_init_container() {
+    let mut serving: Vec<String> = Vec::new();
+    let mut over: Vec<String> = Vec::new();
+    for name in CAPTURED_PODS {
+        let p = pod(name);
+        for c in &p.containers {
+            let ContainerState::Terminated(run) = &c.state else {
+                continue;
+            };
+            let seen = format!(
+                "{name}/{} ({:?}, {}) {}",
+                c.name,
+                c.role,
+                p.phase.as_deref().unwrap_or("no phase"),
+                exit_fact(run)
+            );
+            if finished(&p) {
+                over.push(seen);
+            } else {
+                assert_eq!(
+                    (c.role, ending(run)),
+                    (ContainerRole::Init, Ending::Finished),
+                    "{seen}: this is the field's normal state on a working cluster, and a \
+                     capture that broke that would make the ruling above an argument about \
+                     nothing"
+                );
+                serving.push(seen);
+            }
+        }
+    }
+    println!(
+        "inside a pod that is still going:\n  {}",
+        serving.join("\n  ")
+    );
+    println!("inside a pod that is over:\n  {}", over.join("\n  "));
+    assert_eq!(
+        serving,
+        [
+            "healthy-retry/wait-for-db (Init, Running) exit 0 (the run ended without an error)",
+            "healthy/migrate (Init, Running) exit 0 (the run ended without an error)"
+        ],
+        "both captures that carry the field, named — a sweep that found nothing prints the same \
+         line as one that found nothing wrong"
+    );
+    assert_eq!(
+        over,
+        [
+            "failed/app (Regular, Failed) exit 137 (Kubernetes lost track of the container and \
+          wrote this code in its place)",
+            "succeeded/migrate (Regular, Succeeded) exit 0 (the run ended without an error)"
+        ],
+        "and the only bad exit this field holds anywhere in the corpus is on a pod that is over"
+    );
+    for name in ["healthy", "healthy-retry"] {
+        nothing(
+            &findings(&[name]),
+            "a finished init container is what this field looks like on a pod that is working, \
+             and nothing about it is a finding",
+        );
+    }
+}
+// --- THE RUN A CONTAINER IS SITTING IN RIGHT NOW END ---

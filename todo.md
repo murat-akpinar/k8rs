@@ -1310,7 +1310,7 @@ this plan is delivery mechanism for what this phase produces.
       where it sits in `state.terminated`, which no rule reads — and the pairs the
       kubelet never writes stay deliberately unasserted, which is why one test had
       to be renamed rather than widened
-- [ ] **A container that is terminated *right now* with a bad exit is read by no
+- [x] **A container that is terminated *right now* with a bad exit is read by no
       rule as an ending** — rule 1 needs a `CrashLoopBackOff` waiting reason,
       rule 7 needs `Running`, `stuck_at_the_starting_line` returns early on any
       `last_terminated`, and rule 6 reads `lastState` and not `state`. One reader
@@ -1345,7 +1345,99 @@ this plan is delivery mechanism for what this phase produces.
       `AllContainersRestarting` condition, was measured and is **not** one: its
       value is a transient, `True` in 7 of 40 one-second samples on a thrashing
       pod and never once on a single-container one. Rule 5's own doc says *one
-      incident, one card*
+      incident, one card*.
+      **Ruled 2026-08-15: no
+      ([NOTES § D96](NOTES.md#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)).**
+      The field draws no card, the one reader may only *suppress*, and the ruling
+      is pinned by a test section rather than left as prose — the red run is a
+      reader being **added** and the suite falling over, twice, for a reader that
+      speaks on a bad ending and one that speaks on a clean one. Four legs, and
+      the operator review corrected three of them: a pod that is over leaves this
+      screen by D2 and — since `analysis.rs` does not exist and Jobs are not
+      watched — **lands on no screen at all today**; this field's normal state is
+      a finished init container, which the corpus sweep proves is its *entire*
+      committed population; and the reason to refuse it is **redundancy rather
+      than transience**, because `state.terminated` and `lastState` were measured
+      carrying the same record in the same snapshot, so refusing loses nothing
+      about any container that comes back. **The reply *then debounce it* is
+      answered by invariant 5**: a pure `analyze` has no memory, so a card here
+      would be a function of when the sampler looked, by construction.
+      **The cost, accepted and measured twice**: the gang trigger's own exit
+      reaches `lastState` in **0 of 80 samples across two clusters**, so it is
+      never nameable and rule 5's denial stands — which closes the fan-out half of
+      this box for good, not just for now. Three other candidates for *the only
+      record there will ever be* were hunted and none of them is one; a container
+      `crictl rm`'d under `Never` is even restarted anyway, with the synthesized
+      record landing in `lastState`.
+      **What the box shipped is a test section and no product code**, which is the
+      only honest shape for a ruling: `--- THE RUN A CONTAINER IS SITTING IN RIGHT
+      NOW ---`, three tests over seven shapes × six endings, plus the corpus
+      sweep and `doing_its_job`'s pin. **The red run is an addition, not a
+      reversion** — a reader is *added* to the rule set and the suite has to fall
+      over — and `tester` ran **25** of them, one per verb the ruling names:
+      drawing a card, changing an age, changing evidence, changing a command,
+      speaking on a clean ending, and drawing from a different rule. 22 died.
+      **The three that lived are why this box took a second pass.** `whole_card`
+      compared six of `Finding`'s eight fields, so a reader that rewrote the
+      **name at the top of the card** passed all 188 tests — the ruling's own
+      *cannot change a sentence* was untrue of the heading. It compares eight now,
+      by destructuring, so a ninth field stops the build rather than falling
+      outside the comparison; and an eighth shape was added on `owned-pods.json`,
+      because all five bases were bare pods where `owner == object` and the
+      dimension had nothing to separate. **Leg 2's corpus was not the corpus**: a
+      hand-maintained list of 31 names, against which a planted fixture that
+      directly falsifies the claim stayed green — it is derived from the fixtures
+      directory now, asserted equal both ways, with `List` fixtures excluded
+      structurally rather than by name. And the **age** verb was caught only
+      because the table happens to carry two stamp-less endings, which the table's
+      own comment explained as something else and now states.
+      **Four doc comments carried a promise this box retired** — *those pods
+      belong to the Waste report* — and only two were found by naming them; the
+      sweep found the other two, of which the worse is an **assert message**, the
+      sentence a failing run prints. And the leg that said *`analyze` skips every
+      pod rule* was contradicted by `analyze`'s own doc three lines above the
+      loop, which had said *"Rule 12 is deliberately outside the skip"* all along
+- [ ] **A container that has stopped for good inside a pod that is still
+      `Running` is on no k8rs screen, and `kubectl get pods` prints `Error` for
+      it** — the shape
+      [D96](NOTES.md#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)
+      ruled out of the transient class because it is **permanent**, and the one
+      the operator review says not to leave at the bottom of a phase. Measured on
+      kind v1.36.1: two pods sat at `1/2 Error`, `Ready: False`, `phase: Running`
+      for fourteen minutes with `restartCount: 0` and an empty `lastState`, every
+      rule in this file silent, while the tool the reader already has open printed
+      `Error` in its STATUS column — [D2](NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)'s
+      *do not teach them to trust the other tool*, pointing at us. The victims are
+      **Job pods and bare pods**: a Deployment-owned pod surfaces as a W-series
+      shortfall on its owner, and a single-container pod goes terminal and leaves.
+      **The condition is decidable and the obvious version of it is a false
+      positive.** `restartPolicyRules` can only *add* restarts — the API rejects
+      `DoNotRestart` outright — so *will this container come back* is
+      `container.restartPolicy ?? pod.restartPolicy`, with any matching rule
+      overriding it upward:
+      `Always` yes · `OnFailure` only on a non-zero exit · `Never` no · any
+      `restartPolicyRules` entry matching the exit code, yes. **A reader that
+      takes the policy and not the rules beside it ships the KEP's headline use
+      case as a false positive** — measured, pod `Never` / container `Never` with
+      one retry rule on exit `3` was in `CrashLoopBackOff` at five restarts, which
+      a policy-only reader calls *stopped for good*. Note also that a **regular**
+      container may override the pod at this version (`ContainerRestartRules`,
+      beta on by default), so *`Always` restarts everything* is a 1.28 sentence.
+      **Two shapes are not in that table at all**: a native sidecar (an init
+      container with `restartPolicy: Always`) is restarted until the regular
+      containers terminate and is then shut down and *not* restarted, so its
+      answer changes with the pod's phase of life rather than with its own
+      fields; and a plain init container failing under pod `Never` takes the whole
+      pod to `Failed`, which is leg 1's door and not this box's subject.
+      **What it needs**: `spec.restartPolicy` on `PodSnapshot` and the rules list
+      on `ContainerSnapshot` — the container's own `restartPolicy` is already read
+      for `ContainerRole::Sidecar`, so this is two fields and no new join — plus a
+      **new capture**, because no committed fixture holds the shape (a pod with
+      `restartPolicy: Never`, one container exiting non-zero, one sleeping). The
+      capture is the PM's, under `K8RS_CLUSTER=k8rs` and the sanitization gate.
+      Decide too what the clean-exit half says: `OnFailure` with `exit 0` beside a
+      running sibling is the *Job never completes because the helper is still
+      running* shape, which is the same silence with a different sentence
 - [ ] **A pod that used its own restart rule three times and has served ever
       since carries two permanent WARN cards, and the object says it is over** —
       measured on kind v1.36.1: `gang-restart`, `2/2 Ready`, `phase: Running`,
@@ -1492,6 +1584,20 @@ this plan is delivery mechanism for what this phase produces.
       titles and rule 6's still say *the container's last run***, which is the
       claim this box says the object does not support. One of them is D93-blessed
       and shipped, so moving it is this box's call and not a wording tidy-up
+- [ ] **`just check` cannot see a comment's width, so the 100-column rule is a
+      convention and not a gate** — `cargo fmt` reflows code and leaves comments
+      alone, and two lines over 100 columns shipped into `rules.rs` on
+      2026-08-15 and were caught by a reviewer counting characters rather than by
+      the build. **Config is not the fix**: `rustfmt`'s `wrap_comments` and
+      `error_on_line_overflow` are both nightly-only options, so a `rustfmt.toml`
+      would be silently ignored on the pinned stable toolchain — which is worse
+      than no gate, because it looks like one. A `scripts/` guard is, and it is
+      `tester`'s: fail on any line in `src/*.rs` past 100 columns, run from
+      `just check` with a `--self-test` like its neighbours. **It needs a decision
+      it cannot make for itself**: the file already carries a deliberate markdown
+      table whose rows are long on purpose, so either the table is rewrapped or
+      the guard learns one narrow, named exemption — an unnamed allowance is how a
+      guard becomes decoration
 - [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
       in the green line, not an assertion, so nothing fails and that is exactly
       why it will survive. One word, `tester`'s file, and it goes with whichever
@@ -1512,7 +1618,16 @@ this plan is delivery mechanism for what this phase produces.
       it to read D94 before naming the cluster is what handed it the name. Nothing
       to fix in the record; it is the sharpest possible argument that the refusal
       has to be mechanical, since the file warning about the name is itself a way
-      of spreading it.
+      of spreading it. **Third instance the same day, and this one actually ran**:
+      the review of the D96 ruling brought its cluster up as `k8rs-review`,
+      against a brief that said `review`, so `k8rs-review-control-plane` existed
+      on a machine and `sanitize.jq` would have waved its node name through.
+      Nothing leaked — a review takes no captures — but the refusal has now been
+      defeated in practice by the second agent to reach for it, which is the
+      argument for anchoring rather than repeating. **One wording fix belongs with
+      the anchor**: `CLAUDE.md` says the sanitizer refuses *a name*, and it
+      refuses a **node-name prefix** — `review` is refused only because kind names
+      the node `review-control-plane`.
       **The primary fix is in `sanitize.jq`, not in `cluster.sh`** — the reviewer
       never ran `cluster.sh`, it ran `kind create cluster` directly, because a
       review is one measurement and not a fixture trip, and the next one will skip
