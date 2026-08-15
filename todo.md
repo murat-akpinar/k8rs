@@ -1487,6 +1487,31 @@ cluster either.
       and not a promise. Landed in a later phase than the one that found it,
       per CLAUDE.md § What to do next. Done-when: a self-test plants a decision
       with no index line and the guard goes red on it
+- [ ] **The fixture sanitization gate does not run over `reports/`, and that is
+      where raw cluster output now lands** — `reports/` takes an agent's
+      measurements into a *committed* file
+      ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)),
+      which is the path `scripts/sanitize.jq` exists to guard for fixtures. Today
+      the rule is a paragraph in [`reports/README.md`](reports/README.md) enforced
+      by the PM reading the diff — a promise, and
+      [D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12) is what
+      promises are worth here. The guard is not the fixture sanitizer reused:
+      that one rewrites JSON, this one reads prose and must refuse a token, a
+      PEM block, a kubeconfig, an env value, an annotation payload, a node IP or
+      a hostname wherever it appears in a markdown file. **Feed it every framing**
+      (D31): the value whole, as a substring of a longer line, inside a fenced
+      block, and base64-re-encoded. `tester`'s files, and it runs from
+      `just check` with a `--self-test` like its neighbours. Done-when: each
+      refused class is planted once, seen red, and the clean tree green before
+      and after — and one **canary** proves the guard is reading the directory at
+      all, so *found nothing* cannot print the same line as *nothing to find*
+- [ ] **`reports/` has no retention rule and this repo's disease is append** —
+      the directory grows one file per measurement forever, in the tree
+      [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+      ruled must get smaller. Decide the bound before there is anything to bound:
+      whether a report whose decision landed is deleted, kept, or reduced to the
+      `D##` that cites it. PM's, at a phase close, not mid-phase
+
 *Moved out of Phase 3: `tester`'s files, no rule touched ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))*
 
 - [ ] **`just check` cannot see a comment's width, so the 100-column rule is a

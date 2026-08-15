@@ -129,6 +129,7 @@ its line moving with it.
 - [D105](#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16) — the security gate splits into what a script can decide today, and what is waiting for code
 - [D106](#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16) — Phase 3's twenty-three open boxes are two families, six foreign boxes and one already done
 - [D107](#d107--claudemd-grew-back-past-the-size-that-made-d60-compress-it-2026-08-16) — CLAUDE.md grew back past the size that made D60 compress it
+- [D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16) — work with no phase gets a file, and measurements get a directory
 
 ## Why it exists — where the gap is
 
@@ -7574,6 +7575,70 @@ is 42–75 lines per file, each one saying in its own words that `CLAUDE.md` is
 binding and is not restated there, each citing `D##` rather than re-arguing —
 `540b87e` already removed the copies. They are left alone. The file that grew is
 the file every session loads in full.
+
+### D108 — work with no phase gets a file, and measurements get a directory (2026-08-16)
+
+Two gaps, both visible in the same hour, both created by rules that were right.
+
+**`todo.md` had no home for work that belongs to no phase.**
+[CLAUDE.md](CLAUDE.md#what-to-do-next) says a box is never added to an open phase
+and what is found mid-flight is *boxed in a later phase* — which is correct and
+has one failure mode: *later phase* becomes the answer to everything, and the
+next phase's scope is decided by what the previous phase happened to trip over.
+Measured the same day:
+[D106](#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16)
+moved six boxes out of Phase 3 and took Phase 4 from twelve open boxes to
+eighteen — a 50% scope increase on a phase nobody had planned that way.
+[`backlog.md`](backlog.md) is where an unphased finding goes instead.
+
+**The rule that keeps it from becoming a second `todo.md` is that nothing in it
+is work.** No agent reads it, `/basla` reads `todo.md` and only `todo.md`, and
+the triage that turns entries into boxes runs at phase close with the rest of the
+ritual. It also makes the file every turn pages through smaller, which is
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+standing demand: an entry that is never picked is pure weight in `todo.md` and
+costs nothing in a file nobody opens mid-phase.
+
+**`k8s-admin` measures and writes nothing down.** Its definition tells it to
+paste commands and real output, and that output lands in a report to the PM that
+lives in a conversation and ends with it. What survived did so by being retyped
+into a box body — *`docker restart` leaves `exitCode: 255, reason: "Unknown"`* is
+in `todo.md` for that reason and nowhere else, and it is the measurement that
+turned a shipped rule into a defect. [`reports/`](reports/README.md) keeps the
+measurement itself, one file per run, named by date and subject.
+
+**So `k8s-admin`'s ownership row changes from *nothing* to `reports/`**, and it is
+the only agent whose row changes. It is the agent whose output was evaporating;
+giving the tree to anyone else would mean transcription, which is the step that
+was already losing the data. Everything else about it holds — it still never
+edits product code, still never commits, and a measurement is still evidence for
+a finding and never a box's done-when
+([D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)).
+
+**A report may not conclude.** If a measurement settled something, the settlement
+is a decision with a `D##` here, and the report is what that decision cites. A
+report that argues is the second copy of a decision, and this file has already
+ruled which copy goes stale.
+
+**The security finding this opens, stated rather than deferred quietly.** A report
+carries real cluster output into a *committed* file, which is the exact path
+`scripts/sanitize.jq` exists to guard for fixtures — and it does not run over
+`reports/`. Until a guard does, the rule is manual and narrow: no object dumps,
+only the specific field values a finding turns on, never a token, key,
+kubeconfig, env value, annotation payload or node identifier
+([REQUIREMENTS § DevSecOps](REQUIREMENTS.md#devsecops-requirements)). Extending
+the gate is `tester`'s and is boxed in Phase 4. A manual rule enforced by the PM
+reading the diff is the weaker thing this repo has already been burned by
+([D26](#d26--a-green-build-that-proves-nothing-2026-08-12)), which is why the box
+exists rather than a promise.
+
+**mem0 was proposed in the same breath and is not built.** Persistent memory is
+already done twice — this file, versioned and guarded by `scripts/check-docs.py`,
+and the session memory directory outside the repo — and a hosted instance would
+put project data on an outbound connection
+[docs/security.md](docs/security.md) says does not exist. Recorded in
+[`backlog.md`](backlog.md) § Ruled out so the idea does not arrive a second time
+without the reason attached.
 
 ## Decisions made
 

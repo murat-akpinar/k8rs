@@ -65,6 +65,8 @@ whoever is writing — a dev at step 3 as much as the PM at step 7:
 | **Why** a choice was made — every decision, numbered `D1…` | [NOTES § Decision index](NOTES.md#decision-index) first — one line each; open the one section you need, never the whole file |
 | **What** is required, per role (developer / devops / devsecops) | [REQUIREMENTS.md](REQUIREMENTS.md) |
 | **When** — phases, order, done-when. The only place steps are checked off | [todo.md](todo.md) |
+| Work that belongs to **no phase yet** — a finding nobody has ruled on, an idea with no home | [backlog.md](backlog.md) — nothing in it is work; read at phase close, never mid-phase ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)) |
+| A **measurement** somebody already made — commands and their real output | [reports/](reports/README.md) — evidence a decision cites, never the decision |
 | The **built** state, for humans outside this repo | [docs/](docs/README.md) — never contains anything not yet true of the code |
 | What a screen actually looks like, key by key | [screens/](screens/README.md) — one file per screen |
 | The v1 rule set (rules 1–11, severities, thresholds) | [NOTES § v1 rule set](NOTES.md#v1-rule-set) |
@@ -381,8 +383,8 @@ Every path in the repo appears in exactly one **Writes** cell.
 | `dev-ui` | `theme.rs` `views.rs` `ui.rs`, `main.rs` **from Phase 12**, `examples/` (the Phase 8 spike) | the four lower files |
 | `tui-designer` | `screens/` | any `.rs` |
 | `tester` | `tests/` `scripts/` `justfile` `clippy.toml` `deny.toml` `.github/workflows/` | product code in `src/` — **including the rule tests**, see below |
-| `k8s-admin` | nothing — reads everything, reports | every file |
-| **PM** (main session) | `todo.md` `NOTES.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/` `.claude/commands/`, branches, commits, PRs | `src/` (delegate it) |
+| `k8s-admin` | `reports/` — its own measurements, one file per run | every other file: no code, no screen, no plan, no box |
+| **PM** (main session) | `todo.md` `NOTES.md` `backlog.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/` `.claude/commands/`, branches, commits, PRs | `src/` (delegate it) |
 
 **A `<name>_tests.rs`, and every module under `<name>_tests/`, has the same
 writer as `<name>.rs`** (invariant 11): the tests move out of the file, never out
@@ -438,7 +440,12 @@ cluster tunes the code until the cluster agrees. It runs under
 **`K8RS_CLUSTER=review`** — the default name is the PM's fixture cluster and
 teardown would delete it, and `review` is additionally a name `scripts/sanitize.jq`
 **refuses**, so a review cluster cannot produce a committed fixture even by
-mistake. One cluster at a time, and its output is evidence for a *finding* — a
+mistake. **The cluster is ephemeral; the write-up is not** — the measurement
+lands in [`reports/`](reports/README.md) under that file's sanitization rule,
+which is what keeps *an object from the cluster* on the PM's side of this split
+while *what was observed about it* stays on `k8s-admin`'s
+([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)).
+One cluster at a time, and its output is evidence for a *finding* — a
 box that needs a cluster to close is still a PM box.
 
 ### The one hard rule of concurrency
@@ -455,8 +462,8 @@ say. What may genuinely run at the same time — at most one writer per row:
 |---|---|
 | one dev writing `src/` · `tester` writing `tests/`, `scripts/` | disjoint trees |
 | one dev writing · `tui-designer` on a **later** phase's screen | `screens/` is not code |
-| two reviewers (`k8s-admin` + `tui-designer`) on the same diff | neither writes a file — but if `k8s-admin` is measuring, no capture runs beside it |
-| one dev writing · `k8s-admin` auditing an **already merged** phase | the audit lands as findings, not as an edit |
+| two reviewers (`k8s-admin` + `tui-designer`) on the same diff | disjoint trees — `k8s-admin` writes only `reports/`, `tui-designer` only `screens/`; but if `k8s-admin` is measuring, no capture runs beside it |
+| one dev writing · `k8s-admin` auditing an **already merged** phase | the audit lands as findings and a `reports/` file, never as an edit to the thing audited |
 
 Anything else runs one at a time; worktree isolation (`isolation: "worktree"`)
 exists if two writers are ever unavoidable, but reach for the plan fix first.
