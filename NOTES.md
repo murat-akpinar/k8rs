@@ -125,6 +125,7 @@ its line moving with it.
 - [D101](#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15) — a point sample cannot separate a settled container from one on a long cycle, so the count becomes a report row
 - [D102](#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15) — the second copy of a shared sentence is dropped, by `analyze` and not by a rule
 - [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15) — the process was measured, and what it lacked was a rule that makes something smaller
+- [D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15) — the second agent was re-running the first agent's commands, and a tool does it better
 
 ## Why it exists — where the gap is
 
@@ -7195,11 +7196,19 @@ dependency `rules.rs`'s purity does not survive. A rule owes a true card;
 `analyze` owes that two true cards about one container do not tell one story
 twice.
 
-**The scope is the container, and that is load-bearing.** `Finding::object` is
-the *pod*, so the same fold over a pod would drop the card about a second
-container that lost its status too — a pod-wide silence produced out of a
-per-container fact. The caller's `for c in &pod.containers` supplies the scope;
-no new `Finding` field, no matching on evidence text.
+**The scope is the container, and the first reason written here for it was
+measurably false.** `Finding::object` is the *pod*, and this entry said a
+pod-wide fold would therefore drop the card about a second container that lost
+its status too. The operator review moved the fold out of the loop and ran the
+suite: **205 passed.** It cannot eat the neighbour's card *today*, because every
+card the eight container rules draw leads with `container_fact`, so the
+subset clause below fails on the first fact of any cross-container pair. The
+scope is kept for the converse, which is the reason that will still be true
+later: **the day a rule draws a card whose evidence does not lead with
+`container_fact`, a pod-wide fold starts deleting the neighbour's cards**, and
+`for c in &pod.containers` insures against that for nothing. A reason that only
+holds while a coincidence holds is not a reason, and the test named after this
+paragraph passed with the fold pod-wide until it was rewritten to fail.
 
 **The more severe survives** — `Severity`'s derived `Ord` declares `Critical`
 first, so the fold keeps the *smaller* value, and a comparison written the
@@ -7214,6 +7223,19 @@ evidence split on `FACTS`, must already be on the card that beats it, and it may
 carry no `timestamp` the survivor lacks. A duplicated sentence is a cheap
 failure; a fact deleted off the screen because a neighbour worded its advice the
 same way is not.
+
+**The key is API free text in one arm, and the guard that makes that safe was
+accidental.** `previous_run_failed`'s `Failed` branch sets its action from
+`last_words(Terminated::message)` — a string the object carries, which anything
+that can write `/dev/termination-log` can choose. So a crafted message that
+equalled another rule's action verbatim would delete that rule's card, and the
+only thing preventing it is that `last_words` frames the quote with a constant
+prefix no static action shares. Nobody wrote that down and nothing asserted it;
+it is the security gate's *free text from the API is untrusted* reaching a place
+the gate's own list does not name — not the screen, but a comparison the screen
+is derived from. **The ruling: the frame is pinned by a test**, and the fold's
+key stays a `String` rather than growing a type, because the frame is what makes
+the strings disjoint.
 
 **Today it fires on exactly two pairs**, both against `previous_run_failed` on
 `Ending::Unwatched`: `crash_looping` beside it, and `restarting_repeatedly`
@@ -7302,6 +7324,49 @@ Found work is recorded and lands in a later phase.
 invariant moves. Everything cut here is a second copy of something that exists
 elsewhere — which is [D102](#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15)'s
 finding, one layer up.
+
+### D104 — the second agent was re-running the first agent's commands, and a tool does it better (2026-08-15)
+
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+measured what a box costs to *read*. This is what a box costs to *run*, measured
+on the same day over one box — the `analyze` fold,
+[D102](#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15):
+
+| dispatch | wall | tokens | defects it found |
+|---|---|---|---|
+| `dev-core` writes it, proves it red then green | 19 min | 207k | — (the work) |
+| `tester`, step 4 | 14 min | 120k | **0** |
+| `k8s-admin`, family review | 33 min | 212k | **2**, both load-bearing |
+| `dev-core` fixes | 8 min | 230k | — |
+
+**Step 4 re-ran four mutations that were already red and found nothing.** Its
+fifth, its own, went green once the predicate was tightened — an artifact of the
+looser code, not a defect. What that turn *did* find came from somewhere else
+entirely: a probe that fed the fold a stamped record, and an audit of whether the
+expected numbers in the edited tests were derived from the requirement or updated
+to match the output. Meanwhile the two real defects — the survivor's title losing
+the diagnosis, and this file recording a reason for the container scope that a
+five-minute experiment showed was false — came from the review that reads a
+family at once.
+
+**So the reproduction moves to `just mutants` and stays mechanical.** D26's rule
+was never *a second agent repeats the first one*; it was *a test that cannot fail
+is not a test*, and a surviving mutant states exactly that, from a tool with no
+incentive to say the build is green. The author still pastes its own red and
+green — that is evidence for the reader, not the gate. `tester` keeps the work
+that pays: attack the assertions, feed the shapes nobody fed, read what the
+screen prints, run `just check`.
+
+**And the dev writes a family in one turn, because that is what the reviewer
+already reads.** The `137` chain cost four boxes over 27 hours one rule at a
+time, and the fourth found what the first three could not see from inside a
+single rule. A family briefed as one box is one dev turn and one review; boxes
+that share no code stay one at a time, because batching unrelated work is how a
+review stops fitting in a reviewer's head.
+
+**What is deliberately not cut**: the operator review, the second pass over the
+landed tree, the security gate. In this measurement they are the only things that
+found anything, and speed taken out of them is not speed.
 
 ## Decisions made
 

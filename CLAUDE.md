@@ -481,7 +481,15 @@ prove a failure in two files it does not own before it could report.
 
 ### The cycle — one `todo.md` box is one turn of it
 
-The box is the unit of work, never a phase and never "the next few boxes".
+The box is the unit of work, never a phase and never "the next few boxes" —
+**with one exception, and it is the one that pays**: boxes of the same **family**
+that touch the same code are briefed, written and reviewed **together**, in one
+turn of the cycle. Four boxes fixing `137` one rule at a time cost 27 hours and
+the fourth found what the first three could not see
+([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
+A family is what step 6 already reviews as one; splitting it for the dev and
+merging it for the reviewer is the worst of both. Unrelated boxes stay one at a
+time.
 
 | # | Step | Who | Gate to pass |
 |---|---|---|---|
@@ -531,13 +539,24 @@ reason recorded in `NOTES.md`.
 Agents never create, switch, merge or delete a branch. Work that is not a
 phase — a fix, a docs change, this file — goes on `development` too.
 
-### Step 4 is the anti-leak mechanism, so it is mechanical
+### Step 4 is the anti-leak mechanism, so a machine runs it
 
-"I saw it fail" is a claim; `tester` reproduces it. Stash or comment out the
-implementation body, run the test, watch it fail, restore, watch it pass — and
-paste **both** outputs
-([D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12)). Same for
-guards in `scripts/`.
+"I saw it fail" is a claim, and
+[D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12) exists because
+a green build once proved nothing. **The author still proves its own change red
+then green and pastes both outputs** — that is step 3's, not a separate turn.
+What checks the *claim* is `just mutants` over the changed file: a surviving
+mutant is a test that cannot fail, stated by a tool that has no incentive
+([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
+
+**So `tester` no longer re-runs the author's mutations by hand.** Measured on
+2026-08-15, the fold box: fourteen minutes and 120k tokens re-running four
+mutations that were already red, and **zero** defects found by the re-run. Its
+work is the part that did find things — attack the assertions (is this expected
+number derived from the requirement, or updated to match the output?), feed the
+shapes the author did not, read what the screen actually prints, and `just
+check`. Guards in `scripts/` keep the hand `--self-test`, which is their
+equivalent.
 
 ### The brief the PM hands out, and the report it gets back
 
