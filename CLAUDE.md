@@ -561,9 +561,16 @@ feed the shapes the author did not, read what the screen actually prints, and
 
 ### The brief the PM hands out, and the report it gets back
 
-The brief, five lines, no more: the box verbatim · the files you may write ·
-what "done" means for this box · which `NOTES.md` section decides the
-behaviour · what is explicitly out of scope this turn.
+The brief, six lines, no more: the box verbatim · the files you may write ·
+what "done" means for this turn · which `NOTES.md` section decides the
+behaviour · what is explicitly out of scope · **and what to read, by region**.
+
+**That last line is the one that costs hours when it is missing**
+([D110](NOTES.md#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16)).
+An agent starts cold and, told only *fix rule 5*, pages the whole file. Name the
+`// --- … START ---` regions and the test modules the turn actually touches, plus
+the shared helpers it must not disagree with — the pod rules are 2 454 lines of
+`rules.rs`, not its 5 186, and the region markers exist for exactly this.
 
 The report, or the work is not received: what changed and where · the exact
 commands run and their real output · the red run and the green run · what could

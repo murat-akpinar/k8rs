@@ -33,6 +33,14 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   `cargo deny` — except step 2, *build it and run it on the test host*, which
   needs a remote machine and is therefore the one that can be skipped in silence.
   Raised 2026-08-16; the user has not ruled on it.
+- **`src/rules_tests/pod.rs` is 9 809 lines, the largest file in the repo**, and
+  every dispatch touching a pod rule pages it
+  ([D110](NOTES.md#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16)).
+  Splitting it is the obvious next cut and is deliberately not taken on a line
+  count alone: it is where
+  [D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)'s
+  warning lands, since a module boundary is where a second copy of a shared
+  helper grows back. Needs evidence and a ruling, at a phase close.
 - **`PRIOR-ART.md`'s gaps that no ruling has boxed.** The file is evidence and
   never a plan, and a gap becomes a box only by a decision
   ([D89](NOTES.md#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14)

@@ -131,6 +131,7 @@ its line moving with it.
 - [D107](#d107--claudemd-grew-back-past-the-size-that-made-d60-compress-it-2026-08-16) — CLAUDE.md grew back past the size that made D60 compress it
 - [D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16) — work with no phase gets a file, and measurements get a directory
 - [D109](#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16) — the family is the unit of work, and the commit stays per turn
+- [D110](#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16) — the brief names the regions, because a cold dispatch reads fifteen thousand lines
 
 ## Why it exists — where the gap is
 
@@ -7702,6 +7703,56 @@ running:** [D107](#d107--claudemd-grew-back-past-the-size-that-made-d60-compress
 cuts what every agent reads before it starts, and
 [D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)
 already removed a whole dispatch's worth of re-run from every box.
+
+### D110 — the brief names the regions, because a cold dispatch reads fifteen thousand lines (2026-08-16)
+
+The user reported a box costing two hours and named the markdown files as the
+cause. Measured instead of accepted, and the measurement refuses the premise —
+this is what one cold `dev-core` dispatch has in front of it:
+
+| File | Lines |
+|---|---|
+| `src/rules_tests/pod.rs` | 9 809 |
+| `NOTES.md` | 8 658 |
+| `src/rules.rs` | 5 186 |
+| `todo.md` | 2 449 |
+| **`CLAUDE.md`** | **680** |
+
+**`CLAUDE.md` is 2% of it.** [D107](#d107--claudemd-grew-back-past-the-size-that-made-d60-compress-it-2026-08-16)
+cut it by 3%, which is three parts in ten thousand of what a dispatch reads, and
+an hour was spent there before anything was measured — the same error D107 itself
+records, made twice in one day. `pod.rs` alone is fourteen times the file that
+was being compressed.
+
+**The second half of the cost is the dispatch count, and it is now measured too.**
+The `todo-guard` turn — one agent, one small Python file, no rule logic — took
+**10.2 minutes and 94 632 tokens**. A box runs four to five of those in sequence:
+dev, the mutation run, `tester`, `k8s-admin`, then the PM's own pass. Two hours is
+that arithmetic, not a bloated instruction file.
+
+**The ruling: the brief names what to read, by region.** `rules.rs` already
+carries `// --- … START ---` markers and they map one-to-one onto the test
+modules — pod 2 454 lines, snapshot 994, node 948, workload 326, certificate 153.
+An agent told *fix rule 5* and nothing else pages all 5 186; an agent told *the
+pod region, `rules_tests/pod.rs`, and the helpers `ending` / `exit_meaning`*
+reads a third of it. The brief grows from five lines to six, and it is the
+cheapest of the three levers because it moves no file and changes no rule.
+
+**The other two levers are already banked and are the larger ones.**
+[D106](#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16)
+and [D109](#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)
+made the family the unit, taking Phase 3 from twenty-three turns to six — a ~4×
+cut in dispatch count, which is the thing the clock is actually spent on.
+[D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)
+removed one dispatch's worth of re-run from every box before that.
+
+**What is deliberately not done: `pod.rs` is not split.** It is the largest file
+in the repo and the obvious next cut, and it is exactly where
+[D91](#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)'s warning
+applies — a module boundary is where the second copy of a shared helper grows
+back, and the defects this repo has paid most for were two rules reading one
+container and disagreeing. A split there is a decision with evidence behind it,
+not a reflex against a line count. Recorded in [`backlog.md`](backlog.md).
 
 ## Decisions made
 
