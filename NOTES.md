@@ -7378,15 +7378,18 @@ single rule. A family briefed as one box is one dev turn and one review; boxes
 that share no code stay one at a time, because batching unrelated work is how a
 review stops fitting in a reviewer's head.
 
-**And the first draft of this entry wrote a gate nobody could pass.** It said
-*`just mutants` over the changed file*. Run once: **519 mutants** on `rules.rs`
-after a 58-second baseline build, which is hours, per box. The tool that was
-brought in to make the cycle cheaper would have made it unrunnable, and the only
-reason it was caught is that it was run instead of reasoned about — which is the
-same rule this repo already has for tests. **So the per-box gate is
-`cargo mutants --in-diff`, over the box's own diff**; the whole-file run stays
-what `todo.md` always had it as, a phase-close gate, with `--iterate` to skip
-what an earlier run already caught.
+**And the first draft of this entry wrote the gate at the wrong scope, twice —
+in both directions.** It said *`just mutants` over the changed file*. Run once:
+**519 mutants** on `rules.rs`, 58-second baseline build, **~2s per mutant**,
+twenty-odd minutes whole. The first correction called that *hours, unrunnable in
+a box*, which was an estimate written before the run finished and was wrong by an
+order of magnitude — the same defect as the sentence it was fixing, one turn
+later. What is true is smaller and still decides it: **a box that changed one
+function has no business re-proving the other five hundred mutants**, so the
+per-box gate is `cargo mutants --in-diff` over the box's own diff, and the
+whole-file run stays what `todo.md` always had it as, a phase-close gate, with
+`--iterate` skipping what an earlier run caught. Both wrong versions came from
+reasoning about a number instead of reading it.
 
 **What is deliberately not cut**: the operator review, the second pass over the
 landed tree, the security gate. In this measurement they are the only things that

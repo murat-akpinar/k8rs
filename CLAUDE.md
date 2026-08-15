@@ -550,9 +550,10 @@ cannot fail, stated by a tool that has no incentive
 ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
 **Per box it is scoped to the diff** —
 `cargo mutants --timeout 90 --in-diff <(git diff HEAD)` — because `just mutants`
-over the whole file generates **519** mutants on `rules.rs` and cannot finish
-inside a box. `just mutants` is the *phase-close* gate it always was, and
-`--iterate` skips what an earlier run already caught.
+over the whole file is **519 mutants at ~2s each**, twenty-odd minutes, and a
+box that changed one function has no business re-proving the other five hundred.
+`just mutants` whole is the *phase-close* gate it always was, and `--iterate`
+skips what an earlier run already caught.
 
 **So `tester` no longer re-runs the author's mutations by hand.** Measured on
 2026-08-15, the fold box: fourteen minutes and 120k tokens re-running four
