@@ -14,6 +14,118 @@ The original sentence ended "…without installing anything into the cluster",
 and the tool was read-only. Nothing is still installed into the cluster; the
 read-only part is gone on purpose.)*
 
+## Decision index
+
+Every numbered decision, one line each — **read this, then open the one section
+you need.** The file is ~150k tokens and no agent turn should page through it to
+find an entry (NOTES § D103). Each line links its own anchor, so
+`scripts/check-docs.py` fails on a heading that was renamed or removed without
+its line moving with it.
+
+- [D1](#d1--the-audience-contradiction-resolved) — The audience contradiction, resolved
+- [D2](#d2--the-dividing-line-broken-now-vs-risky-later) — The dividing line: broken now vs. risky later
+- [D3](#d3--findings-group-by-owner-not-by-pod) — Findings group by owner, not by pod
+- [D4](#d4--the-flagship-example-promised-a-number-that-cannot-exist) — The flagship example promised a number that cannot exist
+- [D5](#d5--namespace-scoping-is-a-v1-requirement-not-a-filter) — Namespace scoping is a v1 requirement, not a filter
+- [D6](#d6--operation-order-was-inverted-for-the-audience) — Operation order was inverted for the audience
+- [D7](#d7--rollout-undo-joins-the-operation-set) — `rollout undo` joins the operation set
+- [D8](#d8--invariant-4-was-not-literally-true) — Invariant 4 was not literally true
+- [D9](#d9--one-rule-added-to-v1-the-rest-recorded-not-built) — One rule added to v1; the rest recorded, not built
+- [D10](#d10--m1-ships-publicly-as-v001) — M1 ships publicly as v0.0.1
+- [D11](#d11--the-ninth-file-pre-approved) — The ninth file, pre-approved
+- [D12](#d12--the-key-map-and-two-keys-deleted) — the key map, and two keys deleted
+- [D13](#d13--licence-gpl-30-or-later-reversed-2026-08-12) — licence: `GPL-3.0-or-later` (reversed 2026-08-12)
+- [D14](#d14--three-plan-corrections) — three plan corrections
+- [D15](#d15--the-widget-layer-and-what-it-rules-out) — the widget layer, and what it rules out
+- [D16](#d16--the-context-switcher) — the context switcher
+- [D17](#d17--the---once-output) — the `--once` output
+- [D18](#d18--the-clock-is-an-input-not-an-ambient-fact) — the clock is an input, not an ambient fact
+- [D19](#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program) — 401 is a third case, and the kubeconfig can run a program
+- [D20](#d20--a-call-that-takes-time-is-a-state-and-there-was-none) — a call that takes time is a state, and there was none
+- [D21](#d21--if-the-write-cannot-be-audited-the-write-does-not-happen) — if the write cannot be audited, the write does not happen
+- [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms) — a confirmation can outlive the thing it confirms
+- [D23](#d23--permissions-are-discovered-by-failing-and-that-is-backwards) — permissions are discovered by failing, and that is backwards
+- [D24](#d24--ctrl-z) — Ctrl-Z
+- [D25](#d25--what-this-review-did-not-decide) — what this review did not decide
+- [D26](#d26--a-green-build-that-proves-nothing-2026-08-12) — a green build that proves nothing
+- [D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12) — two findings the open watch already paid for
+- [D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) — the workload watch, and the blind spot it closes
+- [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) — a guard is proven only for the shapes it was fed
+- [D30](#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12) — the guards Phase 2 added, and the freeze they collided with
+- [D31](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12) — the sanitizer matched the whole string, and secrets are rarely the whole string
+- [D32](#d32--one-long-lived-development-branch-not-one-per-phase-2026-08-12) — one long-lived `development` branch, not one per phase
+- [D33](#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) — Phase 3 opens with one Phase 2 box still open, on purpose
+- [D34](#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12) — the temporary `main.rs` belongs to `dev-core` until Phase 12
+- [D35](#d35--just-mutants-is-a-check-that-cannot-fail-and-the-justfile-unfreezes-for-one-line-2026-08-12) — `just mutants` is a check that cannot fail, and the justfile unfreezes for one line
+- [D36](#d36--the-finding-shape-the-review-sent-back-2026-08-12) — the `Finding` shape the review sent back
+- [D37](#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12) — a controller's message is a status field, not a payload
+- [D38](#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12) — the grouping key was a derive, and a derive cannot be told what to ignore
+- [D39](#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12) — a Node owns pods, and three more things the shape could not say
+- [D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12) — the capture could not produce the shape, so the test sets one field
+- [D41](#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12) — `cargo mutants` cannot see the defect it was put there to catch
+- [D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12) — the snapshot types freeze one phase after the file they live in
+- [D43](#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12) — N2 has no clock, and that makes a finding's age optional
+- [D44](#d44--five-more-mockups-promising-numbers-nothing-produces-2026-08-12) — five more mockups promising numbers nothing produces
+- [D45](#d45--the-decode-invented-a-container-state-the-api-says-is-waiting-2026-08-12) — the decode invented a container state the API says is `Waiting`
+- [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12) — nine fields the contract dropped, and the drain that does not drain
+- [D47](#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12) — Phase 3 is running ahead of an open Phase 2, and what that buys and owes
+- [D48](#d48--a-check-that-is-switched-off-is-named-on-the-screen-that-would-have-shown-it-2026-08-12) — a check that is switched off is named on the screen that would have shown it
+- [D49](#d49--the-link-checker-skipped-every-link-that-wrapped-and-had-been-green-all-along-2026-08-12) — the link checker skipped every link that wrapped, and had been green all along
+- [D50](#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12) — the rule tests live in `rules.rs`, and no lib target is added to change that
+- [D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12) — the third review of the same contract, and the sentence that would have rebuilt the bug it closed
+- [D52](#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12) — the guards were fed the shapes their authors wrote, not the shapes the repo produces
+- [D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12) — a committed capture is never edited to make a test pass
+- [D54](#d54--now-is-metav1time-not-a-bare-jifftimestamp-2026-08-12) — `now` is `meta::v1::Time`, not a bare `jiff::Timestamp`
+- [D55](#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) — the clock was written backwards, and the clamp protects the harmless half
+- [D56](#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12) — C1 cannot represent "never expires", and a rule may not return a `Result`
+- [D57](#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12) — the pinned `now` is part of the fixture contract, and it makes "recent" unrepresentable
+- [D58](#d58--a-phase-2-box-was-passed-over-and-the-order-it-comes-back-in-2026-08-12) — a Phase 2 box was passed over, and the order it comes back in
+- [D59](#d59--the-sanitizer-refuses-a-requester-and-an-exit-status-guard-cannot-see-a-deletion-2026-08-12) — the sanitizer refuses a requester, and an exit-status guard cannot see a deletion
+- [D60](#d60--claudemd-was-compressed-and-four-stories-moved-here-2026-08-12) — CLAUDE.md was compressed, and four stories moved here
+- [D61](#d61--a-verify-predicate-must-hold-across-the-whole-window-not-at-one-instant-2026-08-12) — a verify predicate must hold across the whole window, not at one instant
+- [D62](#d62--the-fifth-place-a-node-name-lives-and-a-guard-that-asked-less-than-its-consumer-2026-08-12) — the fifth place a node name lives, and a guard that asked less than its consumer
+- [D63](#d63--the-field-kubectl-never-writes-and-a-substitution-test-that-could-not-see-a-clause-2026-08-12) — the field kubectl never writes, and a substitution test that could not see a clause
+- [D64](#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13) — the capture trip: what the cluster settled, and the approval it reversed
+- [D65](#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13) — the repin: N2 gains a clock, and what two agents decided that no brief did
+- [D66](#d66--just-check-is-not-quite-the-whole-of-ci-and-the-gap-is-the-one-ci-was-built-to-watch-2026-08-13) — `just check` is not quite the whole of CI, and the gap is the one CI was built to watch
+- [D67](#d67--the-cross-compile-row-closed-with-a-skip-and-what-the-skip-costs-2026-08-13) — the cross-compile row closed with a skip, and what the skip costs
+- [D68](#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13) — the age ladder is not the formatter's choice, and what the brief still left open
+- [D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13) — the operator review that reopened the box, and the prune line that was never true
+- [D70](#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13) — rule 8 is narrowed to `kube-system`, and every storage operator lives outside it
+- [D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13) — nine rules, three blockers, and the two that were decisions, not code
+- [D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13) — rule 13 is added to v1, and the field it was proposed on is narrower than the case
+- [D73](#d73--rule-10-and-the-test-that-argued-for-its-own-deletion-2026-08-13) — rule 10, and the test that argued for its own deletion
+- [D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13) — two candidate rules, one refused and one taken, decided on who actually runs this
+- [D75](#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13) — the third role nobody asked about, and the card that never cleared
+- [D76](#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13) — the review that built a cluster, and the premise it measured away
+- [D77](#d77--the-comment-cut-and-the-rationale-that-stays-in-the-code-2026-08-13) — the comment cut, and the rationale that stays in the code
+- [D78](#d78--the-socket-the-escalator-could-not-see-and-the-three-mutations-that-survived-the-fix-2026-08-13) — the socket the escalator could not see, and the three mutations that survived the fix
+- [D79](#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13) — the review that found the door beside the one D78 closed
+- [D80](#d80--the-tests-moved-out-of-rulesrs-and-d50s-ruling-did-not-move-with-them-2026-08-13) — the tests moved out of `rules.rs`, and D50's ruling did not move with them
+- [D81](#d81--the-node-rules-and-the-four-things-a-real-cluster-said-about-them-2026-08-13) — the node rules, and the four things a real cluster said about them
+- [D82](#d82--the-w-series-and-the-card-that-would-have-taught-people-to-mute-the-tool-2026-08-14) — the W-series, and the card that would have taught people to mute the tool
+- [D83](#d83--the-hours-rung-runs-to-48-and-the-age-ladder-gets-one-home-2026-08-14) — the hours rung runs to 48, and the age ladder gets one home
+- [D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14) — a memory-starved capture host silently turns `OOMKilled` into `Error`
+- [D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14) — rule 1 contradicts itself on a clean exit, and it gets its own box
+- [D86](#d86--c1s-parser-costs-three-minor-rust-versions-and-the-alternative-was-an-accepted-vulnerability-2026-08-14) — C1's parser costs three minor Rust versions, and the alternative was an accepted vulnerability
+- [D87](#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14) — C1 has two bands and they belong on two screens; D2 only ever ruled on one of them
+- [D88](#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14) — an exit code names an ending, never an agent, and the boundary for folding a found defect in
+- [D89](#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14) — k9s's tracker is read as prior art, and twelve of its classes become boxes
+- [D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15) — the third door, and the command trade D88 made a day earlier
+- [D91](#d91--the-tests-split-and-the-product-file-does-not-2026-08-15) — the tests split, and the product file does not
+- [D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15) — who may touch a cluster, split by the artifact and not by the agent
+- [D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15) — an exit code is translated once for every role, and `137` is read from the object rather than from the number
+- [D94](#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15) — the first review cluster was named `k8rs-review`, and a guard the obvious wrong name walks straight past is not a guard
+- [D95](#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15) — the two `137` reasons become endings, and rule 5 draws where rule 6 goes silent
+- [D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15) — the run a container is sitting in is no rule's subject, and the one reader may only suppress
+- [D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15) — a container that cannot come back gets rule 15, and a restart count stands in for a field the pinned types cannot see
+- [D98](#d98--the-user-leaves-the-room-and-the-pm-stops-asking-2026-08-15) — the user leaves the room, and the PM stops asking
+- [D99](#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15) — the pin follows the newest types, and the old rule was self-violating from the first capture
+- [D100](#d100--the-field-that-separates-a-settled-restart-from-a-live-one-was-already-in-the-snapshot-and-rule-5-never-read-it-2026-08-15) — the field that separates a settled restart from a live one was already in the snapshot, and rule 5 never read it
+- [D101](#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15) — a point sample cannot separate a settled container from one on a long cycle, so the count becomes a report row
+- [D102](#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15) — the second copy of a shared sentence is dropped, by `analyze` and not by a rule
+- [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15) — the process was measured, and what it lacked was a rule that makes something smaller
+
 ## Why it exists — where the gap is
 
 Looking at the existing tools:
@@ -7110,6 +7222,86 @@ beside it. Every other action in the file is distinct per container.
 **Cost:** O(n²) over at most eight cards, which is why the drops are picked
 rather than sorted for. It applies to every shared action, not to this one pair
 — which is what the box asked for.
+
+### D103 — the process was measured, and what it lacked was a rule that makes something smaller (2026-08-15)
+
+The user asked whether the rules themselves had made the work slow: one box was
+taking about two hours. Measured before answering.
+
+| | |
+|---|---|
+| age | 2026-08-12 00:25 → 2026-08-15 21:00, ~3.8 days |
+| boxes | 76 closed, 121 open |
+| last three days | ~6 boxes/day ≈ **2 h/box** |
+| `just check`, full, warm | **40 s** |
+
+**The gate is 40 seconds of a two-hour box, so the build was never the
+bottleneck.** What costs is the reading. The set an agent must orient in before
+it may write a line:
+
+| file | ≈tokens |
+|---|---|
+| `src/rules_tests.rs` | 231k |
+| `NOTES.md` | 149k |
+| `src/rules.rs` | 83k |
+| `todo.md` | 70k |
+| `CLAUDE.md` + `PRIOR-ART.md` + `REQUIREMENTS.md` | 27k |
+
+**≈560k tokens, and a box spends four to five cold dispatches in it** —
+`dev-core`, `tester` twice, `k8s-admin`, then the PM's own pass. None of them can
+hold it, so each greps, reads a slice, misses what was not in the slice, and the
+review sends the box back. **The cost per box is a function of the boxes already
+closed**, which is the deceleration the user felt: 39 decisions were recorded on
+day one and 103 exist now, and every one of them is read by every box after it.
+
+**The evidence that this is what it is, and not ordinary review:** rule 1 got
+*reads how the previous run ended* on 08-14 08:36, rule 5 got the same fix on
+08-14 21:08, `137` was made to be read from the object on 08-15 03:37, and *every
+rule reads them once* landed 08-15 11:46. One class defect, four boxes, 27 hours,
+one rule at a time — because no reviewer could hold every rule at once. Over the
+same window 41 commits carried **12 `feat`** and 17 `docs`.
+
+**The defect is structural and it is one sentence: this repo has append and no
+compaction.** Every rule here ends in *record it* — `NOTES.md`, `todo.md`, a doc
+comment citing both. Not one rule anywhere makes something smaller, and the two
+files every agent must read are the two that every box grows. `todo.md`'s worked
+Phase 3 boxes average **35 lines** against **10.6** in an untouched Phase 5,
+because the outcome of each review round is appended back onto the box that
+prompted it. That history is real, but it is a summary of `NOTES.md` entries the
+box already links to, sitting in the file whose job is to say *what is next*.
+
+**Four rulings, and the first reverses this file:**
+
+1. **`src/rules_tests.rs` splits now, not at Phase 3 close**, reversing
+   [D91](#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)'s timing
+   and nothing else of it — the split is still by rule family, and `rules.rs`
+   still stays whole for D91's own reason. D91 deferred it because eight boxes
+   were open against the file; twenty-four are open now, and the file went from
+   13 105 lines to 17 460 in the one day since, +33%. The premise inverted: the
+   deferral was priced at eight boxes of churn and is now being paid at
+   twenty-four, on the largest single read in the repo.
+2. **`todo.md` holds boxes, not history.** A closed box keeps its title and its
+   `NOTES.md` links; the round-by-round narrative under it goes, because every
+   claim in it cites a decision that holds the same thing.
+3. **`NOTES.md` opens with a one-line index of every decision**, so an agent
+   reads ~4k tokens to find the entry and opens one section instead of grepping
+   149k. It costs no new machinery: each line is a link to its own anchor, and
+   `scripts/check-docs.py` already fails on a broken one, so a renamed or deleted
+   heading is caught by the guard that exists.
+4. **`k8s-admin` reviews a rule *family*, not a rule** — see
+   [CLAUDE.md § The cycle](CLAUDE.md#the-cycle--one-todomd-box-is-one-turn-of-it).
+   The 137 chain above is what per-rule review costs: the reviewer that could
+   have seen all four at once never saw two.
+
+**And the standing rule the four are instances of: a box may not be added to an
+open phase.** On 08-14 the k9s prior-art review turned twelve gaps into twelve
+Phase 3 boxes while Phase 3 was running, which is how a phase stops converging.
+Found work is recorded and lands in a later phase.
+
+**What this does not touch.** No gate is loosened, no test is deleted, no
+invariant moves. Everything cut here is a second copy of something that exists
+elsewhere — which is [D102](#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15)'s
+finding, one layer up.
 
 ## Decisions made
 

@@ -25,12 +25,43 @@ than assuming the highest-numbered phase is the only one running
 All work is on `development`. Product code is bottom-up and forward-only, and
 a file finished in an earlier step is frozen.
 
+**A box is never added to an open phase.** Work found mid-phase — a review
+finding, a prior-art gap, an idea — is recorded where it belongs and boxed in a
+*later* phase, so the phase that is running can converge. Twelve boxes were
+injected into a running Phase 3 on 2026-08-14 and the phase stopped closing
+([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+The one exception is a defect in the box currently being landed: that is the
+same box, not a new one.
+
+## Every file here also has to get smaller
+
+Every other rule in this file ends in *record it*. None of them made anything
+shorter, and the two files every agent must read — `NOTES.md` and `todo.md` —
+are the two that every box grows. That is why a box came to cost two hours when
+the gate that proves it costs forty seconds
+([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+Three rules, all of them the PM's, all of them run at step 7:
+
+- **`todo.md` holds boxes, not history.** A box says what to do and how it is
+  known to be done. When it closes it keeps its title and its `NOTES.md`
+  links — the round-by-round story of how it got there does not go back onto
+  it, because every claim in that story cites a decision that already holds it.
+- **A decision is written once, in `NOTES.md`, and cited everywhere else.** A
+  doc comment, a box, a report: they link `D##`, they do not restate it. The
+  second copy is the one that goes stale, and it is never the one that gets
+  fixed.
+- **`NOTES.md`'s index is part of the entry.** A new `### D##` heading lands
+  with its line in [§ Decision index](NOTES.md#decision-index) in the same edit.
+  `scripts/check-docs.py` fails on a line whose anchor stopped resolving, so a
+  renamed heading is caught; a heading added with no line at all is not, and
+  that one is on the PM.
+
 ## Where to look
 
 | Looking for | Go to |
 |---|---|
 | Which file holds X, who may write it, what to touch for a change | [docs/maps.md](docs/maps.md) |
-| **Why** a choice was made — every decision, numbered `D1…` | [NOTES.md](NOTES.md) |
+| **Why** a choice was made — every decision, numbered `D1…` | [NOTES § Decision index](NOTES.md#decision-index) first — one line each; open the one section you need, never the whole file |
 | **What** is required, per role (developer / devops / devsecops) | [REQUIREMENTS.md](REQUIREMENTS.md) |
 | **When** — phases, order, done-when. The only place steps are checked off | [todo.md](todo.md) |
 | The **built** state, for humans outside this repo | [docs/](docs/README.md) — never contains anything not yet true of the code |
@@ -448,8 +479,19 @@ The box is the unit of work, never a phase and never "the next few boxes".
 | 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
 | 4 | Witness red, then green | `tester` | **reverts the implementation and re-runs** — see below |
 | 5 | Full run | `tester` | `just check` green **and** the code exercised for real |
-| 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting |
+| 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting. **Batched by rule family, not by rule** — see below |
 | 7 | Land it | PM | see below |
+
+**Step 6 reviews a family, not a rule** ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+A reviewer shown one rule finds the defect in that one rule; every expensive
+defect this repo has had was two rules reading one container and disagreeing,
+which is invisible from inside either. So the review runs when a **family** is
+complete — the pod rules, the node rules, the workload rules, the certificate
+rules — and it reads them together, with the shared helpers they all call. Four
+boxes over 27 hours fixing `137` one rule at a time is what the per-rule version
+cost. Two exceptions stay per-box, because the blast radius is not a family:
+**anything in `ops.rs`, and any change to a shared helper** — a helper is the
+thing every rule in the family already agreed on.
 
 Step 7 in order, one push at the end and not two: [second
 pass](#second-pass--nothing-is-delivered-on-its-first-draft) over the **landed

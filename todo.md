@@ -655,15 +655,7 @@ this plan is delivery mechanism for what this phase produces.
       nor a regular one, and `ClusterSnapshot` carries `namespace_scope` —
       without which a rule cannot tell a small cluster from a partial view of a
       large one, and D43's own ruling is unimplementable.
-      **Six more after the third review** — pod-level requests
-      (`PodSpec.resources`, or N5 sums zero for a pod that committed four
-      CPUs), the *enacted* memory limit from `ContainerStatus.resources` rather
-      than the requested one from `spec`, the API **group** in `ObjectKind` (an
-      OpenKruise Advanced StatefulSet is `Kind: StatefulSet` and Phase 7 would
-      aim `scale` at the wrong object), `Terminated.started_at` and `.message`,
-      and C1's input — the kubeconfig context name and client certificate,
-      never the key
-      ([NOTES § D51](NOTES.md#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12))
+      Closed — [D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12) · [D51](NOTES.md#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)
 - [x] **`Snapshot` carries `now`**, and every fixture pins it. Rule 12 and the
       certificate rules need the time; calling a clock inside a rule would
       break [invariant 5](CLAUDE.md) and would make fixtures expire — a test
@@ -673,28 +665,7 @@ this plan is delivery mechanism for what this phase produces.
       every decoded API timestamp already wears, so the comparison every rule
       makes is two values of one type
       ([NOTES § D54](NOTES.md#d54--now-is-metav1time-not-a-bare-jifftimestamp-2026-08-12)).
-      **The pin is `2026-08-13T00:00:00Z` since the second capture trip
-      (2026-08-13); it was `2026-08-12T00:00:00Z` when this box was written,
-      and it was not chosen freely either time:**
-      `scripts/certs-test.sh` already asserted the certificate fixtures against
-      that instant, and it now extracts the Rust pin and refuses to disagree
-      with it — the one edge of that coupling nothing was guarding. The pin
-      moves with the capture, in four places, and its cost is that **nothing in
-      the fixture set can be "recent"**
-      ([NOTES § D57](NOTES.md#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)).
-      **Three corrections the reviews forced, none of them cosmetic:** the
-      guard first asserted every snapshot timestamp `<= now`, which is false of
-      `deletionTimestamp` — the apiserver writes *request time + grace*, so a
-      pod inside its grace period, i.e. rule 12's own negative fixture, was
-      rejected and the user's clock blamed; it asserts `deletionTimestamp −
-      grace <= now` instead. D18's clock-skew sentence had the direction
-      backwards and had been copied into the code
-      ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12)).
-      And the arithmetic the next box will write has three traps, now named on
-      the field: `.0` on both sides, `a - b` is a seconds-only `Span` whose
-      `.get_minutes()` is `0` over 43 minutes, and the grace subtraction is
-      `checked_sub` because a real apiserver accepts a grace that overflows it
-      ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12))
+      Closed — [D18](NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact) · [D54](NOTES.md#d54--now-is-metav1time-not-a-bare-jifftimestamp-2026-08-12) · [D57](NOTES.md#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12) · [D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) · [D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12)
 - [x] `Finding` carries **timestamps, not phrases**. "4 min ago" is formatted
       by the renderer, so `ui.rs` and the `--once` printer share one source and
       a test asserts a duration instead of parsing English. A non-positive age
@@ -712,16 +683,7 @@ this plan is delivery mechanism for what this phase produces.
       already prints rather than the formatter's choice. Sub-second ages join
       the negative ones in "just now" — `0s ago` reads as a stopped clock
       ([NOTES § D68](NOTES.md#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13)).
-      **Reopened once by the operator review, and it was right to be**: the
-      "just now" branch had no bound on the future side, so a rule filling
-      `timestamp` from a certificate's `notAfter` would have printed a
-      plausible sentence instead of being visibly wrong. `age` answers
-      `Option<String>` and refuses past five minutes of skew; the render
-      decision moved behind `Finding::age(now)` so neither renderer retypes
-      it; and the field now carries the **right source field per rule**,
-      because "the wrong-field class" named no pairs and three of them are one
-      line apart from the right answer
-      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
+      Closed — [D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12) · [D68](NOTES.md#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13) · [D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)
 - [x] **Close the one row where `just check` is not CI** — `tester`'s, not
       `dev-core`'s, and it touches `justfile` / `.github/workflows/` only, so it
       runs alongside the rules work rather than ahead of it (disjoint trees).
@@ -742,14 +704,7 @@ this plan is delivery mechanism for what this phase produces.
       a green run. Found by Phase 2's closing second pass in a Phase 1 artifact,
       which is why it is a box here and not a reopening there
       ([NOTES § D66](NOTES.md#d66--just-check-is-not-quite-the-whole-of-ci-and-the-gap-is-the-one-ci-was-built-to-watch-2026-08-13)).
-      **The skip horn won, and this machine forced it** — there is no `rustup`
-      here at all, so "require" means red forever on the machine that closes
-      phases. Paid for three ways so a *green* run still shows it: `cross` runs
-      last, the banner names every skipped target, and it goes to stderr. An
-      unknown triple and an unreadable matrix are **not** skips. `just cross`
-      now reads the target list out of `ci.yml` rather than keeping a second
-      copy — a list in two files is the drift this row was made of
-      ([NOTES § D67](NOTES.md#d67--the-cross-compile-row-closed-with-a-skip-and-what-the-skip-costs-2026-08-13))
+      Closed — [D66](NOTES.md#d66--just-check-is-not-quite-the-whole-of-ci-and-the-gap-is-the-one-ci-was-built-to-watch-2026-08-13) · [D67](NOTES.md#d67--the-cross-compile-row-closed-with-a-skip-and-what-the-skip-costs-2026-08-13)
 - [x] Pod rules 1–8 and 12 (stuck Terminating). Rule 9 (no limits) is not an
       Alerts rule — it belongs to the Capacity report in Phase 4; rule 8 fires
       only on the escalated hostPath case. Events-based rule 11 stays deferred.
@@ -796,6 +751,7 @@ this plan is delivery mechanism for what this phase produces.
       down entirely on a pod with a `deletionTimestamp` — true is not the same
       as actionable, and rule 12 owns that pod and names the finalizer
       ([NOTES § D73](NOTES.md#d73--rule-10-and-the-test-that-argued-for-its-own-deletion-2026-08-13))
+      Closed — [D27](NOTES.md#d27--two-findings-the-open-watch-already-paid-for-2026-08-12) · [D73](NOTES.md#d73--rule-10-and-the-test-that-argued-for-its-own-deletion-2026-08-13)
 - [x] **Rules 1–6 read `initContainerStatuses` too.** A pod at
       `Init:CrashLoopBackOff` produces no finding otherwise, and the finding
       has to name the init container — "the app container is fine, the init one
@@ -811,6 +767,7 @@ this plan is delivery mechanism for what this phase produces.
       cleared it; it is silent only when the container is doing its job *and*
       the kill is older than the grace
       ([NOTES § D75](NOTES.md#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13))
+      Closed — [D75](NOTES.md#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13)
 - [x] **Rule 13 — placed on a node, but the containers never started.** The
       twelfth Alerts rule, added on 2026-08-13 by an explicit reversal of
       [invariant 13](CLAUDE.md)'s scope guard: the `ContainerCreating` wedge is
@@ -824,29 +781,7 @@ this plan is delivery mechanism for what this phase produces.
       legitimately take minutes to pull and firing under that alerts on every
       cold start. **WARN, not CRITICAL:** the one healthy thing that still
       looks like this is a slow pull.
-      **`conditions[PodReadyToStartContainers]` is the evidence line and not
-      the gate** — the review proposed it as the trigger and it is narrower
-      than the case: KEP-3085 defines it as *sandbox created and network
-      configured*, so `FailedAttachVolume`, an unbound PVC and a volume still
-      attached to a dead node all read `True` while the pod sits wedged. It
-      says *why*: `False` = no network yet, `True`/absent = the block is after
-      the sandbox, almost always a volume.
-      **It ships with a negative side only** — every captured pod has the
-      condition `True`, so the positive fixture is a capture-trip item below
-      ([NOTES § D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)).
-      **The operator review built a real kind cluster for this one and three
-      blockers came back.** The two evidence sentences were **inverted** —
-      the kubelet mounts volumes *before* it creates the sandbox, so `False`
-      covers storage *and* network and `True` means the mounts already
-      succeeded; the card had been sending a beginner whose ConfigMap was
-      missing to look at the CNI. `PodInitializing` was silencing the rule on
-      every pod that declares an init container — Istio, Linkerd, migrations,
-      most Helm charts — which is most of the class it was added for. And the
-      title spoke for every container while the gate needed one. The image
-      family (`InvalidImageName`, `ErrImageNeverPull`, `ImageInspectError`,
-      `RegistryUnavailable`, `SignatureValidationFailed`) **moved to rule 3**,
-      which they always belonged to
-      ([NOTES § D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13))
+      Closed — [D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13) · [D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)
 - [x] **Rule 14 — nothing has even looked at this pod.** `phase == Pending`
       with **no `PodScheduled` condition at all**, older than **2 minutes**
       from `metadata.creationTimestamp` — a field `PodSnapshot` must gain, and
@@ -869,6 +804,7 @@ this plan is delivery mechanism for what this phase produces.
       telling that apart from one bad `schedulerName` needs cross-pod
       reasoning, and that waits for a real cluster to show the wall is real
       ([NOTES § D74](NOTES.md#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13))
+      Closed — [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12) · [D74](NOTES.md#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13)
 - [x] Node rules N1–N6 (NotReady · cordoned · pressure · kubelet skew ·
       overcommit · what blocks a Pending pod). **N1's card has to reach the
       pods, not only the node** — every pod rule reads pod *status*, and the
@@ -879,63 +815,7 @@ this plan is delivery mechanism for what this phase produces.
       the gap was found. Without this, Alerts says "node NotReady" in one place
       and nothing about the thing the user cares about
       ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
-      **N2's age is optional, and it fires only when the cordoned node still
-      has pods a drain would move** — the narrowing is what stops every routine
-      maintenance window raising an alert; a cordoned node with nothing movable
-      left is parked, not broken, and belongs to the Capacity report.
-      **The "no duration" this box used to require was reversed by
-      [NOTES § D65](NOTES.md#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13)**:
-      the node lifecycle controller stamps `timeAdded` on the `NoSchedule`
-      taint it mirrors from `spec.unschedulable`, so a `kubectl cordon` carries
-      a time and only a hand-applied `kubectl taint` does not. The card is
-      drawn both ways, and the *gate* never depended on the clock.
-      The finding names the pod count. **"Still has pods" is not the same as
-      "a drain left something behind":** a drain never evicts DaemonSet pods
-      or static pods, so counting every pod fires N2 on every correctly
-      drained node — kindnet + kube-proxy on kind, four static pods on a
-      cordoned control-plane node. Not counted: `Succeeded`/`Failed`,
-      DaemonSet-owned, `mirror`. **And N2 stays silent on a node carrying an
-      autoscaler scale-down taint** (`ToBeDeletedByClusterAutoscaler`,
-      `karpenter.sh/disrupted`) — that node is cordoned with pods on it for the
-      whole eviction window by design
-      ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
-      **N5 adds a native sidecar's requests rather than maxing them** — same
-      section — and **a pod-level `spec.resources` request replaces the
-      container sum rather than adding to it**; the formula in `rules.rs` is
-      the order-free simplification of upstream's `resource.PodRequests` and
-      understates the rare pod declaring a plain init container after a
-      sidecar. **A scale-down that never finishes is a Drain-safety row, not an
-      Alerts card** — N2 stays silent on the taint, so nothing else would ever
-      show a PDB-blocked scale-down
-      ([NOTES § D51](NOTES.md#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)). **N2 and N5 do not fire at all under namespace scope** and
-      say so: both join every pod on a node, and a partial view turns N2 into
-      a missing finding and N5 into an understated sum — the degradation
-      `docs/architecture.md` § Error handling already specifies for a 403,
-      not a new mechanism. N6 is unaffected (node taints + the Pending pod's
-      own spec are in scope by definition)
-      ([NOTES § D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12)).
-      **Three timestamp traps, all reachable from fields the snapshot already
-      carries:** N3 reads *that condition's* `last_transition`, never `Ready`'s
-      off the same flat `Vec`, or a DiskPressure card is dated the node's boot
-      time; N6's subject is the **pod**, so `scheduled.last_transition`, never
-      the blocking node's taint `added_at`; and N2's age is the age of the
-      *taint*, which anything rewriting `node.spec.taints` re-stamps — so the
-      card says "cordoned about 2 hours ago" and builds no argument on it.
-      **N2 also owes a kubectl line that can show the number it prints**:
-      `kubectl describe node` does not print `timeAdded`, so either the card
-      offers `-o jsonpath='{.spec.taints}'` or it records that the age is the
-      one claim `describe` cannot back
-      ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
-      **Shipped, and four things landed that this box did not ask for**
-      ([NOTES § D81](NOTES.md#d81--the-node-rules-and-the-four-things-a-real-cluster-said-about-them-2026-08-13)):
-      D69's choice above resolved to **`describe node`**, because it backs the
-      title and the count while `jsonpath` backs only the optional age; **N6 is
-      not a card** but the node half of rule 10's, since the two fire on one
-      population and D28 forbids two cards for one pod; **`SUPPORTED_SKEW` is
-      3**, upstream's number, not the 2 this repo had written down; and a
-      **managed-taint translation table** exists because naming those keys raw
-      told the reader to tolerate a cordon, an unreachable node and an
-      autoscaler's own scale-down
+      Closed — [D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13) · [D65](NOTES.md#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13) · [D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12) · [D51](NOTES.md#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12) · [D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12) · [D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13) · [D81](NOTES.md#d81--the-node-rules-and-the-four-things-a-real-cluster-said-about-them-2026-08-13)
 - [x] **Workload rules W1–W2** — W1: the pods were never created
       (`ReplicaSet.status.conditions[ReplicaFailure]`, quota/webhook/PVC
       message shown verbatim); W2: the rollout gave up
@@ -979,32 +859,7 @@ this plan is delivery mechanism for what this phase produces.
       empty rather than as cluster-scoped. If this box does it anyway, it owes
       the test for that shape
       ([NOTES § D38](NOTES.md#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)).
-      **A certificate that never expires produces no finding, and that is the
-      only shape available:** RFC 5280 spells "no well-defined expiry" as
-      `99991231235959Z`, which is past the end of jiff's `Timestamp` range, so
-      the conversion returns an `Err` a pure rule may not propagate. The reflex
-      shape is `.unwrap()`, the input is a kubeconfig, and a corporate PKI is
-      exactly where a non-expiring CA turns up — the panic would land on
-      startup
-      ([NOTES § D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12)).
-      **Shipped, and the box's own "warn at 30 days" turned out to name only
-      half of it** ([NOTES § D87](NOTES.md#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14)):
-      the expiring band is **`Info`** and takes `Severity`'s existing door to
-      the Certificates report that [D2](NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)
-      sent C1 through — the same door N4 and N5 use — while the **expired** band
-      is `Critical` and reaches Alerts, reversing D2's letter for a case D2 never
-      considered: a credential that ran out is not *risky later*, it is why every
-      other card on the screen is missing. `dev-core` raised that contradiction
-      against its own brief rather than burying it, which is what made the ruling
-      possible. **D56's panic was reproduced before it was prevented** — an
-      `.unwrap()` on the 9999 certificate's jiff conversion dies with
-      `not in the required range of -377705023201..=253402207200`. Five
-      malformed shapes return no finding: not PEM at all, a truncated body, a
-      well-formed PEM that is not a certificate, a private key wearing a
-      certificate's name, and empty — each built from bytes in the test, because
-      `tests/fixtures/certs/` is a closed set `certs-test.sh` refuses to grow.
-      The 30-day boundary is asserted at **both** ends, which neither committed
-      fixture can do: 22 and 363 days pass any threshold between them
+      Closed — [D51](NOTES.md#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12) · [D38](NOTES.md#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12) · [D56](NOTES.md#d56--c1-cannot-represent-never-expires-and-a-rule-may-not-return-a-result-2026-08-12) · [D87](NOTES.md#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14) · [D2](NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)
 - [x] **Rule 5 has rule 1's defect, one rule over** — its card says *"it is
       serving now, but something keeps killing it"*, which is false in exactly
       the way rule 1's *"keeps crashing"* was: over a container whose restarts
@@ -1019,30 +874,7 @@ this plan is delivery mechanism for what this phase produces.
       than folded in**, which is the right call — an untested branch invented
       inside someone else's box is the scope creep CLAUDE.md names
       ([NOTES § D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)).
-      **Shipped in nine rounds and three operator reviews, every one of which
-      blocked, and almost nothing about it was the one-line change the box
-      predicted**
-      ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)).
-      The rule now has four arms on `ending`, each owning its claim, its action
-      **and its command**. The first draft answered the box by asserting the
-      opposite cause — *"nothing killed that run"* — which is false of any
-      container that traps SIGTERM and exits 0, so a probe kill landed there and
-      was told to move a healthy Deployment into a CronJob: **D85's own charge,
-      rebuilt inside the fix for D85**. `Init` + `Finished` was reported
-      unreachable, and was not — the exemption reads the *current* state, and a
-      rebuilt pod sandbox re-runs every init container while the count survives.
-      The `Failed` arm had the same role-blindness and was folded in; rule 1's
-      matching defect was not, and that boundary is D88's. Two helpers came out
-      of it — `stopped_action`, `failed_action` — because the second round had
-      pasted rule 1's strings verbatim. The `None` arm's first command **could
-      never have worked**: `--previous` is gated on the same field whose absence
-      puts a card in that arm. Its last clause was wrong twice in opposite
-      directions before it stopped branching on evidence the object does not
-      carry. **What it could not prove:** no committed capture reaches any
-      ending but `Failed` here, so every other arm is tested on a decoded copy
-      and the trip is named in the test doc comments. **What it opened:** four
-      boxes above and below this line, one of them for a card that ships today
-      with a visible self-contradiction
+      Closed — [D40](NOTES.md#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12) · [D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14) · [D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)
 - [x] **Rule 1's clean-exit action offers two readings and the true one is
       missing** — found by the operator review of the rule 5 box, and left to
       its own box by the boundary that box established: it crosses into another
@@ -1060,36 +892,7 @@ this plan is delivery mechanism for what this phase produces.
       correct the card are exactly what its command cannot show. One clause and
       one command, and the two cannot be decided apart
       ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)).
-      **Shipped in five rounds, four `tester` passes and three operator
-      reviews** ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
-      The clause and the command were decided together, in the direction D88 had
-      ruled the other way a day earlier: `CrashLoopBackOff` behind a clean exit
-      already fixes `restartPolicy` to `Always` (`ShouldContainerBeRestarted`
-      refuses `Never`, and `OnFailure` on `exit 0`), so the field D88 bought a
-      command for is implied by the state while the events stay the only
-      discriminator — **both rules now take `describe`, and no card in `rules.rs`
-      names `restartPolicy` any more**. One shared `finished_action(role)` joins
-      `stopped_action` and `failed_action`, so the two rules cannot drift on one
-      container. **The first fix permuted the doors instead of completing them** —
-      it deleted *quitting early* while adding *something stopped it*, which
-      offers a CronJob to every `nginx` that exits `0` in under a second: D88's
-      own blocker rebuilt inside the fix for it, caught by the operator review.
-      Three branches ship, none of them a verdict. **Door 1 names the `Killing`
-      event and the node, not the probes** — measured on a kind v1.36.1 cluster
-      the reviewer brought up: `killContainer` writes `Killing` whatever asked and
-      its message names the probe itself, while `Unhealthy` is also what a failing
-      *readiness* probe writes with nothing killed behind it. The `Init` arm's
-      events clause is hedged for the same trip's second measurement: where the
-      sandbox is **gone** rather than changed, the kubelet re-runs every init
-      container and emits no event at all. **`exit_meaning`'s `0` row was settled
-      here** — *"the program finished successfully"* named an agent one line above
-      an action whose whole subject is that the code names none; it now reads
-      *"the run ended without an error"*. `Init` + `CrashLoopBackOff` + `exit 0`
-      is reachable, and the "unreachable" claim was wrong for the second time in
-      this area. Actions came **from 9 / 8 / 9 wrapped lines to 5 / 5 / 5** and a
-      test holds them there. **What it could not prove:** no committed capture
-      reaches any ending but `Failed` on these arms — those debts are the capture
-      box below
+      Closed — [D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14) · [D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)
 - [x] **The `137` story is role-blind in both places it is told, and they print
       on one screen** — decided once here, or the two are decided differently.
       **(i) `exit_meaning`'s `137` line names a probe the container may not be
@@ -1112,100 +915,7 @@ this plan is delivery mechanism for what this phase produces.
       is one decision and not two:** *"did not stop when it was asked to"* is
       asserted for every `137` that lacks the word, but
       [D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
-      recorded this project's own capture host delivering five consecutive
-      genuine cgroup kills as `137` with `reason: "Error"` — so the word's
-      absence proves nothing, and the sentence rules out memory precisely when a
-      starved node makes memory most likely. The rule 5 box shipped an action
-      that repeated this and it was caught in review; the translation underneath
-      still says it. **Reachable today** — an init container that ignores
-      SIGTERM is SIGKILLed after the grace period and comes back `137` with no
-      `OOMKilled`. **And a card ships with the disagreement visible on it right
-      now**, which is why this box is worded as a defect and not a tidy-up: rule
-      5's init action says *"no health check is behind any of them — Kubernetes
-      allows this kind of container none"* one row under an evidence line
-      offering a failing liveness probe. That denial is deliberate — dropping it
-      would leave the wrong suggestion as the only voice on the card — and it is
-      a correction printed beside the thing it corrects, which is not where a
-      correction belongs. **There is no test asserting the card is internally
-      coherent**, because that test is red today for a reason living in this box
-      rather than in rule 5; it is owed here, with the fix.
-      **(ii) rule 6's own `137` arm has no role split at all.**
-      `previous_run_failed`'s `(None, 137)` action opens *"check the liveness and
-      startup probes"* for every role — the same defect rules 1 and 5 have now
-      had removed twice each, in the one rule that was not looked at. It reaches
-      the screen **beside** rule 5's card on the same container: two k8rs cards,
-      one object, one telling the reader to check a probe and the other saying
-      Kubernetes allows none. Found by `tester` while replaying the rule 5 box's
-      matrix. It joins (i) rather than taking its own box because both answer the
-      same question — *what does `137` mean for a container that may not have a
-      probe* — and answering it twice is how the two drift
-      ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)
-      on why that boundary sits where it does).
-      **(iii) and a third meaning was measured on a cluster after this box was
-      written**, so decide all three at once: on kind v1.36.1 a **sandbox rebuild
-      on a perfectly healthy container** produced `137` with
-      `reason: ContainerStatusUnknown` (sandbox removed) and `137` with
-      `reason: Error` (sandbox stopped) — nothing was asked to stop, nothing
-      hung, and no probe was involved, on any role
-      ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
-      **The `0` row of the same table is already settled and is not this box's**:
-      it printed *"the program finished successfully"*, which named an agent, and
-      now reads *"the run ended without an error"* — it reaches the screen from
-      rules 1 and 5 only, which is why it could be decided inside their box while
-      `137`, printed by rules 1, 5 **and** 6, could not.
-      **Shipped in four rounds, two `tester` passes and two operator reviews, the
-      first of which returned two blockers**
-      ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
-      The ruling was the door the box did not lead with: **`exit_meaning` stays
-      role-blind and the bare `137` row stops naming a cause**, because a
-      translation names how a run ended while naming *what* ended it is
-      diagnosis, and the diagnosis is already split by role four functions over.
-      `137` went from two readings to **four**, three of which the object names:
-      `OOMKilled`, the new `ContainerStatusUnknown`, the new
-      `RestartingAllContainers`, and — where the object names none — a row that
-      says the signal and stops. Rule 6's arm split by role through a shared
-      `killed_action`.
-      **Almost nothing about it was what the box predicted.** The
-      `ContainerStatusUnknown` action shipped naming *a reboot, or a restart of
-      the software that runs the containers on it*, and the operator review
-      measured both on kind v1.36.1 and found **neither produces it**: a node
-      reboot writes `exit 255 / reason: Unknown` because containerd's state
-      survives and the containers are found, dead; a containerd restart is a
-      no-op because the shims survive it. The producer is a rebuilt sandbox, and
-      it emits no event — which is the thing `finished_action(Init)` already had
-      correct words for, so one screen was describing one event two ways. And
-      rule 6's **title** said *the previous run failed* one line above a
-      translation saying Kubernetes lost track of the container: **D85's own
-      charge, rebuilt inside the fix for D85** for the second time in this area.
-      Its root is `ending()` reading `137` without the `reason`, left alone on
-      purpose because moving it moves three rules at once.
-      **The fourth reason arrived during the review and its own fix created a
-      third instance of the same defect**: `RestartingAllContainers` is
-      beta-on-by-default at the pinned version, and adding its translation row
-      put *the previous run failed* above *which is what this pod asked for*. Rule
-      6 now goes silent on it — the third member of its exemption list beside
-      `exit 0` and `exit 143` — which removes a kubelet-authored log line as a
-      **side effect and not as a fix**, and both the doc comment and the box below
-      say so.
-      **The guard the box owed was written and did not hold twice.** It matched
-      its probe words case-sensitively, so a capitalised *"Probes are worth
-      checking"* planted into the one arm it exists to protect passed green; and
-      it printed its card total without asserting it, so deleting the shapes part
-      (iii) is about left it green on a smaller set. A line-width cap also went
-      red *first* on a long plant, so a layout constraint briefly looked like a
-      content guard. Three guards, three agents, none of them finding the hole in
-      their own ([NOTES § D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
-      **What it could not prove:** no committed capture reaches any of the three
-      named reasons, so all of them are decoded plants whose fidelity comes from
-      the kubelet source rather than from a capture — both literals set three
-      fields and stop, and an unset `metav1.Time` marshals to `null`; and the
-      title branch's key cannot be told apart from one reading the null
-      `finishedAt` beside it, which is accepted as unobservable rather than
-      closed with a fixture no cluster writes.
-      **What it opened:** four boxes below this line — rules 1 and 5 blind to both
-      new reasons, the `last_log_line` class, `exit 255`, and `lastState` meaning
-      *the last run Kubernetes wrote down* rather than *the previous run* — plus
-      one in `scripts/` that has nothing to do with `137` at all
+      Closed — [D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14) · [D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13) · [D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14) · [D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14) · [D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15) · [D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15) · [D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)
 - [x] **Rules 1 and 5 print the two reasons `exit_meaning` learned and were
       never taught what either one means** — the half the `137` box above left
       out, on purpose and recorded
@@ -1216,111 +926,7 @@ this plan is delivery mechanism for what this phase produces.
       one object: **rule 5** offers *"check the memory limit against what it
       really needs — the kernel takes a container that goes over"* under an
       evidence line saying nothing measured anything; **rule 5's serving title**
-      says *"it is serving now, but something keeps killing it"* over the same
-      line, a positive claim of repeated killing where the kubelet recorded no
-      kill at all; and **rule 1** says *"read the previous run's logs — that is
-      where it says why it exits"* for a run whose container the runtime has
-      dropped. **Rule 1's half is worse than the other two and the first wording
-      of this box understated it**: the log that action names cannot be served by
-      the API at all, because the kubelet gates `--previous` on
-      `lastState.terminated.containerID` and the synthesized status carries
-      none — measured, `previous terminated container "app" in pod
-      "lost-notready" not found` — which is the class D88 already named. Rule 5's
-      two are generic-advice-under-specific-evidence; rule 1's is a command that
-      cannot run. **And rule 5's is permanent**: `lastState` never expires and
-      `restartCount` never falls, so *"something keeps killing it"* stays on a
-      healthy container for the life of the pod — the permanence failure mode
-      this file has now rediscovered four times (D71 on rule 6, D75 on rule 2,
-      D85, here). Corrections from the operator review of the `137` box, which
-      also confirmed the boxing itself was the right call.
-      **The root is one function below all three**: `ending()` maps `137` to
-      `Ending::Failed` without reading the `reason` that `exit_meaning` two
-      functions later says changes the meaning, so the title, the arm and the
-      firing all inherit it. Whether `ending()` gains a fourth variant is this
-      box's to decide and no other's — it was held out of the `137` box
-      deliberately, because moving it moves three rules at once.
-      **Found twice from opposite sides in one turn**, by `dev-core` while
-      writing the fix and by `tester` while attacking it, and boxed rather than
-      folded in because it asks a different question: *what should a rule do
-      about a run Kubernetes never watched end?* **It is decided with the rule 1
-      `Failed | None` box below, or the two answer it differently** — that box
-      already owes rule 1's `Failed` arm a command that can reach a log, and
-      this shape is the case where no command can, because there may be no log.
-      **Untested today**: the `137` box's own test looks up one card by title, so
-      it never looks at the neighbour it is standing beside; whatever ships here
-      owes an assertion over the *whole* card set for that shape, not one card of
-      it.
-      **`RestartingAllContainers` is the same defect on the second reason, and it
-      joins here rather than taking a box.** Rule 6 is exempt from it — the pod's
-      own `restartPolicyRules` asked for the removal, so it is the third member of
-      that rule's *not a finding* list beside `exit 0` and `exit 143`. Rules 1 and
-      5 have no such exemption, so rule 5 still draws *"restarted 31 times — it is
-      serving now, but something keeps killing it"* over an evidence line reading
-      *"removed so Kubernetes could restart every container in the pod, which is
-      what this pod asked for"*, and it sends the reader after that container's
-      memory limit and liveness probe when the container that failed was its
-      **sibling**. **Rule 5's is the instance to start from, and the first
-      wording of this line said rule 1's and was wrong.** Rule 1's card is the
-      sharper contradiction on paper — *"Container keeps crashing"* directly over
-      *"which is what this pod asked for"* — but the second operator review
-      argued from `kuberuntime_manager.go` that the shape barely exists: the
-      restart-all path **purges every container from the runtime**, so `doBackOff`
-      finds no exited record, no backoff entry is made, and `CrashLoopBackOff`
-      never appears. Measured to match — 31 restarts per container in 5m52s, about
-      one every 11s behind an 8s sleep, which is no backoff at all, and a
-      five-minute wait loop that never saw the reason. It came out of a **planted**
-      matrix row, and a planted shape is not a reachable one.
-      **And rule 5's half is partly a fan-out question, not only a wording one**:
-      one restart-rule firing writes the record into *every* container in the pod,
-      so it draws one rule-5 card per container — two on a two-container pod, six
-      on a six-container pod — all with the same evidence line and the same wrong
-      action, for one event. Rule 5's own doc says *one incident, one card*.
-      Measured on kind v1.36.1 with the feature gate at its
-      default — `{1.36, true, Beta}` — on a pod declaring `restartPolicyRules`
-      ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
-      Both reasons want one answer, which is why they are one box.
-      **Shipped 2026-08-15
-      ([NOTES § D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)).**
-      The root was `ending()`, as the box guessed: it reads the `reason` beside
-      the code now and gained two variants, so the answer is one function and not
-      three cards — and the mechanism is the compiler, since every `match` on that
-      enum stopped building until rules 1, 5 and 6 each said what the two mean.
-      **Rule 5 got arms and not an exemption**, because its subject is the count,
-      which is real under both reasons, and because the trigger's own record is
-      overwritten by the same synthesized `137` — so a second exemption would
-      blank a thrashing pod entirely. Rule 6 draws exactly what it drew; only its
-      key moved.
-      **The operator review took a cluster to it and the first draft did not
-      survive contact.** The new action told the reader to *find the container
-      with an exit code of its own*, and measured: every container prints
-      `Exit Code: 137` on a settled pod, the trigger's own `exit 3` was visible in
-      12 of 40 one-second samples on a thrashing one, and a **single-container**
-      pod gets the identical record and was being sent to compare it with siblings
-      it does not have. The fix trades the command — that arm carries `get_yaml`
-      and names `restartPolicyRules`, the one field that identifies a trigger and
-      the one `describe` does not print. **The field that looked like a better
-      answer was measured and rejected**: the pod's `AllContainersRestarting`
-      condition is a transient, `True` in 7 of 40 samples and never once on the
-      one-container pod, and the reviewer's own first recommendation died on the
-      second measurement — two point samples of a transient are an inference in a
-      measurement's clothes.
-      **Four more the review measured and this box closed**: rule 5's serving
-      title made an 11-line card at a three-digit restart count, over the measured
-      maximum, and both claims were reworded and are now measured by a test at
-      four counts; rule 1's `Unwatched` arm is as unproduced as its `RestartRule`
-      neighbour and now says so; `ending()`'s premise *a real exit code means the
-      run was watched* was false and is narrowed; and `doing_its_job` compared
-      with `==`, so the compiler had **not** forced it — the claim this box is
-      built on was true of three call sites out of four until it became a `match`.
-      **The guard for the blocker broke twice under attack**, both times on the
-      shape of the assertion rather than its content: three `contains` fragments
-      survive an appended *but rarely*, and the height cap caught the longer
-      variant for being too tall rather than for lying.
-      **What could not be proven**: no committed capture holds either reason in
-      `lastState` — the pin for `ContainerStatusUnknown` comes from `failed.json`,
-      where it sits in `state.terminated`, which no rule reads — and the pairs the
-      kubelet never writes stay deliberately unasserted, which is why one test had
-      to be renamed rather than widened
+      Closed — [D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15) · [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)
 - [x] **A container that is terminated *right now* with a bad exit is read by no
       rule as an ending** — rule 1 needs a `CrashLoopBackOff` waiting reason,
       rule 7 needs `Running`, `stuck_at_the_starting_line` returns early on any
@@ -1339,75 +945,7 @@ this plan is delivery mechanism for what this phase produces.
       operator review of the `137` box, which also corrected the sentence that
       claimed the sibling covered it
       ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
-      Decide whether `state.terminated` is a rule's subject at all: it is a
-      transient a watch will see and a `--once` run may not, which is the argument
-      both ways and the reason this is a decision and not an omission.
-      **Rule 5's fan-out is the same decision seen from the card side, and it
-      lands here rather than in a box of its own.** One firing writes the record
-      into every container, so rule 5 draws one card per container — six on a
-      six-container pod, one event — and since
-      [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)
-      every one of them is *truthful*, which is the whole of what that box fixed:
-      each says the pod's own rules restarted them together and that the record
-      does not say which one exited first. **Which container exited first is only
-      identifiable from `state.terminated`, and that half is this box's.** Whether
-      the fan-out should be drawn at all is the other half and it moved to the box
-      below — where the field that looked like the answer, the pod's
-      `AllContainersRestarting` condition, was measured and is **not** one: its
-      value is a transient, `True` in 7 of 40 one-second samples on a thrashing
-      pod and never once on a single-container one. Rule 5's own doc says *one
-      incident, one card*.
-      **Ruled 2026-08-15: no
-      ([NOTES § D96](NOTES.md#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)).**
-      The field draws no card, the one reader may only *suppress*, and the ruling
-      is pinned by a test section rather than left as prose — the red run is a
-      reader being **added** and the suite falling over, twice, for a reader that
-      speaks on a bad ending and one that speaks on a clean one. Four legs, and
-      the operator review corrected three of them: a pod that is over leaves this
-      screen by D2 and — since `analysis.rs` does not exist and Jobs are not
-      watched — **lands on no screen at all today**; this field's normal state is
-      a finished init container, which the corpus sweep proves is its *entire*
-      committed population; and the reason to refuse it is **redundancy rather
-      than transience**, because `state.terminated` and `lastState` were measured
-      carrying the same record in the same snapshot, so refusing loses nothing
-      about any container that comes back. **The reply *then debounce it* is
-      answered by invariant 5**: a pure `analyze` has no memory, so a card here
-      would be a function of when the sampler looked, by construction.
-      **The cost, accepted and measured twice**: the gang trigger's own exit
-      reaches `lastState` in **0 of 80 samples across two clusters**, so it is
-      never nameable and rule 5's denial stands — which closes the fan-out half of
-      this box for good, not just for now. Three other candidates for *the only
-      record there will ever be* were hunted and none of them is one; a container
-      `crictl rm`'d under `Never` is even restarted anyway, with the synthesized
-      record landing in `lastState`.
-      **What the box shipped is a test section and no product code**, which is the
-      only honest shape for a ruling: `--- THE RUN A CONTAINER IS SITTING IN RIGHT
-      NOW ---`, three tests over seven shapes × six endings, plus the corpus
-      sweep and `doing_its_job`'s pin. **The red run is an addition, not a
-      reversion** — a reader is *added* to the rule set and the suite has to fall
-      over — and `tester` ran **25** of them, one per verb the ruling names:
-      drawing a card, changing an age, changing evidence, changing a command,
-      speaking on a clean ending, and drawing from a different rule. 22 died.
-      **The three that lived are why this box took a second pass.** `whole_card`
-      compared six of `Finding`'s eight fields, so a reader that rewrote the
-      **name at the top of the card** passed all 188 tests — the ruling's own
-      *cannot change a sentence* was untrue of the heading. It compares eight now,
-      by destructuring, so a ninth field stops the build rather than falling
-      outside the comparison; and an eighth shape was added on `owned-pods.json`,
-      because all five bases were bare pods where `owner == object` and the
-      dimension had nothing to separate. **Leg 2's corpus was not the corpus**: a
-      hand-maintained list of 31 names, against which a planted fixture that
-      directly falsifies the claim stayed green — it is derived from the fixtures
-      directory now, asserted equal both ways, with `List` fixtures excluded
-      structurally rather than by name. And the **age** verb was caught only
-      because the table happens to carry two stamp-less endings, which the table's
-      own comment explained as something else and now states.
-      **Four doc comments carried a promise this box retired** — *those pods
-      belong to the Waste report* — and only two were found by naming them; the
-      sweep found the other two, of which the worse is an **assert message**, the
-      sentence a failing run prints. And the leg that said *`analyze` skips every
-      pod rule* was contradicted by `analyze`'s own doc three lines above the
-      loop, which had said *"Rule 12 is deliberately outside the skip"* all along
+      Closed — [D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15) · [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15) · [D96](NOTES.md#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)
 - [x] **A container that has stopped for good inside a pod that is still
       `Running` is on no k8rs screen, and `kubectl get pods` prints `Error` for
       it** — the shape
@@ -1513,69 +1051,7 @@ this plan is delivery mechanism for what this phase produces.
       dropping — every field the rules read that arrived after 1.32 — and decide
       whether the pin follows the kind image from now on or is chosen
       independently and asserted against it.
-      **Closed 2026-08-15
-      ([NOTES § D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).**
-      The rule is reversed, not patched: **pin the newest feature the crate
-      offers**, because the two failure modes are not symmetric — a pin below the
-      cluster drops fields silently, a pin above it yields `None`, which invariant
-      5 already defines as *no finding*. The old rule was **self-violating from
-      the first capture**: `v1_32 ± 2` is `1.30…1.34` and every fixture is
-      v1.36.1, and `scripts/verify-test.sh` had already cross-checked its field
-      names against *v1_36* types the build did not have.
-      **The survey is mechanical and it is in the entry**: field-name sets diffed
-      between `v1_32` and `v1_36` over exactly the structs `rules.rs` decodes,
-      every file asserted present in both trees first — **12 added, 0 removed**
-      at that scope, and **20 added, 0 removed** at the operator review's wider
-      one, which walks everything reachable from the six watched kinds. D99 keeps
-      both numbers rather than reconciling them, because the difference between
-      them *is* the answer to what counts as a field k8rs decodes. Nothing removed
-      at either scope is why the bump compiles untouched and all 200 tests pass on
-      it. Three of the twelve can change a rule's answer and become the three
-      boxes below; the rest are inert here and are listed in D99 so nobody
-      re-derives them.
-      **Nothing compares the two is fixed by something that compares the two**:
-      `scripts/fixture-audit.sh` now reads the feature out of `Cargo.toml` and the
-      version out of `tests/fixtures/K8S_VERSION` and fails when the pin's minor
-      is **below** the cluster's — an inequality, so the crate may run ahead of
-      the kind image. Witnessed red on the state this repo was in an hour earlier
-      (`v1_32` against 1.36 fixtures) and green after restoring. **The guard's own
-      first draft failed the way this box describes**: `set -euo pipefail` killed
-      it on an unmatched `grep`, so an unparseable `Cargo.toml` gave exit 1 with
-      no message and a self-test asserting only the status could not tell that
-      from a diagnosis — the self-test now asserts the failure *text*.
-      **What stayed out, deliberately: no rule changed.** Three comments in
-      `src/` that named the pin as the reason a field cannot be read were made
-      true and no more. In doing that the comments stopped calling
-      `restarts == 0` a *stand-in*: the field cannot exist on a cluster below
-      1.34 at all, so the count is the only one of the two that answers on every
-      cluster k8rs meets, and reading the field will **join** it rather than
-      retire it.
-      **The operator review found two blockers and both were in prose, not
-      code.** The reversed rule lived in a **fourth** file nobody had swept —
-      `docs/architecture.md` § Version compatibility, the tree that by CLAUDE.md's
-      own words never contains anything not yet true of the code — and left
-      standing it would have handed the next reader the ±2 window as a live
-      instruction, under which the honest repair is to re-capture against a kind
-      **1.34** image, which the new guard passes without a word. And D99's
-      write-path paragraph justified Phase 7's safety with *"a dry-run is where an
-      unknown field would be rejected"*, **measured false**: a merge patch
-      carrying an unknown field answers `200 OK` under `dryRun=All`, objecting
-      only in a `Warning` header kube does not surface — so the sentence Phase 7
-      would have cited as its licence not to check is now a Phase 7 box instead.
-      Three further findings: the guard read a `v1_N` token in a *trailing
-      comment* as the pin, and its self-test had never fed it the shape the real
-      pipeline hands it — a dependency line under a comment block, in a repo whose
-      house style annotates exactly that line — closed by cutting at `#`, TOML's
-      own lexical rule, with the array-bound alternative dropped after an
-      ablation showed no self-test case could fail without it; the residual
-      false-alarm paths (an inline table reformatted across lines, a `#` inside a
-      quoted string) all fail **loudly**, which is the direction that matters.
-      `None` has two exceptions worth writing down —
-      a **required** field decodes as `Default`, not `None`, and twelve resource
-      types changed group/version, which is a `404` — and the reversal **relocates**
-      the silent-drop failure rather than removing it, onto users whose cluster is
-      newer than the pin, which the Phase 13 connect-check box now owes a sentence
-      for
+      Closed — [D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)
 - [x] **A pod that used its own restart rule three times and has served ever
       since carries two permanent WARN cards, and the object says it is over** —
       measured on kind v1.36.1: `gang-restart`, `2/2 Ready`, `phase: Running`,
@@ -1589,56 +1065,7 @@ this plan is delivery mechanism for what this phase produces.
       draws three cards and would otherwise draw none
       ([D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15))
       — **but both objects exist and only one was on the table.**
-      **The field that looked like the answer is not one, and it was measured
-      twice before that was known.** The pod carries an `AllContainersRestarting`
-      condition — `kubectl describe pod` renders it, an ordinary pod has no such
-      row at all — and two point samples said `True` on the thrashing pod and
-      `False` on the settled one. Sampled properly it is a **transient**: `True`
-      in 7 of 40 one-second samples on the thrashing two-container pod, one per
-      kill-and-recreate window, and on a **single-container** gang-restart pod
-      `False` in 71 of 71 samples at 5 Hz while it restarted six times. So the
-      value cannot separate the two pods and reads as *it is over* when it is not;
-      only the **presence** of the row is stable, and that says no more than the
-      card's own evidence line already says. **What is left is that no measured
-      field separates them**, and these records carry no stamps either — so
-      `Finding::timestamp` is `None` and no clock can age the card out. Decide on
-      that basis: rule 5 lives with the permanence as it does for every other
-      ending, or something not yet found does it. Found by the operator review of
-      the D95 box; the correction to its own first answer came from the same
-      reviewer, measured.
-      **Closed 2026-08-15 the second way
-      ([NOTES § D100](NOTES.md#d100--the-field-that-separates-a-settled-restart-from-a-live-one-was-already-in-the-snapshot-and-rule-5-never-read-it-2026-08-15)),
-      and the thing not yet found was already decoded**: `state.running.startedAt`
-      — *when the current run began* — on the live state rather than in the frozen
-      `lastState`, and its own doc comment already named rule 5 as one of the rules
-      it is evidence for. **Measured, 20,458 container-samples at 5 Hz**: the
-      settled pod climbs to 923.6 s off **one** value while the thrashing pod
-      never exceeds 7.7 s across 74; `lastState` stayed byte-identical across all
-      three gang restarts while `startedAt` moved on every one. It is not a
-      transient the way `AllContainersRestarting` was — a timestamp is a monotone
-      function of `now`, not a boolean somebody has to keep current — and it
-      **cannot be missing in the branch that needs it**, because `serving` implies
-      `Running` implies the variant that carries it (0 absent in 14,672 running
-      samples).
-      **Three changes, no new constant**: the serving card is dated off that field
-      instead of a `finishedAt` a gang restart leaves `null`; it is suppressed once
-      that age passes `NOT_READY_GRACE`, in `out_of_memory`'s clause shape, so an
-      absent or future stamp **keeps** the card; and `RestartingAllContainers`
-      joins `CrashLoopBackOff` in the waiting exemption, which stops the same card
-      measurably flipping WARN ↔ CRITICAL every ~9 s. Deleting `&& !serving`
-      looked tidier and is refused in writing — `restarts10serving.json` exists to
-      prove that a container serving at ten restarts is WARN.
-      **The PM's own first attempt to close this was wrong and the arithmetic is
-      the lesson**: `startedAt − finishedAt` is the backoff between runs, not the
-      age of the current one. At the pinned clock both restart fixtures have been
-      serving ~49 h, so their serving-card assertions moved to `findings_at` —
-      same bytes, two moments, the pattern rule 2's own age-out test already uses.
-      27 cards → 25 on the whole capture.
-      **What the close is honest about**: the settled gang-restart object is still
-      owed and rides the capture trip below, so the exemption is proved on a
-      decoded plant (D40) meanwhile — and `dev-core` caught a **false sentence in
-      D100 itself** before copying it into the code, which is where the box below
-      came from
+      Closed — [D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13) · [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15) · [D100](NOTES.md#d100--the-field-that-separates-a-settled-restart-from-a-live-one-was-already-in-the-snapshot-and-rule-5-never-read-it-2026-08-15)
 - [x] **Nothing reports a container that is fine right now and keeps dying on a
       long cycle, and it is one question for four rules rather than a fifth
       threshold on one** — surfaced by
@@ -1653,34 +1080,7 @@ this plan is delivery mechanism for what this phase produces.
       box added. The gap is older than that box and rule 5's permanence was
       covering it by accident, at the price of a card on every pod that has ever
       hiccuped; removing the accident is right and leaves the hole visible.
-      **Do not answer it with a rate**: history is invariant 5's forbidden, and
-      `restarts ÷ pod age` is a second number deciding what the clock means. The
-      honest candidates are the **Waste/Capacity report** — where *this workload
-      has been unhealthy for a long stretch* is a sentence that belongs — or a
-      single shared clause the four rules read, decided once. Answer it in NOTES
-      before writing anything, because whichever way it goes it moves four rules.
-      **Answered 2026-08-15
-      ([NOTES § D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)),
-      and it moves none of them**: no clause over one Pod sample separates the two
-      containers, because every field the snapshot carries differs only in how
-      *recent* it is, and the thing that separates them — how often the numbers
-      moved — is history, which invariant 5 forbids a rule. Three candidates are
-      recorded and refused there: a count with no clock is D71's permanence back
-      at whatever threshold you pick, a longer shared clock needs one above 24
-      hours and then fires on every node reboot, and *has it outlived the previous
-      run* gives a settled pod a three-week card. **The sequence does exist, in
-      Events, and is refused on the watch budget rather than on physics** — said
-      in D101 so that v0.5, which opens that watch for rule 11, re-asks the
-      question instead of reading this entry as closed. What a card may not assert
-      a sorted table may print, so the question becomes a report row of *restarts*
-      and *how long this run has lasted* — never divided
-      ([PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)) —
-      boxed in Phase 4 below. The costs are named rather than discovered: between
-      restarts Alerts is silent, on a short cycle the card vanishes while it is
-      being read, and `--once` carries no reports at all. **The operator review
-      caught the load-bearing one**: the first draft dated the row off
-      `last_terminated.finished_at`, which the two synthesized `137`s leave
-      `null` — blank on the exact shape the box is named after
+      Closed — [D100](NOTES.md#d100--the-field-that-separates-a-settled-restart-from-a-live-one-was-already-in-the-snapshot-and-rule-5-never-read-it-2026-08-15) · [D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)
 - [x] **Rules 5 and 6 print the identical four-line action on two adjacent cards,
       and no `CrashLoopBackOff` is needed to see it** — on a container past the
       restart band whose last recorded run is a lost status, rule 5 draws the
@@ -1700,8 +1100,7 @@ this plan is delivery mechanism for what this phase produces.
       which is an `analyze` decision and not a rule's, beside
       `explains_a_shortfall`. Whatever it decides applies to every shared action,
       not to this one pair.
-      **Closed by `one_card_per_action` in `analyze`, scoped to the container**
-      ([D102](NOTES.md#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15))
+      Closed — [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15) · [D102](NOTES.md#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15)
 - [ ] **A lost init-container status reads as *finished successfully*, and then
       two rules stand down** — `kubelet_pods.go:2714-2718` synthesizes
       `Terminated { reason: "Completed", exitCode: 0 }` for an init container
@@ -2092,13 +1491,7 @@ this plan is delivery mechanism for what this phase produces.
       D70's writable-branch exemption and drew **no card at all** — the exact
       shape the escalator tests the path rather than the mode for
       ([NOTES § D78](NOTES.md#d78--the-socket-the-escalator-could-not-see-and-the-three-mutations-that-survived-the-fix-2026-08-13)).
-      The operator review then found the same door one level up: matching the
-      socket **file** alone left `/run/containerd` — which our own capture
-      mounts — drawing the writable card and its *"mount it read-only"* advice,
-      which hands over the node. Ancestors match now, k3s/RKE2 and cri-dockerd
-      joined the list, and the socket card no longer tells a legitimate node
-      agent to remove the mount that is its job
-      ([NOTES § D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13))
+      Closed — [D78](NOTES.md#d78--the-socket-the-escalator-could-not-see-and-the-three-mutations-that-survived-the-fix-2026-08-13) · [D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
 - [x] Rule 5 thresholds (≥3 WARN, ≥10 CRITICAL) — **and CRITICAL only when the container is not serving**, because a red card whose own title says it is serving is what teaches people to ignore red. **Rule 12 does not add a
       second grace period** — the apiserver already wrote *request time +
       grace* into `deletionTimestamp`, and the grace beside it is read for the
@@ -2109,13 +1502,7 @@ this plan is delivery mechanism for what this phase produces.
       at `> 0` a laptop ten minutes fast files a finding for every pod a
       correctly-progressing rollout has just asked to terminate
       ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12)).
-      **The margin is `> 60s`, flat — the `max(30s, grace)` this box used to
-      specify was wrong** and charged the grace twice, hiding a pod with
-      `terminationGracePeriodSeconds: 3600` for a full hour past its kill
-      deadline, which is the Kafka/Vault case rule 12 exists for. The margin
-      covers kubelet observation, watch latency and skew; none of those scales
-      with a grace the deadline already spent
-      ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
+      Closed — [D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12) · [D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) · [D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)
 - [x] **A capture trip for the branches no committed fixture can reach — you
       run this one, not an agent** (`just cluster-up` · edit
       `scripts/broken.yaml` · `just fixtures`). **Seven branches shipped with
@@ -2223,71 +1610,7 @@ this plan is delivery mechanism for what this phase produces.
       **width budget** — `alerts.md` right-aligns it with no stated maximum,
       and the widest string is 14 characters
       ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
-      **(4) A fourth, and it is two rules that cannot both be obeyed:** rule 3's
-      evidence is the runtime's verbatim sentence — ~250 characters on the
-      committed capture — because
-      [D37](NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)
-      requires the message be quoted and not paraphrased, while
-      `screens/widgets.md` § 7 caps a card at 3–5 lines. As built, that card is
-      six. `rules.rs` cannot resolve it without breaking D37, so the answer is
-      geometry: wrap, truncate with the full text on selection, or let one card
-      be tall. Whichever it is, `views.rs` needs it decided before Phase 9, not
-      discovered there.
-      **It is owed on the `action` line too, not just on evidence** — measured
-      off the printed cards, three actions run 200, 149 and 146 characters
-      (rule 10's scheduler advice, rule 1's pull advice, rule 8's socket
-      advice), and at `alerts.md`'s 45-column card pane the socket action alone
-      wraps to four lines by itself. **N6's merge made the worst case worse
-      rather than adding a fourth entry**: rule 10's card now carries N6's
-      sentence *and* the scheduler's verbatim message on one `·`-joined
-      evidence line, which `screens/alerts.md` § N6 draws at **twelve** lines
-      and says so rather than pretending it fits. Shortening them is not the fix: each is
-      long because it answers a question the reader actually has
-      ([NOTES § D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
-      for why rule 8's grew). Mitigating, from D3: findings group by owner, so a
-      40-node DaemonSet is one card and not forty.
-      **Closed 2026-08-14, and all four answered with drawings rather than
-      prose** ([NOTES § D83](NOTES.md#d83--the-hours-rung-runs-to-48-and-the-age-ladder-gets-one-home-2026-08-14)):
-      (1) the cordon card prints the ladder's ordinary string and **nothing on
-      it reasons from the age** — `timeAdded` dates the *taint*, so a
-      `spec.taints` rewrite re-stamps it and the number can only ever be too
-      small, which is a safe floor to sort by and a fatal thing to argue from.
-      (2) The hours rung runs to **48**, matching `HumanDuration`'s own
-      boundary, and `1 day ago` becomes an unreachable string. (3) The age
-      column's budget is **14** columns, from the epoch string. (4) The geometry
-      is settled at the 80×24 floor — card region 53, body text 51, evidence
-      capped at **three** wrapped lines with the full text one `⏎` away, action
-      never cut, card 3–10 lines so a second finding is always on screen; and
-      `--once` does not cut at all, because it has no keypress to restore with.
-      The round also gave the ladder **one home**, `screens/widgets.md` § 1b,
-      which is now what `rules::age` cites instead of three screens. Two
-      measurements corrected numbers this file had been quoting: rule 3's
-      evidence is **347** characters, not ~250, and the longest unbreakable
-      token is 58 columns — wide enough that wrapping alone cannot fit it and
-      only a character break can
-      **The trip ran on 2026-08-14 and this box closes with it: 48 fixtures
-      from `kindest/node:v1.36.1`, `verify` 37/37, twelve of the thirteen shapes
-      on the first attempt.** Four things it settled that reading could not
-      ([NOTES § D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14),
-      [§ D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)):
-      **the capture host must have memory headroom** — a starved one reports
-      every memory-limit kill as `reason: "Error"`, which is the word D71 uses
-      for the *opposite* rule, and `cluster.sh verify` refusing on the wrong
-      host before a byte is written is what saved rule 2's positive fixture.
-      **`broken-oomserving` shipped with `count=1`** on a `dd`, and a short read
-      from `/dev/zero` satisfies a count without allocating, so the container
-      exited 0 and the shape never appeared; `exec tail /dev/zero` has no
-      newline to stop at and no short read to end on. **`CAPTURED_PODS` claimed
-      "every pod capture in the repository" and held 12 of 31**, so the pin
-      guard walked a third of what it named and nineteen captures — every new
-      one among them — had their timestamps compared against `now` by nothing.
-      And **rule 1 draws a card that argues with itself** on the two objects the
-      trip brought back for rule 6, which is D85's own box below.
-      **Twelve syntheses retired onto real objects**, three of them branches
-      that had no test at all and could be deleted with the suite still green:
-      rule 6's `exit 0` and `143` exemptions, and rule 7's `started` suppressor.
-      The pin moved to `2026-08-14T00:00:00Z` in five places, one of which
-      (`docs/maps.md`) nothing had been guarding
+      Closed — [D43](NOTES.md#d43--n2-has-no-clock-and-that-makes-a-findings-age-optional-2026-08-12) · [D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13) · [D37](NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12) · [D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13) · [D83](NOTES.md#d83--the-hours-rung-runs-to-48-and-the-age-ladder-gets-one-home-2026-08-14) · [D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14) · [D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)
 - [x] **Rule 1 must read how the previous run ended** — it draws *"Container
       keeps crashing"* over `exit 0` on a batch job that finished, and a
       **CRITICAL** *"keeps crashing"* whose own evidence line reads *"an
@@ -2301,26 +1624,7 @@ this plan is delivery mechanism for what this phase produces.
       ([NOTES § D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)):
       it is rule *logic*, so the plain-language pass below is the wrong home for
       it, and the capture trip above is not unfinished for having found it.
-      **Shipped in two rounds, and the fix is at the root**: a shared
-      `enum Ending { Finished, Stopped, Failed }` is now the one place a rule
-      *decides* what `exit 0` and `143` mean, so rules 1 and 6 cannot come to
-      disagree again — rule 6's guard was rewritten onto it and proven
-      equivalent over **160 enumerated inputs** by a standalone program rather
-      than by assertion. **The operator review's blocker was inside the fix**:
-      the exit-0 action told the reader to move the container into a Job, which
-      is false twice over on a native sidecar *in* a Job — the object already is
-      one and its `restartPolicy` is `Never`, and
-      `tests/fixtures/healthy-sidecar.json` sits one short run from producing
-      that card. Actions are role-aware now. Three more of the same shape went
-      with it: *"nothing has crashed"* was an absolute built from one sample
-      (backoff accumulates; four crashes then one clean exit is a real state),
-      the card named `restartPolicy` while offering `kubectl describe pod`,
-      which prints no such field, and rule 6's 137 arm named probes without
-      naming memory — which [D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
-      had just shown can arrive with the word `OOMKilled` missing. **The durable
-      lesson is the reviewer's**: the rule reasons past its evidence, claiming
-      *why* a loop exists from one observation of one run, and every branch's
-      wording now stays inside what a single `lastState` can support
+      Closed — [D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14) · [D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
 - [ ] Plain-language pass over every string a user will read — the jargon test
       is "would someone in their first month understand this sentence?"
       **Three sentences are already known wrong and are owed to this box** — all
