@@ -40,7 +40,8 @@ shorter, and the two files every agent must read — `NOTES.md` and `todo.md` �
 are the two that every box grows. That is why a box came to cost two hours when
 the gate that proves it costs forty seconds
 ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
-Three rules, all of them the PM's, all of them run at step 7:
+Three rules. The first and third are the PM's, at step 7; the second binds
+whoever is writing — a dev at step 3 as much as the PM at step 7:
 
 - **`todo.md` holds boxes, not history.** A box says what to do and how it is
   known to be done. When it closes it keeps its title and its `NOTES.md`
@@ -185,6 +186,16 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     which is the thing [D50](NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)
     refused and still refuses. This is a convention, not a per-file judgement
     call: every product file that has tests splits the same way.
+    **The test file — and only the test file — may split again**, into
+    `src/<name>_tests/` with one `#[path]` module per `// --- … START ---`
+    region of the product file, when it has grown past what one turn can read.
+    `rules_tests.rs` did on 2026-08-15 and now holds the imports, the helpers
+    more than one region reads, and five declarations. Still no `mod.rs`, still
+    no `lib.rs`, and **the product file never splits with it**: the defects this
+    repo has paid most for were two rules reading one container and disagreeing,
+    and a module boundary is exactly where the second copy of a shared helper
+    grows back ([D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15) ·
+    [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
 12. **No per-kind code in the browser.** Resource views come from API discovery
     and server-side `Table` printing; typed structs exist only where the rule
     engine needs them. A hand-written column list for a kind is a design failure.

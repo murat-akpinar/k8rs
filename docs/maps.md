@@ -56,7 +56,16 @@ frozen. Layer order is the row order below. A file's tests sit beside it in
 **Tests sit beside the file they test**, never inside it: `src/rules.rs` carries
 `#[cfg(test)] #[path = "rules_tests.rs"] mod tests;` and no test code of its own;
 the tests live in [`src/rules_tests.rs`](../src/rules_tests.rs), same writer as
-the file they test. Still a **child module**, so it sees the private items — and
+the file they test. **When that file outgrows a turn it splits by section, and
+only it does** — since 2026-08-15 `rules_tests.rs` holds the imports, the
+helpers more than one section reads, and five `#[path]` declarations into
+[`src/rules_tests/`](../src/rules_tests) (`snapshot` · `pod` · `node` ·
+`workload` · `certificate`), one per `// --- … START ---` region of `rules.rs`.
+No `mod.rs`, and `rules.rs` itself stays whole — a module boundary is where a
+second copy of a shared helper grows back
+([NOTES § D91](../NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15) ·
+[§ D103](../NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+Still a **child module**, so it sees the private items — and
 the crate still has one `bin` target and no `lib`, which is why nothing under
 `tests/` can reach a product type and why the tests are not there
 ([NOTES § D50](../NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12) ·
@@ -123,7 +132,7 @@ describes people who have to be in the room. Workflows default to
 
 | I want to | Touch, in this order | Owner |
 |---|---|---|
-| Add or change a **rule** | [`src/rules.rs`](../src/rules.rs) + its tests in [`src/rules_tests.rs`](../src/rules_tests.rs), same change → a NOTES entry for anything the plan did not decide | `dev-core` → PM |
+| Add or change a **rule** | [`src/rules.rs`](../src/rules.rs) + its tests in the [`src/rules_tests/`](../src/rules_tests) module for that rule's section, same change → a NOTES entry for anything the plan did not decide | `dev-core` → PM |
 | Add a **report** | `src/analysis.rs` + its tests in `src/analysis_tests.rs` | `dev-core` |
 | Change what a **screen** looks like | `screens/<screen>.md` **first**, then `src/views.rs` / `src/ui.rs` | `tui-designer` → `dev-ui` |
 | Change a **colour** | `src/theme.rs` — and nowhere else | `dev-ui` |
