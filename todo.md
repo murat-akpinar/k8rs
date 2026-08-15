@@ -1195,7 +1195,7 @@ this plan is delivery mechanism for what this phase produces.
       new reasons, the `last_log_line` class, `exit 255`, and `lastState` meaning
       *the last run Kubernetes wrote down* rather than *the previous run* — plus
       one in `scripts/` that has nothing to do with `137` at all
-- [ ] **Rules 1 and 5 print the two reasons `exit_meaning` learned and were
+- [x] **Rules 1 and 5 print the two reasons `exit_meaning` learned and were
       never taught what either one means** — the half the `137` box above left
       out, on purpose and recorded
       ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
@@ -1267,7 +1267,49 @@ this plan is delivery mechanism for what this phase produces.
       Measured on kind v1.36.1 with the feature gate at its
       default — `{1.36, true, Beta}` — on a pod declaring `restartPolicyRules`
       ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
-      Both reasons want one answer, which is why they are one box
+      Both reasons want one answer, which is why they are one box.
+      **Shipped 2026-08-15
+      ([NOTES § D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)).**
+      The root was `ending()`, as the box guessed: it reads the `reason` beside
+      the code now and gained two variants, so the answer is one function and not
+      three cards — and the mechanism is the compiler, since every `match` on that
+      enum stopped building until rules 1, 5 and 6 each said what the two mean.
+      **Rule 5 got arms and not an exemption**, because its subject is the count,
+      which is real under both reasons, and because the trigger's own record is
+      overwritten by the same synthesized `137` — so a second exemption would
+      blank a thrashing pod entirely. Rule 6 draws exactly what it drew; only its
+      key moved.
+      **The operator review took a cluster to it and the first draft did not
+      survive contact.** The new action told the reader to *find the container
+      with an exit code of its own*, and measured: every container prints
+      `Exit Code: 137` on a settled pod, the trigger's own `exit 3` was visible in
+      12 of 40 one-second samples on a thrashing one, and a **single-container**
+      pod gets the identical record and was being sent to compare it with siblings
+      it does not have. The fix trades the command — that arm carries `get_yaml`
+      and names `restartPolicyRules`, the one field that identifies a trigger and
+      the one `describe` does not print. **The field that looked like a better
+      answer was measured and rejected**: the pod's `AllContainersRestarting`
+      condition is a transient, `True` in 7 of 40 samples and never once on the
+      one-container pod, and the reviewer's own first recommendation died on the
+      second measurement — two point samples of a transient are an inference in a
+      measurement's clothes.
+      **Four more the review measured and this box closed**: rule 5's serving
+      title made an 11-line card at a three-digit restart count, over the measured
+      maximum, and both claims were reworded and are now measured by a test at
+      four counts; rule 1's `Unwatched` arm is as unproduced as its `RestartRule`
+      neighbour and now says so; `ending()`'s premise *a real exit code means the
+      run was watched* was false and is narrowed; and `doing_its_job` compared
+      with `==`, so the compiler had **not** forced it — the claim this box is
+      built on was true of three call sites out of four until it became a `match`.
+      **The guard for the blocker broke twice under attack**, both times on the
+      shape of the assertion rather than its content: three `contains` fragments
+      survive an appended *but rarely*, and the height cap caught the longer
+      variant for being too tall rather than for lying.
+      **What could not be proven**: no committed capture holds either reason in
+      `lastState` — the pin for `ContainerStatusUnknown` comes from `failed.json`,
+      where it sits in `state.terminated`, which no rule reads — and the pairs the
+      kubelet never writes stay deliberately unasserted, which is why one test had
+      to be renamed rather than widened
 - [ ] **A container that is terminated *right now* with a bad exit is read by no
       rule as an ending** — rule 1 needs a `CrashLoopBackOff` waiting reason,
       rule 7 needs `Running`, `stuck_at_the_starting_line` returns early on any
@@ -1288,7 +1330,86 @@ this plan is delivery mechanism for what this phase produces.
       ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
       Decide whether `state.terminated` is a rule's subject at all: it is a
       transient a watch will see and a `--once` run may not, which is the argument
-      both ways and the reason this is a decision and not an omission
+      both ways and the reason this is a decision and not an omission.
+      **Rule 5's fan-out is the same decision seen from the card side, and it
+      lands here rather than in a box of its own.** One firing writes the record
+      into every container, so rule 5 draws one card per container — six on a
+      six-container pod, one event — and since
+      [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)
+      every one of them is *truthful*, which is the whole of what that box fixed:
+      each says the pod's own rules restarted them together and that the record
+      does not say which one exited first. **Which container exited first is only
+      identifiable from `state.terminated`, and that half is this box's.** Whether
+      the fan-out should be drawn at all is the other half and it moved to the box
+      below — where the field that looked like the answer, the pod's
+      `AllContainersRestarting` condition, was measured and is **not** one: its
+      value is a transient, `True` in 7 of 40 one-second samples on a thrashing
+      pod and never once on a single-container one. Rule 5's own doc says *one
+      incident, one card*
+- [ ] **A pod that used its own restart rule three times and has served ever
+      since carries two permanent WARN cards, and the object says it is over** —
+      measured on kind v1.36.1: `gang-restart`, `2/2 Ready`, `phase: Running`,
+      three declared gang restarts and then quiet, draws *"Container has been
+      restarted 3 times — it is serving now"* **once per container, for the life
+      of the pod**, because `lastState` never expires and `restartCount` never
+      falls. That is [D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)'s
+      false-positive class and it is the same argument rule 6 uses to stay silent
+      on the same reason. **The ruling that let rule 5 keep drawing was made
+      against the other object and it stands** — a pod thrashing at 88 restarts
+      draws three cards and would otherwise draw none
+      ([D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15))
+      — **but both objects exist and only one was on the table.**
+      **The field that looked like the answer is not one, and it was measured
+      twice before that was known.** The pod carries an `AllContainersRestarting`
+      condition — `kubectl describe pod` renders it, an ordinary pod has no such
+      row at all — and two point samples said `True` on the thrashing pod and
+      `False` on the settled one. Sampled properly it is a **transient**: `True`
+      in 7 of 40 one-second samples on the thrashing two-container pod, one per
+      kill-and-recreate window, and on a **single-container** gang-restart pod
+      `False` in 71 of 71 samples at 5 Hz while it restarted six times. So the
+      value cannot separate the two pods and reads as *it is over* when it is not;
+      only the **presence** of the row is stable, and that says no more than the
+      card's own evidence line already says. **What is left is that no measured
+      field separates them**, and these records carry no stamps either — so
+      `Finding::timestamp` is `None` and no clock can age the card out. Decide on
+      that basis: rule 5 lives with the permanence as it does for every other
+      ending, or something not yet found does it. Found by the operator review of
+      the D95 box; the correction to its own first answer came from the same
+      reviewer, measured
+- [ ] **Rules 5 and 6 print the identical four-line action on two adjacent cards,
+      and no `CrashLoopBackOff` is needed to see it** — on a container past the
+      restart band whose last recorded run is a lost status, rule 5 draws the
+      count and rule 6 draws *No record of how the container's last run ended*,
+      **both carrying `unwatched_action` verbatim**: 26 lines about one container
+      in a 16-row pane, rule 7 underneath. The suite prints it in its own
+      `--nocapture` output and nobody read it, which is the second time that has
+      been the finding in this area. [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)
+      recorded the pair as rules **1** and 6 and that is the rarer of the two —
+      the backoff instance needs a shape the same review could not produce in ~20
+      attempts, while this one needs only a sandbox loss on a container that comes
+      back unready, which `lost-notready` already is. **Silence is not the fix and
+      D93 already refused it**: rule 6's card is what keeps a reader off
+      `logs --previous`, which the API will not serve for this record. What is
+      cheap is that the *second* copy of a shared sentence says nothing new — so
+      the decision is whether a rule may know that a neighbour already said it,
+      which is an `analyze` decision and not a rule's, beside
+      `explains_a_shortfall`. Whatever it decides applies to every shared action,
+      not to this one pair
+- [ ] **A lost init-container status reads as *finished successfully*, and then
+      two rules stand down** — `kubelet_pods.go:2714-2718` synthesizes
+      `Terminated { reason: "Completed", exitCode: 0 }` for an init container
+      whose status the runtime lost, which is the **third** bare literal beside
+      the two [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)
+      turned into endings. `ending` reads the `0` and answers `Finished`,
+      `doing_its_job` then answers true for an init container, and rules 5 and 6
+      both return `None`: **k8rs says nothing at all about a run Kubernetes lost**,
+      which is the class the D95 box exists to remove, one literal over. It is
+      why that box's `ending` premise had to be narrowed to *the two reasons this
+      file has evidence for* rather than *a real exit code means the run was
+      watched*. **`0` cannot be keyed on alone** — every finished init container
+      writes it — so this needs the `reason` beside it, and the object to prove it
+      on is one no committed capture holds. Found by the operator review of the
+      D95 box, from D93's own source citation
 - [ ] **Rule 6's `ContainerStatusUnknown` card can never carry a date, and
       nothing else can age it out** — `Finding::timestamp` comes from
       `finished_at`, the kubelet's literal sets no stamps, and `lastState` never
@@ -1360,7 +1481,17 @@ this plan is delivery mechanism for what this phase produces.
       every rule that says *previous* means the second thing. Turned up by the
       operator review of the `137` box while verifying the kubelet source. Decide
       what the cards may claim about `lastState` at all; it reaches rules 1, 5
-      and 6 and `exit_fact` under all three
+      and 6 and `exit_fact` under all three.
+      **Measured since, on a live cluster**: the record stood still at one
+      `finishedAt` while `restartCount` went 7 → 16, nine restarts under one
+      unchanged `lastState`. **And the surviving instances are now named**, because
+      [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)
+      dodged the class rather than fixing it: rule 5's two new clauses were worded
+      about **the record** — *the record names no ending*, *the pod's rule is on
+      record* — precisely so they stay true after the freeze, while **rule 1's
+      titles and rule 6's still say *the container's last run***, which is the
+      claim this box says the object does not support. One of them is D93-blessed
+      and shipped, so moving it is this box's call and not a wording tidy-up
 - [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
       in the green line, not an assertion, so nothing fails and that is exactly
       why it will survive. One word, `tester`'s file, and it goes with whichever
@@ -1374,6 +1505,14 @@ this plan is delivery mechanism for what this phase produces.
       it**, and that is exactly what the first agent to raise a review cluster
       typed, against three committed files that said `review`
       ([NOTES § D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
+      **The second reviewer reached for the same wrong name and reported it as a
+      repo defect** (2026-08-15) — every committed file still said `review`, and
+      the string had reached it through **D94's own title**, which contains
+      `k8rs-review` because the entry is about that mistake. The brief that told
+      it to read D94 before naming the cluster is what handed it the name. Nothing
+      to fix in the record; it is the sharpest possible argument that the refusal
+      has to be mechanical, since the file warning about the name is itself a way
+      of spreading it.
       **The primary fix is in `sanitize.jq`, not in `cluster.sh`** — the reviewer
       never ran `cluster.sh`, it ran `kind create cluster` directly, because a
       review is one measurement and not a fixture trip, and the next one will skip
@@ -1407,14 +1546,35 @@ this plan is delivery mechanism for what this phase produces.
       committed captures — a digest-pinned image spends a whole line on its own.
       Rule 5 answered that by putting the load-bearing fact ahead of the image so
       the *image* is what gets cut, which is the right order and not a fix for
-      the cap. Either the budget is wrong or four
+      the cap. **Measured again on a card D95 shipped**, where that order paid
+      off and left one thing behind: the serving `RestartingAllContainers` card's
+      evidence wraps to four lines at 51 columns, the cut takes the image as
+      designed, and what the reader is left holding ends `…what this pod asked
+      for) ·` — **a trailing separator with nothing after it**. Allowed by this
+      file's own cut rule, so it is the renderer's to trim when `ui.rs` lands, not
+      a `rules.rs` defect; it belongs here because this is the box that decides
+      whether the cap is the right number. Either the budget is wrong or four
       actions are, and that is a `tui-designer` call on `screens/`, not a
       `rules.rs` one; whichever way it goes, it decides what the plain-language
       pass below has to shorten. **Same file, same box:** `alerts.md` quotes
       rule 5's *"it is serving now, but something keeps killing it"* as the
       example of a serving card that does not silence W2. Still true — that is
-      the `Failed` arm — but it is one arm of four now, and the passage reads as
-      if it were the whole rule.
+      the `Failed` arm — but it is one arm of **six** since the two `137` reasons
+      got their own
+      ([NOTES § D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)),
+      and the passage reads as if it were the whole rule. **And the title is the
+      part this file caps by implication only** — the ten-line card is 1 identity
+      + 1 title + 3 evidence + 5 action, so a title's second and third lines spend
+      a budget nothing reserved. D95's first draft proved it costs something real:
+      at a **three-digit** restart count its serving clause made a **3-line title
+      and an 11-line card**, over the measured maximum, and it was caught by the
+      operator review rather than by anything in the repo. It shipped reworded,
+      with `the_cards_this_box_ships_fit_the_height_they_are_drawn_at` measuring
+      **those four cards and no others** at exactly 10 lines
+      ([NOTES § D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)).
+      Two things that box leaves here: **every other title in the file is
+      unmeasured**, and a restart count is the one field that grows with the
+      cluster's uptime rather than with a rule's wording.
       **One requirement to carry into whatever rewrite this box produces**,
       deferred here rather than lengthening a sentence already over the cap:
       `stopped_action` names two producers of a repeated polite stop — a health

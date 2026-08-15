@@ -6004,6 +6004,236 @@ one. **A guard is tested by the mistake someone would actually make**, which is
 rarely the mistake it was written against — and the pattern here is that nobody
 finds that mistake in their own guard.
 
+### D95 — the two `137` reasons become endings, and rule 5 draws where rule 6 goes silent (2026-08-15)
+
+[D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)
+taught `exit_meaning` two readings of `137` the kubelet writes itself and
+deliberately stopped there: rules 1 and 5 printed both translations and their
+actions knew neither. So one card said *Kubernetes lost track of the container*
+and the card under it said *check the memory limit and the liveness probe*, and
+rule 1 sent the reader to `logs --previous` for a run whose `containerID` the
+API does not have — a command that cannot run, not merely advice that does not
+help.
+
+**The root is `ending()`, and this box's whole design is that the fix is one
+function and not three cards.** It read the number alone; it now reads the
+reason beside it, and gains `Ending::Unwatched` (`137` + `ContainerStatusUnknown`)
+and `Ending::RestartRule` (`137` + `RestartingAllContainers`). **The mechanism is
+the compiler**: every `match` on that enum stopped building until rules 1, 5 and
+6 each said what the two mean. A `reason` check inside one rule — the obvious
+smaller diff — would have left the other two silently wrong, which is exactly how
+this pair of defects shipped in the first place.
+
+**The reason is read *beside the code*, never alone, and that is a real
+behaviour change on unreachable objects.** Rule 6 used to exempt
+`RestartingAllContainers` and re-title `ContainerStatusUnknown` on the reason
+whatever the exit code was; now both keys are the pair. Three shapes moved —
+`1 + ContainerStatusUnknown` from the *No record* title to the ordinary one, and
+`1` or `5` + `RestartingAllContainers` from silent to drawing a card. **Nothing
+the kubelet writes is affected**, and this is the one place in the file where
+that claim rests on a committed capture rather than on the kubelet's source:
+`failed.json` carries the pair on `broken-failed` / `app`. The ruling: a real
+exit code means the run *was* watched, so an ordinary reading of it is the
+honest one, and no test is invented for a pair the API cannot produce
+([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)).
+
+**`OOMKilled` is deliberately not a variant.** Rule 2 owns the labelled kill,
+*something keeps killing it* is true of it, and rules 1 and 5 need nothing new to
+say — so it stays `Failed` and rule 6 keeps exempting it by reason. The enum
+holds the endings the *other* rules have to tell apart, not every reason the
+kubelet writes.
+
+**Rule 5 gets arms and not an exemption. That is the ruling of this box.** Rule 6
+goes silent on `RestartingAllContainers` because *the previous run failed* is its
+whole subject and the ending refuses it. Rule 5's subject is the **count**, which
+is real under both reasons — and silence would blank the pod: one restart-rule
+firing writes the same synthesized record into *every* container's `lastState`,
+the trigger's included, so a rule 5 exemption on top of rule 6's would leave a
+pod thrashing 31 times in six minutes with nothing on the screen at all. What
+goes is the claim and the action, not the card: *"something keeps killing it"* is
+a positive claim of repeated killing on a run nothing is recorded as having
+killed, and `failed_action`'s memory limit and liveness probe are doors onto a
+kill under an evidence line saying no kill was seen.
+
+**Two shared sentences, not five copies** — `unwatched_action` and
+`restart_rule_action`, beside the four `finished_action` / `stopped_action` /
+`failed_action` / `killed_action` already there. Both are **role-blind**, which is
+also what keeps them clear of `validateInitContainers`: a sentence that names no
+probe cannot name one an init container may not have, so the split the other four
+make has nothing to split on. `unwatched_action` is rule 6's shipped text
+unchanged, now called by three rules instead of one.
+
+**`restart_rule_action` may not say *this container is fine*, and that is the
+whole of its wording.** The record lands on every container including the one
+whose own exit triggered the rule — its own bad exit is in `state.terminated`,
+which no rule reads — so *look at the other containers* would be wrong on exactly
+the container that failed. What the object supports is that it does not say which
+one went first; **where the card sends the reader instead is the operator
+review's finding below**, and the first draft got it wrong by naming a thing
+`describe` does not show. The sentence ends on *and that may be this container*
+by design, and a guard now holds it there — a hedge appended after that clause
+takes it back, which is how the second attack broke it.
+
+**Rule 1's `RestartRule` arm is written and is barely reachable, and it says so.**
+The restart-all path purges every container from the runtime, so `doBackOff`
+finds no exited record, no backoff entry is made and `CrashLoopBackOff` does not
+appear — measured at about one restart every 11s behind an 8s sleep, which is no
+backoff at all. The arm exists because the enum forces an answer; the shape it is
+tested on is planted, and a planted shape is not a reachable one
+([D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)).
+
+**D93's unobservable branch is observable now, by the route D93 predicted and not
+the one it named.** That entry accepted that a title keyed on the null `finishedAt`
+could not be told from one keyed on the reason, and recorded that the day rule 6's
+exemption narrowed, the keys would diverge. The exemption did not move — rule
+**5** stopped exempting instead, and because it draws a different clause for each
+variant, a stamp-keyed `ending()` now prints *no ending on record* over a run
+whose record is complete. The tests tell the two apart on the first object.
+
+**The attack found two holes the author's own green run could not**, and both are
+the same class one level apart:
+
+- **A negative-only assertion proves the card does not lie, not that it says
+  anything.** Replacing `unwatched_action()` at rules 1's and 5's call sites with
+  the literal `"ask a friend"` passed 184 tests: the test forbade every kill word,
+  every log pointer and every probe, and `"ask a friend"` says none of them. Its
+  `RestartRule` sibling caught the same mutation immediately, because it asserts
+  what the sentence *contains*. **Every negative test in this file owes one
+  positive line beside it**, and the asymmetry between two tests written in one
+  sitting is how far that goes without being noticed.
+- **A constant every test plants from is pinned by nothing.** `STATUS_LOST`
+  misspelled as `"containerstatusunknown"` and `RESTART_ALL` as
+  `"RESTARTINGALLCONTAINERS"` both shipped 184 green, because every shape in the
+  suite writes the reason *out of the same constant it is then matched against* —
+  a rule that never fires against a real cluster, with a suite that is green about
+  it. `write-guard.py`'s `CANARIES` class one level down. The two are pinned by
+  different evidence and the difference is stated rather than blurred:
+  `STATUS_LOST` is read off `failed.json`'s captured bytes, spelling and `137`
+  together; `RESTART_ALL` has no capture and is pinned to the literal against
+  `kubelet_pods.go` at v1.36.1, **a source-derived pin and not a captured one**.
+
+**The operator review took a cluster to it and the first draft did not survive
+contact.** Everything below was measured on kind v1.36.1, and it is why this entry
+has a second half.
+
+**The blocker: the new action named a thing to find that the pod does not
+contain.** *Check the containers in the pod and look for the one with an exit code
+of its own* fails on three measured shapes — on a settled pod every container
+prints `Exit Code: 137` and the trigger's own `exit 3` is gone; on a thrashing pod
+it was visible in **12 of 40** one-second samples; and a **single-container** pod
+declaring `action: RestartAllContainers` gets the identical record and was being
+told to compare it with siblings it does not have. That is `killed_action`'s own
+rule broken one function over: an action may name a *thing to find out*, never a
+*thing to find* that its command does not show.
+
+**The fix trades the command, which is the second time this area has paid that
+price** ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
+`describe` cannot name the trigger by any route that survives measurement, so the
+`RestartRule` arm of rules 1 and 5 carries `get_yaml` instead and names the one
+field that can: `restartPolicyRules` is declared on the container(s) that can set
+a gang restart off, it is in `get -o yaml` and in no part of `describe`, and on a
+one-container pod it resolves to that container. The card keeps the denial — *this
+record does not say which container exited* — and its closing clause keeps **this**
+container in the frame, because the trigger carries the same record as everyone
+else and a card that exonerated it would be wrong on exactly the container that
+failed.
+
+**What was given up, both measured rather than assumed.** `describe`'s events do
+name the killed containers, and the kubelet's spam filter eats them: `x2` and `x3`
+recorded against **130** real restarts, expiring in an hour. And the pod's
+`AllContainersRestarting` condition — the field that looked like the answer —
+**is a transient, not a state**: `True` in 7 of 40 one-second samples on the
+thrashing two-container pod, one per kill-and-recreate window, and on the
+single-container pod `False` in 71 of 71 samples at 5 Hz while it restarted six
+times. Only the *presence* of the row is stable, and presence says no more than
+the card's evidence line already says.
+
+**The general lesson, and it is the sharpest one in this entry: two point samples
+of a transient are an inference wearing a measurement's clothes.** The reviewer
+filed *the condition is `True` on the thrashing pod and `False` on the settled
+one* off two samples, recommended a card be pointed at it, and then — asked to
+confirm one unrelated detail about the same field — sampled it properly and killed
+its own recommendation. **That is the same defect it had just filed as finding
+1**, one field over, by the same author, inside one review. A field read once is
+not a field measured; it is a field caught at a moment. The PM had already written
+the wrong claim into two `todo.md` boxes on the strength of it.
+
+**Three more findings the review measured, all now closed in the code:** rule 5's
+`Unwatched` serving title made an **11-line card** at a three-digit restart count
+against `screens/alerts.md`'s measured maximum of ten — both claims were reworded
+to the `Failed` arm's 32-character budget and the four cards this box ships are
+measured at exactly 10 by a new test, off the cards `analyze` really draws rather
+than off copies of the strings. Rule 1's `Unwatched` arm turned out to be **as
+unproven as its `RestartRule` neighbour** — never produced in ~20 attempts, since
+the kubelet's synthesized write is gated on `LastTerminationState.Terminated ==
+nil` and a container that earned a backoff necessarily has one — and it now
+carries the same caveat instead of being presented as a field fix. And
+`ending()`'s premise, *a real exit code means the run was watched*, was **false**:
+`kubelet_pods.go:2714-2718` synthesizes `Completed` / `0` for an init container
+whose status the runtime lost, which `ending` reads as `Finished`, `doing_its_job`
+then reads as *this container is fine*, and rules 5 and 6 both stand down — k8rs
+silent on a lost run, which is this box's own defect one literal over. The premise
+is narrowed to the two reasons this file has evidence for; the third literal is
+boxed.
+
+**Two mechanism findings worth more than the wording ones.** `doing_its_job` read
+`ending(run) == Ending::Finished`, so **the compiler did not force it** to answer
+for the new variants — it classified both silently, and this entry's central claim
+was true of three call sites out of four. It is a `match` now, and adding a
+throwaway variant stops the build at four places. And the tests never fed the shape
+the cluster actually writes: every plant put the record on **one** container where
+the kubelet puts it on **all** of them, so the fan-out described in prose was
+asserted nowhere. The two-container plant is in.
+
+**The guard for that blocker had to be written twice, and the second break was in
+the assertion's *shape* rather than in what it asserted.** The first version
+pinned the new sentence with three `contains` fragments; appending eight words —
+*…and that may be this container, **but rarely*** — keeps all three and reverses
+the sentence, and the suite stayed green. A longer exonerating variant did go red,
+but **only in the height test**, for being five action lines rather than for
+lying: inside an action's remaining slack the wording guard was blind, and that
+action had 32 characters of it. **A `contains` fragment cannot see what comes
+after it** — the sentence it pins can be taken back by the next clause, which is
+the same framing hole [D31](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)
+named for substrings and [D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)
+named for letter-case, in the guard written to close the finding that came from
+both. What holds it now: every card's action compared to the function by value,
+the sentence required to *end* on the clause that keeps this container in frame,
+and an `EXONERATES` list run over title, evidence and action alike — because a
+title exonerates as easily as an action, which is the path the author's own second
+pass added rather than the reviewer's. **Its control is synthetic and says so**:
+these are words the rule set may never say, so a control drawn from the product
+would mean the defect had already shipped; what is proved is that the detector
+fires, on every phrase and on the exact mutation.
+
+**Three smaller things the same pass found, worth recording because each is a way
+a green suite lies.** Two commands were unpinned — moving rule 1's and rule 5's
+`Unwatched` arms from `describe` to `get_yaml` stayed green, on the two arms whose
+sentence hedges *the events rarely say so* about a command that prints no events;
+they are pinned by value now. A comment justifying a constant was **false and
+would have become lore**: the height test's three-digit restart count was
+explained as what makes the card overflow, and the card measures ten lines at 7,
+132, 1320 and 999,999,999 alike — the count sits on a line with slack and the
+*clause* is what decides, so the constant is now a list the test loops over and
+the comment says what is true. And a test's **name** claimed what it did not feed:
+widening `ending()`'s two arms from `137` to any code stays green, because the
+unreachable pairs are deliberately unasserted — the gap stays, by the same refusal
+as above, and the name went instead. A name is evidence to the next reader.
+
+**What this box did not close, recorded so the next reader does not read silence
+as completeness.** The **fan-out** is now six *truthful* cards instead of six wrong
+ones; which container exited first needs `state.terminated`, and *whether the cards
+should be drawn at all* has **no measured field behind it** — the condition above
+was that field until it was sampled. A pod that gang-restarted three times and has
+served ever since carries a permanent WARN card per container, which is D71's class
+on a record that carries no stamps either, so no clock can age it out. Rules **5**
+and 6 print the identical four-line action on adjacent cards — 26 lines about one
+container in a 16-row pane — and the reachable pair is that one, not the rules 1
+and 6 pair this entry named in its first draft, which needs a shape the review
+could not produce. Silence is not the fix (D93 refused it); knowing that a
+neighbour already said it is an `analyze` decision, beside `explains_a_shortfall`.
+All three are boxed, with their measurements.
+
 ## Decisions made
 
 ### Product

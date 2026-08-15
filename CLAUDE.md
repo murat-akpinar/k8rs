@@ -399,6 +399,15 @@ exists if two writers are ever unavoidable, but reach for the plan fix first.
 **Review is not one of these slots** — nothing is built on top of a box until
 `k8s-admin` reports, and the dev idles meanwhile.
 
+**The gate is not split by tree, so the PM is a writer too.** `just check` reads
+`docs/`, `todo.md`, `NOTES.md` and `screens/` as well as `src/` — a PM edit that
+lands mid-run turns up as a red build in somebody else's report, and a link to an
+anchor written one edit later is red until the second edit lands. Two rules,
+both cheap: **every PM edit is self-consistent on its own** — never a link to an
+anchor that does not exist yet — and while an agent is running the gate, the PM
+either waits or expects to explain the red. Seen 2026-08-15: `dev-core` had to
+prove a failure in two files it does not own before it could report.
+
 ### The cycle — one `todo.md` box is one turn of it
 
 The box is the unit of work, never a phase and never "the next few boxes".

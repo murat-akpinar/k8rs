@@ -5887,6 +5887,854 @@ fn a_container_the_pods_own_restart_rule_removed_is_not_a_run_that_failed() {
     );
 }
 
+/// **One ending on each of the three roles, in the state rule 1 reads and the state rule 5
+/// reads** — the driver behind the two whole-card-set tests below (NOTES § D29, § D40).
+///
+/// **`looping: true` is rule 1's state and `false` is rule 5's**, and the base capture moves with
+/// it rather than the plant: `crashloop.json` is a captured `CrashLoopBackOff` and
+/// `restarts10.json` a captured restart history that is out of it, so on the `Regular` role only
+/// the previous run's ending is planted at all.
+///
+/// **`reason: None` is the control and keeps [`exited`]'s pairing** — `Error` beside a non-zero
+/// code, which is what the runtime writes and what every committed capture holds. Fed `1` it is
+/// the ordinary bad exit each new arm is measured against, and it is what keeps the forbidden
+/// sentences reachable: a negative asserted over a rule set that stopped saying the words guards
+/// nothing (CLAUDE.md § Code phase rules).
+///
+/// **The two `137` reasons are plants on every role, and neither is captured** — both were
+/// measured on kind v1.36.1 and never captured (NOTES § D40, § D93). What is captured underneath
+/// each is the state: the backoff wait, the restart count, the sidecar that is up and not ready.
+///
+/// **The sidecar's count is the one field moved beyond the ending**, because
+/// `healthy-unreadysidecar.json` was captured at `0` restarts and rule 5 does not look below
+/// [`RESTARTS_WARN`] — without it that role reaches rule 1 and never rule 5.
+fn every_role_with(
+    code: i32,
+    reason: Option<&str>,
+    looping: bool,
+) -> Vec<(ContainerRole, &'static str, PodSnapshot)> {
+    let (capture, plain) = if looping {
+        ("crashloop", "quitter")
+    } else {
+        ("restarts10", "flaky")
+    };
+    vec![
+        (
+            ContainerRole::Regular,
+            plain,
+            capture_but(capture, |p| ended_as(p, plain, code, reason, None)),
+        ),
+        (
+            ContainerRole::Sidecar,
+            "proxy",
+            capture_but("healthy-unreadysidecar", |p| {
+                ended_as(p, "proxy", code, reason, None);
+                if looping {
+                    backing_off(p, "proxy");
+                }
+                container_status(p, "proxy").restart_count = RESTARTS_WARN + 1;
+            }),
+        ),
+        (
+            ContainerRole::Init,
+            "wait-for-db",
+            init_previous_run(code, reason, None, looping),
+        ),
+    ]
+}
+
+/// **Every card k8rs draws about a container whose last run Kubernetes never watched end** — the
+/// assertion the `137` box owed and did not make (NOTES § D93). That box's own test looks one card
+/// up by its title, so rule 5's *"something keeps killing it"* and rule 1's *"read the previous
+/// run's logs"* stood beside rule 6's correct card and were never read.
+///
+/// **What no card about this container may say**, whichever rule drew it: that something crashed,
+/// failed or was killed — the kubelet wrote `137` where a status went missing and nothing is
+/// recorded as having ended the run — and, worse than wrong, that the previous run's log holds
+/// the answer: `--previous` is gated on `lastState.terminated.containerID`, which this record does
+/// not carry, so the API answers `previous terminated container … not found` (measured).
+///
+/// **Both states and all three roles**, because rules 1 and 5 are mutually exclusive — rule 5
+/// stands down inside `CrashLoopBackOff` — so one state proves only half the card set
+/// ([`every_role_with`], NOTES § D29).
+///
+/// **The control is the same plant with the ordinary `Error` beside the code**, asserted to keep
+/// every sentence this test forbids: the wording is not being deleted, it is being made
+/// conditional on the reason the object carries.
+#[test]
+fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
+    for looping in [false, true] {
+        for (role, name, planted) in every_role_with(137, Some(STATUS_LOST), looping) {
+            let object = planted.id.name.clone();
+            let subject = container(&planted, name);
+            println!("=== {object} {role:?} looping={looping}\n{subject:?}");
+            assert_eq!(
+                subject.role, role,
+                "the role under test, or the shapes below are three copies of one card"
+            );
+            let all = analyze(&pods_at(vec![planted], now()));
+            show(&all);
+            let about = cards_about(&all, name);
+            // **The whole set is counted, not searched.** The wrong cards this box removes were
+            // standing *beside* a right one, so a test that looks one up by title cannot see
+            // them — and a rule that goes silent takes its own negatives with it
+            // (NOTES § D26, § D93).
+            let expected = match (role, looping) {
+                // rule 5 and rule 6 — plus rule 7 on the one base that is running and unready,
+                // which is a card about the readiness check now and not about the ending.
+                (ContainerRole::Regular, false) => 3,
+                // rule 1 and rule 6 when it is backing off; rule 5 and rule 6 when it is not.
+                _ => 2,
+            };
+            assert_eq!(
+                about.len(),
+                expected,
+                "{object} {role:?} looping={looping} draws {} cards about {name} and not \
+                 {expected}: {:?}",
+                about.len(),
+                titles(&all)
+            );
+            no_card_reads_this_run_as_a_kill(&about, &format!("{object} {role:?}"));
+            // **The card rule 1 or rule 5 drew is the one this box is about**, and it says what
+            // the object supports: on the wait, that there is no record of the ending; on the
+            // re-run, the count, with the translation beside it.
+            // **Selected by a field rather than by the words under test.** Rules 1 and 5 both
+            // put [`exit_fact`] in the *evidence*; rule 6 puts it in the title and rule 7 does
+            // not draw it at all — so this picks the card this box is about without keying on
+            // the sentence the assertions below are checking (NOTES § D26).
+            let counted = about
+                .iter()
+                .find(|f| f.evidence.contains("exit 137"))
+                .expect("rule 1 or rule 5 speaks for this container");
+            if looping {
+                assert!(
+                    counted
+                        .title
+                        .starts_with("No record of how the container's last run ended")
+                        && counted.title.contains("CrashLoopBackOff"),
+                    "the loop is real and the crash is not: {}",
+                    counted.title
+                );
+            } else {
+                assert!(
+                    counted.title.contains("restarted") && counted.evidence.contains("exit 137"),
+                    "the count is real and the translation goes with it: {} / {}",
+                    counted.title,
+                    counted.evidence
+                );
+            }
+            // **And it draws the shared sentence, which the negatives above cannot say.** Every
+            // one of them is satisfied by *ask a friend*: absent a positive, both call sites can
+            // be replaced with any harmless string and the suite stays green — `tester` shipped
+            // exactly that mutation past 184 tests. Asserted as **equality with the function**
+            // rather than as a substring, because the requirement is that these two rules say
+            // what rule 6 says and do not spell a fifth copy of it (NOTES § D93). The words
+            // themselves are pinned one test up, on rule 6's own card.
+            assert_eq!(
+                counted.action,
+                unwatched_action(),
+                "{object} {role:?}: rules 1 and 5 answer this ending with the sentence rule 6 \
+                 answers it with — that sharing is the fix, not a tidy-up of it"
+            );
+            // **And the command that sentence needs.** It sends the reader to the pod's events
+            // — *the events rarely say so* is its own hedge about them — and `get -o yaml`
+            // prints no events at all, so these two arms may not drift to it the way the
+            // `RestartRule` arms deliberately did (invariant 4, NOTES § D95).
+            assert_eq!(
+                counted.kubectl_cmd.as_deref(),
+                describe(&counted.object).as_deref(),
+                "{object} {role:?}: the card offers the output its own action names"
+            );
+            // **And rule 6's card is still beside it, unchanged** — the one card this shape
+            // always had right, which is why the neighbours went unread (NOTES § D93).
+            let lost = only(&all, &object, "exit 137");
+            assert!(
+                lost.title
+                    .starts_with("No record of how the container's last run ended"),
+                "rule 6 ships what it shipped: {}",
+                lost.title
+            );
+        }
+    }
+
+    // **The serving container, which is where rule 5's claim is printed at all.** The other
+    // shapes above are past the band and *down*, and that title carries no clause — so without
+    // this the sentence the box replaced would be untested in both directions.
+    let serving = capture_but("restarts10serving", |p| {
+        ended_as(p, "flaky", 137, Some(STATUS_LOST), None)
+    });
+    assert!(
+        doing_its_job(container(&serving, "flaky")),
+        "the plant has to stay a serving container, or the clause below is not the one drawn"
+    );
+    let all = analyze(&pods_at(vec![serving], now()));
+    show(&all);
+    let about = cards_about(&all, "flaky");
+    assert_eq!(
+        about.len(),
+        1,
+        "rule 5 alone — rule 6 stands down on a container that is serving: {:?}",
+        titles(&all)
+    );
+    no_card_reads_this_run_as_a_kill(&about, "broken-restarts10serving serving");
+    let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    assert!(
+        card.title
+            .contains("it is serving now, and the record names no ending"),
+        "the clause parses inside the serving sentence, claims only what the record holds, and \
+         says it about the *record* — *its last run* is false the moment anything has run since, \
+         because `lastState` freezes, and *but something keeps killing it* is a positive claim of \
+         repeated killing on a run nothing is recorded as having killed (NOTES § D93, § D95): {}",
+        card.title
+    );
+    assert_eq!(
+        card.action,
+        unwatched_action(),
+        "and the serving card carries the same sentence — the clause above is the only thing \
+         this shape changes, and a card is asserted whole or the half nobody looked at is where \
+         the next wrong sentence sits"
+    );
+    assert_eq!(
+        card.kubectl_cmd.as_deref(),
+        describe(&card.object).as_deref(),
+        "and the command with it: this sentence's own hedge is about the pod's events, which \
+         `get -o yaml` does not print"
+    );
+
+    // **The control, or every negative above is guarding a sentence the rule set no longer
+    // says.** The same plants with the ordinary `Error` the runtime writes keep all three
+    // (NOTES § D26): the wording is not being deleted, it is being made conditional on the
+    // reason beside the code.
+    let mut kept: HashSet<&str> = HashSet::new();
+    for looping in [false, true] {
+        for (_, name, planted) in every_role_with(1, None, looping) {
+            let all = analyze(&pods_at(vec![planted], now()));
+            for f in cards_about(&all, name) {
+                let said = format!("{} {} {}", f.title, f.evidence, f.action).to_lowercase();
+                for phrase in KILLED_IT {
+                    if said.contains(phrase) {
+                        kept.insert(phrase);
+                    }
+                }
+                for pointer in SENT_TO_THE_LOGS {
+                    if f.action.contains(pointer) {
+                        kept.insert(pointer);
+                    }
+                }
+                if said.contains("memory limit") {
+                    kept.insert("memory limit");
+                }
+            }
+        }
+    }
+    let serving = restarts10_ending("restarts10serving", 1);
+    for f in cards_about(&analyze(&pods_at(vec![serving], now())), "flaky") {
+        let said = f.title.to_lowercase();
+        for phrase in KILLED_IT {
+            if said.contains(phrase) {
+                kept.insert(phrase);
+            }
+        }
+    }
+    println!("still said on an ordinary Error: {kept:?}");
+    for phrase in KILLED_IT
+        .iter()
+        .chain(SENT_TO_THE_LOGS.iter())
+        .chain(["memory limit"].iter())
+    {
+        assert!(
+            kept.contains(phrase),
+            "{phrase:?} is said by no card in this rule set any more, so the negatives above \
+             guard nothing (CLAUDE.md § Code phase rules): {kept:?}"
+        );
+    }
+}
+
+/// **Every card k8rs draws about a container the pod's own restart rule removed** — rule 6's half
+/// was answered when the reason was added; rules 1 and 5 were left claiming it crashed and that
+/// something keeps killing it, over an evidence line reading *which is what this pod asked for*
+/// (NOTES § D93).
+///
+/// **Rule 5 gets an arm and not an exemption, and that is the ruling worth reading here.** One
+/// restart-rule firing writes the same synthesized record into *every* container's `lastState`,
+/// so an exemption on top of rule 6's would leave a pod thrashing 31 times in six minutes with no
+/// card on the screen at all. The count is real; the claim about it was not.
+///
+/// **Rule 1's arm is written and is barely reachable, which is said rather than hidden.** The
+/// restart-all path purges every container from the runtime, so `doBackOff` finds no exited
+/// record, no backoff entry is made and `CrashLoopBackOff` does not appear — measured at about
+/// one restart every 11s behind an 8s sleep, which is no backoff at all. **The `looping: true`
+/// shapes below are planted, and a planted shape is not a reachable one**: what they prove is
+/// that the arm the enum forced is truthful, not that a cluster draws it (NOTES § D40, § D93).
+///
+/// **What must not be on any of these cards** is a door onto a kill — the reader is being sent
+/// after this container's memory limit and health checks when the container that exited may be
+/// its sibling — and, on rule 6, a card at all.
+#[test]
+fn no_card_about_a_container_the_pods_own_restart_rule_removed_says_it_crashed() {
+    // **The detector before the negatives, or the negatives pass because nothing was detected**
+    // (NOTES § D26, § D29). Every phrase, and the exact eight words `tester` appended to walk
+    // past the first version of this guard.
+    for phrase in EXONERATES {
+        let planted = format!("and that may be this container, {phrase} — check the spec");
+        assert_eq!(
+            exonerating(&planted),
+            Some(phrase),
+            "{phrase:?} is in the list and the detector does not see it"
+        );
+    }
+    assert_eq!(
+        exonerating("…can set it off, and that may be this container, but rarely"),
+        Some("but rarely"),
+        "the mutation that shipped green past three `contains` fragments"
+    );
+    assert_eq!(
+        exonerating("Probes Are Worth Checking"),
+        None,
+        "and it does not fire on an ordinary sentence, or every card below passes for nothing"
+    );
+
+    // **The sentence itself, in one place** — every card below is asserted equal to it, so this
+    // is where its content is guarded. **Two guards, because a clause can be taken back two
+    // ways**: appending to it, which the `ends_with` catches, and denying it earlier in the
+    // sentence, which the detector catches.
+    println!("{}", restart_rule_action());
+    assert_eq!(
+        exonerating(restart_rule_action()),
+        None,
+        "the trigger carries this very record, so the card may not hand the reader an excuse to \
+         stop looking at the container they are looking at (NOTES § D95)"
+    );
+    assert!(
+        restart_rule_action().ends_with("and that may be this container"),
+        "and the last thing the reader reads is that clause, unqualified — *but rarely* after it \
+         is a card that exonerates in eight words: {}",
+        restart_rule_action()
+    );
+
+    for looping in [false, true] {
+        for (role, name, planted) in every_role_with(137, Some(RESTART_ALL), looping) {
+            let object = planted.id.name.clone();
+            println!("=== {object} {role:?} looping={looping}");
+            // **Rule 6 is asked directly, per role and per state.** Its silence was proved on one
+            // regular container in one phase; the arm that now carries it is read by three rules,
+            // so the exemption is asserted everywhere it has to hold (NOTES § D29).
+            assert!(
+                previous_run_failed(&planted, container(&planted, name)).is_none(),
+                "{object} {role:?}: the pod declared the rule and the kubelet obeyed it — \
+                 nothing failed, whatever the card would have been titled"
+            );
+            let all = analyze(&pods_at(vec![planted], now()));
+            show(&all);
+            let about = cards_about(&all, name);
+            let expected = match (role, looping) {
+                // rule 5 and rule 7, which is about the readiness check and not the ending.
+                (ContainerRole::Regular, false) => 2,
+                // rule 1 on the wait, rule 5 on the re-run. Rule 6 draws nothing on this reason,
+                // and that number is the assertion (NOTES § D26).
+                _ => 1,
+            };
+            assert_eq!(
+                about.len(),
+                expected,
+                "{object} {role:?} looping={looping} draws {} cards about {name} and not \
+                 {expected}: {:?}",
+                about.len(),
+                titles(&all)
+            );
+            no_card_reads_this_run_as_a_kill(&about, &format!("{object} {role:?}"));
+            no_card_lets_this_container_off(&about, &format!("{object} {role:?}"));
+            let counted = about
+                .iter()
+                .find(|f| f.evidence.contains("exit 137"))
+                .expect("rule 1 or rule 5 speaks for this container");
+            if looping {
+                assert!(
+                    counted
+                        .title
+                        .starts_with("The pod's own restart rule removed the container"),
+                    "the loop is real and the crash is not — this container was taken away, not \
+                     broken: {}",
+                    counted.title
+                );
+            }
+            // **The action sends the reader to the container that actually exited, and does not
+            // say this one is fine.** The trigger's own record is overwritten by the same
+            // synthesized `137`, so *look elsewhere* would be wrong on exactly the container that
+            // failed; what the record supports is that it does not say which one went first
+            // (NOTES § D93).
+            // **Equality, not fragments.** Three `contains` checks all held while eight words
+            // were appended that took the third one back; tying the card to the function puts
+            // every card behind the two guards at the top of this test (NOTES § D95).
+            assert_eq!(
+                counted.action,
+                restart_rule_action(),
+                "{object} {role:?}: the card carries the shared sentence, whose content is \
+                 guarded where it is written"
+            );
+            // **And the command changes with the sentence.** `restartPolicyRules` is in the
+            // spec and in no part of `describe`'s output, so an action naming it under
+            // `kubectl describe pod` is a card that cannot show what it says (invariant 4,
+            // NOTES § D95).
+            assert_eq!(
+                counted.kubectl_cmd.as_deref(),
+                Some(
+                    format!(
+                        "kubectl get pod {object} -n {} -o yaml",
+                        counted.object.namespace.as_deref().unwrap_or_default()
+                    )
+                    .as_str()
+                ),
+                "{object} {role:?}: the card offers the output its own action names"
+            );
+        }
+    }
+
+    // **The serving container, where rule 5's clause is printed at all** — see the test above.
+    let serving = capture_but("restarts10serving", |p| {
+        ended_as(p, "flaky", 137, Some(RESTART_ALL), None)
+    });
+    let all = analyze(&pods_at(vec![serving], now()));
+    show(&all);
+    let about = cards_about(&all, "flaky");
+    assert_eq!(about.len(), 1, "rule 5 alone: {:?}", titles(&all));
+    no_card_reads_this_run_as_a_kill(&about, "broken-restarts10serving serving");
+    no_card_lets_this_container_off(&about, "broken-restarts10serving serving");
+    let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    assert!(
+        card.title
+            .contains("it is serving now, and the record names the pod's rule"),
+        "the clause parses inside the serving sentence and says whose doing this was, about the \
+         *record* rather than about the last restart — the record freezes while the count keeps \
+         rising, and *but something keeps killing it* is the opposite claim about a pod getting \
+         what it asked for (NOTES § D93, § D95): {}",
+        card.title
+    );
+    // **The translation still reaches the screen from this card**, which is the only place it
+    // does now that rule 6 is silent on the reason.
+    assert!(
+        card.evidence.contains("restart every container in the pod"),
+        "{}",
+        card.evidence
+    );
+    assert_eq!(
+        card.action,
+        restart_rule_action(),
+        "and the serving card is behind the same guards as the rest — a card asserted on its \
+         title alone is a card whose action nobody read"
+    );
+
+    // **The shape a cluster actually writes, which every plant above gets wrong in the same
+    // way** (NOTES § D95). One firing puts the synthesized record into **every** container's
+    // `lastState` — measured three of three and two of two, the trigger included — so the
+    // fan-out this rule's own doc describes is drawn by two cards on a two-container pod, and
+    // until now no test in this file had ever handed the rules more than one container carrying
+    // it. `broken-hostpath` is the committed capture with two regular containers, and both are
+    // moved together (NOTES § D40).
+    let gang = capture_but("hostpath", |p| {
+        for name in ["nosy", "shipper"] {
+            ended_as(p, name, 137, Some(RESTART_ALL), None);
+            container_status(p, name).restart_count = RESTARTS_WARN + 1;
+        }
+    });
+    let all = analyze(&pods_at(vec![gang], now()));
+    show(&all);
+    // **Both containers draw, and each card is its own container's.** A rule that fired once for
+    // the pod, or twice with one container's name on both, passes any assertion that only counts
+    // (NOTES § D26) — which is also why `cards_about` matches the whole name: `nosy` and
+    // `shipper` share a pod here, and the `contains` this helper used until now would have
+    // merged them.
+    //
+    // **Counted over the cards drawn from the ending**, because this capture is the host-mount
+    // fixture and rules 8 and 9 speak for both containers too — true cards about another
+    // question, and not the fan-out under test.
+    // **The lookup itself, on the one pod in this file with two containers to confuse.** `nosy`
+    // and `shipper` do not nest, so the fan-out above passes under a substring match too — and a
+    // helper that merges two containers' cards is a silent over-count in exactly the assertions
+    // next door. A strict prefix of a real name is what separates the two implementations, and
+    // `app` / `app-proxy` is the pair a real cluster brings (NOTES § D95).
+    assert!(
+        cards_about(&all, "ship").is_empty(),
+        "a card is about a container or it is not: {:?}",
+        titles(&all)
+    );
+    assert!(
+        !cards_about(&all, "shipper").is_empty(),
+        "and the whole name still finds it, or the line above passes because nothing matches at \
+         all (NOTES § D26)"
+    );
+
+    for name in ["nosy", "shipper"] {
+        let about = cards_about(&all, name);
+        no_card_reads_this_run_as_a_kill(&about, &format!("broken-hostpath {name}"));
+        no_card_lets_this_container_off(&about, &format!("broken-hostpath {name}"));
+        let ending: Vec<&&Finding> = about
+            .iter()
+            .filter(|f| f.evidence.contains("exit 137"))
+            .collect();
+        assert_eq!(
+            ending.len(),
+            1,
+            "{name}: one card from the ending — the record is on this container as much as on \
+             its sibling, and rule 6 is exempt on both: {:?}",
+            titles(&all)
+        );
+        let card = ending[0];
+        assert!(
+            card.title.contains(
+                "restarted 4 times — it is serving now, and the record names the pod's rule"
+            ),
+            "{name}: the card carries its own count and the clause: {}",
+            card.title
+        );
+        assert_eq!(
+            card.action,
+            restart_rule_action(),
+            "{name}: and both get the sentence that exonerates neither of them — on this object \
+             the trigger is one of these two and the record does not say which"
+        );
+    }
+}
+
+/// **The cards this box ships, measured at the width they are drawn at** (`screens/alerts.md`
+/// § How wide a card is, and how tall; NOTES § D95). A card is the identity line, the title, the
+/// evidence capped at three lines, and the action — **ten lines is the maximum**, and the action
+/// is never cut, so a title that grows by one wrapped line spends a line the card does not have.
+///
+/// **The count is three digits because that is the realistic worst case, and not because the
+/// count is what overflows the card.** The review's own kind cluster hit 132 restarts in ten
+/// minutes on a pod whose restart rule was firing, so this is the number a real reader sees.
+/// **The height does not move with it**: fed 7, 10, 132, 1320 and 999,999,999 every card here
+/// measures the same ten lines, because the count sits on the title's first line, which has
+/// slack, and the wrap redistributes around it. What decides the height is the *clause* — the
+/// 42-character wording these replaced wrapped the title to three lines at every one of those
+/// counts (NOTES § D95). Said plainly because the first draft of this comment claimed the count
+/// was the cause, and a false rationale in a test is what the next reader inherits as fact.
+///
+/// **Measured off the cards [`analyze`] actually draws, not off copies of the strings.** A test
+/// that re-typed the title would measure itself, and the wording it is guarding lives in a match
+/// arm that no function exposes.
+///
+/// **It measures the four cards this box ships and no others.** Five actions elsewhere in this
+/// file are over the cap already; they are boxed, and widening this test to catch them would make
+/// it fail for something it cannot fix (NOTES § D88).
+#[test]
+fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
+    // `screens/alerts.md` § The columns: body text 51, action continuations 49 — and § The
+    // height: 1 identity + title + evidence (cut at three) + action, ten lines in all.
+    const BODY_COLUMNS: usize = 51;
+    const EVIDENCE_CAP: usize = 3;
+    const CARD_LINES: usize = 10;
+    // The realistic worst case a cluster reaches, and the absurd bound either side of it — fed
+    // as a range rather than as one number, because the claim in this test's own doc is that the
+    // height does *not* move with the count and a claim nothing measures is the lore this comment
+    // was rewritten to remove (NOTES § D40, § D95).
+    const COUNTS: [i32; 4] = [7, 132, 1320, 999_999_999];
+
+    let mut measured = 0usize;
+    for (reason, count) in [STATUS_LOST, RESTART_ALL]
+        .into_iter()
+        .flat_map(|r| COUNTS.map(|n| (r, n)))
+    {
+        // Rule 1's card, on the wait; rule 5's serving card, where the clause prints at all.
+        // Both carry `count`, so the `n=` in the output below is true of the card beside it —
+        // `crashloop.json` is captured in `CrashLoopBackOff`, so only the ending and the count
+        // are planted (NOTES § D40).
+        let looping = capture_but("crashloop", |p| {
+            ended_as(p, "quitter", 137, Some(reason), None);
+            container_status(p, "quitter").restart_count = count;
+        });
+        let serving = capture_but("restarts10serving", |p| {
+            ended_as(p, "flaky", 137, Some(reason), None);
+            container_status(p, "flaky").restart_count = count;
+        });
+        for pod in [looping, serving] {
+            let object = pod.id.name.clone();
+            for card in analyze(&pods_at(vec![pod], now())) {
+                // Rules 1 and 5 put the ending in the evidence; this box's other card is rule
+                // 6's, which is measured by the box that wrote it.
+                if !card.evidence.contains("exit 137") {
+                    continue;
+                }
+                let title = wrapped_at(&card.title, BODY_COLUMNS).len();
+                let evidence = wrapped_at(&card.evidence, BODY_COLUMNS)
+                    .len()
+                    .min(EVIDENCE_CAP);
+                let action = wrapped_at(&card.action, ACTION_COLUMNS).len();
+                let height = 1 + title + evidence + action;
+                println!(
+                    "{object} {reason} n={count}: {height} lines — 1 + {title} title + \
+                     {evidence} evidence + {action} action\n  {}\n  {}",
+                    card.title, card.action
+                );
+                assert!(
+                    height <= CARD_LINES,
+                    "{object} {reason} n={count}: a {height}-line card, and the pane's \
+                     maximum is \
+                     {CARD_LINES} — the title wraps to {title} lines at {BODY_COLUMNS} columns. \
+                     That is a `rules.rs` finding and not a layout problem \
+                     (`screens/alerts.md` § How tall): {}",
+                    card.title
+                );
+                measured += 1;
+            }
+        }
+    }
+    // Written down rather than summed: a card that stops being drawn takes its own measurement
+    // with it and subtracts from a total nobody reads (NOTES § D26).
+    assert_eq!(
+        measured,
+        2 * COUNTS.len() * 2,
+        "the two cards this box ships — rule 1's and rule 5's — on each reason at each count"
+    );
+}
+
+/// **The two readings [`ending`] gained on 2026-08-15, asserted on the function itself** — the
+/// root the three rules above all read, and the reason the fix is one change rather than three
+/// (NOTES § D95).
+///
+/// **What this proves is that the number alone does not decide**: every row below holds the code
+/// at `137` or gives the reason as `None`, so what separates them is the reason. `0` and `143`
+/// are the same ending whatever is written beside them, and `OOMKilled` stays
+/// [`Failed`](Ending::Failed) on purpose — rule 2 owns the labelled kill and *something keeps
+/// killing it* is true of it, so rules 1 and 5 need no arm for it.
+///
+/// **The other direction is deliberately unguarded, and the name used to claim otherwise.** This
+/// was `ending_reads_the_reason_beside_the_code_and_not_the_number_alone` until `tester` widened
+/// both arms from `(137, Some(reason))` to `(_, Some(reason))` and the suite stayed green: no row
+/// feeds `(1, Some(STATUS_LOST))`, because **the kubelet never writes that pair** and asserting
+/// behaviour on an object the API cannot produce is what NOTES § D29 and § D95 refuse.
+/// [`ending`]'s own doc says as much where it records the three unreachable pairs that moved. The
+/// gap stays; the **name** had to go, because a name is evidence to the next reader
+/// (NOTES § D26).
+///
+/// **Read off a planted object rather than a literal**, for the reason the decode tests give: the
+/// pairing of a code with a reason is the API's, not this file's ([`ended_as`], NOTES § D40).
+///
+/// **And the two spellings are pinned before anything is planted from them**, because every shape
+/// in this file writes the reason *out of the same constant it is then matched against*: a typo in
+/// either one ships a rule that never fires against a real cluster and a suite that stays green
+/// about it. `tester` proved it — `STATUS_LOST` misspelled as `"containerstatusunknown"` and
+/// `RESTART_ALL` as `"RESTARTINGALLCONTAINERS"` both passed 184 tests. It is the
+/// `scripts/write-guard.py` `CANARIES` class one level down (CLAUDE.md § Code phase rules).
+///
+/// **The two are pinned by different evidence, and the difference is stated rather than blurred**
+/// (NOTES § D40):
+///
+/// - **[`STATUS_LOST`] is captured.** `failed.json` carries the kubelet's own object on
+///   `broken-failed` / `app` — `exitCode: 137`, the reason spelled out, both stamps `null` and the
+///   sentence the kubelet writes beside it — so the spelling *and* the `137` it pairs with are read
+///   off a real cluster's bytes rather than off this file. **It sits in `state.terminated`, which
+///   no rule reads yet**: that is the next box, and it is why this capture proves the string and
+///   not the rule. The bytes are read, never edited (NOTES § D53).
+/// - **[`RESTART_ALL`] has no capture at all.** It was measured on kind and never captured, so the
+///   pin below is the literal spelling against `kubelet_pods.go` at v1.36.1 — **a source-derived
+///   pin, not a captured one.** No fixture is invented for it (NOTES § D29, § D93).
+#[test]
+fn the_reason_and_not_the_number_alone_decides_which_ending_it_is() {
+    // The captured half. `broken-failed`'s container is *currently* terminated, so the object
+    // arrives as [`ContainerState::Terminated`] rather than in `last_terminated`.
+    let capture = pod("failed");
+    let app = container(&capture, "app");
+    println!("failed.json, state.terminated: {:?}", app.state);
+    let ContainerState::Terminated(lost) = &app.state else {
+        panic!("failed.json's container is terminated where the kubelet lost its status: {app:?}")
+    };
+    assert_eq!(
+        (lost.reason.as_deref(), lost.exit_code),
+        (Some(STATUS_LOST), 137),
+        "the constant is the string a cluster writes, and the code it is written beside — every \
+         other shape in this file plants the reason from this same constant, so nothing else in \
+         the suite would notice it being wrong: {lost:?}"
+    );
+    // The source-derived half: `kubelet_pods.go` at v1.36.1 writes this word, and no committed
+    // capture holds it. Spelled out here so a typo in the constant has one place that disagrees.
+    assert_eq!(
+        RESTART_ALL, "RestartingAllContainers",
+        "the reason the kubelet writes when a pod's own `restartPolicyRules` remove a container"
+    );
+
+    for (code, reason, expected) in [
+        (137, Some(STATUS_LOST), Ending::Unwatched),
+        (137, Some(RESTART_ALL), Ending::RestartRule),
+        // The three that were already here, and the one deliberately left among them.
+        (137, Some("OOMKilled"), Ending::Failed),
+        (137, None, Ending::Failed),
+        (1, None, Ending::Failed),
+        (0, None, Ending::Finished),
+        (143, None, Ending::Stopped),
+    ] {
+        let planted = init_previous_run(code, reason, None, false);
+        let run = container(&planted, "wait-for-db")
+            .last_terminated
+            .as_ref()
+            .expect("the plant writes the previous run this reads");
+        println!("exit {code} {reason:?} -> {:?}", ending(run));
+        assert_eq!(
+            ending(run),
+            expected,
+            "exit {code} beside {reason:?} is {expected:?} — a reading of `Failed` for either of \
+             the kubelet's own two reasons is what put *keeps crashing* and *something keeps \
+             killing it* on a run nothing killed, in three rules at once: {run:?}"
+        );
+    }
+}
+
+/// **What no card may claim about a run nothing is recorded as having ended** — the negatives the
+/// two whole-card-set tests above share, applied to *every* card the pod draws about the
+/// container and not to the one the test went looking for (NOTES § D93).
+///
+/// **The doors onto a kill are asked of the cards drawn from the ending only**, and that is a
+/// scope rather than a hole: on `restarts10.json` rule 7 also fires, and its card names the
+/// readiness probe about the container's readiness *now* — a true card about a different
+/// question. The three cards that read the ending all carry [`exit_fact`] on the title or the
+/// evidence, which is what selects them.
+fn no_card_reads_this_run_as_a_kill(about: &[&Finding], shape: &str) {
+    for f in about {
+        let said = format!("{} {} {}", f.title, f.evidence, f.action).to_lowercase();
+        for phrase in KILLED_IT {
+            assert!(
+                !said.contains(phrase),
+                "{shape}: {phrase:?} — the kubelet wrote 137 where a status went missing, and \
+                 nothing is recorded as having ended this run: {} / {} / {}",
+                f.title,
+                f.evidence,
+                f.action
+            );
+        }
+        // **The pointer that is not merely unhelpful but impossible.** `logs --previous` is gated
+        // on `lastState.terminated.containerID`, which this record does not carry, so the API
+        // answers `previous terminated container "app" in pod "lost-notready" not found`
+        // (measured — NOTES § D93).
+        for pointer in SENT_TO_THE_LOGS {
+            assert!(
+                !f.action.contains(pointer),
+                "{shape}: the API will not serve that log — there is no containerID on this \
+                 record to serve it from: {}",
+                f.action
+            );
+        }
+        assert!(
+            !said.contains("--previous"),
+            "{shape}: nor the flag itself: {}",
+            f.action
+        );
+        if !said.contains("exit 137") {
+            continue;
+        }
+        // **Neither record carries a stamp, so no card drawn off one may date itself or say how
+        // long the run lasted.** Both are asserted on rule 6's card already; rules 1 and 5 build
+        // their own age and their own *the last run lasted …* line out of the same two fields,
+        // and a rule that starts inventing one is caught here saying so (NOTES § D93).
+        assert_eq!(
+            f.timestamp, None,
+            "{shape}: the run carries no `finishedAt`, so the card carries no age: {f:?}"
+        );
+        assert!(
+            !said.contains("lasted") && !said.contains("ran for"),
+            "{shape}: and no duration either — the run has no stamps to measure: {}",
+            f.evidence
+        );
+        for door in PROBE_WORDS.iter().chain(["memory limit"].iter()) {
+            assert!(
+                !said.contains(door),
+                "{shape}: {door:?} is a door onto a kill, under an evidence line saying no kill \
+                 was seen: {} / {} / {}",
+                f.title,
+                f.evidence,
+                f.action
+            );
+        }
+    }
+}
+
+/// Every card the pod drew **about one container**, which is what the two tests above assert
+/// over — a pod's other containers have cards of their own and are not this box's subject.
+///
+/// **Matched on the whole name and not on a substring of it.** Every rule puts [`container_fact`]
+/// first in its evidence, and that fact ends the name either at the end of the line or at the
+/// space before its role gloss — so `app` and `app-proxy` are told apart. A `contains` walked
+/// straight past that, and the two-container plant next door is the first shape in this file that
+/// would have merged two containers' cards into one silent over-count (NOTES § D95).
+fn cards_about<'a>(all: &'a [Finding], name: &str) -> Vec<&'a Finding> {
+    let ends_there = format!("container {name}");
+    let gloss = format!("container {name} (");
+    all.iter()
+        .filter(|f| {
+            let fact = f.evidence.split(FACTS).next().unwrap_or_default();
+            fact.ends_with(&ends_there) || fact.contains(&gloss)
+        })
+        .collect()
+}
+
+/// **The ways a card could tell the reader that this container is the innocent one** — the guard
+/// for the blocker the operator review filed, in [`KILLED_IT`]'s shape (NOTES § D95).
+///
+/// **The claim is false of the object, not merely unhelpful.** One gang restart writes the same
+/// synthesized record into *every* container's `lastState`, the container whose own exit
+/// triggered it included — its `exit 3` is in `state.terminated`, which no rule reads — so a card
+/// that exonerates the container it is drawn about is wrong on precisely the container that
+/// failed, and points the one reader who was looking at the right thing somewhere else.
+///
+/// **Hedges count, and they are what got past the first guard.** `tester` appended eight words —
+/// *…and that may be this container, but rarely* — and the suite stayed green: the assertions
+/// were three `contains` fragments, all of which that sentence keeps. A clause can be taken back
+/// by what follows it.
+///
+/// **Its control is synthetic, and that is the honest form here.** [`KILLED_IT`] is asserted
+/// present on a real card because an ordinary bad exit still says those words; these words the
+/// rule set may **never** say, so a control drawn from the product would mean the defect had
+/// shipped. What is proved instead is that the detector fires — every phrase, and the exact
+/// mutation — which is the same anti-rot requirement one level down (CLAUDE.md § Code phase
+/// rules, *a derived list asserts it found something*).
+const EXONERATES: [&str; 10] = [
+    "but rarely",
+    "though rarely",
+    "unlikely",
+    "not this container",
+    "not this one",
+    "another container",
+    "a different container",
+    "its sibling",
+    "look elsewhere",
+    "is fine",
+];
+
+/// The first [`EXONERATES`] phrase in `text`, lowercased for [`PROBE_WORDS`]' reason
+/// (NOTES § D31) — `None` when the sentence keeps the reader in the frame.
+fn exonerating(text: &str) -> Option<&'static str> {
+    let said = text.to_lowercase();
+    EXONERATES.into_iter().find(|p| said.contains(p))
+}
+
+/// [`EXONERATES`] over **the whole card** and not the action alone — the requirement is that
+/// nothing on a gang-restart card tells the reader to stop looking at this container, and a title
+/// can say that as easily as an action can (NOTES § D95).
+fn no_card_lets_this_container_off(cards: &[&Finding], shape: &str) {
+    for f in cards {
+        let whole = format!("{} {} {}", f.title, f.evidence, f.action);
+        assert_eq!(
+            exonerating(&whole),
+            None,
+            "{shape}: the trigger carries this same record, so the container the reader is \
+             looking at may be the one that failed: {} / {} / {}",
+            f.title,
+            f.evidence,
+            f.action
+        );
+    }
+}
+
+/// **The three claims of a kill the rule set can put on a card**, matched against a lowercased
+/// haystack for [`PROBE_WORDS`]' reason (NOTES § D31). Each is true of an ordinary bad exit and
+/// false of the two reasons the kubelet writes itself, so each is asserted absent on those and
+/// **present on the control** — a phrase nothing says any more is a negative guarding nothing.
+const KILLED_IT: [&str; 3] = [
+    "keeps crashing",
+    "something keeps killing",
+    "previous run failed",
+];
+
 /// **The card set this box owes: no card k8rs draws about an `Init` container names a probe,
 /// anywhere on it.** `validateInitContainers` rejects `livenessProbe`, `readinessProbe` and
 /// `startupProbe` on an init container that is not restartable, so a title, an evidence line or
