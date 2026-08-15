@@ -3665,8 +3665,27 @@ fn the_thresholds_and_the_exit_table_are_the_ones_the_documents_write_down() {
         // liveness-probe kill that outlives the grace period lands as exit 137 with
         // reason `Error`; the memory sentence there sends someone to raise a limit on
         // a container whose health endpoint is timing out.
-        (137, Some("Error"), "did not stop when it was asked to"),
-        (137, None, "did not stop when it was asked to"),
+        //
+        // **It names the signal and stops, since 2026-08-15.** *Did not stop when it was
+        // asked to* was asserted for every 137 the word `OOMKilled` was missing from, and
+        // three shapes reach that exact object without it: a container that ignores
+        // SIGTERM, a genuine cgroup kill on a host too short of memory to attribute it
+        // (NOTES § D84), and a rebuilt sandbox killing a container nothing asked to stop
+        // (NOTES § D90). The negatives below are the half this substring cannot hold.
+        (137, Some("Error"), "killed with SIGKILL"),
+        (137, None, "killed with SIGKILL"),
+        // **The third meaning, and it is not a kill at all.** `convertToAPIContainerStatuses`
+        // writes this pair where the kubelet could not read a status, not where it watched
+        // one end — so the row says the number was written in and claims nothing about the
+        // run (NOTES § D90, [`STATUS_LOST`]).
+        (137, Some(STATUS_LOST), "lost track of the container"),
+        // **The fourth meaning, and it is beta-on-by-default at the version the fixtures pin.**
+        // `RestartAllContainersOnContainerExits` is `{1.36, Default: true, Beta}` in
+        // `kube_features.go`, and under a pod's own `restartPolicyRules` the kubelet removes the
+        // other containers to restart them together — `exitCode: 137`, this reason, and the
+        // message *the container is removed because RestartAllContainers in place*. Nothing
+        // failed and nothing was killed: the pod asked for it (NOTES § D93, [`RESTART_ALL`]).
+        (137, Some(RESTART_ALL), "restart every container in the pod"),
         (143, None, "ordinary shutdown"),
         // **The row the table did not have**, which is why `exit 0` reached the screen as a
         // bare number under a card about crashing (NOTES § D85). The kubelet's own `reason`
@@ -3707,6 +3726,68 @@ fn the_thresholds_and_the_exit_table_are_the_ones_the_documents_write_down() {
             "a run a liveness probe stopped, and one a memory killer on the node stopped, both \
              report 0 — so the translation says how the run ended and leaves who ended it to the \
              action: {said:?}"
+        );
+    }
+    // **And `137` may not name a cause either, which is the same requirement one row down.** The
+    // translation is printed by rules 1, 5 and 6 and takes **no role** — so a cause named here
+    // is named on an init container's card too, where `validateInitContainers` has already
+    // refused the probe half of it and the action one line below says so. Naming who sent the
+    // signal is the action's job, and the action knows the role ([`killed_action`], NOTES § D85,
+    // § D88, § D90).
+    // **And the two reasons the kubelet writes itself may not be read as kills**, which the
+    // substrings above cannot hold: *killed* would pass a table lookup on either while telling
+    // the reader something took a container that nothing took (NOTES § D93).
+    for (reason, why) in [
+        (STATUS_LOST, "the kubelet never watched this run end"),
+        (
+            RESTART_ALL,
+            "the pod's own restart rule removed it on purpose",
+        ),
+    ] {
+        let said = exit_meaning(137, Some(reason)).expect("the table translates 137");
+        assert!(
+            !said.to_lowercase().contains("killed"),
+            "{reason}: {why}, so a row calling it a kill is the number read as a signal it \
+             never was: {said:?}"
+        );
+    }
+    // **No `137` row may name a probe, whatever its reason** — the translation takes no role, and
+    // an init container is allowed none.
+    for reason in [
+        Some("Error"),
+        None,
+        Some("OOMKilled"),
+        Some(STATUS_LOST),
+        Some(RESTART_ALL),
+    ] {
+        // Lowercased like every other [`PROBE_WORDS`] site — the two comparisons in this test
+        // were the exceptions that made that constant's own doc comment untrue.
+        let said = exit_meaning(137, reason)
+            .expect("the table translates 137")
+            .to_lowercase();
+        for probe in PROBE_WORDS {
+            assert!(
+                !said.contains(probe),
+                "137 {reason:?} may not name {probe:?}: this sentence prints on an init \
+                 container's card too, one line above an action that has to pick doors for the \
+                 role — {said:?}"
+            );
+        }
+    }
+    // **And the rows whose agent the object does not name may not claim one.** *Did not stop when
+    // it was asked to* was asserted of every unlabelled `137`, and three shapes reach that object
+    // with nobody having asked anything (NOTES § D84, § D90, § D93). **[`RESTART_ALL`] is
+    // deliberately not in this list**: there the object *does* name the agent — the pod's own
+    // restart rule — and a row that refused to say so would be hiding what D71's mechanism exists
+    // to surface.
+    for reason in [Some("Error"), None, Some(STATUS_LOST)] {
+        let said = exit_meaning(137, reason)
+            .expect("the table translates 137")
+            .to_lowercase();
+        assert!(
+            !said.contains("asked"),
+            "137 {reason:?} may not say anything was asked of the container: the object \
+             separates none of the endings that reach it — {said:?}"
         );
     }
 
@@ -4556,6 +4637,17 @@ fn the_verdict_hangs_off_the_conditional(action: &str, verdict: &str) {
     );
 }
 
+/// **The three probes `validateInitContainers` rejects, and the word itself** — matched against a
+/// **lowercased** haystack everywhere they are used, because a sentence-initial *Probes are worth
+/// checking* is the same forbidden advice and walked past the first draft of these guards
+/// (NOTES § D31).
+///
+/// **"Everywhere" is the whole claim, and it was false for two days.** The two call sites over
+/// [`exit_meaning`]'s raw return compared unlowered, and were only not a hole because the card
+/// guard catches a capitalised `Probes` first — shadowed by a neighbour is not a state to keep,
+/// so the sites were fixed rather than the sentence (NOTES § D93).
+const PROBE_WORDS: [&str; 4] = ["liveness", "readiness", "startup", "probe"];
+
 /// **The two literal pointers at a log** the rules can put in front of a reader. A card whose
 /// own evidence says nothing failed must not carry either, and the test that says so has to
 /// name them rather than search for the word "log" — the new cards mention logs precisely to
@@ -5300,6 +5392,17 @@ fn a_kill_from_outside_the_application_does_not_send_the_reader_to_its_logs() {
          at probes: {}",
         card.action
     );
+    // **And the caveat itself, on this arm as well as on the `Init` one.** `contains("memory")`
+    // alone passes a sentence that names the limit and says nothing about the word being
+    // missing — the half that stops a reader reading *no `OOMKilled`* as *not memory*. It is one
+    // requirement over both arms of [`killed_action`], so it is pinned on both: pinned on one, a
+    // rewrite that drops it here ships green (NOTES § D84).
+    assert!(
+        card.action.contains("not always labelled"),
+        "the kernel's word may simply be absent, and the arm that does not say so rules memory \
+         out exactly where a starved node makes it likeliest: {}",
+        card.action
+    );
 
     // **The canary under [`SENT_TO_THE_LOGS`].** A rule reworded out from under that list
     // leaves every "must not contain" assertion above passing over a phrase nothing produces
@@ -5312,6 +5415,611 @@ fn a_kill_from_outside_the_application_does_not_send_the_reader_to_its_logs() {
             everything.iter().any(|f| f.action.contains(pointer)),
             "no card in the whole capture says {pointer:?} any more, so the assertions that \
              forbid it are guarding nothing: {:?}",
+            everything
+                .iter()
+                .map(|f| f.action.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// **The same arm on the role Kubernetes allows no probe on** — rule 6 was the one of the three
+/// rules whose `137` action never got a role split, and it prints **beside** rule 5's card about
+/// the same container: one screen, one object, one card sending the reader to a liveness probe
+/// and the other saying `validateInitContainers` forbids all three (NOTES § D85, § D90).
+///
+/// **The split is asserted as a split**, not as two independent sentences: the `Regular` arm must
+/// keep the probes, or a rewrite that dropped them everywhere would pass the negatives below
+/// while making the card useless on the role that *does* have a health check.
+///
+/// **No committed capture holds an init container killed from outside**, so the previous run is
+/// a plant on a decoded copy of `healthy-retry.json` and the current state is
+/// [`init_previous_run`]'s (NOTES § D40).
+#[test]
+fn an_init_container_killed_from_outside_is_not_sent_to_a_probe_it_may_not_have() {
+    let killed = init_previous_run(137, None, None, false);
+    let waiter = container(&killed, "wait-for-db");
+    println!("{waiter:?}");
+    let run = waiter
+        .last_terminated
+        .as_ref()
+        .expect("the plant rewrote the run before this one");
+    assert!(
+        waiter.role == ContainerRole::Init
+            && !doing_its_job(waiter)
+            && (run.exit_code, run.reason.as_deref(), run.message.as_deref())
+                == (137, Some("Error"), None),
+        "the arm under test is rule 6's `137`, and it is reached only past the log-line arm, \
+         past rule 2's `OOMKilled` and past the reason the kubelet writes for a status it never \
+         read: {waiter:?}"
+    );
+
+    let all = analyze(&pods_at(vec![killed], now()));
+    show(&all);
+    let card = only(&all, "healthy-retry", "previous run failed");
+    // **Lowercased, or the guard only holds for the capitalisation it happened to be written
+    // against.** A sentence-initial *Probes are worth checking* is the same forbidden advice on
+    // the same forbidden role, and it walked past this loop while it compared the raw string
+    // (NOTES § D31).
+    let said = card.action.to_lowercase();
+    for probe in PROBE_WORDS {
+        assert!(
+            !said.contains(probe),
+            "`validateInitContainers` rejects a {probe} on this kind of container, and rule 5's \
+             card on this very container says so one row down the same screen: {}",
+            card.action
+        );
+    }
+    // **What survives the split, both halves.** The memory limit is true of every role — an init
+    // container carries limits and the kernel takes it the same way, and on a host without
+    // headroom a real cgroup kill arrives here as `137`/`Error` with the word lost, which is the
+    // one shape where nothing else on the screen says *memory* (NOTES § D84).
+    assert!(
+        card.action.contains("memory limit") && card.action.contains("not always labelled"),
+        "the reader is sent to the limit and told the kernel's word may be missing — an action \
+         that reads anything into its absence rules memory out exactly where memory is likeliest \
+         and rule 2 is silent: {}",
+        card.action
+    );
+    // **And the sentence this arm exists for** (NOTES § D85): the kill came from outside, so the
+    // general *read the logs* arm is a hunt through a log that holds no error. Without this pin
+    // the split could be satisfied by falling through to [`failed_action`], which is the one
+    // thing the arm may not do.
+    assert!(
+        card.action.contains("its own logs will not say why"),
+        "the reason this arm is not the general one: {}",
+        card.action
+    );
+    for pointer in SENT_TO_THE_LOGS {
+        assert!(
+            !card.action.contains(pointer),
+            "the application did not fail — something outside it killed the container, and its \
+             own log holds no error to find: {}",
+            card.action
+        );
+    }
+
+    // **The other side of the split, or the negatives above pass on a sentence that helps
+    // nobody.** `broken-startup` is a regular container the kubelet killed for a `startupProbe`
+    // that never passed, and it is the one role the probes are real advice for.
+    let captured = findings(&["startup"]);
+    let regular = only(&captured, "broken-startup", "previous run failed");
+    assert!(
+        regular.action.contains("liveness") && regular.action.contains("startup"),
+        "the two health checks that kill a container that is otherwise running stay on the role \
+         allowed to have them: {}",
+        regular.action
+    );
+    assert_ne!(
+        regular.action, card.action,
+        "and the arms are a split, not one sentence reached twice"
+    );
+
+    // **The budget both arms are drawn inside** (`screens/alerts.md` § The height). The sentence
+    // they replaced measured six wrapped lines; neither replacement may be longer than the cap
+    // that file makes a `rules.rs` finding rather than a layout problem.
+    for role in [
+        ContainerRole::Regular,
+        ContainerRole::Sidecar,
+        ContainerRole::Init,
+    ] {
+        let lines = wrapped_at(killed_action(role), ACTION_COLUMNS);
+        println!(
+            "{role:?}: {} lines at {ACTION_COLUMNS} columns",
+            lines.len()
+        );
+        assert!(
+            lines.len() <= 5,
+            "{role:?}: an action that wraps past five lines is a `rules.rs` finding — {} lines: \
+             {:?}",
+            lines.len(),
+            killed_action(role)
+        );
+    }
+}
+
+/// **The third meaning of `137`, and the only one that is not a kill** (NOTES § D90).
+/// `convertToAPIContainerStatuses` writes `137` beside [`STATUS_LOST`] in two places, both of
+/// them a status the kubelet could not read — the runtime reporting the container `Unknown` while
+/// the last status said `Running`, and the container gone from the runtime's list altogether. The
+/// number is a placeholder (`// this code indicates an error` is the comment beside it), so
+/// every door [`killed_action`] opens is about a signal no record holds.
+///
+/// **It is asserted ahead of the log-line arm on purpose.** The kubelet writes its own sentence
+/// into `message` beside that reason, so without this ordering the card prints *the last thing it
+/// logged was: The container could not be located when the pod was terminated* about a container
+/// that logged nothing.
+///
+/// **No capture holds this shape** — it was measured on a kind v1.36.1 cluster and never
+/// captured, so both the reason and the kubelet's message are planted on a decoded copy
+/// (NOTES § D40).
+///
+/// **Every role is fed it, and the one the cluster produced is the `Regular`.** The arm is
+/// role-blind, so the path is the same three times over — and a check is proven only for the
+/// shapes it was fed, never for the shapes it would obviously handle (NOTES § D29). What D90
+/// measured was a sandbox rebuild under a **healthy regular container**; driving only the init
+/// container would have left that one untested and the sidecar reaching [`killed_action`] through
+/// a line-width measurement and no card at all.
+#[test]
+fn a_run_kubernetes_lost_track_of_is_not_read_as_a_kill() {
+    // The kubelet's own two sentences, verbatim from `kubelet_pods.go`, and the shape with no
+    // message at all (NOTES § D29).
+    let messages = [
+        Some("The container could not be located when the pod was terminated"),
+        Some(
+            "The container could not be located when the pod was deleted.  The container used to be Running",
+        ),
+        None,
+    ];
+    // One capture per role. `broken-startup` is the shape D90 measured — a regular container the
+    // rebuild took; `healthy-unreadysidecar` is a native sidecar that is up and not ready, so
+    // [`ended_as`] writes it a previous run and the restart that goes with one; the init
+    // container needs its *current* state moved as well, which is [`init_previous_run`]'s job.
+    let roles = [
+        ("startup", "slowboot", ContainerRole::Regular),
+        ("healthy-unreadysidecar", "proxy", ContainerRole::Sidecar),
+        ("healthy-retry", "wait-for-db", ContainerRole::Init),
+    ];
+    for (capture, name, role) in roles {
+        for message in messages {
+            let lost = match role {
+                ContainerRole::Init => init_previous_run(137, Some(STATUS_LOST), message, false),
+                _ => capture_but(capture, |p| {
+                    ended_as(p, name, 137, Some(STATUS_LOST), message)
+                }),
+            };
+            // **Both halves, per role**: the role the card is about, and the gate rule 6 sits
+            // behind — a base whose container is serving draws nothing at all, and every negative
+            // below would then be asserted about a card that was never made (NOTES § D26).
+            let subject = container(&lost, name);
+            assert!(
+                subject.role == role && !doing_its_job(subject),
+                "the role under test and the gate rule 6 sits behind: {subject:?}"
+            );
+            // **The object the cluster writes, in the two fields two shipped behaviours read.**
+            // The kubelet is describing a run it never watched, so it writes the reason, the
+            // message and the code and nothing else — no `startedAt`, no `finishedAt`, no
+            // `containerID`. A plant that left the capture's stamps behind would prove [`lasted`]
+            // and [`Finding::timestamp`] against an object no cluster produces (NOTES § D29).
+            assert_eq!(
+                subject
+                    .last_terminated
+                    .as_ref()
+                    .map(|r| (r.started_at.is_none(), r.finished_at.is_none())),
+                Some((true, true)),
+                "{role:?}: measured on kind v1.36.1 — both stamps are null on this shape: \
+                 {subject:?}"
+            );
+            let object = lost.id.name.clone();
+            let all = analyze(&pods_at(vec![lost], now()));
+            show(&all);
+            // **Looked up by the code and not by the words**, so the two assertions below are
+            // what fails when the title is wrong. Keyed on the shipped title, `only` goes red
+            // first and the requirement never runs — a lookup that doubles as the assertion
+            // passes for the wrong reason the day someone rewrites it. Rule 6 is the only rule
+            // that puts the exit code in its *title*.
+            let card = only(&all, &object, "exit 137");
+            assert!(
+                card.title.contains("lost track of the container"),
+                "{role:?}: the code is translated as what it is — a number written in where a \
+                 status went missing, not a kill anything is recorded as having sent: {}",
+                card.title
+            );
+            // **The rule's own subject may not be asserted about this shape.** *The container's
+            // previous run failed* stood one line above a translation calling the number a
+            // placeholder and an action saying nothing here says what ended the run — three
+            // sentences on one card, the first contradicted by the other two and false of the
+            // object: the container measured healthy either side of the rebuild on kind v1.36.1
+            // (NOTES § D85, § D93).
+            assert!(
+                !card.title.to_lowercase().contains("failed"),
+                "{role:?}: nothing is known to have failed — a title that says so is this box's \
+                 own defect rebuilt in the rule it was opened to fix: {}",
+                card.title
+            );
+            // **And the fact it carries instead is the one the reader needs**: there is no
+            // previous-run log to go and read, because the kubelet gates `logs --previous` on
+            // the `containerID` this shape does not have. Silence was the other door and was
+            // refused for that reason (NOTES § D93).
+            assert!(
+                card.title.to_lowercase().contains("no record"),
+                "{role:?}: the card says what happened rather than nothing at all: {}",
+                card.title
+            );
+            assert!(
+                card.action.contains("no signal was recorded") && card.action.contains("node"),
+                "{role:?}: and the action answers the title rather than the number: nothing sent \
+                 this, so the doors are on the machine that lost it: {}",
+                card.action
+            );
+            // **The producer, and the two it may not name.** Measured on kind v1.36.1, one pod
+            // each: `crictl rmp -f` on the sandbox writes this object; a node reboot writes
+            // `exit 255` / `Unknown` instead, because containerd's state survives it and the
+            // containers are found dead; and restarting containerd changes nothing at all, the
+            // shims outlive it. The card sent a 3am reader to `uptime` and
+            // `systemctl status containerd` on a machine that had been up for weeks.
+            assert!(
+                card.action.contains("sandbox"),
+                "{role:?}: the measured producer is a rebuilt pod sandbox, and this file already \
+                 has the words for it one helper over (`finished_action`): {}",
+                card.action
+            );
+            for wrong in ["reboot", "containerd", "runtime restart", "uptime"] {
+                assert!(
+                    !card.action.to_lowercase().contains(wrong),
+                    "{role:?}: {wrong:?} does not produce this object — a door that cannot be \
+                     the cause costs the reader their first move: {}",
+                    card.action
+                );
+            }
+            // **Lowercased, because the forbidden word is forbidden however it is capitalised.**
+            // A sentence-initial *Probes are worth checking* passed this loop while it compared
+            // the raw string, on exactly the role that may not have one (NOTES § D31).
+            let said = card.action.to_lowercase();
+            for door in ["liveness", "startup", "probe", "memory limit"] {
+                assert!(
+                    !said.contains(door),
+                    "{role:?}: {door:?} is a door onto a kill, and this card is not about one — \
+                     an action that lists them under a title saying the status was lost is the \
+                     disagreement this box was opened for: {}",
+                    card.action
+                );
+            }
+            assert!(
+                !said.contains("the last thing it logged"),
+                "{role:?}: the kubelet wrote that message, not the container — presenting it as \
+                 the container's last words is a record that lies (invariant 4): {}",
+                card.action
+            );
+            // **And what the missing fields do to the card, pinned as observed.** Both follow
+            // from the object rather than from a choice this rule made: with no `finishedAt`
+            // there is no age, which is a state D88 made deliberate for rule 5's arm with no
+            // previous run; with no stamps there is no *ran for*, so the evidence is the
+            // container and nothing else. Neither is asserted as desirable — they are asserted so
+            // that a rule which starts inventing one is caught saying so (NOTES § D93).
+            assert_eq!(
+                card.timestamp, None,
+                "{role:?}: the run carries no `finishedAt`, so the card carries no age and may \
+                 not invent one: {card:?}"
+            );
+            assert!(
+                !card.evidence.contains("ran for"),
+                "{role:?}: and no duration either — the run has no stamps to measure: {}",
+                card.evidence
+            );
+        }
+    }
+
+    // **The canary under the ordering.** With the arm removed the first two shapes above fall to
+    // the log-line arm, which is a *different* wrong answer from the one the negatives hunt — so
+    // the shape with no message is what proves the reason is read at all, and this line proves
+    // the message it is read ahead of really does reach the card on every other reason.
+    let logged = init_previous_run(137, None, Some("panic: cannot reach db"), false);
+    let all = analyze(&pods_at(vec![logged], now()));
+    let card = only(&all, "healthy-retry", "previous run failed");
+    println!("{}", card.action);
+    assert_eq!(
+        card.action, "the last thing it logged was: panic: cannot reach db",
+        "the container's own last words still answer first on every reason but the one the \
+         kubelet writes itself"
+    );
+}
+
+/// **Rule 6's third exemption: a container the pod's own restart rule removed did not fail**
+/// (NOTES § D93). `RestartAllContainersOnContainerExits` is beta-on-by-default at the version
+/// `tests/fixtures/K8S_VERSION` pins, so under `restartPolicyRules` the kubelet takes the *other*
+/// containers down to restart them together — `exitCode: 137`, [`RESTART_ALL`], and the waiting
+/// reason and message it writes for them, all verified in `kubelet_pods.go` at v1.36.1. A WARN
+/// card for a declared policy working correctly is the false-positive class this rule was
+/// designed around, one per firing, on a field that never expires (NOTES § D71).
+///
+/// **The silence is proved beside a card, not alone.** A rule that had simply stopped firing
+/// would pass any assertion that only looks for nothing, so the sibling is planted in the same
+/// pod with the exit that actually ended it — `3`, its own error — and has to draw.
+///
+/// **Which phase this is, exactly, because the other one is not covered and must not look it.**
+/// `RestartAllContainers` removes the old container rather than leaving it for the kubelet to
+/// query, so the trigger's own record is propagated into `lastState` when its containerID changes
+/// (`kubelet_pods.go:2299-2302`) — that is the object below, and it is producible. **Before that
+/// propagation the trigger's `exit 3` is in `state.terminated`, which no rule reads as an
+/// ending** — [`doing_its_job`] is the only reader of the current terminated state and asks only
+/// whether an init container finished — and the synthesized `137` is in every container's
+/// `lastState` including its own: rule
+/// 6 is then quiet on the whole pod. So this test proves the exemption keeps a card that exists,
+/// not that a card always exists. That gap is a hole and not a hand-off, and it is boxed
+/// (NOTES § D93).
+///
+/// **`broken-hostpath` is the base because it is the one committed capture with two regular
+/// containers**; both are `Running` and ready there, so both current states are planted — the
+/// removed one into the `RestartingAllContainers` wait the kubelet writes, the sibling into a
+/// restart it has not finished (NOTES § D40).
+#[test]
+fn a_container_the_pods_own_restart_rule_removed_is_not_a_run_that_failed() {
+    let restarted = capture_but("hostpath", |p| {
+        // What the kubelet writes for a container it removed to restart the pod together: the
+        // wait, its own sentence, and the previous run carrying the same reason.
+        ended_as(
+            p,
+            "nosy",
+            137,
+            Some(RESTART_ALL),
+            Some("The container is removed because RestartAllContainers in place"),
+        );
+        let removed = container_status(p, "nosy");
+        removed.state = waiting_at(
+            RESTART_ALL,
+            Some("The container is removed because RestartAllContainers in place"),
+        );
+        removed.ready = false;
+        // And the sibling that actually ended, which is why the rule fired at all.
+        ended_as(p, "shipper", 3, None, None);
+        let failed = container_status(p, "shipper");
+        failed.state = waiting_at("ContainerCreating", None);
+        failed.ready = false;
+    });
+    // **The two shapes, and [`ended_as`]'s strip asserted in both directions.** The kubelet writes
+    // its own terminations as three fields — `Reason`, `Message`, `ExitCode` — and nothing else:
+    // `kubelet_pods.go:2581-2585` at v1.36.1 is the struct literal, and a zero `metav1.Time`
+    // marshals to `null` (`apimachinery/.../v1/time.go:162`). So `nosy` has no stamps and
+    // `shipper`, whose reason is the ordinary `Error`, keeps the capture's. **Both directions
+    // matter and neither was asserted**: stripping every reason costs rule 1 its *"the last run
+    // lasted …"* line, and stripping neither invents one (NOTES § D29, § D93).
+    for (name, code, reason, stamped) in [
+        ("nosy", 137, Some(RESTART_ALL), false),
+        ("shipper", 3, Some("Error"), true),
+    ] {
+        let c = container(&restarted, name);
+        println!("{c:?}");
+        assert!(
+            !doing_its_job(c)
+                && c.last_terminated
+                    .as_ref()
+                    .map(|r| (r.exit_code, r.reason.as_deref()))
+                    == Some((code, reason)),
+            "{name}: the gate rule 6 sits behind, and the run it would read — without both, the \
+             silence below is the rule not reaching the container rather than exempting it: {c:?}"
+        );
+        assert_eq!(
+            c.last_terminated
+                .as_ref()
+                .map(|r| (r.started_at.is_some(), r.finished_at.is_some())),
+            Some((stamped, stamped)),
+            "{name}: {reason:?} is {}a reason the kubelet writes itself, so the stamps are \
+             {}there — a plant that got this backwards would prove `lasted` and \
+             `Finding::timestamp` against an object no cluster produces: {c:?}",
+            if stamped { "not " } else { "" },
+            if stamped { "" } else { "not " }
+        );
+    }
+
+    // **Rule 6 is asked directly, because its title is no longer one string.** The silence was
+    // asserted as *no card whose title says "previous run failed" names nosy* — and rule 6 has
+    // two titles since the `STATUS_LOST` branch, so a rule that drew the other one about this
+    // container passed. Calling the rule states the requirement instead of searching for the
+    // words it happens to use (NOTES § D26, § D93).
+    let removed = previous_run_failed(&restarted, container(&restarted, "nosy"));
+    assert!(
+        removed.is_none(),
+        "rule 6 draws nothing at all about a container the pod's own restart rule removed, \
+         whatever it would have titled the card: {removed:?}"
+    );
+    assert!(
+        previous_run_failed(&restarted, container(&restarted, "shipper")).is_some(),
+        "and in this phase it still draws about the sibling that actually ended, or the exemption \
+         above is a rule that stopped firing rather than one that exempts — the claim is about \
+         the object below, whose trigger has had its own record propagated into `lastState`, and \
+         not about every phase of a restart-rule firing (NOTES § D93)"
+    );
+
+    let all = analyze(&pods_at(vec![restarted], now()));
+    show(&all);
+    // **The sibling draws, so the silence is an exemption and not a dead rule** (NOTES § D26).
+    //
+    // **Keyed on `exit 3` and not on the rule's own words**, for the reason the `STATUS_LOST`
+    // lookup was re-keyed one test up: with the exemption gone there are *two* cards saying
+    // *previous run failed*, so `only` panics on the count and the assertion that names the
+    // defect never runs. A lookup that doubles as the assertion reports the wrong failure.
+    let failed = only(&all, "broken-hostpath", "exit 3");
+    assert!(
+        failed.evidence.contains("container shipper"),
+        "the container that actually ended is the one with the card, and it is named on it: {}",
+        failed.evidence
+    );
+    assert!(
+        failed.title.contains("exit 3"),
+        "with its own exit code, which is the one thing on this pod that says why: {}",
+        failed.title
+    );
+    // **And the removed one draws no rule 6 card at all.** Checked by name rather than by
+    // counting: other rules draw about `nosy` on this capture — it is the host-mount fixture —
+    // so "no card mentions nosy" would be false for a reason that has nothing to do with this.
+    assert!(
+        !all.iter()
+            .any(|f| f.title.contains("previous run failed")
+                && f.evidence.contains("container nosy")),
+        "a container the pod asked Kubernetes to remove did not fail, and a WARN card per \
+         restart-rule firing is the false-positive class this rule is designed around: {:?}",
+        titles(&all)
+    );
+    // **The kubelet's own sentence goes with it, and that is a side effect rather than the fix.**
+    // It would have printed as *the last thing it logged was* about a container that logged
+    // nothing — the same lie `STATUS_LOST` is scoped out of by arm order. The class defect is
+    // still open and still boxed; two ad-hoc mechanisms is what makes the third look unnecessary
+    // (NOTES § D88, § D93).
+    assert!(
+        !all.iter()
+            .any(|f| f.action.contains("RestartAllContainers in place")),
+        "the kubelet wrote that sentence, not the container: {:?}",
+        all.iter().map(|f| f.action.as_str()).collect::<Vec<_>>()
+    );
+    // **The translation is not silenced with the card.** Rules 1 and 5 print `exit_fact`
+    // whatever rule 6 does, so the reading still reaches a screen — this is the assertion that
+    // says which rule now carries `RESTART_ALL`'s row to a reader, since rule 6 no longer does.
+    let cycling = init_previous_run(137, Some(RESTART_ALL), None, false);
+    let all = analyze(&pods_at(vec![cycling], now()));
+    show(&all);
+    let card = only(&all, "healthy-retry", "restarted 4 times");
+    assert!(
+        card.evidence.contains("restart every container in the pod"),
+        "rule 5 draws the count and carries the translation with it, so the row is still read by \
+         a card and not only by the table test: {}",
+        card.evidence
+    );
+}
+
+/// **The card set this box owes: no card k8rs draws about an `Init` container names a probe,
+/// anywhere on it.** `validateInitContainers` rejects `livenessProbe`, `readinessProbe` and
+/// `startupProbe` on an init container that is not restartable, so a title, an evidence line or
+/// an action naming one is advice the reader cannot follow — and rules 1, 5 and 6 all draw about
+/// the same container, onto the same screen, so the fact has to hold across the three of them at
+/// once (NOTES § D85, § D90).
+///
+/// **Driven over every `(exit code, reason)` shape those rules can reach, in both states they
+/// reach it in** (NOTES § D29): the wait rule 1 fires on and the re-run rules 5 and 6 fire on,
+/// each over the whole translation table plus a code the table does not cover and the reason the
+/// kubelet writes for a status it never read.
+///
+/// **It asserts the cards exist before it asserts what they do not say.** A filter that matched
+/// nothing would print the same green line as a rule set that had been fixed
+/// (NOTES § D26), and the words themselves are proved reachable off the committed captures at
+/// the end — a rule set that stopped saying *liveness* at all would leave every negative here
+/// guarding nothing.
+#[test]
+fn no_card_about_an_init_container_ever_names_a_probe() {
+    // `0` and `143` are the two rule 6 exempts and rules 1 and 5 read as clean endings; `1`,
+    // `126`, `127` and `137` are the failures; `42` is a code the table does not translate; and
+    // `137` is fed all three of its reasons, which is the whole of this box.
+    //
+    // **The fourth column is how many cards that shape must draw about this container**, and it
+    // is the difference between a guard and a counter: with the count only summed and printed,
+    // deleting both [`STATUS_LOST`] rows — part (iii) of this box, its whole subject — left the
+    // loop green over eight shapes instead of ten (CLAUDE.md § Code phase rules, *a derived list
+    // asserts it found something*). One is a clean ending, which only rules 1 and 5 draw on;
+    // two is a failure, where rule 6 or rule 2 joins them.
+    let runs: [(i32, Option<&str>, Option<&str>, usize); 12] = [
+        (0, None, None, 1),
+        (143, None, None, 1),
+        (1, None, None, 2),
+        (126, None, None, 2),
+        (127, None, None, 2),
+        (42, None, None, 2),
+        (137, None, None, 2),
+        (137, Some("OOMKilled"), None, 2),
+        (137, Some(STATUS_LOST), None, 2),
+        // The same reason with the kubelet's own sentence beside it, which is the pair a cluster
+        // actually writes and the one that decides whether rule 6 reads the reason or the
+        // message (NOTES § D90).
+        (
+            137,
+            Some(STATUS_LOST),
+            Some("The container could not be located when the pod was terminated"),
+            2,
+        ),
+        // **The fourth `137` reason, both ways round.** It is beta-on-by-default at the pinned
+        // version, so it is a shape the real pipeline hands these rules today — and the kubelet
+        // writes a message beside it, which sends rule 6 down a different arm from the bare one
+        // (NOTES § D29, § D93).
+        // **One card, not two: rule 6 exempts this reason.** The pod's own restart rule removed
+        // the container, so nothing failed — the exemption sits beside `OOMKilled`'s and the
+        // count here is what says it holds on this role too (NOTES § D93).
+        (137, Some(RESTART_ALL), None, 1),
+        (
+            137,
+            Some(RESTART_ALL),
+            Some("The container is removed because RestartAllContainers in place"),
+            1,
+        ),
+    ];
+    // Written down rather than summed, so a row that is deleted along with the array's length
+    // takes this line red with it.
+    const INIT_CARDS: usize = 40;
+    let mut cards = 0usize;
+    for looping in [false, true] {
+        for (code, reason, message, expected) in runs {
+            let pod = init_previous_run(code, reason, message, looping);
+            let all = analyze(&pods_at(vec![pod], now()));
+            let about_init: Vec<&Finding> = all
+                .iter()
+                .filter(|f| f.evidence.contains("init container wait-for-db"))
+                .collect();
+            println!(
+                "exit {code} {reason:?} message={} looping={looping}: {} findings",
+                message.is_some(),
+                all.len()
+            );
+            for f in &about_init {
+                println!("  {} | {} | {}", f.title, f.evidence, f.action);
+            }
+            assert_eq!(
+                about_init.len(),
+                expected,
+                "exit {code} {reason:?} message={} looping={looping} draws {} cards about the \
+                 init container and not {expected} — a shape that goes silent takes its own \
+                 assertions with it and subtracts from a total nobody reads (NOTES § D26): {:?}",
+                message.is_some(),
+                about_init.len(),
+                titles(&all)
+            );
+            cards += about_init.len();
+            for f in about_init {
+                for (part, text) in [
+                    ("title", &f.title),
+                    ("evidence", &f.evidence),
+                    ("action", &f.action),
+                ] {
+                    // **Lowercased, and that is not tidiness.** *Probes are worth checking* —
+                    // capitalised because it opens a sentence — is the forbidden advice on the
+                    // forbidden role, and it passed this loop while it compared the raw string.
+                    // A guard is proven only for the framing it was written for (NOTES § D31).
+                    let said = text.to_lowercase();
+                    for probe in PROBE_WORDS {
+                        assert!(
+                            !said.contains(probe),
+                            "exit {code} {reason:?} looping={looping}: the {part} names \
+                             {probe:?} about a container Kubernetes allows none — {text}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    println!("{cards} cards about one init container, none of them naming a probe");
+    assert_eq!(
+        cards, INIT_CARDS,
+        "the shapes above are the whole of what rules 1, 5 and 6 can draw about an init \
+         container, and a row deleted out of the table is a meaning that stopped being guarded"
+    );
+
+    // **The canary: every word above is one this rule set still says.** "Found nothing" and
+    // "there was nothing to find" print the same green line, so each is asserted present on a
+    // card drawn off the committed captures — where the container *is* allowed a health check
+    // (CLAUDE.md § Code phase rules).
+    let everything = findings(&CAPTURED_PODS);
+    for probe in PROBE_WORDS {
+        assert!(
+            everything.iter().any(|f| f.action.contains(probe)),
+            "no card in the whole capture says {probe:?} any more, so the loop above is \
+             guarding a word nothing produces: {:?}",
             everything
                 .iter()
                 .map(|f| f.action.as_str())
@@ -6794,24 +7502,114 @@ fn a_sidecar_that_keeps_finishing_is_not_told_to_move_to_a_job() {
 /// the second on its being there at all (NOTES § D88). A plant is worth the shape it builds, so
 /// all three are now written, inert or not.
 fn init_run_again(exit_code: i32) -> PodSnapshot {
+    init_previous_run(exit_code, None, None, false)
+}
+
+/// **[`init_run_again`] over any previous run, and in either state an init container reaches
+/// rules 1, 5 and 6 in** — the driver behind
+/// [`no_card_about_an_init_container_ever_names_a_probe`], which owes every
+/// `(exit code, reason)` shape those three rules can draw an `Init` card from (NOTES § D29).
+///
+/// `reason: None` keeps the pairing [`exited`] writes — `Completed` beside `0`, `Error` beside
+/// everything else, which is what the API emits. It is overridden for the one shape where the
+/// kubelet does not read the reason off the code at all: it writes [`STATUS_LOST`] and a sentence
+/// of its own into `message`, where it could not read a status rather than watching a run end
+/// (NOTES § D90).
+///
+/// **`looping: true` is the wait, `false` is the re-run.** The first is rule 1's state, taken
+/// from [`backing_off`]; the second is rule 5's and rule 6's, and adds the restart the kubelet
+/// counts when it starts the container again. Both leave the app on `PodInitializing` behind a
+/// pod put back where a rebuilt sandbox leaves it — an init container in either state beside a
+/// *ready* app in a `Running` pod is a shape no kubelet writes.
+fn init_previous_run(
+    exit_code: i32,
+    reason: Option<&str>,
+    message: Option<&str>,
+    looping: bool,
+) -> PodSnapshot {
     capture_but("healthy-retry", |p| {
-        exited(p, "wait-for-db", exit_code);
-        let init = container_status(p, "wait-for-db");
-        init.state = Some(ApiContainerState {
-            running: Some(ContainerStateRunning {
-                started_at: Some(time("2026-08-13T23:34:00Z")),
-            }),
-            ..ApiContainerState::default()
-        });
-        init.ready = false;
-        init.started = Some(true);
-        init.restart_count += 1;
-        // The app goes back behind it and the pod back behind them both, which is what a rebuilt
-        // sandbox does — an init container running again beside a *ready* app in a `Running` pod
-        // is a shape no kubelet writes.
+        ended_as(p, "wait-for-db", exit_code, reason, message);
+        if looping {
+            backing_off(p, "wait-for-db");
+        } else {
+            let init = container_status(p, "wait-for-db");
+            init.state = Some(ApiContainerState {
+                running: Some(ContainerStateRunning {
+                    started_at: Some(time("2026-08-13T23:34:00Z")),
+                }),
+                ..ApiContainerState::default()
+            });
+            init.ready = false;
+            init.started = Some(true);
+            init.restart_count += 1;
+        }
         never_ran(p, "app", "PodInitializing", None);
         sandbox_rebuilt(p);
     })
+}
+
+/// **A captured container's previous run rewritten whole** — the code [`exited`] writes, plus the
+/// `reason` and the `message` beside it.
+///
+/// `reason: None` keeps [`exited`]'s pairing — `Completed` beside `0`, `Error` beside everything
+/// else, which is what the API emits. It is overridden for the one pair the kubelet does not read
+/// off the code at all: [`STATUS_LOST`] and a sentence of its own, written where it could not read
+/// a status rather than where it watched a run end (NOTES § D90).
+///
+/// **Where the capture holds no previous run the plant creates one, and two things go with it.**
+/// `startContainer` writes `RestartCount + 1` when it runs a container again, so a `lastState`
+/// beside a count of `0` is a pair no kubelet produces; and the run is stamped **before** the
+/// state the capture is in — every capture in this repository was taken with its containers
+/// running from `22:33:10Z`, and a previous run that ended after the current one started is a
+/// timeline no cluster writes. A plant is only worth the shape it builds (NOTES § D40, § D53).
+fn ended_as(pod: &mut Pod, name: &str, code: i32, reason: Option<&str>, message: Option<&str>) {
+    let status = container_status(pod, name);
+    if status
+        .last_state
+        .as_ref()
+        .and_then(|s| s.terminated.as_ref())
+        .is_none()
+    {
+        status.last_state = Some(ApiContainerState {
+            terminated: Some(ContainerStateTerminated {
+                started_at: Some(time("2026-08-13T22:32:30Z")),
+                finished_at: Some(time("2026-08-13T22:33:00Z")),
+                ..ContainerStateTerminated::default()
+            }),
+            ..ApiContainerState::default()
+        });
+        status.restart_count += 1;
+    }
+    exited(pod, name, code);
+    let run = container_status(pod, name)
+        .last_state
+        .as_mut()
+        .and_then(|s| s.terminated.as_mut())
+        .expect("the run above is either the capture's or this plant's");
+    if let Some(reason) = reason {
+        run.reason = Some(reason.to_string());
+    }
+    run.message = message.map(str::to_string);
+    // **The two reasons the kubelet writes itself carry three fields and no more**, so the plant
+    // strips the rest rather than leaving the capture's behind: it is describing a run it did not
+    // watch, so there are no stamps and no `containerID` to describe it with.
+    //
+    // **Read out of the source rather than inferred**, because the choice moves what rule 1
+    // draws. At v1.36.1 both struct literals set `Reason`, `Message` and `ExitCode` and stop —
+    // `kubelet_pods.go:2621-2625` for [`STATUS_LOST`], `:2581-2585` for [`RESTART_ALL`] — and an
+    // unset `metav1.Time` marshals to `null`
+    // (`apimachinery/pkg/apis/meta/v1/time.go:162-166`, *"Encode unset/nil objects as JSON's
+    // null"*). `k8s-admin` measured the same nulls for [`STATUS_LOST`] on kind; [`RESTART_ALL`]'s
+    // were not measured and are settled here from the identical literal.
+    //
+    // A plant that kept the capture's stamps would prove the rules against an object no cluster
+    // produces (NOTES § D29, § D40), and two shipped behaviours read exactly these fields:
+    // [`lasted`] for the evidence line and [`Finding::timestamp`] for the age.
+    if matches!(run.reason.as_deref(), Some(STATUS_LOST | RESTART_ALL)) {
+        run.started_at = None;
+        run.finished_at = None;
+        run.container_id = None;
+    }
 }
 
 /// **A plain init container that finished its work and was run again** — the third role on the

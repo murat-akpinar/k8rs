@@ -1586,6 +1586,35 @@ fn ending(run: &Terminated) -> Ending {
     }
 }
 
+/// **The kubelet's own `reason` for a run it never watched end, and the third meaning of `137`**
+/// (NOTES § D90, § D93). `convertToAPIContainerStatuses` writes
+/// `Terminated { reason: ContainerStatusUnknown, exitCode: 137 }` in two places, both of them a
+/// status it could not read rather than a kill it saw: where the runtime reports the container
+/// `Unknown` while the previous status said `Running`, and where the container has gone from the
+/// runtime's list altogether. The comment beside the number in that file is
+/// `// this code indicates an error` — it is a placeholder, not a signal anything sent, which is
+/// why it gets a row of its own rather than the SIGKILL sentence.
+///
+/// **The whole object is those three fields and nothing else**: `startedAt`, `finishedAt` and
+/// `containerID` are all absent — the struct literal at `kubelet_pods.go:2621-2625` sets `Reason`,
+/// `Message` and `ExitCode` and stops, and an unset `metav1.Time` marshals to `null`
+/// (`apimachinery/pkg/apis/meta/v1/time.go:162`) — because the kubelet is describing a run it did
+/// not see. So a card of this class has no age and no *ran for*
+/// ([`lasted`], [`Finding::timestamp`]) — measured
+/// on kind v1.36.1, where `crictl rmp -f` on the sandbox is the producer and a node reboot is
+/// **not**: containerd's state survives that, the containers are found dead, and the kubelet
+/// writes `exit 255` / `Unknown` instead.
+const STATUS_LOST: &str = "ContainerStatusUnknown";
+
+/// **The fourth meaning of `137`, and the only one that is the pod getting what it asked for.**
+/// `RestartAllContainersOnContainerExits` is `{Version: 1.36, Default: true, Beta}` — on by
+/// default at the version `tests/fixtures/K8S_VERSION` pins — and under a pod's own
+/// `restartPolicyRules` the kubelet removes the other containers to restart them together,
+/// writing `Terminated { reason: RestartingAllContainers, exitCode: 137 }` with the same three
+/// fields and no more. Verified in `kube_features.go` and `kubelet_pods.go` at v1.36.1, not taken
+/// on report (NOTES § D93).
+const RESTART_ALL: &str = "RestartingAllContainers";
+
 /// **What an exit code means, in the words a beginner needs** — NOTES § v1 rule set's
 /// translation table, and nothing invented beside it. `None` is a code with no accepted meaning,
 /// where the number alone is the honest answer.
@@ -1600,19 +1629,36 @@ fn ending(run: &Terminated) -> Ending {
 /// and stood one line above [`finished_action`], whose whole subject is that the code cannot say
 /// who ended the run (NOTES § D85, § D88).
 ///
-/// **137 needs the `reason` beside it, and NOTES' own table is corrected here** (NOTES § D71):
-/// with [`Terminated::reason`] `OOMKilled` the kernel took the container for using too much
-/// memory; **without it**, 137 is the kubelet's own SIGKILL after an unanswered SIGTERM — a
-/// failing `livenessProbe`, or a shutdown that hangs.
+/// **137 needs the `reason` beside it, and it has four readings rather than two** (NOTES § D71,
+/// § D90, § D93): with [`Terminated::reason`] `OOMKilled` the kernel took the container for using
+/// too much memory; with [`STATUS_LOST`] nothing was killed that Kubernetes watched, and the
+/// number is what it wrote where a status went missing; with [`RESTART_ALL`] the pod's own
+/// restart rule removed it on purpose; **with anything else the row names the signal and stops
+/// there.**
+///
+/// **That last row named a cause until 2026-08-15, and the object supports none** — *did not stop
+/// when it was asked to — a failing liveness probe, or a shutdown that hangs* is three claims
+/// deep. An init container may hold no probe at all (`validateInitContainers`, [`killed_action`]);
+/// a genuine cgroup kill arrives without the word on a host short of memory (NOTES § D84); and a
+/// rebuilt sandbox kills a container nothing asked to stop (NOTES § D90). **Who sent the signal
+/// is the action's question, because only the action knows the role** — a translation printed by
+/// rules 1, 5 and 6 alike cannot answer it three ways (NOTES § D88, § D93).
 fn exit_meaning(code: i32, reason: Option<&str>) -> Option<&'static str> {
     Some(match code {
         0 => "the run ended without an error",
         137 if reason == Some("OOMKilled") => {
             "killed by the kernel for using more memory than it was allowed"
         }
+        137 if reason == Some(STATUS_LOST) => {
+            "Kubernetes lost track of the container and wrote this code in its place"
+        }
+        137 if reason == Some(RESTART_ALL) => {
+            "removed so Kubernetes could restart every container in the pod, which is what this \
+             pod asked for"
+        }
         137 => {
-            "killed because it did not stop when it was asked to — a failing liveness probe, \
-             or a shutdown that hangs"
+            "killed with SIGKILL — a stop the program cannot refuse, and the code does not say \
+             what sent it"
         }
         143 => "stopped with SIGTERM, which is an ordinary shutdown and not an error",
         1 | 2 => "the application's own error",
@@ -1805,6 +1851,63 @@ fn failed_action(role: ContainerRole) -> &'static str {
              word is not always on the card. No health check is behind any of it — Kubernetes \
              allows this kind of container none, and the app cannot start until one of these \
              runs succeeds"
+        }
+    }
+}
+
+/// **What to do about the `137` that is left once the other three readings are gone, per role** —
+/// [`previous_run_failed`]'s only, and the fourth of the per-role sentences [`finished_action`],
+/// [`stopped_action`] and [`failed_action`] make.
+///
+/// **Every reason the kubelet writes itself is gone by the time this is called**, which is a
+/// stronger statement than *not `OOMKilled`* and is why these two sentences may talk about a kill
+/// without qualifying one: `OOMKilled` and [`RESTART_ALL`] return at the top of that rule, and
+/// [`STATUS_LOST`] is answered by its own arm above this one. What is left is what a runtime
+/// writes for an ordinary bad exit — `Error`, on containerd — or no reason at all, and the
+/// sentences below read the same either way. **The list is spelled here and nowhere else** — it
+/// was written twice, and the copy went stale the first time a fourth reading was added
+/// (NOTES § D93).
+///
+/// **It was role-blind until 2026-08-15**, sending
+/// an init container after a probe `validateInitContainers` forbids it while [`failed_action`]
+/// and [`stopped_action`] refused to name one on the same container — rule 5's card and rule 6's,
+/// one object, contradicting each other on one screen (NOTES § D85).
+///
+/// **Deliberately not [`failed_action`]**: this kill came from outside the application, so the
+/// container's own logs hold no error to find, and that sentence is the whole reason this arm
+/// exists rather than falling through to *read the logs* (NOTES § D85).
+///
+/// **Memory is on both arms even though rule 2 owns the labelled kill**: on a host without
+/// headroom a genuine cgroup OOM arrives here as `137`/`Error` with the word simply lost, which
+/// is the condition under which OOM kills happen and the one shape where nothing else on the
+/// screen says *memory* (NOTES § D84).
+///
+/// **Neither arm names what sent the signal**, because the code does not ([`exit_meaning`]): they
+/// open the doors and leave them open, the shape NOTES § D88, § D90 and § D93 settled next door.
+/// **Rules 1 and 5 were deliberately left out of that split** — their `Failed` arm is a box of its
+/// own, for the reason NOTES § D93 records.
+///
+/// **"Whether it stops when asked to" is a hypothesis, not a field, and that is on purpose.**
+/// `describe` prints no such thing — `Termination Grace Period` shows only while a pod is
+/// deleting — and the clause was queried for it and kept: the reader tests it against the
+/// `Killing` event and the exit code the card's own title carries. `describe` *does* print the
+/// probes and both limits, init containers included, which is the rest of the sentence
+/// (invariant 4; asked and answered three times in this area, so it is written down here).
+///
+/// **`startup.json` is the captured `Regular` arm** — a `startupProbe` that never passes, killed
+/// at the grace period. **No committed capture reaches the `Init` arm**; it is proved on a
+/// decoded plant off `healthy-retry.json` (NOTES § D40).
+fn killed_action(role: ContainerRole) -> &'static str {
+    match role {
+        ContainerRole::Regular | ContainerRole::Sidecar => {
+            "check the liveness and startup probes, whether it stops when asked to, and the \
+             memory limit: a kill for using too much memory is not always labelled as one, and \
+             this kill came from outside the application, so its own logs will not say why"
+        }
+        ContainerRole::Init => {
+            "check the memory limit: a kill for using too much memory is not always labelled as \
+             one. Kubernetes allows this kind of container no health check, and this kill came \
+             from outside the application, so its own logs will not say why"
         }
     }
 }
@@ -2204,6 +2307,31 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
 /// codes are [`ending`]'s to name, not this rule's, because rule 1 reads the same container and
 /// has to reach the same verdict about it (NOTES § D85).
 ///
+/// **[`RESTART_ALL`] is the third exemption, and it is an exemption rather than a wording
+/// problem** (NOTES § D93). The pod declared `restartPolicyRules`; the kubelet removed this
+/// container because those rules said to. Nothing failed and nothing was killed from outside, so
+/// a WARN card is the false-positive class this rule's whole design exists to remove — one per
+/// restart-rule firing, forever, on a field that never expires (NOTES § D71).
+///
+/// **What the exemption costs, stated for both phases rather than the convenient one.** The
+/// container whose own bad exit triggered the restart draws its card **once its record has landed
+/// in `lastState`** — `kubelet_pods.go:2299-2302` propagates it there when the containerID
+/// changes, because `RestartAllContainers` removes the old container instead of leaving it for the
+/// kubelet to query. **Before that it has not.** In the phase a snapshot is likeliest to catch,
+/// the synthesized `137` sits in *every* container's `lastState`, the trigger's included, and the
+/// trigger's own `exit 3` is in `state.terminated` — **which no rule reads as an ending.** The
+/// one place the current terminated state is read at all is [`doing_its_job`], and it asks only
+/// whether an init container finished; rules 1, 5 and 6 take their ending from `lastState`. So
+/// rule 6 is quiet on the whole pod and only [`restarting_repeatedly`]'s count remains. Still the
+/// right trade, but it is a hole and not a hand-off (NOTES § D93).
+///
+/// **The exemption also removes a card that was lying, and that is a side effect and not the
+/// fix.** The kubelet writes its own sentence into `message` beside that reason, which the
+/// log-line arm below would print as *the last thing it logged was* about a container that logged
+/// nothing. That class defect is still open and still boxed — [`STATUS_LOST`] is scoped out of it
+/// by arm order and [`RESTART_ALL`] by this early return, and **two ad-hoc mechanisms is exactly
+/// the state that makes the third look unnecessary** (NOTES § D88, § D93).
+///
 /// **And quiet on a container that is serving now, because this field never expires** — the
 /// largest false-positive volume in this box, needing no unusual manifest, only uptime
 /// (NOTES § D71); that history belongs to [`restarting_repeatedly`], which has a threshold under
@@ -2218,46 +2346,125 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
 /// `init.json`'s are the general *read the logs* arm beside. **`startup.json` reaches the `137`
 /// arm**, whose kill came from outside the application: the general arm sent that reader hunting
 /// an error the container never logged (NOTES § D85).
+///
+/// **`137` means four things and this rule draws two of them** ([`exit_meaning`],
+/// [`killed_action`], NOTES § D90, § D93). `OOMKilled` and [`RESTART_ALL`] never arrive — both
+/// return above — [`STATUS_LOST`] is not a kill at all and moves the title with it, because this
+/// rule's own subject, *the previous run failed*, is the one claim that shape cannot support. What
+/// is left is a SIGKILL whose sender the code does not name. **The role split is the point of the
+/// box**: that arm handed every role *check the liveness and startup probes* while rule 5's card
+/// on the same container said Kubernetes allows an init container none, and the two print
+/// together (NOTES § D85).
+///
+/// **The translation for [`RESTART_ALL`] still reaches the screen, from rules 1 and 5**, which
+/// print [`exit_fact`] whatever this rule does — so the exemption silences the card and not the
+/// reading (NOTES § D93).
+///
+/// **No committed capture reaches [`STATUS_LOST`], [`RESTART_ALL`] or the `Init` side of
+/// [`killed_action`]** — the first two were measured on a kind v1.36.1 cluster and never
+/// captured, the third needs an init container killed from outside. All are proved on decoded
+/// plants off committed captures (NOTES § D40).
 fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     let run = c.last_terminated.as_ref()?;
     if ending(run) != Ending::Failed
-        || run.reason.as_deref() == Some("OOMKilled")
+        || matches!(run.reason.as_deref(), Some("OOMKilled" | RESTART_ALL))
         || doing_its_job(c)
     {
         return None;
     }
-    // The kubelet's `reason` for a non-zero exit is the bare word `Error`, which says nothing
-    // the title has not already said in a sentence (invariant 14).
+    // Past the exemptions the `reason` is the bare word `Error`, or [`STATUS_LOST`] where the
+    // kubelet never watched the run end. Neither goes in the evidence: [`exit_fact`] has put both
+    // into the title as a sentence already (invariant 14).
+    // **[`ContainerSnapshot::restarts`] is deliberately not a fact here, and the one-clause
+    // evidence a [`STATUS_LOST`] card draws is not a reason to add it.** The object carries the
+    // count — `kubelet_pods.go:2628-2630` bumps it — but it counts restarts from every cause,
+    // and on a card whose subject is *one* lost status it reads as *this happened N times*: the
+    // incomplete-denominator class PRIOR-ART.md catalogues and this tool exists not to do. The
+    // reader who needs a count gets it from [`restarting_repeatedly`], framed by a threshold.
+    // **The question underneath is real and unanswered** — the object does not say whether this
+    // was once or is ongoing — so the card does not claim either (NOTES § D93).
     let mut facts = vec![container_fact(c)];
     if let Some(d) = lasted(run) {
         facts.push(format!("ran for {d}"));
     }
     Some(Finding {
         severity: Severity::Warn,
-        title: format!("The container's previous run failed — {}", exit_fact(run)),
+        // **[`STATUS_LOST`] gets its own opening, because *failed* is false of the object.** The
+        // run this card is drawn from was never watched to an end, so the rule's own subject is
+        // the one thing it may not assert: the container measured healthy either side of it on
+        // kind v1.36.1, and *it failed* stood one line above a translation calling the number a
+        // placeholder and an action saying nothing here says what ended the run — three sentences
+        // on one card, the first contradicted by the other two (NOTES § D85, § D93).
+        //
+        // **Silence was the other door and it was refused**: with no
+        // `lastState.terminated.containerID` the kubelet will not serve `logs --previous`, so a
+        // card that said nothing would leave the reader hunting a log the API refuses. This one
+        // carries the fact and the reason for it. The branch is here and **not in [`ending`]**,
+        // which rules 1 and 5 read too (NOTES § D93).
+        //
+        // **The key is the `reason`, and a branch keyed on the null `finishedAt` would draw the
+        // same card — but that is a property of the exemption list above, not of the object
+        // space.** [`RESTART_ALL`] is stamp-less too and its reason is not this one, so it
+        // separates the two keys exactly; it never arrives only because the early return at the
+        // top of this rule sends it away first. **Narrow that exemption and the keys diverge on
+        // the first object the cluster writes** — which is why
+        // `a_container_the_pods_own_restart_rule_removed_is_not_a_run_that_failed` asserting
+        // `previous_run_failed` is `None` for it is what holds this ruling up, and the place to
+        // look when it stops holding. Nor is stamp-less a synonym for this reason in the kubelet
+        // at all: `kubelet_pods.go:2714-2718` writes a third bare literal, `Completed` / `0`, for
+        // an init container whose status the runtime lost.
+        //
+        // Within the reachable set the difference is unobservable, so it stays keyed on the
+        // reason and **no fixture is invented to prove it** (NOTES § D29, § D93).
+        title: match run.reason.as_deref() {
+            Some(STATUS_LOST) => format!(
+                "No record of how the container's last run ended — {}",
+                exit_fact(run)
+            ),
+            _ => format!("The container's previous run failed — {}", exit_fact(run)),
+        },
         evidence: facts.join(FACTS),
-        action: match (last_log_line(run), run.exit_code) {
-            (Some(line), _) => format!("the last thing it logged was: {line}"),
-            (None, 126 | 127) => {
+        action: match (last_log_line(run), run.exit_code, run.reason.as_deref()) {
+            // **[`STATUS_LOST`] answers ahead of the log line, and only this reason does.**
+            // The kubelet writes its own sentence into `message` beside this `reason` — *the
+            // container could not be located when the pod was terminated* — so the arm below
+            // would print the kubelet's words under *the last thing it logged was*, about a
+            // container that logged nothing. Nothing was killed that Kubernetes watched, so
+            // every door [`killed_action`] opens is about a signal no record holds
+            // (NOTES § D90, § D93).
+            //
+            // **It names the sandbox and no longer the node's uptime.** The producer measured on
+            // kind v1.36.1 is `crictl rmp -f` on the pod's sandbox; a node reboot is not one —
+            // containerd's state survives it and the kubelet writes `exit 255` / `Unknown` — and
+            // restarting containerd is a no-op, the shims outlive it. The card sent a reader to
+            // check `uptime` on a machine that had been up for weeks. The wording is deliberately
+            // the one [`finished_action`]'s `Init` arm already uses for the same event, hedged
+            // the same way: the events usually do not carry it.
+            //
+            // **It names the commoner of [`STATUS_LOST`]'s two producers, and the tail carries the
+            // other.** A wedged shim or a runtime that cannot be read reaches this same reason
+            // with no sandbox rebuilt anywhere — *the node the pod is on is where the reason is*
+            // is the clause that answers it, and naming both producers inside four lines would
+            // cost a door (`screens/alerts.md` § The height, NOTES § D93).
+            (_, 137, Some(STATUS_LOST)) => {
+                "no signal was recorded, so nothing here says what ended the run — a rebuilt pod \
+                 sandbox takes its containers with it, and the events rarely say so. The node \
+                 the pod is on is where the reason is"
+                    .to_string()
+            }
+            (Some(line), _, _) => format!("the last thing it logged was: {line}"),
+            (None, 126 | 127, _) => {
                 "check the container's command and arguments — what they name is not in the \
                  image"
                     .to_string()
             }
-            // `137` reaches this rule only with `reason` something other than `OOMKilled` —
-            // rule 2 owns the other one — so the kill came from outside the application, and
-            // the general arm's *find the application's own error* is a hunt through a log
-            // that does not hold one (NOTES § D85, § D71). **Memory stays on the list even
-            // though rule 2 owns the labelled kill**: on a host without headroom a genuine
-            // cgroup OOM arrives here as `137`/`Error` with the word lost, which is exactly
-            // the condition under which OOM kills happen (NOTES § D84).
-            (None, 137) => {
-                "check the liveness and startup probes, whether the container stops when it is \
-                 asked to, and its memory limit — this kill came from outside the application, \
-                 so its own logs will not say why, and a kill for using too much memory does \
-                 not always arrive labelled as one"
-                    .to_string()
-            }
-            (None, _) => {
+            // The last reading of `137`, and [`killed_action`] carries which reasons still reach
+            // it and why — the list lives there, not in a second copy here. What it means for
+            // this arm: the kill came from outside the application, so the general arm's *find
+            // the application's own error* is a hunt through a log that does not hold one, and
+            // the role decides which doors may be opened (NOTES § D85, § D71, § D93).
+            (None, 137, _) => killed_action(c.role).to_string(),
+            (None, _, _) => {
                 "read the logs of that run to find the application's own error".to_string()
             }
         },

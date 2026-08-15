@@ -3698,7 +3698,11 @@ deadline. It is `> 60s`, flat.
 had no `reason` beside the code; it has one now, and a liveness-probe kill that
 outlives the grace lands as `137 / Error`. Rule 2 correctly stayed quiet and
 rule 6 printed the memory sentence anyway, holding the field that disproves it.
-Corrected in the table above: 137 has two meanings and the object says which.
+Corrected in the table above — and corrected a second time on 2026-08-15, when
+the row that replaced it turned out to name the *other* cause with the same
+false confidence: 137 has three readings, the object names two, and where it
+names neither the table says the signal and stops
+([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
 
 **Three false-positive classes that needed no unusual manifest, only uptime.**
 Rule 6 had no bound at all — `lastState.terminated` never expires, so one
@@ -5758,6 +5762,248 @@ CLAUDE.md already says the PM decides in writing when two parties disagree, and
 a contradiction between two committed files is that, with nobody in the room to
 argue it.
 
+### D93 — an exit code is translated once for every role, and `137` is read from the object rather than from the number (2026-08-15)
+
+`todo.md`'s three-part `137` box asked one question in three places, and it had
+to be answered once or the three answers drift — which is the whole of
+[D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14).
+The question: **what does `137` mean for a container that may not be allowed a
+probe?**
+
+**The door taken: `exit_meaning` stays role-blind, and its bare-`137` row stops
+naming a cause.** The box offered the other door — make the translation
+role-aware — and it was refused for three reasons:
+
+- **A translation names how a run ended; naming *what* ended it is diagnosis**,
+  and diagnosis is the action's job. The action is already split by role in
+  four places (`finished_action`, `stopped_action`, `failed_action`, and now
+  `killed_action`), so a role fork in the translation restates one line down
+  what the card already says one line up.
+- **`exit_meaning` is printed by rules 1, 5 and 6.** A role argument there
+  changes three rules' cards at once and puts the same branch in three places
+  that must not disagree — the defect the box exists to remove, rebuilt as its
+  fix.
+- **Three causes reach the same `137`-without-`OOMKilled` shape and the object
+  separates none of them**: a SIGKILL after an unanswered SIGTERM; a genuine
+  cgroup kill whose word was lost on a host short of memory
+  ([D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14));
+  and a sandbox rebuild on a container nothing asked to stop
+  ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
+  **The third reaches the bare row even after the reasons below were added**, and
+  that is worth stating because it looks contradicted by them: D90 measured the
+  rebuild twice, and only the *removed* sandbox writes
+  `ContainerStatusUnknown` — a sandbox merely **stopped** arrives as plain
+  `137`/`Error`, indistinguishable from the other two. A one-line evidence field
+  naming one of three is wrong two-thirds of the time, and it was naming the one
+  an init container cannot have.
+
+**`137` with `reason: ContainerStatusUnknown` gets its own row**, by the same
+mechanism D71 established for `OOMKilled`: *the object says which*. It is not a
+kill at all — `convertToAPIContainerStatuses` writes `exitCode: 137` where the
+kubelet could not read a status, with `// this code indicates an error` beside
+the number in its own source. **Verified from the kubelet source before the row
+shipped, not from D90's measurement**, which observed the pair from outside and
+could not tell a synthesized number from a watched one.
+
+**A fourth reason turned up in the operator review and it is not a finding at
+all.** `RestartAllContainersOnContainerExits` is `{1.36, Default: true, Beta}` at
+the version `tests/fixtures/K8S_VERSION` pins, and the kubelet writes
+`exitCode: 137, reason: RestartingAllContainers` when a pod's own
+`restartPolicyRules` remove a container. Measured on kind with no gates touched.
+Two halves, ruled apart:
+
+- **The translation row ships** — the `reason` beside the code says exactly what
+  removed it, and *"the code does not say what sent it"* is false whenever it
+  does. Same function, same question, verified in the kubelet source before the
+  row was written.
+- **Rule 6 goes silent on it**, beside `exit 0`, `exit 143` and `OOMKilled`. The
+  pod declared the rule, the kubelet obeyed it, and nothing failed — a WARN card
+  for a declared policy working correctly is D71's false-positive class on a
+  field that never expires.
+
+**"Nothing is lost, the sibling draws its card" was written into three files and
+is true of one phase of two.** The second operator review measured the other: the
+kubelet writes the synthesized `137` record into **every** container's
+`lastState`, the trigger included, while the trigger's own bad exit sits in
+`state.terminated`. In that phase rule 6 is exempt on both containers and **no
+rule reads the `exit 3` that started it as an ending** — `doing_its_job` reads
+that field, but only to ask whether an init container finished — so rule 5's
+count is the only card.
+The claim is corrected wherever it was made, to *a container that failed draws its
+card in the phase where its own record has landed in `lastState`*, and **the other
+phase is a hole and not a hand-off** — the register `stuck_at_the_starting_line`
+already uses for the same shape. The gap is boxed; the exemption stands, because
+the card it removes was never the one that diagnosed the failure.
+
+**Adding the row created the contradiction it then had to fix**, which is
+[D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)'s
+shape — the title read *the previous run failed* one line above *which is what
+this pod asked for*. The exemption removes the card and the contradiction
+together. **It also removes a kubelet-authored log line as a side effect, and
+that is not the fix**: `ContainerStatusUnknown` is scoped out of the log arm by
+arm order and `RestartingAllContainers` by a rule exemption granted for an
+unrelated reason, so two ad-hoc mechanisms now hide one class defect. That is
+written into the box that owes the class fix, because two accidental greens are
+how a third instance ships.
+
+**Rule 6's `137` action splits by role through `killed_action`**, shared rather
+than spelled a fourth time. It sent every role after a liveness probe while rule
+5's card on the same container said Kubernetes allows an init container none —
+two k8rs cards, one object, one screen.
+
+**What was left out, and why the boundary sits there.** Rules 1 and 5 print the
+new translation and their actions were **not** taught about
+`ContainerStatusUnknown`: rule 5 offers *check the memory limit* under an
+evidence line saying Kubernetes lost track of the container. Found twice, from
+both sides — by `dev-core` while writing the fix and by `tester` while attacking
+it — and boxed rather than folded in, because it asks a **different** question
+(*what should a rule do about a run Kubernetes never watched end*) and because
+answering it decides rule 1's `Failed` arm, which is an open box below this one.
+That is [D88](#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)'s
+boundary applied, and what it leaves is generic advice under specific evidence,
+not the denial printed beside the thing it denies that this box removed. **The
+operator review agreed the boxing was right and corrected the box twice**: rule
+1's half is not merely generic, it names a log the API cannot serve, because
+`--previous` is gated on the `containerID` the synthesized status does not carry;
+and rule 5's card is *permanent*, since `lastState` never expires and
+`restartCount` never falls.
+
+**The guard the box owed was written, and it did not hold on the first draft.**
+*No card k8rs draws about an init container names a probe anywhere* — title,
+evidence or action, across rules 1, 5 and 6. `tester` broke it twice: the word
+list was matched **case-sensitively**, so `"Probes are worth checking"` planted
+into the one arm the guard exists to protect passed green — a framing hole of
+exactly [D31](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)'s
+kind, in the check written to close a framing hole; and the card total was
+printed and never asserted, so deleting the two shapes part (iii) is about left
+the guard green on a smaller set
+([D26](#d26--a-green-build-that-proves-nothing-2026-08-12)). **A guard is only
+proven for the framings it was fed, including the framings of its own haystack**,
+and that is the general lesson: this one had been fed the shapes and not the
+letter-cases.
+
+**A gap accepted, in writing, because closing it would need an object no cluster
+writes.** Rule 6's new title branches on `reason == ContainerStatusUnknown`, and
+`tester` proved no test can tell that implementation apart from one keyed on the
+null `finishedAt` beside it: a stamp-keyed branch passes all 181.
+
+**The first wording of this paragraph said no producible object separates the two
+keys, and that is false** — the second operator review produced one. A
+`RestartingAllContainers` record carries `finishedAt: null` **and** a reason that
+is not `ContainerStatusUnknown`, so a stamp-keyed branch would put *No record of
+how the container's last run ended* over a run whose record is complete and whose
+message says exactly what happened. It never reaches the branch because the
+exemption three lines above returns first. **So the indistinguishability is a
+property of the exemption list, not of the object space**, and the day that
+exemption is narrowed — which the box below has to consider, since it must teach
+rules 1 and 5 about the same reason — the two keys diverge on the first object
+the cluster writes. The comment beside the branch now cites the exemption
+assertion as the thing that holds the ruling up, so the reason is visible where
+it would stop holding. (A third stamp-less literal exists for completeness:
+`kubelet_pods.go:2714-2718` writes `Terminated{Reason: "Completed", ExitCode: 0}`
+for an init container whose status the runtime lost, so *stamp-less ⟺
+`ContainerStatusUnknown`* was never true of the kubelet, only of what rule 6
+currently reaches.)
+
+The ruling itself is unchanged. The alternative — plant a reason with the stamps
+left on — asserts behaviour against
+an object the API cannot produce, which is what
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) exists
+to refuse in the other direction. **Recorded so nobody later "fixes" the test by
+inventing the impossible shape**, and noted as self-closing: if the two shapes
+ever diverge, the divergent one separates the keys and the tests start telling
+them apart on their own.
+
+**One finding rejected, in writing.** The operator review held that
+`killed_action`'s *"whether it stops when asked to"* names something
+`kubectl describe pod` does not print — true, there is no such field, and
+`Termination Grace Period` renders only while a pod is deleting. **Rejected as a
+change:** that clause is a hypothesis for the reader to test, not a field for
+them to look up, and the `Killing` event plus the exit code in the card's own
+title is the trail it sends them down. The distinction is worth stating because
+this area has been asked the question three times: an action may name a *thing to
+find out*, and may not name a *thing to find* that the command does not show.
+Recorded in `killed_action`'s doc comment so the fourth asking has an answer.
+
+**Two nuances about the kubelet's own source that the review turned up and that
+outlive this box.** `convertToAPIContainerStatuses`' first site writes the
+**current** `state.terminated`, reaching `lastState` only indirectly; and its
+second is gated on `LastTerminationState.Terminated == nil`, so **only a
+container's first lost status is ever recorded**. A container that already
+carried a `255` and was then removed from the runtime came back with
+`restartCount + 1` and the old `255` untouched. `lastState` is therefore not
+*"the run before this one"* — it is *"the last run Kubernetes managed to write
+down"*, which is a different sentence, and every card in this file says the
+first. Boxed, because it reaches rules 1, 5, 6 and `exit_fact` alike.
+
+### D94 — the first review cluster was named `k8rs-review`, and a guard the obvious wrong name walks straight past is not a guard (2026-08-15)
+
+[D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)
+was written a day earlier and its central claim was mechanical: the review
+cluster runs as **`K8RS_CLUSTER=review`**, "additionally a name
+`scripts/sanitize.jq` **refuses**, so a review cluster cannot produce a committed
+fixture even by mistake". D92 chose `review` over `k8rs-review` *specifically*
+because `refuse_foreign_nodes` keys on the prefix `k8rs-` and would have let the
+second one through.
+
+**The first agent to use it typed `k8rs-review`.** Three committed sources said
+`review` — CLAUDE.md § The boxes no agent can run, `.claude/agents/k8s-admin.md`,
+and the brief it was handed — and the run went up under the one name D92 had
+examined and rejected. It measured the consequence itself, in both directions:
+
+```
+$ jq -f scripts/sanitize.jq nodes.json          # k8rs-review-control-plane
+jq exit=0 — sanitizer ACCEPTED the capture
+$ jq -f scripts/sanitize.jq nodes-review.json   # review-control-plane
+jq: error: sanitize: node identifiers are not from the kind test cluster … exit 5
+```
+
+No artifact was produced and the cluster was torn down, so nothing reached the
+repository. **The boundary held because no capture was attempted, not because the
+mechanism stopped one.**
+
+**The ruling, and it is against the design and not the agent.** `k8rs-review` is
+what anyone types by analogy with `k8rs`, and it is the one wrong name the guard
+is blind to. The guard is not useless — it still refuses a capture taken from
+somebody's production cluster, which is the threat it was written for — but it
+does **none** of the work D92 assigned it, because the single name it lets
+through is the single name a reviewer would pick. D92's claim is amended: the
+*name* is still `review`, and it is still
+refused by the sanitizer, but **choosing a refused name is not the same as
+refusing every unrefused one**.
+
+**The first mechanism this entry named was aimed at the wrong door, and the agent
+that tripped it said so.** It owed a refusal in `scripts/cluster.sh` — but the
+command actually run was `kind create cluster` directly, because a review is one
+measurement and not a fixture trip, so the next reviewer will skip that script for
+the same reason. **The guard that runs on the only path that matters is
+`sanitize.jq` itself**, on every capture, and its blind spot is one loose
+predicate: `startswith("k8rs-")` accepts the whole `k8rs-*` family where the
+fixture cluster produces exactly four node names. Anchoring it to those names —
+keeping the `.lan` suffix the identity rule already allows — refuses
+`k8rs-review-control-plane` where the refusal is written down, whoever created the
+cluster and however they created it. `cluster.sh` still gets its refusal as the
+early, loud one; it must not be the only one. Both are `tester`'s and both are in
+one box.
+
+**Reported by the agent that did it**, as a contradiction between committed
+files rather than as its own slip — which is how it was caught, and is worth more
+than a correct run that reported nothing. The misattribution is recorded because
+the sequence matters to the lesson and not because it needs answering.
+
+**The general shape, and it is the third instance in one turn** — three
+different agents, three different guards, and no two of them found by the same
+pair of eyes. `tester` found the `137` box's own probe guard passing a
+capitalised `"Probes"`; `dev-core`, proving that fix, found a line-width cap
+going red *first* on a long plant, so a layout constraint briefly looked like a
+content guard; and `k8s-admin` found this one, in the mechanism written the day
+before to make a promise mechanical
+([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
+Each was proven for the case its author had in mind and blind to the neighbouring
+one. **A guard is tested by the mistake someone would actually make**, which is
+rarely the mistake it was written against — and the pattern here is that nobody
+finds that mistake in their own guard.
+
 ## Decisions made
 
 ### Product
@@ -5944,19 +6190,26 @@ never needed this watch ([D27](#d27--two-findings-the-open-watch-already-paid-fo
 |---|---|
 | **0** | **The run ended without an error.** It says *how* the run ended and never *who* ended it — a program that traps SIGTERM and shuts down tidily reports `0` whether it chose to stop or a liveness probe asked it to, so the first wording, *"the program finished successfully"*, named an agent one line above an action whose whole subject is that the code names none ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)). Added 2026-08-14, when the capture trip produced the first object that reaches it: a container exiting 0 under `restartPolicy: Always` is in `CrashLoopBackOff` like any other, and with no row here the code printed bare under a title claiming a crash ([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)) |
 | 137 **with** `reason: OOMKilled` | SIGKILL after running out of memory |
-| 137 **without** it | SIGKILL — it did not stop when it was asked to, which is what a failing liveness probe or a shutdown timeout does |
+| 137 **with** `reason: RestartingAllContainers` | **Not a failure at all** — the pod's own `restartPolicyRules` asked for every container to be restarted, and the kubelet removed this one to do it. `RestartAllContainersOnContainerExits` is `{1.36, Default: true, Beta}` at the pinned version, so this needs no unusual cluster, only a pod that declares the rules. **Rule 6 is exempt from it**, beside `exit 0`, `exit 143` and `OOMKilled`: the container that actually failed is the sibling ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
+| 137 **with** `reason: ContainerStatusUnknown` | **Not a kill at all** — the number the kubelet writes where it could not read a status. `convertToAPIContainerStatuses` fills in `exitCode: 137` for a container the runtime reports `Unknown` or has dropped from its list, with `// this code indicates an error` beside the number in its own source ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
+| 137 **with none of those** | SIGKILL — a stop the program cannot refuse, **and the code does not say what sent it.** It named a cause until 2026-08-15 — *did not stop when it was asked to, a failing liveness probe or a shutdown timeout* — which is three claims the object cannot support: an init container may hold no probe at all, a genuine cgroup kill arrives without the word on a starved host ([D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)), and a rebuilt sandbox kills a container nothing asked to stop ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)). Who sent it is the **action's** question, because only the action knows the role ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
 | 143 | SIGTERM — graceful shutdown, not an error |
 | 1 / 2 | The application's own error, check the logs |
 | 126 / 127 | Command not executable / not found — `command` is wrong |
 
-**137 has two meanings and the object says which** — this table read "almost
-always OOM" until 2026-08-13, and it was written for a rule that had no
-`reason` field beside the code. It has one now: a liveness-probe kill that
-outlives the grace period lands as `exitCode: 137, reason: "Error"`, rule 2
-correctly stays quiet on it, and rule 6 printing the memory sentence sends
-someone to raise a limit on a container whose probe endpoint is timing out —
-the most expensive kind of wrong, because the fix appears to work for a while
+**137 has four meanings, the object names three of them, and where it names none
+the table refuses to guess** — this row read "almost always OOM" until
+2026-08-13, and it was written for a rule that had no `reason` field beside the
+code. It has one now: a liveness-probe kill that outlives the grace period lands
+as `exitCode: 137, reason: "Error"`, rule 2 correctly stays quiet on it, and rule
+6 printing the memory sentence sends someone to raise a limit on a container
+whose probe endpoint is timing out — the most expensive kind of wrong, because
+the fix appears to work for a while
 ([D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
+**The replacement then named the opposite cause just as flatly**, and was
+corrected on 2026-08-15 for the same reason the first row was wrong: it answered
+from the code what only the object can answer, and the object is silent
+([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
 
 **Severity escalators** (for rule 8): if the path is `/`, a **container-runtime
 socket or any directory one sits under**, or the mount is not `readOnly` →
