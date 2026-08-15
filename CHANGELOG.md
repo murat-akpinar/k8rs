@@ -84,6 +84,7 @@
 - *(docs)* The tests split by rule family at phase close, the product file does not ([f644828](https://github.com/murat-akpinar/k8rs/commit/f644828c09675c92a973c4812464e1711e7829e5))
 - *(docs)* Each phase names the prior-art classes it can ship, and the operator review checks them ([5ced22d](https://github.com/murat-akpinar/k8rs/commit/5ced22d0785a292468099efdeff9a324f16d0d15))
 - *(docs)* The cluster splits by what a run produces, not by who runs it ([3de4b81](https://github.com/murat-akpinar/k8rs/commit/3de4b81903e778bf0dc1db9899feeb759ba5e483)) — k8s-admin's brief said "prefer checking" against the kind cluster while CLAUDE.md said the agents do not have one. The reviewer followed its brief; the contradiction was never asked. Rule by what the rule protected — fabrication, not access:
+- *(rules)* The long-cycle restarter is a report row, not a fifth threshold ([b7fda0a](https://github.com/murat-akpinar/k8rs/commit/b7fda0a2b51cbdfb88c90018022df9ed19293b0b)) — D101 answers the box D100 left open: no clause over one Pod sample separates a settled container from one on a thirty-minute cycle, so rules 1, 2, 5 and 6 keep their suppressors unchanged and the count becomes a per-container row in the Phase 4 reports. Three candidates are refused in writing, the Events sequence is refused on the watch budget rather than on physics, and the costs are named — Alerts is silent between restarts, the card can vanish while it is being read, and --once carries no reports.
 
 ### 🧪 Testing
 
