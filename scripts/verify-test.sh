@@ -82,7 +82,7 @@ for canary in oom crashloop image config pending hostpath readiness restarts \
               healthy_init healthy_sidecar healthy_hostpath healthy_podlevel \
               cordoned tainted notready \
               exit0 sigterm socket succeeded failed restarts10 restarts10serving \
-              startup notfound wedged unjudged oomserving healthy_retry \
+              startup notfound wedged unjudged oomserving neverback healthy_retry \
               healthy_unreadysidecar; do
   [ -n "${want[$canary]:-}" ] || {
     echo "verify-test: cluster.sh has no predicate '$canary' — the extraction broke, not the predicate"
@@ -2576,6 +2576,87 @@ obj[healthy_unreadysidecar_pod]=$(jq '.metadata.name = "healthy-unreadysidecar"
 obj[sidecar_running_ready]=$(jq '.status.initContainerStatuses |= map(.ready = true)' \
   <<<"${obj[healthy_unreadysidecar_pod]}")
 
+# D96's shape, which no capture holds yet — `broken-neverback` is the manifest
+# that produces it and the trip after this box is what puts it on disk; re-cut
+# these five from `neverback.json` when it lands. Composed, not written: the pod
+# and the running container are `broken-readiness` as captured (Running, one
+# container up, restartCount 0, an empty lastState), and the two terminated runs
+# are the ones already cut out of `broken-restarts` for succeeded_pod (exit 0,
+# Completed) and failed_pod (exit 1, Error) — moved onto a second and third
+# container and stripped of the restart history a `Never` pod cannot have.
+obj[neverback_pod]=$(jq --argjson f "${obj[failed_pod]}" --argjson s "${obj[succeeded_pod]}" \
+  '.metadata.name = "broken-neverback"
+   | .spec.restartPolicy = "Never"
+   | .spec.containers = [{name:"broke",resources:{}},{name:"done",resources:{}},{name:"keeper",resources:{}}]
+   | .status.conditions |= map(if .type == "Ready" or .type == "ContainersReady"
+       then .message = "containers with unready status: [broke done]" else . end)
+   | .status.containerStatuses = [
+       ($f.status.containerStatuses[0] | .name = "broke"  | .restartCount = 0 | .ready = false | .started = false | .lastState = {}),
+       ($s.status.containerStatuses[0] | .name = "done"   | .restartCount = 0 | .ready = false | .started = false | .lastState = {}),
+       (.status.containerStatuses[0]   | .name = "keeper" | .ready = true)
+     ]' <<<"${obj[readiness]}")
+
+# The same three statuses under a policy that brings them back, and it is a real
+# object rather than a convenient one: under `restartPolicy: Always` a container
+# that has just exited sits in exactly this state — terminated, restartCount 0,
+# nothing in lastState yet — for the moment before the kubelet restarts it.
+# Certifying *that* as stopped for good is the whole failure this fixture exists
+# to keep out, and it is the one clause the predicate cannot get from the status
+# side at all.
+obj[neverback_always]=$(jq '.spec.restartPolicy = "Always"' <<<"${obj[neverback_pod]}")
+
+# The KEP's headline use case, and the reason the restart history is read as well
+# as `spec.restartPolicy`: `ContainerRestartRules` is beta and on by default at
+# v1.36, so a **regular** container may override the pod upward — pod `Never`,
+# container `Always`, and it has died three times and been brought back each
+# time. Caught in the instant it has just died again, so it is sitting in a
+# terminated run at exit 1 exactly like the fixture is: the pod-level clause
+# passes, the exit code passes, and only `restartCount` says this container comes
+# back. A policy-only reader calls this stopped for good.
+obj[neverback_container_always]=$(jq '.spec.containers |= map(if .name == "broke"
+       then .restartPolicy = "Always" else . end)
+   | .status.containerStatuses |= map(if .name == "broke"
+       then .restartCount = 3 | .lastState = {terminated: .state.terminated} else . end)' \
+  <<<"${obj[neverback_pod]}")
+
+# `keeper` has stopped too, and the phase has not caught up yet — the capture
+# taken one second early, which is the failure the guard on this fixture exists
+# for. It is the only object here that the phase clause lets through, so it is
+# what makes reading the containers as well as the phase worth anything.
+obj[neverback_racing]=$(jq '(.status.containerStatuses[] | select(.name == "done") | .state) as $stopped
+   | .status.containerStatuses |= map(if .name == "keeper"
+       then .ready = false | .started = false | .state = $stopped else . end)' \
+  <<<"${obj[neverback_pod]}")
+
+# and the same object one second later, which is the pod that is genuinely over:
+# under `Never` a pod goes `Failed` once every container has stopped, and from
+# there every rule already skips it. One field apart from the one above, so the
+# two say which clause is doing the work.
+obj[neverback_over]=$(jq '.status.phase = "Failed"' <<<"${obj[neverback_racing]}")
+
+# The same pod on a node whose kubelet stopped posting. Every container status
+# is the last one that kubelet sent, so `keeper` still reads running and the two
+# terminated runs are still there — and the phase says the cluster has lost track
+# of all of it (`just fixtures` records the same effect as the reason
+# `break-nodes` runs *after* every pod capture: a stopped kubelet turns every pod
+# on that node Unknown within a minute). This is the only object here the
+# container clauses let through, and it is what makes reading the phase as well
+# as the containers worth anything.
+obj[neverback_lost]=$(jq '.status.phase = "Unknown"' <<<"${obj[neverback_pod]}")
+
+# Nothing wrong with it at all: both stopped containers finished cleanly, which
+# under `Never` is what `Never` means. Without this the exit code could be
+# dropped from the predicate and every object above would still answer the same.
+obj[neverback_clean]=$(jq '.status.containerStatuses |= map(if .name == "broke"
+       then .state.terminated.exitCode = 0 | .state.terminated.reason = "Completed"
+       else . end)' <<<"${obj[neverback_pod]}")
+
+# The pod after somebody tidied away the second container that "also just exits"
+# — the edit broken.yaml's comment warns about, made here so the trip refuses it
+# instead of capturing a fixture with no negative inside it.
+obj[neverback_no_done]=$(jq '.spec.containers |= map(select(.name != "done"))
+   | .status.containerStatuses |= map(select(.name != "done"))' <<<"${obj[neverback_pod]}")
+
 # --- CORPUS END ---
 
 # --- ASSERTIONS START ---
@@ -2859,6 +2940,21 @@ check unjudged  miss  healthy    "the healthy pod"
 check oomserving match oomserving_pod "broken-oomserving: killed by the kernel once, serving ever since"
 check oomserving miss  oom       "the same kill on a container that never came back"
 check oomserving miss  restarts  "serving with a crash behind it, but an application error rather than the kernel"
+
+# D96: stopped for good, in a pod that is still going. Every clause of the
+# predicate has an object here that refuses it and differs in nothing else it
+# could refuse on — the two policies, the phase, the exit code and the clean
+# sibling — because this is the one fixture whose whole subject is a *negative*
+# living inside the positive.
+check neverback match neverback_pod "broken-neverback: broke terminated at exit 1 and never coming back, done finished cleanly, keeper still up"
+check neverback miss  neverback_always "the identical statuses under restartPolicy Always — the moment between an exit and the kubelet's restart, which is a container that does come back"
+check neverback miss  neverback_container_always "pod Never with a container-level Always over it, three restarts in and just died again — the KEP shape a policy-only reader ships as a false positive"
+check neverback miss  neverback_racing "keeper stopped a second ago and the phase has not caught up — the capture taken too early"
+check neverback miss  neverback_over "the same object a second later: Failed, and already skipped by every rule"
+check neverback miss  neverback_lost "the same three containers on a node whose kubelet stopped posting — the statuses are stale and the phase says so"
+check neverback miss  neverback_clean "both containers exited 0 — under Never that is what Never means, and nothing is wrong"
+check neverback miss  neverback_no_done "the two-container version somebody tidied the clean exit out of"
+check neverback miss  readiness "a Running pod with nothing terminated in it at all"
 
 # D75's two silences, both on the healthy side because nothing may fire on
 # either.

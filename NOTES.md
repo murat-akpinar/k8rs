@@ -2723,12 +2723,20 @@ in Rust, not code.
 > five places rather than four: this file, `certs-test.sh`, `make-certs.sh`'s
 > header, `src/rules_tests.rs` and **`docs/maps.md`**, which had gone stale
 > unnoticed because nothing compares its three numbers to the script's — and
-> **that stays unguarded, deliberately.** A guard would mean `check-docs.py`
-> parsing a bash array to compare three integers in one table row that moves
-> once per capture trip, and the row now tells its reader to check it against
-> `certs-test.sh` rather than trust it. The pin-drift that *is* guarded is the
-> one that silently changes what a test means; a stale doc row is read by a
-> human who can be told where the truth lives. Each
+> **that stayed unguarded, deliberately, until it went stale a second time.**
+> The 2026-08-15 capture moved the pin again, to `2026-08-16T00:00:00Z`
+> ([D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)),
+> and that row was wrong again — this time carrying **two** wrong facts rather
+> than one, since it also said `now` sat *two days* into each certificate where
+> it now sits four. Twice on consecutive moves is a pattern, and the fix is not
+> a guard: **the numbers came out of the doc row and out of this paragraph.** A
+> guard would mean `check-docs.py` parsing a bash array to compare integers in
+> prose; deleting the copy costs nothing, because `certs-test.sh`'s `pinned[]`
+> holds them and asserts that `src/rules_tests.rs` pins the same instant. What
+> is left in prose is where the numbers live, which does not rot when they move.
+> **The general rule this is the second instance of**: a fact that moves on a
+> schedule should be *pointed at*, not restated — a copy nothing compares is a
+> lie with a delay on it. Each
 > fixture still exercises the
 > case it exists for (inside C1's 30-day window, far outside it, already
 > expired), and regenerating would have written fresh key material into the
@@ -3277,8 +3285,10 @@ must. `screens/alerts.md`'s cordon card is `tui-designer`'s round.
 
 **The certificates were not regenerated.** Their `notBefore`/`notAfter` bytes
 are committed evidence; moving `now` past them changes only what the arithmetic
-says — 23 / 364 / −4 where it used to say 24 / 365 / −3 (and 22 / 363 / −5
-since the 2026-08-14 capture, [D57](#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)). Each fixture still
+says — 23 / 364 / −4 where it used to say 24 / 365 / −3, and again at every
+capture since; **the current values are `certs-test.sh`'s `pinned[]` and are
+deliberately not repeated in prose any more**
+([D57](#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)). Each fixture still
 exercises the case it exists for, and regeneration would have written fresh key
 material into the repo to buy nothing. One relationship ended quietly with it:
 `now` used to equal the certificates' `notBefore` exactly and now sits a day
@@ -4495,9 +4505,11 @@ file up and still reported 97 declared, 97 listed.
 **A second drift fell out of the same look, older and unrelated to the move.**
 `docs/maps.md` said `certs-test.sh` asserts "24 / 365 / −3 days at the pinned
 `now`" — those are the certificates' *lengths*, and `now` sat one day into each,
-so the guard asserted 23 / 364 / −4 days **left** (22 / 363 / −5 since the
-2026-08-14 capture moved the pin again — and that row went stale a *second*
-time, which is the same drift wearing the same coat). Wrong since the row was
+so the guard asserted 23 / 364 / −4 days **left** — and it moved again with
+every capture after, the row going stale a *second* time before the numbers
+were taken out of it altogether
+([D57](#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)).
+Wrong since the row was
 written, and it survived because both numbers are plausible and neither is
 compared to anything. Fixed to say both, since the pair is what makes it
 checkable.
@@ -6267,11 +6279,25 @@ rule and is visible on no k8rs screen today. The ruling holds either way; the
 claim is smaller than it was written.
 
 **Leg 2 — this field's normal state is a healthy object.** Every container any
-committed capture holds in `state.terminated` inside a pod that is *not* over is
-a finished init container at `exit 0` — two of them, swept over the whole corpus
-rather than asserted about two files. A reader keyed on this field starts from a
-haystack of healthy objects and zero positives, which is why the one reader there
-is asks only the init question.
+committed capture holds in `state.terminated` inside a pod that is *not* over
+**ended without an error, whatever its role** — swept over the whole corpus
+rather than asserted about the files someone remembered. A reader keyed on this
+field starts from a haystack of healthy objects, which is why the one reader
+there is asks only the init question.
+
+**That leg was written as *a finished init container* and the next box falsified
+it the same day** — deliberately, by capturing the object it describes. `neverback`
+holds two **Regular** containers in this state, one at `exit 1` and one at `exit 0`,
+so *init* was a property of the two captures that happened to exist rather than of
+the field; what the ruling actually rests on is that **nothing in this state is a
+fault unless somebody built one**. The guard now exempts `neverback/broke` by
+**exact `pod/container` name** rather than by a class like *any Regular container
+that draws a card* — a second capture landing in this state reddens it exactly as
+the first one did, which is the only reason narrowing it is not weakening it. The
+general lesson is worth more than the correction: **a claim about the corpus has a
+shelf life tied to the corpus**, and the thing that tells you it expired is the
+test carrying it, not the entry
+([D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)).
 
 **Leg 3 — the reason is redundancy, not transience, and the first draft had the
 weaker half.** *A transient a watch will see and `--once` may not* is measurably
@@ -6375,6 +6401,153 @@ happen: the citations were still in the tree when checked, and the holder was to
 what had landed under it. The general shape is the one this file keeps finding —
 **a rule is broken first by the person who just wrote it**, because they are the
 one acting on the assumption it was written to correct.
+
+### D97 — a container that cannot come back gets rule 15, and a restart count stands in for a field the pinned types cannot see (2026-08-15)
+
+[D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)
+refused the run a container is sitting in **as a transient** and named one
+exception on its way out: a container that has stopped and **cannot come back**,
+inside a pod that is not over, is permanent, and no rule read it. This is that
+rule.
+
+**The shape, measured on the fixture cluster before a line was written.** A pod at
+`phase: Running` with `restartPolicy: Never`, one container terminated `exit 1` at
+`restartCount: 0`, a second terminated `exit 0`, a third still running.
+`kubectl get pods` prints `1/3 Error`. Every rule in `rules.rs` was silent on it —
+rule 5 needs a restart count that `Never` can never move, rule 6 needs a
+`lastState` a container that never restarted has never had, rule 7 needs
+`Running`, rule 13 stands down while anything in the pod runs.
+
+**The truth table collapses to one arm, which is why the rule is four conditions
+and no branches.** On a *bad* exit, `Always` restarts it and `OnFailure` restarts
+it; only `Never` does not. So rule 15 fires on `ContainerState::Terminated` +
+`Ending::Failed` + `restarts == 0` + effective policy `Never`, and CRITICAL,
+because [D2](#d2--the-dividing-line-broken-now-vs-risky-later) asks whether this
+container is serving and the answer will not change.
+
+**The policy that decides is the container's, not the pod's** — measured, and it
+is the leg that would have been silently wrong. Under `ContainerRestartRules`
+(beta, on by default at v1.36.1) a **regular** container may declare
+`restartPolicy: Never` inside an `Always` pod: the one I ran sat at
+`restartCount: 0`, `phase: Running`, `1/2 Error` for as long as its sandbox
+lived. A rule keyed on the pod's policy misses it entirely.
+
+**"For as long as its sandbox lived" is the correction the review made to this
+paragraph, and it is not a hedge.** The first draft said *indefinitely*. Measured:
+reboot the node and that container **comes back**, `restartCount` 0 → 1 → 4,
+because the kubelet reads the **pod's** policy when it recreates a sandbox and
+`Always` there restarts everything, override or not. The pod-level `Never` shape
+behaves the other way and honestly — the pod goes `phase: Failed` and leaves
+through `finished(pod)`, card and all. So the two shapes this rule folds together
+have different futures, and the card may not make an absolute claim about either:
+what is true of both is that nothing is *waiting* to run the container again, and
+that replacing the pod is what starts it over. So the snapshot carries the **effective**
+policy — the container's own where it has one, the pod's otherwise — derived at
+decode beside `ContainerRole`, which is derived from the same field.
+
+**Two shapes cannot reach this rule, and that is by construction rather than by a
+role check** — both measured: an init container failing under pod `Never` takes
+the pod to `phase: Failed`, so it leaves through `finished(pod)`; and a native
+sidecar is `restartPolicy: Always` by definition, so its effective policy is never
+`Never` — the one I ran restarted twice and the pod stayed `Running`. Only
+`Regular` containers arrive, so the rule needs no role split and names no probe.
+
+**The count guard is a stand-in for a field the build cannot read, and that is
+worth stating plainly.** `restartPolicyRules` can only *add* restarts — the API
+rejects a `DoNotRestart` action outright — so a container whose rules match its
+exit code comes back even under `Never`: one measured pod sat in
+`CrashLoopBackOff` at five restarts. **`Cargo.toml` pins `k8s-openapi` at feature
+`v1_32` and that field arrives in the generated types at `v1_34`**, so it decodes
+to nothing today. `restarts == 0` is the proxy: something that has restarted is
+not something that will not restart. **The residual gap is one window** — the
+first exit, before the first retry — and it is in the rule's doc rather than in a
+footnote. The pin itself is a box of its own: the crate already ships `v1_32`
+through `v1_36` in the version `Cargo.lock` holds, so it is a feature flag rather
+than a dependency, and every fixture in the repo is captured from **v1.36.1**
+while being decoded by 1.32 types. Serde drops what it does not know, so four
+versions of fields read exactly like fields the cluster did not set.
+
+**The card's command is the first `kubectl logs` in the file, and it was measured
+before it was written.** `kubectl logs <pod> -c <container>` on the terminated
+container returned its own last line, with no `--previous` and no error, because
+the pod still exists and the log is still there — still true 46 minutes later,
+across a kubelet restart, and across a full node reboot, since the kubelet's
+container GC keeps the one dead instance.
+
+**And the card said *it is still there*, which was one measurement generalised to
+every state — the exact move
+[D88](#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)
+exists to refuse.** `kubectl logs` is the **only** command any card offers that
+goes to the kubelet on the node rather than to the API server, and this rule's
+four conditions are read from a pod status that **freezes when that kubelet
+dies**. Measured on a review cluster: kubelet stopped, and eight minutes later the
+card still drew — `Terminated`, `Failed`, `restarts == 0`, effective `Never`,
+`phase: Running`, every field unchanged — while the command beside it answered
+`dial tcp …:10250: connect: connection refused`; at five minutes the pod picked up
+a `deletionTimestamp` it could not complete, so rule 12 drew an honest card beside
+rule 15's dead corridor. **The rule is most likely to be firing exactly when its
+command is least likely to work.** The clause came out; the command stayed. What
+replaced the promise is the container's own last words from
+`state.terminated.message`, which is the one fact that survives that state,
+because it is in the API server and the log is not.
+
+**What the card says instead, and what it cost.** The action ends on the reader's
+next move rather than on a prediction — *nothing is waiting to start it again, so
+the pod has to be replaced; until it is, whatever needed this container is still
+without it* — which is the *what to do* the first draft never had: its third part
+described what would **not** happen. The container's own last words go on the card
+ahead of the duration, because the evidence is cut at three lines and something
+had to give: the message is in the API server and the log is on the node, so on
+the very shape that made this a blocker it is the only clause that still answers.
+**The card is at ten lines with no slack in any shape that carries a message** —
+the title and the action are constants and the evidence is cut, so it is bounded
+rather than merely measured, but a word added anywhere overflows it.
+
+**The clean-exit half is silent, and the fixture carries it.** A container that
+exits `0` and is not restarted is doing exactly what `Never` means. Calling that a
+fault needs the Job above the pod — *the Job never completes because the helper is
+still running* — and Jobs are not watched (invariant 6). The captured pod holds
+such a container on purpose, so the silence is asserted against a real object
+rather than assumed.
+
+**The capture is one fixture, not a re-run of all fifty, and that is a decision.**
+`just fixtures` rebuilds the whole corpus from a fresh cluster; running it to add
+one pod would rewrite fifty committed files with new UIDs and timestamps and put
+every test that reads a captured value at risk, for one new object. So the pod
+went into `scripts/broken.yaml`, `cluster.sh verify` learned its predicate and the
+recipe learned its capture and its guard — **the recipe reproduces it on the next
+full run** — and the single file was taken with the recipe's own filter,
+`sanitize.jq`, on the cluster `cluster.sh verify` had passed. A single-fixture
+capture is a real capture; what would make it a hand-written one is skipping any
+of those three.
+
+**What it cost, which the first draft of this paragraph left out.** The new
+fixture is dated 2026-08-15 where the corpus is 2026-08-13, so the pinned test
+clock — `fn now()`, which sat between them — was **before** a capture it is read
+against, and the card this rule was written for drew with no age at all. Editing
+the capture's timestamp is what [D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
+forbids, so **the clock follows the corpus**: `now()` moved to
+`2026-08-16T00:00:00Z`, and with it eight age assertions (`28 min ago` and
+`1 hour ago` alike became `2 days ago`, the cordon's guard 24 → 2904 minutes) and
+the three certificates' day counts, in `certs-test.sh` and `make-certs.sh`. No
+assertion was weakened — only expected values moved, each witnessed red at the old
+number and green at the new one. **A single capture taken on a new day carries a
+repin with it**, and the next person taking one should expect that rather than
+discover it; the cordon fixture now sits 24 minutes past `age()`'s 48-hour rung,
+so a trip finishing later in the day flips its phrase, which the test says out
+loud with the arithmetic in its failure message.
+
+**A boundary in [D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)
+the PM crossed deliberately, recorded rather than glossed.** That entry gives
+ephemeral measurement to `k8s-admin` and nobody else; the three shapes above were
+measured by the **PM**, on the fixture cluster, in a scratch namespace deleted
+afterwards. The reason is the one D93's first draft failed on: the person writing
+the ruling has to be able to defend it, and a design key defended by hearsay is
+how *the pod's own restart rule* got written about a field that lives on a
+container. The amendment is narrow and it is the whole licence: **the PM may
+measure what a decision it is about to write turns on**, in its own namespace, on
+no `demo=broken` object, deleted after, and reported like any other measurement.
+Anything that tunes code until a cluster agrees is still `k8s-admin`'s.
 
 ## Decisions made
 
@@ -6535,6 +6708,7 @@ all of them testable.
 | 12 | **Pod stuck Terminating** | `deletionTimestamp` already in the past — the apiserver sets it to *request time + grace*, so it is the deadline, not the moment ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | "Asked to shut down N minutes ago and still hasn't — held by *(the finalizer, named)* / the kubelet" |
 | 13 | **Placed on a node, but the containers never started** — the `ContainerCreating` wedge, the *residual* after rules 1/3/4 explain themselves. Gate: `conditions[PodScheduled] == True`, no container started, > 10 min since that transition. `conditions[PodReadyToStartContainers]` is the **evidence**, not the gate — `False` = no sandbox/network yet, `True` = the block is after it, almost always a volume ([D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)) | `conditions[PodScheduled]` + `containerStatuses[].state` + `conditions[PodReadyToStartContainers]` | "It was given a machine to run on, but it has not been able to start — the node cannot give it *(a network / its storage)*" |
 | 14 | **Nothing has even looked at this pod** — `phase == Pending` with **no `PodScheduled` condition at all**, older than 2 minutes from `metadata.creationTimestamp`. kube-scheduler is down or crashlooping, or `schedulerName` names one that is not installed or lacks RBAC. Without it every pod is Pending and `--once` prints *nothing is broken* ([D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13)) | absence of `conditions[PodScheduled]` + `metadata.creationTimestamp` | "Nothing has even looked at this pod yet — the scheduler that should give it a machine may not be running" |
+| 15 | **A container has stopped and nothing is starting it again** — `state.terminated` with a bad ending, `restartCount == 0`, and an effective `restartPolicy` of `Never`, inside a pod that is **not** over. The one exception [D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15) carves out of *the run a container is sitting in is no rule's subject*: that state is a transient everywhere else, and here it is permanent — `kubectl get pods` prints `Error` for such a pod while every other rule in the file is silent. CRITICAL, and the card is the file's first `kubectl logs` ([D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)) | `containerStatuses[].state.terminated` + `restartCount` + `spec.containers[].restartPolicy` falling back to `spec.restartPolicy` | "This container has stopped and nothing is starting it again — read its log; nothing is waiting to start it again, so the pod has to be replaced" |
 
 **Rules 1–6 read `initContainerStatuses` as well as `containerStatuses`** — a
 pod stuck at `Init:CrashLoopBackOff` is invisible otherwise, and init
@@ -6562,7 +6736,7 @@ never needed this watch ([D27](#d27--two-findings-the-open-watch-already-paid-fo
 |---|---|
 | **0** | **The run ended without an error.** It says *how* the run ended and never *who* ended it — a program that traps SIGTERM and shuts down tidily reports `0` whether it chose to stop or a liveness probe asked it to, so the first wording, *"the program finished successfully"*, named an agent one line above an action whose whole subject is that the code names none ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)). Added 2026-08-14, when the capture trip produced the first object that reaches it: a container exiting 0 under `restartPolicy: Always` is in `CrashLoopBackOff` like any other, and with no row here the code printed bare under a title claiming a crash ([D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)) |
 | 137 **with** `reason: OOMKilled` | SIGKILL after running out of memory |
-| 137 **with** `reason: RestartingAllContainers` | **Not a failure at all** — a `restartPolicyRules` entry asked for every container to be restarted, and the kubelet removed this one to do it. The rules are declared **per container** (`spec.containers[].restartPolicyRules`, no pod-level field exists at v1.36.1) and only their `RestartAllContainers` action reaches the whole pod ([D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)). `RestartAllContainersOnContainerExits` is `{1.36, Default: true, Beta}` at the pinned version, so this needs no unusual cluster, only a pod that declares the rules. **Rule 6 is exempt from it**, beside `exit 0`, `exit 143` and `OOMKilled`: the container that actually failed is the sibling ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
+| 137 **with** `reason: RestartingAllContainers` | **Not a failure at all** — a sibling exited into a `restartPolicyRules` entry **whose action is `RestartAllContainers`**, and the kubelet removed this one to do it. The rules are declared **per container** (`spec.containers[].restartPolicyRules`, no pod-level field exists at v1.36.1), and the action matters: measured, `action: Restart` restarted the failing container five times without touching its sibling, while `kubectl explain` and the OpenAPI document both claim `Restart` is the only value there is ([D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15), [D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)). `RestartAllContainersOnContainerExits` is `{1.36, Default: true, Beta}` at the pinned version, so this needs no unusual cluster, only a pod that declares the rules. **Rule 6 is exempt from it**, beside `exit 0`, `exit 143` and `OOMKilled`: the container that actually failed is the sibling ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
 | 137 **with** `reason: ContainerStatusUnknown` | **Not a kill at all** — the number the kubelet writes where it could not read a status. `convertToAPIContainerStatuses` fills in `exitCode: 137` for a container the runtime reports `Unknown` or has dropped from its list, with `// this code indicates an error` beside the number in its own source ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
 | 137 **with none of those** | SIGKILL — a stop the program cannot refuse, **and the code does not say what sent it.** It named a cause until 2026-08-15 — *did not stop when it was asked to, a failing liveness probe or a shutdown timeout* — which is three claims the object cannot support: an init container may hold no probe at all, a genuine cgroup kill arrives without the word on a starved host ([D84](#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)), and a rebuilt sandbox kills a container nothing asked to stop ([D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)). Who sent it is the **action's** question, because only the action knows the role ([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)) |
 | 143 | SIGTERM — graceful shutdown, not an error |
@@ -7216,6 +7390,7 @@ in the prose.
 | 12 | `broken-stuck` | Stuck Terminating: a finalizer nothing removes. Applied by the script, put into Terminating by the capture step |
 | 1–6 (init) | `broken-init` | `Init:CrashLoopBackOff` — an init container that exits non-zero while the app container never starts. The pod the old rule set could not see ([D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)) |
 | 14 | **none yet, and this one is easy** | `schedulerName: does-not-exist` on an otherwise ordinary pod. Nothing picks it up, so no `PodScheduled` condition is ever written — the exact shape, with no control-plane surgery and nothing to clean up ([D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13)) |
+| 15 | `broken-neverback` | `restartPolicy: Never`, three containers: one exits 1 (the finding), one exits 0 (the clean-exit negative on the same object), one sleeps so the pod never reaches `Failed` and leaves through `finished(pod)`. Captured single-file rather than by re-running the whole corpus, which moved the pinned `now` with it ([D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)) |
 | 13 | **none yet** | The `ContainerCreating` wedge. Every captured pod has `PodReadyToStartContainers: True`, so rule 13 ships with a negative side only until the next trip. The residual branch is reachable — a `configMap` **volume** naming an object that does not exist — and the network branch may not be, since it needs the sandbox itself to fail ([D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)) |
 | W1 | `broken-quota` (namespace `k8rs-quota`) | A Deployment whose ReplicaSet cannot create a single pod — the quota allows zero. `kubectl get pods` is empty and the truth lives only on the ReplicaSet's `ReplicaFailure`. It sits in its own namespace because a `pods: "0"` quota applies namespace-wide and would block every pod above ([D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)) |
 

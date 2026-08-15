@@ -197,7 +197,7 @@ fixtures:
     for p in oom crashloop image config pending hostpath readiness restarts nolimits stuck init \
              resize podlimit \
              exit0 sigterm socket succeeded failed restarts10 restarts10serving startup \
-             notfound wedged unjudged oomserving; do
+             notfound wedged unjudged oomserving neverback; do
       "${kc[@]}" get pod "broken-$p" -o json | "${jqs[@]}" > "tests/fixtures/$p.json"
     done
 
@@ -270,6 +270,15 @@ fixtures:
       '.status.phase == "Pending" and (([.status.conditions[]? | select(.type == "PodScheduled")] | length) == 0) and .metadata.creationTimestamp != null'
     guard oomserving.json "OOM kill in lastState on a container that is serving now — rule 2's recency clause, whose two directions are both read off this one object" \
       '[.status.containerStatuses[]? | select(.ready == true and .state.running != null and .lastState.terminated.reason == "OOMKilled")] | length > 0'
+    # D96's shape, and the three fields are asserted separately because a capture
+    # taken a second early, or one taken after `keeper` was gone, writes
+    # perfectly valid JSON that proves none of it: a terminated container without
+    # `Never` beside it is one the kubelet is about to restart, and the same
+    # object at `phase: Failed` is a pod that is over, which every rule already
+    # skips. The clean exit is named too — `done` is this fixture's own negative,
+    # and a two-container capture would silently retire it.
+    guard neverback.json "container stopped for good — a terminated run at a non-zero exit, restartCount still 0, under spec.restartPolicy Never, in a pod that is still Running, beside a container that exited 0 and one that is still up (D96)" \
+      '.spec.restartPolicy == "Never" and .status.phase == "Running" and ([.status.containerStatuses[]? | select(.restartCount == 0 and (.state.terminated.exitCode // 0) != 0)] | length) > 0 and ([.status.containerStatuses[]? | select(.state.terminated.exitCode == 0)] | length) > 0 and ([.status.containerStatuses[]? | select(.state.running != null)] | length) > 0'
 
     # D36: the one broken pod that has an owner — every other pod capture above
     # is a bare pod, so the grouping key's workload branches have no positive

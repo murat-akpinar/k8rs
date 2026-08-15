@@ -894,3 +894,79 @@ spec:
   volumes:
     - name: state
       emptyDir: {}
+---
+# D96's permanent shape, and the one `kubectl get pods` already prints `Error`
+# for while every rule k8rs has stays silent: a container that has stopped **for
+# good** inside a pod that is still `Running`. The rule that reads it comes
+# later; this is the object it will be written against, and the silence is
+# measured rather than assumed — run through `analyze` this pod draws nothing,
+# and no existing card moves.
+#
+# `restartPolicy: Never` is what makes "stopped" mean *for good*, and it is the
+# whole condition: the kubelet brings none of these three back, so `restartCount`
+# stays 0 and `lastState` stays empty and there is nothing here for a restart
+# rule to read. **Neither of the two fields that would complicate that is on
+# this pod, and they are off it for different reasons, because only one of the
+# two can only ever point one way:**
+#
+#   - `spec.containers[].restartPolicyRules` can only *add* restarts. The API
+#     rejects `action: DoNotRestart` by name, and both actions it does accept
+#     restart something: `Restart` brings back that container alone,
+#     `RestartAllContainers` its siblings with it (NOTES § D96). So a container
+#     carrying a rule that matches its own exit code comes back even under
+#     `Never`, which is the shape this fixture is not.
+#   - A container-level `restartPolicy` **subtracts as readily as it adds**, so
+#     carrying one says nothing either way. `Never` on a container inside an
+#     `Always` pod is the subtracting shape, and it is why the snapshot's
+#     effective policy is the container's own *falling back to* the pod's rather
+#     than either field alone (`ContainerSnapshot::restart_policy`) — the one
+#     rule 15's fourth condition reads. Measured on a live kind v1.36.1 cluster
+#     (NOTES § D97): such a container exits 1 and then sits at `1/2 Error`
+#     beside its live sibling, `restartCount: 0`, `phase: Running`, for as long
+#     as its sandbox lives — and reboot the node and it does come back, because
+#     the kubelet reads the **pod's** policy, `Always` there, when it recreates
+#     a sandbox. It is off *this* pod because under a pod already `Never` it
+#     would subtract nothing and change no behaviour, while leaving the capture
+#     unable to say which of the two fields the effective policy came from —
+#     and that pod-level fallback is the leg these bytes are here to prove.
+#
+# **Three containers, and each one is load-bearing:**
+#
+#   - `broke` exits 1. **This is the finding**: terminated, permanently, at a
+#     non-zero exit, with nothing scheduled to try again.
+#   - `done` exits 0, and it is the negative *on the same object*. A container
+#     that finishes cleanly under `Never` is doing exactly what `Never` means;
+#     calling that a fault needs the Job above the pod, which k8rs does not watch
+#     (CLAUDE.md invariant 6). Delete it as the redundant twin of `broke` and the
+#     rule's false-positive case has no capture behind it at all.
+#   - `keeper` sleeps, and it is the reason the shape exists. Under `Never` a pod
+#     reaches `Failed` only once **every** container has stopped — so without a
+#     container that never stops, this whole object leaves through
+#     `finished(pod)` and D96's shape is on no disk anywhere.
+#
+# Measured on kind v1.36.1 by the operator review: such a pod sits at
+# `phase: Running`, `Ready: False`, `restartCount: 0` and an empty `lastState`
+# for as long as it is left alone — so `verify` waits for a state that arrives in
+# seconds and then never moves again. Nothing here needs `break-nodes`, a second
+# revision or a subresource patch: it is one `apply` and the kubelet.
+#
+# `terminationMessagePolicy` is left at its default (`File`) on both exits, like
+# `broken-notfound`: nothing writes /dev/termination-log, so neither termination
+# carries a message, and the object tells the two stopped containers apart by
+# their exit code alone. The stderr line is there for a person reading
+# `kubectl logs`.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-neverback, labels: { demo: broken } }
+spec:
+  restartPolicy: Never
+  containers:
+    - name: broke
+      image: busybox
+      command: ["sh", "-c", "echo cannot reach the license server >&2; exit 1"]
+    - name: done
+      image: busybox
+      command: ["sh", "-c", "echo migration complete; exit 0"]
+    - name: keeper
+      image: busybox
+      command: ["sleep", "86400"]

@@ -319,9 +319,12 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       it yet. Docker access there is per-login: the user is in the `docker`
       group but a stale session is not, so cluster commands run as
       `echo '<cmd>' | newgrp docker` until the next login. **The re-capture
-      moves the pinned `now`** in `src/rules.rs`'s `fn now()`,
+      moves the pinned `now`** in `src/rules_tests.rs`'s `fn now()`,
       `scripts/certs-test.sh` and `scripts/make-certs.sh` together — they
-      describe one afternoon or none
+      describe one afternoon or none. (This said `src/rules.rs` until
+      2026-08-15; the tests moved out of the product file when
+      [D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)
+      split them, and this line did not move with them)
       ([NOTES § D57](NOTES.md#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)).
       **Closed 2026-08-13, the other half run:** `break` → `verify` (23/23) →
       `just fixtures` (34 fixtures from v1.36.1, the sanitizer test green, then
@@ -1397,7 +1400,7 @@ this plan is delivery mechanism for what this phase produces.
       sentence a failing run prints. And the leg that said *`analyze` skips every
       pod rule* was contradicted by `analyze`'s own doc three lines above the
       loop, which had said *"Rule 12 is deliberately outside the skip"* all along
-- [ ] **A container that has stopped for good inside a pod that is still
+- [x] **A container that has stopped for good inside a pod that is still
       `Running` is on no k8rs screen, and `kubectl get pods` prints `Error` for
       it** — the shape
       [D96](NOTES.md#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)
@@ -1437,7 +1440,67 @@ this plan is delivery mechanism for what this phase produces.
       capture is the PM's, under `K8RS_CLUSTER=k8rs` and the sanitization gate.
       Decide too what the clean-exit half says: `OnFailure` with `exit 0` beside a
       running sibling is the *Job never completes because the helper is still
-      running* shape, which is the same silence with a different sentence
+      running* shape, which is the same silence with a different sentence.
+      **Shipped 2026-08-15 as rule 15, `stopped_for_good`
+      ([NOTES § D97](NOTES.md#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)).**
+      Four conditions and no branches, because on a bad exit the truth table
+      collapses to one arm: `Always` restarts it and `OnFailure` restarts it, so
+      only `Never` reaches the rule. One new snapshot field — the **effective**
+      policy, the container's own then the pod's — measured into existence: a
+      regular container declaring `Never` inside an `Always` pod sits at
+      `1/2 Error` while its sandbox lives, and a rule keyed on the pod's policy
+      misses it entirely. The card carries the file's **first `kubectl logs`**.
+      **The capture is real and it is one file**: the pod went into
+      `broken.yaml`, the predicate into `cluster.sh verify`, the capture and its
+      guard into the recipe, and the single object was taken with `sanitize.jq`
+      off the cluster `verify` had just passed — 51 fixtures, byte-identical
+      under a second pass. **It cost a repin**: the new capture is a day newer
+      than the corpus, so the pinned `now()` moved to `2026-08-16` and eight age
+      assertions and three certificate day-counts moved with it, each witnessed
+      red at the old number and green at the new one.
+      **The operator review found one blocker, and it was mine rather than the
+      rule's.** The action said *read its log — it is still there*, generalised
+      from one happy-path measurement. `kubectl logs` is the only command any
+      card offers that goes to the **kubelet on the node**, and every one of this
+      rule's conditions is read from a pod status that **freezes when that
+      kubelet dies** — measured, eight minutes of the card drawing unchanged
+      while the command answered `connection refused`, with rule 12's honest card
+      beside it. **The rule is most likely to fire exactly when its command is
+      least likely to work.** The promise came out, the command stayed, and the
+      container's own last words went on the card ahead of the duration, because
+      the message is in the API server while the log is on the node.
+      **The title kept the promise the action had given up** — *nothing **will**
+      start it again*, a prediction measurably false in the container-level
+      shape, where a node reboot brings it back because the kubelet reads the
+      *pod's* policy when it recreates a sandbox. Both are present tense now, and
+      the refusal list that guards them lost its leading `Nothing` so it catches
+      the rewording rather than the capitalisation, and runs over title, evidence
+      and action alike.
+      **What stayed out**: the clean-exit half is silent — a container that exits
+      `0` under `Never` is doing what `Never` means, and calling it a fault needs
+      the Job above the pod, which is not watched — and the `restartPolicyRules`
+      window stays open, one measured second between the exit and the retry,
+      because the field is unreadable at the pinned `k8s-openapi` feature
+- [ ] **`k8s-openapi` is pinned at feature `v1_32` while every fixture is
+      captured from kind v1.36.1, so four versions of fields decode to nothing
+      and nothing says so** — found while designing rule 15, which needs
+      `spec.containers[].restartPolicyRules` and cannot read it: that field
+      arrives in the generated types at **`v1_34`**, and the crate ships
+      `v1_32` … `v1_36` **in the version already in `Cargo.lock`**. So this is a
+      feature flag and not a new dependency (invariant 10 is not the gate here),
+      but the blast radius is every type in the API surface, which is why it is a
+      box and not a line in someone else's. **The drift is silent by
+      construction**: serde drops unknown fields, so a 1.36 object decodes
+      cleanly into 1.32 types and the missing field reads exactly like a field
+      the cluster did not set — the same *found none / there were none* confusion
+      the fixture guards exist for, one layer down. `tests/fixtures/K8S_VERSION`
+      records the cluster's version and the justfile's comment says a feature
+      bump means a re-capture; **nothing compares the two**, which is why this
+      has been true for the whole phase without a build going red. What the box
+      owes: bump to `v1_36`, then find what else the snapshot has been silently
+      dropping — every field the rules read that arrived after 1.32 — and decide
+      whether the pin follows the kind image from now on or is chosen
+      independently and asserted against it
 - [ ] **A pod that used its own restart rule three times and has served ever
       since carries two permanent WARN cards, and the object says it is over** —
       measured on kind v1.36.1: `gang-restart`, `2/2 Ready`, `phase: Running`,
@@ -1618,7 +1681,15 @@ this plan is delivery mechanism for what this phase produces.
       it to read D94 before naming the cluster is what handed it the name. Nothing
       to fix in the record; it is the sharpest possible argument that the refusal
       has to be mechanical, since the file warning about the name is itself a way
-      of spreading it. **Third instance the same day, and this one actually ran**:
+      of spreading it. **Third instance, and this one is the sharpest**: the
+      reviewer of the D97 box quoted its own agent definition back as saying
+      **`K8RS_CLUSTER=k8rs-review`, always** — `.claude/agents/k8s-admin.md:54`
+      says `review`, in those words, and every other committed file agrees. It
+      used `review` and filed the difference as a defect in the instructions.
+      **Three agents, three misreadings, zero wrong strings in the repo**: the
+      only place `k8rs-review` is written is D94's own title, and it keeps
+      arriving in working memory from there. No wording change can fix a string
+      nobody wrote; the anchor is the fix **Third instance the same day, and this one actually ran**:
       the review of the D96 ruling brought its cluster up as `k8rs-review`,
       against a brief that said `review`, so `k8rs-review-control-plane` existed
       on a machine and `sanitize.jq` would have waved its node name through.
@@ -2235,9 +2306,20 @@ public release.
       ([NOTES § D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)).
       **One field the prune line will drop if it is read literally, and two
       shipped cards depend on it:** `spec.initContainers[].restartPolicy`.
-      `ContainerSnapshot` names no `restart_policy` — the field is read during
-      the decode, to tell a native sidecar from a plain init container — so
-      "the fields the snapshot **types** name" does not cover it. Drop it and
+      `ContainerSnapshot` **named** no `restart_policy` until 2026-08-15 — the
+      field was read during the decode, to tell a native sidecar from a plain
+      init container — so "the fields the snapshot **types** name" did not cover
+      it. **That half is closed and the other half opened in the same change**
+      ([D97](NOTES.md#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)):
+      the container's own policy is now a snapshot field, and the field it falls
+      back to — **`spec.restartPolicy`, pod level** — is consumed at decode and
+      named by **no snapshot type at all**, because `ContainerSnapshot` carries
+      the *effective* value rather than the two it was computed from. A prune
+      written from the structs keeps the container field and drops the pod one,
+      and rule 15 then goes silent on every pod that does not override per
+      container — which is nearly all of them, the committed fixture included.
+      The doc comment on the field says this at length; a prune is not written
+      from doc comments. Drop it and
       every Istio/Linkerd sidecar decodes as `Init`, where rules 1 and 5 both
       tell its owner that *"Kubernetes does not allow health checks on this kind
       of container"* — about a container whose manifest has a liveness probe in

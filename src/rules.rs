@@ -170,6 +170,7 @@ pub struct Finding {
     /// | 8 | **`None`** — a standing property, not an event (NOTES § D69) | `metadata.creationTimestamp` |
     /// | 12 | `deletionTimestamp − grace` (NOTES § D46) | the `deletionTimestamp` itself, the deadline |
     /// | 14 | `metadata.creationTimestamp` — the one rule whose event never happened (NOTES § D74) | — |
+    /// | 15 | [`Terminated::finished_at`] on the run in [`ContainerSnapshot::state`] — the run the container is stopped in **now**, which is the whole of what tells this rule from rules 1, 2 and 6 | `last_terminated`'s, a run this container has never had |
     /// | N1 | the `Ready` condition's `last_transition` — the node's own, and the one it fires on | — |
     /// | N2 | the cordon taint's [`Taint::added_at`], which dates the taint and not the cordon (NOTES § D65) | — |
     /// | N3 | *that* condition's `last_transition` | `Ready`'s, off the same flat `Vec` |
@@ -447,8 +448,13 @@ pub enum ContainerState {
     /// whether it ever became ready; the only source for *not ready since* is
     /// [`PodSnapshot::ready`]'s `last_transition` (NOTES § D51).
     Running { started_at: Option<Time> },
-    /// An init container that failed and is not being retried sits here — `Init:Error`,
-    /// which NOTES § D27 lists beside `Init:CrashLoopBackOff`.
+    /// **The run the container is stopped in *now*, as opposed to
+    /// [`last_terminated`](ContainerSnapshot::last_terminated), which is the run before this
+    /// one.** An init container that failed and is not being retried sits here — `Init:Error`,
+    /// which NOTES § D27 lists beside `Init:CrashLoopBackOff` — and so does a regular container
+    /// that stopped for good inside a pod that is still `Running`, which is
+    /// [`stopped_for_good`]'s subject and the one card any rule draws off this field
+    /// (NOTES § D96).
     Terminated(Terminated),
 }
 
@@ -514,6 +520,33 @@ pub struct ContainerSnapshot {
     pub image: String,
     /// Which of the three this is (NOTES § D27 for why both arrays are read at all).
     pub role: ContainerRole,
+    /// **The policy this container is actually under** — its own `spec.containers[].restartPolicy`
+    /// where it declares one, and the pod's `spec.restartPolicy` where it does not. Rule 15's
+    /// fourth condition, and the one field that answers *will Kubernetes start this again*
+    /// ([`stopped_for_good`], NOTES § D96).
+    ///
+    /// **Derived here rather than joined later**, out of the same two fields [`ContainerRole`] is
+    /// derived from — and **the two readings are not the same one**: the role asks the
+    /// container's own field alone, because a *regular* container is `Regular` whatever the pod
+    /// says, while this one falls back on purpose.
+    ///
+    /// **Two spec paths feed one field, and the prune has to keep both** (invariant 6):
+    /// `spec.containers[].restartPolicy`, which [`ContainerRole`] already needed, **and
+    /// `spec.restartPolicy`, which is new here and is named by no other snapshot field** — a
+    /// prune written by reading these structs would keep the first and drop the second, and this
+    /// rule would then be silent on every pod that does not override per container, which is
+    /// almost all of them.
+    ///
+    /// **`None` fires nothing.** The API server defaults `spec.restartPolicy` to `Always` on every
+    /// accepted create, so an empty answer means the field was pruned or the object never reached
+    /// validation, and neither is a licence to guess.
+    ///
+    /// **It is a policy and not a verdict, and the difference is a gap this layer cannot close**:
+    /// `spec.containers[].restartPolicyRules` can override it upward per exit code, and that field
+    /// does not exist in the generated types at the `v1_32` feature `Cargo.toml` pins — it arrives
+    /// at `v1_34` — so it is dropped at decode and no rule can read it. What stands in for it is
+    /// [`ContainerSnapshot::restarts`] ([`stopped_for_good`]).
+    pub restart_policy: Option<String>,
     /// Rule 7: running but not passing its readiness probe, so the Service dropped it.
     pub ready: bool,
     /// `status.started` — true once the container has passed its **startup probe** and run its
@@ -585,7 +618,7 @@ pub struct Toleration {
     pub effect: Option<String>,
 }
 
-/// One pod, reduced to what rules 1–8, 10 and 12–14 read, plus the pod half of the N5 and
+/// One pod, reduced to what rules 1–8, 10 and 12–15 read, plus the pod half of the N5 and
 /// N6 joins.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PodSnapshot {
@@ -994,16 +1027,22 @@ fn container_snapshots(
             // list is not asked because a regular container answers `Regular` either way, which
             // is a statement about our own behaviour rather than a bet on upstream's
             // (NOTES § D46).
-            let restartable = declared.and_then(|c| c.restart_policy.as_deref()) == Some("Always");
+            let own = declared.and_then(|c| c.restart_policy.as_deref());
+            let restartable = own == Some("Always");
             let role = match (is_init, restartable) {
                 (true, true) => ContainerRole::Sidecar,
                 (true, false) => ContainerRole::Init,
                 (false, _) => ContainerRole::Regular,
             };
+            // **The same two fields, read the other way**: the role wants the container's own
+            // answer and nothing else, and the effective policy falls back to the pod's
+            // ([`ContainerSnapshot::restart_policy`]). One expression each, off one lookup.
+            let restart_policy = own.or(spec.restart_policy.as_deref()).map(str::to_string);
             ContainerSnapshot {
                 name: s.name,
                 image: s.image,
                 role,
+                restart_policy,
                 ready: s.ready,
                 // Upstream: "The null value must be treated the same as false."
                 started: s.started.unwrap_or(false),
@@ -1335,7 +1374,7 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 /// **Every rule in this file, over one snapshot** — the signature invariant 5 names, and the only
 /// entry point `k8s.rs` and the `--once` printer are given.
 ///
-/// Rules 1–8, 10 and 12–14, the node rules that draw a card — N1, N2 and N3 — the W-series, W1 and
+/// Rules 1–8, 10, 12–15, the node rules that draw a card — N1, N2 and N3 — the W-series, W1 and
 /// W2, and **C1, whose two bands leave here through different doors** (NOTES § D87): the expiring
 /// half is `Info` and is the Certificates report's input, the expired half is `Critical` and is an
 /// Alerts card, and C1 is called from here — where N4 and N5 are not — because that second half has
@@ -1346,11 +1385,13 @@ const RUNTIME_SOCKETS: [&str; 5] = [
 ///
 /// **Rules 1–6 read every container the pod has**, in either status array and whichever of
 /// [`ContainerRole`] it is (NOTES § D27, § D75). **Rule 7 is the one exception and reads regular
-/// containers only.** **Rules 8 and 10 are not container rules at all** — rule 10 reads a pod
-/// condition, which is what lets it fire on a pod that has no containers — and **rule 13 is a
-/// third shape**: one card about the *pod*, reached by walking its containers.
+/// containers only.** **Rule 15 reads every container too and reaches only the regular ones**, out
+/// of the policy it gates on rather than out of a role check ([`stopped_for_good`]). **Rules 8 and
+/// 10 are not container rules at all** — rule 10 reads a pod condition, which is what lets it fire
+/// on a pod that has no containers — and **rule 13 is a third shape**: one card about the *pod*,
+/// reached by walking its containers.
 ///
-/// **A pod that finished is not broken now**, so rules 1–8, 10, 13 and 14 skip `Succeeded` and
+/// **A pod that finished is not broken now**, so rules 1–8, 10, 13, 14 and 15 skip `Succeeded` and
 /// `Failed`: this screen holds what is broken *now*, and their restart counts and last exits are
 /// not that (NOTES § D2, § D71).
 ///
@@ -1391,6 +1432,7 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
             findings.extend(restarting_repeatedly(pod, c));
             findings.extend(previous_run_failed(pod, c));
             findings.extend(running_but_not_ready(&snapshot.now, pod, c));
+            findings.extend(stopped_for_good(pod, c));
         }
     }
     // **The W-series runs last, and in two passes rather than one.** W2 asks whether anything
@@ -1453,6 +1495,45 @@ fn describe(id: &ObjectId) -> Option<String> {
 fn get_yaml(resource: &str, id: &ObjectId) -> Option<String> {
     Some(format!(
         "kubectl get {resource} {}{} -o yaml",
+        id.name,
+        in_namespace(id)
+    ))
+}
+
+/// `kubectl logs <pod> -c <container>` — **what the container itself said, which no other command
+/// in this file shows** ([`stopped_for_good`] is its first caller).
+///
+/// **No `--previous`, and it is *which run* that decides it rather than whether the log is
+/// reachable** (invariant 4, NOTES § D96). The flag serves the run *before* the current one, and
+/// every other ending in this file is read out of `lastState`; rule 15's container is stopped in
+/// the run it is sitting in **now**, so `--previous` would send this reader to a run that never
+/// happened. Measured on kind v1.36.1 with the node healthy: the bare command returned the
+/// container's own last line, no flag and no error.
+///
+/// **That measurement is a happy path and the paragraph it used to end justified more than it
+/// showed** (NOTES § D97) — see the last paragraph here, which is the correction and is why the
+/// card's action no longer promises the log is there. The `--previous` argument is untouched by
+/// it: a run that never happened has no log under any flag.
+///
+/// **`-c` is always written, never only for a pod with more than one container.** The flag is
+/// harmless on a single-container pod, and the card names one container out of however many the
+/// reader's pod has — a command that made them guess which is the record invariant 4 says may not
+/// lie.
+///
+/// **No `--tail`, and the reason is what the command log is** (invariant 4, NOTES § D97). This
+/// line is the *equivalent command the user would have typed*, and `kubectl logs <pod> -c <name>`
+/// is exactly that; a flag we picked makes the line ours rather than theirs, and teaches a
+/// default nobody chose. A reader who wants less pipes it. Asked by the operator review and
+/// answered here so it is answered rather than re-asked.
+///
+/// **What it cannot promise is that the log is there.** This is the only command in this file
+/// that goes to the **kubelet on the node** rather than to the API server, so a node that has
+/// stopped answering returns `connection refused` while the pod status the rule read sits frozen
+/// and unchanged. The command is still the right one — it is where the answer is when there is
+/// one — but [`stopped_for_good`]'s action may not say the log is still there, and does not.
+fn logs(id: &ObjectId, container: &str) -> Option<String> {
+    Some(format!(
+        "kubectl logs {} -c {container}{}",
         id.name,
         in_namespace(id)
     ))
@@ -1682,12 +1763,20 @@ const STATUS_LOST: &str = "ContainerStatusUnknown";
 
 /// **The fourth meaning of `137`, and the only one that is the pod getting what it asked for.**
 /// `RestartAllContainersOnContainerExits` is `{Version: 1.36, Default: true, Beta}` — on by
-/// default at the version `tests/fixtures/K8S_VERSION` pins — and when a container that declares
-/// `restartPolicyRules` exits into a matching rule, the kubelet removes the other containers to
-/// restart them together, writing
+/// default at the version `tests/fixtures/K8S_VERSION` pins — and when a container exits into a
+/// matching rule **whose action is `RestartAllContainers`**, the kubelet removes the other
+/// containers to restart them together, writing
 /// `Terminated { reason: RestartingAllContainers, exitCode: 137 }` with the same three fields and
 /// no more. Verified in `kube_features.go` and `kubelet_pods.go` at v1.36.1, not taken on report
 /// (NOTES § D93).
+///
+/// **A matching rule is not enough — the *action* is what makes it a gang restart, and the
+/// published schema hides that** (NOTES § D97). `kubectl explain` and the OpenAPI document both
+/// say the only action is `Restart`; the **validator** accepts two, and they behave differently:
+/// measured on kind v1.36.1, `action: Restart` restarted the failing container five times and
+/// never touched its sibling, while `action: RestartAllContainers` moved them in lockstep. So
+/// this reason is written by one action out of two, which makes [`Ending::RestartRule`] narrower
+/// than *a container had restart rules* — better founded, not weaker.
 ///
 /// **The rules are declared on a *container*, and only the effect is pod-wide.** There is no
 /// `pod.spec.restartPolicyRules` at v1.36.1 — `kubectl explain` answers that the field does not
@@ -1779,6 +1868,15 @@ fn exit_fact(run: &Terminated) -> String {
 /// **One line, and this is where that is decided.** A `Finding`'s fields are one card line each
 /// (`screens/widgets.md` § 2). It is not truncation — § 7 forbids k8rs shortening a string
 /// itself, and bounding a huge value is `k8s.rs`'s job at ingest.
+/// **`the last thing it logged was: …`** — the one wording for [`Terminated::message`], because
+/// two rules print it: [`previous_run_failed`] as its whole action, and [`stopped_for_good`] as a
+/// fact on the evidence line. Two spellings of one fact on one screen is where NOTES § D85
+/// starts, and this one is a *quote frame* — the sentence after the colon is the container's, not
+/// ours.
+fn last_words(line: &str) -> String {
+    format!("the last thing it logged was: {line}")
+}
+
 fn last_log_line(run: &Terminated) -> Option<&str> {
     run.message
         .as_deref()?
@@ -2669,7 +2767,7 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
             // **When the kubelet kept the container's last words they replace the advice**, then
             // the two codes that name a missing command, then the `137` no reason explains.
             match (last_log_line(run), run.exit_code) {
-                (Some(line), _) => format!("the last thing it logged was: {line}"),
+                (Some(line), _) => last_words(line),
                 (None, 126 | 127) => {
                     "check the container's command and arguments — what they name is not in the \
                      image"
@@ -2769,6 +2867,148 @@ fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
         owner: pod.owner.clone(),
         object: pod.id.clone(),
         timestamp: Some(since.clone()),
+    })
+}
+
+/// **Rule 15 — the container has stopped, and nothing is starting it again.** CRITICAL, on
+/// a container that is stopped **in the run it is sitting in now** (NOTES § D96). Four conditions,
+/// all of them required:
+///
+/// **Present tense here as on the card, and that is a correction rather than a style** (NOTES
+/// § D97). This headline read *Kubernetes **will not** start it again* while the card said the
+/// same thing, and the prediction is false in a shape this rule reaches: pod `Always` with a
+/// container's own `Never`, node rebooted, and the container comes back, because the kubelet reads
+/// the **pod's** policy when it rebuilds a sandbox. What the four conditions below actually
+/// establish is a fact about **now** — the run is over and nothing is starting another — and the
+/// rule's own doc may not claim more than its card does.
+///
+/// | condition | why it is there |
+/// |---|---|
+/// | [`ContainerState::Terminated`] | the subject is `state.terminated`, the run the container is in **now** — not `lastState`, which is the run before this one and every other rule's field |
+/// | [`ending`] is [`Failed`](Ending::Failed) | rule 6's exemptions, inherited whole rather than respelled: `exit 0` and `exit 143` are not faults, and the two `137` reasons the kubelet writes itself mean the container is coming back |
+/// | `restarts == 0` | the false-positive guard, below |
+/// | [`restart_policy`](ContainerSnapshot::restart_policy) is `Never` | the only policy that reaches this rule on a bad exit: `Always` restarts everything and `OnFailure` restarts a non-zero exit, so the truth table collapses to one arm |
+///
+/// **`Never` is not read as a synonym for *nothing will restart it*, and the field that would
+/// settle it cannot be read at all.** `spec.containers[].restartPolicyRules` can only *add*
+/// restarts — the API rejects a `DoNotRestart` action outright — so a container declaring a retry
+/// rule on its own exit code comes back under `Never`, which is KEP-5307's headline use case and
+/// would be this rule's headline false positive: measured on kind v1.36.1, a pod `Never` with one
+/// retry rule on `exit 3` sat in `CrashLoopBackOff` at five restarts. **That field does not exist
+/// in the generated types at the `v1_32` feature `Cargo.toml` pins** — it arrives at `v1_34` — so
+/// it is silently dropped at decode and no rule here can consult it. **`restarts == 0` is what
+/// stands in for it**: a container that has already been restarted is not a container that will
+/// not be restarted, whatever declared it. **The residual gap is one window** — the first exit,
+/// before the first retry — and it is a gap rather than a bound: this rule draws a card that is
+/// wrong for as long as that window lasts.
+///
+/// **Only a [`Regular`](ContainerRole::Regular) container reaches this rule, and by construction
+/// rather than by a check** (NOTES § D96, measured). A [`Sidecar`](ContainerRole::Sidecar) *is* an
+/// init container with `restartPolicy: Always`, so its effective policy is `Always` and never
+/// `Never` — the fourth condition refuses it out of the same field its role came from, absolutely
+/// and at every moment. A plain [`Init`](ContainerRole::Init) container that fails and will not be
+/// retried takes the whole pod to `phase: Failed`, which leaves through [`finished`] before
+/// [`analyze`] reaches any container — **and the door is wider than the pod-level reading, which
+/// matters because this field has two** (NOTES § D97). The first draft argued it only for pod
+/// `Never`; the review built the shape the effective-policy fallback opens — pod `Always` with an
+/// init container declaring its own `restartPolicy: Never`, `exit 1` — the API accepts it, and the
+/// pod still goes `phase: Failed`. So both readings of the fourth condition leave by the same
+/// door, which is the claim this rule needs rather than the narrower one it had.
+/// **That half is a settled state and not an instant**: between the
+/// kubelet writing the failed status and the phase moving, a snapshot can catch such a pod still
+/// `Pending`, and this rule draws its card about the init container. That card is **true** —
+/// the container did stop and nothing will run it again — so it is a card that disappears rather
+/// than one that was wrong, which is why the window is named here and not guarded against.
+/// **So no role split and no probe is named**, and the guard `validateInitContainers` forces on
+/// the other actions in this file has nothing to guard here.
+///
+/// **The clean-exit half of the shape is deliberately silent** (NOTES § D96, leg 7). A container
+/// that exits `0` under `Never` beside a sibling that is still running is doing exactly what the
+/// policy means; the fault a reader would want named there — *the Job never completes because the
+/// helper is still running* — is a claim about the Job above the pod, and Jobs are not watched
+/// (invariant 6). That silence is [`ending`]'s [`Finished`](Ending::Finished) arm.
+///
+/// **`OOMKilled` reaches this rule rather than rule 2, and that is right rather than an
+/// oversight.** [`out_of_memory`] reads `lastState`, which a container that was never restarted
+/// does not have, so it is structurally silent on this shape; the kill is
+/// [`Failed`](Ending::Failed) here as everywhere ([`ending`]), and [`exit_fact`] puts the kernel's
+/// own reading of `137` on the card. One card, and it is this one.
+///
+/// **The command is the first [`logs`] in this file, and the reason it may be one is the same
+/// reason the rule exists**: the pod is still there and so is the container's log, with no
+/// `--previous` and no error — measured. Every other ending in this file is a run that is over
+/// inside a container that has been replaced, which is why they all send the reader to
+/// [`describe`] instead.
+///
+/// The age is [`Terminated::finished_at`] on that run ([`Finding::timestamp`]).
+fn stopped_for_good(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+    let ContainerState::Terminated(run) = &c.state else {
+        return None;
+    };
+    // Answered arm by arm rather than compared against one, so an ending added later cannot join
+    // this rule by default (NOTES § D95).
+    match ending(run) {
+        Ending::Failed => {}
+        // Nothing failed: under `Never` a clean exit is the policy doing what it says, and `143`
+        // is a shutdown asked for and obeyed.
+        Ending::Finished | Ending::Stopped => return None,
+        // Neither can hold this title up. `Unwatched` is a run nothing watched end, so *it has
+        // stopped* is the one claim that record cannot make — rule 6's own reasoning about the
+        // same reason — and a container the kubelet lost is restarted even under `Never`, its
+        // record landing in `lastState`. `RestartRule` is a restart already under way by
+        // definition.
+        Ending::Unwatched | Ending::RestartRule => return None,
+    }
+    if c.restarts != 0 || c.restart_policy.as_deref() != Some("Never") {
+        return None;
+    }
+    let mut facts = vec![container_fact(c), exit_fact(run)];
+    // **Ahead of the duration on purpose, because it is the fact that survives the node.** The
+    // kubelet writes this into the API server; the log the action sends the reader to lives on
+    // the machine. When that machine is the reason the card is on screen at all, this clause is
+    // the only thing on it that still answers — so it may not be the one the three-line cut
+    // takes first (NOTES § D97, [`last_words`]).
+    facts.extend(last_log_line(run).map(last_words));
+    if let Some(d) = lasted(run) {
+        facts.push(format!("ran for {d}"));
+    }
+    Some(Finding {
+        severity: Severity::Critical,
+        // **Present tense, because the card may not predict** (NOTES § D97). *nothing **will**
+        // start it again* is the same false promise the action carried, in the line the reader
+        // reads first: pod `Always` with a container's own `Never` and a node reboot brings the
+        // container back, measured. What the object supports is what is true *now* — the run is
+        // over and nothing is starting another — which is also what the action says, and one card
+        // may not hold two tenses about one fact (NOTES § D85).
+        //
+        // No policy name anywhere on this card either. `kubectl logs` prints no part of the spec,
+        // and an action may name only what its own command shows (invariant 4, NOTES § D88) — so
+        // the reason it is not coming back is written as the plain sentence instead.
+        title: "This container has stopped and nothing is starting it again".to_string(),
+        evidence: facts.join(FACTS),
+        // **Two promises came out of this sentence on 2026-08-15, both measured false on a review
+        // cluster** (NOTES § D97). *its log is still there* was written from one happy-path
+        // measurement: [`logs`] is the only command in this file that goes to the kubelet, every
+        // condition above is read from a status that **freezes when the kubelet dies**, and a card
+        // measured unchanged for eight minutes past a stopped kubelet printed a command answering
+        // `connection refused`. And *nothing will run it again inside this pod* is false in the
+        // one shape the effective policy exists for: pod `Always` with a container's own `Never`,
+        // node rebooted, and the container came back — the kubelet reads the **pod's** policy when
+        // it rebuilds a sandbox.
+        //
+        // **What is left is what every measured shape agrees on, and it is a door rather than a
+        // verdict**: nothing is *waiting* to start it, so the pod has to be replaced, and until it
+        // is, whatever needed this container does not have it. That third clause is the card's
+        // *what to do* — a finding whose last line only says what will not happen has two parts
+        // of the three.
+        action: "read its log — that is where it says why it stopped. Nothing is waiting to \
+                 start it again, so the pod has to be replaced; until it is, whatever needed \
+                 this container is still without it"
+            .to_string(),
+        kubectl_cmd: logs(&pod.id, &c.name),
+        owner: pod.owner.clone(),
+        object: pod.id.clone(),
+        timestamp: run.finished_at.clone(),
     })
 }
 

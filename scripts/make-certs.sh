@@ -9,13 +9,16 @@
 # (NOTES § D18), so the test states the date it is asking about and the
 # fixture never expires:
 #
-#   reference now  = 2026-08-14
-#   expiring cert  = notAfter 2026-09-05  → 22 days left  → C1 warns (< 30)
-#   healthy cert   = notAfter 2027-08-12  → 363 days left → C1 says nothing
+#   reference now  = 2026-08-16
+#   expiring cert  = notAfter 2026-09-05  → 20 days left  → C1 warns (< 30)
+#   healthy cert   = notAfter 2027-08-12  → 361 days left → C1 says nothing
 #
 # The dates below are absolute, so moving that reference instant (NOTES § D57)
 # changes what the certificates *mean*, never the bytes this script writes —
-# only these three lines and the day counts in scripts/certs-test.sh.
+# only these three lines, the expired count in the comment above the third
+# `gen`, and the day counts in scripts/certs-test.sh. This sentence named the
+# three lines alone until 2026-08-16, and that fourth number is the one a repin
+# following it to the letter leaves behind.
 #
 # Both are self-signed: C1 reads `notAfter` out of the kubeconfig's
 # `client-certificate-data`, and a chain would prove nothing extra.
@@ -58,7 +61,7 @@ gen expiring-client "kubernetes-admin-expiring" 20260812000000Z 20260905000000Z
 gen healthy-client  "kubernetes-admin"          20260812000000Z 20270812000000Z
 
 # A certificate that is already past its notAfter: C1 must say "expired", not
-# "expires in -5 days", and the renderer must not produce a negative duration.
+# "expires in -7 days", and the renderer must not produce a negative duration.
 gen expired-client  "kubernetes-admin-expired"  20250812000000Z 20260809000000Z
 
 echo "certificate fixtures written to tests/fixtures/certs (dates pinned; they do not expire)"

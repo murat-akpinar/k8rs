@@ -404,7 +404,7 @@ POD_STATES=(oom crashloop image config pending hostpath readiness restarts
             nolimits stuck init quota w2 owned resize podlimit sts rollout ds
             healthy_init healthy_sidecar healthy_hostpath healthy_podlevel
             exit0 sigterm socket succeeded failed startup notfound wedged
-            unjudged oomserving healthy_retry healthy_unreadysidecar)
+            unjudged oomserving neverback healthy_retry healthy_unreadysidecar)
 # The two fixtures that cost more than every other one put together, split out
 # so that a failure in the fast set is reported in the usual few minutes instead
 # of behind a half-hour wait. See `verify` for the arithmetic — there is no
@@ -584,6 +584,27 @@ declare -A want=(
   # is crashlooping, so rule 2 stays quiet on it for the state rather than for
   # the age.
   [oomserving]='.status.phase=="Running" and (.status.containerStatuses[0] | .ready==true and .state.running!=null and .restartCount>=1 and .lastState.terminated.reason=="OOMKilled" and .lastState.terminated.exitCode==137)'
+  # D96's shape, and all three containers are asserted because all three are the
+  # fixture: the one that stopped for good, the one that stopped correctly beside
+  # it, and the one holding the pod out of a terminal phase. Read **by name**
+  # and not by index: every other predicate here reads `containerStatuses[0]`
+  # because the container it is about is the only one that matters on that pod,
+  # and here all three matter and nothing promises which lands first.
+  #
+  # `restartPolicy` is in the predicate rather than left to the manifest because
+  # it is the entire condition: the same three statuses under `Always` are a
+  # container the kubelet is about to bring back, which is the false positive the
+  # rule this fixture is for must not ship. `restartCount==0` is not the same
+  # claim read twice — `ContainerRestartRules` is beta and on by default at
+  # v1.36, so a *container* may override the pod upward, and the only field that
+  # says it did is the count.
+  #
+  # `keeper` running is asserted beside `phase=="Running"` and not instead of it:
+  # the phase is what a person reads, and the container is what makes it true. A
+  # capture taken in the second after the last container stopped still says
+  # `Running`, which is precisely the "capture taken too early" this table
+  # exists to refuse.
+  [neverback]='.spec.restartPolicy=="Never" and .status.phase=="Running" and ([.status.containerStatuses[]?|select(.name=="broke" and .restartCount==0 and .state.terminated.exitCode==1)]|length)==1 and ([.status.containerStatuses[]?|select(.name=="done" and .restartCount==0 and .state.terminated.exitCode==0)]|length)==1 and ([.status.containerStatuses[]?|select(.name=="keeper" and .state.running!=null)]|length)==1'
   # The wait-for-dependency loop, finished: the failed history is in lastState,
   # the successful exit is in state, and the pod is serving. Nothing may fire.
   [healthy_retry]='.status.phase=="Running" and ([.status.containerStatuses[].ready]|all) and (.status.initContainerStatuses[0] | .restartCount>=3 and .state.terminated.exitCode==0 and .lastState.terminated.exitCode==1)'
@@ -632,6 +653,7 @@ declare -A why=(
   [wedged]="rule 13 — placed, and stuck before the sandbox on a ConfigMap that does not exist (D72/D76)"
   [unjudged]="rule 14 — no PodScheduled line at all: nothing has looked at this pod (D74)"
   [oomserving]="rule 2 — OOMKilled once and serving since, which is the recency clause (D75)"
+  [neverback]="D96 — stopped for good under restartPolicy Never, in a pod still Running (with its own clean-exit negative beside it)"
   [healthy_retry]="D75 — the wait-for-dependency init loop that finished: rules 5 and 6 must be silent"
   [healthy_unreadysidecar]="D75 — a sidecar running but not ready: rule 7 is regular containers only"
 )
@@ -668,6 +690,21 @@ diagnose() {
            state:      (.status.containerStatuses // [])[0].state,
            last:       (.status.containerStatuses // [])[0].lastState,
            restarts:   (.status.containerStatuses // [])[0].restartCount,
+           # The three keys above read container [0], which is the container
+           # every predicate here is about — except `broken-neverback`, whose
+           # whole subject is *which* of three containers is in which state, and
+           # whose FAIL therefore printed the one container that was fine
+           # (broken-hostpath has two as well, and the second was equally
+           # invisible; nothing had needed it yet). Only
+           # reached when there is more than one, so every existing FAIL line is
+           # byte-identical: the empty array is dropped by the filter at the
+           # foot of this function.
+           # (No apostrophes in these comments: the whole filter is one
+           # single-quoted shell string, and one would end it.)
+           containers: [ (.status.containerStatuses // []) | select(length > 1) | .[]
+                         | { name, restarts: .restartCount, state: (.state | keys[0]?),
+                             exit: .state.terminated.exitCode }
+                         | with_entries(select(.value != null)) ],
            init:       (.status.initContainerStatuses // [])[0].state,
            enacted:    (.status.containerStatuses // [])[0].resources,
            declared:   (.spec.containers // [])[0].resources,
