@@ -6914,6 +6914,159 @@ refused.** That one needed `analyze` to remember *I saw an exit 3 four seconds
 ago*. This is a pure function of `(now, object)` with `now` carried on the
 snapshot — invariant 5's own mechanism, which rules 2, 7, 10 and 13 already use.
 
+### D101 — a point sample cannot separate a settled container from one on a long cycle, so the count becomes a report row (2026-08-15)
+
+[D100](#d100--the-field-that-separates-a-settled-restart-from-a-live-one-was-already-in-the-snapshot-and-rule-5-never-read-it-2026-08-15)
+left a hole and boxed it: **nothing in the rule set reports a container that is
+fine right now and keeps dying on a long cycle.** The box demanded the answer be
+written here first, because it is one question for four rules and not a fifth
+threshold on one.
+
+**What is true today, read off the file rather than remembered.**
+[`crash_looping`](src/rules.rs) needs `waiting == CrashLoopBackOff`, and a
+container in the middle of a thirty-minute cycle is `Running`, not waiting.
+[`out_of_memory`](src/rules.rs) stands down on `doing_its_job` **and** a kill
+older than `NOT_READY_GRACE`. [`restarting_repeatedly`](src/rules.rs) stands down
+on serving **and** a current run older than the same ten minutes.
+[`previous_run_failed`](src/rules.rs) stands down on `doing_its_job` with **no
+clock at all**. So the JVM that dies on the nightly batch draws a card for ten
+minutes at 03:00 and nothing at all by morning.
+
+**The ruling: the rule set does not answer it, all four suppressors are
+unchanged, and the question becomes a counted row in the Phase 4 reports.** It is
+one decision for the four — the next rule that wants a fifth constant has to
+reverse *this* entry, not add one.
+
+**Why no clause over one Pod sample can carry it.** Three shapes were tried, and
+each is refuted by a container this project has already had to reason about:
+
+1. **A count with no clock** — never suppress at or above some restart count.
+   Every container in question is above any such line by definition, so this is a
+   permanent card on every pod that has ever reached it, whether the line is
+   `RESTARTS_WARN` or ten: the false-positive class that needs no unusual
+   manifest, only uptime, which
+   [D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)
+   removed from rule 6 and D100 finished removing from rule 5. Moving the line
+   changes *which* pods carry the permanent card, not whether one exists.
+2. **A longer shared clock** — keep every suppressor and raise
+   `NOT_READY_GRACE`. This is the first thing the next reader proposes and it
+   fails on its own arithmetic: a threshold catches only cycles shorter than
+   itself, so covering the nightly batch needs one above 24 hours, which draws a
+   card on every pod on a node that rebooted last night and on every liveness
+   blip of the past day. It also needs a sixth number, against D100's own claim
+   that there is one threshold for one question.
+3. **The current run against the previous one** — *has it outlived the run before
+   it?* Inverted where it matters: a container that ran three weeks, hiccupped
+   once and has been up twenty-five minutes fails that test for three weeks. It
+   survives the count gate too — three restarts in a bad hour last month, a clean
+   three-week run, then a node reboot twenty-five minutes ago is four restarts
+   and a current run younger than its predecessor — and the arithmetic is one
+   nobody reconstructs at 03:00.
+
+**What separates the two containers is how often the numbers moved, and the Pod
+does not record that.** Every field the snapshot carries — `restarts`, the
+current run's `started_at`, the previous run's stamps, `creation_timestamp` —
+differs between a
+settled container and a thirty-minute cycler only in how *recent* it is, so every
+separator built out of one collapses into candidate 2. History is invariant 5's
+forbidden, and the only point-in-time stand-in is a rate, which the box refused
+before this entry was written: `restarts ÷ pod age` is a second number deciding
+what the clock means, and two rules wearing one card.
+
+**The sequence does exist in the cluster, in another object, and it is refused on
+cost and not on physics.** Saying *impossible* here would be false, and a false
+impossibility is what stops a question being re-asked when the cost changes. A
+core/v1 `Event` carries `count`, `firstTimestamp` and `lastTimestamp` — a counted
+sequence, held in an object, readable at one moment, with no history we keep and
+no rate we compute; it is what `kubectl describe pod` prints as `(x5 over 2h)`.
+It would separate the thirty-minute case and **not** the nightly one, because the
+API server's default `--event-ttl` is one hour. It is not read for the reason
+this repo has refused it three times already — a global Events watch is the
+noisiest stream in the cluster, and the watch budget is why k8rs is lighter than
+k9s — and rule 11 waits on that same watch in v0.5
+([D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12), § Rules
+that need Events). **When it opens, this question is asked again** rather than
+treated as closed by this entry.
+
+**What a card may not assert, a sorted table may print.** A card claims *this is
+broken now* and has to age out or it is noise; a row says *here is the count,
+here is how long this run has lasted* and asserts nothing — so permanence, fatal
+on the broken-now screen, is correct in a table. The two numbers are printed side
+by side and **never divided**, which is [PRIOR-ART §
+F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)'s actual rule: never
+divide by a denominator that is not guaranteed complete, and restarts are per
+container. That such a number belongs in a report rather than nowhere is Phase
+4's own header in [`todo.md`](todo.md), not something F2 says — F2 would have it
+print as `n/a`, and a row of two defensible numbers is what that looks like when
+the ratio is the undefined thing.
+
+**The row is per container, and both its numbers belong to that container** —
+`restarts`, and the age of the run it is in from `state.running.started_at`, the
+field D100 established. **Not `last_terminated.finished_at`**: two of `ending`'s
+five variants are the `137`s the kubelet synthesizes, and its literal sets
+`Reason`, `Message` and `ExitCode` and stops — D100 measured the gang-restart one
+`null` in 100% of samples — so a row dated off that field is blank on the very
+shape this box is named after, and sorts *first*, because `Option`'s derived
+`Ord` puts `None` there. **And not a sum across a workload's pods**: the count
+would be per container while the age was per pod, which is F2's own defect with
+the division outsourced to the reader — six pods at two restarts each from a node
+reboot forty days ago would print the same first two columns as one pod that has
+OOMed twelve times since lunch. So the report emits one row per container and
+leaves any collapsing to the view; `pod.owner` is the ReplicaSet until Phase 5
+resolves it, and a report grouping on it today would key on a hashed revision
+name and lose the count on every deploy.
+
+**What the row may not do.** It may not name how the last run ended: `ending` and
+`exit_meaning` are private to `rules.rs`, which freezes at Phase 3 close, and
+re-spelling the translation in a second file is the two-readers-one-container
+defect [D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)
+exists to prevent. **That boundary is a convention, not a gate**: `Terminated`'s
+`reason` and `exit_code` are `pub`, so nothing mechanical stops a raw `exit 137`
+reaching a report row, and nothing should print one. The *field list* is a choice
+rather than a wall in the other direction —
+[D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)
+keeps the snapshot types open until Phase 4 close, so a report that genuinely
+needs a new field may add one; what it may not do is widen a private item's
+visibility quietly.
+
+**Where it goes on screen is `tui-designer`'s, and this entry hands it two
+constraints.** The Waste pane is the only report carrying rows of this kind
+today, and its headings say the opposite of what this row means — *Things that
+cost you something for nothing*, with *Worth knowing (not broken)* under it — of
+a container that keeps dying (invariant 14). And Waste is the one pane the
+sidebar never badges, so the compensation for the Alerts silence would sit where
+nothing sends the reader. Neither is settled here; both go into a Phase 4 box of
+their own that sits **ahead** of the row's, because a screen spec that arrives
+after the code is a spec of what was built.
+
+**The costs, named here rather than discovered later.**
+
+- **Between restarts the Alerts screen is silent about it**, and that is the
+  whole of what this ruling accepts. For a thirty-minute cycle the card is up for
+  about ten minutes in every thirty; for a nightly batch it is ten minutes a day,
+  at an hour nobody is looking. That reader — the one who checks in the morning —
+  is the report's reader, and had nothing before this entry either.
+- **On a short cycle the card also disappears while it is being read.** Ten
+  minutes of every thirty means a reader who opens k8rs nine minutes into the
+  window watches the card go with no action of their own, on a screen that draws
+  on events (invariant 7) — which teaches them they misread it. That is D100's
+  consequence rather than this entry's, and this is the entry that accepts it.
+- **`--once` carries findings and not reports**
+  ([`screens/once.md`](screens/once.md)), so a cron report at 09:00 still says
+  nothing about the 03:00 crash. Not fixed here: choosing a report needs an
+  argument that takes a value, which is what pulls `clap` in
+  ([docs/tech-stack.md](docs/tech-stack.md)). It is a real gap and it belongs to
+  whoever reopens `--once`, not to this box.
+- **The count resets when the pod is replaced** — a rollout, an eviction, a
+  drain — so the row understates a chronic restarter right after a deploy. The
+  wording has to say *since this pod started* or the row lies, which makes it
+  `tui-designer`'s line before it is anyone's code.
+- **The report is a point sample too.** It prints how many and how long; it never
+  prints how often, because that is the division nobody can defend. Two numbers
+  side by side is not a rate — no threshold is derived from them and nothing is
+  asserted — and the reader's own arithmetic is not a claim k8rs has to justify at
+  03:00.
+
 ## Decisions made
 
 ### Product

@@ -1639,7 +1639,7 @@ this plan is delivery mechanism for what this phase produces.
       decoded plant (D40) meanwhile — and `dev-core` caught a **false sentence in
       D100 itself** before copying it into the code, which is where the box below
       came from
-- [ ] **Nothing reports a container that is fine right now and keeps dying on a
+- [x] **Nothing reports a container that is fine right now and keeps dying on a
       long cycle, and it is one question for four rules rather than a fifth
       threshold on one** — surfaced by
       [D100](NOTES.md#d100--the-field-that-separates-a-settled-restart-from-a-live-one-was-already-in-the-snapshot-and-rule-5-never-read-it-2026-08-15)'s
@@ -1658,7 +1658,29 @@ this plan is delivery mechanism for what this phase produces.
       honest candidates are the **Waste/Capacity report** — where *this workload
       has been unhealthy for a long stretch* is a sentence that belongs — or a
       single shared clause the four rules read, decided once. Answer it in NOTES
-      before writing anything, because whichever way it goes it moves four rules
+      before writing anything, because whichever way it goes it moves four rules.
+      **Answered 2026-08-15
+      ([NOTES § D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)),
+      and it moves none of them**: no clause over one Pod sample separates the two
+      containers, because every field the snapshot carries differs only in how
+      *recent* it is, and the thing that separates them — how often the numbers
+      moved — is history, which invariant 5 forbids a rule. Three candidates are
+      recorded and refused there: a count with no clock is D71's permanence back
+      at whatever threshold you pick, a longer shared clock needs one above 24
+      hours and then fires on every node reboot, and *has it outlived the previous
+      run* gives a settled pod a three-week card. **The sequence does exist, in
+      Events, and is refused on the watch budget rather than on physics** — said
+      in D101 so that v0.5, which opens that watch for rule 11, re-asks the
+      question instead of reading this entry as closed. What a card may not assert
+      a sorted table may print, so the question becomes a report row of *restarts*
+      and *how long this run has lasted* — never divided
+      ([PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)) —
+      boxed in Phase 4 below. The costs are named rather than discovered: between
+      restarts Alerts is silent, on a short cycle the card vanishes while it is
+      being read, and `--once` carries no reports at all. **The operator review
+      caught the load-bearing one**: the first draft dated the row off
+      `last_terminated.finished_at`, which the two synthesized `137`s leave
+      `null` — blank on the exact shape the box is named after
 - [ ] **Rules 5 and 6 print the identical four-line action on two adjacent cards,
       and no `CrashLoopBackOff` is needed to see it** — on a container past the
       restart band whose last recorded run is a lost status, rule 5 draws the
@@ -2449,6 +2471,38 @@ cluster either.
       promoting it would cost a permanent Services + EndpointSlices watch, and
       the watch budget is why k8rs is lighter than k9s), then unbound/unused
       PVCs, Evicted and Completed pod pileups, ReplicaSets parked at 0
+- [ ] **`tui-designer` answers where the restart row lives, before it is
+      written** —
+      [D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)
+      hands the screen two constraints and settles neither. Waste is the only pane
+      carrying rows of this kind today, and both its headings deny what the row
+      says: *Things that cost you something for nothing*, with *Worth knowing (not
+      broken)* under it, over a container that keeps dying (invariant 14). And
+      Waste is the one pane the sidebar never badges, so the compensation for the
+      Alerts silence lands where nothing sends the reader. Re-title, re-home or
+      badge it — in `screens/analysis.md`, with the wording of the two columns,
+      which says **since this pod started** because a rollout resets the count
+- [ ] **Restarts, as a counted row and never an alert card** — the hole D101
+      left visible: a container that is fine right now and keeps dying on a long
+      cycle draws nothing from rules 1, 2, 5 or 6 between its restarts. **One row
+      per container, both numbers that container's own**: `restarts`, and how long
+      the run it is in has lasted — from `state.running.started_at` and **not**
+      from `last_terminated.finished_at`, which the two synthesized `137`s leave
+      `null` on the gang-restart shape (D100's measurement). Sorted worst first,
+      **never divided**
+      ([PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)); no
+      sum across a workload's pods, whose count and age would live in two
+      different domains, and no grouping on `pod.owner`, which is the ReplicaSet
+      until Phase 5 and loses the count on every deploy. **The row jumps to the
+      container's pod and not to a finding** — there is no finding, which is the
+      whole reason the row exists, and the `Report` shape box above has to allow
+      that (the unbound PVC and the parked ReplicaSet are the same case).
+      **It may not name how the last run ended** — `ending` and `exit_meaning` are private to `rules.rs`,
+      frozen at Phase 3 close, and re-spelling the translation here is the defect
+      [D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)
+      exists to prevent. That one is a convention with no gate behind it —
+      `Terminated`'s `reason` and `exit_code` are `pub`, so a raw `exit 137` in a
+      row is reachable and is wrong
 - [ ] **Posture** rows: the plain read-only hostPath mounts that no longer
       appear in Alerts — CNI/CSI/node agents are supposed to have them, so
       they are a list to review, not an alarm to answer. Computed **here**,
