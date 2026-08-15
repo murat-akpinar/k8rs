@@ -6783,6 +6783,137 @@ Rule 15 keeps `restarts == 0` as the stand-in
 gave it; what changes today is that the comments explaining it may no longer say
 the field cannot be read.
 
+### D100 — the field that separates a settled restart from a live one was already in the snapshot, and rule 5 never read it (2026-08-15)
+
+The box asked to be closed one of two ways: *rule 5 lives with the permanence as
+it does for every other ending, or something not yet found does it.* It is the
+second, and the thing was not merely findable — it was **already decoded**, and
+its own doc comment names rule 5 as one of the rules it is evidence for.
+
+**The premise that had to go.** The box ended *"no measured field separates them,
+and these records carry no stamps either — so `Finding::timestamp` is `None` and
+no clock can age the card out."* Half is right: the synthesized `lastState` a
+gang restart writes carries **neither** stamp, measured `null` in 100% of samples
+on both pods, so rule 5's `timestamp` really is `None` for this shape. The other
+half is false. `state.running.startedAt` — *when the current run began* — sits on
+the same container in the same object, is written by a different path, and does
+not freeze.
+
+**Measured on kind v1.36.1, `K8RS_CLUSTER=review`, 20,458 container-samples at
+5 Hz across two runs**, restricted to the samples where rule 5 actually draws:
+
+| object | serving samples | age min → max | distinct `startedAt` |
+|---|---|---|---|
+| settled gang pod (3 restarts, then quiet) | 1629 per container | 5.4 s → **923.6 s** | **1** |
+| thrashing gang pod (never stops) | 853–1225 | 0 → **7.7 s** | 74 |
+| slow crasher (60 s cycle) | 424 | 0 → 60.4 s | 6 |
+| native sidecar (6 s cycle) | 49 | 0 → 7.0 s | 6 |
+
+`lastState` was byte-identical across all three of the settled pod's restarts
+while `startedAt` moved on every one. **It is not the transient
+`AllContainersRestarting` turned out to be**, and the difference is structural
+rather than lucky: a condition is a boolean somebody has to keep current, while a
+timestamp is a monotone function of `now` that changes only when the thing it
+dates happens. The two objects are indistinguishable for the first ~8 seconds
+after a restart, which is correct — a pod that restarted five seconds ago *is* a
+thrashing pod as far as any object can tell.
+
+**The field cannot be missing in the branch that needs it**, which is what makes
+this a suppression that can be proved rather than assumed: `doing_its_job`
+returns `c.ready` only under `ContainerState::Running`, and rule 5 returns `None`
+on its one other true arm (a finished init container) before reaching the card.
+So *serving* implies *Running* implies the variant that carries `started_at`.
+14,672 running-container samples, `kube-system` included: zero without it.
+
+**The ruling, and it is [`out_of_memory`](src/rules.rs)'s clause with rule 5's
+field.**
+
+1. `Finding::timestamp` comes from `state.running.started_at` on the serving
+   branch. This stands on its own merits: rule 5's own doc says *the age is when
+   the counter last went up*, and for a serving container that moment is exactly
+   this field. Today the `RestartRule` card renders with no age at all, on a
+   screen with an age column, and sorts **first** in its band rather than last
+   because `Option`'s derived `Ord` puts `None` first.
+2. The serving card is suppressed once that age passes **`NOT_READY_GRACE`** —
+   the constant `out_of_memory` already uses for the identical question, *is this
+   old news on a container that has been fine since?* Its doc claims *one
+   threshold for one question, so changing it moves all four*; making it five
+   keeps that claim true and inventing a sixth number makes it false.
+3. **Absence keeps the card, a future stamp keeps the card, and `!serving` never
+   ages out** — `is_some_and`, copied from `out_of_memory`, never
+   `unwrap_or(huge)`. The exemption has to be proved.
+
+**The cost, named here rather than discovered later.** A container on a long
+cycle — an OOM every thirty minutes, a JVM that dies on the nightly batch — has
+an age that exceeds ten minutes for most of its cycle, so its rule 5 card is on
+the screen for ten minutes in every thirty instead of always.
+
+**The first draft of this paragraph softened that with a sentence that is
+false**, and `dev-core` refused to copy it into the code: *"rule 6 still draws on
+the same container throughout, so the screen is not blank about it."* It does
+not. `previous_run_failed` returns `None` on `doing_its_job(c)` **with no clock
+at all** — the instant the container is serving, not ten minutes later — and
+rule 2 carries the same clause with the same threshold while rule 1 needs a
+backoff state the container is not in. So between restarts that container draws
+**nothing from any rule**, and the two green `nothing(...)` assertions this box
+adds at the pinned clock are whole captures drawing zero cards.
+
+Accepted anyway, and the correction changes which argument carries it. Not *the
+screen still says something* — it does not. What holds is that **the gap is
+older than this change and is shared by four rules**: rule 5's permanence was
+covering it by accident, at the price of a permanent card on every pod that has
+ever hiccuped, which is the defect this box exists to remove. Rule 5 was in fact
+the *least* consistent of the four and is now the most persistent — quiet after
+ten minutes where rule 6 is quiet immediately. The alternative discriminator, a
+restart *rate*, is either history (invariant 5 forbids it) or `restarts ÷ pod
+age`, which is a second number deciding what the clock means and two rules
+wearing one card. **What is left over is a real hole and it gets its own box**:
+nothing in the rule set reports a container that is fine right now and keeps
+dying on a long cycle. That is one question for the whole set, not a fifth
+threshold bolted onto rule 5.
+
+**What was *not* done, and why the tempting version is worse.** The same
+measurement found rule 5's severity flipping WARN ↔ CRITICAL every restart cycle
+on the thrashing pod — 1104 WARN against 354 CRITICAL samples of one container —
+because a gang restart parks it in `waiting: RestartingAllContainers` for ~2 s of
+every ~9 s and `severity` is keyed on `!serving`. The tidy-looking fix is to
+delete `&& !serving` and key severity on the count alone. **It is refused**:
+`tests/fixtures/restarts10serving.json` is a captured object whose entire purpose
+is that a container serving at ten restarts is WARN and not CRITICAL, so deleting
+the clause deletes the fixture's reason to exist. What lands instead is one more
+string in the exemption already on that line — `RestartingAllContainers` beside
+`CrashLoopBackOff` — so `serving` is never sampled *during* a restart. Same
+class as the box's own rejection of `AllContainersRestarting`: a point sample of
+a transient must not decide what the user sees.
+
+**The PM closed this box wrongly on the first attempt, and the arithmetic is the
+lesson.** `restarts10serving.json` reads `finishedAt 22:54:14` → `startedAt
+22:59:26`, and that 5m12s was offered as *how long it has been serving*. It is
+not: it is the gap between the runs, which is the CrashLoopBackOff backoff cap.
+The age is `now − startedAt`, and at the pinned `now` **both** restart fixtures
+have been serving ~49 hours, so both are suppressed and their serving-card
+assertions have to move. The pattern that proves it is already in the file, on
+the rule this borrows from: `an_old_kill_on_a_container_that_has_been_fine_since_is_not_on_the_broken_now_screen`
+reads one capture at two moments through `findings_at`. Same bytes, two clocks —
+no new fixture for the ordinary ending.
+
+**One object is still owed and it is on the capture trip**
+([D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)
+puts it with the PM): a settled gang-restart pod, two containers,
+`restartPolicyRules {In,[3]} → RestartAllContainers`, three restarts then quiet,
+captured while `2/2 Ready`, so the committed bytes carry
+`lastState {137, RestartingAllContainers, startedAt: null, finishedAt: null}`
+beside a live `state.running.startedAt`. Nothing in the corpus holds
+`RestartingAllContainers` at all today. Note for the manifest, measured: **the
+API rejects `restartPolicyRules` unless the container also sets its own
+`restartPolicy`** — `must specify restartPolicy when restart rules are used` —
+which `broken.yaml`'s comment block does not mention.
+
+**This is not the debounce [D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)
+refused.** That one needed `analyze` to remember *I saw an exit 3 four seconds
+ago*. This is a pure function of `(now, object)` with `now` carried on the
+snapshot — invariant 5's own mechanism, which rules 2, 7, 10 and 13 already use.
+
 ## Decisions made
 
 ### Product

@@ -1576,50 +1576,7 @@ this plan is delivery mechanism for what this phase produces.
       the silent-drop failure rather than removing it, onto users whose cluster is
       newer than the pin, which the Phase 13 connect-check box now owes a sentence
       for
-- [ ] **`spec.containers[].restartPolicyRules` is decodable now and still
-      reaches no rule, so rule 15's stand-in is a proxy where the real signal is
-      available** — the field arrives at `v1_34` and the pin is `v1_36`
-      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
-      but **decodable is not present**: invariant 6 prunes the watch to the fields
-      the snapshot types *name*, and none names this one. So this is a snapshot
-      field, a prune line, a fixture that carries it, and only then the rule
-      change — not *read a field*. What it buys is D97's own named residual gap:
-      rule 15 fires on `restarts == 0`, and a container declaring a retry rule on
-      its own exit code comes back under `Never`, which is KEP-5307's headline use
-      case and this rule's headline false positive — measured on kind v1.36.1, a
-      pod `Never` with one retry rule on `exit 3` sat in `CrashLoopBackOff` at
-      five restarts. **The count cannot be dropped for the field**: a rule matched
-      on exit code against the declared rules answers *will it retry this exit*,
-      which is what the card claims, but the window is one exit wide and the
-      object to prove it on has to be captured. `scripts/broken.yaml` already
-      declares gang restarts, so the capture is a variant of an object the recipe
-      builds, not a new trip
-- [ ] **`terminatingReplicas` is decodable now, and a pod on its way out is
-      currently counted as a pod that is missing** — added to both
-      `DeploymentStatus` and `ReplicaSetStatus` after 1.32
-      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).
-      The workload rules read ready-versus-desired and cannot today tell a
-      rollout draining old pods from a Deployment that genuinely cannot fill its
-      replicas — the shape every operator sees during a normal deploy, which is
-      the false-positive class that makes a tool get muted. Same shape as the box
-      above: snapshot field, prune line, fixture, then the rule. Check first
-      whether `explains_a_shortfall` is where it belongs rather than a rule of its
-      own
-- [ ] **In-place resize makes *what a container asks for* and *what it has* two
-      different numbers, and every resource rule reads only the first** —
-      `podStatus.resources` and `podStatus.allocatedResources` arrive after 1.32
-      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
-      beside the `.status.resize` string this file already records as an
-      unreachable branch at the old pin. Rules 8/9 and the Capacity report compare
-      `spec.containers[].resources` against the node, which is the *request*, not
-      the allocation, and after a resize those disagree. **Decide the scope before
-      writing anything**: this may be one snapshot field and a fallback, or it may
-      be out of scope entirely under the invariant-13 guard — *would someone who
-      runs clusters meet this in a normal week* is a genuine question for a
-      feature that went beta in 1.33, and the honest answer may be no until it is
-      on by default. Answer it in NOTES either way; do not leave it as a silent
-      omission, which is exactly what the pin was
-- [ ] **A pod that used its own restart rule three times and has served ever
+- [x] **A pod that used its own restart rule three times and has served ever
       since carries two permanent WARN cards, and the object says it is over** —
       measured on kind v1.36.1: `gang-restart`, `2/2 Ready`, `phase: Running`,
       three declared gang restarts and then quiet, draws *"Container has been
@@ -1648,7 +1605,60 @@ this plan is delivery mechanism for what this phase produces.
       that basis: rule 5 lives with the permanence as it does for every other
       ending, or something not yet found does it. Found by the operator review of
       the D95 box; the correction to its own first answer came from the same
-      reviewer, measured
+      reviewer, measured.
+      **Closed 2026-08-15 the second way
+      ([NOTES § D100](NOTES.md#d100--the-field-that-separates-a-settled-restart-from-a-live-one-was-already-in-the-snapshot-and-rule-5-never-read-it-2026-08-15)),
+      and the thing not yet found was already decoded**: `state.running.startedAt`
+      — *when the current run began* — on the live state rather than in the frozen
+      `lastState`, and its own doc comment already named rule 5 as one of the rules
+      it is evidence for. **Measured, 20,458 container-samples at 5 Hz**: the
+      settled pod climbs to 923.6 s off **one** value while the thrashing pod
+      never exceeds 7.7 s across 74; `lastState` stayed byte-identical across all
+      three gang restarts while `startedAt` moved on every one. It is not a
+      transient the way `AllContainersRestarting` was — a timestamp is a monotone
+      function of `now`, not a boolean somebody has to keep current — and it
+      **cannot be missing in the branch that needs it**, because `serving` implies
+      `Running` implies the variant that carries it (0 absent in 14,672 running
+      samples).
+      **Three changes, no new constant**: the serving card is dated off that field
+      instead of a `finishedAt` a gang restart leaves `null`; it is suppressed once
+      that age passes `NOT_READY_GRACE`, in `out_of_memory`'s clause shape, so an
+      absent or future stamp **keeps** the card; and `RestartingAllContainers`
+      joins `CrashLoopBackOff` in the waiting exemption, which stops the same card
+      measurably flipping WARN ↔ CRITICAL every ~9 s. Deleting `&& !serving`
+      looked tidier and is refused in writing — `restarts10serving.json` exists to
+      prove that a container serving at ten restarts is WARN.
+      **The PM's own first attempt to close this was wrong and the arithmetic is
+      the lesson**: `startedAt − finishedAt` is the backoff between runs, not the
+      age of the current one. At the pinned clock both restart fixtures have been
+      serving ~49 h, so their serving-card assertions moved to `findings_at` —
+      same bytes, two moments, the pattern rule 2's own age-out test already uses.
+      27 cards → 25 on the whole capture.
+      **What the close is honest about**: the settled gang-restart object is still
+      owed and rides the capture trip below, so the exemption is proved on a
+      decoded plant (D40) meanwhile — and `dev-core` caught a **false sentence in
+      D100 itself** before copying it into the code, which is where the box below
+      came from
+- [ ] **Nothing reports a container that is fine right now and keeps dying on a
+      long cycle, and it is one question for four rules rather than a fifth
+      threshold on one** — surfaced by
+      [D100](NOTES.md#d100--the-field-that-separates-a-settled-restart-from-a-live-one-was-already-in-the-snapshot-and-rule-5-never-read-it-2026-08-15)'s
+      cost paragraph, whose first draft claimed rule 6 covers the gap and was
+      **measured false by the dev who was told to implement it**: rule 6 returns
+      `None` on `doing_its_job(c)` with **no clock at all**, rule 2 carries the
+      same clause with the same threshold, and rule 1 needs a backoff state the
+      container is not in. So a container that OOMs every thirty minutes, or a JVM
+      that dies on the nightly batch, draws **nothing from any rule** between its
+      restarts — proved by the two whole-capture `nothing(...)` assertions D100's
+      box added. The gap is older than that box and rule 5's permanence was
+      covering it by accident, at the price of a card on every pod that has ever
+      hiccuped; removing the accident is right and leaves the hole visible.
+      **Do not answer it with a rate**: history is invariant 5's forbidden, and
+      `restarts ÷ pod age` is a second number deciding what the clock means. The
+      honest candidates are the **Waste/Capacity report** — where *this workload
+      has been unhealthy for a long stretch* is a sentence that belongs — or a
+      single shared clause the four rules read, decided once. Answer it in NOTES
+      before writing anything, because whichever way it goes it moves four rules
 - [ ] **Rules 5 and 6 print the identical four-line action on two adjacent cards,
       and no `CrashLoopBackOff` is needed to see it** — on a container past the
       restart band whose last recorded run is a lost status, rule 5 draws the
@@ -1965,7 +1975,12 @@ this plan is delivery mechanism for what this phase produces.
       (`docker restart kind-worker`), which is the half of the rule-1-versus-rule-5
       producer asymmetry that is argued rather than seen. All three are `k8s-admin`
       or a capture trip, not a dev
-      ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15))
+      ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
+      **(d) joined on 2026-08-15**: a pod under `restartPolicy: Never` whose
+      container declares a `restartPolicyRules` entry matching its own exit code,
+      which the kubelet then restarts — rule 15's named false positive, and the
+      one object the `restartPolicyRules` box below cannot be written without.
+      Four objects, one trip
 - [ ] **`crash_looping`'s `if c.restarts > 0` is the one surviving mutant in
       `rules.rs`** — `cargo mutants` reports it MISSED at HEAD and in every round
       of the clean-exit box, in three different line positions, so it is neither
@@ -1985,6 +2000,61 @@ this plan is delivery mechanism for what this phase produces.
       although the requirement is met. The bias is toward a false red and never a
       false green, which is the safe direction; whoever meets that failure fixes
       the helper, not the assertion
+- [ ] **`spec.containers[].restartPolicyRules` is decodable now and still
+      reaches no rule, so rule 15's stand-in is a proxy where the real signal is
+      available** — the field arrives at `v1_34` and the pin is `v1_36`
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
+      but **decodable is not present**: invariant 6 prunes the watch to the fields
+      the snapshot types *name*, and none names this one. So this is a snapshot
+      field, a prune line, a fixture that carries it, and only then the rule
+      change — not *read a field*. What it buys is D97's own named residual gap:
+      rule 15 fires on `restarts == 0`, and a container declaring a retry rule on
+      its own exit code comes back under `Never`, which is KEP-5307's headline use
+      case and this rule's headline false positive — measured on kind v1.36.1, a
+      pod `Never` with one retry rule on `exit 3` sat in `CrashLoopBackOff` at
+      five restarts. **The count cannot be dropped for the field**: a rule matched
+      on exit code against the declared rules answers *will it retry this exit*,
+      which is what the card claims, but the window is one exit wide and the
+      object to prove it on has to be captured — `scripts/broken.yaml` keeps
+      `restartPolicyRules` **off** the rule-15 fixture on purpose, so this is a
+      new object, not a variant of one already there. **It rides the capture trip
+      three boxes up** rather than opening its own: that box already owes a
+      cluster for three objects, and one trip is the whole argument for grouping
+      them.
+      **Placed here rather than at the front of the phase, and that is a PM call
+      made in writing.** These three D99 follow-ups were written directly under
+      the box that spawned them, which put an *enhancement* ahead of every
+      operator-review finding above — a permanent WARN card on a healthy pod, a
+      run Kubernetes lost that k8rs says nothing at all about. Weighed against
+      those, the defect this box closes is **one backoff window wide**, on a beta
+      feature, and costs a snapshot field, a prune line, a capture and a rule
+      change. The severe ones go first; the ordering, not the value, is what
+      changed
+- [ ] **`terminatingReplicas` is decodable now, and a pod on its way out is
+      currently counted as a pod that is missing** — added to both
+      `DeploymentStatus` and `ReplicaSetStatus` after 1.32
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).
+      The workload rules read ready-versus-desired and cannot today tell a
+      rollout draining old pods from a Deployment that genuinely cannot fill its
+      replicas — the shape every operator sees during a normal deploy, which is
+      the false-positive class that makes a tool get muted. Same shape as the box
+      above: snapshot field, prune line, fixture, then the rule. Check first
+      whether `explains_a_shortfall` is where it belongs rather than a rule of its
+      own
+- [ ] **In-place resize makes *what a container asks for* and *what it has* two
+      different numbers, and every resource rule reads only the first** —
+      `podStatus.resources` and `podStatus.allocatedResources` arrive after 1.32
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
+      beside the `.status.resize` string this file already records as an
+      unreachable branch at the old pin. Rules 8/9 and the Capacity report compare
+      `spec.containers[].resources` against the node, which is the *request*, not
+      the allocation, and after a resize those disagree. **Decide the scope before
+      writing anything**: this may be one snapshot field and a fallback, or it may
+      be out of scope entirely under the invariant-13 guard — *would someone who
+      runs clusters meet this in a normal week* is a genuine question for a
+      feature that went beta in 1.33, and the honest answer may be no until it is
+      on by default. Answer it in NOTES either way; do not leave it as a silent
+      omission, which is exactly what the pin was
 - [x] Exit-code translation table (137/143/1/126/127) — **137 has four readings, the object names three of them, and where it names none the table refuses to guess**: `reason: OOMKilled` is memory, `reason: RestartingAllContainers` is the pod's own restart rules removing the container and is not a failure at all, `reason: ContainerStatusUnknown` is not a kill at all but the number the kubelet writes where it could not read a status, and with none of those the row names the signal and stops. The old "almost always OOM" row was written before the rule had `reason` beside the code ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)); **what replaced it named the opposite cause just as flatly and was corrected on 2026-08-15** — *did not stop when it was asked to* is false of an init container that may hold no probe, of a cgroup kill whose word was lost on a starved host, and of a rebuilt sandbox ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15))
 - [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket
       **or any directory one sits under**, or a writable host mount. There is no

@@ -166,6 +166,7 @@ pub struct Finding {
     /// | rule | the field | the one it is not |
     /// |---|---|---|
     /// | 1, 2, 6 | [`Terminated::finished_at`] on [`ContainerSnapshot::last_terminated`] | `started_at`, one line above it |
+    /// | 5 | serving: `started_at` on [`ContainerState::Running`] — when the run the counter last opened began, and the field that ages the card out (NOTES § D100); otherwise [`Terminated::finished_at`] like the row above | the *previous* run's [`Terminated::started_at`], which dates the run before this one |
     /// | 7 | the **later** of [`PodSnapshot::ready`]'s `last_transition` and the container's own `started_at` — a floor, since `Ready` is pod-scoped (NOTES § D71) | [`PodSnapshot::scheduled`]'s |
     /// | 8 | **`None`** — a standing property, not an event (NOTES § D69) | `metadata.creationTimestamp` |
     /// | 12 | `deletionTimestamp − grace` (NOTES § D46) | the `deletionTimestamp` itself, the deadline |
@@ -1327,8 +1328,9 @@ const RESTARTS_CRITICAL: i32 = 10;
 /// Kubernetes' own answer to *"how long may a pod take to become ready before that counts as a
 /// failure"* (NOTES § D46, § D51, § D72).
 ///
-/// **Read by rules 2, 7, 10 and 13** — one threshold for one question, so changing it moves all
-/// four.
+/// **Read by rules 2, 5, 7, 10 and 13** — one threshold for one question, so changing it moves all
+/// five. Rule 5 joined them on 2026-08-15 for rule 2's question exactly: *is this old news on a
+/// container that has been fine since?* (NOTES § D100).
 const NOT_READY_GRACE: SignedDuration = SignedDuration::from_mins(10);
 
 /// **How long a pod may sit with nothing having judged it at all** — two minutes, anchored at
@@ -1432,7 +1434,7 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
             findings.extend(out_of_memory(&snapshot.now, pod, c));
             findings.extend(image_not_pulled(pod, c));
             findings.extend(container_config_missing(pod, c));
-            findings.extend(restarting_repeatedly(pod, c));
+            findings.extend(restarting_repeatedly(&snapshot.now, pod, c));
             findings.extend(previous_run_failed(pod, c));
             findings.extend(running_but_not_ready(&snapshot.now, pod, c));
             findings.extend(stopped_for_good(pod, c));
@@ -2536,28 +2538,80 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 /// does not move it**: the band answers *is this container serving*, and a container that keeps
 /// finishing early and is not ready now is as down as one that keeps crashing. A lifetime counter
 /// carries no *rate*, and REQUIREMENTS marks the two numbers *(suggestion)* (NOTES § D71). The age
-/// is when the counter last went up.
+/// is when the counter last went up — **and for a serving container that moment is the start of
+/// the run it is in**, `state.running.startedAt`, not the frozen `lastState` that a restart rule
+/// leaves with no stamp at all (NOTES § D100).
+///
+/// **The serving card ages out of the screen at [`NOT_READY_GRACE`], and nothing else does**
+/// (NOTES § D100). `restartCount` never goes down, so a container that used its three restarts
+/// and has served ever since would carry a permanent WARN on a screen whose subject is *what is
+/// broken now* — rule 2's question exactly, answered with rule 2's threshold and rule 2's
+/// `is_some_and`: **a container with no start time keeps its card, and so does one whose start
+/// time is in the future**, because the exemption is proved rather than assumed. A container that
+/// is **not** serving never ages out, whatever the count.
+///
+/// **What it costs, measured against the file rather than assumed:** a container on a long cycle
+/// — an OOM every thirty minutes, a JVM that dies on the nightly batch — is off this card for
+/// most of that cycle, and **no other rule here fills the gap while it is serving**.
+/// [`previous_run_failed`] stands down on the same `doing_its_job`, [`out_of_memory`] on the same
+/// clause with the same threshold, and [`crash_looping`] needs a backoff state the container is
+/// not in. So between ten minutes after a restart and the next one the screen is quiet about it.
+/// Accepted for the reason rule 2 already accepts it on a kill that is worse to miss than a
+/// count: the alternative is a restart *rate*, which is either history — invariant 5 forbids it —
+/// or `restarts ÷ pod age`, a second number deciding what the clock means (NOTES § D100, whose
+/// own sentence about rule 6 drawing throughout does not hold: that rule is silent on a serving
+/// container by design).
+///
+/// **[`RESTART_ALL`] joins `CrashLoopBackOff` in the waiting exemption for a reason about
+/// sampling, not about gang restarts** (NOTES § D100). A pod whose restart rule fires parks every
+/// container in that waiting reason for about two seconds of every cycle, and the severity above
+/// is keyed on `serving` — so the same card was measured flipping WARN ↔ CRITICAL every restart,
+/// 1104 samples against 354 on one container. The count is unaffected and the card returns the
+/// moment the container is running again: what is refused is a *point sample of a transient*
+/// deciding what the user sees — the same objection this rule's `CrashLoopBackOff` exemption
+/// makes, one reason over. **What it costs, if that state ever stopped being transient:** a
+/// container held in it draws nothing from this rule, and nothing from rule 13 either, whose
+/// first condition is a container that has never run. A wedged kubelet is the N-series' subject
+/// and not this one's, but the hole is named rather than left to be found.
 ///
 /// **Both halves of the band are captured**: `restarts10.json` is past ten restarts and not
-/// serving, and `restarts10serving.json` is the same count on a container that is. **No ending
-/// but [`Failed`](Ending::Failed) is**, and no committed capture reaches one: every captured
-/// restart history exits non-zero, and the two objects that do end cleanly — `exit0.json` and
-/// `sigterm.json` — are in `CrashLoopBackOff`, which is this rule's own exemption. The others are
-/// synthesized on decoded copies (NOTES § D40).
-fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
+/// serving, and `restarts10serving.json` is the same count on a container that is — read at a
+/// moment inside its run, since at the pinned `now` it has been serving 49 hours and the clause
+/// above has stood it down. **No ending but [`Failed`](Ending::Failed) is**, and no committed
+/// capture reaches one: every captured restart history exits non-zero, and the two objects that do
+/// end cleanly — `exit0.json` and `sigterm.json` — are in `CrashLoopBackOff`, which is this rule's
+/// own exemption. The others are synthesized on decoded copies (NOTES § D40). **No committed
+/// capture holds [`RESTART_ALL`] in `state.waiting` either** — that object is on the capture trip
+/// (NOTES § D100), so the new exemption is proved on a decoded copy and not on bytes.
+fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     // An init container that has finished successfully is out of this rule's subject altogether,
     // not merely a milder case of it: its count is frozen for the life of the pod, and every
     // sentence below is about a container that is *still* being restarted (NOTES § D75).
     if c.role == ContainerRole::Init && doing_its_job(c) {
         return None;
     }
-    if c.restarts < RESTARTS_WARN || waiting(c).map(|(r, _)| r) == Some("CrashLoopBackOff") {
+    if c.restarts < RESTARTS_WARN
+        || matches!(
+            waiting(c).map(|(r, _)| r),
+            Some("CrashLoopBackOff" | RESTART_ALL)
+        )
+    {
         return None;
     }
     // Every container that reaches here is judged by the expression this rule always used, and
     // the one init case that differs returned above — so the title below cannot say "it is
     // serving now" about a container that has stopped.
     let serving = doing_its_job(c);
+    // *Serving* implies [`ContainerState::Running`] here — the one other arm `doing_its_job`
+    // answers `true` on returned above — so this is `None` only where the API omitted the field,
+    // and `is_some_and` keeps the card in that case and on a future stamp (NOTES § D100).
+    let running_since = match &c.state {
+        ContainerState::Running { started_at } => started_at.as_ref(),
+        _ => None,
+    };
+    if serving && running_since.is_some_and(|t| now.0.duration_since(t.0) > NOT_READY_GRACE) {
+        return None;
+    }
     // `claim` carries its own leading comma so the last arm can add nothing at all, and every
     // arm's action names only what its own command prints (invariant 4).
     let (claim, action, cmd) = match c.last_terminated.as_ref().map(ending) {
@@ -2622,10 +2676,16 @@ fn restarting_repeatedly(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Fin
         kubectl_cmd: cmd,
         owner: pod.owner.clone(),
         object: pod.id.clone(),
-        timestamp: c
-            .last_terminated
-            .as_ref()
-            .and_then(|t| t.finished_at.clone()),
+        // The moment the counter last went up, from whichever field records it for this shape:
+        // for a serving container that is the start of the run it is in, and the ending it came
+        // out of carries no stamp at all when a restart rule wrote it (NOTES § D100).
+        timestamp: if serving {
+            running_since.cloned()
+        } else {
+            c.last_terminated
+                .as_ref()
+                .and_then(|t| t.finished_at.clone())
+        },
     })
 }
 

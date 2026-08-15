@@ -3668,6 +3668,73 @@ fn findings(names: &[&str]) -> Vec<Finding> {
     findings_at(names, now())
 }
 
+/// **When the run a container is sitting in began** — `state.running.startedAt`, which is rule
+/// 5's stamp on a serving card and the field its suppression is measured from (NOTES § D100).
+/// Panics on a container that is not running, because every caller below is reading a serving
+/// card and a `None` there would silently move the moment to the pin.
+fn began_running(p: &PodSnapshot, name: &str) -> Time {
+    match &container(p, name).state {
+        ContainerState::Running { started_at } => started_at
+            .clone()
+            .expect("a running container the API stamped"),
+        other => panic!("{name} is not running, so it has no current run: {other:?}"),
+    }
+}
+
+/// **A moment `mins` minutes into that run.** Every serving-card assertion in this file is read
+/// at one of these rather than at [`now`], because the restart captures were taken 49 hours
+/// before the pin and rule 5 stands its serving card down after [`NOT_READY_GRACE`]
+/// (NOTES § D100) — the same bytes at two clocks, which is what
+/// `an_old_kill_on_a_container_that_has_been_fine_since_…` does for rule 2.
+fn into_the_run(p: &PodSnapshot, name: &str, mins: i64) -> Time {
+    Time(
+        began_running(p, name)
+            .0
+            .checked_add(SignedDuration::from_mins(mins))
+            .expect("a moment inside a captured run"),
+    )
+}
+
+/// The pod, and the moment five minutes into its container's current run — the pair every
+/// serving-card test hands to [`analyze`].
+fn serving_at(p: PodSnapshot, name: &str) -> ClusterSnapshot {
+    let moment = into_the_run(&p, name, 5);
+    pods_at(vec![p], moment)
+}
+
+/// **Five minutes into the newest run this pod holds** — a moment where every card the pod draws
+/// is still news, whichever container carries one. For the tests whose subject is not rule 5 at
+/// all but whose pod has a serving container in rule 5's band: that card ages out at
+/// [`NOT_READY_GRACE`] (NOTES § D100), and at the pin it would be missing from a set the test is
+/// comparing against another set. [`now`] for a pod with nothing running — no card such a pod
+/// draws can age out, because rule 5's clause is the serving branch's alone.
+fn while_its_cards_draw(p: &PodSnapshot) -> Time {
+    p.containers
+        .iter()
+        .filter_map(|c| match &c.state {
+            ContainerState::Running { started_at } => started_at.clone(),
+            _ => None,
+        })
+        .max_by_key(|t| t.0)
+        .map_or_else(now, |began| {
+            Time(
+                began
+                    .0
+                    .checked_add(SignedDuration::from_mins(5))
+                    .expect("a moment inside a captured run"),
+            )
+        })
+}
+
+/// [`analyze`] over that pair, with the cards printed at *that* moment rather than at the pin —
+/// so `--nocapture` shows the age the reader of a serving card actually sees.
+fn serving_findings(p: PodSnapshot, name: &str) -> Vec<Finding> {
+    let snapshot = serving_at(p, name);
+    let all = analyze(&snapshot);
+    show_at(&all, &snapshot.now);
+    all
+}
+
 /// One finding as `--once` would print it (`screens/once.md`) — so that
 /// `cargo test -- --nocapture` shows the sentences a user reads and not a `Debug` dump
 /// of the struct they came in. CLAUDE.md's "green tests are not working software" gate
@@ -3699,8 +3766,14 @@ fn titles(all: &[Finding]) -> Vec<&str> {
 }
 
 fn show(all: &[Finding]) {
+    show_at(all, &now());
+}
+
+/// The same, for the tests that read a capture at a moment of their own: the age on the card is
+/// the one *that* reader sees, and printing it against the pin would draw none at all.
+fn show_at(all: &[Finding], now: &Time) {
     for f in all {
-        println!("{}", card(f, &now()));
+        println!("{}", card(f, now));
     }
 }
 
@@ -4573,10 +4646,19 @@ fn a_pod_out_of_the_service_is_only_a_finding_once_it_has_been_that_way_a_while(
 /// Rule 5's warn band and the sentence that only holds for a container that is
 /// actually serving — and rule 6's silence beside it, which is the same fixture's
 /// second job.
+///
+/// **One capture, two clocks** (NOTES § D100). Five minutes into the run this container is
+/// sitting in, three restarts is news and the card draws. Forty-nine hours later — the pinned
+/// [`now`], which is where the committed bytes sit — the same container has been serving all
+/// that time and the card is gone, because `restartCount` never comes down and nothing else
+/// would ever clear it. The second direction is the one the box is about: without it this card
+/// is on the screen for the life of the pod.
 #[test]
 fn a_container_that_looks_fine_still_gets_a_card_for_how_often_it_has_died() {
-    let all = findings(&["restarts"]);
-    show(&all);
+    let snapshot = serving_at(pod("restarts"), "flaky");
+    let news = snapshot.now.clone();
+    let all = analyze(&snapshot);
+    show_at(&all, &news);
     assert_eq!(
         all.len(),
         1,
@@ -4613,6 +4695,252 @@ fn a_container_that_looks_fine_still_gets_a_card_for_how_often_it_has_died() {
         "and it stays WARN whatever the count while the container is serving: a red card \
          whose own title says it is serving is what teaches a reader to stop believing \
          red (NOTES § D2)"
+    );
+
+    // **And the card is dated, which it was not until D100.** The stamp is the start of the run
+    // the container is in — the moment the counter last went up — and not the `lastState` this
+    // capture happens to carry one on: a gang restart leaves that record with no stamp at all,
+    // and the card would render with no age on a screen with an age column.
+    assert_eq!(
+        counted.timestamp.as_ref(),
+        Some(&began_running(&pod("restarts"), "flaky")),
+        "rule 5 dates a serving card by `state.running.startedAt`"
+    );
+    assert_eq!(
+        counted.age(&news).as_deref(),
+        Some("5 min ago"),
+        "and the reader is told when, in the words `screens/widgets.md` spells"
+    );
+
+    // **The other direction, and the whole of the box.** Same bytes, 49 hours later.
+    nothing(
+        &findings(&["restarts"]),
+        "this container used its three restarts two days ago and has served ever since. \
+         Nothing is broken *now*, the count can never come down, and no other rule carries \
+         this pod — so the card would be permanent (NOTES § D100)",
+    );
+}
+
+/// **The suppression's edges, and the two shapes that must survive it** (NOTES § D100).
+///
+/// The clause is [`out_of_memory`]'s, with rule 5's field: `is_some_and`, never
+/// `unwrap_or(huge)`. So the exemption has to be **proved by the object** — a container the API
+/// gave no start time, and one whose start time is in the future, both keep the card, because
+/// neither says *this container has been fine for ten minutes*. Written the other way round they
+/// would both silence it, and the second one silences it for a whole hour on a node whose clock
+/// is ahead.
+///
+/// **The boundary is asserted on both sides of [`NOT_READY_GRACE`]**, since a threshold nobody
+/// crosses is a threshold nobody has tested — the technique rule 7's test uses, and `>` rather
+/// than `>=` is what puts the moment itself on the drawing side.
+///
+/// **Neither of the two shapes is in the corpus and neither can be** — D100 measured 14,672
+/// running-container samples with a `startedAt` and none without, and a future stamp needs a
+/// skewed clock rather than a broken workload. They are planted on a decoded copy, which is what
+/// a plant is for: the requirement is about what the *rule* may assume, not about what this
+/// cluster happened to write (NOTES § D40).
+#[test]
+fn the_serving_card_ages_out_only_where_the_object_proves_it_has_been_fine() {
+    let base = pod("restarts10serving");
+    let began = began_running(&base, "flaky");
+    assert!(
+        doing_its_job(container(&base, "flaky")),
+        "every direction below is about the serving branch, which is the only one that ages out"
+    );
+
+    // The threshold itself is still news, and one second past it is not.
+    let edge = into_the_run(&base, "flaky", 10);
+    let all = findings_at(&["restarts10serving"], edge.clone());
+    show_at(&all, &edge);
+    let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    assert_eq!(
+        card.age(&edge).as_deref(),
+        Some("10 min ago"),
+        "ten minutes in, the container has not yet outlasted the grace Kubernetes' own \
+         `progressDeadlineSeconds` gives it"
+    );
+    nothing(
+        &findings_at(
+            &["restarts10serving"],
+            Time(
+                began
+                    .0
+                    .checked_add(SignedDuration::from_mins(10) + SignedDuration::from_secs(1))
+                    .expect("a second past the grace is a moment"),
+            ),
+        ),
+        "and one second past it the container has been serving longer than Kubernetes waits \
+         for a rollout, which is where this stops being news",
+    );
+
+    // **No start time: the card stays.** Read at the pin, 49 hours after the capture, where a
+    // clause written `unwrap_or(huge)` or `map_or(true, …)` would silence it.
+    let unstamped = capture_but("restarts10serving", |p| {
+        container_status(p, "flaky").state = Some(ApiContainerState {
+            running: Some(ContainerStateRunning { started_at: None }),
+            ..ApiContainerState::default()
+        });
+    });
+    assert!(
+        doing_its_job(container(&unstamped, "flaky")),
+        "the plant leaves the container serving — it is the stamp that goes, and nothing else"
+    );
+    let all = analyze(&pods_at(vec![unstamped], now()));
+    show(&all);
+    let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    assert_eq!(
+        card.timestamp, None,
+        "there is no field to date it from, so the card draws no age — and `Finding::age` \
+         answering nothing is what the renderer already handles"
+    );
+    assert_eq!(
+        card.severity,
+        Severity::Warn,
+        "and it is the serving card, unchanged: an object that cannot prove the container has \
+         been fine keeps it (NOTES § D100)"
+    );
+
+    // **A start time in the future: the card stays too.** A node whose clock is an hour ahead
+    // says nothing about how long this container has been up, and `duration_since` there is
+    // negative — which is smaller than the grace under any reading, so only the direction of the
+    // comparison keeps this card.
+    let ahead = Time(
+        now()
+            .0
+            .checked_add(SignedDuration::from_mins(60))
+            .expect("an hour past the pin is a moment"),
+    );
+    let skewed = capture_but("restarts10serving", |p| {
+        container_status(p, "flaky").state = Some(ApiContainerState {
+            running: Some(ContainerStateRunning {
+                started_at: Some(ahead.clone()),
+            }),
+            ..ApiContainerState::default()
+        });
+    });
+    assert!(
+        doing_its_job(container(&skewed, "flaky")),
+        "and this plant leaves the container serving too — a card kept because the container \
+         stopped serving would prove nothing about the clause under test"
+    );
+    let all = analyze(&pods_at(vec![skewed], now()));
+    show(&all);
+    let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    assert_eq!(
+        (card.severity, card.title.contains("it is serving now")),
+        (Severity::Warn, true),
+        "it is the serving card that survived, and not the down one: {}",
+        card.title
+    );
+    assert_eq!(
+        card.timestamp.as_ref(),
+        Some(&ahead),
+        "the card carries the field it was given, wrong clock and all"
+    );
+    assert_eq!(
+        card.age(&now()),
+        None,
+        "and `age` refuses to draw a moment that far ahead, so the reader sees a card with no \
+         age rather than one dated in the future (NOTES § D69)"
+    );
+}
+
+/// **Rule 5 is not sampled while a gang restart has the container parked** (NOTES § D100).
+///
+/// `RestartAllContainers` puts every container in the pod into
+/// `waiting: RestartingAllContainers` for about two seconds of every cycle, and this rule's
+/// severity is keyed on whether the container is serving — so the *same* card was measured
+/// flipping WARN ↔ CRITICAL on every restart, 1104 samples against 354 of one container. The
+/// exemption is one more string beside `CrashLoopBackOff` on the line that already refuses to
+/// read a container mid-restart; the alternative — deleting `&& !serving` and keying severity on
+/// the count alone — is refused in writing, because `restarts10serving.json` exists to prove a
+/// serving container at ten restarts is WARN.
+///
+/// **The control is what makes it an exemption rather than a rule that stopped firing**: the same
+/// plant with the waiting reason a container gets between ordinary restarts still draws, so the
+/// silence is keyed on *this* reason and not on waiting at all.
+///
+/// **No committed capture holds this state** — nothing in the corpus carries
+/// `RestartingAllContainers` in `state.waiting`, and the object is on the capture trip
+/// (NOTES § D100) — so it is planted on a decoded copy, exactly as
+/// `a_container_the_pods_own_restart_rule_removed_is_not_a_run_that_failed` plants it one rule
+/// over (NOTES § D40).
+#[test]
+fn a_container_a_gang_restart_has_parked_is_not_sampled_for_the_restart_card() {
+    let parked = |reason: &str| {
+        capture_but("restarts10serving", |p| {
+            let c = container_status(p, "flaky");
+            c.state = waiting_at(
+                reason,
+                Some("The container is removed because RestartAllContainers in place"),
+            );
+            c.ready = false;
+            c.started = Some(false);
+        })
+    };
+
+    let gang = parked(RESTART_ALL);
+    let c = container(&gang, "flaky");
+    println!("{c:?}");
+    assert!(
+        c.restarts >= RESTARTS_CRITICAL && !doing_its_job(c),
+        "the plant keeps the count past the red band and takes the container out of service — \
+         which is exactly the pair that used to flip the severity: {c:?}"
+    );
+    assert!(
+        restarting_repeatedly(&now(), &gang, c).is_none(),
+        "the rule is asked directly, so the silence is this clause and not a card that lost its \
+         way to the screen"
+    );
+    // And through `analyze`, where the screen is: no restart card at all on this container.
+    // **Rule 6's card is still beside it and is left alone** — this capture's previous run is a
+    // genuine `exit 1`, not the synthesized record a firing writes, so *the previous run failed*
+    // is true of it and its own exemption is a different question (NOTES § D93).
+    let all = analyze(&pods_at(vec![gang], now()));
+    show(&all);
+    assert!(
+        all.iter().all(|f| !f.title.contains("restarted")),
+        "a container parked two seconds into a restart the pod itself asked for is not this \
+         rule's subject — and least of all a CRITICAL that was a WARN a second ago \
+         (NOTES § D100): {:?}",
+        titles(&all)
+    );
+
+    // **The control on the reason.** `ContainerCreating` is what the kubelet writes for the same
+    // container between ordinary restarts, and that shape is still one the count speaks for.
+    let creating = parked("ContainerCreating");
+    let all = analyze(&pods_at(vec![creating], now()));
+    show(&all);
+    let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    assert_eq!(
+        card.severity,
+        Severity::Critical,
+        "ten restarts on a container that is not serving is the red band, and the exemption \
+         above may not reach it — otherwise the silence is `waiting` and not the reason"
+    );
+    assert!(
+        !card.title.contains("it is serving now"),
+        "and the card is the down one: {}",
+        card.title
+    );
+
+    // **And the flip itself, which is what the exemption is for**: the same object, seconds
+    // earlier, is a WARN that says the container is serving. Without the clause the screen shows
+    // these two alternately, about one container that never changed.
+    let running = only(
+        &analyze(&serving_at(pod("restarts10serving"), "flaky")),
+        "broken-restarts10serving",
+        "restarted 10 times",
+    )
+    .clone();
+    assert_eq!(
+        (
+            running.severity,
+            running.title.contains("it is serving now")
+        ),
+        (Severity::Warn, true),
+        "the same container between two parkings: {}",
+        running.title
     );
 }
 
@@ -6154,8 +6482,9 @@ fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
         doing_its_job(container(&serving, "flaky")),
         "the plant has to stay a serving container, or the clause below is not the one drawn"
     );
-    let all = analyze(&pods_at(vec![serving], now()));
-    show(&all);
+    // Inside the run, since a serving card ages out at the pin (NOTES § D100).
+    let began = began_running(&serving, "flaky");
+    let all = serving_findings(serving, "flaky");
     let about = cards_about(&all, "flaky");
     assert_eq!(
         about.len(),
@@ -6165,6 +6494,14 @@ fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
     );
     no_card_reads_this_run_as_a_kill(&about, "broken-restarts10serving serving");
     let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    // **And this is the shape D100 was measured on**: the record carries neither stamp, so the
+    // card would have had no age at all on a screen with an age column. It is dated by the run
+    // the container is *in* instead — the exception the helper above leaves to its callers.
+    assert_eq!(
+        card.timestamp.as_ref(),
+        Some(&began),
+        "the serving card's age is `state.running.startedAt` and nothing off the record"
+    );
     assert!(
         card.title
             .contains("it is serving now, and the record names no ending"),
@@ -6214,8 +6551,10 @@ fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
             }
         }
     }
+    // The control is a serving card, so it is read where a serving card draws (NOTES § D100) —
+    // at the pin this container has been up for 49 hours and the canary would collect nothing.
     let serving = restarts10_ending("restarts10serving", 1);
-    for f in cards_about(&analyze(&pods_at(vec![serving], now())), "flaky") {
+    for f in cards_about(&serving_findings(serving, "flaky"), "flaky") {
         let said = f.title.to_lowercase();
         for phrase in KILLED_IT {
             if said.contains(phrase) {
@@ -6381,13 +6720,22 @@ fn no_card_about_a_container_the_pods_own_restart_rule_removed_says_it_crashed()
     let serving = capture_but("restarts10serving", |p| {
         ended_as(p, "flaky", 137, Some(RESTART_ALL), None)
     });
-    let all = analyze(&pods_at(vec![serving], now()));
-    show(&all);
+    // Inside the run, since a serving card ages out at the pin (NOTES § D100).
+    let began = began_running(&serving, "flaky");
+    let all = serving_findings(serving, "flaky");
     let about = cards_about(&all, "flaky");
     assert_eq!(about.len(), 1, "rule 5 alone: {:?}", titles(&all));
     no_card_reads_this_run_as_a_kill(&about, "broken-restarts10serving serving");
     no_card_lets_this_container_off(&about, "broken-restarts10serving serving");
     let card = only(&all, "broken-restarts10serving", "restarted 10 times");
+    // **This is the shape D100 measured the undated card on** — a restart rule's synthesized
+    // record carries neither stamp, in 100% of samples — so the age comes off the run the
+    // container is in instead of off the record.
+    assert_eq!(
+        card.timestamp.as_ref(),
+        Some(&began),
+        "the serving card's age is `state.running.startedAt` and nothing off the record"
+    );
     assert!(
         card.title
             .contains("it is serving now, and the record names the pod's rule"),
@@ -6424,8 +6772,10 @@ fn no_card_about_a_container_the_pods_own_restart_rule_removed_says_it_crashed()
             container_status(p, name).restart_count = RESTARTS_WARN + 1;
         }
     });
-    let all = analyze(&pods_at(vec![gang], now()));
-    show(&all);
+    // Both containers are serving, and `nosy` started nine seconds before `shipper`, so one
+    // moment inside the first run is inside the second as well (NOTES § D100).
+    let stamps = ["nosy", "shipper"].map(|name| (name, began_running(&gang, name)));
+    let all = serving_findings(gang, "nosy");
     // **Both containers draw, and each card is its own container's.** A rule that fired once for
     // the pod, or twice with one container's name on both, passes any assertion that only counts
     // (NOTES § D26) — which is also why `cards_about` matches the whole name: `nosy` and
@@ -6451,7 +6801,7 @@ fn no_card_about_a_container_the_pods_own_restart_rule_removed_says_it_crashed()
          all (NOTES § D26)"
     );
 
-    for name in ["nosy", "shipper"] {
+    for (name, began) in &stamps {
         let about = cards_about(&all, name);
         no_card_reads_this_run_as_a_kill(&about, &format!("broken-hostpath {name}"));
         no_card_lets_this_container_off(&about, &format!("broken-hostpath {name}"));
@@ -6479,6 +6829,14 @@ fn no_card_about_a_container_the_pods_own_restart_rule_removed_says_it_crashed()
             restart_rule_action(),
             "{name}: and both get the sentence that exonerates neither of them — on this object \
              the trigger is one of these two and the record does not say which"
+        );
+        // **And each card is dated by its own container's run**, nine seconds apart on this
+        // capture — the record they share carries no stamp at all, so a rule reading the wrong
+        // one of the two would put one container's age on the other's card (NOTES § D100).
+        assert_eq!(
+            card.timestamp.as_ref(),
+            Some(began),
+            "{name}: the age is when *this* container's current run began"
         );
     }
 }
@@ -6535,9 +6893,13 @@ fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
             ended_as(p, "flaky", 137, Some(reason), None);
             container_status(p, "flaky").restart_count = count;
         });
-        for pod in [looping, serving] {
+        // The serving card is measured inside the run it is drawn on, because it ages out at
+        // `NOT_READY_GRACE` (NOTES § D100); the looping container is waiting, and rule 1's card
+        // never ages out. The height is a property of the wording either way.
+        let serving_moment = into_the_run(&serving, "flaky", 5);
+        for (pod, moment) in [(looping, now()), (serving, serving_moment)] {
             let object = pod.id.name.clone();
-            for card in analyze(&pods_at(vec![pod], now())) {
+            for card in analyze(&pods_at(vec![pod], moment)) {
                 // Rules 1 and 5 put the ending in the evidence; this box's other card is rule
                 // 6's, which is measured by the box that wrote it.
                 if !card.evidence.contains("exit 137") {
@@ -6715,10 +7077,18 @@ fn no_card_reads_this_run_as_a_kill(about: &[&Finding], shape: &str) {
         // long the run lasted.** Both are asserted on rule 6's card already; rules 1 and 5 build
         // their own age and their own *the last run lasted …* line out of the same two fields,
         // and a rule that starts inventing one is caught here saying so (NOTES § D93).
-        assert_eq!(
-            f.timestamp, None,
-            "{shape}: the run carries no `finishedAt`, so the card carries no age: {f:?}"
-        );
+        //
+        // **Rule 5's *serving* card is the one exception, and it is dated off a different field**
+        // (NOTES § D100): `state.running.startedAt`, the start of the run the container is in —
+        // live on the same object, moving on every restart, and nothing to do with the record
+        // this function is about. The callers that draw one pin the field it came from, which is
+        // where that claim can be checked against the object.
+        if !f.title.contains("it is serving now") {
+            assert_eq!(
+                f.timestamp, None,
+                "{shape}: the run carries no `finishedAt`, so the card carries no age: {f:?}"
+            );
+        }
         assert!(
             !said.contains("lasted") && !said.contains("ran for"),
             "{shape}: and no duration either — the run has no stamps to measure: {}",
@@ -8000,14 +8370,29 @@ fn ten_restarts_is_red_unless_the_container_is_still_answering() {
         "and the sentence that is only true of a working container is not on it: {}",
         red.title
     );
+    // **The half of D100 that did not move.** A container that is down is dated by the run that
+    // ended, `lastState.terminated.finishedAt`, as it always was — only the serving branch reads
+    // the run the container is *in*, because only a serving container has one.
+    assert_eq!(
+        red.timestamp,
+        down.last_terminated
+            .as_ref()
+            .and_then(|run| run.finished_at.clone()),
+        "the down card's age is when the last run ended"
+    );
 
+    // Read inside the run, because the serving half is the half that ages out: at the pin this
+    // capture has been serving 49 hours and rule 5 has stood it down (NOTES § D100). The red
+    // half above needs no such moment — a container that is *not* serving never ages out.
+    let snapshot = serving_at(pod("restarts10serving"), "flaky");
+    let news = snapshot.now.clone();
     let amber = only(
-        &findings(&["restarts10serving"]),
+        &analyze(&snapshot),
         "broken-restarts10serving",
         &format!("restarted {} times", serving.restarts),
     )
     .clone();
-    show(std::slice::from_ref(&amber));
+    show_at(std::slice::from_ref(&amber), &news);
     assert_eq!(
         amber.severity,
         Severity::Warn,
@@ -8019,6 +8404,31 @@ fn ten_restarts_is_red_unless_the_container_is_still_answering() {
         amber.title.contains("it is serving now"),
         "and the title says so: {}",
         amber.title
+    );
+    // And the serving card is dated by the run it is in, which is the other half.
+    assert_eq!(
+        amber.timestamp.as_ref(),
+        Some(&began_running(&pod("restarts10serving"), "flaky")),
+        "the serving card's age is `state.running.startedAt` (NOTES § D100)"
+    );
+    assert_ne!(
+        amber.timestamp, red.timestamp,
+        "the two branches read different fields, or one of these assertions is passing on the \
+         other's field"
+    );
+
+    // **And the two halves age differently, which is the other thing the clause says.** Ten
+    // restarts on a container that came back and has served for two days is not on a screen
+    // about what is broken now; ten restarts on one that is still down is, forever, because
+    // nothing about it has got better.
+    nothing(
+        &findings(&["restarts10serving"]),
+        "the serving card ages out at the same threshold rule 2's kill does (NOTES § D100)",
+    );
+    only(
+        &findings(&["restarts10"]),
+        "broken-restarts10",
+        &format!("restarted {} times", down.restarts),
     );
 }
 
@@ -8052,13 +8462,18 @@ fn restarts10_ending(name: &str, exit_code: i32) -> PodSnapshot {
 /// not being removed, it is being made conditional on the thing it claims.
 #[test]
 fn a_serving_container_that_finished_cleanly_is_not_one_something_keeps_killing() {
+    // Every card in this test is a *serving* one, so every one of them is read inside the run
+    // the capture is sitting in: at the pin the container has been up for 49 hours and rule 5
+    // has stood the card down (NOTES § D100), which is its own test one function up.
+    let snapshot = serving_at(pod("restarts10serving"), "flaky");
+    let news = snapshot.now.clone();
     let killed = only(
-        &findings(&["restarts10serving"]),
+        &analyze(&snapshot),
         "broken-restarts10serving",
         "restarted 10 times",
     )
     .clone();
-    show(std::slice::from_ref(&killed));
+    show_at(std::slice::from_ref(&killed), &news);
     assert!(
         killed.title.contains("something keeps killing it")
             && killed.action.contains("memory limit")
@@ -8093,8 +8508,10 @@ fn a_serving_container_that_finished_cleanly_is_not_one_something_keeps_killing(
         );
         let image = c.image.clone();
 
-        let all = analyze(&pods_at(vec![plant], now()));
-        show(&all);
+        let snapshot = serving_at(plant, "flaky");
+        let moment = snapshot.now.clone();
+        let all = analyze(&snapshot);
+        show_at(&all, &moment);
         assert_eq!(
             all.len(),
             1,
@@ -8176,8 +8593,8 @@ fn each_ending_sends_the_reader_somewhere_the_answer_can_be() {
         "this is the *plain container* half of the role split, and the assertion below is only \
          about it — the sidecar half is the test after this one"
     );
-    let all = analyze(&pods_at(vec![finished], now()));
-    show(&all);
+    // Serving cards, so read inside the run rather than at the pin (NOTES § D100).
+    let all = serving_findings(finished, "flaky");
     let card = only(&all, "broken-restarts10serving", "restarted 10 times");
     // **Both readings stay open.** An application that traps SIGTERM and shuts down tidily
     // reports `0`, and the kubelet writes `0` / `Completed` whichever of the two happened — so
@@ -8253,8 +8670,7 @@ fn each_ending_sends_the_reader_somewhere_the_answer_can_be() {
     );
 
     let stopped = restarts10_ending("restarts10serving", 143);
-    let all = analyze(&pods_at(vec![stopped], now()));
-    show(&all);
+    let all = serving_findings(stopped, "flaky");
     let card = only(&all, "broken-restarts10serving", "restarted 10 times");
     assert!(
         card.action.contains("probes") && card.action.contains("systemd-oomd"),
@@ -8286,8 +8702,7 @@ fn each_ending_sends_the_reader_somewhere_the_answer_can_be() {
         container(&forgotten, "flaky").last_terminated.is_none(),
         "the plant has to actually remove the previous run"
     );
-    let all = analyze(&pods_at(vec![forgotten], now()));
-    show(&all);
+    let all = serving_findings(forgotten, "flaky");
     let card = only(&all, "broken-restarts10serving", "restarted 10 times");
     assert_eq!(
         card.title, "Container has been restarted 10 times — it is serving now",
@@ -8356,8 +8771,8 @@ fn a_sidecar_that_keeps_finishing_is_not_told_to_move_to_a_job() {
          previous run are all the capture's own, and without them this is not the card: {proxy:?}"
     );
 
-    let all = analyze(&pods_at(vec![restarted], now()));
-    show(&all);
+    // A serving card, so read inside the run this sidecar is sitting in (NOTES § D100).
+    let all = serving_findings(restarted, "proxy");
     let card = only(&all, "healthy-sidecar", "restarted 3 times");
     assert!(
         card.evidence
@@ -8788,8 +9203,9 @@ fn a_stopped_container_reads_the_same_on_this_rule_as_it_does_on_rule_one() {
         container_status(p, "proxy").restart_count = RESTARTS_WARN;
         exited(p, "proxy", 143);
     });
-    let all = analyze(&pods_at(vec![sidecar], now()));
-    show(&all);
+    // Still serving, so still read inside its run (NOTES § D100) — unlike the init container
+    // below, which is stopped and whose card therefore never ages out.
+    let all = serving_findings(sidecar, "proxy");
     let card = only(&all, "healthy-sidecar", "restarted 3 times");
     assert!(
         card.action.contains("probes"),
@@ -10560,7 +10976,7 @@ fn the_whole_capture_through_the_rules_at_once() {
 
     assert_eq!(
         all.len(),
-        27,
+        25,
         "one card per thing that is broken across every pod the repository has captured, \
          counted rather than described: the list is long enough now that a sentence naming \
          each one would be a second copy of the tests above, and a number that moves when a \
@@ -10589,13 +11005,21 @@ fn the_whole_capture_through_the_rules_at_once() {
     // twice. The silent set is the healthy fixtures, the three that are only an Analysis
     // posture row, the two pods that are *over* — a finished pod's restart counts and last exits
     // are not what is broken now, which is all this screen holds (D2), and they reach no other
-    // screen either (D96) — and the one whose fault is real but old.
+    // screen either (D96) — and the three whose fault is real but old.
     let silent = [
         // The kill in this one is an hour old and its container has been serving since, which
         // is rule 2's recency clause deciding — read at a `now` five minutes after the kill it
         // is a CRITICAL, and `an_old_kill_on_a_container_that_has_been_fine_since_…` reads it
         // both ways off these same bytes.
         "oomserving",
+        // **The same shape, one rule over, since D100.** Both of these are containers that used
+        // their restarts and have been serving for the 49 hours between the capture and the pin,
+        // and `restartCount` never comes down — so at *this* moment they are old news, and at a
+        // moment inside their run they are two of the cards this screen exists for.
+        // `a_container_that_looks_fine_…` and `ten_restarts_is_red_…` read both directions off
+        // these same bytes.
+        "restarts",
+        "restarts10serving",
         "healthy",
         "healthy-hostpath",
         "healthy-podlevel",
@@ -13889,8 +14313,14 @@ fn a_pod_that_is_serving_does_not_explain_a_rollout_that_has_no_pods() {
         "the adopted pod has to actually hang off the ReplicaSet under the Deployment, or the \
          suppression this test is about was never reachable"
     );
-    let with_serving = analyze(&with_workloads(vec![serving], chain.clone()));
-    show(&with_serving);
+    // Read inside this pod's run, because rule 5's serving card ages out at the pin and the
+    // whole test is what that card does *not* suppress (NOTES § D100).
+    let moment = while_its_cards_draw(&serving);
+    let with_serving = analyze(&ClusterSnapshot {
+        now: moment.clone(),
+        ..with_workloads(vec![serving], chain.clone())
+    });
+    show_at(&with_serving, &moment);
     only(&with_serving, "broken-restarts", "restarted 3 times");
     only(&with_serving, "broken-owned", "gave up");
 
@@ -15349,7 +15779,12 @@ fn the_run_a_container_is_sitting_in_draws_no_card_while_something_will_restart_
                 );
             }
 
-            let all = analyze(&pods_at(vec![planted], now()));
+            // Read where this pod's cards draw: several of these shapes carry a *serving*
+            // neighbour in rule 5's band, and at the pin that card has aged out of half the sets
+            // being compared (NOTES § D100). The subject of this test is the terminated run, and
+            // nothing about it moves with the clock.
+            let moment = while_its_cards_draw(&planted);
+            let all = analyze(&pods_at(vec![planted], moment));
             let about = cards_about(&all, name);
             println!(
                 "=== {label} ({role:?} {name} on {object}) — exit {code} {reason:?}: {} cards, \
@@ -16474,7 +16909,10 @@ fn no_other_rule_draws_on_the_container_that_has_stopped_for_good() {
             "rule 4, the missing configuration",
             container_config_missing(&p, c),
         ),
-        ("rule 5, the restart count", restarting_repeatedly(&p, c)),
+        (
+            "rule 5, the restart count",
+            restarting_repeatedly(&now(), &p, c),
+        ),
         ("rule 6, the previous run", previous_run_failed(&p, c)),
         (
             "rule 7, the readiness probe",
