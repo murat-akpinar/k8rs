@@ -11,10 +11,12 @@ start a new box on top of it.
 Then, until told to stop:
 
 1. First unchecked box in the **lowest open** phase of `todo.md` — read the
-   file, do not assume the highest-numbered phase is the only one running.
-2. Run the seven-step cycle: brief → (screen spec) → dev writes code + tests →
-   `tester` witnesses red then green → `just check` → `k8s-admin` review →
-   land it.
+   file, do not assume the highest-numbered phase is the only one running. If
+   the boxes under it are the same **family** touching the same code, brief them
+   as one turn (D104); unrelated boxes stay one at a time.
+2. Run the cycle: brief → (screen spec) → dev writes code + tests and proves its
+   own red/green → `just mutants` → `tester` attacks the assertions and runs
+   `just check` → `k8s-admin` reviews the family → land it.
 3. Land = second pass over the landed tree · security gate · check the box in
    the work commit · CHANGELOG separately · push.
 4. Next box. No "shall I continue" (D98).

@@ -496,8 +496,8 @@ time.
 | 1 | Read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking |
 | 2 | Screen spec, **only if a screen changes** | `tui-designer` | the mockup covers every state, not just the happy one |
 | 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
-| 4 | Witness red, then green | `tester` | **reverts the implementation and re-runs** — see below |
-| 5 | Full run | `tester` | `just check` green **and** the code exercised for real |
+| 4 | Prove the tests can fail | `just mutants` | a surviving mutant is a test that cannot fail; the author's own red/green is pasted in step 3 — see below |
+| 5 | Attack it, then the full run | `tester` | the assertions attacked and the unfed shapes fed · `just check` green **and** the code exercised for real |
 | 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting. **Batched by rule family, not by rule** — see below |
 | 7 | Land it | PM | see below |
 
