@@ -435,6 +435,21 @@ unable to do what the justfile itself instructs it to.
 Goal: k8rs diagnoses correctly, headless. Still the core — everything else in
 this plan is delivery mechanism for what this phase produces.
 
+**The open boxes below are two families, and each is briefed and reviewed as one
+turn** ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16)).
+They are not reordered — the brief names them, the file keeps them where the text
+that cites them expects to find them.
+
+- **Family A — what the object supports, against what the card claims.** The
+  lost init-container status · `the last thing it logged was:` · `exit 255` after
+  a node reboot · what `lastState` means on a container that terminated before ·
+  a status with no declaration. Shared helpers: `ending`, `exit_meaning`,
+  `exit_fact`, `container_snapshots`.
+- **Family B — what the card tells the reader to do, on the shape it is drawn
+  about.** Rule 6's undatable `ContainerStatusUnknown` card · event expiry taught
+  on one role · rule 1's `Failed | None` arm · the dead first instruction ·
+  `screens/alerts.md`'s action budget.
+
 - [x] `Finding` struct (severity · title · evidence · action · kubectl_cmd ·
       **owner** — the grouping key: Deployment/StatefulSet/DaemonSet/Job, or
       the bare pod when it has no owner. Grouping itself happens in `views.rs`;
@@ -1005,72 +1020,6 @@ this plan is delivery mechanism for what this phase produces.
       titles and rule 6's still say *the container's last run***, which is the
       claim this box says the object does not support. One of them is D93-blessed
       and shipped, so moving it is this box's call and not a wording tidy-up
-- [ ] **`just check` cannot see a comment's width, so the 100-column rule is a
-      convention and not a gate** — `cargo fmt` reflows code and leaves comments
-      alone, and two lines over 100 columns shipped into `rules.rs` on
-      2026-08-15 and were caught by a reviewer counting characters rather than by
-      the build. **Config is not the fix**: `rustfmt`'s `wrap_comments` and
-      `error_on_line_overflow` are both nightly-only options, so a `rustfmt.toml`
-      would be silently ignored on the pinned stable toolchain — which is worse
-      than no gate, because it looks like one. A `scripts/` guard is, and it is
-      `tester`'s: fail on any line in `src/*.rs` past 100 columns, run from
-      `just check` with a `--self-test` like its neighbours. **It needs a decision
-      it cannot make for itself**: the file already carries a deliberate markdown
-      table whose rows are long on purpose, so either the table is rewrapped or
-      the guard learns one narrow, named exemption — an unnamed allowance is how a
-      guard becomes decoration
-- [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
-      in the green line, not an assertion, so nothing fails and that is exactly
-      why it will survive. One word, `tester`'s file, and it goes with whichever
-      of that agent's boxes runs next
-- [ ] **`cluster.sh` accepts the one cluster name that defeats the fixture
-      guard** — `scripts/sanitize.jq` refuses node names that do not
-      `startswith("k8rs-")`, and
-      [D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)
-      leans on that to make *a review cluster cannot produce a committed fixture*
-      mechanical rather than promised. **`k8rs-review` sails straight through
-      it**, and that is exactly what the first agent to raise a review cluster
-      typed, against three committed files that said `review`
-      ([NOTES § D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
-      **The second reviewer reached for the same wrong name and reported it as a
-      repo defect** (2026-08-15) — every committed file still said `review`, and
-      the string had reached it through **D94's own title**, which contains
-      `k8rs-review` because the entry is about that mistake. The brief that told
-      it to read D94 before naming the cluster is what handed it the name. Nothing
-      to fix in the record; it is the sharpest possible argument that the refusal
-      has to be mechanical, since the file warning about the name is itself a way
-      of spreading it. **Third instance, and this one is the sharpest**: the
-      reviewer of the D97 box quoted its own agent definition back as saying
-      **`K8RS_CLUSTER=k8rs-review`, always** — `.claude/agents/k8s-admin.md:54`
-      says `review`, in those words, and every other committed file agrees. It
-      used `review` and filed the difference as a defect in the instructions.
-      **Three agents, three misreadings, zero wrong strings in the repo**: the
-      only place `k8rs-review` is written is D94's own title, and it keeps
-      arriving in working memory from there. No wording change can fix a string
-      nobody wrote; the anchor is the fix **Third instance the same day, and this one actually ran**:
-      the review of the D96 ruling brought its cluster up as `k8rs-review`,
-      against a brief that said `review`, so `k8rs-review-control-plane` existed
-      on a machine and `sanitize.jq` would have waved its node name through.
-      Nothing leaked — a review takes no captures — but the refusal has now been
-      defeated in practice by the second agent to reach for it, which is the
-      argument for anchoring rather than repeating. **One wording fix belongs with
-      the anchor**: `CLAUDE.md` says the sanitizer refuses *a name*, and it
-      refuses a **node-name prefix** — `review` is refused only because kind names
-      the node `review-control-plane`.
-      **The primary fix is in `sanitize.jq`, not in `cluster.sh`** — the reviewer
-      never ran `cluster.sh`, it ran `kind create cluster` directly, because a
-      review is one measurement and not a fixture trip, and the next one will skip
-      that script for the same reason. So: **anchor `refuse_foreign_nodes` to the
-      four node names the fixture cluster actually produces** — control plane and
-      numbered workers, keeping the `.lan` suffix the identity rule already
-      allows — instead of accepting the whole `k8rs-*` family. That refuses
-      `k8rs-review-control-plane` on the only path that matters, whoever made the
-      cluster and however. **Then** give `cluster.sh` its refusal too, as the
-      early and loud one; it must not be the only one. Done-when: both refusals
-      proven by running them, both directions, and the proof is a `just check`
-      step rather than a paragraph. Watch the blast radius — the anchor must still
-      accept every node name in the 50 committed fixtures, so run
-      `fixture-audit.sh` before and after and show it unchanged. `tester`'s files
 - [ ] **`screens/alerts.md`'s action budget is false of four shipped cards, and
       the file says that is a `rules.rs` finding** — it caps a card's action at
       two to five lines, never cut ([alerts.md](screens/alerts.md)), and states
@@ -1230,61 +1179,6 @@ this plan is delivery mechanism for what this phase produces.
       although the requirement is met. The bias is toward a false red and never a
       false green, which is the safe direction; whoever meets that failure fixes
       the helper, not the assertion
-- [ ] **`spec.containers[].restartPolicyRules` is decodable now and still
-      reaches no rule, so rule 15's stand-in is a proxy where the real signal is
-      available** — the field arrives at `v1_34` and the pin is `v1_36`
-      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
-      but **decodable is not present**: invariant 6 prunes the watch to the fields
-      the snapshot types *name*, and none names this one. So this is a snapshot
-      field, a prune line, a fixture that carries it, and only then the rule
-      change — not *read a field*. What it buys is D97's own named residual gap:
-      rule 15 fires on `restarts == 0`, and a container declaring a retry rule on
-      its own exit code comes back under `Never`, which is KEP-5307's headline use
-      case and this rule's headline false positive — measured on kind v1.36.1, a
-      pod `Never` with one retry rule on `exit 3` sat in `CrashLoopBackOff` at
-      five restarts. **The count cannot be dropped for the field**: a rule matched
-      on exit code against the declared rules answers *will it retry this exit*,
-      which is what the card claims, but the window is one exit wide and the
-      object to prove it on has to be captured — `scripts/broken.yaml` keeps
-      `restartPolicyRules` **off** the rule-15 fixture on purpose, so this is a
-      new object, not a variant of one already there. **It rides the capture trip
-      three boxes up** rather than opening its own: that box already owes a
-      cluster for three objects, and one trip is the whole argument for grouping
-      them.
-      **Placed here rather than at the front of the phase, and that is a PM call
-      made in writing.** These three D99 follow-ups were written directly under
-      the box that spawned them, which put an *enhancement* ahead of every
-      operator-review finding above — a permanent WARN card on a healthy pod, a
-      run Kubernetes lost that k8rs says nothing at all about. Weighed against
-      those, the defect this box closes is **one backoff window wide**, on a beta
-      feature, and costs a snapshot field, a prune line, a capture and a rule
-      change. The severe ones go first; the ordering, not the value, is what
-      changed
-- [ ] **`terminatingReplicas` is decodable now, and a pod on its way out is
-      currently counted as a pod that is missing** — added to both
-      `DeploymentStatus` and `ReplicaSetStatus` after 1.32
-      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).
-      The workload rules read ready-versus-desired and cannot today tell a
-      rollout draining old pods from a Deployment that genuinely cannot fill its
-      replicas — the shape every operator sees during a normal deploy, which is
-      the false-positive class that makes a tool get muted. Same shape as the box
-      above: snapshot field, prune line, fixture, then the rule. Check first
-      whether `explains_a_shortfall` is where it belongs rather than a rule of its
-      own
-- [ ] **In-place resize makes *what a container asks for* and *what it has* two
-      different numbers, and every resource rule reads only the first** —
-      `podStatus.resources` and `podStatus.allocatedResources` arrive after 1.32
-      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
-      beside the `.status.resize` string this file already records as an
-      unreachable branch at the old pin. Rules 8/9 and the Capacity report compare
-      `spec.containers[].resources` against the node, which is the *request*, not
-      the allocation, and after a resize those disagree. **Decide the scope before
-      writing anything**: this may be one snapshot field and a fallback, or it may
-      be out of scope entirely under the invariant-13 guard — *would someone who
-      runs clusters meet this in a normal week* is a genuine question for a
-      feature that went beta in 1.33, and the honest answer may be no until it is
-      on by default. Answer it in NOTES either way; do not leave it as a silent
-      omission, which is exactly what the pin was
 - [x] Exit-code translation table (137/143/1/126/127) — **137 has four readings, the object names three of them, and where it names none the table refuses to guess**: `reason: OOMKilled` is memory, `reason: RestartingAllContainers` is the pod's own restart rules removing the container and is not a failure at all, `reason: ContainerStatusUnknown` is not a kill at all but the number the kubelet writes where it could not read a status, and with none of those the row names the signal and stops. The old "almost always OOM" row was written before the rule had `reason` beside the code ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)); **what replaced it named the opposite cause just as flatly and was corrected on 2026-08-15** — *did not stop when it was asked to* is false of an init container that may hold no probe, of a cgroup kill whose word was lost on a starved host, and of a rebuilt sandbox ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15))
 - [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket
       **or any directory one sits under**, or a writable host mount. There is no
@@ -1525,7 +1419,7 @@ this plan is delivery mechanism for what this phase produces.
       invariant 9 broken for the length of two phases, and "the fixtures are
       ours" is an argument about today's inputs, not about the code
 
-- [ ] **Split `rules_tests.rs` into one file per rule family — at phase close,
+- [x] **Split `rules_tests.rs` into one file per rule family — at phase close,
       after the last rule box and not before it.** 13 105 lines against the
       product file's 4 339, of which only 2 097 are code: **the test file is the
       one that actually grew**, and it is what every agent turn pages through.
@@ -1545,7 +1439,16 @@ this plan is delivery mechanism for what this phase produces.
       to grow, which is the thing being defended against. **Why at close:** eight
       boxes are open against `rules.rs` and its tests; moving the tests under
       them lands every open box in a file that just moved. The user ruled on
-      2026-08-15 ([NOTES § D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15))
+      2026-08-15 ([NOTES § D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)).
+      Closed — the *at phase close* timing was reversed by
+      [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+      and `4d73366` landed it: `src/rules_tests/` holds `snapshot.rs` `pod.rs`
+      `node.rs` `workload.rs` `certificate.rs`, `rules_tests.rs` is 499 lines,
+      and `test-guard.py` walks the subdirectory unedited — `207 declared, 207
+      listed, 0 ignored — OK` (the box's 177 predates the tests added since). It
+      stayed unchecked because the ruling that reversed it was written in a
+      different file from the box it reversed
+      ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))
 
 **🔒 Security gate:** no finding text may quote an env value or a Secret —
 findings name *fields*, not payloads. The certificate parser is fed malformed
@@ -1584,6 +1487,75 @@ cluster either.
       and not a promise. Landed in a later phase than the one that found it,
       per CLAUDE.md § What to do next. Done-when: a self-test plants a decision
       with no index line and the guard goes red on it
+*Moved out of Phase 3: `tester`'s files, no rule touched ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))*
+
+- [ ] **`just check` cannot see a comment's width, so the 100-column rule is a
+      convention and not a gate** — `cargo fmt` reflows code and leaves comments
+      alone, and two lines over 100 columns shipped into `rules.rs` on
+      2026-08-15 and were caught by a reviewer counting characters rather than by
+      the build. **Config is not the fix**: `rustfmt`'s `wrap_comments` and
+      `error_on_line_overflow` are both nightly-only options, so a `rustfmt.toml`
+      would be silently ignored on the pinned stable toolchain — which is worse
+      than no gate, because it looks like one. A `scripts/` guard is, and it is
+      `tester`'s: fail on any line in `src/*.rs` past 100 columns, run from
+      `just check` with a `--self-test` like its neighbours. **It needs a decision
+      it cannot make for itself**: the file already carries a deliberate markdown
+      table whose rows are long on purpose, so either the table is rewrapped or
+      the guard learns one narrow, named exemption — an unnamed allowance is how a
+      guard becomes decoration
+- [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
+      in the green line, not an assertion, so nothing fails and that is exactly
+      why it will survive. One word, `tester`'s file, and it goes with whichever
+      of that agent's boxes runs next
+- [ ] **`cluster.sh` accepts the one cluster name that defeats the fixture
+      guard** — `scripts/sanitize.jq` refuses node names that do not
+      `startswith("k8rs-")`, and
+      [D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)
+      leans on that to make *a review cluster cannot produce a committed fixture*
+      mechanical rather than promised. **`k8rs-review` sails straight through
+      it**, and that is exactly what the first agent to raise a review cluster
+      typed, against three committed files that said `review`
+      ([NOTES § D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
+      **The second reviewer reached for the same wrong name and reported it as a
+      repo defect** (2026-08-15) — every committed file still said `review`, and
+      the string had reached it through **D94's own title**, which contains
+      `k8rs-review` because the entry is about that mistake. The brief that told
+      it to read D94 before naming the cluster is what handed it the name. Nothing
+      to fix in the record; it is the sharpest possible argument that the refusal
+      has to be mechanical, since the file warning about the name is itself a way
+      of spreading it. **Third instance, and this one is the sharpest**: the
+      reviewer of the D97 box quoted its own agent definition back as saying
+      **`K8RS_CLUSTER=k8rs-review`, always** — `.claude/agents/k8s-admin.md:54`
+      says `review`, in those words, and every other committed file agrees. It
+      used `review` and filed the difference as a defect in the instructions.
+      **Three agents, three misreadings, zero wrong strings in the repo**: the
+      only place `k8rs-review` is written is D94's own title, and it keeps
+      arriving in working memory from there. No wording change can fix a string
+      nobody wrote; the anchor is the fix **Third instance the same day, and this one actually ran**:
+      the review of the D96 ruling brought its cluster up as `k8rs-review`,
+      against a brief that said `review`, so `k8rs-review-control-plane` existed
+      on a machine and `sanitize.jq` would have waved its node name through.
+      Nothing leaked — a review takes no captures — but the refusal has now been
+      defeated in practice by the second agent to reach for it, which is the
+      argument for anchoring rather than repeating. **One wording fix belongs with
+      the anchor**: `CLAUDE.md` says the sanitizer refuses *a name*, and it
+      refuses a **node-name prefix** — `review` is refused only because kind names
+      the node `review-control-plane`.
+      **The primary fix is in `sanitize.jq`, not in `cluster.sh`** — the reviewer
+      never ran `cluster.sh`, it ran `kind create cluster` directly, because a
+      review is one measurement and not a fixture trip, and the next one will skip
+      that script for the same reason. So: **anchor `refuse_foreign_nodes` to the
+      four node names the fixture cluster actually produces** — control plane and
+      numbered workers, keeping the `.lan` suffix the identity rule already
+      allows — instead of accepting the whole `k8rs-*` family. That refuses
+      `k8rs-review-control-plane` on the only path that matters, whoever made the
+      cluster and however. **Then** give `cluster.sh` its refusal too, as the
+      early and loud one; it must not be the only one. Done-when: both refusals
+      proven by running them, both directions, and the proof is a `just check`
+      step rather than a paragraph. Watch the blast radius — the anchor must still
+      accept every node name in the 50 committed fixtures, so run
+      `fixture-audit.sh` before and after and show it unchanged. `tester`'s files
+
 - [ ] `Report` shape: title · rows · the finding each row can jump to
 - [ ] **Capacity** — per node: requests vs allocatable vs actual usage, plus
       **the workloads with no limits defined** (the old rule 9, which lives
@@ -1594,6 +1566,64 @@ cluster either.
       clusters this project targets — and `spec.overhead`, the RuntimeClass
       charge the scheduler counts and a `spec`-only sum does not
       ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12))
+*Moved out of Phase 3: each is a snapshot field before it is a rule, which is the one-phase window [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12) opened ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))*
+
+- [ ] **`spec.containers[].restartPolicyRules` is decodable now and still
+      reaches no rule, so rule 15's stand-in is a proxy where the real signal is
+      available** — the field arrives at `v1_34` and the pin is `v1_36`
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
+      but **decodable is not present**: invariant 6 prunes the watch to the fields
+      the snapshot types *name*, and none names this one. So this is a snapshot
+      field, a prune line, a fixture that carries it, and only then the rule
+      change — not *read a field*. What it buys is D97's own named residual gap:
+      rule 15 fires on `restarts == 0`, and a container declaring a retry rule on
+      its own exit code comes back under `Never`, which is KEP-5307's headline use
+      case and this rule's headline false positive — measured on kind v1.36.1, a
+      pod `Never` with one retry rule on `exit 3` sat in `CrashLoopBackOff` at
+      five restarts. **The count cannot be dropped for the field**: a rule matched
+      on exit code against the declared rules answers *will it retry this exit*,
+      which is what the card claims, but the window is one exit wide and the
+      object to prove it on has to be captured — `scripts/broken.yaml` keeps
+      `restartPolicyRules` **off** the rule-15 fixture on purpose, so this is a
+      new object, not a variant of one already there. **It rides the capture trip
+      three boxes up** rather than opening its own: that box already owes a
+      cluster for three objects, and one trip is the whole argument for grouping
+      them.
+      **Placed here rather than at the front of the phase, and that is a PM call
+      made in writing.** These three D99 follow-ups were written directly under
+      the box that spawned them, which put an *enhancement* ahead of every
+      operator-review finding above — a permanent WARN card on a healthy pod, a
+      run Kubernetes lost that k8rs says nothing at all about. Weighed against
+      those, the defect this box closes is **one backoff window wide**, on a beta
+      feature, and costs a snapshot field, a prune line, a capture and a rule
+      change. The severe ones go first; the ordering, not the value, is what
+      changed
+- [ ] **`terminatingReplicas` is decodable now, and a pod on its way out is
+      currently counted as a pod that is missing** — added to both
+      `DeploymentStatus` and `ReplicaSetStatus` after 1.32
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).
+      The workload rules read ready-versus-desired and cannot today tell a
+      rollout draining old pods from a Deployment that genuinely cannot fill its
+      replicas — the shape every operator sees during a normal deploy, which is
+      the false-positive class that makes a tool get muted. Same shape as the box
+      above: snapshot field, prune line, fixture, then the rule. Check first
+      whether `explains_a_shortfall` is where it belongs rather than a rule of its
+      own
+- [ ] **In-place resize makes *what a container asks for* and *what it has* two
+      different numbers, and every resource rule reads only the first** —
+      `podStatus.resources` and `podStatus.allocatedResources` arrive after 1.32
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
+      beside the `.status.resize` string this file already records as an
+      unreachable branch at the old pin. Rules 8/9 and the Capacity report compare
+      `spec.containers[].resources` against the node, which is the *request*, not
+      the allocation, and after a resize those disagree. **Decide the scope before
+      writing anything**: this may be one snapshot field and a fallback, or it may
+      be out of scope entirely under the invariant-13 guard — *would someone who
+      runs clusters meet this in a normal week* is a genuine question for a
+      feature that went beta in 1.33, and the honest answer may be no until it is
+      on by default. Answer it in NOTES either way; do not leave it as a silent
+      omission, which is exactly what the pin was
+
 - [ ] **Drain safety** — for each node, what a drain would do and what would
       block it. A PDB whose `minAvailable` equals the replica count means the
       drain never finishes; say so before, not 40 minutes in

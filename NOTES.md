@@ -127,6 +127,8 @@ its line moving with it.
 - [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15) — the process was measured, and what it lacked was a rule that makes something smaller
 - [D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15) — the second agent was re-running the first agent's commands, and a tool does it better
 - [D105](#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16) — the security gate splits into what a script can decide today, and what is waiting for code
+- [D106](#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16) — Phase 3's twenty-three open boxes are two families, six foreign boxes and one already done
+- [D107](#d107--claudemd-grew-back-past-the-size-that-made-d60-compress-it-2026-08-16) — CLAUDE.md grew back past the size that made D60 compress it
 
 ## Why it exists — where the gap is
 
@@ -7466,6 +7468,112 @@ half carrying the token was the half the pattern never saw. Both were found by
 running it against `src/rules.rs` rather than against its own fixtures — the same
 rule as [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12),
 applied to the guard.
+
+### D106 — Phase 3's twenty-three open boxes are two families, six foreign boxes and one already done (2026-08-16)
+
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+wrote the rule that stops a running phase being fed new boxes, and it has held:
+nothing has been injected into Phase 3 since. **The pile that was already there
+was never triaged under it**, and Phase 3 has not closed in the two days since.
+All twenty-three were read whole on 2026-08-16 — not their titles, their bodies —
+and the first finding is that **almost none of them is deferrable on merit**. They
+describe cards that print wrong text today, and Phase 3's own done-when is
+*running the binary on a fixture prints correct findings*. The defect is not that
+the boxes exist; it is that they are twenty-three units of work for what is
+**two classes, and a class is what [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+ruled is reviewed as one turn.**
+
+**Family A — what the object actually supports, against what the card claims it
+does.** The lost init-container status read as a clean finish; `the last thing it
+logged was:` presenting a kubelet-authored sentence as the application's own
+words; `exit 255` after a node reboot blamed on the application; `lastState`
+meaning *the last run Kubernetes managed to write down* rather than *the previous
+run*; a container status arriving with no matching declaration. Five boxes, one
+question, and they touch the same four helpers — `ending`, `exit_meaning`,
+`exit_fact`, `container_snapshots`. This is the `137` chain
+([D93](#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15))
+arriving a third time: one class, split across boxes, each review seeing one
+slice.
+
+**Family B — what the card tells the reader to do, on the shape it is actually
+drawn about.** Rule 6's `ContainerStatusUnknown` card that no clock can age out;
+event expiry taught on one role and not the other two; rule 1's `Failed | None`
+arm pointing at a log no command can reach; the first instruction being dead on
+the commonest shape. Plus **`screens/alerts.md`'s action budget**, which belongs
+here and not in a later phase: it rules that an action wrapping past five lines is
+a `rules.rs` defect, 9 of 52 shipped actions exceed it, and `rules.rs` freezes at
+Phase 3 close — a box that may require a frozen file to change cannot be deferred
+past the freeze. Five boxes, one question.
+
+**Six boxes are not Phase 3's, by owner or by rule, and move to Phase 4.** Three
+are `tester`'s and touch no rule: the 100-column guard, `certs-test.sh`'s stale
+`(C1 warns)`, and anchoring `sanitize.jq`'s node-name refusal
+([D94](#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
+Three arrived from the pin bump rather than from Phase 3's contract —
+`restartPolicyRules`, `terminatingReplicas`, and the in-place-resize split between
+what a container asks for and what it has
+([D99](#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)) —
+and each is a snapshot field before it is a rule, which is precisely the
+one-phase window
+[D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)
+opened. Moving them is that rule being used, not an exception to it.
+
+**One box is already done.** *Split `rules_tests.rs` into one file per rule
+family — at phase close, after the last rule box and not before it.*
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)'s
+first ruling reversed that timing and `4d73366` landed it: `src/rules_tests/`
+holds `pod.rs`, `node.rs`, `workload.rs`, `certificate.rs`, `snapshot.rs`, and
+`rules_tests.rs` is 499 lines against the 13 105 the box describes. It stayed
+unchecked because the ruling that reversed it was written in a different file from
+the box it reversed.
+
+**The boxes are not reordered, and that is deliberate.** Physically regrouping
+twenty-three bodies is a large diff over text every one of them cites, for no gain
+the brief cannot give for free: the families are named at Phase 3's head and the
+PM briefs them as one turn. Six turns and one tick replace twenty-three.
+
+**What this does not do is loosen a gate.** Every box in both families is still
+fixed before Phase 3 closes, with its own red and green; what changes is that
+`k8s-admin` reads five at once with the helpers they share, which is the only
+position from which two rules disagreeing about one container is visible.
+
+### D107 — CLAUDE.md grew back past the size that made D60 compress it (2026-08-16)
+
+[D60](#d60--claudemd-was-compressed-and-four-stories-moved-here-2026-08-12)
+measured `CLAUDE.md` at 682 lines and 6 548 words, called that a standing cost
+paid at every session start and every compaction, and cut it to roughly 3 000
+words. Measured again on 2026-08-16: **689 lines, 6 604 words** — larger than the
+state that was ruled a problem, four days later. § *Agent workflow* is 244 of
+those lines, 35% of the file; D60's own figure for the same section was 30%.
+
+**The mechanism is the one D60 named and the one
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+generalised: every rule here ends in *record it*, and the file where a rule is
+recorded is this one.** Each addition was correct on its own — a real leak, a real
+concurrency defect, a real measurement — and each arrived with the story that
+justified it, which is the half D60 ruled belongs in `NOTES.md`.
+
+**The rule is unchanged and is applied again, not rewritten: the rule stays in
+`CLAUDE.md`, the story moves here and is cited by number.** What goes is
+narrative that a `D##` already holds. The `137` chain's *four boxes, 27 hours* is
+told three times in the file — in § The cycle, in step 6, and again in § Phase
+close — and [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+holds it once. The fold box's *fourteen minutes and 120k tokens* is
+[D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)'s.
+The scratchpad collision, the review that had to prove a red in two files it did
+not own, the twelve boxes injected into a running Phase 3 — all held elsewhere,
+all retold here.
+
+**No invariant, no security-gate line, no ownership row and no cycle step is
+dropped**, which is the same guarantee D60 gave and the thing to check this
+against: the count of each is the test, and it is stated in the box that lands
+this.
+
+**The agent files are measured too and are not the problem.** `.claude/agents/`
+is 42–75 lines per file, each one saying in its own words that `CLAUDE.md` is
+binding and is not restated there, each citing `D##` rather than re-arguing —
+`540b87e` already removed the copies. They are left alone. The file that grew is
+the file every session loads in full.
 
 ## Decisions made
 
