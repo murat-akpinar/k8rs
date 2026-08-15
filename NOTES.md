@@ -7378,9 +7378,29 @@ single rule. A family briefed as one box is one dev turn and one review; boxes
 that share no code stay one at a time, because batching unrelated work is how a
 review stops fitting in a reviewer's head.
 
+**And the first draft of this entry wrote a gate nobody could pass.** It said
+*`just mutants` over the changed file*. Run once: **519 mutants** on `rules.rs`
+after a 58-second baseline build, which is hours, per box. The tool that was
+brought in to make the cycle cheaper would have made it unrunnable, and the only
+reason it was caught is that it was run instead of reasoned about — which is the
+same rule this repo already has for tests. **So the per-box gate is
+`cargo mutants --in-diff`, over the box's own diff**; the whole-file run stays
+what `todo.md` always had it as, a phase-close gate, with `--iterate` to skip
+what an earlier run already caught.
+
 **What is deliberately not cut**: the operator review, the second pass over the
 landed tree, the security gate. In this measurement they are the only things that
 found anything, and speed taken out of them is not speed.
+
+**What is left, measured, for whoever picks this up next.** `rules.rs` is 5 186
+lines and **2 400 of them are doc comments** — 51 blocks of fifteen lines or more
+account for 1 644. Every dispatch reads that file. This repo's own rule says a
+doc comment *states what the item is and cites the decision that shaped it — it
+does not re-argue it*, and at 46% the file is re-arguing at scale: the same
+second-copy defect [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+found in `todo.md`, one layer down. `src/rules_tests/pod.rs` is the same shape at
+9 809 lines, and it already carries the section markers a further split would cut
+along.
 
 ## Decisions made
 

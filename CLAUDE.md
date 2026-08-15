@@ -496,7 +496,7 @@ time.
 | 1 | Read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking |
 | 2 | Screen spec, **only if a screen changes** | `tui-designer` | the mockup covers every state, not just the happy one |
 | 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
-| 4 | Prove the tests can fail | `just mutants` | a surviving mutant is a test that cannot fail; the author's own red/green is pasted in step 3 — see below |
+| 4 | Prove the tests can fail | `cargo mutants --in-diff` | over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
 | 5 | Attack it, then the full run | `tester` | the assertions attacked and the unfed shapes fed · `just check` green **and** the code exercised for real |
 | 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting. **Batched by rule family, not by rule** — see below |
 | 7 | Land it | PM | see below |
@@ -545,9 +545,14 @@ phase — a fix, a docs change, this file — goes on `development` too.
 [D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12) exists because
 a green build once proved nothing. **The author still proves its own change red
 then green and pastes both outputs** — that is step 3's, not a separate turn.
-What checks the *claim* is `just mutants` over the changed file: a surviving
-mutant is a test that cannot fail, stated by a tool that has no incentive
+What checks the *claim* is a mutation run: a surviving mutant is a test that
+cannot fail, stated by a tool that has no incentive
 ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
+**Per box it is scoped to the diff** —
+`cargo mutants --timeout 90 --in-diff <(git diff HEAD)` — because `just mutants`
+over the whole file generates **519** mutants on `rules.rs` and cannot finish
+inside a box. `just mutants` is the *phase-close* gate it always was, and
+`--iterate` skips what an earlier run already caught.
 
 **So `tester` no longer re-runs the author's mutations by hand.** Measured on
 2026-08-15, the fold box: fourteen minutes and 120k tokens re-running four
