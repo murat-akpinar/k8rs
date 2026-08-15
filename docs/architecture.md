@@ -330,11 +330,24 @@ minimum terminal 80×24.
 
 ## Version compatibility
 
-`k8s-openapi` is pinned to the **oldest** supported version feature — the
-Kubernetes API is forward compatible, so a client built against an old
-feature talks to newer clusters. Supported window: pinned version ±2 minor
-(mirrors the kubectl skew policy). kube-rs and k8s-openapi are upgraded
-together, never separately.
+`k8s-openapi` is pinned to the **newest** version feature the crate offers —
+`v1_36` today. The pin decides which fields exist in the generated types, and the
+two ways of getting it wrong are not symmetric: pinned **below** the cluster,
+every field added since is dropped at decode without a word, and a dropped field
+is indistinguishable from one the cluster never set; pinned **above** it, the
+field is simply absent and reads as no finding, which every rule already handles.
+A diagnosis tool cannot afford the first, so the pin leads.
+
+The rule was the opposite until 2026-08-15 — *oldest feature, window ±2 minor* —
+and it is reversed in
+[NOTES § D99](../NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15),
+which also measures what the old pin had been dropping.
+
+`scripts/fixture-audit.sh` fails when the pin's minor falls below the version in
+`tests/fixtures/K8S_VERSION` — an inequality, so the crate may run ahead of the
+kind image. Nothing yet compares the pin with the *user's* cluster at runtime;
+that is an open box. kube-rs and k8s-openapi are upgraded together, never
+separately.
 
 ## Out of scope
 

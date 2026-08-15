@@ -18,11 +18,15 @@ exclude = ["screens/", "scripts/", "tmp/", "docs/", "NOTES.md", "REQUIREMENTS.md
 [dependencies]
 # The API types the rule engine reads fields off, and — through its own
 # re-export — the `jiff::Timestamp` that `Snapshot::now` is
-# ([NOTES § D18](NOTES.md)). Pinned to the *oldest* supported version feature:
-# the API is forward compatible, so v1_32 talks to the v1.36 kind cluster the
-# fixtures came from (docs/tech-stack.md). Upgraded together with kube-rs,
-# never separately.
-k8s-openapi = { version = "0.28.0", features = ["v1_32"] }
+# ([NOTES § D18](NOTES.md)). Pinned to the *newest* feature the crate offers
+# ([NOTES § D99](NOTES.md)): a pin below the cluster drops every field added
+# since, silently, which is the one failure a diagnosis tool cannot afford — a
+# pin above it yields `None`, which every rule already handles — with two
+# exceptions D99 names, both outside our surface today. The reverse rule
+# held until 2026-08-15 and was two minors below the fixtures the whole time;
+# `scripts/fixture-audit.sh` now compares this line with
+# `tests/fixtures/K8S_VERSION`. Upgraded together with kube-rs, never separately.
+k8s-openapi = { version = "0.28.0", features = ["v1_36"] }
 x509-parser = "0.18.1"
 
 [dev-dependencies]

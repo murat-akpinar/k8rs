@@ -541,11 +541,14 @@ pub struct ContainerSnapshot {
     /// accepted create, so an empty answer means the field was pruned or the object never reached
     /// validation, and neither is a licence to guess.
     ///
-    /// **It is a policy and not a verdict, and the difference is a gap this layer cannot close**:
-    /// `spec.containers[].restartPolicyRules` can override it upward per exit code, and that field
-    /// does not exist in the generated types at the `v1_32` feature `Cargo.toml` pins — it arrives
-    /// at `v1_34` — so it is dropped at decode and no rule can read it. What stands in for it is
-    /// [`ContainerSnapshot::restarts`] ([`stopped_for_good`]).
+    /// **It is a policy and not a verdict, and the difference is a gap this layer does not close**:
+    /// `spec.containers[].restartPolicyRules` can override it upward per exit code. The generated
+    /// types carry that field at the `v1_36` feature `Cargo.toml` pins — it arrives at `v1_34` —
+    /// but no snapshot field here names it, so nothing prunes it in and no rule reads it; reading
+    /// it is a box of its own (NOTES § D99). [`ContainerSnapshot::restarts`] answers in its place,
+    /// and goes on answering after the field is read: no cluster below 1.34 can carry the field at
+    /// all, and the pin sits above the cluster on purpose (NOTES § D97, § D99). The case is argued
+    /// once, at [`stopped_for_good`].
     pub restart_policy: Option<String>,
     /// Rule 7: running but not passing its readiness probe, so the Service dropped it.
     pub ready: bool,
@@ -2889,18 +2892,22 @@ fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 /// | `restarts == 0` | the false-positive guard, below |
 /// | [`restart_policy`](ContainerSnapshot::restart_policy) is `Never` | the only policy that reaches this rule on a bad exit: `Always` restarts everything and `OnFailure` restarts a non-zero exit, so the truth table collapses to one arm |
 ///
-/// **`Never` is not read as a synonym for *nothing will restart it*, and the field that would
-/// settle it cannot be read at all.** `spec.containers[].restartPolicyRules` can only *add*
-/// restarts — the API rejects a `DoNotRestart` action outright — so a container declaring a retry
+/// **`Never` is not read as a synonym for *nothing will restart it*, and the field that speaks to
+/// it most directly is not one this rule consults.** `spec.containers[].restartPolicyRules` can
+/// only *add* restarts — the API rejects a `DoNotRestart` action outright — so a container declaring a retry
 /// rule on its own exit code comes back under `Never`, which is KEP-5307's headline use case and
 /// would be this rule's headline false positive: measured on kind v1.36.1, a pod `Never` with one
-/// retry rule on `exit 3` sat in `CrashLoopBackOff` at five restarts. **That field does not exist
-/// in the generated types at the `v1_32` feature `Cargo.toml` pins** — it arrives at `v1_34` — so
-/// it is silently dropped at decode and no rule here can consult it. **`restarts == 0` is what
-/// stands in for it**: a container that has already been restarted is not a container that will
-/// not be restarted, whatever declared it. **The residual gap is one window** — the first exit,
-/// before the first retry — and it is a gap rather than a bound: this rule draws a card that is
-/// wrong for as long as that window lasts.
+/// retry rule on `exit 3` sat in `CrashLoopBackOff` at five restarts. **The generated types carry
+/// that field at the `v1_36` feature `Cargo.toml` pins** — it arrives at `v1_34` — **but nothing
+/// here reads it yet**: no snapshot field names it; reading it is a box of its own (NOTES § D99).
+/// **`restarts == 0` is the guard, and reading the field will not retire it** (NOTES § D97,
+/// unchanged by the pin): a container that has already been restarted is not a container that will
+/// not be restarted, whatever declared it — and **no cluster below 1.34 can carry the field at
+/// all**, while the pin sits above the cluster on purpose (NOTES § D99), so the count is the only
+/// one of the two that answers on every cluster k8rs meets. The field, when this rule learns to
+/// read it, joins the count rather than replacing it. **The residual gap is one window** — the
+/// first exit, before the first retry — and it is a gap rather than a bound: this rule draws a
+/// card that is wrong for as long as that window lasts.
 ///
 /// **Only a [`Regular`](ContainerRole::Regular) container reaches this rule, and by construction
 /// rather than by a check** (NOTES § D96, measured). A [`Sidecar`](ContainerRole::Sidecar) *is* an

@@ -16220,9 +16220,14 @@ fn every_one_of_rule_fifteens_four_conditions_is_load_bearing() {
             // **The KEP false positive, and the reason the count is the guard.** A container may
             // declare `restartPolicyRules`, which can only *add* restarts to `Never` — measured
             // on kind v1.36.1, a retry rule on exit 3 had one in `CrashLoopBackOff` at five
-            // restarts. That field does not exist in the generated types at the `v1_32` feature
-            // `Cargo.toml` pins, so no rule can read it; something that has already been
-            // restarted has something restarting it (NOTES § D96).
+            // restarts. The generated types carry that field at the `v1_36` feature `Cargo.toml`
+            // pins — it arrives at `v1_34` — but **no cluster below 1.34 can carry it at all**,
+            // and the pin sits above the cluster on purpose (NOTES § D99), so k8rs meets clusters
+            // where reading the field answers nothing. `restarts == 0` is the guard that holds
+            // across the whole range (NOTES § D97): something that has already been restarted has
+            // something restarting it (NOTES § D96). **The open box that teaches rule 15 to read
+            // the field keeps this case** — the count is a permanent companion to the field, not
+            // a placeholder that box deletes.
             "it has been restarted once already, so something is restarting it",
             first_run_under(Some("Never"), |p| {
                 // `ended_as` writes the previous run *and* bumps the count, which is the pair the

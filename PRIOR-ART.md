@@ -151,10 +151,13 @@ context is instant.
   waiting for something the server will never send. Any watch we open needs a
   deadline on *first sync*, after which the UI says what it is waiting for — see
   A1's loading state.
-- **The floor we declare is not a floor anything enforces.** `Cargo.toml` pins
-  `k8s-openapi` to `v1_32` and calls it "the *oldest* supported version" — that is
+- **The floor we declare is not a floor anything enforces.** `Cargo.toml` pinned
+  `k8s-openapi` to `v1_32` and called it "the *oldest* supported version" — that is
   a statement about which version of the API types we compile against, made on the
-  client side. Nothing stops a user pointing k8rs at a v1.24 cluster, and nothing
+  client side. *(The pin itself was reversed to the newest offered on 2026-08-15,
+  [NOTES § D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)
+  — which does not touch this paragraph's point, only its example: a compile-time
+  pin still declares nothing about the oldest server we will meet.)* Nothing stops a user pointing k8rs at a v1.24 cluster, and nothing
   today would tell them that is what went wrong. kube-rs also offers a
   streaming-list strategy; if it is ever switched on for speed, #4044 is the bill,
   and the oldest apiserver we actually mean to support is what decides.

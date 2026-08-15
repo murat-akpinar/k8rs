@@ -14,9 +14,12 @@
 # is in git history for good (REQUIREMENTS G-5).
 #
 # Usage:
-#     fixture-audit.sh             # audit tests/fixtures/
-#     fixture-audit.sh <dir>       # audit some other tree (the self-test uses this)
-#     fixture-audit.sh --self-test # prove the guard fails when it should
+#     fixture-audit.sh                    # audit tests/fixtures/
+#     fixture-audit.sh <dir> [Cargo.toml] # audit some other tree (the self-test
+#                                         # uses this; the second argument lets
+#                                         # it drive the pin check without ever
+#                                         # editing the real Cargo.toml)
+#     fixture-audit.sh --self-test        # prove the guard fails when it should
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,13 +44,31 @@ if [ "${1:-}" = "--self-test" ]; then
   echo '{"kind":"Pod","metadata":{"name":"a"},"spec":{"nodeName":"k8rs-worker"}}' > "$d/p.json"
   echo "v1.36.1" > "$d/K8S_VERSION"
   b64=$(base64 -w0 "$tmpd/k.pem")
+  # The self-test's default Cargo.toml, so every case below tests nothing but
+  # what it is named for: reading the real one would make a key-material case
+  # fail with a *version* message the day someone downgrades the pin.
+  printf 'k8s-openapi = { version = "0.28.0", features = ["v1_36"] }\n' > "$tmpd/level.toml"
 
   sfail=0
-  expect() { # $1 = the exit status this tree must produce, $2 = what it is
+  expect() { # $1 = exit status this tree must produce, $2 = what it is, $3… = extra args
     local out rc=0
-    out=$(bash "$0" "$d" 2>&1) || rc=$?
+    out=$(bash "$0" "$d" "${3:-$tmpd/level.toml}" 2>&1) || rc=$?
     if [ "$rc" -ne "$1" ]; then
       echo "FAIL  self-test: $2 — expected exit $1, got $rc"
+      printf '%s\n' "$out" | sed 's/^/      /'
+      sfail=1
+    fi
+  }
+
+  # An exit status alone cannot tell a diagnosis from a crash — `set -e` killing
+  # the script on a grep that matched nothing also exits 1, and that is exactly
+  # what the two unparseable cases below did while reading green. So where the
+  # *message* is the point, assert the message.
+  expect_says() { # $1 = text the failure must contain, $2… = extra args to the guard
+    local out rc=0
+    out=$(bash "$0" "$d" "${2:-$tmpd/level.toml}" 2>&1) || rc=$?
+    if [ "$rc" -ne 1 ] || ! grep -qF -- "$1" <<<"$out"; then
+      echo "FAIL  self-test: expected exit 1 with a failure naming '$1', got exit $rc"
       printf '%s\n' "$out" | sed 's/^/      /'
       sfail=1
     fi
@@ -94,17 +115,100 @@ if [ "${1:-}" = "--self-test" ]; then
   expect 1 "a committed file the filter accepts but does not leave alone — captured before a rule existed"
   rm "$d/csr.json"
 
+  # The k8s-openapi pin against the fixtures' cluster, both directions and both
+  # ways of extracting nothing. Driven through throwaway Cargo.tomls handed in
+  # as $2, so the real one is never edited to make a test pass — and so the two
+  # unparseable cases can be planted at all, which editing the real file could
+  # only do by breaking the build.
+  printf 'k8s-openapi = { version = "0.28.0", features = ["v1_32"] }\n' > "$tmpd/below.toml"
+  # The wording is asserted, not just the exit status: the whole value of this
+  # failure is that it tells a reader the pin is under the cluster and names the
+  # two ways out.
+  expect_says "the k8s-openapi pin is v1_32 but the fixtures were captured from 1.36" "$tmpd/below.toml"
+  expect_says "Bump the feature in Cargo.toml to \"v1_36\", or re-capture" "$tmpd/below.toml"
+
+  expect 0 "the pin level with the cluster" "$tmpd/level.toml"
+
+  printf 'k8s-openapi = { version = "0.29.0", features = ["v1_99"] }\n' > "$tmpd/ahead.toml"
+  expect 0 "the pin ahead of the cluster — an inequality, not an equality (NOTES § D99)" "$tmpd/ahead.toml"
+
+  # A bare single line was never the input this guard is handed. In the real
+  # Cargo.toml the dependency sits under a seven-line comment block and the
+  # house style annotates the line itself, and a `v1_N` in either comment used
+  # to be read as the pin: a trailing `# bump to v1_36` beside a `v1_32` pin
+  # printed the clean line (NOTES § D29 — a check is proven only for the shapes
+  # it was fed). So every case below carries the block, which names a *higher*
+  # version than any pin under it: each red case has to go red in spite of it,
+  # which is what keeps the already-correct anchor honest. The trailing comment
+  # is then fed in both directions, because a fix that cuts comments must not
+  # start failing on one that names an *older* version beside a pin that is
+  # fine — that case would pass on the unfixed guard too, and it is here to fail
+  # on an over-eager fix rather than on this one.
+  toml() { # $1 = file, $2 = the feature to pin, $3 = the trailing comment
+    { printf '# The API types the rule engine reads fields off. Pinned to the newest\n'
+      printf '# feature the crate offers (NOTES § D99): a pin below the cluster drops\n'
+      printf '# every field added since, silently, and "found none" is the same\n'
+      printf '# silence as "there were none". This block names "v1_99" on purpose —\n'
+      printf '# a comment *above* the line was caught correctly from the start, and\n'
+      printf '# stays fed here so it keeps being caught.\n'
+      printf '# Upgraded together with kube-rs, never separately.\n'
+      printf 'k8s-openapi = { version = "0.28.0", features = ["%s"] }%s\n' "$2" "$3"
+    } > "$1"
+  }
+
+  toml "$tmpd/trailing-higher.toml" v1_32 '  # bump to v1_36 when the fixtures move'
+  expect_says "the k8s-openapi pin is v1_32 but the fixtures were captured from 1.36" "$tmpd/trailing-higher.toml"
+
+  # The other direction, and the one an over-eager fix breaks: the pin is fine
+  # and the comment names something older.
+  toml "$tmpd/trailing-lower.toml" v1_36 '  # was "v1_32" until 2026-08-15'
+  expect 0 "a comment naming an older version beside a pin that is fine" "$tmpd/trailing-lower.toml"
+
+  # A third framing of the same comment, and the one that decided how the pin is
+  # read: the comment quotes a whole `features = [...]`, so bounding the token to
+  # that array would have found the comment's array and passed. Cutting at `#`
+  # kills all three, which is why there is one narrowing here and not two.
+  toml "$tmpd/trailing-array.toml" v1_32 '  # was features = ["v1_99"] before the downgrade'
+  expect_says "the k8s-openapi pin is v1_32 but the fixtures were captured from 1.36" "$tmpd/trailing-array.toml"
+
+  # `features` with a second entry beside the pin — the shape this line becomes
+  # the day anything but the version feature is switched on. The token taken has
+  # to be the largest `v1_N`, not the first or last array entry.
+  printf 'k8s-openapi = { version = "0.28.0", features = ["v1_32", "schemars"] }\n' > "$tmpd/list.toml"
+  expect_says "the k8s-openapi pin is v1_32 but the fixtures were captured from 1.36" "$tmpd/list.toml"
+
+  # The table form — `[dependencies.k8s-openapi]` with `features` on its own
+  # line — is not read, and must fail loudly rather than compare empty against
+  # empty. Supporting it is a Cargo.toml change, and Cargo.toml uses the inline
+  # form; what is asserted here is only that the unsupported shape is noisy.
+  printf '[dependencies.k8s-openapi]\nversion = "0.28.0"\nfeatures = ["v1_36"]\n' > "$tmpd/table.toml"
+  expect_says 'no k8s-openapi "v1_<minor>" feature found' "$tmpd/table.toml"
+
+  # Both halves of "extracted nothing must not read as nothing to compare", and
+  # both by message: an exit status could not tell either of them from the crash
+  # they were actually producing.
+  printf 'k8s-openapi = "0.28.0"\n' > "$tmpd/nofeature.toml"
+  expect_says 'no k8s-openapi "v1_<minor>" feature found' "$tmpd/nofeature.toml"
+
+  echo "unknown" > "$d/K8S_VERSION"
+  expect_says "reads 'unknown', which is not a 1.x server version"
+  echo "v1.36.1" > "$d/K8S_VERSION"
+
   if [ $sfail -eq 0 ]; then
     echo "fixture-audit: self-test passed — a private key is refused armoured," \
          "base64-wrapped, DER, mislabeled, whole-file base64 and inside JSON," \
          "and so is a file scripts/sanitize.jq would refuse or would still" \
-         "change; a real certificate is not"
+         "change; a real certificate is not; and a k8s-openapi pin below the" \
+         "fixtures' cluster is refused, level or ahead is not, whatever a comment" \
+         "above or beside the line names, and neither side failing to parse can" \
+         "pass as agreement"
   fi
   exit $sfail
 fi
 # --- SELF-TEST END ---
 
 fixtures="${1:-$here/../tests/fixtures}"
+cargo_toml="${2:-$here/../Cargo.toml}"
 
 # Recursive, and JSON is only the shape that gets *parsed*. A key does not stop
 # being a key because it was written as `admin.key.pem`, a kubeconfig, or one
@@ -294,9 +398,62 @@ if [ -f "$fixtures/nodes.json" ]; then
   done
 fi
 
-# The capture stamps the server version it came from; without it nobody can
-# tell whether a fixture predates a k8s-openapi bump.
-[ -f "$fixtures/K8S_VERSION" ] || note "K8S_VERSION is missing — the fixtures record no cluster version"
+# The capture stamps the server version it came from, and the pin in Cargo.toml
+# must not sit below it (NOTES § D99). An older pin is the one drift that does
+# not announce itself: serde drops the unknown field at decode, so a rule
+# reading a field added after the pin finds nothing, and "found none" is the
+# same silence as "there were none". An **inequality**, not an equality — the
+# crate may legitimately run ahead of the kind image.
+#
+# Both sides are asserted extracted. An unparseable Cargo.toml or a K8S_VERSION
+# that does not read as 1.x would otherwise compare empty against empty and
+# print the clean line — the failure class write-guard.py keeps CANARIES for.
+# Anchoring on `1.` is part of that: a 2.x server or a `v2_` feature stops
+# matching and fails loudly rather than being compared against the wrong number.
+if [ -f "$fixtures/K8S_VERSION" ]; then
+  # `|| true` on both, and it is not decoration: under `set -euo pipefail` a grep
+  # that matches nothing exits 1, the assignment fails, and the script dies
+  # *before* reaching the notes below — exit 1 with not a word printed. Seen
+  # here, in this guard, on both unparseable cases: the self-test's `expect 1`
+  # went green over a silent crash, which is the same defect one layer up that
+  # the whole box is about. `expect_says` below is why it cannot recur.
+  # The comment is cut before a token is taken, because the whole matched line
+  # was never the pin: `sort | tail -1` takes the largest `v1_N` on it, and a
+  # trailing `# bump to v1_36` beside a `v1_32` pin handed it the comment's
+  # number and printed the clean line. A comment *above* the line was already
+  # excluded by the anchor; this is the same defect one column over, and the
+  # house style annotates exactly this line, so it is the input shape rather
+  # than an exotic one. Cutting at `#` is TOML's own lexical rule.
+  #
+  # Reading the token from inside `features = [ ... ]` instead was tried and
+  # dropped: it closes the same case, and nothing the real Cargo.toml can
+  # produce distinguishes the two — with the comment already cut, removing the
+  # array bound failed no self-test case, and a stage no test can fail without
+  # is a stage nobody is guarding (NOTES § D29).
+  pin=$(grep -E '^[[:space:]]*k8s-openapi[[:space:]]*=' "$cargo_toml" 2>/dev/null |
+        sed 's/#.*//' |
+        grep -oE 'v1_[0-9]+' | sort -t_ -k2 -n | tail -1) || true
+  # Anchored: unanchored, `1\.[0-9]+` matches the tail of a hypothetical `v21.3`
+  # and compares against the wrong number in silence. Anchored, it matches
+  # nothing and says so.
+  cluster=$(grep -oE '^v?1\.[0-9]+' "$fixtures/K8S_VERSION" | head -1) || true
+  cluster=${cluster#v}
+  if [ -z "$pin" ]; then
+    note "no k8s-openapi \"v1_<minor>\" feature found in $cargo_toml — the pin cannot be" \
+         "compared against the fixtures' cluster, so nothing is guarding the decode (NOTES § D99)"
+  elif [ -z "$cluster" ]; then
+    note "[K8S_VERSION] reads '$(tr -d '\n' < "$fixtures/K8S_VERSION")', which is not a 1.x server" \
+         "version — the pin cannot be compared against it, so nothing is guarding the decode (NOTES § D99)"
+  elif [ "${pin#v1_}" -lt "${cluster#1.}" ]; then
+    note "the k8s-openapi pin is $pin but the fixtures were captured from $cluster —" \
+         "every field added after 1.${pin#v1_} is dropped at decode without a word, so a rule" \
+         "that reads one finds nothing and reports nothing. Bump the feature in Cargo.toml to" \
+         "\"v1_${cluster#1.}\", or re-capture the fixtures against a kind 1.${pin#v1_} image (NOTES § D99)"
+  fi
+else
+  note "K8S_VERSION is missing — the fixtures record no cluster version, so the k8s-openapi pin" \
+       "cannot be compared against it"
+fi
 # --- WHAT MUST STILL BE THERE END ---
 
 if [ $fail -eq 0 ]; then
@@ -307,6 +464,7 @@ if [ $fail -eq 0 ]; then
   echo "fixture-audit: ${#all_files[@]} committed fixtures (${#files[@]} parsed as JSON) —" \
        "no annotations, no env values, no addresses; no key material in any framing" \
        "(armoured, base64-wrapped, DER, mislabeled); node names intact;" \
-       "and scripts/sanitize.jq leaves every one of them byte-identical"
+       "scripts/sanitize.jq leaves every one of them byte-identical;" \
+       "and the k8s-openapi pin is not below the cluster they came from"
 fi
 exit $fail

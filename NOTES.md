@@ -6549,6 +6549,240 @@ measure what a decision it is about to write turns on**, in its own namespace, o
 no `demo=broken` object, deleted after, and reported like any other measurement.
 Anything that tunes code until a cluster agrees is still `k8s-admin`'s.
 
+### D98 — the user leaves the room, and the PM stops asking (2026-08-15)
+
+The standing instruction, given after the rule-15 box closed: *manage the
+project — brief the agents, run the checks, make the final calls; develop it end
+to end, and do not wait for my "continue" or my approval.* Recorded rather than
+remembered, because a standing authorisation that lives only in a chat log is one
+the next context window cannot honour.
+
+**What changes is one thing: the pause between boxes.** Until now a box ended at
+the push and the next one waited to be picked. It no longer does — the PM reads
+the *first unchecked box in the lowest open phase*, briefs it, runs the cycle,
+lands it, and starts the next one in the same breath. The choice of box was never
+the user's anyway; [`todo.md`](todo.md) has decided it since Phase 0, and asking
+was a courtesy, not a gate.
+
+**What does not change is everything else, and that is the point.** Every step of
+the cycle, the security gate, the second pass over the landed tree, the phase
+close ritual, forward-only, one writer per file tree. A gate exists to stop *the
+PM* as much as an agent, and the party it was protecting the work from has just
+left. So none of them is negotiable now, and the reflex to check "is this worth
+bothering the user with" is replaced by "is this written down where the next
+reader will find it".
+
+**Three things still stop the run, and none of them is approval.** A box needing
+a credential or an account nobody here holds — the crates.io publish, GitHub
+repo settings, anything behind a login — still stops: the PM prints the exact
+command and the box stays **open**, because [§ The boxes no agent can
+run](CLAUDE.md) is about fabrication and fabrication got easier today, not
+harder. A red build stops, and is never negotiated down to get past a gate. And a
+reversal of something the user decided is still a *decision*, written here before
+it is acted on — autonomy is the licence to choose the next box, not to rewrite
+the design.
+
+**The cost, stated plainly.** The user was the last reader outside the loop, and
+the leak list in CLAUDE.md § *Where a leak would actually happen* was written for
+a PM who could be caught. Nobody catches it now. The compensation is that reports
+are written for a reader who was not there and will check: commands and their
+real output, the red run and the green one, every choice the brief did not
+decide. A summary that cannot be audited from the repo alone is the failure mode
+this entry creates, and naming it is the only guard available.
+
+### D99 — the pin follows the newest types, and the old rule was self-violating from the first capture (2026-08-15)
+
+`Cargo.toml` pinned `k8s-openapi` at feature **`v1_32`**, the *oldest* the crate
+offers, on a rule written in Phase 0 and repeated in **four** files:
+[`docs/tech-stack.md`](docs/tech-stack.md) — *"pinned to the oldest feature still
+offered … the API is forward compatible, so an old pin talks to newer clusters.
+Support window = pinned ±2 minor"* — [`REQUIREMENTS.md`](REQUIREMENTS.md),
+[`PRIOR-ART.md`](PRIOR-ART.md), which records k9s doing the same, and
+[`docs/architecture.md`](docs/architecture.md) § Version compatibility. **The
+sentence is true of the wire and false of the diagnosis**, and this entry
+reverses it.
+
+*Four, because the first draft of this paragraph said three and the operator
+review found the fourth.* It is worth a sentence rather than a silent correction:
+`docs/architecture.md` is the file CLAUDE.md describes as *never containing
+anything not yet true of the code*, and leaving it would have handed the next
+contributor the ±2 window as a live instruction — under which the honest repair
+is to re-capture the fixtures against a kind **1.34** image, which the new guard
+cheerfully passes. A doc that is wrong in the same direction as a guard's blind
+spot is worse than either alone.
+
+**The two failure modes are not symmetric, and only one of them is visible.**
+
+| | what happens | what the tool shows |
+|---|---|---|
+| pin **older** than the cluster | serde drops the unknown field at decode | nothing — the field reads exactly like one the cluster did not set. *Found none* and *there were none* are the same silence, one layer under the fixture guards that exist for it |
+| pin **newer** than the cluster | the field is absent from the object | `None` → invariant 5's defined behaviour: *a missing field means no finding*. Every rule already handles it, because every rule already handles a field the cluster did not set |
+
+Forward compatibility was never at risk in either direction — reads work both
+ways. What the old pin bought was a guarantee nobody needed; what it cost was
+the tool's own subject matter.
+
+**`None` is the right half of that table for an added *optional* field, and the
+operator review found the two places it is not** — neither reachable from k8rs's
+surface today, both recorded because this entry is what the next box adding a
+typed kind will read:
+
+- **A required field does not become `None`, it becomes `Default`.** k8s-openapi
+  decodes non-`Option` fields with `unwrap_or_default()`, not a missing-field
+  error, so an absent required field reads `""` / `0` / `false` — **a value, not
+  an absence** — and invariant 5's *a missing field means no finding* does not
+  cover it: the rule sees a confident wrong answer. `ContainerStatus::image`,
+  `ready` and `restart_count` are all this shape. Eleven fields flipped optional
+  → required crate-wide inside this window, so the mechanism is live, and the
+  struct this entry's own follow-up box will read has one
+  (`ContainerRestartRule.action` is a bare `String`). **The lesson generalises past the pin**: a snapshot field
+  read off a required field can never distinguish *false* from *not there*, and
+  the check belongs where the field is pruned in.
+- **Twelve resource types changed group/version in the window** — `SelfSubjectReview`
+  `v1beta1`→`v1`, `ValidatingAdmissionPolicy` `v1beta1`→`v1`, the `resource.k8s.io`
+  claim types `v1beta1`→`v1beta2`, and so on. Against an older apiserver that is a
+  **404, not a `None`**; confirmed live (`/apis/authentication.k8s.io/v1beta1` →
+  `HTTP 404` on a cluster whose only version is `v1`). None of the twelve is in
+  k8rs's surface: `may_i` uses `authorization.k8s.io/v1`, the C-series uses
+  `certificates.k8s.io/v1`, and the browser derives its group/version from
+  discovery rather than a constant (invariant 12) — which is one more thing that
+  invariant buys.
+
+**The rule was self-violating before its first capture.** `v1_32 ± 2 minor` is
+`1.30 … 1.34`. Every fixture in `tests/fixtures` was captured from kind
+**v1.36.1**, two minors above the stated ceiling, from the first capture trip
+onward. And `scripts/verify-test.sh` records its field names as *"cross-checked
+against … the k8s-openapi **v1_36** generated types"* — a check performed against
+types the build did not have. The drift had already produced a false document; it
+took rule 15 needing a field to make anyone look.
+
+**What was actually being dropped, measured rather than assumed.** Field-name
+sets diffed between `v1_32` and `v1_36` of the generated types, over exactly the
+structs [`rules.rs`](src/rules.rs) decodes (`PodSpec`, `PodStatus`,
+`PodCondition`, `Container`, `ContainerStatus`, `ContainerState*`, `Node*`,
+`ResourceRequirements`, `ObjectMeta`, the four workload `*Status` and
+`*Condition` types) — every file asserted present in both trees first, because a
+sweep that silently skips a path prints the same empty list as a clean one:
+
+- **12 fields added, 0 removed** — *at that scope*, which is the named struct
+  list and not the transitive closure. The operator review walked everything
+  reachable from the six watched kinds instead and found **20**, the extra seven
+  being `NodeSystemInfo.swap`, `EnvVarSource.fileKeyRef`,
+  `VolumeMountStatus.volumeStatus`, `ResourceHealth.message`,
+  `VolumeProjection.podCertificate`, `EphemeralContainer.restartPolicyRules` and
+  `Lifecycle.stopSignal`. All optional, none read anywhere in `src/`; the only one
+  sitting in a struct the rules genuinely decode is `NodeSystemInfo.swap`, beside
+  the `kubeletVersion` N4 already reads. **0 removed is confirmed twice**, at both
+  scopes — which is why the bump compiles untouched and all 200 tests pass on it.
+  The two numbers are kept rather than reconciled: the difference between them
+  *is* the answer to "what counts as a field k8rs decodes", and it is the
+  transitive one.
+- Three of them can change a rule's answer, and each becomes its own box:
+  `container.restartPolicyRules` (v1_34 — the field rule 15 works around),
+  `deploymentStatus.terminatingReplicas` and `replicaSetStatus.terminatingReplicas`
+  (a pod on its way out is not a pod that is missing), and
+  `podStatus.resources` / `allocatedResources` (in-place resize — what a
+  container *has* stops being what its spec *asks for*).
+- The rest are inert here: `hostnameOverride`, `schedulingGroup`,
+  `observedGeneration` on pod and condition, `stopSignal`, `declaredFeatures`,
+  and the extended-resource-claim statuses.
+
+**The new rule: pin the newest feature the crate offers, and assert it against
+the cluster the fixtures came from.** The guard compares the feature in
+`Cargo.toml` with `tests/fixtures/K8S_VERSION` and is an **inequality** — pin ≥
+cluster — not an equality, so the crate may move ahead of the kind image without
+turning `just check` red for nothing. The justfile has promised this since Phase
+2 (*"when the k8s-openapi feature is bumped, re-capture against a matching kind
+version — the K8S_VERSION stamp is what makes that drift visible"*) and **nothing
+compared the two**, which is the whole reason the pin sat wrong for a phase.
+
+**What the inequality costs, named rather than left to be discovered.** A pin
+above the cluster puts fields in the types that no fixture can contain, so a rule
+could read one and be untestable — the class NOTES already carries as the
+unreachable `.status.resize` branch. No new gate is added for it: *positive and
+negative fixture, both* already refuses such a rule, because a positive fixture
+for a field the capture cluster cannot produce cannot be written. The existing
+gate is the guard.
+
+**And the failure this entry calls unaffordable is not eliminated — it is
+relocated, onto the user's machine.** Before: pin 1.32, fixtures 1.36, so the
+drift lived in this repo, where the new guard now catches it. After: pin = newest
+offered = the kind image, so the guard is satisfied by construction and can only
+fire in the window between kind shipping a minor and k8s-openapi shipping it. The
+instance that remains is **the user's cluster newer than our pin** — everyone on
+1.37 the day 1.37 ships — dropping its added fields exactly as the old pin
+dropped 1.36's, and `fixture-audit.sh` structurally cannot see it: it compares the
+pin against a stamp taken from the pinned image, never against anybody's cluster.
+So the connect-time check `todo.md` already carries for the *floor* owes a second
+sentence for the *ceiling*, and that box now says so. Naming this is the price of
+the reversal being honest rather than merely correct: the argument that justifies
+it is the same argument that indicts what is left.
+
+**Writes are not a new risk, and the first draft of this paragraph gave the
+wrong reason for it** (Phase 7, unbuilt). The conclusion stands: `ops.rs` sets
+replicas, `unschedulable`, annotations and eviction, all far older than this
+window in every direction. The reason it gave — *"every mutation is preceded by a
+server-side `dryRun=All`, which is where an unknown field would be rejected
+loudly by an older apiserver"* — **is measurably false**, and it is the sentence
+Phase 7 would have cited as its licence not to check. Measured by the operator
+review on kind v1.36.1 through `kubectl proxy`, sending what kube-rs sends (an
+apiserver cannot tell a field that is unknown because it is *new* from one that
+is unknown because it is *invented*, so this is the same code path a v1.30 server
+takes):
+
+| call, with `dryRun=All` | answer |
+|---|---|
+| merge patch on a Deployment with an unknown field | **`200 OK`**, `Warning: 299 - "unknown field …"`, field silently absent from the result |
+| merge patch on the `scale` subresource — what `Api::patch_scale` uses | **`200 OK`**, same warning |
+| `POST …/eviction` with an unknown field | **`201 Created`**, same warning |
+| any of the above **plus `fieldValidation=Strict`** | `422` / `400` — rejected |
+| server-side apply (`application/apply-patch+yaml`) | `500`, *field not declared in schema* |
+
+`kube::api::PatchParams::default()` is `field_validation: None` and kube's own
+doc says that parameter applies only to `Patch::Apply`, which this design does
+not use. So **dry-run is not the guard against sending a field the cluster does
+not have** — the dry-run returns 200, the real call returns 200, and the audit
+log records a successful mutation that changed nothing. That is invariant 4's
+*neither record may lie* broken by the server rather than by us, and the only
+signal is a `Warning` header kube's `Api` methods do not surface. Phase 7 owns
+the fix; the box is open, and it carries the second half of the measurement:
+the `422` body echoes **the whole object**, every label, annotation and
+`managedFields` entry, so an apiserver error rendered verbatim into the audit log
+puts there exactly what `scripts/sanitize.jq` strips out of fixtures.
+
+**The requirement that predicted this is the one directly under the rule that
+caused it.** [`REQUIREMENTS.md`](REQUIREMENTS.md) § the version triangle ends
+*"a stale pin silently produces wrong diagnoses — the most likely breaking point
+of the project"*, two lines below *"pin the oldest supported version feature"*.
+Both were written on 2026-08-11 and they are the same sentence read twice: the
+prediction was filed as a risk of falling behind, and the pin rule was the thing
+that guaranteed it from day one.
+
+**Readable in the types is not present in the snapshot, and the difference is a
+whole box each.** Raised by `dev-core` while rewriting the comments, and it
+narrows this entry: invariant 6 prunes the watch to *the fields the snapshot
+types in `rules.rs` name*, so a field the generated types now carry is still
+absent from every object a rule sees until a snapshot field names it and the
+pruner keeps it. So the three boxes below are not *read a field* — each is a
+snapshot field, a prune line, a fixture that contains it, and only then a rule.
+The bump removes the floor under that work; it does none of it.
+
+**The guard's first draft failed the way the box describes, one layer down**, and
+is recorded because it is the third instance in this file. Under `set -euo
+pipefail` a `grep` that matches nothing kills the script before it can say
+anything, so an unparseable `Cargo.toml` produced **exit 1 with no message** — and
+a self-test asserting only the exit code cannot tell that from a diagnosis. Found
+by `tester`'s own second pass; the fix is that the self-test asserts the failure
+*text*, not the status. A guard against silent nothing that fails silently on
+nothing is the box's own subject, re-enacted by the fix for it.
+
+**What this box does not do: change a rule.** The bump makes three fields
+decodable; using them is three boxes, opened in `todo.md` and not started here.
+Rule 15 keeps `restarts == 0` as the stand-in
+[D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)
+gave it; what changes today is that the comments explaining it may no longer say
+the field cannot be read.
+
 ## Decisions made
 
 ### Product

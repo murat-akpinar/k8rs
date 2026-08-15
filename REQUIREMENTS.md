@@ -43,12 +43,20 @@
    (drift tracking).
 
 3. **The k8s-openapi / kube-rs version triangle** *(all three roles)*
-   - Pin the **oldest** supported version feature — verified 2026-08-11 as
-     **`v1_32`**; `v1_30` is no longer offered by k8s-openapi — the k8s
-     API is forward compatible; a client built against an old feature talks
-     to newer clusters.
-   - Document the supported window in the README: pinned ±2 minor
-     (kubectl skew policy).
+   - Pin the **newest** feature k8s-openapi offers — **`v1_36`** as of
+     2026-08-15. **This reverses the original requirement**, which said
+     *oldest* (`v1_32`) on the grounds that the API is forward compatible: true
+     of the wire, false of the diagnosis. An old pin drops every field added
+     since, at decode, and a dropped field is indistinguishable from one the
+     cluster never set. A new pin against an older cluster reads `None`, which
+     invariant 5 already defines as *no finding*
+     ([NOTES § D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).
+   - **The pin is asserted, not documented.** `scripts/fixture-audit.sh` fails
+     when the pin's minor falls below `tests/fixtures/K8S_VERSION` — an
+     inequality, so the crate may run ahead of the kind image.
+   - Document the supported window in the README: types are the pinned
+     version; against an older cluster the fields it did not have read as
+     absent, and the floor is the oldest apiserver kube-rs itself supports.
    - kube-rs + k8s-openapi are coupled: **group them** in Dependabot,
      upgrade together.
    - A stale pin silently produces wrong diagnoses — the most likely

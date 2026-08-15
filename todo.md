@@ -93,7 +93,11 @@ Phases 1 and 2 still name theirs because that is where they actually ran.
       plan
 - [x] `k8s-openapi` pin **confirmed against the crate, not from memory**
       (2026-08-11): `0.28.0` offers exactly `v1_32`…`v1_36`, so pinning the
-      oldest — `v1_32` — is available and keeps the ±2 minor window. The same
+      oldest — `v1_32` — is available and keeps the ±2 minor window.
+      **Reversed 2026-08-15: the pin is the *newest* offered
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15))** —
+      the ±2 window this box relied on had been false since the first capture.
+      The same
       check answered the time question: `meta::v1::Time` is
       `jiff::Timestamp` and the crate re-exports `jiff`, so `Snapshot::now`
       costs no dependency ([NOTES § D18](NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact)).
@@ -268,7 +272,11 @@ Wider than the old plan — the rule set now covers nodes and certificates, and
       someone re-runs `just fixtures` on a different machine. The pinned
       `v1_32` types talk to anything in the window and above it (forward
       compatibility), so this is a reproducibility choice, not a compatibility
-      one
+      one — *and the second half of that sentence was wrong: they talk to it and
+      silently drop what it added
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
+      which is why the image and the pin are now compared by
+      `scripts/fixture-audit.sh`*
 - [x] kind cluster up, states settled (CrashLoop in backoff, OOM kills seen).
       `cluster.sh verify` asserts each one reached the state its rule is
       about — **23/23 pass** against the real cluster on the second trip
@@ -1481,7 +1489,11 @@ this plan is delivery mechanism for what this phase produces.
       the Job above the pod, which is not watched — and the `restartPolicyRules`
       window stays open, one measured second between the exit and the retry,
       because the field is unreadable at the pinned `k8s-openapi` feature
-- [ ] **`k8s-openapi` is pinned at feature `v1_32` while every fixture is
+      — *the pin moved the next box down
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
+      and the window stays open for a different reason: the types carry the field
+      now, and nothing prunes it into the snapshot*
+- [x] **`k8s-openapi` is pinned at feature `v1_32` while every fixture is
       captured from kind v1.36.1, so four versions of fields decode to nothing
       and nothing says so** — found while designing rule 15, which needs
       `spec.containers[].restartPolicyRules` and cannot read it: that field
@@ -1500,7 +1512,113 @@ this plan is delivery mechanism for what this phase produces.
       owes: bump to `v1_36`, then find what else the snapshot has been silently
       dropping — every field the rules read that arrived after 1.32 — and decide
       whether the pin follows the kind image from now on or is chosen
-      independently and asserted against it
+      independently and asserted against it.
+      **Closed 2026-08-15
+      ([NOTES § D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).**
+      The rule is reversed, not patched: **pin the newest feature the crate
+      offers**, because the two failure modes are not symmetric — a pin below the
+      cluster drops fields silently, a pin above it yields `None`, which invariant
+      5 already defines as *no finding*. The old rule was **self-violating from
+      the first capture**: `v1_32 ± 2` is `1.30…1.34` and every fixture is
+      v1.36.1, and `scripts/verify-test.sh` had already cross-checked its field
+      names against *v1_36* types the build did not have.
+      **The survey is mechanical and it is in the entry**: field-name sets diffed
+      between `v1_32` and `v1_36` over exactly the structs `rules.rs` decodes,
+      every file asserted present in both trees first — **12 added, 0 removed**
+      at that scope, and **20 added, 0 removed** at the operator review's wider
+      one, which walks everything reachable from the six watched kinds. D99 keeps
+      both numbers rather than reconciling them, because the difference between
+      them *is* the answer to what counts as a field k8rs decodes. Nothing removed
+      at either scope is why the bump compiles untouched and all 200 tests pass on
+      it. Three of the twelve can change a rule's answer and become the three
+      boxes below; the rest are inert here and are listed in D99 so nobody
+      re-derives them.
+      **Nothing compares the two is fixed by something that compares the two**:
+      `scripts/fixture-audit.sh` now reads the feature out of `Cargo.toml` and the
+      version out of `tests/fixtures/K8S_VERSION` and fails when the pin's minor
+      is **below** the cluster's — an inequality, so the crate may run ahead of
+      the kind image. Witnessed red on the state this repo was in an hour earlier
+      (`v1_32` against 1.36 fixtures) and green after restoring. **The guard's own
+      first draft failed the way this box describes**: `set -euo pipefail` killed
+      it on an unmatched `grep`, so an unparseable `Cargo.toml` gave exit 1 with
+      no message and a self-test asserting only the status could not tell that
+      from a diagnosis — the self-test now asserts the failure *text*.
+      **What stayed out, deliberately: no rule changed.** Three comments in
+      `src/` that named the pin as the reason a field cannot be read were made
+      true and no more. In doing that the comments stopped calling
+      `restarts == 0` a *stand-in*: the field cannot exist on a cluster below
+      1.34 at all, so the count is the only one of the two that answers on every
+      cluster k8rs meets, and reading the field will **join** it rather than
+      retire it.
+      **The operator review found two blockers and both were in prose, not
+      code.** The reversed rule lived in a **fourth** file nobody had swept —
+      `docs/architecture.md` § Version compatibility, the tree that by CLAUDE.md's
+      own words never contains anything not yet true of the code — and left
+      standing it would have handed the next reader the ±2 window as a live
+      instruction, under which the honest repair is to re-capture against a kind
+      **1.34** image, which the new guard passes without a word. And D99's
+      write-path paragraph justified Phase 7's safety with *"a dry-run is where an
+      unknown field would be rejected"*, **measured false**: a merge patch
+      carrying an unknown field answers `200 OK` under `dryRun=All`, objecting
+      only in a `Warning` header kube does not surface — so the sentence Phase 7
+      would have cited as its licence not to check is now a Phase 7 box instead.
+      Three further findings: the guard read a `v1_N` token in a *trailing
+      comment* as the pin, and its self-test had never fed it the shape the real
+      pipeline hands it — a dependency line under a comment block, in a repo whose
+      house style annotates exactly that line — closed by cutting at `#`, TOML's
+      own lexical rule, with the array-bound alternative dropped after an
+      ablation showed no self-test case could fail without it; the residual
+      false-alarm paths (an inline table reformatted across lines, a `#` inside a
+      quoted string) all fail **loudly**, which is the direction that matters.
+      `None` has two exceptions worth writing down —
+      a **required** field decodes as `Default`, not `None`, and twelve resource
+      types changed group/version, which is a `404` — and the reversal **relocates**
+      the silent-drop failure rather than removing it, onto users whose cluster is
+      newer than the pin, which the Phase 13 connect-check box now owes a sentence
+      for
+- [ ] **`spec.containers[].restartPolicyRules` is decodable now and still
+      reaches no rule, so rule 15's stand-in is a proxy where the real signal is
+      available** — the field arrives at `v1_34` and the pin is `v1_36`
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
+      but **decodable is not present**: invariant 6 prunes the watch to the fields
+      the snapshot types *name*, and none names this one. So this is a snapshot
+      field, a prune line, a fixture that carries it, and only then the rule
+      change — not *read a field*. What it buys is D97's own named residual gap:
+      rule 15 fires on `restarts == 0`, and a container declaring a retry rule on
+      its own exit code comes back under `Never`, which is KEP-5307's headline use
+      case and this rule's headline false positive — measured on kind v1.36.1, a
+      pod `Never` with one retry rule on `exit 3` sat in `CrashLoopBackOff` at
+      five restarts. **The count cannot be dropped for the field**: a rule matched
+      on exit code against the declared rules answers *will it retry this exit*,
+      which is what the card claims, but the window is one exit wide and the
+      object to prove it on has to be captured. `scripts/broken.yaml` already
+      declares gang restarts, so the capture is a variant of an object the recipe
+      builds, not a new trip
+- [ ] **`terminatingReplicas` is decodable now, and a pod on its way out is
+      currently counted as a pod that is missing** — added to both
+      `DeploymentStatus` and `ReplicaSetStatus` after 1.32
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).
+      The workload rules read ready-versus-desired and cannot today tell a
+      rollout draining old pods from a Deployment that genuinely cannot fill its
+      replicas — the shape every operator sees during a normal deploy, which is
+      the false-positive class that makes a tool get muted. Same shape as the box
+      above: snapshot field, prune line, fixture, then the rule. Check first
+      whether `explains_a_shortfall` is where it belongs rather than a rule of its
+      own
+- [ ] **In-place resize makes *what a container asks for* and *what it has* two
+      different numbers, and every resource rule reads only the first** —
+      `podStatus.resources` and `podStatus.allocatedResources` arrive after 1.32
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
+      beside the `.status.resize` string this file already records as an
+      unreachable branch at the old pin. Rules 8/9 and the Capacity report compare
+      `spec.containers[].resources` against the node, which is the *request*, not
+      the allocation, and after a resize those disagree. **Decide the scope before
+      writing anything**: this may be one snapshot field and a fallback, or it may
+      be out of scope entirely under the invariant-13 guard — *would someone who
+      runs clusters meet this in a normal week* is a genuine question for a
+      feature that went beta in 1.33, and the honest answer may be no until it is
+      on by default. Answer it in NOTES either way; do not leave it as a silent
+      omission, which is exactly what the pin was
 - [ ] **A pod that used its own restart rule three times and has served ever
       since carries two permanent WARN cards, and the object says it is over** —
       measured on kind v1.36.1: `gang-restart`, `2/2 Ready`, `phase: Running`,
@@ -2353,6 +2471,22 @@ public release.
       a deadline on the first watch sync** — `Cargo.toml` pins `k8s-openapi` to
       `v1_32` and calls it *"the oldest supported version"*, which is a statement
       about the types we compile against and is enforced nowhere at runtime.
+      *(The pin is the **newest** offered since 2026-08-15,
+      [D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15),
+      which makes this box more pressing rather than less: no line anywhere now
+      even claims a floor.)*
+      **And it now owes the other end too, which is the half D99 did not name.**
+      The reversal moved the silent-drop failure out of this repo — where the new
+      `fixture-audit.sh` guard catches it — and onto **the user's machine**: a
+      cluster *newer* than our pinned types drops its added fields exactly as the
+      old pin dropped 1.36's, and that guard structurally cannot see it, because
+      it only ever compares the pin against a fixture stamp taken from the pinned
+      image. Every k8rs user on 1.37 the day 1.37 ships is in that state. So the
+      connect-time check has two sentences, not one: *this cluster is older than
+      anything we support* and *this cluster is newer than the types this build
+      was compiled against, so some of what it reports may not reach the
+      screen* — the second being the one D99 calls the unaffordable failure.
+      Found by the operator review of the D99 box
       Nothing stops a stranger pointing v0.0.1 at a v1.24 cluster, and nothing
       would tell them that is what went wrong. The shape to design against is
       k9s's [#4044](https://github.com/derailed/k9s/issues/4044): client-go's
@@ -2609,6 +2743,28 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       step: *consequence text → dry-run → confirm callback → call → audit*
 - [ ] Server-side `dryRun=All` wherever supported; a rejected dry-run aborts
       and surfaces the API server's own message
+- [ ] **A dry-run does not reject an unknown field, so the mutation contract
+      needs `fieldValidation=Strict` and a place to put the warning** — measured
+      2026-08-15 on kind v1.36.1
+      ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)):
+      a merge patch carrying a field the cluster does not have answers
+      **`200 OK`** under `dryRun=All`, with the objection only in a `Warning: 299`
+      header that kube's `Api` methods do not surface. Same for the `scale`
+      subresource and the eviction POST. So the box above it is not the guard it
+      reads as: the dry-run passes, the real call passes, and the **audit log
+      records a successful mutation that changed nothing** — invariant 4's
+      *neither record may lie*, broken by the server rather than by us, and
+      exactly the shape a user on a cluster older than our pinned types would
+      meet. `PatchParams::default()` sends no `fieldValidation`; `Strict` turns
+      the 200 into a `422` (a `400` for eviction). **Two things to decide, not
+      one**: whether `Strict` goes on every write or only where a rejection is
+      recoverable — it is a behaviour change on a cluster that today accepts the
+      call — and where the warning goes when it is *not* strict, since a header
+      nobody renders is the same silence one layer up. **Sanitize before
+      rendering either**: the `422` body echoes the whole object, every label,
+      annotation and `managedFields` entry, and an apiserver error written
+      verbatim into the audit log puts there what `scripts/sanitize.jq` exists to
+      strip out of fixtures
 - [ ] The headless driver: the temporary main takes a subcommand
       (`k8rs ops scale deploy/web 3 -n payments`) so every operation is
       runnable — and scriptable in `just e2e` — before any key exists. This is

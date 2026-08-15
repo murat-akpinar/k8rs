@@ -356,6 +356,21 @@ Rule tests live in `src/rules_tests.rs` — beside the file they test, still a
 child module of it (invariant 11), written by the dev who wrote it; `tester`'s
 job on those is step 4: attack them.
 
+### The PM does not wait for approval — the boxes run back to back
+
+**Standing authorisation, 2026-08-15
+([D98](NOTES.md#d98--the-user-leaves-the-room-and-the-pm-stops-asking-2026-08-15)):
+the user is not in the room.** The PM picks the next box, briefs it, runs the
+cycle, lands it, and starts the next one — no "shall I continue", no approval
+between boxes, no question the repo already answers. The box was never the
+user's to choose: [`todo.md`](todo.md) decides it.
+
+Nothing else loosens. Every gate below stops the PM exactly as it stopped an
+agent, and the one person who could have caught a skipped gate has left — so a
+gate skipped now is never found. The stops that remain are the section below, a
+red build, and any reversal of a design decision, which is written into
+[NOTES.md](NOTES.md) before it is acted on.
+
 ### The boxes no agent can run — say so, do not fake them
 
 Some boxes need a machine, a credential or an account the agents do not have:
