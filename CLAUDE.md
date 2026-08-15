@@ -323,7 +323,11 @@ delivery, in the same turn, never filed as follow-ups — then say what changed.
 Five subagents live in `.claude/agents/`, committed. **The main session is the
 project manager.** Agents do not talk to each other, do not commit, do not push,
 and do not check a box in `todo.md`. Every handoff goes through the PM, so there
-is exactly one place a lie can be caught.
+is exactly one place a lie can be caught. **The PM is not a sixth agent for the
+same reason** — a subagent starts cold on every dispatch and would carry neither
+this file, nor `todo.md`, nor the box it just landed; `/basla`
+(`.claude/commands/`) is the trigger that puts the main session into this
+procedure, not a delegation of it.
 
 ### Ownership — and the file each one may write
 
@@ -336,7 +340,7 @@ Every path in the repo appears in exactly one **Writes** cell.
 | `tui-designer` | `screens/` | any `.rs` |
 | `tester` | `tests/` `scripts/` `justfile` `clippy.toml` `deny.toml` `.github/workflows/` | product code in `src/` — **including the rule tests**, see below |
 | `k8s-admin` | nothing — reads everything, reports | every file |
-| **PM** (main session) | `todo.md` `NOTES.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/`, branches, commits, PRs | `src/` (delegate it) |
+| **PM** (main session) | `todo.md` `NOTES.md` `REQUIREMENTS.md` `docs/` `README.md` `README_TR.md` `CHANGELOG.md` `Cargo.toml` `Cargo.lock` `cliff.toml` `CLAUDE.md` `.gitignore` `LICENSE` `.claude/agents/` `.claude/commands/`, branches, commits, PRs | `src/` (delegate it) |
 
 **A `<name>_tests.rs` has the same writer as `<name>.rs`** (invariant 11): the
 tests move out of the file, never out of the author's hands — `tester`'s job on
