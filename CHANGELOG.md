@@ -44,6 +44,7 @@
 - *(rules)* The two 137 reasons are endings, so every rule reads them once ([5e979db](https://github.com/murat-akpinar/k8rs/commit/5e979dbd7ae98bd1eb82b71f6c2764977230fca9)) — Rules 1 and 5 printed the two readings `exit_meaning` learned and knew neither. On one object rule 5 offered "check the memory limit and the liveness probe" under an evidence line saying Kubernetes lost track of the container, and rule 1 sent the reader to `logs --previous` for a run whose `containerID` the record does not carry — a command the API refuses, not merely advice that does not help.
 - *(k8s)* Pin k8s-openapi to the newest generated types ([6c7a20f](https://github.com/murat-akpinar/k8rs/commit/6c7a20f2d86216f42ad7c8cad98d81590a7034e0)) — The pin sat at v1_32, the oldest feature the crate offers, while every fixture is captured from kind v1.36.1 — so four versions of fields decoded to nothing and nothing said so. serde drops an unknown field, which reads exactly like a field the cluster never set: "found none" and "there were none" are the same silence, one layer under the guards that exist for it.
 - *(rules)* Age the serving restart card out and stop sampling it mid-restart ([a870b89](https://github.com/murat-akpinar/k8rs/commit/a870b89bf96b83bad5a284b559484a4e5beba385)) — A container that used its restart rules and has served ever since carried a permanent WARN on a screen whose subject is what is broken now. The field that separates a settled restart from a live one was already decoded and rule 5 never read it: state.running.startedAt moves on every restart, while the lastState a gang restart synthesizes carries neither stamp.
+- *(rules)* The second copy of a shared sentence says nothing, so it goes ([527c255](https://github.com/murat-akpinar/k8rs/commit/527c255e8bdb7373180ea81ede1edfa0e134e07b)) — Rules 5 and 6 draw the same four-line action on one container. The fold lives in analyze, is scoped to the container, keeps the more severe card, and drops a card only when every fact on it is already on the survivor.
 
 ### 💼 Other
 
@@ -52,6 +53,7 @@
 ### 🚜 Refactor
 
 - *(rules)* Move the tests beside rules.rs instead of inside it ([0c52097](https://github.com/murat-akpinar/k8rs/commit/0c52097c8c2a9c8cf7fc6e179e57f250202067a2)) — src/rules.rs was 8913 lines and 6584 of them were `#[cfg(test)] mod tests` — the product file was a quarter of its own file. The tests now live in src/rules_tests.rs behind the one declaration `#[cfg(test)] #[path = "rules_tests.rs"] mod tests;`, and CLAUDE.md carries it as a convention rather than a one-off: every product file that grows tests splits the same way, so analysis.rs does it in Phase 4 without anyone deciding again.
+- *(rules)* Split the rule tests by family, and say so where it is documented ([4d73366](https://github.com/murat-akpinar/k8rs/commit/4d73366f28cf66958354f4c45361ae8f949fe8b4)) — 17460 lines in one file was the largest single read in the repo and every agent turn paged through it. rules_tests.rs keeps the imports and the helpers more than one region reads; five #[path] modules hold the tests, one per region of rules.rs. No mod.rs, no lib.rs, and rules.rs is byte-identical — the product file does not split.
 
 ### 📚 Documentation
 
@@ -85,6 +87,7 @@
 - *(docs)* Each phase names the prior-art classes it can ship, and the operator review checks them ([5ced22d](https://github.com/murat-akpinar/k8rs/commit/5ced22d0785a292468099efdeff9a324f16d0d15))
 - *(docs)* The cluster splits by what a run produces, not by who runs it ([3de4b81](https://github.com/murat-akpinar/k8rs/commit/3de4b81903e778bf0dc1db9899feeb759ba5e483)) — k8s-admin's brief said "prefer checking" against the kind cluster while CLAUDE.md said the agents do not have one. The reviewer followed its brief; the contradiction was never asked. Rule by what the rule protected — fabrication, not access:
 - *(rules)* The long-cycle restarter is a report row, not a fifth threshold ([b7fda0a](https://github.com/murat-akpinar/k8rs/commit/b7fda0a2b51cbdfb88c90018022df9ed19293b0b)) — D101 answers the box D100 left open: no clause over one Pod sample separates a settled container from one on a thirty-minute cycle, so rules 1, 2, 5 and 6 keep their suppressors unchanged and the count becomes a per-container row in the Phase 4 reports. Three candidates are refused in writing, the Events sequence is refused on the watch budget rather than on physics, and the costs are named — Alerts is silent between restarts, the card can vanish while it is being read, and --once carries no reports.
+- *(docs)* The repo grows every box and nothing ever made it smaller ([fb5cd1c](https://github.com/murat-akpinar/k8rs/commit/fb5cd1c89ce47f9bcfb543efaaf83daa3e71a775))
 
 ### 🧪 Testing
 
