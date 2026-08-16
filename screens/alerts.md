@@ -35,7 +35,7 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 |---|---|
 | Sidebar | `ALERTS` is selected on startup. Counts are **owners**, not pods. |
 | Header row | Three zones on one line: cluster vitals left, the name centred, context · connection state · `admin` or `read-only` right. The right zone also carries the namespace scope when it is not cluster-wide, and a warning if the kubeconfig disables TLS verification. It is never truncated ([widgets.md § The header row](widgets.md#1a-the-header-row)). |
-| Finding card | four parts, in this order and only this order: **who** (the identity line, with the age) · **what happened** · **the evidence** · **what to do**. Three to ten lines, wrapped and capped by [How wide a card is, and how tall](#how-wide-a-card-is-and-how-tall). Title bright, evidence dim. Blank line between cards — half the design. |
+| Finding card | four parts, in this order and only this order: **who** (the identity line, with the age) · **what happened** · **the evidence** · **what to do**. Three to twelve lines, wrapped and capped by [How wide a card is, and how tall](#how-wide-a-card-is-and-how-tall). Title bright, evidence dim. Blank line between cards — half the design. |
 | The card's right edge | **when it happened, or nothing.** It is the only right-aligned field on the title line, and it holds one fact: the time of the event this card is about. A card whose finding has no such time leaves it empty rather than borrowing a nearby timestamp that answers a different question (see *No number we cannot produce*). |
 | That field is **right-aligned, not trailing** | It ends two columns before the pane's right edge — `4 min ago`, `12 min ago` and `2 hours ago` all stop at the same column, and a longer or shorter age moves its left end, never its right. It is laid out **first**, at its measured width, and the name takes what is left; **at most 14 columns**, which is the whole budget ([How wide a card is, and how tall](#how-wide-a-card-is-and-how-tall)). The mockup used to disagree with itself here, because an age once ran flush to the border with no source behind it (`6 days ago` on the cordon card) — that string is gone; the column itself was never the problem, and the cordon card uses it again below, honestly this time ([the cordon card](#the-cordon-card-with-and-without-its-clock)). |
 | Command log | every command k8rs ran, as the user would have typed it. |
@@ -183,28 +183,68 @@ The body pane is **16 rows** at 80×24, and there is only one way to spend the
 1 divider + 1 footer + 1 bottom border. Count them in the frame below; nothing
 in that list is optional.
 
+**80×24 is the worst case in both directions, and every cap below is stated
+against it.** A taller terminal adds rows to the body and nothing else; a wider
+one widens the card region, so the same strings wrap to *fewer* lines and every
+card gets shorter. Below the minimum there is no layout at all — one sentence
+saying so ([widgets.md § 8](widgets.md#8-smaller-than-8024)) — so there is no
+size at which a card is worse than what is drawn here.
+
 A card is filled in one order, and only the evidence is ever cut:
 
 | # | Part | Lines | May it be cut? |
 |---|---|---|---|
 | 1 | identity — `● name` (`· n of m pods`) age | exactly 1, never wraps | the name clips, the age never |
-| 2 | what happened (`title`) | wrapped, drawn whole — 1 or 2 measured | no |
+| 2 | what happened (`title`) | wrapped, drawn whole — **capped at 3 lines** | no |
 | 3 | the evidence | wrapped, **capped at 3 lines** | **yes — this one only** |
-| 4 | `→ ` what to do (`action`) | wrapped, drawn whole — 2 to 5 measured | no |
+| 4 | `→ ` what to do (`action`) | wrapped, drawn whole — **capped at 5 lines** | no |
+
+**Those four caps add to twelve, and twelve is the card cap.** Every number in
+the table is a real one a rule reaches today; 1 + 3 + 3 + 5 is what a card
+measures when all four do at once. The caps and the total are one statement and
+are read off each other, which is the thing this section did not do until
+2026-08-16 — it wrote the parts and the total independently, and they disagreed
+by two rows.
 
 - **The action is never cut.** A fix the reader cannot finish reading is not a
-  fix, and the three long ones are long because each answers a question the
-  reader actually has — rule 8's grew in review for exactly that reason
+  fix, and the long ones are long because each answers a question the reader
+  actually has — rule 8's grew in review for exactly that reason
   ([NOTES § D79](../NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)).
-  Shortening them was considered and rejected: that trades a real answer for a
-  layout.
-- **The evidence is cut because it is the only unbounded thing on the card.**
+  Cutting one to fit was considered and rejected: that trades a real answer for
+  a layout. **Shortening one is not the same thing and is not refused** — the
+  three clean-exit arms came down from 9 / 8 / 9 wrapped lines to 5 / 5 / 5 with
+  all three of their doors still open, and what came out was the preamble and
+  the restatements
+  ([NOTES § D90](../NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
+  *Never cut* is a rule about how a card is built — no rule's fix arrives
+  half-written. Five lines is a budget the author writes to. They are not the
+  same instrument and they do not contradict each other.
+- **The action is k8rs's own words, always — a string the cluster wrote is
+  never one.** A controller's or a runtime's message is evidence, and it goes on
+  the evidence line with every other quote, behind the three-line cut. This is
+  the rule that makes the five-line budget enforceable at all: an author can
+  measure what they wrote, and nobody can measure what a runtime will write.
+  **Measured, and reachable by a typo:** a container whose `command` names a
+  path that is not in the image carries containerd's whole `runc` error, which
+  is 7 wrapped lines — *"Kubernetes recorded this: failed to create containerd
+  task: failed to create shim task: OCI runtime create failed…"* standing where
+  the instruction belongs, telling a beginner nothing to do
+  ([invariant 14](../CLAUDE.md)). Two consequences, both deliberate: the card
+  keeps the runtime's exact words, one line lower and cut like any other quote;
+  and **a rule with nothing useful to say must still say something in its own
+  voice** — the action slot is never empty, and it is never filled by borrowing
+  from the API. That keeps the card's four parts four different jobs, which is
+  the whole reason it has four.
+- **The evidence is cut because it is the only unbounded thing on the card**,
+  and the bullet above is what makes that true rather than nearly true.
   Everything else was written by a rule author and is as long as they made it;
   the evidence carries a controller's sentence quoted verbatim, which
   [NOTES § D37](../NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)
   requires be kept word for word and which no author bounds. Measured on the
-  committed capture: rule 3's evidence is **347 characters**, rule 10's after
-  N6's merge is **358**. Three lines is 150-odd of them.
+  run: rule 3's evidence is **422 characters** — it was 347 when this line was
+  first written, and it grew because the registry did, not because a rule
+  author typed anything — and rule 10's after N6's merge is **358**. Three lines
+  is 150-odd of them.
 - **Three lines, not two, and the number was measured rather than chosen.** At
   two, rule 10's card cuts at *"· the scheduler's…"* and the reader never sees
   one word of the message the rule went and fetched. At three the quote's
@@ -221,45 +261,129 @@ A card is filled in one order, and only the evidence is ever cut:
 - **The full text is one `⏎` away**, on the object's detail screen, where the
   finding that brought you there is pinned ([detail.md](detail.md)). That is
   what makes the cut honest: nothing is lost, it is one keypress deeper.
-- **A card is three to ten lines, and 10 is measured, not decreed.** Three is
+- **The title is capped at three lines, and that cap is new.** It was capped by
+  implication only until 2026-08-16 — the table said *1 or 2*, so a title's
+  third line spent a row nothing had reserved, and that is not hypothetical:
+  a serving clause at a three-digit restart count once made a 3-line title and
+  an 11-line card, caught by an operator review and by nothing in the repo
+  ([NOTES § D95](../NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)).
+  **Three, not two, and the number is a measurement:** of the 69 distinct titles
+  the rule set prints on the run, **three wordings** wrap to three lines, and
+  every one is a fixed frame plus a translation — rule 6 spends its title on
+  *what `exit 137` means*, which is invariant 14 doing its job. Cutting those to
+  two lines would cut the translation, which is the trade this section refuses
+  everywhere else.
+- **The title is the one part of a card that two authors write and nobody may
+  cut, and neither author can see the other's length.** A rule picks the
+  frame — *"The last run on record has no
+  exit code of its own — "* — and `exit_meaning` writes the translation that
+  finishes it, for a code, not for a frame. Rule 6 has three frames — **32, 53
+  and 58 columns** — and any of them can pick up any translation, so the same
+  sentence costs a different number of lines depending on which one does. **That is
+  where a third line comes from, and it is why this cap is worth writing down
+  rather than observing.** Nothing here asks a rule to shorten a translation:
+  explaining `exit 255` to someone who has never seen it is the card's job
+  ([invariant 14](../CLAUDE.md)).
+- **No title the rules can draw measures four today, and the margin is four
+  columns.** Measured against the landed code: the tightest one a cluster can
+  produce is the `-1` a runtime writes when it could not read an exit code,
+  which finishes its third line with **4 free columns**; the `255` beside it has
+  6, and `137`'s frames leave 8 to 12. **One word is the whole of that margin** —
+  the `255` translation carried *already* until 2026-08-16 and measured four
+  lines; the word came out and the title came back inside the cap. The word was
+  never the defect, the missing margin was.
+- **So a translation is measured against every frame that can reach it**, not
+  against the one it was written for — and the sweep is the argument. Pair rule
+  6's three frames with the twelve endings `exit_fact` can print and **5 of the
+  36 combinations measure four lines**, with a sixth landing on its third line
+  with zero columns to spare. Not one of those six is on a screen, and what
+  keeps them off is not a budget: it is `ending`, pairing `137` with one frame
+  and `255` with another for reasons that have nothing to do with layout. Move a
+  pairing there — the kind of change this phase has already made more than
+  once — and a card goes over with nobody having touched a word of its wording.
+- **A card is three to twelve lines, and 12 is the parts added up — 10 was one
+  drawing measured and then written down as if it bound every card.** Three is
   the floor a card with no evidence and one line of each other part reaches;
-  four is the shortest the rule set actually produces today (N2's, drawn
-  below). The tallest is rule 11 — 1 identity + 1 title + 3 evidence + 5
-  action. Ten lines plus the blank separator is 11 of 16 rows, which leaves
-  five for the next card: **the pane always shows a second finding**, and that
-  is the property the cap exists to hold. A screen that can show only one
-  finding is not a list, and Alerts is a triage list before it is anything
-  else.
+  four is the shortest the rule set actually produces today (N2's, drawn below).
+  The old number came off the unschedulable pod's card, which was 1 identity +
+  **1** title + 3 evidence + 5 action when it was written down — and every card
+  with an ordinary two-line title has measured 11 ever since, inside every part
+  budget this file states and over the total it states. **That is the whole
+  finding, and it is arithmetic:** 1 + 2 + 3 + 5 is 11, and 1 + 3 + 3 + 5 is 12.
+  (That card was also miscredited to rule 11 here for as long as the number
+  stood; it is rule 10's, and rule 11 is the probe-failure card.)
+- **Twelve is also exactly what the pane can afford, so the promise gets sharper
+  rather than weaker.** The body is 16 rows: 12 for the tallest card, 1 for the
+  blank separator, and **3 left — the next finding's identity line and two lines
+  of its title**. Not *a second card is somewhere below*: its name and what is
+  wrong with it are both on screen, at the worst card the rule set can draw,
+  with no rows to spare. That is the property the cap exists to hold, it is
+  checkable by looking at the screen, and the frame below is drawn at it. A
+  screen that can show only one finding is not a list, and Alerts is a triage
+  list before it is anything else.
+- **The cap is the card's, and the pane obeys nothing.** The *pane* cuts
+  whatever does not fit, as it always has. **The state where that bites is a
+  banner**, which shares the body pane with the list: the widest one drawn takes
+  **ten of the sixteen rows** — eight lines, the blank between its two
+  paragraphs, and the blank above the list
+  ([widgets.md § 2](widgets.md#2-element--widget),
+  [states.md](states.md#you-can-only-see-some-namespaces)). Six rows left is
+  identity + 3 title + 2 evidence, so **a twelve-line card's action is entirely
+  off screen** — and no cap fixes that, because the banner is telling the reader
+  something they need more than the first card's fix. What the screen owes them
+  instead is that the list still moves: `ListState` keeps the selected card in
+  view, so `↓` reaches the action rather than scrolling past it, and `⏎` has the
+  whole finding pinned ([detail.md](detail.md)). **This is not a 403's problem
+  alone** — the namespace-scope banner is the ordinary state for anyone who is
+  not a cluster admin.
 - **What keeps this bounded is not the cap, it is D3.** Findings group by owner
   ([NOTES § D3](../NOTES.md#d3--findings-group-by-owner-not-by-pod)), so a
-  DaemonSet broken on forty nodes is one ten-line card and not four hundred
+  DaemonSet broken on forty nodes is one twelve-line card and not four hundred
   lines.
-- **If an action ever wraps past five lines, that is a `rules.rs` finding, not
-  a layout problem.** Five lines is about 200 characters at this width, which
-  is where rule 11's sits today. The budget is written down so the next long
-  action is noticed when it is written rather than when it is drawn.
+- **An action that wraps past five lines is a `rules.rs` finding, not a layout
+  problem** — and that sentence has been in this file for weeks while four
+  actions broke it, so here is what a rule author measures against. **Five lines
+  is 232 to 245 characters** at the 49 columns a continuation has; the spread is
+  where the words happen to break. **Measured on the run, not estimated**
+  (`cargo test -- --nocapture`, every distinct `→ ` line wrapped at 49): of 44
+  distinct author-written actions, **4 are over** — `stopped_action`'s two arms
+  at 6 lines, rule 5's no-record arm at 6, and `failed_action(Init)` at **8**,
+  which draws a 14-line card. The fifth string that measured over is the runtime
+  quote two bullets up, and it is not an action at all. **What that costs is
+  40 · 36 · 18 · 105 characters**, in that order. Nothing here says which words
+  go: that is `rules.rs`'s, and D90 is the proof it can be paid without closing
+  a door.
+- **Ten more actions sit *at* five lines, and the cap does not move for them
+  either.** The two clean-exit arms D90 rewrote have **3 and 0 free columns** on
+  their last line — so a later box that wants to add four or six characters to
+  one of them is asking for a row that does not exist, and the words come out of
+  the sentence rather than out of the number. That is the whole point of writing
+  a budget down instead of reading it off whatever shipped last.
 
-The tallest measured card, in the frame, at the floor it is budgeted for:
+The tallest card the budget allows, in the frame, at the floor it is budgeted
+for — 12 rows, the separator, and the three the next finding gets. **Three card
+shapes are over it today**, all of them the same eight-line action, so this is
+the shape the rule set is coming back to rather than one it is safely inside:
 
 ```
  nodes 3/3                          k8rs         ctx: prod-eu · live · admin
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
-│▸ ALERTS     3 ● 7 ▲│  ● shop/api  ·  1 of 6 pods                  9 min ago  │
-│ RESOURCES          │    Nothing has decided where this pod should run        │
-│   workloads        │    nothing has written a scheduling decision on it: a   │
-│   network          │    pod that was given a machine and a pod that was      │
-│   storage          │    refused one both carry a PodScheduled line in…       │
-│   config           │    → check that something is actually scheduling — on   │
-│   cluster          │      most clusters kube-scheduler is a pod in the       │
-│ ANALYSIS           │      kube-system namespace — and that this pod is not   │
-│   capacity      1 ▲│      asking for a different one by name                 │
-│   certificates  30d│      (spec.schedulerName)                               │
-│   drain safety     │                                                         │
-│   waste            │  ● default/broken-hostpath                              │
-│   versions         │    A container can drive the container runtime, which   │
-│                    │    is full control of that machine                      │
-│                    │    container nosy · /run/containerd on the node ·       │
-│                    │    writable                                             │
+│▸ ALERTS     3 ● 7 ▲│  ▲ default/healthy-sidecar                   5 min ago  │
+│ RESOURCES          │    Container has been restarted 3 times — it is         │
+│   workloads        │    serving now, and the last run on record finished     │
+│   network          │    cleanly                                              │
+│   storage          │    sidecar container proxy (it runs beside the app the  │
+│   config           │    whole time) · exit 0 (the run ended without an       │
+│   cluster          │    error) · docker.io/library/busybox:latest            │
+│ ANALYSIS           │    → exit 0 says the run ended, not who stopped it —    │
+│   capacity      1 ▲│      check the pod's events for a Killing line and the  │
+│   certificates  30d│      node for a memory killer. If nothing stopped it    │
+│   drain safety     │      the program ends itself, and this one must run as  │
+│   waste            │      long as the app does: finishing at all is the bug  │
+│   versions         │                                                         │
+│                    │  ▲ shop/api  ·  2 of 6 pods                 12 min ago  │
+│                    │    Running, but not receiving traffic — the readiness   │
+│                    │    check is failing                                     │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
 │ $ kubectl get pods -A --watch                                                │
 │ $ kubectl get nodes --watch                                                  │
@@ -268,19 +392,47 @@ The tallest measured card, in the frame, at the floor it is budgeted for:
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The second card is `default/broken-hostpath` — five of its nine lines, cut by
-the pane and not by the card. A bare pod, so no owner and no `n of m`, the same
-as N6's first card below. It has **no age**, because rule 8 describes a
-standing property rather than an event
-([NOTES § D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)),
-so its name has the whole 51 columns and the right edge is blank.
+**Every string on that card is the run's own**, `default/healthy-sidecar` off
+the committed captures: 1 identity + 3 title + 3 evidence + 5 action, the four
+caps all met at once, and the 16 body rows spent exactly. It is a `▲` and the
+card below it is too, which is not a coincidence to build on — the cap is
+severity-blind, and the tallest shape is whichever rule reaches all four caps.
+**Its evidence fills the three lines without needing the cut**, so no `…`
+appears here; that string simply ends where the cap is. The `→ ` costs the
+action two columns on its first line, and continuations indent under the text
+rather than under the arrow.
+
+`shop/api` gets three rows and that is the floor, not a comfortable margin: its
+name, its count, its age, and the whole of *what is wrong with it*. **Its title
+fits in two lines. A three-line title in that slot loses its last line to the
+pane** — which is the pane cutting, not the card, and is the one place a title
+is ever short of what its rule wrote. Nothing below is lost either way, because
+the pane scrolls ([widgets.md § 4](widgets.md#4-scrolling)); what the three rows
+buy is a reader who has not yet touched a key seeing two findings instead of
+one.
 
 ### The cards the budget was measured against
 
-Real strings, from the committed capture. The first is where the quote gets
-cut; the second is the tallest card the rule set can produce; the third is the
-one whose *action* is what makes it tall. The fourth is not a measurement — it
-is the shape all of this exists to leave alone.
+Real strings, off the run, at the card region's own width rather than the
+frame's. The tallest card is the one in the frame above; these three measure
+**10, 9 and 9**, and each gets there a different way. The first is where the
+quote gets cut — 422 characters of it, the longest string any rule fetches. The
+second is the pod nothing will schedule, where the quote is the scheduler's own
+verdict. The third has **no age at all**, because
+rule 8 describes a standing property rather than an event
+([NOTES § D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)),
+so its name has the whole 51 columns and the right edge stays blank. It is a
+bare pod, so no owner and no `n of m`, the same as N6's first card below. The
+fourth is not a measurement — it is the shape all of this exists to leave alone.
+
+**The first card is the arithmetic in one drawing.** It has the ordinary
+two-line title almost every card in the rule set has, it reaches ten lines, and
+its action is **four** lines — not five. That is what a ten-line cap actually
+bought at a two-line title, while this file went on promising five. The number
+was read off the tallest drawing on the page rather than off the parts, and then
+the drawing moved: the pod that will not schedule was 1 identity + 1 title + 3
+evidence + 5 action when the ten was written down, and its rule has since
+reworded the title to two lines and the action to three.
 
 ```
 ● payments/web  ·  2 of 5 pods              4 min ago
@@ -296,16 +448,15 @@ is the shape all of this exists to leave alone.
 ```
 
 ```
-● shop/api  ·  1 of 6 pods                  9 min ago
-  Nothing has decided where this pod should run
-  nothing has written a scheduling decision on it: a
-  pod that was given a machine and a pod that was
-  refused one both carry a PodScheduled line in…
-  → check that something is actually scheduling — on
-    most clusters kube-scheduler is a pod in the
-    kube-system namespace — and that this pod is not
-    asking for a different one by name
-    (spec.schedulerName)
+● default/broken-pending                    9 min ago
+  No machine in the cluster will take this pod, so it
+  has never started (it shows as Pending)
+  the scheduler's own words (a node is one machine):
+  0/4 nodes are available: 1 node(s) had untolerated
+  taint(s), 3 node(s) didn't match Pod's node…
+  → check what this pod asks for: the node labels it
+    selects, which machines it says it can run on,
+    and how much cpu and memory it requests
 ```
 
 ```
@@ -329,6 +480,63 @@ lines, and nothing above makes them taller:
   2 pods here would still have to move
   → allow new pods once the work is done
 ```
+
+### The card the runtime writes, and what moving its quote costs
+
+The one card whose *action* was a string from the cluster. It is
+`default/broken-restarts10` on the committed capture — a container whose
+`command` names a path the image does not have, so containerd fails to start it
+and writes its own error onto the record. **The first drawing is what ships
+today** — 10 rows, and the reader is told nothing to do:
+
+```
+▲ default/broken-restarts10                2 days ago
+  The last run on record failed — exit 128
+  container flaky
+  → Kubernetes recorded this: failed to create
+    containerd task: failed to create shim task: OCI
+    runtime create failed: runc create failed: unable
+    to start container process: error during
+    container init: exec: "/definitely-not-here":
+    stat /definitely-not-here: no such file or
+    directory
+```
+
+And the second is the same object under the rule two sections up — the quote on
+the evidence line, cut at three like every other quote, and the action in k8rs's
+own voice, 9 rows:
+
+```
+▲ default/broken-restarts10                2 days ago
+  The last run on record failed — exit 128
+  container flaky · Kubernetes recorded this: failed
+  to create containerd task: failed to create shim
+  task: OCI runtime create failed: runc create…
+  → the container never got as far as running, so it
+    has no log of its own — check the command and
+    arguments in the pod's spec against what is
+    actually in the image
+```
+
+- **That action is the geometry's sentence, not the rule's** — the same footing
+  W1's and W2's are drawn on below. `rules.rs` owns the wording and may differ;
+  what is settled here is the slot, and that an action of two to five lines
+  keeps this card between 7 and 10.
+- **The cut costs the reader the useful half, and that is stated rather than
+  hidden.** containerd puts its diagnosis last — `exec:
+  "/definitely-not-here": stat …: no such file or directory` — so three lines
+  leave them holding the frame and not the fact. It is not reorderable:
+  [NOTES § D37](../NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)
+  keeps a controller's sentence word for word, and *load-bearing fact first*
+  can only order the facts k8rs joined, never the inside of a quote. **What
+  answers it is the action** — a sentence that names the container's `command`
+  as the thing to look at gets the reader there without the quote — and the full
+  text one `⏎` away ([detail.md](detail.md)), which is the standing answer for
+  every quote this screen cuts.
+- **This is the trade, said plainly:** the old card handed over a complete
+  runtime error and no instruction; the new one hands over a complete
+  instruction and a cut runtime error. Only one of those two is a thing the
+  reader cannot get anywhere else on this screen, and it is not the quote.
 
 ## The cordon card, with and without its clock
 
@@ -958,11 +1166,22 @@ the second finding is not a second card, it is a consequence of the first.
   (pod → ReplicaSet → Deployment): a rollout that timed out because its new
   pod cannot pull its image is rule 3's card, and W2 adds nothing a reader
   wants to that.
-- **A pod that is *serving* does not silence it.** Rule 5's *"it is serving
-  now, but something keeps killing it"* is a finding about a workload that is
-  up, and it explains nothing about a rollout that will not finish — so W2
-  still files beside it. The test is what the finding *explains*, not whether
-  the owner has one.
+- **A pod that is *serving* does not silence it, and the test is the pod's own
+  `Ready` condition.** Not which rule fired, not which sentence it carries, and
+  not whether the owner has a finding at all: a finding filed on a pod that
+  reads `Ready=True` explains nothing about a rollout that will not finish, so
+  W2 still files beside it. Rule 5's serving card is the shape that reaches this
+  most often — *"Container has been restarted 10 times — it is serving now…"*,
+  a workload that is up — and **it carries one of six clauses, not one**
+  ([`restarting_repeatedly`](../src/rules.rs) reads the ending and appends the
+  clause that matches: the run finished cleanly · was stopped · the record names
+  no ending · the record names the pod's rule · the exit code is not its own ·
+  something keeps killing it, plus a seventh shape with no clause where there is
+  no record to read). *"but something keeps killing it"* was quoted here as
+  though it were the whole rule; it is the last of the six
+  ([NOTES § D95](../NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)).
+  **The clause is not what decides anything here** — the same six ride rule 5's
+  *down* card, where the pod is not `Ready` and W2 does stand down.
 - **This is a `rules.rs` behaviour, and the screen is the place it is
   visible.** The suppression is why the drawn W2 card above is a shape rather
   than a screenshot: nothing on the committed capture renders it.

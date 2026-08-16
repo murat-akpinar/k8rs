@@ -41,6 +41,27 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   [D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)'s
   warning lands, since a module boundary is where a second copy of a shared
   helper grows back. Needs evidence and a ruling, at a phase close.
+- **An in-place resize restart reaches `137` far more often than `143`, and no
+  card on that path names it.** Measured on kind v1.36.1
+  ([reports/2026-08-16-previous-logs-resize-and-the-probe-floor.md](reports/2026-08-16-previous-logs-resize-and-the-probe-floor.md)):
+  a container whose PID 1 has no `SIGTERM` handler — the stock case — comes back
+  from `resizePolicy: RestartContainer` as `137` / `Error`, and only one that
+  traps the signal gives `143`. Family B added the resize door to
+  `stopped_action`, i.e. to the ending a *well-behaved* container reaches; the
+  commoner outcome lands on `killed_action` and `failed_action`, which name no
+  resize, and `killed_action` names no events either — so the
+  `Killing … resize requires restart` line the answer is sitting on is on no
+  card's path. Found by the Family B operator review, 2026-08-16.
+- **The lost-run suppressor deletes the only card naming a sandbox rebuild, in
+  one shape.** A container with `Ending::Unwatched` in `lastState`, restarted
+  **once** (below `RESTARTS_WARN`, so rule 5 is silent), whose readiness probe
+  has been failing past `NOT_READY_GRACE`: rule 7 fires, is `Reads::Now`, and
+  rule 6's lost-run card goes. Nothing left says the container was taken out from
+  under the kubelet. The operator review would still ship the suppressor — the
+  deleted card is undated and permanent — and named the shape because it is the
+  one where the deleted card was the answer
+  ([D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)).
+  2026-08-16.
 - **`PRIOR-ART.md`'s gaps that no ruling has boxed.** The file is evidence and
   never a plan, and a gap becomes a box only by a decision
   ([D89](NOTES.md#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14)

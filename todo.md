@@ -947,7 +947,7 @@ that cites them expects to find them.
       `reason: "Completed"`, which no genuine finish can be told from, and the
       kubelet is deducing rather than guessing, so silence is the true reading:
       [D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)
-- [ ] **Rule 6's `ContainerStatusUnknown` card can never carry a date, and
+- [x] **Rule 6's `ContainerStatusUnknown` card can never carry a date, and
       nothing else can age it out** — `Finding::timestamp` comes from
       `finished_at`, the kubelet's literal sets no stamps, and `lastState` never
       expires while this rule's only suppressor is `doing_its_job`. So a container
@@ -966,7 +966,10 @@ that cites them expects to find them.
       The reader genuinely cannot tell *once* from *ongoing* and the object does
       not answer it, so the question is whether the card should exist on a
       container whose current trouble is something else — which is a suppressor
-      question, not a wording one
+      question, not a wording one.
+      Closed as a suppressor, in `analyze` and not in a rule (D102's own ruling):
+      an undatable card about the past yields to a dated card about the present —
+      [D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)
 - [x] **`the last thing it logged was:` prints text the container never wrote** —
       rule 6 reads `lastState.terminated.message` and presents it as the
       application's own last words, but that field is whatever the kubelet put
@@ -1040,7 +1043,7 @@ that cites them expects to find them.
       Closed — both moved to rule 5's *on record* frame, and one draft of the new
       wording failed invariant 13 on a bare noun the card never introduces:
       [D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)
-- [ ] **`screens/alerts.md`'s action budget is false of four shipped cards, and
+- [x] **`screens/alerts.md`'s action budget is false of four shipped cards, and
       the file says that is a `rules.rs` finding** — it caps a card's action at
       two to five lines, never cut ([alerts.md](screens/alerts.md)), and states
       that an action wrapping past five is a rule defect rather than a layout
@@ -1122,8 +1125,13 @@ that cites them expects to find them.
       transcribed, not derived:** the 49 columns and the five-line cap live as
       constants in the test, so this file moving does not turn a build red —
       parsing `alerts.md` is the only stronger option and is bigger than either
-      box
-- [ ] **The clean-exit arms teach that events expire on one role and not on the
+      box.
+      Closed — **it was neither the budget nor the actions**: the parts table
+      permitted 11 while the summary said 10. The cap is 12, derived; the title
+      gets one for the first time; and parsing `alerts.md` was measured at ~22
+      lines of Python, which retires *bigger than either box* — the guard itself
+      is `tester`'s, in a later phase — [D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)
+- [x] **The clean-exit arms teach that events expire on one role and not on the
       other two, and rule 5 is where that costs something** — the `Init` arm
       says *"the events … last about an hour"* and then names the node; the
       `Regular` and `Sidecar` arms send the reader to the same events with no
@@ -1137,8 +1145,10 @@ that cites them expects to find them.
       string had the same exposure. **It is not free**: those two arms have four
       to six characters of slack at the five-line cap, so closing it costs a door
       unless the budget box above moves the cap first — the two are decided in
-      that order ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15))
-- [ ] **Rule 1's `Failed | None` arm sends the reader to a log no command can
+      that order ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
+      Closed — the budget box moved first, as this box required, and the window
+      is on all three arms — [D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)
+- [x] **Rule 1's `Failed | None` arm sends the reader to a log no command can
       reach** — *"read the previous run's logs — that is where it says why it
       exits"*, with `kubectl describe pod` on the card, which prints no logs at
       all. That is invariant 4 in the small. The `None` half is worse and is
@@ -1154,8 +1164,10 @@ that cites them expects to find them.
       failed (`command` mistyped) lands on exactly this arm — *keeps crashing …
       read the previous run's logs* about a container that never ran and has no
       log — while rule 6's card beside it carries the runtime's own diagnosis
-      ([D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16))
-- [ ] **The first instruction on a clean-exit card can be dead on the shape the
+      ([D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)).
+      Closed — the arm split, `previous_logs` was written, and the fork turned
+      out to be *did the run start* rather than the exit code — [D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)
+- [x] **The first instruction on a clean-exit card can be dead on the shape the
       card is most often drawn about** — the action opens *"check the pod's
       events for a `Killing` line"*, and with stock probe settings
       (`initialDelaySeconds: 0`, `periodSeconds: 10`, `failureThreshold: 3`) the
@@ -1166,7 +1178,10 @@ that cites them expects to find them.
       spends their first move proving the first door shut, and `lasted` is
       already in the snapshot and already on the screen. Whether a rule may
       **order** its doors by a fact it holds is the decision here, and it is a
-      new one: no rule reorders its own action today
+      new one: no rule reorders its own action today.
+      Closed — a rule may, under three constraints: it reorders and never
+      deletes, the fact must already be on the card, and the threshold is derived —
+      [D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)
 - [ ] **The clean-exit boxes left three objects no cluster has produced for us**,
       and two of them are one command each. **(a)** A probe kill that reports
       `exit 0` — the premise of the first clause on two arms of two rules, and
@@ -1384,10 +1399,18 @@ that cites them expects to find them.
       `kubectl logs <pod> -c <container> --previous`, and `--previous` is
       exactly the flag they will not know. One `kubectl_cmd` per finding is the
       constraint, so this is a wording problem or a shape problem, not a bug.
-      **Half of this is already built:** rule 5's no-previous-run arm needed the
-      same command and `previous_logs` now emits exactly that line, so this item
-      is a call site away rather than a design question
+      **This sentence claimed `previous_logs` was already built, and it was not
+      until Family B wrote it on 2026-08-16** — `logs()` emitted no `--previous`,
+      and `tester` built a recommendation on the false half before anyone
+      re-read the code. It exists now, beside [`logs`], and rule 6's general
+      `Failed` arm carries it, so what is left here is the **call sites this box
+      still owns** rather than the function
       ([D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)).
+      A `kubectl_cmd` is a change to what a card *teaches* (invariant 4), so each
+      one is an operator-review question and not a wording tidy-up. **The rule
+      this leaves behind is the one that cost the time: a box may say what the
+      code should do and may not assert what it currently does** — that second
+      sentence goes stale with no build to catch it.
       **One warning for whoever runs this box, so a red is not misread:** the
       rule tests pin prose, and one pin — `"finishing at all is the bug"` on rule
       5's sidecar arm — sits in exactly the register this pass exists to rewrite.

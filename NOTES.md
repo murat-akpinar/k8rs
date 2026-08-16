@@ -134,6 +134,7 @@ its line moving with it.
 - [D110](#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16) — the brief names the regions, because a cold dispatch reads fifteen thousand lines
 - [D111](#d111--the-guard-list-exists-once-and-ci-gets-no-new-action-for-it-2026-08-16) — the guard list exists once, and CI gets no new action for it
 - [D112](#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16) — `lastState.terminated` has three authors, and the file was reading it as if it had one
+- [D113](#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16) — a card's parts were budgeted separately and never added up, and everything else this family found was reached by fixing that
 
 ## Why it exists — where the gap is
 
@@ -7973,6 +7974,181 @@ sentence left in twice by the edit that superseded it, and a comment that went
 stale in the same turn that made it stale. **A gate that is skipped because
 everyone upstream passed is the gate that had the finding**
 ([CLAUDE.md § The cycle](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it)).
+
+### D113 — a card's parts were budgeted separately and never added up, and everything else this family found was reached by fixing that (2026-08-16)
+
+Phase 3's **Family B**, five boxes, one question: *what does the card tell the
+reader to do, on the shape it is actually drawn about*
+([D106](#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16)).
+Evidence: [`reports/2026-08-16-previous-logs-resize-and-the-probe-floor.md`](reports/2026-08-16-previous-logs-resize-and-the-probe-floor.md).
+
+`screens/alerts.md` said an action wrapping past five lines was a `rules.rs`
+defect, and four actions had been over it for weeks. The box framed it as *either
+the budget is wrong or the actions are*. **It was neither: the file's parts table
+permitted `1 + 2 + 3 + 5 = 11` while its summary capped a card at 10, and the two
+numbers had never been added up.** Measured over 93 shapes, 15 exceed 10 and four
+of those are over with **every part inside its own stated budget**. The 10 came
+off one drawing whose rule has since been reworded; the number stayed.
+
+The cap is **12**, derived — 16 body rows − 1 separator − 3 for the next finding's
+identity and two title lines — and the promise it protects gets sharper: *the pane
+always shows a second finding* becomes *the next finding's name and what is wrong
+with it are both on screen*. Everything below was reached by fixing that.
+
+#### The title gets a cap for the first time, because two authors write it
+
+A rule picks the frame; `exit_meaning` writes the translation that finishes it,
+**for a code, not for a frame**. Rule 6 has three frames — 32, 53 and 58 columns —
+and any can pick up any translation. Pair them with the twelve endings `exit_fact`
+prints and **5 of the 36 combinations measure four lines**, a sixth landing with
+zero columns to spare. **None is on a screen, and what keeps them off is not a
+budget — it is `ending`'s pairings.** Move one, which this phase has done more than
+once, and a card goes over with nobody having touched a word. The tightest
+reachable title has **four free columns**; the `255` translation carried the word
+*already* until this box and measured four lines. The word was never the defect,
+the missing margin was.
+
+#### The action is k8rs's own words, always
+
+The one input no rule author can bound is a quoted API value, and rule 6 was the
+only rule putting one in the **action** — rules 3, 10, W1 and W2 all put a quoted
+controller message on the evidence line, behind the three-line cut. So a mistyped
+`command` produced the *what to do* `Kubernetes recorded this: failed to create
+containerd task: … OCI runtime create failed …`, which tells a beginner nothing to
+do. Moving it to evidence closes the budget's only unbounded input and makes
+**invariant 9 stronger**: a crafted message moves from
+`one_card_per_action`'s primary key to its subset clause, where it can only
+*add* a fact — the fold gets harder to satisfy, not easier.
+
+#### The fork is the object, not the number — and the PM's own ruling was the defect
+
+`126` and `127` were routed to `describe` on the premise that the container never
+ran. **Measured, that premise is false and the counter-example was a committed
+capture.** They are what a *shell inside a container that ran* reports: real
+`startedAt`, real `containerID`, and the log holds the diagnosis on one line —
+`tests/fixtures/notfound.json` is exactly that. Only `128`/`StartError` is the
+runtime never starting a process, and that shape's `startedAt` is the **epoch**,
+the field [D112](#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)
+found.
+
+**The PM ruled that `126..=128` was one code answered once and shared.** That
+sentence put *the command was found but could not be run* on a card's evidence line
+and *what they name is not in the image* on its action line — D85's class moved
+*inside a single card*, and shared onto the CRITICAL card as well as the WARN one.
+Corrected to key on whether the run **started**, which is also **positive evidence
+the log is servable**: `Terminated` carries no `containerID` at all (invariant 6
+pruned it), so the duration is the only proxy there is and it is strictly better
+than the code. `128` was never a safe key either — a program can choose
+`os.Exit(128)`. And the never-ran arm keys on the **start alone**, because a
+backwards clock step gives `finishedAt < startedAt` on a container that ran
+perfectly well; before that split it cost a duration line, and for one round it
+would have cost a false diagnosis.
+
+#### One ending, one answer — and sharing went wrong twice before it went right
+
+Rules 1, 5 and 6 now answer `Ending::Failed` with one sentence and one command, and
+`failed_action` is deleted. Each intermediate state shipped a defect on a committed
+capture, which is the argument for the end state rather than against it:
+
+- rule 1 keeping `failed_action` said *check the memory limit and the liveness
+  probe* over its own evidence line reading *exit 127 (the command was not found)*;
+- sharing `137` by the code alone handed an `OOMKilled` container `killed_action`,
+  whose sentence *a kill for using too much memory is not always labelled as one*
+  stood beside rule 2's card asserting the label — **three contradictions on one
+  screen about one container**, always together, since rule 2's suppressor cannot
+  fire inside `CrashLoopBackOff`. Fixed at the **helper**, not the caller:
+  `killed_action`'s doc has always stated its precondition, and enforcing it once
+  covers rule 5's identical hole and every future caller;
+- rule 5 keeping `failed_action` left the CRITICAL card carrying the weaker answer
+  beside rule 6's WARN card on `restarts10.json`. The stated reason — *this rule
+  reads a count and has no run to ask with* — was false; it calls `ending` on the
+  line above.
+
+**And the shared sentence itself had to stop naming a speaker.** *That is where the
+program said what went wrong* is false of a container the kernel SIGKILLed
+mid-sentence. It promises a **place** now and never a diagnosis, which is true of an
+application's error, a shell's `not found`, and an interrupted run alike.
+
+#### What a cluster settled, and is now a citation rather than a hedge
+
+A **sidecar is resizable** and the kubelet restarts it; a plain init container is
+not — the API refuses `RestartContainer` on a non-sidecar init container outright,
+so `stopped_action(Init)`'s exhaustive claim stays exhaustive. **`systemd-oomd` can
+only produce `137`**, never the `143` its card was about; only `earlyoom` belonged
+there. **`describe` prints no `resizePolicy`**, so the resize door names the durable
+**events** rather than the transient condition. **`--event-ttl` is 1h** on kind, GKE
+and AKS, and aggregation refreshes the lease, so an ongoing `Killing x5` outlives it
+— in the reader's favour. `Events: <none>` on a serving container had been reading
+to a beginner as *nothing stopped it*.
+
+#### A rule may order its own doors by a fact on its card
+
+New, and the only case. Three constraints, all load-bearing: it **reorders and
+never deletes**, because the object makes a probe kill unlikely and never
+impossible; the fact must be **already on the card**, so the reader can see why the
+order is what it is; and the threshold is **named and derived** — `PROBE_FLOOR` is
+stock probe settings putting the earliest kill at 20s, measured conservative
+(third failure at ~23s, kill at 29s). The shape sent the long way round is
+`failureThreshold: 1`, and the door is demoted, never shut.
+
+#### D112 is right and narrow, and four doc comments generalised it
+
+`lastState.terminated` **advances at every ordinary restart** — measured, the record
+and its `containerID` moving with `restartCount` 2 → 3. Only the **synthesized**
+write is frozen, which is `Ending::Unwatched`, which carries no `containerID` and
+keeps `describe` anyway. `--previous` cannot diverge from the card even in
+principle: the kubelet resolves it *through* `lastState.terminated.containerID`, the
+exact record rule 6 read. **The residual is availability, not identity** — the
+kubelet keeps one dead container per name, so the log is gone for the window in
+which the container is `terminated` rather than running, and `doing_its_job` is
+false in exactly that window.
+
+#### The guards could not fail, and one class no guard here could see
+
+- The whole-rule-set sweep's canary was `len() > 40` against a real 143, and every
+  corpus contribution could be deleted with the sweep still green.
+- Four of six `Reads` labels were untested and one was reachable: `image_not_pulled`
+  mislabelled ships the undatable card for the life of the pod with **218 of 218
+  tests passing**. Two more are held not by the label but by **state exclusion**,
+  and the doc credited the label.
+- The corpus was literal arrays with **no `match` over `Ending` anywhere in the test
+  tree** — the third declaration of the residue the open box at `todo.md` ~1183
+  already carries twice. Fixed rather than declared again, so a new variant stops
+  the **tests** compiling: D95's mechanism applied to the guards that check D95.
+- **`cargo mutants` does not mutate range patterns.** Three of the four mutations of
+  `126..=128` were green. The gate was run correctly and could not have caught it.
+
+**The general lesson is a guard, and it is this family's real output.** Every guard
+in this file hunts two rules saying the **identical** sentence, because the fold's
+whole purpose is to collapse repetition — so a repetition is loud and a
+**contradiction is silent**. `CANNOT_BOTH_HOLD` sweeps `(claim, denial)` pairs per
+container across title, evidence and action; each row is a defect this family
+actually shipped, and each half is asserted reachable. Its canary paid for itself on
+its first run, finding a phrase nothing produced. A card contradicting **its own
+evidence line** needs its own end-to-end assertion — the pair guard is quiet there,
+correctly, because the two cards agree.
+
+#### One thing that is not a defect, ruled and recorded
+
+Two cards about `broken-crashloop` carry a byte-identical action and command, and
+they stay. The pair is the fold's **output**, not a failure: the second card appears
+if and only if it carries a fact the first lacks — here the panic line, the most
+useful string on the screen — and where there is nothing extra the pair already
+collapses. **The caveat that makes it true**: the fold survives only because rule
+6's facts are a subset of its neighbour's, so a later box adding any fact to rule 6,
+**or removing one from a survivor**, stops the fold on every container rather than
+only the ones with a message. That is written at `one_card_per_action`, from both
+ends.
+
+#### Two panics, in a layer that had none
+
+`grep -c '\.expect(\|\.unwrap()' src/rules.rs` was **0** before this family. Two
+arms re-unwrapped an `Option` their own `match` had already destructured — unable to
+fire, and that is the point: this layer's guarantee that a missing field means no
+finding is **mechanical** (`From` cannot fail), and an `.expect()` is the other kind
+of promise. Bound in the match instead, and the count is back to 0. Found by the
+security gate rather than by a review, which is what that gate is for
+(invariants 5 and 8).
 
 ## Decisions made
 

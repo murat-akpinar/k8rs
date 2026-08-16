@@ -279,6 +279,63 @@ fn counted(n: i64, unit: &str) -> String {
     }
 }
 
+/// **The subtraction and its three refusals, as a number rather than as a sentence** — one run's
+/// length, or `None` where the record cannot support one (NOTES § D113).
+///
+/// **It exists because two callers want different things from one fact and must not disagree about
+/// which runs have it.** [`lasted`] spells it for the reader; [`finished_action`] compares it
+/// against [`PROBE_FLOOR`] to decide which of its doors goes first. Re-deriving the second from
+/// the first would mean parsing `2s` back out of a string, and re-deriving it beside this would be
+/// two copies of the epoch guard.
+///
+/// The three refusals are [`lasted`]'s, and that doc carries why each one is here: no start or no
+/// end, a start at the Unix epoch (**a container whose start failed**, and a real value the API
+/// sends), and an end before the beginning.
+fn run_length(run: &Terminated) -> Option<SignedDuration> {
+    let elapsed = run
+        .finished_at
+        .as_ref()?
+        .0
+        .duration_since(ever_started(run)?.0);
+    (elapsed >= SignedDuration::ZERO).then_some(elapsed)
+}
+
+/// **When the run began, or `None` where it never began at all** — the *start* half of
+/// [`run_length`]'s three refusals, split out because one caller may only have that half
+/// (NOTES § D113).
+///
+/// **The epoch is a value the API really sends**: containerd fills the other four fields and
+/// leaves `StartedAt` at `0` when it never got the process going, and `time.Unix(0, 0)` is not
+/// Go's zero time, so it marshals as a real RFC3339 stamp that no `Option` on the path can see
+/// (NOTES § D112).
+///
+/// **[`failed_run_action`] keys on this and not on [`run_length`], and the difference is a
+/// clock.** `run_length` also refuses a run whose `finishedAt` is *before* its `startedAt` —
+/// which is not a container that never ran but a **backwards clock step between two wall-clock
+/// stamps**: `chrony`'s `makestep` after a bad RTC, a VM resumed from a snapshot. That container
+/// ran, has a `containerID`, and its log holds the panic; keyed on `run_length` it was told
+/// *what they name is not in the image* under [`describe`], with the duration missing from the
+/// same card because [`ran_for`] shares that predicate — so nothing on the screen let the reader
+/// see the inconsistency. Before this family that case cost a duration line, which is a miss;
+/// after it, it cost a false diagnosis. Reasoned from what the two fields are, not measured.
+fn ever_started(run: &Terminated) -> Option<&Time> {
+    run.started_at
+        .as_ref()
+        .filter(|t| t.0 != Timestamp::UNIX_EPOCH)
+}
+
+/// **The earliest a health check can end a run, on a pod that declares none of the probe's
+/// timings** — `initialDelaySeconds: 0`, `periodSeconds: 10`, `failureThreshold: 3`, which are the
+/// API's defaults. The probe runs at 0s, 10s and 20s and the *third* consecutive failure is the
+/// one that kills, so twenty seconds is the floor and not a round number anybody liked
+/// (NOTES § D113).
+///
+/// **It orders [`finished_action`]'s doors and closes none of them.** A pod that sets a shorter
+/// `periodSeconds` moves the real floor down, so the number is read as *unlikely* and never as
+/// *impossible* — which is why the card that reads it says a health check *rarely* kills a run
+/// this short and still names the `Killing` line.
+const PROBE_FLOOR: SignedDuration = SignedDuration::from_secs(20);
+
 /// **How long one container run lasted** — `2s`, `40 min`, `3 hours`, `6 days`. Rules 1, 5 and
 /// 6 all show it, because it is the first fork of every crashloop triage and
 /// `kubectl describe` leaves the subtraction to a human (NOTES § D51).
@@ -311,14 +368,7 @@ fn counted(n: i64, unit: &str) -> String {
 /// noise at best. **One guard here rather than three at the callers** — [`crash_looping`],
 /// [`previous_run_failed`] and [`stopped_for_good`] all reach this through [`ran_for`].
 fn lasted(run: &Terminated) -> Option<String> {
-    let began = run.started_at.as_ref()?.0;
-    if began == Timestamp::UNIX_EPOCH {
-        return None;
-    }
-    let elapsed = run.finished_at.as_ref()?.0.duration_since(began);
-    if elapsed < SignedDuration::ZERO {
-        return None;
-    }
+    let elapsed = run_length(run)?;
     Some(if elapsed.as_secs() < 1 {
         "under a second".to_string()
     } else if elapsed.as_mins() < 1 {
@@ -340,9 +390,14 @@ fn lasted(run: &Terminated) -> Option<String> {
 /// survivor's, so two spellings of one fact kept two byte-identical cards on
 /// [`Ending::CodeUnknown`], in the mechanism written to prevent exactly that.
 ///
-/// **The shorter spelling won**, because rule 1's cards sit at the ten-line cap with no slack
-/// (`screens/alerts.md` § The height) and its title already says *the last run on record*, so the
-/// context the longer wording carried is on the card either way.
+/// **The shorter spelling won**, because rule 1's title already says *the last run on record*, so
+/// the context the longer wording carried is on the card either way.
+///
+/// **That reason used to be second and a wrong number was first** — *rule 1's cards sit at the
+/// ten-line cap with no slack*, written the day before `screens/alerts.md` measured its own parts
+/// and found the card cap was **12**, not 10 (NOTES § D113). The slack was real but the cap was
+/// not, so the argument is gone and the conclusion is not: two spellings of one fact on one screen
+/// is NOTES § D85 at any cap, and the fold below needs a subset either way.
 ///
 /// **`None` on [`Ending::CodeUnknown`], because `finishedAt` is not a fact about the run there.**
 /// containerd stamps it when it *recovers* and finds the task gone
@@ -357,10 +412,12 @@ fn lasted(run: &Terminated) -> Option<String> {
 /// place for *no stamps* and *stamps that do not subtract*; what cannot be delegated to it is *a
 /// stamp that measures something else*, because nothing about the value says so.
 ///
-/// **It also buys the fold.** With no duration on that ending [`previous_run_failed`]'s facts
-/// reduce to [`container_fact`], which is a strict subset of both neighbours', so
+/// **It also buys the fold on that ending.** With no duration there [`previous_run_failed`]'s
+/// facts reduce to [`container_fact`], which is a strict subset of both neighbours', so
 /// [`one_card_per_action`] collapses the repeated sentence on **both** shapes instead of on
-/// whichever of the two happened to print a duration.
+/// whichever of the two happened to print a duration. **On every other ending the subset is held
+/// the other way round** — [`restarting_repeatedly`] carries [`ran_for`] deliberately, for the
+/// same fold (NOTES § D113).
 ///
 /// Otherwise `None` follows [`lasted`]: a record with no stamps, or one that never started, has no
 /// duration and no card invents one.
@@ -1509,16 +1566,31 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
             // Collected per container rather than appended straight to the list, because
             // [`one_card_per_action`] is scoped to the container and this loop is where that
             // scope exists (NOTES § D102).
-            let mut cards = Vec::new();
-            cards.extend(crash_looping(pod, c));
-            cards.extend(out_of_memory(&snapshot.now, pod, c));
-            cards.extend(image_not_pulled(pod, c));
-            cards.extend(container_config_missing(pod, c));
-            cards.extend(restarting_repeatedly(&snapshot.now, pod, c));
-            cards.extend(previous_run_failed(pod, c));
-            cards.extend(running_but_not_ready(&snapshot.now, pod, c));
-            cards.extend(stopped_for_good(pod, c));
-            findings.extend(one_card_per_action(cards));
+            //
+            // **Each rule is labelled with what it read**, which is the one thing only this
+            // caller knows: a `Finding` does not carry the rule that drew it, and re-deriving the
+            // split from the container would be a second copy of eight rules' triggers
+            // ([`lost_run_yields_to_the_present`], NOTES § D113). [`Reads::Now`] is a rule whose
+            // card is about what the container is doing at this moment; [`Reads::Record`] is one
+            // whose whole subject is a run that is already over.
+            //
+            // **[`restarting_repeatedly`] is [`Reads::Now`] and it is the one that needs saying.**
+            // Its *trigger* is `restartCount`, which is history — but its card is about a
+            // container that is restarting or serving now, it stands down on the current state in
+            // three places, and it carries a count nothing else on the screen does. Both halves of
+            // the label matter and both come out the same way: it is a card the reader may not
+            // lose, and it is a card whose presence means the container's present is accounted for.
+            let cards = vec![
+                (Reads::Now, crash_looping(pod, c)),
+                (Reads::Record, out_of_memory(&snapshot.now, pod, c)),
+                (Reads::Now, image_not_pulled(pod, c)),
+                (Reads::Now, container_config_missing(pod, c)),
+                (Reads::Now, restarting_repeatedly(&snapshot.now, pod, c)),
+                (Reads::Record, previous_run_failed(pod, c)),
+                (Reads::Now, running_but_not_ready(&snapshot.now, pod, c)),
+                (Reads::Now, stopped_for_good(pod, c)),
+            ];
+            findings.extend(one_card_per_action(lost_run_yields_to_the_present(cards)));
         }
     }
     // **The W-series runs last, and in two passes rather than one.** W2 asks whether anything
@@ -1541,6 +1613,88 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
         .collect();
     findings.extend(gave_up);
     findings
+}
+
+/// **Which half of the container a rule read** — its `state`, or the `lastState` record of a run
+/// that is over. [`analyze`] labels each call with it and nothing else does, because a [`Finding`]
+/// does not carry the rule that drew it (NOTES § D113).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reads {
+    /// The rule's trigger is what the container is doing at this moment.
+    Now,
+    /// The rule's trigger is `lastState.terminated` — a run that has already ended.
+    Record,
+}
+
+/// **A card about a run nobody watched end may not stand beside a card about what the container is
+/// doing now** (NOTES § D113).
+///
+/// **Because that card can never be dated and so can never age off the screen.** The kubelet
+/// synthesizes an [`Ending::Unwatched`] record with `reason`, `message` and `exitCode` and no
+/// `finishedAt` at all ([`last_log_line`]), so [`Finding::timestamp`] is `None`, the age column is
+/// blank, and the card sits in the ageless block at the bottom of its severity band for the life
+/// of the pod. Every other permanence in this file was answered with a clock — rule 2's
+/// [`NOT_READY_GRACE`], rule 5's serving card, rule 6's [`doing_its_job`] — and this is the first
+/// one where there is no stamp to read. Measured on `lost-notready`: a failing readiness probe,
+/// beside a loss long over.
+///
+/// **A restart count in its evidence was the other proposal and was rejected**: the count is every
+/// restart from every cause, and on a card whose subject is *one* lost status it reads as *this
+/// happened N times* — `PRIOR-ART.md`'s incomplete-denominator class. The reader genuinely cannot
+/// tell *once* from *ongoing* from the object, so the card does not claim either; what it can be
+/// asked is whether it should be on screen at all, which is a suppressor question and not a
+/// wording one.
+///
+/// **This is [`analyze`]'s decision and not a rule's**, for [`one_card_per_action`]'s reason: no
+/// rule may be made to know what its neighbour drew (NOTES § D102). Nothing is deleted where the
+/// lost status *is* the trouble — a container whose only card is this one keeps it, which is
+/// exactly the shape it is the answer for.
+///
+/// **The candidate is narrow on three keys.** The action has to be [`unwatched_action`]; the rule
+/// has to have read a record rather than the container's current state; and the card has to carry
+/// **no [`Finding::timestamp`]**, which is this suppressor's own premise made a condition rather
+/// than a fact assumed about it. So [`crash_looping`]'s and [`restarting_repeatedly`]'s cards on
+/// the same ending are never candidates, whatever they say — rule 1's is about a container backing
+/// off *right now*, and rule 5's carries a restart count nothing else on the screen has — and a
+/// lost-run card that somehow *does* date keeps its place, because the age column can then retire
+/// it the ordinary way. Today that leaves [`previous_run_failed`] as the only rule that can lose a
+/// card here.
+///
+/// **Two mechanisms hold that, and only one of them is the label — which this doc got wrong for a
+/// turn** (NOTES § D113). [`restarting_repeatedly`], [`running_but_not_ready`],
+/// [`image_not_pulled`] and [`container_config_missing`] are held by their [`Reads`] label and by
+/// nothing else: flip one and the undatable card ships beside theirs. [`crash_looping`] and
+/// [`stopped_for_good`] are held by the **container's state** — no other rule labelled
+/// [`Reads::Now`] can draw about a container in `CrashLoopBackOff` or sitting in
+/// `state.terminated`, so `present` is `false` there and their labels are never consulted at all.
+/// `every_rule_that_reads_the_present_is_proved_to_be_one` asserts which is which, because a rule
+/// that starts co-firing is a rule whose label suddenly becomes load-bearing with nothing saying
+/// so.
+///
+/// **The stamp condition is also what keeps [`one_card_per_action`]'s own rule intact**: that fold
+/// refuses to delete a card carrying a [`Finding::timestamp`] the survivor lacks, and a suppressor
+/// whose whole justification is *this card can never be dated* may not be the thing that deletes a
+/// dated one (NOTES § D102).
+///
+/// **What it changes over [`one_card_per_action`] alone** is the pairs that fold has no answer
+/// for: rules 1 and 5 already collapse rule 6's card by saying the same sentence, so what is new
+/// is rule 6's lost-run card standing beside rules 3, 4, 7 and 15 — different sentences, one
+/// container, and only one of them about the present.
+fn lost_run_yields_to_the_present(cards: Vec<(Reads, Option<Finding>)>) -> Vec<Finding> {
+    let present = cards
+        .iter()
+        .any(|(reads, f)| *reads == Reads::Now && f.is_some());
+    cards
+        .into_iter()
+        .filter_map(|(reads, f)| {
+            f.filter(|f| {
+                !(present
+                    && reads == Reads::Record
+                    && f.timestamp.is_none()
+                    && f.action == unwatched_action())
+            })
+        })
+        .collect()
 }
 
 /// **One card per action string, about one container** — the second copy of a shared sentence
@@ -1577,30 +1731,54 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
 /// `None` on a record with no stamps, which is three inferences away from here and is exactly the
 /// kind of thing that stops being true without anyone noticing.
 ///
-/// **Today this fires on four pairs**, all against [`previous_run_failed`] and on the two endings
-/// where three rules answer with one sentence: [`Ending::Unwatched`] through [`unwatched_action`]
-/// and [`Ending::CodeUnknown`] through [`no_exit_code_action`], each drawn beside
-/// [`crash_looping`] and beside [`restarting_repeatedly`]. Every other action in this file is
-/// distinct per container, [`failed_action`] against every arm of rule 6's `Failed` branch
-/// included.
+/// **Today this fires on three endings and every pair is against [`previous_run_failed`].**
+/// [`Ending::Unwatched`] through [`unwatched_action`] and [`Ending::CodeUnknown`] through
+/// [`no_exit_code_action`] are the two where three rules answer with one sentence, each drawn
+/// beside [`crash_looping`] and beside [`restarting_repeatedly`]. **[`Ending::Failed`] is the
+/// third and it is new** (NOTES § D113): all three rules take [`failed_run_action`] whole, so a
+/// `Failed` card with no termination message on it folds too — `broken-notfound` draws **one**
+/// card where it drew two. The inventory is asserted over the corpus by
+/// `only_rule_6_shares_a_sentence_with_a_neighbour_and_only_where_nothing_read_the_ending` rather
+/// than left here as prose, which is what caught this paragraph going stale.
+///
+/// **What keeps the `Failed` fold honest is a subset relation held on purpose, and it is held from
+/// both sides.** Rule 6's facts are [`container_fact`] · the quote · [`ran_for`]; the survivors
+/// carry the first and third, and [`restarting_repeatedly`] carries [`ran_for`] **because of this
+/// fold** — added on 2026-08-16, when rules 5 and 6 became identical from the arrow down and a
+/// duration was the only thing left standing between two byte-identical cards (NOTES § D113).
+///
+/// **So the caveat runs in two directions, and neither is an accident to rely on.** A later box
+/// adding any *other* fact to rule 6 stops the fold on **every** container rather than only on
+/// those with a message, and the reader gets two cards saying one sentence everywhere. A later box
+/// *removing* [`ran_for`] from a survivor does the same thing from the other end. The card that
+/// still stands is the one carrying the container's last words, which is a fact worth a card —
+/// that is the operator review's ruling, and this is the relation it rests on.
 ///
 /// **All four collapse, and getting there took two fixes rather than a tolerance.** Rule 6's only
 /// fact on either ending is [`container_fact`], which is the survivor's first. It was not so for
 /// one turn: [`crash_looping`] and [`previous_run_failed`] spelled one duration two ways, and on
 /// [`CodeUnknown`](Ending::CodeUnknown) — the one ending whose record carries real stamps — that
-/// left two byte-identical ten-line cards in a sixteen-row pane. **Then the duration turned out
+/// left two byte-identical ten-line cards in a sixteen-row pane. (Ten was what those two measured;
+/// the pane's cap is 12 and the number in this sentence is the drawing, not the budget —
+/// NOTES § D113.) **Then the duration turned out
 /// not to belong on that ending at all**: containerd stamps `finishedAt` when it recovers rather
 /// than when the run ended, so [`ran_for`] refuses it, and rule 6 adds nothing to either
 /// neighbour. Two defects, one visible only through this clause. **The inventory is asserted over the corpus and not left here as a claim** —
 /// a rule that starts wording its advice like a neighbour would otherwise begin deleting cards
 /// with nothing going red.
 ///
-/// **One of the keys is free text from the API and that is not an oversight.** Rule 6's `Failed`
-/// arm hands [`last_words`] a `Terminated::message` the workload wrote, so a crafted message is
-/// matched against every other rule's action. It is safe because [`last_words`] frames the quote
-/// with a constant prefix no static action begins with, which makes the frame a guard rather than
-/// a wording choice (invariant 9) — pinned by a test, because a guard nobody wrote down is one the
-/// next edit removes.
+/// **One of the keys is free text from the API, and where it lands got the guard stronger**
+/// (invariant 9, NOTES § D113). Rule 6's `Failed` arm handed [`last_words`] a
+/// `Terminated::message` the workload wrote, and until 2026-08-16 that was the card's whole
+/// **action** — the fold's primary key, where a crafted message equalling another rule's advice
+/// would have deleted a card. It is a fact on the **evidence** line now, which the subset clause
+/// reads: a crafted message can only *add* a fact, and a card with one more fact is **harder** to
+/// beat, not easier. The exposure is closed rather than moved.
+///
+/// **The frame is still the guard on what is left.** [`last_words`] wraps the quote in a constant
+/// prefix no fact any other rule prints begins with, so a crafted message cannot equal a
+/// neighbour's fact however exactly it is copied — pinned by a test, because a guard nobody wrote
+/// down is one the next edit removes.
 fn one_card_per_action(cards: Vec<Finding>) -> Vec<Finding> {
     // O(n²) over at most eight cards, which is why the drops are picked rather than sorted for.
     let beaten: Vec<bool> = cards
@@ -1628,6 +1806,10 @@ fn one_card_per_action(cards: Vec<Finding>) -> Vec<Finding> {
 /// last run ended, its restart count, the limits it is running under and its mounts, and
 /// `Liveness:` / `Readiness:` / `Startup:` per container out of `describeContainers`. That is
 /// what rules 1–8 claim, checked per card (NOTES § D71).
+///
+/// **`Command:` and `Args:` are in that list too**, which is what backs the one action
+/// [`failed_run_action`] hands out on the arm where the run never started — that container has no
+/// log at all, so [`previous_logs`] would be a command with nothing behind it (NOTES § D113).
 ///
 /// **It is also what rules 1 and 5 word their endings against** (NOTES § D85, § D88): a clean or
 /// polite ending is told apart from a kill by the `Killing` event and the probe lines, and the
@@ -1668,7 +1850,8 @@ fn get_yaml(resource: &str, id: &ObjectId) -> Option<String> {
 }
 
 /// `kubectl logs <pod> -c <container>` — **what the container itself said, which no other command
-/// in this file shows** ([`stopped_for_good`] is its first caller).
+/// in this file shows** ([`stopped_for_good`] is its first caller, and [`previous_logs`] is the
+/// one variant of it).
 ///
 /// **No `--previous`, and it is *which run* that decides it rather than whether the log is
 /// reachable** (invariant 4, NOTES § D96). The flag serves the run *before* the current one, and
@@ -1704,6 +1887,54 @@ fn logs(id: &ObjectId, container: &str) -> Option<String> {
         id.name,
         in_namespace(id)
     ))
+}
+
+/// `kubectl logs <pod> -c <container> -n <ns> --previous` — **the same command with the flag
+/// [`logs`] refuses**, for the one card whose subject is a run that is already over
+/// ([`previous_run_failed`]'s general [`Failed`](Ending::Failed) arm, NOTES § D113).
+///
+/// **Two functions and not a parameter**, because the flag is a *claim* rather than an option:
+/// [`logs`]' doc argues at length that rule 15's container is stopped in the run it is sitting in
+/// now, so `--previous` there points at a run that never happened. A caller appending the flag
+/// behind that doc is how the argument stops being true without the doc changing.
+///
+/// **Why it is servable here.** The kubelet gates the flag on `lastState.terminated.containerID`,
+/// and this ending is the one whose record carries it — which is exactly what
+/// [`Ending::Unwatched`] does *not*, and why that arm keeps [`describe`]. `describe` printing no
+/// logs at all was the defect: the sentence was right and the command under it was not
+/// (invariant 4).
+///
+/// **It is always the run the card is about, and the first draft said otherwise** (NOTES § D113).
+/// *`lastState` freezes, so the flag serves a later run* was written from D112 and is not what
+/// D112 says: `kubelet_pods.go:2616` gates the **synthesized** write, so only a container's first
+/// *lost* status is frozen — that is [`Ending::Unwatched`], which carries no `containerID` and
+/// keeps [`describe`] anyway. Measured across ordinary restarts, the record advances every time
+/// (`reports/2026-08-16-previous-logs-resize-and-the-probe-floor.md` § 1): `startedAt`
+/// `05:33:16` → `05:33:53` between `restartCount` 2 and 3, with the `containerID` moving with it.
+/// It cannot diverge even in principle — the kubelet resolves `--previous` **through**
+/// `lastState.terminated.containerID` (`validateContainerLogStatus`), which is the record this
+/// rule read.
+///
+/// **What it cannot promise is that the log is still on the node, and that window is real.** The
+/// kubelet keeps **one** dead container per container name
+/// (`--maximum-dead-containers-per-container`, default 1, unset on kind), so the moment the
+/// current container exits it becomes the newest dead one and the container `lastState` names is
+/// collected: measured `unable to retrieve container logs for containerd://…` for the whole
+/// window in which the container is `terminated` rather than running — about 29 s between early
+/// restarts and minutes later on. **[`doing_its_job`] is false in exactly that window, so
+/// [`previous_run_failed`] draws on it.** In the settled `CrashLoopBackOff` back-off the flag
+/// works, 15 of 15 samples. This is [`logs`]' own warning one notch worse, and it is why the
+/// action names the log as the place the answer was written rather than promising to hand it over.
+///
+/// **In `waiting` the flag is redundant rather than wrong**: the kubelet resolves a waiting
+/// container's plain `kubectl logs` through the same field, and both returned byte-identical
+/// output. The flag is still written, because the card's subject is a run that is over and the
+/// command log is what the reader would have typed (invariant 4).
+///
+/// The other half of [`logs`]' warning applies unchanged: this is the only command in this file
+/// that goes to the kubelet, so a node that has stopped answering returns `connection refused`.
+fn previous_logs(id: &ObjectId, container: &str) -> Option<String> {
+    Some(format!("{} --previous", logs(id, container)?))
 }
 
 /// One `status.conditions[]` entry, by type — **and the reason every caller looks its own one
@@ -2118,9 +2349,14 @@ fn exit_meaning(code: i32, reason: Option<&str>) -> Option<&'static str> {
              what sent it"
         }
         143 => "stopped with SIGTERM, which is an ordinary shutdown and not an error",
+        // **One word shorter than it was on 2026-08-16, and the word was load-bearing for the
+        // layout rather than for the meaning.** [`previous_run_failed`] spends its whole title on
+        // this translation, and with *already* in it the title wrapped to **four** lines at the 51
+        // columns a card's body has — the only title in the file over `screens/alerts.md`'s new
+        // three-line cap, which that file states for the first time (NOTES § D113). The clause it
+        // is in still says the node arrived after the fact; what went is the emphasis.
         255 if reason == Some(CODE_UNKNOWN) => {
-            "the node found the container already dead, so this number stands in for a code \
-             nobody read"
+            "the node found the container dead, so this number stands in for a code nobody read"
         }
         // **A different sentence for the same ending, because the runtimes tell different
         // stories.** CRI-O does not say it found the container dead; it says it could not work out
@@ -2132,6 +2368,15 @@ fn exit_meaning(code: i32, reason: Option<&str>) -> Option<&'static str> {
         1 | 2 => "the application's own error",
         126 => "the command was found but could not be run",
         127 => "the command was not found",
+        // **Hedged, because this one code has two authors and the object does not say which**
+        // (NOTES § D113). It is overwhelmingly the runtime failing to start the container —
+        // containerd labels it `reason: StartError`, CRI-O writes a bare `Error` for the same
+        // event, so the pair the `255` row is keyed on cannot be keyed here — and a program is
+        // still free to call `exit(128)` itself. *Usually* is the honest word: it connects the
+        // number to [`failed_run_action`]'s advice one row down without asserting a cause
+        // the record cannot carry, and printing the number bare beside that advice was the jargon
+        // left unexplained (invariant 14).
+        128 => "usually a container the runtime could not start",
         _ => return None,
     })
 }
@@ -2159,8 +2404,13 @@ fn exit_fact(run: &Terminated) -> String {
 /// (`screens/widgets.md` § 2). It is not truncation — § 7 forbids k8rs shortening a string
 /// itself, and bounding a huge value is `k8s.rs`'s job at ingest.
 /// **`Kubernetes recorded this: …`** — the one wording for [`Terminated::message`], because two
-/// rules print it: [`previous_run_failed`] as its whole action, and [`stopped_for_good`] as a fact
-/// on the evidence line. Two spellings of one fact on one screen is where NOTES § D85 starts.
+/// rules print it, and since 2026-08-16 **both put it in the same place**: a fact on the evidence
+/// line, ahead of the duration, on [`previous_run_failed`]'s `Failed` arm and on
+/// [`stopped_for_good`] (NOTES § D113). It was rule 6's whole *action* until then, which is one
+/// fact in two slots as well as two rules — and it is the slot that mattered: an action is k8rs's
+/// own words, and a card built out of this field cannot be measured against a five-line budget
+/// because no rule author bounds what a runtime writes. Two spellings of one fact on one screen is
+/// where NOTES § D85 starts; two *slots* is the same defect with the length attached.
 ///
 /// **It says who *recorded* the line and never who wrote it, because the object cannot tell.** It
 /// read *the last thing it logged was: …* until 2026-08-16, and three different authors reach this
@@ -2234,9 +2484,35 @@ fn last_log_line(run: &Terminated) -> Option<&str> {
 /// `Killing` is the line that proves a kill happened and the one the card names. **`Unhealthy` is
 /// not**, because a failing *readiness* probe writes it with no kill behind it, and a reader who
 /// greps the word the card gave them would close this door on the wrong evidence. **The node is
-/// named beside it** for the killer that writes no event at all: `systemd-oomd` or `earlyoom`
-/// sends the same signal from outside Kubernetes, and the program's own handler decides whether
-/// that arrives here as `143` ([`stopped_action`]) or as `0`.
+/// named beside it** for the killer that writes no event at all: `earlyoom` sends the same signal
+/// from outside Kubernetes, and the program's own handler decides whether that arrives here as
+/// `143` ([`stopped_action`]) or as `0`. **`systemd-oomd` was named here too until 2026-08-16 and
+/// cannot reach either card**: it kills a cgroup with `cgroup.kill`, which is SIGKILL and arrives
+/// as `137` (NOTES § D113).
+///
+/// **The events clause carries their lifetime on all three arms now, and rule 5 is what it is
+/// for** (NOTES § D113). `--event-ttl` defaults to an hour; the [`Init`](ContainerRole::Init) arm
+/// has said so since D88 and the other two sent the reader to the same events with no window at
+/// all. On [`crash_looping`] that costs nothing — backoff caps at five minutes, so a `Killing`
+/// line is always minutes old — but [`restarting_repeatedly`] draws about a container that is
+/// *serving* at ten restarts, whose last run may have ended hours ago. There `Events: <none>`
+/// reads to a beginner as *nothing stopped it*, which is the reading that walks them into the Job
+/// door for a Deployment that is fine.
+///
+/// **And the doors are ordered by how long the run lasted, which is the first time any rule in
+/// this file orders its own action** (NOTES § D113). Three things hold it up. **It reorders and
+/// never deletes**: a short run does not prove no probe fired, so every door open on the long arm
+/// is open on the short one. **The fact it orders by is already on the card** — `ran_for` is on
+/// the evidence line one row above, so the reader can see why the order is what it is, and the
+/// parameter is `Option` precisely so a caller whose card does *not* print a duration passes
+/// `None` and gets the unordered sentence: [`restarting_repeatedly`]'s evidence is the container,
+/// the exit code and the image, so it does. **And the threshold is derived** — [`PROBE_FLOOR`]
+/// carries the arithmetic.
+///
+/// **The short arms drop the events' lifetime and only they may**, because only [`crash_looping`]
+/// passes a duration, and its container is in `CrashLoopBackOff` — where the backoff caps at five
+/// minutes and the events are always fresh. That is the same reasoning that made the window
+/// harmless on rule 1 in the first place, applied to the arm rule 1 alone can reach.
 ///
 /// **On [`Regular`](ContainerRole::Regular) that leaves three branches and not two**, because
 /// *it stopped itself* is itself two: something stopped it, which the events and the node settle;
@@ -2288,19 +2564,33 @@ fn last_log_line(run: &Terminated) -> Option<&str> {
 /// budget met only by the generous counter is not met; while a token with no space in it costs
 /// every line it fills, which is what the renderer does with one (`screens/alerts.md`
 /// § The height) and what a measure handing it a single line would hide (NOTES § D88).
-fn finished_action(role: ContainerRole) -> &'static str {
-    match role {
-        ContainerRole::Regular => {
-            "exit 0 says the run ended, not who stopped it — check the pod's events for a Killing \
-             line and the node for a memory killer. If nothing stopped it, it ends itself: if \
-             that is meant, it belongs in a Job or a CronJob; if not, it is quitting early"
+fn finished_action(role: ContainerRole, ran_for: Option<SignedDuration>) -> &'static str {
+    let short = ran_for.is_some_and(|d| d < PROBE_FLOOR);
+    match (role, short) {
+        (ContainerRole::Regular, false) => {
+            "exit 0 does not say who ended the run — check the pod's events (kept an hour) for a \
+             Killing line, the node for a memory killer. If nothing did it ends itself: if that \
+             is meant it belongs in a Job or a CronJob; if not, it is quitting early"
         }
-        ContainerRole::Sidecar => {
-            "exit 0 says the run ended, not who stopped it — check the pod's events for a Killing \
-             line and the node for a memory killer. If nothing stopped it the program ends \
-             itself, and this one must run as long as the app does: finishing at all is the bug"
+        (ContainerRole::Regular, true) => {
+            "a health check rarely kills a run this short, so start with the program: if it ends \
+             itself on purpose it belongs in a Job or a CronJob; if not, it quits early. A \
+             Killing line in the events, or a memory killer on the node, says otherwise"
         }
-        ContainerRole::Init => {
+        (ContainerRole::Sidecar, false) => {
+            "exit 0 does not say who ended the run — check the pod's events (kept an hour) for a \
+             Killing line, the node for a memory killer. If nothing did it ends itself, and this \
+             one must run as long as the app does: finishing at all is the bug"
+        }
+        (ContainerRole::Sidecar, true) => {
+            "a health check rarely kills a run this short, so start with the program: this one \
+             must run as long as the app does, so finishing at all is the bug. A Killing line in \
+             the events, or a memory killer on the node, says otherwise"
+        }
+        // **The duration decides nothing here**, because this arm opens no door a probe could
+        // have taken: an init container that is not restartable may hold no probe at all
+        // (`validateInitContainers`), so there is no first door to demote.
+        (ContainerRole::Init, _) => {
             "finishing is what an init container is for, so ask what ran it again: Kubernetes \
              runs them all when the pod's sandbox is rebuilt. The events often do not say why, \
              and last about an hour; the node the pod is on is where the reason is"
@@ -2317,69 +2607,178 @@ fn finished_action(role: ContainerRole) -> &'static str {
 /// `validateInitContainers` forbids all three probes on an init container that is not
 /// restartable, so *check the liveness probe* is advice it cannot follow.
 ///
-/// Both are worded against [`describe`], which prints the probes and the events; the node's
-/// system log is outside kubectl either way.
+/// Both are worded against [`describe`], which prints the probes, the events and — since the
+/// resize door below — the pod's resize conditions; the node's system log is outside kubectl
+/// either way.
+///
+/// **`systemd-oomd` is gone from both arms, because it cannot produce the card it was printed on**
+/// (NOTES § D113). It kills a whole cgroup with `cgroup.kill`, which is SIGKILL and arrives as
+/// `137`; this card is about `143`, a stop the program was asked for and obeyed. Only `earlyoom`
+/// sends a catchable signal, so only `earlyoom` belongs here — the other name sent the reader
+/// grepping their node's log for a tool that could never appear on this ending.
+///
+/// **The third producer is the kubelet resizing the pod in place**, `resizePolicy:
+/// RestartContainer`, which VPA drives on a loop at this repo's target version — a reader whose
+/// pod is being resized was being sent past the answer to two places holding nothing.
+///
+/// **The clause names the events, and the first draft named a field `describe` does not print**
+/// (invariant 4, NOTES § D113). `kubectl describe pod | grep -ic resizePolicy` is **0**: *that can
+/// be set to restart it* pointed at `get -o yaml`, which is the trade [`restart_rule_action`] makes
+/// explicitly and this arm cannot, having four other doors on `describe`. What `describe` does
+/// show is measured and **durable**: `Killing … Container app resize requires restart`,
+/// `ResizeStarted` and `ResizeCompleted` under `Events:`. The `PodResizeInProgress` condition the
+/// first draft leaned on is transient and gone by the time this card is drawn, which is the same
+/// clause being wrong twice
+/// (`reports/2026-08-16-previous-logs-resize-and-the-probe-floor.md` § 3).
+///
+/// **On [`Regular`](ContainerRole::Regular) and [`Sidecar`](ContainerRole::Sidecar), and that is a
+/// citation now rather than a hedge.** A restartable init container **is** resizable and the
+/// kubelet restarts it — `kubectl patch --subresource resize` succeeded and `restartCount` went to
+/// 1 — while a plain init container is refused by the API itself: *must not be set to
+/// 'RestartContainer' for non-sidecar initContainers*. So the [`Init`](ContainerRole::Init) arm's
+/// claim that the stop came from the node or from the program is **exhaustive**, measured.
+///
+/// **The log clause leads, because it is the one that lost its subject.** *Its own log* sat after
+/// *the node, where a memory killer…*, whose nearest antecedent is the node — a door pointing at
+/// the wrong room. Naming the container up front costs nothing and fixes the reference.
+///
+/// **What paid for it on [`Init`](ContainerRole::Init) is a restatement** (NOTES § D90's own
+/// method): *check whether the program exits 143 of its own accord* is *or from the program
+/// itself*, three clauses earlier, said again.
+///
+/// **On the other arm the first draft called the log clause a restatement and it was not.** *The
+/// container's own logs will show nothing worse than a shutdown* names a **place not to look**,
+/// where the clause in front of it names a **cause**, and a beginner's first move on a dead
+/// container is `kubectl logs` — so cutting it would have closed a door and the comment defending
+/// it would have taught the next reader that closing one is free. What was cut instead is the
+/// *why* gloss on the probes (*a failing health check stops a container that never crashed*),
+/// which the closing clause now carries in four words: **the log holds a shutdown and not a
+/// crash** says both that the log is empty of answers and why the probe is the first place to
+/// look. Every door the six-line version opened is open, one more is open than the five-line draft
+/// had, and both arms measure five wrapped lines at 49 columns (NOTES § D113).
 fn stopped_action(role: ContainerRole) -> &'static str {
     match role {
         ContainerRole::Regular | ContainerRole::Sidecar => {
-            "check the liveness and startup probes first — a failing health check is what stops \
-             a container that has not crashed — then the node, where a memory killer such as \
-             systemd-oomd or earlyoom sends the same signal; the container's own logs will show \
-             nothing worse than a shutdown"
+            "the container's own log holds a shutdown and not a crash, so check the liveness and \
+             startup probes, then the pod's events for a resize that restarted it, then the node, \
+             where a memory killer such as earlyoom sends the same signal"
         }
         ContainerRole::Init => {
             "Kubernetes does not allow health checks on this kind of container, so the stop came \
-             from the node or from the program itself — look in the node's system log for a \
-             memory killer such as systemd-oomd or earlyoom, and check whether the program exits \
-             143 of its own accord"
+             from the node or from the program itself — look for a memory killer such as earlyoom \
+             in the node's system log, and for a program that exits 143 itself"
         }
     }
 }
 
-/// **What to do about an [`Ending::Failed`], per role** — [`restarting_repeatedly`]'s only, and
-/// **deliberately not merged with [`stopped_action`]**: a container that failed and one that was
-/// asked to stop are different questions, and one sentence answering both would answer neither.
+/// **What a run that failed needs next, and the fork is whether it ever ran** — shared whole by
+/// [`crash_looping`] and [`previous_run_failed`], which both answer [`Ending::Failed`] and may not
+/// answer it two ways about one container (NOTES § D85, § D113).
 ///
-/// **The memory limit is in both**, because every role carries limits and the kernel takes any
-/// of them. **The probe is not**, for [`stopped_action`]'s reason — `validateInitContainers`
-/// forbids all three on an init container that is not restartable, and this rule handing one out
-/// two arms above the one that refuses it was the same rule contradicting itself
-/// (NOTES § D85). **What replaces it is not a second reading of the code**: [`exit_fact`] has
-/// already translated the reader's own exit code one line above, so an action reciting what each
-/// code *might* have been spends four wrapped lines telling them about numbers they cannot see,
-/// then restates the one they can.
+/// Returns the sentence and **whether the card's command has to serve that run's log**, because
+/// the two are one decision: an action may only name what its own command prints (invariant 4),
+/// and it was a card naming a log under [`describe`] that opened this whole area.
 ///
-/// **The `Init` sentence therefore branches on nothing, and that is the requirement rather than
-/// a shortening.** Neither direction of `137` is decidable from the object: it is memory only
-/// with `reason: OOMKilled` beside it (NOTES § D71) — *and* a genuine cgroup kill arrives as
-/// plain `Error` on a host that is itself short of memory (NOTES § D84), which is the case where
-/// memory is likeliest and rule 2 is silent, because it keys on the word. **The false branch
-/// would be selected by the same node condition that caused the kill.** So the card sends the
-/// reader to the limit either way and says why the word may be missing, which is true under both
-/// readings and was true of the sentence this replaced.
-fn failed_action(role: ContainerRole) -> &'static str {
-    match role {
-        ContainerRole::Regular | ContainerRole::Sidecar => {
-            "check the memory limit and the liveness probe — those are what restart a container \
-             that otherwise runs"
-        }
-        ContainerRole::Init => {
-            "check the memory limit against what it really needs — the kernel takes a container \
-             that goes over, and a node short on memory can take one without saying so, so the \
-             word is not always on the card. No health check is behind any of it — Kubernetes \
-             allows this kind of container none, and the app cannot start until one of these \
-             runs succeeds"
-        }
+/// **The key is `run_length`, not the exit code, and the first draft got that wrong.** `126` and
+/// `127` were read as *the container never started* — they are not. Measured on kind v1.36.1
+/// (`reports/2026-08-16-previous-logs-resize-and-the-probe-floor.md` § 2), they are what a
+/// **shell inside a container that ran** reports, with real stamps, a real `containerID`, and the
+/// whole diagnosis on one line of its log:
+///
+/// | `command` | code | `reason` | `startedAt` | `logs --previous` |
+/// |---|---|---|---|---|
+/// | `sh -c "exec /etc/hostname"` | `126` | `Error` | real | `sh: exec: …: Permission denied` |
+/// | `sh -c "exec /usr/bin/nope"` | `127` | `Error` | real | `sh: exec: …: not found` |
+/// | `["/definitely-not-here"]` | `128` | `StartError` | **epoch** | *(empty)* |
+///
+/// `tests/fixtures/notfound.json` is the middle row — `sh -c 'exec /usr/local/bin/server
+/// --serve'` — so the counter-example was a committed capture the whole time. **And `128` is not a
+/// safe key either**: a program may call `os.Exit(128)` itself, and that container ran and has a
+/// log.
+///
+/// **It also cost a card its own consistency.** *What they name is not in the image* stood as the
+/// action over an evidence line reading `exit 126 (the command was found but could not be run)` —
+/// *found* against *not in the image*, NOTES § D85's class inside one card rather than between
+/// two.
+///
+/// **[`ever_started`] is the discriminator that is actually true of *never ran*** — the epoch
+/// `startedAt` Family A found, which containerd writes when it never got the process going.
+///
+/// **What the `None` arm means is *there is no log*, not *there is nothing to resolve it
+/// through*** (NOTES § D113). An earlier draft of this paragraph said only a CRI status carries a
+/// `containerID`, so `None` meant the flag could not resolve — **and the epoch record came
+/// through CRI and carries one**, measured
+/// (`reports/2026-08-16-terminated-record-stamps-and-authors.md` § 1). `--previous` on it is
+/// perfectly servable; it returns nothing, exit status 0, because the process never wrote a byte.
+/// The conclusion stands and the reason is the plain one: a card may not send a reader to an
+/// empty log. **The snapshot carries no `containerID` at all** (invariant 6 pruned it), so the
+/// start stamp is the only proxy there is — and it is a better one than the exit code, which is
+/// what this replaced.
+///
+/// **`137` answers ahead of both**, because a kill from outside is neither of these questions and
+/// its own log holds no error to find ([`killed_action`]). **It is not shared with rule 1's
+/// caller in the other direction**: rule 6 has returned on `OOMKilled` by the time it asks and
+/// rule 1 has not, so a shared `137` would put *a kill for using too much memory is not always
+/// labelled as one* beside [`out_of_memory`]'s card saying it was — confirmed by the operator
+/// review.
+///
+/// **The log arm's sentence is about what the log *holds*, and it took two goes to get there**
+/// (NOTES § D113). *The application's own error* was wrong first, because a shell's `not found` is
+/// not the application's; *that is where the program said what went wrong* was wrong second, on
+/// the shape this same round added — a container the kernel SIGKILLed **said nothing**, it was cut
+/// off mid-sentence, which is the premise [`killed_action`] is built on one arm up. What is true
+/// of every code this arm now covers is that the log holds **the last thing written before the run
+/// ended**: an application's error, a shell's message, or the output a kill interrupted. The
+/// reader is told where to look and never what they will find, which is also what stops this
+/// promising a diagnosis on a card that cannot know there is one.
+///
+/// **A labelled kill reaches it deliberately** — [`out_of_memory`] draws beside that card with the
+/// fix, and what this one adds is the question rule 2 does not answer: what the container was
+/// doing when the kernel took it.
+fn failed_run_action(run: &Terminated, role: ContainerRole) -> (&'static str, bool) {
+    // **[`killed_action`]'s own precondition, enforced where all three callers route through it**
+    // (NOTES § D113). That sentence is for the `137` *nothing labelled*: it opens with *a kill for
+    // using too much memory is not always labelled as one*, which is false of a container the
+    // kernel labelled. `ending` sends the other three reasons elsewhere, so `OOMKilled` is the one
+    // survivor and this is the whole of the check. Without it [`crash_looping`] put that hedge on
+    // a CRITICAL card over its own evidence line reading *killed by the kernel for using more
+    // memory than it was allowed*, beside [`out_of_memory`] asserting the label in its title —
+    // three contradictions on one screen about `oom.json`, a committed capture.
+    if run.exit_code == 137 && run.reason.as_deref() != Some("OOMKilled") {
+        return (killed_action(role), false);
+    }
+    match ever_started(run) {
+        // **The container never got as far as running**, so there is no log to read and
+        // [`describe`] is what prints the `Command:` and `Args:` this sentence names.
+        None => (
+            "check the container's command and arguments — what they name is not in the image",
+            false,
+        ),
+        // **A labelled kill falls through to here rather than getting an arm of its own.**
+        // [`out_of_memory`] draws beside it and carries the fix; what this card owes is a next
+        // step that does not repeat it and does not deny it. The log is where the program's last
+        // output before the kernel took it is, which is a real second question — *what was it
+        // allocating* — and it is the one thing rule 2's card does not answer.
+        Some(_) => (
+            "read that run's log — it holds the last thing written before the run ended, from \
+             the program or from the shell that started it",
+            true,
+        ),
     }
 }
 
 /// **What to do about the `137` that is left once the other three readings are gone, per role** —
-/// [`previous_run_failed`]'s only, and the fourth of the per-role sentences [`finished_action`],
-/// [`stopped_action`] and [`failed_action`] make.
+/// reached through [`failed_run_action`] by all three rules that read an ending, and the third of
+/// the per-role sentences [`finished_action`] and [`stopped_action`] make.
 ///
 /// **Every reason anything writes for itself is gone by the time this is called**, which is a
 /// stronger statement than *not `OOMKilled`* and is why these two sentences may talk about a kill
-/// without qualifying one. `OOMKilled` returns at the top of that rule; [`RESTART_ALL`],
+/// without qualifying one. **That precondition is now enforced where the callers meet, and it was
+/// not for one turn** (NOTES § D113): [`previous_run_failed`] returns on `OOMKilled` and
+/// [`crash_looping`] and [`restarting_repeatedly`] do not, so a shared `137` keyed on the code
+/// alone put *a kill for using too much memory is not always labelled as one* on a CRITICAL card
+/// above [`out_of_memory`] asserting the label in its title, about `oom.json`. The check lives in
+/// [`failed_run_action`], once, rather than in each caller. [`RESTART_ALL`],
 /// [`STATUS_LOST`] and [`CODE_UNKNOWN`] are all answered by [`ending`] — the first leaves through
 /// the silent arm of the `match`, the other two take arms of their own, and none can fall through
 /// to here. (The last of them could not reach this sentence anyway: it is `255`.) What is
@@ -2390,13 +2789,13 @@ fn failed_action(role: ContainerRole) -> &'static str {
 /// at the top and this copy still said it did (NOTES § D93, § D95).
 ///
 /// **It was role-blind until 2026-08-15**, sending
-/// an init container after a probe `validateInitContainers` forbids it while [`failed_action`]
-/// and [`stopped_action`] refused to name one on the same container — rule 5's card and rule 6's,
-/// one object, contradicting each other on one screen (NOTES § D85).
+/// an init container after a probe `validateInitContainers` forbids it while the sentences beside
+/// it refused to name one on the same container — rule 5's card and rule 6's, one object,
+/// contradicting each other on one screen (NOTES § D85).
 ///
-/// **Deliberately not [`failed_action`]**: this kill came from outside the application, so the
+/// **Deliberately not the log arm**: this kill came from outside the application, so the
 /// container's own logs hold no error to find, and that sentence is the whole reason this arm
-/// exists rather than falling through to *read the logs* (NOTES § D85).
+/// exists rather than falling through to *read that run's log* (NOTES § D85).
 ///
 /// **Memory is on both arms even though rule 2 owns the labelled kill**: on a host without
 /// headroom a genuine cgroup OOM arrives here as `137`/`Error` with the word simply lost, which
@@ -2433,8 +2832,9 @@ fn killed_action(role: ContainerRole) -> &'static str {
     }
 }
 
-/// **What to do about an [`Ending::Unwatched`] — the fifth of the shared sentences, and the
-/// first that is the same for every role** (NOTES § D95). Rules 1, 5 and 6 all draw this ending
+/// **What to do about an [`Ending::Unwatched`] — one of the shared sentences, and the first that
+/// was the same for every role** (NOTES § D95). The ordinal it used to carry counted a list that
+/// has since lost a member and gained one, which is what a count in prose does (NOTES § D113). Rules 1, 5 and 6 all draw this ending
 /// and all three say this; it was rule 6's alone until 2026-08-15, while rule 1 sent the reader
 /// to a log the API refuses to serve and rule 5 to a memory limit nothing measured.
 ///
@@ -2480,6 +2880,60 @@ fn unwatched_action() -> &'static str {
 /// [`killed_action`]'s own rule applied here: an action may name a *thing to find out*, never a
 /// *thing to find* its command does not show.
 ///
+/// **What to do when the container has a restart count and no record of the run at all** — the
+/// role-blind like [`unwatched_action`] and [`no_exit_code_action`], for the same reason: it
+/// names no probe and no kill (NOTES § D113).
+///
+/// **Shared by rules 1 and 5, which is what stopped them contradicting each other.** Rule 5's arm
+/// was written for this shape; rule 1's fell through to *read the previous run's logs* — a log the
+/// API refuses to serve, because the kubelet gates `logs --previous` on
+/// `lastState.terminated.containerID` and the record that would carry it is the record this arm is
+/// about. Two rules reading one container and answering one shape two ways is NOTES § D85's own
+/// class, so the answer is one sentence and not two.
+///
+/// **It no longer says *the pod has kept the count***, which rule 5's card can support and rule
+/// 1's cannot: `CrashLoopBackOff` is the wait *before* the next start and
+/// [`ContainerSnapshot::restarts`] can still be `0` there. What both cards do support is that the
+/// run is gone. Rule 5's count is on its own title either way.
+///
+/// **Role-blind for [`unwatched_action`]'s reason**: it names no probe and no kill, so there is
+/// nothing `validateInitContainers` can refuse.
+///
+/// **It names a thing to find out and not a thing to find** ([`killed_action`]'s rule): the events
+/// *may* still hold it, and the honest answer when they do not is to wait for the next restart,
+/// which writes the record back. Both are in [`describe`], which is what every caller of this arm
+/// puts on the card.
+fn no_record_action() -> &'static str {
+    "the run that ended is not on the pod any more, so nothing here says why. Check the pod's \
+     events, which may still name what stopped it — and if they have expired too, the next \
+     restart will write the run back, so watch rather than guess"
+}
+
+/// **What to do about an [`Ending::RestartRule`], shared by rules 1 and 5** — rule 6 is silent on
+/// this ending, so the sentence has two callers rather than three (NOTES § D95).
+///
+/// **It does not say *this container is fine*, and that is the whole of the wording.** The
+/// kubelet writes the same synthesized record into *every* container's `lastState`, **the one
+/// that triggered the restart included** — its own bad exit is in `state.terminated`, which no
+/// rule reads — so a card that told the reader to look elsewhere would be wrong on exactly the
+/// container that failed. Hence the closing clause: the container the reader is looking at may be
+/// the one that set this off.
+///
+/// **It sends them to the spec, and that is why this arm's command is [`get_yaml`] and not
+/// [`describe`]** — the trade rules 3, 4 and 12 already make where `describe` does not print the
+/// field the card names (invariant 4, NOTES § D95). `restartPolicyRules` is declared on the
+/// container that can trigger the gang restart, so on a measured pod it narrows to exactly one,
+/// and on a single-container pod it resolves to that one.
+///
+/// **The two doors it does not open were measured shut on kind v1.36.1.** *Look for the container
+/// with an exit code of its own* was this sentence until 2026-08-15 and it names a thing to find
+/// that the pod does not contain: on a settled pod every container prints `Exit Code: 137` and
+/// the trigger's own code is gone, on a thrashing one it was visible in 12 of 40 one-second
+/// samples, and on a single-container pod there is nothing to compare. The pod's events are the
+/// other dead end — rate-limited to `x2`/`x3` against 130 real restarts, and expiring. That is
+/// [`killed_action`]'s own rule applied here: an action may name a *thing to find out*, never a
+/// *thing to find* its command does not show.
+///
 /// **Role-blind, for [`unwatched_action`]'s reason**: it names no probe, so there is nothing to
 /// refuse an init container.
 fn restart_rule_action() -> &'static str {
@@ -2487,24 +2941,25 @@ fn restart_rule_action() -> &'static str {
      rule (restartPolicyRules) can set it off, and that may be this container"
 }
 
-/// **What to do about an [`Ending::CodeUnknown`] — the sixth shared sentence, and the second that
-/// is the same for every role.** Rules 1, 5 and 6 all draw this ending and all three say this.
+/// **What to do about an [`Ending::CodeUnknown`] — a shared sentence, and one of the three that
+/// are the same for every role.** Rules 1, 5 and 6 all draw this ending and all three say this.
 ///
 /// **Role-blind for [`unwatched_action`]'s reason**: nothing here is a kill and nothing here is a
 /// health check, so there is no probe to name and nothing `validateInitContainers` can refuse.
 ///
 /// **It names a thing to find out and not a thing to find** ([`killed_action`]'s rule, NOTES
-/// § D93, § D95). The first draft ended *and read the previous run's own log* and broke that rule
-/// twice over: this card's command is [`describe`], which prints no logs at all (invariant 4);
-/// and *the previous run* is the phrase [`crash_looping`]'s titles just lost, because `lastState`
-/// freezes — on a container at fifteen restarts `logs --previous` serves run 15 while this card's
-/// evidence describes run 7. The pod's events are what `describe` does print, and *did the node
-/// restart* is a question they can answer.
+/// § D93, § D95). The first draft ended *and read the previous run's own log* under a card whose
+/// command is [`describe`], which prints no logs at all (invariant 4). The pod's events are what
+/// `describe` does print, and *did the node restart* is a question they can answer.
 ///
-/// **What is left out with it is the door this ending has and [`Unwatched`](Ending::Unwatched)
-/// has not** — the record carries the `containerID` the kubelet gates `logs --previous` on, so
-/// that log *is* servable here. Naming it needs a command that shows it, and that is a change to
-/// this arm's `kubectl_cmd` rather than to its sentence.
+/// **The second reason given for leaving the log out was measured false and is withdrawn**
+/// (NOTES § D113). *`lastState` freezes, so `--previous` serves a different run* generalised D112
+/// into a property of the field: only the **synthesized** write is gated, and the record advances
+/// at every ordinary restart. So the door this ending has and [`Unwatched`](Ending::Unwatched) has
+/// not is open — the record carries the `containerID` the kubelet gates the flag on, and
+/// [`previous_logs`] exists now. **What keeps this arm on [`describe`] is the sentence and not the
+/// flag**: nobody read how that run ended, so its log is not where the answer is; the events are,
+/// and they are what this action names.
 fn no_exit_code_action() -> &'static str {
     "the code is a stand-in the node wrote, not the application's — a machine restart is what \
      usually leaves one, and the pod's events are where that shows"
@@ -2519,8 +2974,10 @@ fn no_exit_code_action() -> &'static str {
 /// [`Failed`](Ending::Failed) is a crash: `exit 0` is a run that ended without an error — which
 /// says nothing about *who* ended it, the whole of [`finished_action`] — and `exit 143` is a
 /// shutdown signal delivered and obeyed, usually by something outside the container. Each branch
-/// owes its own action, because *read the previous run's logs* sends the reader of the other two
-/// to a log holding no answer.
+/// owes its own action, because *read the previous run's logs* sent the reader of the other two to
+/// a log holding no answer — and on 2026-08-16 it stopped being any branch's answer at all, for
+/// the reason it was never the right one on this rule: no command on this card prints a log
+/// (invariant 4, NOTES § D113).
 ///
 /// **[`Unwatched`](Ending::Unwatched) is the branch where that action is not merely unhelpful but
 /// impossible** (NOTES § D93). The kubelet gates `logs --previous` on
@@ -2588,16 +3045,17 @@ fn no_exit_code_action() -> &'static str {
 /// container-runtime restart — landing inside a backoff window earlier failures earned
 /// (NOTES § D88).
 ///
-/// **Five of the six branches carry [`describe`]** — the pod's events are what separate a
+/// **Six of the seven branches carry [`describe`]** — the pod's events are what separate a
 /// program that finished from one something else stopped, and they are in no other output. The
 /// `Finished` branch named `restartPolicy` under `get -o yaml` until 2026-08-14, which
 /// bought a field the state already implies — a container backing off from a clean exit is under
 /// a policy that restarts one — at the price of hiding the only evidence that could correct the
-/// card (NOTES § D88). **[`RestartRule`](Ending::RestartRule) is the fifth and it goes the other
+/// card (NOTES § D88). **[`RestartRule`](Ending::RestartRule) is the one that goes the other
 /// way**, for the opposite reason: its action names `restartPolicyRules`, which the state does
-/// *not* imply and `describe` does not print at all ([`restart_rule_action`], NOTES § D95). The
-/// sixth is [`CodeUnknown`](Ending::CodeUnknown), whose action asks whether the node restarted —
-/// a question only the events can answer.
+/// *not* imply and `describe` does not print at all ([`restart_rule_action`], NOTES § D95).
+/// [`CodeUnknown`](Ending::CodeUnknown)'s action asks whether the node restarted — a question only
+/// the events can answer — and the seventh branch, **the container with no record at all**, sends
+/// the reader to the same events for the same reason ([`no_record_action`], NOTES § D113).
 ///
 /// **The severity does not move with the branch.** It answers *is this container serving*, and
 /// on a container the kubelet is backing off from the answer is no in all three — an amber card
@@ -2618,23 +3076,33 @@ fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
         facts.extend(ran_for(run));
         facts.push(exit_fact(run));
     }
-    // A container in this state with no `lastState` at all takes the crash branch: without the
-    // previous run there is nothing to say the loop is anything else, and *go and read the log*
-    // is the right advice when we do not know.
-    let (title, action, cmd) = match c.last_terminated.as_ref().map(ending) {
-        Some(Ending::Finished) => (
+    // **The run is bound by the `match`, not looked up again inside an arm** (NOTES § D113). The
+    // scrutinee was `…map(ending)`, so an arm needing the run itself had to re-open the `Option`
+    // the `match` had already destructured — behind a panicking unwrap that could not fire
+    // *today*, because the arm had proved the `Option` full. **This file carries no such call and
+    // carried none before this family**, and the reason its purity holds is that nothing in it
+    // *can* fail rather than that nobody has yet made it (invariants 5 and 8): a scrutinee
+    // changed or an arm added turns a human's promise into a panic on somebody's terminal.
+    // Pairing the ending with the run hands that promise to the compiler and deletes the second
+    // lookup with it. The count is the assertion — `grep -c` over this file for either unwrapping
+    // call is **0**, and that is checkable without a build.
+    let (title, action, cmd) = match c.last_terminated.as_ref().map(|run| (ending(run), run)) {
+        // **The one call in the file that passes a duration**, because this card is the one that
+        // prints one: [`ran_for`] is in `facts` above, so the order the action arrives in has a
+        // visible reason on the card ([`finished_action`], NOTES § D113).
+        Some((Ending::Finished, run)) => (
             "The last run on record finished cleanly, and Kubernetes is restarting it \
              (CrashLoopBackOff)",
-            finished_action(c.role),
+            finished_action(c.role, run_length(run)),
             describe(&pod.id),
         ),
-        Some(Ending::Stopped) => (
+        Some((Ending::Stopped, _)) => (
             "The last run on record was stopped, and Kubernetes is restarting it \
              (CrashLoopBackOff)",
             stopped_action(c.role),
             describe(&pod.id),
         ),
-        Some(Ending::Unwatched) => (
+        Some((Ending::Unwatched, _)) => (
             "Kubernetes did not record how the run it last saw ended, and is restarting it \
              (CrashLoopBackOff)",
             unwatched_action(),
@@ -2642,7 +3110,7 @@ fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
         ),
         // **`describe` again**: the action asks whether the node restarted, and the pod's events
         // are the only output that can answer it.
-        Some(Ending::CodeUnknown) => (
+        Some((Ending::CodeUnknown, _)) => (
             "The last run on record has no exit code of its own, and Kubernetes is restarting it \
              (CrashLoopBackOff)",
             no_exit_code_action(),
@@ -2651,15 +3119,45 @@ fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
         // The one arm of this rule whose command is not `describe`: its action names
         // `restartPolicyRules`, which lives in the spec and in no part of describe's output
         // (invariant 4, [`restart_rule_action`], NOTES § D95).
-        Some(Ending::RestartRule) => (
+        Some((Ending::RestartRule, _)) => (
             "The pod's own restart rule removed the container, and Kubernetes is restarting it \
              (CrashLoopBackOff)",
             restart_rule_action(),
             get_yaml("pod", &pod.id),
         ),
-        Some(Ending::Failed) | None => (
-            "Container keeps crashing, and each restart waits longer (CrashLoopBackOff)",
-            "read the previous run's logs — that is where it says why it exits",
+        // **[`failed_run_action`], shared with rules 5 and 6 rather than answered a second way**
+        // (NOTES § D113). This arm said *read the previous run's logs — that is where it says why
+        // it exits* under a card whose command is [`describe`], which prints no logs at all —
+        // invariant 4 in the small — while rule 5's card about the same ending sent the reader to
+        // the memory limit and the probe. The two rules never co-fire, so nothing is folded away;
+        // what is gone is one ending answered two ways.
+        //
+        // **[`failed_run_action`] answers this whole ending, and for one turn this arm did not
+        // ask it.** `Ending::Failed` covers every code the four keyed pairs do not, so this arm
+        // handed `notfound.json` — `exit 127`, a committed capture — a memory limit and a probe
+        // over an evidence line reading *the command was not found*. One ending, one answer.
+        Some((Ending::Failed, run)) => {
+            let (action, log) = failed_run_action(run, c.role);
+            (
+                "Container keeps crashing, and each restart waits longer (CrashLoopBackOff)",
+                action,
+                if log {
+                    previous_logs(&pod.id, &c.name)
+                } else {
+                    describe(&pod.id)
+                },
+            )
+        }
+        // **The half where the log was not merely unhelpful but unreachable.** With no `lastState`
+        // there is no `lastState.terminated.containerID`, and the kubelet gates `logs --previous`
+        // on exactly that field — so the card was in this arm *because* the flag its advice
+        // implied could not work. **The title goes with it**: *keeps crashing* is a claim about
+        // runs the pod no longer holds, and the count beside it can be `0`. What the object
+        // supports is the wait and the missing record ([`no_record_action`], shared with rule 5).
+        None => (
+            "Kubernetes is restarting this container and the run that ended is not on the pod \
+             (CrashLoopBackOff)",
+            no_record_action(),
             describe(&pod.id),
         ),
     };
@@ -2758,6 +3256,20 @@ const UNUSABLE_IMAGE: [&str; 7] = [
 /// rather than being dug out of that sentence (NOTES § D46).
 ///
 /// No age: nothing in the container status records when the first attempt was made.
+///
+/// **This is the only `format!` title in the file that interpolates `state.waiting.reason`, and
+/// what bounds it is this rule's own allowlist** (NOTES § D113). The guard three lines below —
+/// `if !UNUSABLE_IMAGE.contains(&reason) { return None; }` — is not a trigger only: it is the
+/// bound, because a `reason` outside those seven never reaches the `format!` at all. The seven are
+/// compile-time constants, the longest is `SignatureValidationFailed` at 25 characters, and the
+/// title it makes measures **2 lines with 10 free** against `screens/alerts.md`'s three-line cap.
+///
+/// **The first draft of this paragraph said the opposite** — *nothing on the path checks that what
+/// arrives is one of them* — and reasoned about a 39-character threshold for an input the function
+/// refuses. Recorded here as what is true rather than deleted, because the shape of the mistake is
+/// the reusable part: a free-text field reached by an allowlist is bounded by the allowlist, and
+/// the ingest bound `k8s.rs` owes every other free-text field is a second line of defence here
+/// rather than the only one.
 fn image_not_pulled(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     let (reason, message) = waiting(c)?;
     if !UNUSABLE_IMAGE.contains(&reason) {
@@ -2830,7 +3342,7 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 /// same synthesized record into every container's `lastState`, so a rule 5 exemption would leave
 /// a pod thrashing 31 times in six minutes with no card on the screen. What goes instead is the
 /// claim and the action — *something keeps killing it* is a positive claim of repeated killing on
-/// a run nothing is recorded as having killed, and [`failed_action`]'s memory limit and liveness
+/// a run nothing is recorded as having killed, and the memory limit and liveness
 /// probe are doors onto a kill under an evidence line saying no kill was seen.
 ///
 /// **Both new claims are worded about the *record* and never about *the last run*, and that is
@@ -2845,7 +3357,8 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 /// **They are also short because the card has a height** (`screens/alerts.md` § How wide a card
 /// is, and how tall). A three-digit `restartCount` is ordinary — a measured cluster reached 132 in
 /// ten minutes — and at 51 columns the clause is what decides whether the title wraps to two lines
-/// or three, which is the difference between a ten-line card and one over the maximum.
+/// or three, and a title over three wrapped lines is over `screens/alerts.md`'s own cap for the
+/// part (NOTES § D113).
 /// `the_cards_this_box_ships_fit_the_height_they_are_drawn_at` measures them there.
 ///
 /// **What is still open is the fan-out, and it is not a wording problem**: one firing draws one
@@ -2881,7 +3394,7 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 /// what may still hold something, and they are in `describe`.
 ///
 /// **Each role is told what is true of it, and every ending splits by role** — in
-/// [`finished_action`], [`stopped_action`] and [`failed_action`], all three *shared* with rule 1
+/// [`finished_action`], [`stopped_action`] and [`failed_run_action`], all three *shared* with rule 1
 /// rather than copied beside it: two rules reading one container and disagreeing is where
 /// NOTES § D85 starts, and two byte-identical copies are that defect with a delay on it.
 /// **The splits are not all the same shape.** [`Stopped`](Ending::Stopped) and
@@ -2991,24 +3504,32 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
     // holding it is the one line `screens/alerts.md` § The height may cut. This is not a rule
     // knowing what its neighbour drew: [`ending`] already told this rule how the run ended, and
     // the title is where a rule says what it read.
-    let (claim, action, cmd) = match c.last_terminated.as_ref().map(ending) {
-        Some(Ending::Finished) => (
+    // The run is bound by the `match` rather than looked up again inside an arm, for
+    // [`crash_looping`]'s reason (NOTES § D113).
+    let (claim, action, cmd) = match c.last_terminated.as_ref().map(|run| (ending(run), run)) {
+        // **The duration, and until 2026-08-16 this passed `None`** ([`finished_action`],
+        // NOTES § D113). The reason it did was that this rule's evidence line carried no
+        // duration, so ordering by one would have been a visible order with a hidden reason —
+        // and the line carries one now, added for the fold two paragraphs down. The constraint is
+        // met, so the rule that was waiting on it applies: rules 1 and 5 order this ending the
+        // same way, off a fact both cards show.
+        Some((Ending::Finished, run)) => (
             ", and the last run on record finished cleanly",
-            finished_action(c.role),
+            finished_action(c.role, run_length(run)),
             describe(&pod.id),
         ),
-        Some(Ending::Stopped) => (
+        Some((Ending::Stopped, _)) => (
             ", and the last run on record was stopped",
             stopped_action(c.role),
             describe(&pod.id),
         ),
-        Some(Ending::Unwatched) => (
+        Some((Ending::Unwatched, _)) => (
             ", and the record names no ending",
             unwatched_action(),
             describe(&pod.id),
         ),
         // Not `describe`, for the reason rule 1's matching arm carries.
-        Some(Ending::RestartRule) => (
+        Some((Ending::RestartRule, _)) => (
             ", and the record names the pod's rule",
             restart_rule_action(),
             get_yaml("pod", &pod.id),
@@ -3017,30 +3538,54 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
         // line one row down prints `exit 255`, and *carries no exit code* was this rule denying
         // it. Rules 1 and 6 say *has no exit code of its own* and survive the same evidence;
         // three words were doing the work and this clause had dropped them (NOTES § D85).
-        Some(Ending::CodeUnknown) => (
+        Some((Ending::CodeUnknown, _)) => (
             ", and the exit code is not its own",
             no_exit_code_action(),
             describe(&pod.id),
         ),
-        Some(Ending::Failed) => (
-            ", but something keeps killing it",
-            failed_action(c.role),
-            describe(&pod.id),
-        ),
-        None => (
-            "",
-            "the pod has kept the count but not the run that ended, so nothing here says why. \
-             Check the pod's events, which may still name what stopped it — and if they have \
-             expired too, the next restart will write the run back into the pod, so watch it \
-             rather than guess",
-            describe(&pod.id),
-        ),
+        // **[`failed_run_action`], the third caller and the last** (NOTES § D113). This arm had a
+        // sentence of its own — *check the memory limit and the liveness probe* — and on
+        // `restarts10.json` it stood on the CRITICAL card while rule 6's WARN card below it said
+        // *read that run's log* about the same `exit 1`, whose own translation on this card's
+        // evidence line is *the application's own error*. The count is this rule's subject; how
+        // the run ended is [`ending`]'s, and it is read right here, so there was never a fork
+        // this rule could not ask.
+        Some((Ending::Failed, run)) => {
+            let (action, log) = failed_run_action(run, c.role);
+            (
+                ", but something keeps killing it",
+                action,
+                if log {
+                    previous_logs(&pod.id, &c.name)
+                } else {
+                    describe(&pod.id)
+                },
+            )
+        }
+        None => ("", no_record_action(), describe(&pod.id)),
     };
     // The exit code goes ahead of the image: every clause the serving title adds is read off it,
     // and evidence is the one card line the screen may cut (`screens/alerts.md` § The height).
+    //
+    // **The duration joined them on 2026-08-16, and it is the fold that asked for it**
+    // (NOTES § D113). Rules 5 and 6 answer [`Ending::Failed`] with one sentence and one command
+    // now, so on `restarts10.json` they drew two cards identical from the arrow down — and the
+    // only thing keeping [`one_card_per_action`] from collapsing them was that rule 6 carried
+    // `ran for under a second` and this rule did not. A duration is not a reason to spend a card:
+    // it is the first fork of every crashloop triage (NOTES § D51), this rule reads the same run
+    // rule 6 does, and [`ran_for`] is the one spelling of it. **It goes ahead of the image for the
+    // reason the image is last** — the image is what the three-line cut takes, and a duration is
+    // not.
+    //
+    // **The fold's subset clause is now maintained by a choice rather than by an accident**, which
+    // is what [`one_card_per_action`]'s own caveat asks for: rule 6's facts are
+    // [`container_fact`] · the quote · [`ran_for`], and this list holds the first and third
+    // deliberately. The card that still stands is the one carrying the container's last words,
+    // which is a fact worth a card.
     let mut facts = vec![container_fact(c)];
     if let Some(run) = &c.last_terminated {
         facts.push(exit_fact(run));
+        facts.extend(ran_for(run));
     }
     facts.push(c.image.clone());
     Some(Finding {
@@ -3076,9 +3621,12 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 }
 
 /// **Rule 6 — the last run this container has on record ended badly, and here is what the code
-/// means.** *Previous* was the word until 2026-08-16 and the object does not support it: `lastState`
-/// freezes on a container that has terminated before, so the record is the last run **written
-/// down** and not the run before this one.
+/// means.** *Previous* was the word until 2026-08-16 and the object does not support it: the
+/// record is the last run Kubernetes **wrote down**, which is the run before this one on every
+/// ordinary restart and is *not* on the one shape D112 found — a container whose first lost status
+/// the kubelet synthesized, where the write is skipped while a previous termination is still
+/// there. That shape is [`Ending::Unwatched`], and it is the only one, measured
+/// (`reports/2026-08-16-previous-logs-resize-and-the-probe-floor.md` § 1, NOTES § D113).
 /// `lastState.terminated.exitCode`, WARN: the run that failed is over, and where the container is
 /// *currently* broken rules 1 to 4 say so as CRITICAL beside this.
 ///
@@ -3109,9 +3657,11 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 /// **The exemption also removes a card carrying the kubelet's own sentence, and that is a side
 /// effect and not the fix.** The kubelet writes it into `message` beside that reason, and the
 /// log-line arm would have printed it as the container's. **What holds that shut is now
-/// structural rather than two accidents**: the log-line match lives inside the
+/// structural rather than two accidents**: the quote is read only inside the
 /// [`Failed`](Ending::Failed) arm, so neither reason can reach it by construction rather than by
-/// arm order and an early return (NOTES § D95). **And a third reason the kubelet writes its own
+/// arm order and an early return (NOTES § D95) — and since 2026-08-16 it reaches the evidence line
+/// rather than the action, so even where it is read it is no longer the card's advice
+/// (NOTES § D113). **And a third reason the kubelet writes its own
 /// message for would reach a frame that no longer claims an author** — [`last_words`] carries why
 /// (NOTES § D88, § D93).
 ///
@@ -3121,12 +3671,26 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 /// it. **"Serving" is the wrong word for an init container, and [`doing_its_job`] is where that is
 /// decided.**
 ///
-/// **When the record carries a message, it replaces the advice** ([`Terminated::message`],
-/// [`last_words`]) — *whoever wrote it*, because the container, the kubelet and the runtime all
-/// reach that field and nothing on the record tells them apart. **Both exit exemptions are
-/// captured** — `exit0.json` and
+/// **When the record carries a message it goes on the evidence line, and the advice is the exit
+/// code's** ([`Terminated::message`], [`last_words`], NOTES § D113). The quote is printed
+/// *whoever wrote it*, because the container, the kubelet and the runtime all reach that field and
+/// nothing on the record tells them apart — and it is printed as **evidence**, because the action
+/// is the rule's own sentence on every arm. It replaced the advice until 2026-08-16, which is how
+/// a mistyped `command` came to have containerd's `runc` error as its whole *what to do*.
+///
+/// **This rule's command is not one command, and that is new** (invariant 4, NOTES § D113). Four
+/// of its five arms carry [`describe`]; the general [`Failed`](Ending::Failed) arm — the one whose
+/// action is *read the logs of that run* — carries [`previous_logs`], because it is **the one card
+/// in the file where that sentence is semantically right**: its subject is a run that is over, and
+/// this ending is the one whose record holds the `containerID` the kubelet gates `--previous` on.
+/// It stood under `describe`, which prints no logs at all, one match arm from the sentence
+/// [`crash_looping`] had just lost for the same reason. **The codes
+/// [`failed_run_action`] sends to the command and arguments keeps `describe`**: that container
+/// never ran, so there is no previous log to serve, and `Command:` and `Args:` are what the reader
+/// is being sent to.
+/// **Both exit exemptions are captured** — `exit0.json` and
 /// `sigterm.json`, on containers that are *not* serving, so the exemption rather than
-/// [`doing_its_job`] is what silences them — and `notfound.json` reaches the `126`/`127` action
+/// [`doing_its_job`] is what silences them — and `notfound.json` reaches the `126`–`128` action
 /// with no termination message beside it, which `restarts10.json`'s bare `exit 1` and
 /// `init.json`'s are the general *read the logs* arm beside. **`startup.json` reaches the `137`
 /// arm**, whose kill came from outside the application: the general arm sent that reader hunting
@@ -3149,16 +3713,29 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 /// **The exemption list, the title and the [`STATUS_LOST`] action each read the reason string in
 /// their own place until 2026-08-15** — three branches on one question that had to agree by hand.
 /// They are one `match` on [`ending`] now, which is where rules 1 and 5 read the same question
-/// from, so [`Unwatched`](Ending::Unwatched) reaching the log-line arm is a shape the compiler
+/// from, so [`Unwatched`](Ending::Unwatched) reaching the quoted evidence is a shape the compiler
 /// refuses rather than one arm order happens to prevent. **The class fix under it landed on
 /// 2026-08-16**: [`last_log_line`] refuses the field on any record with no `finishedAt`, which is
 /// what every synthesized message rides — so the two ad-hoc mechanisms that used to hide one
 /// defect are no longer what holds it shut.
 ///
+/// **What keeps every title of this rule inside `screens/alerts.md`'s three-line cap is
+/// [`ending`]'s pairings, not a budget** (NOTES § D113). The title is a frame plus
+/// [`exit_fact`], and of the 36 frame × translation combinations the two functions can spell,
+/// **five measure four lines**. All five are unreachable — [`ending`] never pairs that frame with
+/// that translation — so moving one pairing puts a card over the cap with nobody having touched a
+/// word. `every_card_the_rule_set_draws_fits_the_four_caps_it_is_budgeted_for` is what would say
+/// so, and it is the reason the sweep plants every `(code, reason)` pair rather than only the
+/// captured ones.
+///
 /// **The titles say what one `lastState` supports, and that is a 2026-08-16 change.** `lastState`
-/// is *the last run Kubernetes wrote down*, not *the run before this one*: the record freezes
-/// while the container goes on restarting, measured at nine restarts under one unchanged entry.
-/// So *the container's previous run failed* became *the last run on record failed*, and the
+/// is *the last run Kubernetes wrote down*, and on the one shape that separates the two it is not
+/// the run before this one: the kubelet skips the **synthesized** write while a previous
+/// termination is still there, so a container's first *lost* status stands unchanged while it goes
+/// on restarting — measured at nine restarts under one entry. **On an ordinary restart the record
+/// advances**, `startedAt` and `containerID` together, which is the correction of 2026-08-16
+/// (NOTES § D113). So *the container's previous run failed* became *the last run on record
+/// failed*, and the
 /// [`Unwatched`](Ending::Unwatched) title says what the **record** does — the framing
 /// [`restarting_repeatedly`]'s two clauses already used, rather than a third one.
 ///
@@ -3217,7 +3794,13 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
     // **stamp-less is load-bearing one function over**, where [`last_log_line`] uses exactly that
     // property to tell the kubelet's own literals from anything a CRI status carries. Which is
     // not the same as telling *authors* apart; [`last_words`] carries that.
-    let (title, action) = match ending(run) {
+    // **The quote rides the arm rather than the fact list, and only the [`Failed`](Ending::Failed)
+    // arm has one** (NOTES § D113). Putting [`last_log_line`] unconditionally in the evidence
+    // would give the [`CodeUnknown`](Ending::CodeUnknown) card a fact its neighbours have not —
+    // CRI-O writes a message onto that ending and containerd stamps it — and
+    // [`one_card_per_action`]'s subset clause would then stop collapsing the pair D102 built it
+    // for. The two endings that fold add nothing; the one that does not is the one that quotes.
+    let (title, (action, cmd), quote) = match ending(run) {
         Ending::Finished | Ending::Stopped | Ending::RestartRule => return None,
         // **The log line does not answer first here, and it no longer needs an arm order to stop
         // it.** The kubelet writes its own sentence into `message` beside this reason — *the
@@ -3231,10 +3814,11 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
                 "Kubernetes did not record how the run it last saw ended — {}",
                 exit_fact(run)
             ),
-            unwatched_action().to_string(),
+            (unwatched_action().to_string(), describe(&pod.id)),
+            None,
         ),
-        // **Answered ahead of the log-line arm for the same reason [`Unwatched`](Ending::Unwatched)
-        // is, and then some.** Nothing read how this run ended, so *the last run on record failed*
+        // **Answered ahead of the [`Failed`](Ending::Failed) arm for the same reason
+        // [`Unwatched`](Ending::Unwatched) is, and then some.** Nothing read how this run ended, so *the last run on record failed*
         // is a
         // claim the record does not carry — and the general arm below would send the reader after
         // *the application's own error* on a code the application never chose.
@@ -3243,32 +3827,43 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
                 "The last run on record has no exit code of its own — {}",
                 exit_fact(run)
             ),
-            no_exit_code_action().to_string(),
+            (no_exit_code_action().to_string(), describe(&pod.id)),
+            None,
         ),
         Ending::Failed => (
             format!("The last run on record failed — {}", exit_fact(run)),
-            // **A message on the record replaces the advice, whoever wrote it** ([`last_words`]),
-            // then the two codes that name a missing command, then the `137` no reason explains.
+            // **The record decides this and the cluster's own string never does, because the
+            // action is k8rs's own words** (`screens/alerts.md` § The height, NOTES § D113).
+            // A message on the record used to *replace* the advice, and the
+            // commonest broken-pod state there is — a mistyped `command` — therefore put
+            // containerd's whole `runc` error where the *what to do* belongs: seven wrapped lines
+            // of *failed to create containerd task: failed to create shim task: OCI runtime create
+            // failed…*, which tells a beginner nothing to do (invariant 14). It is also the one
+            // input no rule author can bound, so the five-line budget was unenforceable while it
+            // stood here. The quote is evidence now, on the line the screen may cut, and this arm
+            // always says something in the rule's own voice.
+            //
+            // **[`failed_run_action`] answers this whole ending, for this rule and for
+            // [`crash_looping`] and [`restarting_repeatedly`] alike** (NOTES § D113). One ending
+            // answered two ways is where
+            // NOTES § D85 starts, and the version of it this arm shipped put *check the memory
+            // limit and the liveness probe* on the CRITICAL card over an evidence line reading
+            // *the command was not found*. The command comes back with the sentence, because
+            // whether the log is the answer and whether the card may name one are one decision.
+            {
+                let (action, log) = failed_run_action(run, c.role);
+                (
+                    action.to_string(),
+                    if log {
+                        previous_logs(&pod.id, &c.name)
+                    } else {
+                        describe(&pod.id)
+                    },
+                )
+            },
             // [`last_log_line`] has already dropped the one class that is never worth printing —
             // a kubelet placeholder on a record it synthesized.
-            match (last_log_line(run), run.exit_code) {
-                (Some(line), _) => last_words(line),
-                (None, 126 | 127) => {
-                    "check the container's command and arguments — what they name is not in the \
-                     image"
-                        .to_string()
-                }
-                // The last reading of `137`, and [`killed_action`] carries which reasons still
-                // reach it and why — the list lives there, not in a second copy here. What it
-                // means for this arm: the kill came from outside the application, so the general
-                // arm's *find the application's own error* is a hunt through a log that does not
-                // hold one, and the role decides which doors may be opened
-                // (NOTES § D85, § D71, § D93).
-                (None, 137) => killed_action(c.role).to_string(),
-                (None, _) => {
-                    "read the logs of that run to find the application's own error".to_string()
-                }
-            },
+            last_log_line(run).map(last_words),
         ),
     };
     // --- WHAT THE ENDING DECIDES END ---
@@ -3284,13 +3879,17 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
     // **The question underneath is real and unanswered** — the object does not say whether this
     // was once or is ongoing — so the card does not claim either (NOTES § D93).
     let mut facts = vec![container_fact(c)];
+    // **Ahead of the duration, the same order [`stopped_for_good`] puts it in** — two rules
+    // printing one fact may not disagree about where it sits, and this is the fact that survives
+    // the node (NOTES § D97, § D113).
+    facts.extend(quote);
     facts.extend(ran_for(run));
     Some(Finding {
         severity: Severity::Warn,
         title,
         evidence: facts.join(FACTS),
         action,
-        kubectl_cmd: describe(&pod.id),
+        kubectl_cmd: cmd,
         owner: pod.owner.clone(),
         object: pod.id.clone(),
         timestamp: run.finished_at.clone(),
@@ -3463,7 +4062,7 @@ fn stopped_for_good(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding>
         // leaves the sibling running and the pod `Running`.
         //
         // **Measured at the width it is drawn at**: the whole action is four wrapped lines like
-        // the arm above it, which is what the ten-line card has room for once the two-line title
+        // the arm above it, which is what keeps this card at ten lines once the two-line title
         // and the three-line evidence are on it (`screens/alerts.md` § The height). A first draft
         // said the same thing in 112 characters and drew a twelve-line card.
         Ending::CodeUnknown => "the node wrote that number, not the app, so read its log",

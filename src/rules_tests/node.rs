@@ -2289,8 +2289,13 @@ fn a_pod_that_finished_is_charged_to_nobody_and_alarms_about_nothing() {
         });
         let noisy = analyze(&pods_at(vec![still_running], now()));
         show(&noisy);
+        // **One card is enough since 2026-08-16** (NOTES § D113): rules 5 and 6 answer a failed
+        // ending with one sentence and rule 5 now carries the duration, so where rule 6 adds no
+        // fact its card folds. What this half needs is that the pod is *not silent* while it
+        // runs, which is what makes the silence below a property of `finished` and not of the
+        // capture.
         assert!(
-            noisy.len() >= 2,
+            !noisy.is_empty(),
             "{name}.json draws cards while it is running, or the silence below proves nothing: \
              {:?}",
             titles(&noisy)
