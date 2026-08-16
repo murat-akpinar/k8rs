@@ -133,6 +133,7 @@ its line moving with it.
 - [D109](#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16) — the family is the unit of work, and the commit stays per turn
 - [D110](#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16) — the brief names the regions, because a cold dispatch reads fifteen thousand lines
 - [D111](#d111--the-guard-list-exists-once-and-ci-gets-no-new-action-for-it-2026-08-16) — the guard list exists once, and CI gets no new action for it
+- [D112](#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16) — `lastState.terminated` has three authors, and the file was reading it as if it had one
 
 ## Why it exists — where the gap is
 
@@ -7800,6 +7801,179 @@ assertion about CI coverage is the same hole again.
 **The rule this leaves behind:** when a fix needs a new dependency to reach an
 entry point, the entry point is the thing to change.
 
+### D112 — `lastState.terminated` has three authors, and the file was reading it as if it had one (2026-08-16)
+
+Phase 3's **Family A** — five boxes, one question: *what does the object support,
+against what does the card claim*
+([D106](#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16)).
+The answer that came back is one sentence and every finding in the family is an
+instance of it: **`lastState.terminated` is written by three different authors**,
+and `rules.rs` knew about one and a half of them.
+
+1. the **container** — its own last words, through `terminationMessagePath` or the
+   log tail under `terminationMessagePolicy: FallbackToLogsOnError`;
+2. the **kubelet** — four synthesized literals, every one of them stamp-less;
+3. the **container runtime** — `StartError`, containerd's `255`/`Unknown`, CRI-O's
+   `-1`. The one nothing in this file knew about, and the only one that writes
+   real stamps beside its own sentence.
+
+Evidence: [`reports/2026-08-16-terminated-record-stamps-and-authors.md`](reports/2026-08-16-terminated-record-stamps-and-authors.md),
+an ephemeral `K8RS_CLUSTER=review` run at `kindest/node:v1.36.1`
+([D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)).
+**Three of the defects below had shipped past 211 green tests**, and a cluster is
+what produced all three: the epoch duration, the runtime's sentence printed as the
+container's, and the duration that counts a node's downtime. None of them is a
+shape a fixture in this repository holds.
+
+#### Two boxes were reversed, and both reversals were written down after they were acted on
+
+[CLAUDE.md § The PM does not wait for approval](CLAUDE.md#the-pm-does-not-wait-for-approval--the-boxes-run-back-to-back)
+requires a reversal in this file **before** it is acted on. Both of these were
+decided in the brief and recorded here afterwards. Naming the slip is the point of
+recording it.
+
+**931 asked for a third `Ending` keyed on the `reason`, and it was refused.**
+`kubelet_pods.go:2705-2723` at `release-1.36` writes `Terminated { reason:
+"Completed", exitCode: 0 }` for an init container whose status the runtime lost —
+but `reason: "Completed"` is byte for byte what a watched finish writes, so it
+separates no object the API can produce. And the kubelet is **deducing rather than
+guessing**: the write is gated on `HasAnyRegularContainerCreated`, and regular
+containers start only once every non-restartable init container has succeeded.
+`Ending::Finished` is therefore the true reading, `doing_its_job` answering *yes*
+is correct, and a card would be a permanent WARN on **every static pod in every
+cluster** after a kubelet restart — the class the source's own comment names
+first. The box's premise was the defect, not the code; the outcome is a corrected
+doc and a test that pins the silence. `k8s-admin` verified the deduction against
+v1.36.1 and ruled the box closed rather than reopened.
+
+Two corrections underneath that ruling, both found after it was written:
+
+- **The literal can reach `lastState`.** The first reason recorded was *it lands
+  in `state.terminated`, so rules 1, 5 and 6 never reach it* — false at v1.36.1.
+  `convertContainerStatus` (`kubelet_pods.go:2294-2306`) copies
+  `oldStatus.State.Terminated` into `lastState` when the containerID changes, and
+  the literal carries an empty one. The verdict does not move; what moves is that
+  the silence rests on the *reading* and not on the field being out of reach.
+- **The gate is weaker than the deduction it licenses.**
+  `HasAnyRegularContainerCreated` counts a regular container in `Exited`, while
+  `computeInitContainerActions` computes the same thing from the same list and
+  deliberately excludes it (*"If the node is rebooted, all containers will be in
+  the exited state…"*). So the status path can write the literal during a sandbox
+  rebuild about an init container that has not run *yet* in the new sandbox. Still
+  true of the past, silence still right — recorded rather than boxed, because the
+  doc may not read tighter than the gate is.
+
+**991 said "it needs no `reason`, only a row and an arm", and was overruled.** A
+program that runs `exit -1` in a shell reports `255`, so a code-alone row would
+tell that reader their program did not fail. Keyed on the pair, as `137` is. Two
+things then arrived that the box did not have. The pair is **containerd's and not
+the kubelet's** — `cStatus.Reason = status.Reason` copies straight out of the CRI
+status — and **CRI-O writes `-1` / `"Error"` for the same event**, which fell
+through to `Ending::Failed` and shipped the exact lie `991` exists to remove, on
+every OpenShift cluster. `-1` joined the ending keyed on the **code alone**, and it
+is the *cleaner* key of the two: POSIX statuses are `0..=255`, so no process can
+report it and the objection that made `255` a pair does not apply. A source-derived
+pin, on the footing
+[`RESTART_ALL`](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)
+already stands on — no CRI-O node exists on any host this repository builds on, and
+no fixture is invented for one
+([D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12),
+[D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)).
+
+#### The stamp premise was half right, and the half that was wrong decided box 966
+
+Guarding on a missing `finishedAt` is sound about the **kubelet**: of the five
+places `kubelet_pods.go` builds a `ContainerStateTerminated`, one sets `StartedAt`,
+`FinishedAt` and `ContainerID`, and the other four set `Reason`, `Message` and
+`ExitCode` and stop. It is not sound about the **runtime**: a `StartError` record
+carries a real `finishedAt` beside a message runc wrote, and CRI-O does the same
+with `Reason: "Error"` — which is also what an ordinary application failure
+carries, so no reason tells them apart either. Measured, the old frame printed
+*the last thing it logged was: failed to create containerd task: …* about a
+container that logged nothing.
+
+Box 966's own done-when then decided it: **if the card cannot tell the two apart
+from the object, the sentence stops claiming authorship rather than guessing it.**
+It cannot. `last_words` now says who *recorded* the line and never who wrote it.
+The stamp guard stayed, on the narrower claim it can actually support — a kubelet
+placeholder never displaces a card's advice.
+
+#### Two numbers were printed with more confidence than their inputs carry
+
+Both in `lasted`, both
+[PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)'s class, both
+measured rather than reasoned.
+
+**`startedAt` arrives as the epoch, not as null.** containerd leaves it at `0` on a
+start failure; the kubelet writes `metav1.NewTime(cs.StartedAt)` unconditionally;
+`time.Unix(0, 0)` is **not** Go's zero time, so it marshals as a real RFC3339 stamp
+and no `Option` on the path can see it. A mistyped `command` — one of the
+commonest broken-pod states there is — drew **`ran for 20681 days`**, and was still
+drawing it seven restarts later. **`Finding::timestamp`'s own note asserted the
+opposite in writing** (*"An `Option` and not a zero"*), which is what made the shape
+unthinkable one function away: the note that guarantees a thing is the note to
+check.
+
+**`finishedAt` on a node outage is written at recovery, not at death.** containerd
+stamps it when it comes back and finds the task gone, so a container that ran for
+50 seconds behind a node away for three minutes printed **`ran for 3 min`**, and a
+node down overnight would print *ran for 8 hours* — a duration nobody measured, one
+line under a translation saying nobody read how the run ended. Dropped on
+`Ending::CodeUnknown`.
+
+**And dropping it bought the card back.** Rule 1 spelled the duration *the last run
+lasted …* while rules 6 and 15 spelled it *ran for …*, off one `lasted` call —
+[D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)'s
+own class, one fact in two wordings — and because
+[`one_card_per_action`](#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15)
+folds only where the beaten card's facts are a **subset** of the survivor's, the
+two spellings left **two byte-identical ten-line cards on one container in a
+sixteen-row pane**, inside the mechanism written to prevent exactly that. One
+spelling in one helper fixed half of it; the duration not belonging on that ending
+fixed the rest, and rule 6's facts now reduce to the survivor's first fact on both
+shapes. Two defects, one visible only through that clause.
+
+#### What the cards say now, and one string that failed the plain-language rule
+
+The `lastState` claims were reworded because the record is *the last run Kubernetes
+managed to write down* and not *the run before this one* —
+`kubelet_pods.go:2616` gates the second write site on
+`LastTerminationState.Terminated == nil`, so only a container's **first** lost
+status is ever recorded, measured at nine restarts under one unchanged record. The
+frame is [D95](#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15)'s
+existing *on record* wording rather than a third framing, and height forced the
+titles shorter rather than longer: every card measures ten lines of ten.
+
+**One first draft failed invariant 13's second half and was replaced.** *"The
+record names no ending for this container"* is jargon-free and **referent-free** —
+nothing on the card, in `screens/alerts.md`, or in `kubectl` output introduces *the
+record* as a thing, so a newcomer has no object to attach the noun to. The owner is
+nameable, so it names one. A bare noun the card never introduces is the failure
+mode; *on record* as a **modifier** on a subject the reader already has is not, and
+that distinction is what the surviving titles rest on.
+
+#### Not proven, and it is written into the code that way
+
+No CRI-O node and no virtual node exist on any host here, so the `-1` pair and the
+undeclared-container shape are source-derived pins and plants on decoded captures
+([D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)),
+not captures. `cargo mutants` does not mutate struct-literal fields, so the
+decode's assertions rest on a hand mutation. Box 1380's done-when says *a fixture*
+and it is a plant; that is the honest reading of a shape no cluster this repository
+can build will produce, and it is named here rather than smoothed over.
+
+#### The process finding, and it is the same one as the code finding
+
+The family took four rounds. Rounds 1 and 2 were the author and `tester` working
+from source and fixtures; **rounds 3 and 4 came from the two passes that read
+something nobody else had read** — a real cluster, and the assembled files. Neither
+found a wording nit. The cluster found two defects that ship, and the landed-tree
+pass found a headline stating an absolute the code two lines below broke, a
+sentence left in twice by the edit that superseded it, and a comment that went
+stale in the same turn that made it stale. **A gate that is skipped because
+everyone upstream passed is the gate that had the finding**
+([CLAUDE.md § The cycle](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it)).
+
 ## Decisions made
 
 ### Product
@@ -7993,6 +8167,8 @@ never needed this watch ([D27](#d27--two-findings-the-open-watch-already-paid-fo
 | 143 | SIGTERM — graceful shutdown, not an error |
 | 1 / 2 | The application's own error, check the logs |
 | 126 / 127 | Command not executable / not found — `command` is wrong |
+| **255 with `reason: Unknown`** | **Not the application's code at all** — the node found the container already dead and the *runtime* wrote this in place of a code nobody read. **containerd's pair, not the kubelet's**, and the commonest abnormal `lastState` a cluster produces: a node restart leaves it, with real stamps and a real `containerID`, so `logs --previous` works here ([D112](#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)). **Bare `255` stays untranslated** — `exit -1` in a shell reports it, and a code-alone row would tell that reader their program did not fail |
+| **-1** | The same event as the row above, spelled by **CRI-O**: the exit code could not be determined. Keyed on the **code alone**, because CRI-O's reason is `Error`, which an ordinary failure also carries — and because `-1` is outside the POSIX range `0..=255`, so no process can report it. A source-derived pin, no CRI-O node exists here ([D112](#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)) |
 
 **137 has four meanings, the object names three of them, and where it names none
 the table refuses to guess** — this row read "almost always OOM" until

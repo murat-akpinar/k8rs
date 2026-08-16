@@ -928,7 +928,7 @@ that cites them expects to find them.
       `explains_a_shortfall`. Whatever it decides applies to every shared action,
       not to this one pair.
       Closed — [D95](NOTES.md#d95--the-two-137-reasons-become-endings-and-rule-5-draws-where-rule-6-goes-silent-2026-08-15) · [D102](NOTES.md#d102--the-second-copy-of-a-shared-sentence-is-dropped-by-analyze-and-not-by-a-rule-2026-08-15)
-- [ ] **A lost init-container status reads as *finished successfully*, and then
+- [x] **A lost init-container status reads as *finished successfully*, and then
       two rules stand down** — `kubelet_pods.go:2714-2718` synthesizes
       `Terminated { reason: "Completed", exitCode: 0 }` for an init container
       whose status the runtime lost, which is the **third** bare literal beside
@@ -942,7 +942,11 @@ that cites them expects to find them.
       watched*. **`0` cannot be keyed on alone** — every finished init container
       writes it — so this needs the `reason` beside it, and the object to prove it
       on is one no committed capture holds. Found by the operator review of the
-      D95 box, from D93's own source citation
+      D95 box, from D93's own source citation.
+      Closed, and **the premise above was the defect** — the source writes
+      `reason: "Completed"`, which no genuine finish can be told from, and the
+      kubelet is deducing rather than guessing, so silence is the true reading:
+      [D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)
 - [ ] **Rule 6's `ContainerStatusUnknown` card can never carry a date, and
       nothing else can age it out** — `Finding::timestamp` comes from
       `finished_at`, the kubelet's literal sets no stamps, and `lastState` never
@@ -963,7 +967,7 @@ that cites them expects to find them.
       not answer it, so the question is whether the card should exist on a
       container whose current trouble is something else — which is a suppressor
       question, not a wording one
-- [ ] **`the last thing it logged was:` prints text the container never wrote** —
+- [x] **`the last thing it logged was:` prints text the container never wrote** —
       rule 6 reads `lastState.terminated.message` and presents it as the
       application's own last words, but that field is whatever the kubelet put
       there, and on at least one reason the kubelet writes its own sentence into
@@ -987,8 +991,12 @@ that cites them expects to find them.
       *sometimes*. Reported by `dev-core` rather than folded in, which is the
       right call ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)).
       Decide whether the card can tell the two apart from the object at all; if
-      it cannot, the sentence stops claiming authorship rather than guessing it
-- [ ] **A node reboot writes `exit 255` and rule 6 blames the application for
+      it cannot, the sentence stops claiming authorship rather than guessing it.
+      Closed on the second half — it cannot, because a **third** author writes
+      that field and its records carry stamps: the frame now says who *recorded*
+      the line, never who wrote it
+      ([D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16))
+- [x] **A node reboot writes `exit 255` and rule 6 blames the application for
       it** — measured on kind v1.36.1, not reasoned: `docker restart` of the node
       leaves `exitCode: 255, reason: "Unknown"` with a real containerID and real
       timestamps, because containerd's state survives the reboot and the
@@ -1002,8 +1010,12 @@ that cites them expects to find them.
       established that the `137` card's own sentence about reboots was wrong for
       the same reason ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15)).
       **`255` is not `137`'s question**, which is why it is here and was not
-      folded in: it needs no role split and no `reason`, only a row and an arm
-- [ ] **Only a container's *first* lost status is ever recorded, so a card
+      folded in: it needs no role split and no `reason`, only a row and an arm.
+      Closed — and **the `reason` was needed after all** (a program may exit 255),
+      while CRI-O turned out to write `-1` / `"Error"` for the same event and was
+      still being blamed for it:
+      [D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)
+- [x] **Only a container's *first* lost status is ever recorded, so a card
       reasoning from `lastState` is wrong on any container that has terminated
       before** — `convertToAPIContainerStatuses`' second site is gated on
       `LastTerminationState.Terminated == nil`, verified in the kubelet source
@@ -1024,7 +1036,10 @@ that cites them expects to find them.
       record* — precisely so they stay true after the freeze, while **rule 1's
       titles and rule 6's still say *the container's last run***, which is the
       claim this box says the object does not support. One of them is D93-blessed
-      and shipped, so moving it is this box's call and not a wording tidy-up
+      and shipped, so moving it is this box's call and not a wording tidy-up.
+      Closed — both moved to rule 5's *on record* frame, and one draft of the new
+      wording failed invariant 13 on a bare noun the card never introduces:
+      [D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)
 - [ ] **`screens/alerts.md`'s action budget is false of four shipped cards, and
       the file says that is a `rules.rs` finding** — it caps a card's action at
       two to five lines, never cut ([alerts.md](screens/alerts.md)), and states
@@ -1134,7 +1149,12 @@ that cites them expects to find them.
       rewritten for this in its own box; rule 1's, ten lines below the code the
       clean-exit box touched, was not, and the boundary that left it there is
       [D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14)'s.
-      Found by `k8s-admin` while checking invariant 4 across the whole match
+      Found by `k8s-admin` while checking invariant 4 across the whole match.
+      **A measured instance joined it on 2026-08-16**: a container whose start
+      failed (`command` mistyped) lands on exactly this arm — *keeps crashing …
+      read the previous run's logs* about a container that never ran and has no
+      log — while rule 6's card beside it carries the runtime's own diagnosis
+      ([D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16))
 - [ ] **The first instruction on a clean-exit card can be dead on the shape the
       card is most often drawn about** — the action opens *"check the pod's
       events for a `Killing` line"*, and with stock probe settings
@@ -1183,7 +1203,12 @@ that cites them expects to find them.
       after the hour, or the verdict on both sides of the conditional, goes red
       although the requirement is met. The bias is toward a false red and never a
       false green, which is the safe direction; whoever meets that failure fixes
-      the helper, not the assertion
+      the helper, not the assertion.
+      **A fourth, the first residue's class on a second axis, declared
+      2026-08-16**: the shared-sentence sweep and the card-height guard both walk
+      a hand-written `(code, reason)` list, so a seventh `Ending` would escape
+      both silently while `rules.rs` itself refuses to compile without it
+      ([D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16))
 - [x] Exit-code translation table (137/143/1/126/127) — **137 has four readings, the object names three of them, and where it names none the table refuses to guess**: `reason: OOMKilled` is memory, `reason: RestartingAllContainers` is the pod's own restart rules removing the container and is not a failure at all, `reason: ContainerStatusUnknown` is not a kill at all but the number the kubelet writes where it could not read a status, and with none of those the row names the signal and stops. The old "almost always OOM" row was written before the rule had `reason` beside the code ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)); **what replaced it named the opposite cause just as flatly and was corrected on 2026-08-15** — *did not stop when it was asked to* is false of an init container that may hold no probe, of a cgroup kill whose word was lost on a starved host, and of a rebuilt sandbox ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15))
 - [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket
       **or any directory one sits under**, or a writable host mount. There is no
@@ -1377,7 +1402,7 @@ that cites them expects to find them.
       the thing making the claim true survives a rewrite; a pin on a token from
       the sentence does not, and every one of the latter in this file is listed
       above
-- [ ] **A container can have a status and no declaration, and the decode's own
+- [x] **A container can have a status and no declaration, and the decode's own
       comment says it cannot** — `container_snapshots` explains its missing test
       with *"the API cannot produce the object: both container lists are
       immutable after create"*. Immutability is not the thing that breaks it: a
@@ -1397,7 +1422,12 @@ that cites them expects to find them.
       inherited, and the comment states what is actually true. **The pairing
       itself is not in question** — it is by name, and that is exactly why the
       index-out-of-range panic k9s shipped in `initContainerStats` has no shape
-      here ([PRIOR-ART § F3](PRIOR-ART.md#f3--container-semantics-moved-underneath-them))
+      here ([PRIOR-ART § F3](PRIOR-ART.md#f3--container-semantics-moved-underneath-them)).
+      Closed — **on a plant and not a fixture**, which is the honest reading of a
+      shape no cluster this repository can build produces, and the requirement is
+      asserted as *a card may not name what the spec never said* rather than as
+      today's field values
+      ([D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16))
 - [ ] Per rule: positive fixture test **and** negative (healthy) fixture test
 - [ ] `cargo mutants --timeout 90` clean over `rules.rs` — a MISSED mutant is a
       rule change no test objected to, i.e. a hole in the diagnosis; it gets a

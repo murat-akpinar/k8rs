@@ -500,9 +500,11 @@ fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
         looping.evidence
     );
     assert!(
-        looping.evidence.contains("the last run lasted 2s"),
+        looping.evidence.contains("ran for 2s"),
         "D51's first fork of a crashloop triage — how long each run survives, which \
-         `describe` makes a human subtract at 3am: {}",
+         `describe` makes a human subtract at 3am. **One spelling, from [`ran_for`]**: rules 1, 6 \
+         and 15 print this off one [`lasted`] call and wrote it three ways until 2026-08-16, \
+         which is NOTES § D85's class inside the mechanism written to collapse the duplicate: {}",
         looping.evidence
     );
     assert!(
@@ -546,15 +548,16 @@ fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
         "a duration, not English parsed back into a number"
     );
 
-    let failed = only(&all, "broken-crashloop", "previous run failed");
+    let failed = only(&all, "broken-crashloop", "on record failed");
     assert_eq!(failed.severity, Severity::Warn);
     assert_eq!(
         failed.action,
-        "the last thing it logged was: panic: dial tcp db.payments.svc:5432: connect: \
+        "Kubernetes recorded this: panic: dial tcp db.payments.svc:5432: connect: \
          connection refused",
         "the kubelet kept the tail of the log, so the card shows it instead of sending \
          the reader to fetch what k8rs is already holding — and it is the *last* line, \
-         not the `starting` this capture opens with"
+         not the `starting` this capture opens with. **The frame says who recorded the line and \
+         not who wrote it** ([`last_words`]): the runtime reaches this field too"
     );
     assert!(
         failed.evidence.contains("ran for 2s"),
@@ -683,7 +686,7 @@ fn the_out_of_memory_card_names_the_limit_and_rule_6_stays_out_of_its_way() {
 
     assert_eq!(
         all.iter()
-            .filter(|f| f.title.contains("previous run failed"))
+            .filter(|f| f.title.contains("on record failed"))
             .count(),
         0,
         "rule 6 owns the exit-code table and rule 2 owns this death; both firing puts \
@@ -1252,7 +1255,7 @@ fn an_ordinary_exit_is_not_a_previous_run_that_failed() {
         show(&all);
         assert_eq!(
             all.iter()
-                .filter(|f| f.title.contains("previous run failed"))
+                .filter(|f| f.title.contains("on record failed"))
                 .count(),
             0,
             "{name}: exit {code} is what an ordinary shutdown looks like — a card here \
@@ -1489,8 +1492,9 @@ fn a_program_that_finished_is_not_a_container_that_crashed() {
         card.title
     );
     assert!(
-        card.title.contains("last run"),
-        "so the title says which run it is talking about: {}",
+        card.title.contains("last run on record"),
+        "so the title says which run it is talking about — the last one Kubernetes wrote down, \
+         which is not the same as the container's last run: {}",
         card.title
     );
     assert!(
@@ -1930,8 +1934,9 @@ fn a_container_that_is_stopped_politely_is_not_one_that_keeps_crashing() {
     // read the whole loop off a single sample, and the same accumulated-backoff shape that
     // breaks the `exit 0` title breaks this one.
     assert!(
-        card.title.contains("last run"),
-        "and it says which run it read that off, because the snapshot holds exactly one: {}",
+        card.title.contains("last run on record"),
+        "and it says which run it read that off, because the snapshot holds exactly one — and \
+         says it about the record, which does not move when the container runs again: {}",
         card.title
     );
     for pointer in SENT_TO_THE_LOGS {
@@ -2049,7 +2054,7 @@ fn a_kill_from_outside_the_application_does_not_send_the_reader_to_its_logs() {
 
     let all = findings(&["startup"]);
     show(&all);
-    let card = only(&all, "broken-startup", "previous run failed");
+    let card = only(&all, "broken-startup", "on record failed");
     for pointer in SENT_TO_THE_LOGS {
         assert!(
             !card.action.contains(pointer),
@@ -2139,7 +2144,7 @@ fn an_init_container_killed_from_outside_is_not_sent_to_a_probe_it_may_not_have(
 
     let all = analyze(&pods_at(vec![killed], now()));
     show(&all);
-    let card = only(&all, "healthy-retry", "previous run failed");
+    let card = only(&all, "healthy-retry", "on record failed");
     // **Lowercased, or the guard only holds for the capitalisation it happened to be written
     // against.** A sentence-initial *Probes are worth checking* is the same forbidden advice on
     // the same forbidden role, and it walked past this loop while it compared the raw string
@@ -2186,7 +2191,7 @@ fn an_init_container_killed_from_outside_is_not_sent_to_a_probe_it_may_not_have(
     // nobody.** `broken-startup` is a regular container the kubelet killed for a `startupProbe`
     // that never passed, and it is the one role the probes are real advice for.
     let captured = findings(&["startup"]);
-    let regular = only(&captured, "broken-startup", "previous run failed");
+    let regular = only(&captured, "broken-startup", "on record failed");
     assert!(
         regular.action.contains("liveness") && regular.action.contains("startup"),
         "the two health checks that kill a container that is otherwise running stay on the role \
@@ -2339,8 +2344,10 @@ fn a_run_kubernetes_lost_track_of_is_not_read_as_a_kill() {
             // the `containerID` this shape does not have. Silence was the other door and was
             // refused for that reason (NOTES § D93).
             assert!(
-                card.title.to_lowercase().contains("no record"),
-                "{role:?}: the card says what happened rather than nothing at all: {}",
+                card.title.to_lowercase().contains("did not record how"),
+                "{role:?}: the card says what happened rather than nothing at all — and names \
+                 who did not record it, because *the record* is a noun nothing on this card, in \
+                 `screens/alerts.md` or in kubectl's own output introduces (invariant 14): {}",
                 card.title
             );
             assert!(
@@ -2382,12 +2389,15 @@ fn a_run_kubernetes_lost_track_of_is_not_read_as_a_kill() {
                     card.action
                 );
             }
-            assert!(
-                !said.contains("the last thing it logged"),
-                "{role:?}: the kubelet wrote that message, not the container — presenting it as \
-                 the container's last words is a record that lies (invariant 4): {}",
-                card.action
-            );
+            // **The message never reaches this card, and the assertion for that is the
+            // positive one above** — `no signal was recorded` is what the action has to say, and
+            // a card printing the kubelet's sentence instead fails it first. A negative naming
+            // the frame stood here until 2026-08-16 and could not fail: on this shape the record
+            // is stamp-less, so [`last_log_line`] refuses the field before the arm order gets a
+            // say, and removing *both* guards reddens the line above rather than this one. The
+            // two guards are asserted where they live —
+            // [`a_message_on_a_record_nobody_stamped_is_never_read`] and
+            // [`the_quote_frame_says_who_recorded_the_line_and_never_who_wrote_it`].
             // **And what the missing fields do to the card, pinned as observed.** Both follow
             // from the object rather than from a choice this rule made: with no `finishedAt`
             // there is no age, which is a state D88 made deliberate for rule 5's arm with no
@@ -2413,12 +2423,11 @@ fn a_run_kubernetes_lost_track_of_is_not_read_as_a_kill() {
     // the message it is read ahead of really does reach the card on every other reason.
     let logged = init_previous_run(137, None, Some("panic: cannot reach db"), false);
     let all = analyze(&pods_at(vec![logged], now()));
-    let card = only(&all, "healthy-retry", "previous run failed");
+    let card = only(&all, "healthy-retry", "on record failed");
     println!("{}", card.action);
     assert_eq!(
-        card.action, "the last thing it logged was: panic: cannot reach db",
-        "the container's own last words still answer first on every reason but the one the \
-         kubelet writes itself"
+        card.action, "Kubernetes recorded this: panic: cannot reach db",
+        "the message still answers first on every reason but the one the kubelet writes itself"
     );
 }
 
@@ -2510,7 +2519,7 @@ fn a_container_the_pods_own_restart_rule_removed_is_not_a_run_that_failed() {
     }
 
     // **Rule 6 is asked directly, because its title is no longer one string.** The silence was
-    // asserted as *no card whose title says "previous run failed" names nosy* — and rule 6 has
+    // asserted as *no card whose title says "on record failed" names nosy* — and rule 6 has
     // two titles since the `STATUS_LOST` branch, so a rule that drew the other one about this
     // container passed. Calling the rule states the requirement instead of searching for the
     // words it happens to use (NOTES § D26, § D93).
@@ -2534,7 +2543,8 @@ fn a_container_the_pods_own_restart_rule_removed_is_not_a_run_that_failed() {
     //
     // **Keyed on `exit 3` and not on the rule's own words**, for the reason the `STATUS_LOST`
     // lookup was re-keyed one test up: with the exemption gone there are *two* cards saying
-    // *previous run failed*, so `only` panics on the count and the assertion that names the
+    // *the last run on record failed*, so `only` panics on the count and the assertion that names
+    // the
     // defect never runs. A lookup that doubles as the assertion reports the wrong failure.
     let failed = only(&all, "broken-hostpath", "exit 3");
     assert!(
@@ -2552,17 +2562,17 @@ fn a_container_the_pods_own_restart_rule_removed_is_not_a_run_that_failed() {
     // so "no card mentions nosy" would be false for a reason that has nothing to do with this.
     assert!(
         !all.iter()
-            .any(|f| f.title.contains("previous run failed")
-                && f.evidence.contains("container nosy")),
+            .any(|f| f.title.contains("on record failed") && f.evidence.contains("container nosy")),
         "a container the pod asked Kubernetes to remove did not fail, and a WARN card per \
          restart-rule firing is the false-positive class this rule is designed around: {:?}",
         titles(&all)
     );
     // **The kubelet's own sentence goes with it, and that is a side effect rather than the fix.**
-    // It would have printed as *the last thing it logged was* about a container that logged
-    // nothing — the same lie `STATUS_LOST` is scoped out of by arm order. The class defect is
-    // still open and still boxed; two ad-hoc mechanisms is what makes the third look unnecessary
-    // (NOTES § D88, § D93).
+    // It would have become this card's whole *what to do* — a placeholder where the advice
+    // belongs, the same shape `STATUS_LOST` is scoped out of by arm order. **The class under both
+    // is closed**: [`last_words`] stopped claiming an author and [`last_log_line`] drops a
+    // kubelet placeholder outright, so a third reason would meet a structural answer rather than
+    // two accidents (NOTES § D88, § D93).
     assert!(
         !all.iter()
             .any(|f| f.action.contains("RestartAllContainers in place")),
@@ -2712,7 +2722,7 @@ fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
                 assert!(
                     counted
                         .title
-                        .starts_with("No record of how the container's last run ended")
+                        .starts_with("Kubernetes did not record how the run it last saw ended")
                         && counted.title.contains("CrashLoopBackOff"),
                     "the loop is real and the crash is not: {}",
                     counted.title
@@ -2762,7 +2772,7 @@ fn no_card_about_a_run_kubernetes_never_watched_end_claims_it_was_killed() {
             assert!(
                 folded
                     .title
-                    .starts_with("No record of how the container's last run ended"),
+                    .starts_with("Kubernetes did not record how the run it last saw ended"),
                 "rule 6 ships what it shipped: {}",
                 folded.title
             );
@@ -3005,6 +3015,10 @@ fn every_shape_a_container_reaches() -> Vec<PodSnapshot> {
             (137, Some("OOMKilled")),
             (137, Some(STATUS_LOST)),
             (137, Some(RESTART_ALL)),
+            (255, Some(CODE_UNKNOWN)),
+            // The bare number beside it, because keying the pair is what makes the row above
+            // narrow — without this the sweep never sees `255` fall through (NOTES § D29).
+            (255, None),
         ] {
             all.extend(
                 every_role_with(code, reason, looping)
@@ -3033,7 +3047,7 @@ fn every_shape_a_container_reaches() -> Vec<PodSnapshot> {
 /// [`a_crafted_termination_message_cannot_delete_another_rules_card`] drives it end to end
 /// (invariant 9).
 #[test]
-fn only_rule_6_shares_a_sentence_with_a_neighbour_and_only_on_a_lost_status() {
+fn only_rule_6_shares_a_sentence_with_a_neighbour_and_only_where_nothing_read_the_ending() {
     let mut pairs: BTreeSet<(&str, &str, String)> = BTreeSet::new();
     let mut shared = 0usize;
     let mut framed = 0usize;
@@ -3069,12 +3083,15 @@ fn only_rule_6_shares_a_sentence_with_a_neighbour_and_only_on_a_lost_status() {
         [
             ("rule 1", "rule 6", unwatched_action().to_string()),
             ("rule 5", "rule 6", unwatched_action().to_string()),
+            ("rule 1", "rule 6", no_exit_code_action().to_string()),
+            ("rule 5", "rule 6", no_exit_code_action().to_string()),
         ]
         .into_iter()
         .collect::<BTreeSet<_>>(),
         "the whole inventory of what the fold may collapse — rule 6 against whichever of rules 1 \
-         and 5 is speaking, on the one ending all three answer with the same sentence. Anything \
-         else here is a card being deleted that nobody decided to delete"
+         and 5 is speaking, on the **two** endings all three answer with one sentence: a run \
+         nothing watched end, and a run nobody read the code of. Anything else here is a card \
+         being deleted that nobody decided to delete"
     );
     assert!(
         shared > 0 && framed > 0,
@@ -3090,47 +3107,76 @@ fn only_rule_6_shares_a_sentence_with_a_neighbour_and_only_on_a_lost_status() {
 ///
 /// **[`last_words`]' frame is the guard, and it was an accident until it was written down.** The
 /// quote is wrapped in a constant prefix no static action in the file opens with (asserted over
-/// the corpus in [`only_rule_6_shares_a_sentence_with_a_neighbour_and_only_on_a_lost_status`]), so
+/// the corpus in [`only_rule_6_shares_a_sentence_with_a_neighbour_and_only_where_nothing_read_the_ending`]), so
 /// a crafted message cannot equal one however exactly it is copied.
 ///
 /// **`restarts10.json` at `exit 1`**: rule 5 draws [`failed_action`] and rule 6 the quote, on one
 /// container, which is the pair a crafted message would be trying to collapse.
+///
+/// **Three stamp states, and the third is the only one where the frame is the whole guard.**
+/// [`last_log_line`] refuses the field on a record with no `finishedAt`, because that is the shape
+/// every kubelet-authored message rides ([`a_message_on_a_record_nobody_stamped_is_never_read`]);
+/// [`ran_for`] needs **both** stamps. So the two conditions come apart on
+/// `startedAt: null, finishedAt: set`: the message *is* read, and rule 6 carries no duration, so
+/// its facts are a subset of its neighbour's and nothing but the frame stands between a crafted
+/// message and a deleted card. **It is producible** — `kuberuntime_container.go:760-763` fills
+/// `Message` and `FinishedAt` in one block while `StartedAt` is set on a different branch, and a
+/// zero `metav1.Time` marshals to `null`. Adding the guard on 2026-08-16 closed the *both-null*
+/// state, which had been carrying this half; without this row invariant 9's guard would be proven
+/// only where the subset clause blocked the fold anyway.
 #[test]
 fn a_crafted_termination_message_cannot_delete_another_rules_card() {
-    // **Two runs of the same plant, and the second is where the impersonation would actually
-    // delete something.** With the capture's stamps rule 6's evidence carries `ran for …`, which
-    // rule 5's card has not got, so the subset clause blocks the fold whatever the sentences say —
-    // the frame is only stopping the *impersonation* there. Strip the stamps and [`lasted`] goes
-    // quiet: one fact, both cards undated, and a message that copies rule 5's advice takes rule
-    // 6's card off the screen. Both are driven, because a guard is proven only for the shapes it
-    // was fed (NOTES § D29).
-    let plant = |target: Option<&str>, stamped: bool| {
+    // **Three runs of the same plant, and the third is where the impersonation would actually
+    // delete something.** With both of the capture's stamps rule 6's evidence carries
+    // [`ran_for`], which rule 5's card has not got, so the subset clause blocks the fold whatever
+    // the sentences say. With neither, [`last_log_line`] refuses the field and the crafted value
+    // never reaches a card at all. With `finishedAt` alone the two guards come apart: the message
+    // is read and the duration is not, so the frame is the only thing left — which is the state
+    // invariant 9's guard has to be proven in (NOTES § D29).
+    let plant = |target: Option<&str>, started: bool, finished: bool| {
         capture_but("restarts10", |p| {
             ended_as(p, "flaky", 1, None, target);
-            if !stamped {
-                let run = container_status(p, "flaky")
-                    .last_state
-                    .as_mut()
-                    .and_then(|s| s.terminated.as_mut())
-                    .expect("ended_as wrote the run this plant is stripping");
+            let run = container_status(p, "flaky")
+                .last_state
+                .as_mut()
+                .and_then(|s| s.terminated.as_mut())
+                .expect("ended_as wrote the run this plant is stripping");
+            if !started {
                 run.started_at = None;
+            }
+            if !finished {
                 run.finished_at = None;
             }
         })
     };
-    for stamped in [true, false] {
+    for (stamps, started, finished) in [
+        ("both", true, true),
+        ("neither", false, false),
+        ("finishedAt only", false, true),
+    ] {
+        // The one the quote turns on, and the one the duration turns on — asserted rather than
+        // assumed, or the third row is the second row under a different name.
+        let read = analyze(&pods_at(vec![plant(None, started, finished)], now()));
+        assert_eq!(
+            cards_about(&read, "flaky")
+                .iter()
+                .any(|f| f.evidence.contains("ran for")),
+            started && finished,
+            "{stamps}: [`ran_for`] needs both stamps and [`last_log_line`] needs one, which is \
+             what makes these three states and not two"
+        );
         // The card set with nothing written into the message — what every crafted run below is
         // compared against, so what is asserted is *no card went* rather than a count typed out
         // here (NOTES § D26).
-        let plain = analyze(&pods_at(vec![plant(None, stamped)], now()));
+        let plain = read;
         let unaimed: Vec<&str> = cards_about(&plain, "flaky")
             .into_iter()
             .map(|f| f.title.as_str())
             .collect();
         assert!(
             unaimed.len() > 1,
-            "stamped={stamped}: more than one card about this container, or there is nothing for \
-             a crafted message to delete and every run below passes for free: {unaimed:?}"
+            "{stamps}: more than one card about this container, or there is nothing for a \
+             crafted message to delete and every run below passes for free: {unaimed:?}"
         );
         for target in [
             failed_action(ContainerRole::Regular),
@@ -3142,33 +3188,45 @@ fn a_crafted_termination_message_cannot_delete_another_rules_card() {
             "check the readiness probe: the path, the port, and whether the application answers \
              it yet",
         ] {
-            let all = analyze(&pods_at(vec![plant(Some(target), stamped)], now()));
+            let all = analyze(&pods_at(
+                vec![plant(Some(target), started, finished)],
+                now(),
+            ));
             let about = cards_about(&all, "flaky");
             for f in &about {
-                println!("stamped={stamped} | {} | {}", f.title, f.action);
+                println!("{stamps} | {} | {}", f.title, f.action);
             }
-            let quoted = about
-                .iter()
-                .find(|f| f.action.starts_with(QUOTE_FRAME))
-                .unwrap_or_else(|| {
-                    panic!(
-                        "stamped={stamped}: rule 6 quotes the message, or the plant never reached \
-                         the arm: {about:?}"
-                    )
-                });
+            let quoted = about.iter().find(|f| f.action.starts_with(QUOTE_FRAME));
             assert_eq!(
-                quoted.action,
-                last_words(target),
-                "stamped={stamped}: the container's words reach the card framed, which is the \
-                 whole of the guard"
+                quoted.map(|f| f.action.as_str()),
+                finished.then(|| last_words(target)).as_deref(),
+                "{stamps}: where the record carries a `finishedAt` the container's words reach \
+                 the card **framed**, and the frame is what keeps the crafted copy from equalling \
+                 a static action; where it does not, the record is the shape the kubelet \
+                 synthesizes and the field is not read at all — either way nothing on the screen \
+                 carries this string unattributed: {about:?}"
             );
+            // **And on that half the message reaches nothing at all**, which is a stronger claim
+            // than *it is not quoted*: every field of every card is the one the same pod draws
+            // with no message written into it. A rule that dropped the frame and printed the
+            // value bare would satisfy the assertion above and be the exact defect it guards
+            // (NOTES § D26). Compared as whole findings, because *which line it landed on* is
+            // precisely what is not being trusted here.
+            if !finished {
+                assert_eq!(
+                    about,
+                    cards_about(&plain, "flaky"),
+                    "{stamps}: the crafted message may not change any part of any card — the \
+                     record has no `finishedAt`, so the field is never read"
+                );
+            }
             // **The card set, against the same pod with no message at all.** What a crafted
             // message may change is rule 6's own action; what it may not change is how many cards
             // the container has. Comparing titles rather than counting says *which* card went.
             assert_eq!(
                 about.iter().map(|f| f.title.as_str()).collect::<Vec<_>>(),
                 unaimed,
-                "stamped={stamped}: a message the workload wrote has deleted a card — the value \
+                "{stamps}: a message the workload wrote has deleted a card — the value \
                  it reached is the fold's key, and that is the whole of why the frame has to be a \
                  guard and not a wording choice (invariant 9)"
             );
@@ -3176,9 +3234,130 @@ fn a_crafted_termination_message_cannot_delete_another_rules_card() {
     }
 }
 
-/// The frame [`last_words`] wraps a container's own words in — spelled here so the test that pins
-/// it does not re-type the thing it is checking (NOTES § D102).
-const QUOTE_FRAME: &str = "the last thing it logged was: ";
+/// The frame [`last_words`] wraps [`Terminated::message`] in — spelled here so the test that pins
+/// it does not re-type the thing it is checking (NOTES § D102). **Not "the container's words"**:
+/// three authors reach that field and the frame stopped claiming any of them
+/// ([`the_quote_frame_says_who_recorded_the_line_and_never_who_wrote_it`]).
+const QUOTE_FRAME: &str = "Kubernetes recorded this: ";
+
+/// **A message on a record the kubelet synthesized is not read at all, and the missing stamp is
+/// what says so** (NOTES § D88, § D93). Every synthesized record in `kubelet_pods.go` at v1.36.1
+/// is the same three fields — `Reason`, `Message`, `ExitCode` — with no `startedAt`, no
+/// `finishedAt` and no `containerID`, because the kubelet is describing a run it did not watch.
+/// There are **four** such literals, not the two this file had scoped out: `:2385` and `:2624`
+/// ([`STATUS_LOST`]), `:2584` ([`RESTART_ALL`]) and `:2717`, the init container whose status the
+/// runtime lost. Anything arriving through a CRI status carries `FinishedAt` beside its
+/// `Message`, off the same `CONTAINER_EXITED` branch
+/// (`kuberuntime_container.go:760-763`), so the guard reads the presence of a field rather than
+/// guessing at a reason.
+///
+/// **What it does *not* settle is who wrote the line, and that was claimed here for one turn.**
+/// A CRI status is not a container: the runtime writes its own errors into `Message` beside a
+/// real `FinishedAt`, so this guard lets those through by design and the *frame* is what stopped
+/// claiming an author ([`the_quote_frame_says_who_recorded_the_line_and_never_who_wrote_it`]).
+/// This test is about one thing only: a kubelet placeholder never displaces a card's advice.
+///
+/// **Which direction it fails in is the requirement.** A record with no `finishedAt` and a real
+/// message would lose a line the reader could have had — a miss. A kubelet placeholder printed
+/// where a rule's own advice belongs is a card that says nothing. The guard takes the first, and
+/// the two are not symmetric.
+///
+/// **Both known instances were unreachable by accident and neither accident is the fix**
+/// ([`a_run_kubernetes_lost_track_of_is_not_read_as_a_kill`] holds one by arm order,
+/// [`a_container_the_pods_own_restart_rule_removed_is_not_a_run_that_failed`] the other by an
+/// exemption granted for something else). This is asserted on [`last_log_line`] itself, which is
+/// the one place both rules that print the frame read the field from — so a fifth literal, or a
+/// rule that stops scoping one out, cannot reach it however it is routed.
+#[test]
+fn a_message_on_a_record_nobody_stamped_is_never_read() {
+    // **The captured half, and it is the strongest evidence in this test.** `failed.json` carries
+    // the kubelet's own sentence on `broken-failed` / `app`, with both stamps `null` — a real
+    // cluster's bytes, not a plant (NOTES § D53). No rule reads that field as an ending today,
+    // which is exactly why the guard belongs on the helper and not in a rule.
+    let captured = pod("failed");
+    let ContainerState::Terminated(lost) = &container(&captured, "app").state else {
+        panic!("failed.json's container is terminated where the kubelet lost its status")
+    };
+    println!("failed.json: {lost:?}");
+    assert!(
+        lost.message.as_deref().is_some_and(|m| !m.is_empty()) && lost.finished_at.is_none(),
+        "the capture has to carry a message on a stamp-less record, or the assertion below \
+         passes because there was nothing to quote: {lost:?}"
+    );
+    assert_eq!(
+        last_log_line(lost),
+        None,
+        "the kubelet wrote that sentence about a run it never watched — quoting it as the \
+         container's own last words is a record that lies (invariant 4)"
+    );
+
+    // **All four synthesized literals, written as the kubelet writes them** — the three fields
+    // and nothing else, so the shape under test is the source's and not this file's. Read from
+    // `kubelet_pods.go` at v1.36.1; the two `ContainerStatusUnknown` sites differ in their
+    // sentence and both are fed, because a guard is proven only for the shapes it was fed
+    // (NOTES § D29).
+    for (reason, message, code) in [
+        (
+            STATUS_LOST,
+            "The container could not be located when the pod was terminated",
+            137,
+        ),
+        (
+            STATUS_LOST,
+            "The container could not be located when the pod was deleted.  The container used to \
+             be Running",
+            137,
+        ),
+        (
+            RESTART_ALL,
+            "The container is removed because RestartAllContainers in place",
+            137,
+        ),
+        // The fourth, and the one no arm in this file scopes out: an init container whose status
+        // the runtime lost reads `Completed` / `0`, which is what a genuine finish reads too.
+        (
+            "Completed",
+            "Unable to get init container status from container runtime and pod has been \
+             initialized, treat it as exited normally",
+            0,
+        ),
+    ] {
+        let synthesized = Terminated::from(ContainerStateTerminated {
+            reason: Some(reason.to_string()),
+            message: Some(message.to_string()),
+            exit_code: code,
+            ..ContainerStateTerminated::default()
+        });
+        println!("{reason} exit {code}: {:?}", last_log_line(&synthesized));
+        assert_eq!(
+            last_log_line(&synthesized),
+            None,
+            "{reason}: the kubelet wrote this sentence, and the record it rides carries no \
+             `finishedAt` because the kubelet never watched the run end — so the frame may not \
+             claim the container said it"
+        );
+    }
+
+    // **The control, or the guard is a delete rather than a discrimination** (NOTES § D26).
+    // `crashloop.json` carries the container's own log tail under `FallbackToLogsOnError`, on a
+    // record with both stamps, and that is the shape the frame exists for. The same run with
+    // `finishedAt` removed is the only difference, and it is enough.
+    let mut wrote = container(&pod("crashloop"), "quitter")
+        .last_terminated
+        .clone()
+        .expect("the captured crash loop records how its last run ended");
+    assert_eq!(
+        last_log_line(&wrote),
+        Some("panic: dial tcp db.payments.svc:5432: connect: connection refused"),
+        "a container that wrote its own last line still gets it quoted: {wrote:?}"
+    );
+    wrote.finished_at = None;
+    assert_eq!(
+        last_log_line(&wrote),
+        None,
+        "and the one field is what decides it — nothing else about the record moved"
+    );
+}
 
 /// **The three shapes the fold may not touch** (NOTES § D102). Each of them draws two cards that
 /// stay two cards, and each is a different way the drop could be scoped too widely.
@@ -3774,21 +3953,29 @@ fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
     // was rewritten to remove (NOTES § D40, § D95).
     const COUNTS: [i32; 4] = [7, 132, 1320, 999_999_999];
 
+    // **The code travels with the reason**, because the third ending is not another `137`:
+    // `CODE_UNKNOWN` is `255`, and a pair no kubelet writes would be measuring a card no cluster
+    // draws (NOTES § D29, § D95).
+    // CRI-O writes the third ending with a different pair and its own translation, so its cards
+    // are measured rather than assumed to match containerd's.
+    const ENDINGS: [(&str, i32); 4] = [
+        (STATUS_LOST, 137),
+        (RESTART_ALL, 137),
+        (CODE_UNKNOWN, 255),
+        ("Error", -1),
+    ];
     let mut measured = 0usize;
-    for (reason, count) in [STATUS_LOST, RESTART_ALL]
-        .into_iter()
-        .flat_map(|r| COUNTS.map(|n| (r, n)))
-    {
+    for ((reason, code), count) in ENDINGS.into_iter().flat_map(|r| COUNTS.map(|n| (r, n))) {
         // Rule 1's card, on the wait; rule 5's serving card, where the clause prints at all.
         // Both carry `count`, so the `n=` in the output below is true of the card beside it —
         // `crashloop.json` is captured in `CrashLoopBackOff`, so only the ending and the count
         // are planted (NOTES § D40).
         let looping = capture_but("crashloop", |p| {
-            ended_as(p, "quitter", 137, Some(reason), None);
+            ended_as(p, "quitter", code, Some(reason), None);
             container_status(p, "quitter").restart_count = count;
         });
         let serving = capture_but("restarts10serving", |p| {
-            ended_as(p, "flaky", 137, Some(reason), None);
+            ended_as(p, "flaky", code, Some(reason), None);
             container_status(p, "flaky").restart_count = count;
         });
         // **Rule 5's *down* card, which is the one every fold leaves standing** and the one whose
@@ -3796,7 +3983,7 @@ fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
         // change is a title-line change and this test is where a title-line change is priced —
         // the argument for making it was the height, so the height is checked and not asserted.
         let down = capture_but("restarts10", |p| {
-            ended_as(p, "flaky", 137, Some(reason), None);
+            ended_as(p, "flaky", code, Some(reason), None);
             container_status(p, "flaky").restart_count = count;
         });
         // The serving card is measured inside the run it is drawn on, because it ages out at
@@ -3808,7 +3995,7 @@ fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
             for card in analyze(&pods_at(vec![pod], moment)) {
                 // Rules 1 and 5 put the ending in the evidence; this box's other card is rule
                 // 6's, which is measured by the box that wrote it.
-                if !card.evidence.contains("exit 137") {
+                if !card.evidence.contains(&format!("exit {code}")) {
                     continue;
                 }
                 let title = wrapped_at(&card.title, BODY_COLUMNS).len();
@@ -3818,13 +4005,13 @@ fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
                 let action = wrapped_at(&card.action, ACTION_COLUMNS).len();
                 let height = 1 + title + evidence + action;
                 println!(
-                    "{object} {reason} n={count}: {height} lines — 1 + {title} title + \
+                    "{object} {reason} exit {code} n={count}: {height} lines — 1 + {title} title + \
                      {evidence} evidence + {action} action\n  {}\n  {}",
                     card.title, card.action
                 );
                 assert!(
                     height <= CARD_LINES,
-                    "{object} {reason} n={count}: a {height}-line card, and the pane's \
+                    "{object} {reason} exit {code} n={count}: a {height}-line card, and the pane's \
                      maximum is \
                      {CARD_LINES} — the title wraps to {title} lines at {BODY_COLUMNS} columns. \
                      That is a `rules.rs` finding and not a layout problem \
@@ -3839,9 +4026,9 @@ fn the_cards_this_box_ships_fit_the_height_they_are_drawn_at() {
     // with it and subtracts from a total nobody reads (NOTES § D26).
     assert_eq!(
         measured,
-        2 * COUNTS.len() * 3,
-        "the three cards this box ships — rule 1's, and rule 5's in both of its branches — on \
-         each reason at each count"
+        ENDINGS.len() * COUNTS.len() * 3,
+        "the three cards these boxes ship — rule 1's, and rule 5's in both of its branches — on \
+         each ending at each count"
     );
 }
 
@@ -3911,10 +4098,23 @@ fn the_reason_and_not_the_number_alone_decides_which_ending_it_is() {
          containers of its pod — the field is a container's and the effect is the pod's \
          (NOTES § D96)"
     );
+    // **And the third source-derived pin, which is not the kubelet's at all**: containerd's
+    // `unknownContainerStatus()` is `{ExitCode: 255, Reason: "Unknown"}` and
+    // `kuberuntime_container.go:760-763` copies it through, so another runtime spelling it
+    // differently falls through to the bare number — a miss and never a lie.
+    assert_eq!(
+        CODE_UNKNOWN, "Unknown",
+        "the reason a runtime writes for a container it found dead without an exit status, which \
+         is what a node restart leaves behind"
+    );
 
     for (code, reason, expected) in [
         (137, Some(STATUS_LOST), Ending::Unwatched),
         (137, Some(RESTART_ALL), Ending::RestartRule),
+        (255, Some(CODE_UNKNOWN), Ending::CodeUnknown),
+        // **The number alone still decides nothing here either**: a program that runs `exit -1`
+        // in a shell reports 255, and that program really did fail.
+        (255, None, Ending::Failed),
         // The three that were already here, and the one deliberately left among them.
         (137, Some("OOMKilled"), Ending::Failed),
         (137, None, Ending::Failed),
@@ -3936,6 +4136,591 @@ fn the_reason_and_not_the_number_alone_decides_which_ending_it_is() {
              killing it* on a run nothing killed, in three rules at once: {run:?}"
         );
     }
+}
+
+/// **The runtime is a third author, its messages carry `finishedAt`, and the frame stopped
+/// claiming the container wrote the line** — box 966's own done-when, reached the way it said it
+/// would be: *if it cannot tell the two apart, the sentence stops claiming authorship rather than
+/// guessing it.*
+///
+/// **The stamp told the kubelet's four literals from a container's message and cannot tell the
+/// runtime's from either.** containerd writes its start-failure error into `Message` beside a real
+/// `FinishedAt` (`internal/cri/server/container_start.go:67-73`, measured — the card printed *the
+/// last thing it logged was: failed to create containerd task: …* about a container that logged
+/// nothing); CRI-O does the same for a stopped container whose exit code it could not read
+/// (`server/container_status.go:107-130`, `Reason: "Error"`, `Message: cState.Error`). **No reason
+/// separates them either**: `"Error"` is what an ordinary application failure carries.
+///
+/// **So the frame names who *recorded* the line and never who wrote it.** That is true of all
+/// three authors, it is the one thing the object supports, and it names an owner rather than
+/// leaving a bare noun on the card (invariant 14).
+///
+/// **The shape is a runtime-authored message on a *stamped* record**, which is the author
+/// dimension no test in this family had ever been fed (NOTES § D29).
+#[test]
+fn the_quote_frame_says_who_recorded_the_line_and_never_who_wrote_it() {
+    // The frame itself, before any card is read — every assertion below is about this string, and
+    // a test that only looked at cards would pass on a frame that had quietly gone empty.
+    let framed = last_words("panic: cannot reach db");
+    println!("{framed}");
+    assert!(
+        framed.ends_with(": panic: cannot reach db"),
+        "the line still reaches the reader, and still after a colon: {framed}"
+    );
+    for claimed in ["logged", "it said", "its own words", "wrote"] {
+        assert!(
+            !framed.to_lowercase().contains(claimed),
+            "{claimed:?} claims an author the object does not name — the kubelet, the container \
+             and the runtime all reach this field and nothing on the record tells them apart: \
+             {framed}"
+        );
+    }
+    assert!(
+        framed.starts_with("Kubernetes recorded"),
+        "and the positive, or *ask a friend* passes every line above: the card names who put the \
+         line there, which is the one thing that is true whoever wrote it: {framed}"
+    );
+
+    // **The shape the old frame lied about**, measured on kind v1.36.1 with
+    // `command: ["/definitely-not-here"]`: containerd's own error, on a record with a real
+    // `finishedAt` that the stamp guard therefore lets through
+    // (`reports/2026-08-16-terminated-record-stamps-and-authors.md` § 1).
+    let runtime_said = "failed to create containerd task: failed to create shim task: OCI \
+                        runtime create failed: runc create failed: unable to start container \
+                        process: error during container init: exec: \"/definitely-not-here\": \
+                        stat /definitely-not-here: no such file or directory";
+    let start_failed = capture_but("restarts10", |p| {
+        let run = container_status(p, "flaky")
+            .last_state
+            .as_mut()
+            .and_then(|s| s.terminated.as_mut())
+            .expect("the capture records a previous run");
+        run.exit_code = 128;
+        run.reason = Some("StartError".to_string());
+        run.started_at = Some(time("1970-01-01T00:00:00Z"));
+        run.message = Some(runtime_said.to_string());
+    });
+    let run = container(&start_failed, "flaky")
+        .last_terminated
+        .clone()
+        .expect("the plant writes the run this reads");
+    assert!(
+        run.finished_at.is_some() && last_log_line(&run) == Some(runtime_said),
+        "the stamp guard lets this one through — which is the point: it was written to tell the \
+         kubelet's placeholders from a container's words, and the runtime is neither: {run:?}"
+    );
+    let all = analyze(&pods_at(vec![start_failed], now()));
+    show(&all);
+    let quoted = cards_about(&all, "flaky")
+        .into_iter()
+        .find(|f| f.action.contains(runtime_said))
+        .expect("rule 6 puts the message on the card, framed");
+    assert_eq!(
+        quoted.action,
+        last_words(runtime_said),
+        "one frame, and rule 6 does not spell a second copy of it"
+    );
+
+    // **The control: a message the container really did write is still printed** (NOTES § D26).
+    // `crashloop.json` carries the log tail under `terminationMessagePolicy:
+    // FallbackToLogsOnError` — the shape the frame exists for — and what changed is the sentence
+    // in front of it, not whether it reaches the reader.
+    let told = analyze(&pods_at(vec![pod("crashloop")], now()));
+    let card = only(&told, "broken-crashloop", "on record failed");
+    println!("{}", card.action);
+    assert_eq!(
+        card.action,
+        last_words("panic: dial tcp db.payments.svc:5432: connect: connection refused"),
+        "the container's own last line still reaches the card whole, under the same frame"
+    );
+}
+
+/// **A container whose *start* failed carries the epoch as its `startedAt`, and the card said it
+/// had run for 20 681 days** — measured on kind v1.36.1 with `command: ["/definitely-not-here"]`
+/// (`reports/2026-08-16-terminated-record-stamps-and-authors.md` § 1), and still the epoch seven
+/// restarts later.
+///
+/// **The zero survives the whole path because nothing on it is an `Option`.** containerd
+/// (`internal/cri/server/container_start.go:67-73`) sets `FinishedAt`, `ExitCode`, `Reason` and
+/// `Message` on a start failure and leaves `StartedAt` at `0`; the kubelet writes
+/// `metav1.NewTime(cs.StartedAt)` unconditionally, and `time.Unix(0, 0)` is **not** Go's zero
+/// time, so it marshals as a real RFC3339 stamp rather than as `null`. [`Finding::timestamp`]'s
+/// own note said this could not happen — *an `Option` and not a zero* — which is the sentence
+/// that made the shape unthinkable.
+///
+/// **A mistyped command is one of the commonest broken-pod states there is**, and it reaches
+/// rules 1, 6 and 15 alike, so the guard is in [`lasted`] where all three route through.
+///
+/// **What it is not is *ran for 0s***: nothing ran. The card says nothing about a duration, and
+/// the exit code and the message still carry the diagnosis.
+#[test]
+fn a_container_that_never_started_is_not_one_that_ran_since_the_epoch() {
+    // The object as the cluster wrote it, field for field. `restarts10.json` is the base because
+    // its container already has a previous run for the plant to rewrite (NOTES § D40, § D53).
+    let failed_to_start = capture_but("restarts10", |p| {
+        let run = container_status(p, "flaky")
+            .last_state
+            .as_mut()
+            .and_then(|s| s.terminated.as_mut())
+            .expect("the capture records a previous run");
+        run.exit_code = 128;
+        run.reason = Some("StartError".to_string());
+        run.started_at = Some(time("1970-01-01T00:00:00Z"));
+        run.finished_at = Some(time("2026-08-16T01:19:26Z"));
+        run.message = Some(
+            "failed to create containerd task: failed to create shim task: OCI runtime create \
+             failed: runc create failed: unable to start container process: error during \
+             container init: exec: \"/definitely-not-here\": stat /definitely-not-here: no such \
+             file or directory"
+                .to_string(),
+        );
+    });
+    let run = container(&failed_to_start, "flaky")
+        .last_terminated
+        .clone()
+        .expect("the plant writes the run every assertion below reads");
+    println!("{run:?}");
+    assert_eq!(
+        run.started_at.as_ref().map(|t| t.0),
+        Some(Timestamp::UNIX_EPOCH),
+        "the shape under test is the epoch arriving as a *value*, not as a missing field — a \
+         plant that left it `None` would prove the wrong guard: {run:?}"
+    );
+    assert!(
+        run.finished_at.is_some(),
+        "and the other stamp is real, which is why the subtraction happens at all: {run:?}"
+    );
+    // **The arithmetic that was shipping**, so the assertion below is not guarding a number
+    // nobody would have printed.
+    println!("what the old reading would have said: {:?}", {
+        let d = run
+            .finished_at
+            .as_ref()
+            .unwrap()
+            .0
+            .duration_since(Timestamp::UNIX_EPOCH);
+        format!("{} days", d.as_hours() / 24)
+    });
+    assert_eq!(
+        lasted(&run),
+        None,
+        "a run that never started has no duration — *ran for 20681 days* is what the epoch \
+         subtracts to, and *ran for 0s* would be the other wrong answer"
+    );
+    assert_eq!(ran_for(&run), None, "so no card carries the clause at all");
+
+    // **Every card the pod draws, because the guard is in the shared helper and all three rules
+    // that print a duration route through it** (NOTES § D29).
+    let all = analyze(&pods_at(vec![failed_to_start], now()));
+    show(&all);
+    let about = cards_about(&all, "flaky");
+    assert!(
+        !about.is_empty(),
+        "the rules speak for this container, or the negatives below are about an empty screen: \
+         {:?}",
+        titles(&all)
+    );
+    for f in &about {
+        assert!(
+            !f.evidence.contains("ran for") && !f.evidence.contains("day"),
+            "no card may say how long a run that never started lasted: {} / {}",
+            f.title,
+            f.evidence
+        );
+    }
+    // **The control**: the same record with a real `startedAt` still measures, or the guard is a
+    // delete rather than a discrimination (NOTES § D26).
+    let mut ran = run.clone();
+    ran.started_at = Some(time("2026-08-16T01:19:00Z"));
+    assert_eq!(
+        ran_for(&ran).as_deref(),
+        Some("ran for 26s"),
+        "and a run that did start is still measured — the epoch is the whole of what changed"
+    );
+}
+
+/// **The commonest abnormal `lastState` any cluster produces, and it was reading as the
+/// application's own failure** — `exit 255` beside [`CODE_UNKNOWN`], measured on kind v1.36.1 by
+/// restarting the node's container.
+///
+/// **It is containerd's pair and not the kubelet's**, which is the one thing that keeps this
+/// narrower than *255 means a reboot*: `unknownContainerStatus()` in containerd's CRI plugin is
+/// `{ExitCode: 255, Reason: "Unknown"}`, and `kuberuntime_container.go:760-761` copies both
+/// straight through. Another runtime spelling it differently falls through to the bare number —
+/// a miss, never a lie — and that is why the code is read **beside its reason**, exactly as `137`
+/// is. The box asked for a row on the number alone; a program that runs `exit -1` in a shell
+/// reports 255 too, and a code-alone row would tell that reader their program did not fail.
+///
+/// **What the object supports here is more than [`Unwatched`](Ending::Unwatched) supports**: the
+/// containers are *found*, dead, so the record carries real stamps and a real `containerID` and
+/// `logs --previous` works. What it does not carry is a code anybody read, which is the one thing
+/// every card about it turned into the application's error.
+///
+/// **Every role and both states**, because the arm is role-blind and a check is proven only for
+/// the shapes it was fed (NOTES § D29) — and role-blindness is what keeps it clear of
+/// `validateInitContainers`: a sentence naming no probe cannot name one an init container may not
+/// have.
+#[test]
+fn a_node_reboot_does_not_read_as_the_application_failing() {
+    // **The number alone still means nothing** (the spelling of [`CODE_UNKNOWN`] is pinned
+    // beside the other two in
+    // [`the_reason_and_not_the_number_alone_decides_which_ending_it_is`], which is where every
+    // constant this file plants from is checked against something that is not itself), which is the half the box would have got wrong:
+    // `exit -1` in a shell reports 255 and that program really did fail.
+    assert_eq!(
+        exit_meaning(255, None),
+        None,
+        "255 with no reason beside it is a code with no accepted meaning, and the number alone is \
+         the honest answer — a row keyed on the number would tell a reader whose program exited \
+         -1 that it did not fail"
+    );
+    // **One ending, two translations, because the runtimes tell different stories.** containerd
+    // found the container dead; CRI-O could not work out what it ended with. Both rows say the
+    // number is a stand-in, and neither may say the application failed.
+    for (code, reason, story) in [
+        (255, Some(CODE_UNKNOWN), "already dead"),
+        (-1, Some("Error"), "could not tell"),
+    ] {
+        let stood_in = exit_meaning(code, reason)
+            .expect("the ending is translated for the reader")
+            .to_lowercase();
+        println!("exit {code} {reason:?}: {stood_in}");
+        assert!(
+            stood_in.contains("stands in")
+                && stood_in.contains(story)
+                && !stood_in.contains("crash")
+                && !stood_in.contains("fail"),
+            "exit {code}: the row says what the number is — a stand-in the node wrote — and what \
+             the node knew, and never that the application failed: {stood_in}"
+        );
+    }
+
+    // **Both runtimes, because the ending is one and the pair is not** — containerd's
+    // `(255, "Unknown")` and CRI-O's `(-1, "Error")`, whose reason is what an ordinary
+    // application failure carries and whose *code* is therefore the key (NOTES § D29).
+    for (code, reason) in [(255, CODE_UNKNOWN), (-1, "Error")] {
+        for looping in [false, true] {
+            for (role, name, planted) in every_role_with(code, Some(reason), looping) {
+                let object = planted.id.name.clone();
+                let subject = container(&planted, name);
+                println!("=== {object} {role:?} looping={looping}\n{subject:?}");
+                let run = subject
+                    .last_terminated
+                    .as_ref()
+                    .expect("the plant writes the previous run every card below reads");
+                // **The record is a real one, and that is the difference from [`STATUS_LOST`]**:
+                // containerd found the containers rather than losing them, so the stamps survive the
+                // reboot. A plant that stripped them would be proving these cards against the *other*
+                // shape (NOTES § D29, § D40).
+                assert!(
+                    subject.role == role
+                        && run.started_at.is_some()
+                        && run.finished_at.is_some()
+                        && ending(run) == Ending::CodeUnknown,
+                    "{role:?}: the role under test, the stamps the reboot leaves behind, and the \
+                 ending they add up to: {subject:?}"
+                );
+                let all = analyze(&pods_at(vec![planted], now()));
+                show(&all);
+                let about = cards_about(&all, name);
+                assert!(
+                    !about.is_empty(),
+                    "{object} {role:?} exit {code}: some card speaks for this container, or every negative below \
+                 is asserted about a screen with nothing on it (NOTES § D26): {:?}",
+                    titles(&all)
+                );
+                for f in &about {
+                    let said = format!("{} {} {}", f.title, f.evidence, f.action).to_lowercase();
+                    // **The two sentences the box named, and the class they belong to.** *The
+                    // last run on record failed* over *read the logs of that run to find the
+                    // application's own error* sends a reader hunting an error the application never
+                    // made, after a machine restart; *keeps crashing* is the same claim in rule 1's
+                    // words. Nothing on this pod's screen may say the application failed.
+                    for blamed in [
+                        "keeps crashing",
+                        "the application's own error",
+                        "something keeps killing it",
+                        "run failed",
+                    ] {
+                        assert!(
+                            !said.contains(blamed),
+                            "{object} {role:?} exit {code}: {blamed:?} — the number is a stand-in the node wrote \
+                         because it could not read the real one, and blaming the application for \
+                         it is this box's whole subject: {} / {} / {}",
+                            f.title,
+                            f.evidence,
+                            f.action
+                        );
+                    }
+                    // **Role-blind, so the init container is covered by construction** — and the
+                    // negative is still fed, because *would obviously handle it* is not a shape it
+                    // was fed (NOTES § D29, § D85). **Asked of the cards drawn from the ending only**,
+                    // which is a scope and not a hole: on `restarts10.json` rule 7 also fires, and
+                    // its card names the readiness probe about the container's readiness *now* — a
+                    // true card about a different question ([`no_card_reads_this_run_as_a_kill`]).
+                    if !said.contains(&format!("exit {code}")) {
+                        continue;
+                    }
+                    for door in PROBE_WORDS {
+                        assert!(
+                            !said.contains(door),
+                            "{object} {role:?} exit {code}: {door:?} — Kubernetes allows a plain \
+                             init container no health check, and this card prints on one: {}",
+                            f.action
+                        );
+                    }
+                    // **A card may not deny on one line what it prints on the next.** Every card
+                    // reaching here carries the exit code, so a title claiming it is *absent*
+                    // contradicts its own evidence. The qualifier is what makes the claim true,
+                    // and rule 5 shipped one turn without it while rules 1 and 6 had it — the
+                    // three words were doing all the work (NOTES § D85).
+                    if f.title.to_lowercase().contains("exit code") {
+                        assert!(
+                            f.title.contains("of its own") || f.title.contains("not its own"),
+                            "{object} {role:?} exit {code}: the card prints the code one line \
+                             down, so the honest claim is that it is not the container's — never \
+                             that there is none: {} / {}",
+                            f.title,
+                            f.evidence
+                        );
+                    }
+                }
+                // **And the card that reads the ending says the positive.** Every assertion above is
+                // a negative, and a set of negatives is satisfied by a card that says nothing at all —
+                // the hole `tester` shipped past 184 tests once already (NOTES § D95).
+                // **Picked by *where* the code sits and not by the sentence under test**: rules 1
+                // and 5 put [`exit_fact`] on the evidence line, rule 6 on the title.
+                let counted = about
+                    .iter()
+                    .find(|f| f.evidence.contains(&format!("exit {code}")))
+                    .expect("rule 1 or rule 5 speaks for this container");
+                assert_eq!(
+                    counted.action,
+                    no_exit_code_action(),
+                    "{object} {role:?} exit {code}: the three rules that draw off `lastState` answer this ending \
+                 with one sentence, which is what stops them contradicting each other about one \
+                 container (NOTES § D85). **A fourth rule reads the ending and is not in this \
+                 corpus**: rule 15 reads `state.terminated` under `restartPolicy: Never`, which \
+                 nothing [`every_role_with`] builds, and it draws a sentence of its own — pinned \
+                 in [`a_container_stopped_for_good_inside_a_running_pod_draws_a_card_that_names_its_log`], \
+                 where its shapes are"
+                );
+                // **The action may name only what its own command shows** (invariant 4, NOTES
+                // § D93). The command is [`describe`], which prints the pod's events and no logs at
+                // all — so *did the node restart* is a door and any log is not, however servable that
+                // log happens to be on this record. **And *the previous run* is the phrase A4 took
+                // off five titles**: `lastState` freezes, so on a container at fifteen restarts
+                // `logs --previous` serves run 15 while this card describes run 7. The first draft
+                // of this sentence broke both rules at once.
+                assert_eq!(
+                    counted.kubectl_cmd.as_deref(),
+                    describe(&counted.object).as_deref(),
+                    "{object} {role:?} exit {code}: the card offers the output its own action names"
+                );
+                let said = counted.action.to_lowercase();
+                assert!(
+                    said.contains("node") && said.contains("events"),
+                    "{object} {role:?} exit {code}: the machine that is the real subject, and the output that \
+                 can answer for it: {}",
+                    counted.action
+                );
+                for promised in ["log", "previous run", "--previous"] {
+                    assert!(
+                        !said.contains(promised),
+                        "{object} {role:?} exit {code}: {promised:?} — `describe` prints no logs, and `lastState` \
+                     is not the run before this one: {}",
+                        counted.action
+                    );
+                }
+                // **One card, on every shape** ([`one_card_per_action`], NOTES § D102). Rule 6's
+                // only fact on this ending is [`container_fact`], which is its neighbour's first, so
+                // the repeated sentence collapses whichever of rules 1 and 5 is speaking.
+                //
+                // **It took two fixes to get here and both were defects, not tuning.** Rules 1 and 6
+                // spelled one duration two ways, so the subset clause kept two byte-identical
+                // ten-line cards in a sixteen-row pane; and the duration itself was
+                // [`ran_for`]'s to refuse on this ending, because containerd stamps `finishedAt` when
+                // it recovers rather than when the run ended.
+                assert!(
+                    !about
+                        .iter()
+                        .any(|f| f.title.contains(&format!("exit {code}"))),
+                    "{object} {role:?} exit {code}: rule 6 says what its neighbour already said and adds no fact \
+                 to it, so its card goes: {:?}",
+                    about
+                        .iter()
+                        .map(|f| (&f.title, &f.evidence))
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    about
+                        .iter()
+                        .filter(|f| f.action == no_exit_code_action())
+                        .count(),
+                    1,
+                    "{object} {role:?} exit {code}: and the sentence is on the screen once: {:?}",
+                    titles(&all)
+                );
+                // **And the duration is gone from the card that is left**, which is what makes the
+                // fold possible and is a requirement of its own: `finishedAt` is written at recovery
+                // on this ending, so a node down overnight would have printed *ran for 8 hours* about
+                // a run of 50 seconds — one line under a title saying nobody read how it ended.
+                assert!(
+                    !counted.evidence.contains("ran for"),
+                    "{object} {role:?} exit {code}: `finishedAt` measures the node's outage here and not the \
+                 run: {}",
+                    counted.evidence
+                );
+            }
+        }
+    }
+    // **The base capture carries the container id that claim rests on**, read out of the JSON
+    // rather than trusted: `Terminated` does not carry the field, so nothing else in this file
+    // would notice it being absent (NOTES § D40).
+    let raw = fixture("restarts10");
+    assert!(
+        captured_str(
+            captured_status(&raw, "containerStatuses", "flaky"),
+            &["lastState", "terminated", "containerID"]
+        )
+        .starts_with("containerd://"),
+        "the plant is built on a record with a real container id, which is what makes \
+         `logs --previous` an answerable pointer here and not one on a lost status"
+    );
+
+    // **The budget both the action and the card are drawn inside** (`screens/alerts.md` § The
+    // height): five wrapped lines for an action, and the card's own ten are
+    // [`the_cards_this_box_ships_fit_the_height_they_are_drawn_at`]'s.
+    let lines = wrapped_at(no_exit_code_action(), ACTION_COLUMNS);
+    println!("{} lines at {ACTION_COLUMNS} columns", lines.len());
+    assert!(
+        lines.len() <= 5,
+        "an action that wraps past five lines is a `rules.rs` finding — {} lines: {:?}",
+        lines.len(),
+        no_exit_code_action()
+    );
+}
+
+/// **The third bare literal, and k8rs is silent about it on purpose** — `kubelet_pods.go:2705-2723`
+/// at v1.36.1, the init container whose status the runtime lost.
+///
+/// **The premise the box was opened on does not survive the source, and this test is what replaces
+/// it.** Three things had to be read rather than assumed:
+///
+/// - **It lands in `state.terminated`, not in `lastState`.** The loop assigns
+///   `statuses[container.Name].State`, so no rule that reads an ending off `lastState` sees it at
+///   all — rules 1, 5 and 6 are not standing down on this object, they never reach it. The one
+///   reader of the current terminated state is [`doing_its_job`].
+/// - **The `reason` discriminates nothing.** The literal is `Completed` / `0`, which is byte for
+///   byte what a genuine finish writes. Keying an ending on the reason — the shape the box
+///   proposed — separates no object the API can produce. **The only field that differs is the
+///   stamp**, which is [`last_log_line`]'s key and is why that guard is where the class fix went.
+/// - **The kubelet is deducing, not guessing.** The write is gated on
+///   `HasAnyRegularContainerCreated`, and the regular containers are started only after every
+///   non-restartable init container has succeeded — the source says so in its own comment. So
+///   `Finished` is the **true** reading, [`doing_its_job`] answering *yes* is correct, and the
+///   silence is the right output.
+///
+/// **What a card would cost, since silence is never free.** The comment beside that literal names
+/// static pods first, so the class is every control-plane pod after a kubelet restart: a card here
+/// is a permanent WARN on kube-apiserver, etcd and the two controllers on every cluster k8rs is
+/// ever pointed at, about an init container that did its job. That is D71's false-positive class
+/// at its widest.
+///
+/// **The claim is pinned rather than argued, on the object and not on a paraphrase of it**: the
+/// three fields the kubelet writes, planted on a decoded copy of a capture that already has the
+/// rest of the shape (NOTES § D40, § D53). **The stamps are left off because the missing stamps
+/// *are* the shape** — a plant that kept the capture's would be proving the silence against an
+/// object no kubelet produces.
+#[test]
+fn a_lost_init_container_status_reads_as_finished_and_that_is_the_true_reading() {
+    // `healthy-retry.json` is the shape one field away: a plain init container that failed once
+    // and then finished, with the app running behind it. What the plant moves is the *current*
+    // terminated state, from the kubelet's watched `Completed` to its synthesized one.
+    let lost = capture_but("healthy-retry", |p| {
+        container_status(p, "wait-for-db").state = Some(ApiContainerState {
+            terminated: Some(ContainerStateTerminated {
+                reason: Some("Completed".to_string()),
+                message: Some(
+                    "Unable to get init container status from container runtime and pod has been \
+                     initialized, treat it as exited normally"
+                        .to_string(),
+                ),
+                exit_code: 0,
+                ..ContainerStateTerminated::default()
+            }),
+            ..ApiContainerState::default()
+        });
+    });
+    let init = container(&lost, "wait-for-db");
+    println!("{init:?}");
+    let ContainerState::Terminated(run) = &init.state else {
+        panic!("the plant writes the current terminated state this test is about: {init:?}")
+    };
+    // **The object first, in the fields that decide the reading.** The reason is the one a real
+    // finish carries and the stamps are the ones it does not — assert both, or the shape under
+    // test is not the kubelet's (NOTES § D29).
+    assert_eq!(
+        (
+            run.reason.as_deref(),
+            run.exit_code,
+            run.started_at.is_none(),
+            run.finished_at.is_none()
+        ),
+        (Some("Completed"), 0, true, true),
+        "the literal is `Completed` / `0` with no stamps at all — the reason is exactly what a \
+         watched finish writes, so nothing but the missing stamp tells the two apart: {run:?}"
+    );
+    assert!(
+        init.role == ContainerRole::Init
+            && init
+                .last_terminated
+                .as_ref()
+                .is_some_and(|r| r.exit_code == 1),
+        "an init container with a real failure still on its record beside the synthesized \
+         finish — the neighbour whose suppression is half of what this test asserts: {init:?}"
+    );
+    assert!(
+        ending(run) == Ending::Finished && doing_its_job(init),
+        "the kubelet only starts the regular containers once every non-restartable init container \
+         has succeeded, so this is a deduction and `Finished` is the true reading of it: {init:?}"
+    );
+    let all = analyze(&pods_at(vec![lost], now()));
+    show(&all);
+    assert!(
+        cards_about(&all, "wait-for-db").is_empty(),
+        "nothing is wrong here: a card would be a permanent WARN on every static pod in every \
+         cluster after a kubelet restart, which is the class the source's own comment names \
+         first: {:?}",
+        titles(&all)
+    );
+    // **And the kubelet's sentence does not reach the screen by the other door either.** It rides
+    // the record as a `message`, which is exactly the shape [`last_log_line`] refuses.
+    assert!(
+        all.iter().all(|f| !f.action.starts_with(QUOTE_FRAME)),
+        "the kubelet wrote that sentence, not the container: {:?}",
+        all.iter().map(|f| &f.action).collect::<Vec<_>>()
+    );
+
+    // **The canary, or the silence above is the rules never reaching this container** (NOTES § D26).
+    // The same plant with a failing current run draws rule 6's card off the record beside it.
+    let failing = capture_but("healthy-retry", |p| {
+        let run = container_status(p, "wait-for-db")
+            .state
+            .as_mut()
+            .and_then(|s| s.terminated.as_mut())
+            .expect("the capture's init container is currently terminated");
+        run.exit_code = 1;
+        run.reason = Some("Error".to_string());
+    });
+    let reached = analyze(&pods_at(vec![failing], now()));
+    show(&reached);
+    assert!(
+        !cards_about(&reached, "wait-for-db").is_empty(),
+        "an init container that has *not* finished draws on this very pod, so the silence above \
+         is [`doing_its_job`] answering the question rather than the rules failing to look: {:?}",
+        titles(&reached)
+    );
 }
 
 /// **What no card may claim about a run nothing is recorded as having ended** — the negatives the
@@ -3982,8 +4767,9 @@ fn no_card_reads_this_run_as_a_kill(about: &[&Finding], shape: &str) {
         }
         // **Neither record carries a stamp, so no card drawn off one may date itself or say how
         // long the run lasted.** Both are asserted on rule 6's card already; rules 1 and 5 build
-        // their own age and their own *the last run lasted …* line out of the same two fields,
-        // and a rule that starts inventing one is caught here saying so (NOTES § D93).
+        // their own age out of the same two fields, and rule 1 draws the same [`ran_for`] clause
+        // rule 6 does, so a rule that starts inventing one is caught here saying so
+        // (NOTES § D93).
         //
         // **Rule 5's *serving* card is the one exception, and it is dated off a different field**
         // (NOTES § D100): `state.running.startedAt`, the start of the run the container is in —
@@ -3998,7 +4784,8 @@ fn no_card_reads_this_run_as_a_kill(about: &[&Finding], shape: &str) {
         }
         assert!(
             !said.contains("lasted") && !said.contains("ran for"),
-            "{shape}: and no duration either — the run has no stamps to measure: {}",
+            "{shape}: and no duration either — the run has no stamps to measure, whichever of \
+             the two old spellings a card might reach for: {}",
             f.evidence
         );
         for door in PROBE_WORDS.iter().chain(["memory limit"].iter()) {
@@ -4098,7 +4885,7 @@ fn no_card_lets_this_container_off(cards: &[&Finding], shape: &str) {
 const KILLED_IT: [&str; 3] = [
     "keeps crashing",
     "something keeps killing",
-    "previous run failed",
+    "on record failed",
 ];
 
 /// **The card set this box owes: no card k8rs draws about an `Init` container names a probe,
@@ -4274,7 +5061,7 @@ fn a_command_that_is_not_in_the_image_says_so_instead_of_sending_the_reader_to_t
 
     let all = findings(&["notfound"]);
     show(&all);
-    let failed = only(&all, "broken-notfound", "previous run failed");
+    let failed = only(&all, "broken-notfound", "on record failed");
     assert!(
         failed.title.contains("was not found"),
         "invariant 14: 127 is translated, never printed and left: {}",
@@ -5034,7 +5821,7 @@ fn the_crash_looping_init_container_is_found_and_the_card_says_what_kind_it_is()
         looping.evidence
     );
 
-    let previous = only(&all, "broken-init", "previous run failed");
+    let previous = only(&all, "broken-init", "on record failed");
     assert_eq!(
         previous.severity,
         Severity::Warn,
@@ -5398,12 +6185,12 @@ fn a_serving_container_that_finished_cleanly_is_not_one_something_keeps_killing(
     for (exit_code, said, printed) in [
         (
             0,
-            ", and its last run finished cleanly",
+            ", and the last run on record finished cleanly",
             "exit 0 (the run ended without an error)",
         ),
         (
             143,
-            ", and its last run was stopped",
+            ", and the last run on record was stopped",
             "exit 143 (stopped with SIGTERM, which is an ordinary shutdown and not an error)",
         ),
     ] {
@@ -6236,7 +7023,7 @@ fn a_container_that_is_down_keeps_its_band_whatever_the_last_run_did() {
         let all = analyze(&pods_at(vec![plant], now()));
         show(&all);
         assert!(
-            !titles(&all).iter().any(|t| t.contains("previous run")),
+            !titles(&all).iter().any(|t| t.contains("on record failed")),
             "rule 6 exempts both of these codes, so it drops out where the committed capture \
              below draws it — rule 7 stays either way, this container is up and not ready: {:?}",
             titles(&all)
@@ -6261,7 +7048,9 @@ fn a_container_that_is_down_keeps_its_band_whatever_the_last_run_did() {
         // [`the_cards_this_box_ships_fit_the_height_they_are_drawn_at`] and not asserted here.
         assert_eq!(
             card.title,
-            format!("Container has been restarted 10 times, and its last run {said_ending}"),
+            format!(
+                "Container has been restarted 10 times, and the last run on record {said_ending}"
+            ),
             "the count and what the record says ended the run — the two facts this rule read, \
              both on the line the pane may not cut"
         );
@@ -6277,7 +7066,7 @@ fn a_container_that_is_down_keeps_its_band_whatever_the_last_run_did() {
     let both = findings(&["restarts10"]);
     show(&both);
     assert!(
-        titles(&both).iter().any(|t| t.contains("previous run")),
+        titles(&both).iter().any(|t| t.contains("on record failed")),
         "rule 6 on the capture as it stands — an `exit 1` this rule may still call a kill, and \
          the card the plants above removed: {:?}",
         titles(&both)
@@ -9195,18 +9984,55 @@ fn stopped_cards(all: &[Finding]) -> Vec<&Finding> {
 /// the card is about is the one the container is still sitting in ([`logs`], invariant 4).
 #[test]
 fn a_container_stopped_for_good_inside_a_running_pod_draws_a_card_that_names_its_log() {
-    for (framing, code, reason, meaning) in [
+    for (framing, code, reason, meaning, ended, promises) in [
         (
             "an ordinary bad exit",
             1,
             None,
             "the application's own error",
+            Ending::Failed,
+            // The run failed and the application is what failed, so its own log is where the
+            // answer is — the sentence this rule has always drawn.
+            true,
         ),
         (
             "a memory kill nothing else can see",
             137,
             Some("OOMKilled"),
             "killed by the kernel for using more memory than it was allowed",
+            Ending::Failed,
+            true,
+        ),
+        // **The third framing, and the one whose ending is not `Failed`.** A node restart leaves
+        // the container found dead with no code anybody read — it *has* stopped, and under
+        // `Never` at zero restarts nothing is starting it again, so this rule's title holds
+        // where [`Unwatched`](Ending::Unwatched)'s and [`RestartRule`](Ending::RestartRule)'s do
+        // not. What the reader gets that they did not before is the evidence line: the number is
+        // named as a stand-in instead of being printed bare under *it stopped*.
+        // **Both runtimes' spellings of the same ending**, because the translation differs per
+        // code even where the ending does not, and this rule prints it (NOTES § D29).
+        (
+            "CRI-O, where the code could not be read at all",
+            -1,
+            Some("Error"),
+            "the node could not tell what code the container ended with, so this number stands in",
+            Ending::CodeUnknown,
+            false,
+        ),
+        (
+            "a node restart, where the code is a stand-in",
+            255,
+            Some(CODE_UNKNOWN),
+            "the node found the container already dead, so this number stands in for a code \
+             nobody read",
+            Ending::CodeUnknown,
+            // **And here the same sentence would be a false promise.** Nobody read how that run
+            // ended, so the log holds no *why* to send anyone after — the evidence line one row
+            // up says as much, and a card may not contradict itself between two of its lines
+            // (NOTES § D85). The clause is derived from what the record carries, not copied off
+            // the rows above: it shipped copied for one turn, because this ending was folded into
+            // the `Failed` arm and inherited its wording.
+            false,
         ),
     ] {
         let p = stopped_under(Some("Never"), code, reason);
@@ -9215,7 +10041,7 @@ fn a_container_stopped_for_good_inside_a_running_pod_draws_a_card_that_names_its
         // The four conditions, read off the object before any card is. A plant that stopped
         // building one of them would make the card below the rule firing on something else.
         assert!(
-            matches!(&c.state, ContainerState::Terminated(run) if ending(run) == Ending::Failed),
+            matches!(&c.state, ContainerState::Terminated(run) if ending(run) == ended),
             "{framing}: the run it is sitting in, and the ending rule 15 gates on: {c:?}"
         );
         assert_eq!(
@@ -9241,9 +10067,18 @@ fn a_container_stopped_for_good_inside_a_running_pod_draws_a_card_that_names_its
         );
         assert!(
             card.evidence.contains("container shipper")
-                && card.evidence.contains(&format!("exit {code} ({meaning})"))
-                && card.evidence.contains("ran for"),
-            "{framing}: which container, what the code means, and how long it lasted: {}",
+                && card.evidence.contains(&format!("exit {code} ({meaning})")),
+            "{framing}: which container and what the code means: {}",
+            card.evidence
+        );
+        // **How long it lasted, on the endings whose `finishedAt` measures the run.** On
+        // [`CodeUnknown`](Ending::CodeUnknown) containerd stamps that field when it recovers, so
+        // the duration is the node's outage and [`ran_for`] refuses it — the same `promises`
+        // split, because both halves come from the same fact about the record.
+        assert_eq!(
+            card.evidence.contains("ran for"),
+            promises,
+            "{framing}: a duration is claimed exactly where the record measures one: {}",
             card.evidence
         );
         assert_eq!(
@@ -9252,13 +10087,53 @@ fn a_container_stopped_for_good_inside_a_running_pod_draws_a_card_that_names_its
             "{framing}: the container is named, the namespace is named, and there is no \
              --previous — the log this card sends the reader to is the current run's"
         );
+        // **The two clauses that are true on every ending this rule draws.** A finding whose
+        // last line only says what will not happen has two parts of the three (NOTES § D97).
         assert!(
-            card.action.contains("read its log")
-                && card.action.contains("has to be replaced")
-                && card.action.contains("still without it"),
-            "{framing}: all three parts — where the answer is, what the reader has to do, and \
-             what is broken until they do it. A finding whose last line only says what will not \
-             happen has two of the three: {}",
+            card.action.contains("has to be replaced") && card.action.contains("still without it"),
+            "{framing}: what the reader has to do, and what is broken until they do it: {}",
+            card.action
+        );
+        // **And the clause that is the ending's.** The log is named either way — it is what this
+        // rule's own command serves — but *that is where it says why it stopped* is a promise
+        // only a run somebody watched end can keep.
+        assert_eq!(
+            card.action.contains("that is where it says why it stopped"),
+            promises,
+            "{framing}: whether this card may promise the log answers *why*, read off the record \
+             rather than off the row above it: {}",
+            card.action
+        );
+        assert!(
+            card.action.contains("read its log"),
+            "{framing}: the log is still where the container's own side of it is, and this \
+             rule's command is the one `kubectl logs` in the file: {}",
+            card.action
+        );
+        if !promises {
+            assert!(
+                card.action.contains("the node wrote that number")
+                    && card.action.contains("not the app"),
+                "{framing}: what the object does support in its place — where the number came \
+                 from, which is the same thing the evidence line says: {}",
+                card.action
+            );
+        }
+        // **And the card it is drawn on has room for it** (`screens/alerts.md` § How tall).
+        // The title is two lines at 51 columns and the evidence is cut at three, so the action
+        // has four — an ending-aware clause that says the same thing at twice the length draws a
+        // twelve-line card in a sixteen-row pane, which is a `rules.rs` finding and not a layout
+        // problem. Measured on both endings, because the arm this rule gained is the one that
+        // grew.
+        let lines = wrapped_at(&card.action, ACTION_COLUMNS);
+        println!(
+            "{framing}: {} action lines at {ACTION_COLUMNS} columns",
+            lines.len()
+        );
+        assert!(
+            lines.len() <= 4,
+            "{framing}: {} lines, and the ten-line card has room for four: {:?}",
+            lines.len(),
             card.action
         );
         // **The card, whole.** A prediction in the title is the same false claim as one in the
@@ -9376,7 +10251,7 @@ fn the_containers_last_words_are_on_the_card_ahead_of_how_long_it_ran() {
     );
     let words = card
         .evidence
-        .find("the last thing it logged was")
+        .find(QUOTE_FRAME)
         .expect("asserted present one line above");
     let ran = card
         .evidence

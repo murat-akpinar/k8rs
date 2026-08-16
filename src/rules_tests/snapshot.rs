@@ -2772,6 +2772,230 @@ fn an_init_container_that_never_finishes_is_a_sidecar_and_not_an_init_container(
     );
 }
 
+/// **A container can have a status and no declaration, and this is what the decode does with
+/// one** (`container_snapshots`). The pairing is by name and the miss was explained away as
+/// impossible — *both container lists are immutable after create* — which is not the thing that
+/// would prevent it: **a node implementation that is not a kubelet is.** k9s carries the field
+/// report ([#4145](https://github.com/derailed/k9s/issues/4145), open): on Tencent TKE **virtual
+/// nodes** the provider injects a managed logging container into `status.containerStatuses` with
+/// no entry in `spec.containers` — two declared containers, three ready statuses, pod
+/// `Ready: True`. Virtual-kubelet, serverless nodes and sandboxed runtimes all sit in that gap,
+/// and nothing in the API server rejects the object: `spec` and `status` are separate
+/// subresources and no admission plugin cross-checks the two lists.
+///
+/// **This asserts what the code does today, and changes nothing.** Every claim below is a
+/// consequence of `declared` being `None` rather than a decision anyone made, which is exactly
+/// why it is written down: the next reader inherits it as behaviour instead of re-deriving it,
+/// and a decode that starts inventing a limit for an undeclared container is caught saying so.
+///
+/// **The requirement is that no card claims what the spec never said.** A container with no
+/// declaration has no requests, no limits and no `restartPolicy` of its own, so nothing k8rs draws
+/// about it may name one — that is what the second half of this test drives, on a shape that
+/// actually fires rather than on a healthy pod where every rule is silent anyway.
+///
+/// **The regular list is the shape that matters, and the init one is a companion with no known
+/// producer.** k9s #4145 is a provider injecting into `status.containerStatuses`; nothing
+/// documented injects into `status.initContainerStatuses`. The init row is here because the role
+/// is read off the list a status arrived in and from nothing else (NOTES § D29), so a decode that
+/// answered `Regular` for everything would pass the regular row alone — it is not a claim that
+/// the case occurs.
+///
+/// **Planted on a decoded copy of a committed capture, never on the JSON** (NOTES § D53): no
+/// cluster this repository can build runs a virtual node.
+#[test]
+fn a_container_status_with_no_declaration_decodes_with_nothing_the_spec_would_have_given_it() {
+    // What a provider injects: a name, an image, and a ready running container. No `resources`,
+    // because the pod's manifest never asked for any and the provider does not fill the field —
+    // which is the whole of what this container is missing.
+    let injected = |name: &str| ContainerStatus {
+        name: name.to_string(),
+        image: "provider.invalid/logging:v1".to_string(),
+        image_id: String::new(),
+        ready: true,
+        started: Some(true),
+        restart_count: 0,
+        state: Some(ApiContainerState {
+            running: Some(ContainerStateRunning {
+                started_at: Some(time("2026-08-13T23:33:17Z")),
+            }),
+            ..ApiContainerState::default()
+        }),
+        ..ContainerStatus::default()
+    };
+    let mut object: Pod =
+        serde_json::from_value(fixture("healthy")).expect("healthy.json is a Pod");
+    let status = object
+        .status
+        .as_mut()
+        .expect("the captured pod has a status");
+    status
+        .container_statuses
+        .as_mut()
+        .expect("the capture reports its regular container")
+        .push(injected("provider-logs"));
+    status
+        .init_container_statuses
+        .as_mut()
+        .expect("the capture reports its init container")
+        .push(injected("provider-setup"));
+
+    let p = PodSnapshot::from(object);
+    for c in &p.containers {
+        println!("{c:?}");
+    }
+    assert_eq!(
+        p.containers.len(),
+        4,
+        "the status lists decide how many containers a pod has, and a status with no \
+         declaration is still a container: {:?}",
+        p.containers.iter().map(|c| &c.name).collect::<Vec<_>>()
+    );
+    // **The declared pair still decodes off its own declaration**, or every assertion below
+    // passes because the lookup broke for everybody (NOTES § D26).
+    assert_eq!(
+        (
+            container(&p, "app").memory_limit.as_deref(),
+            container(&p, "migrate").role
+        ),
+        (Some("64Mi"), ContainerRole::Init),
+        "the containers that do have a declaration are unaffected by the one that does not"
+    );
+    for (name, role) in [
+        ("provider-logs", ContainerRole::Regular),
+        ("provider-setup", ContainerRole::Init),
+    ] {
+        let c = container(&p, name);
+        assert_eq!(
+            c.role, role,
+            "{name}: with no declaration to read `restartPolicy` off, the list the status arrived \
+             in is the only thing left deciding the role — a decode that answered `Regular` for \
+             everything, or `Init` for everything, passes one of these two rows and not both"
+        );
+        assert_eq!(
+            (
+                c.cpu_request.as_deref(),
+                c.memory_request.as_deref(),
+                c.memory_limit.as_deref()
+            ),
+            (None, None, None),
+            "{name}: nothing was declared and nothing was enacted, so rule 2 has no limit to \
+             name and N5 has nothing to add up — a decode that guessed one would be naming a \
+             number that exists nowhere"
+        );
+        assert_eq!(
+            c.restart_policy.as_deref(),
+            Some("Always"),
+            "{name}: the container's own policy is unreadable, so the effective one is the \
+             pod's — the fallback `container_snapshots` already makes for a container that \
+             declares none"
+        );
+    }
+    // **And no rule invents a card about it.** `healthy.json` is the capture that draws nothing,
+    // so anything here is something an undeclared container made up.
+    let all = analyze(&pods_at(vec![p], now()));
+    show(&all);
+    nothing(
+        &all,
+        "a healthy pod with two containers nobody declared is still a healthy pod",
+    );
+
+    // --- THE SHAPE THAT ACTUALLY DRAWS ---
+    //
+    // **A pod where nothing fires asserts nothing about the cards**, so the same injection is
+    // driven again on a container in trouble: backing off, restarted, with a memory kill on the
+    // record. Rules 1 and 2 both reach it, and rule 2 is the one that would name a number the
+    // spec never carried.
+    //
+    // **The declared container beside it takes the identical plant**, and it is what makes this a
+    // discrimination rather than a rule that has gone quiet: `status.resources` is stripped from
+    // both, so the *only* thing left that could name a limit is the declaration — `app` has one
+    // and `provider-logs` has none.
+    let kill = |c: &mut ContainerStatus| {
+        c.state = Some(ApiContainerState {
+            waiting: Some(ContainerStateWaiting {
+                reason: Some("CrashLoopBackOff".to_string()),
+                message: None,
+            }),
+            ..ApiContainerState::default()
+        });
+        c.last_state = Some(ApiContainerState {
+            terminated: Some(ContainerStateTerminated {
+                reason: Some("OOMKilled".to_string()),
+                exit_code: 137,
+                started_at: Some(time("2026-08-13T23:30:00Z")),
+                finished_at: Some(time("2026-08-13T23:33:00Z")),
+                ..ContainerStateTerminated::default()
+            }),
+            ..ApiContainerState::default()
+        });
+        c.ready = false;
+        c.started = Some(false);
+        c.restart_count = 7;
+        c.resources = None;
+    };
+    let mut broken: Pod =
+        serde_json::from_value(fixture("healthy")).expect("healthy.json is a Pod");
+    let statuses = broken
+        .status
+        .as_mut()
+        .expect("the captured pod has a status")
+        .container_statuses
+        .as_mut()
+        .expect("the capture reports its regular container");
+    statuses.push(injected("provider-logs"));
+    for c in statuses.iter_mut() {
+        kill(c);
+    }
+    let p = PodSnapshot::from(broken);
+    assert_eq!(
+        (
+            container(&p, "app").memory_limit.as_deref(),
+            container(&p, "provider-logs").memory_limit.as_deref()
+        ),
+        (Some("64Mi"), None),
+        "the declaration is the only difference left between these two containers"
+    );
+    let all = analyze(&pods_at(vec![p], now()));
+    show(&all);
+
+    for (name, limit) in [("app", true), ("provider-logs", false)] {
+        let about: Vec<&Finding> = all
+            .iter()
+            .filter(|f| f.evidence.contains(&format!("container {name}")))
+            .collect();
+        assert!(
+            about.len() >= 2,
+            "{name}: the rules reach this container — a card about the loop and a card about the \
+             kill — or every assertion below is about a screen with nothing on it: {:?}",
+            titles(&all)
+        );
+        // **The requirement: a card may not claim what the spec never said.** Rule 2 names the
+        // limit the container exceeded, and there is no limit to name when nobody declared one.
+        assert_eq!(
+            about.iter().any(|f| f.evidence.contains("limit 64Mi")),
+            limit,
+            "{name}: the memory limit is on the card exactly where a declaration carried one — \
+             a number printed for a container whose manifest k8rs never saw is invented: {:?}",
+            about.iter().map(|f| &f.evidence).collect::<Vec<_>>()
+        );
+        for f in &about {
+            assert!(
+                !f.evidence.contains("limit") || limit,
+                "{name}: nor any other limit: {}",
+                f.evidence
+            );
+            // **And it is described as what the status list said it was.** `provider-logs`
+            // arrived in `status.containerStatuses`, so no card may call it an init container or
+            // a sidecar and hand the reader the sentences those roles carry.
+            assert!(
+                !f.evidence.contains("init container") && !f.evidence.contains("sidecar"),
+                "{name}: the regular list is where this status arrived: {}",
+                f.evidence
+            );
+        }
+    }
+}
+
 /// Rule 8's evasion: `subPath` narrows a hostPath mount, so the volume's own path is
 /// not what the container gets. `hostPath: /` with `subPath: run/containerd` hands the
 /// container the node's container runtime state while the volume still records `/` —
