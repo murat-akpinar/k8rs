@@ -62,6 +62,16 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   one where the deleted card was the answer
   ([D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)).
   2026-08-16.
+- **Nothing in `just check` counts panics in product code, and two reached
+  `rules.rs` before anyone noticed.** `clippy` does not flag `.expect()` by
+  default, the mutation run cannot see a call that never fires, and both were
+  found by the PM reading the diff by hand
+  ([D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)).
+  A guard is one `grep` over `src/*.rs` minus the test modules, on the footing
+  `security-guard.py`'s other six checks already stand. `tester`'s, and the
+  interesting half is what the allowlist is: `main.rs` will need `expect` on the
+  terminal restore, so the rule is *not zero*, it is *named and argued*.
+  2026-08-16.
 - **`PRIOR-ART.md`'s gaps that no ruling has boxed.** The file is evidence and
   never a plan, and a gap becomes a box only by a decision
   ([D89](NOTES.md#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14)

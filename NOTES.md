@@ -8146,9 +8146,18 @@ ends.
 arms re-unwrapped an `Option` their own `match` had already destructured — unable to
 fire, and that is the point: this layer's guarantee that a missing field means no
 finding is **mechanical** (`From` cannot fail), and an `.expect()` is the other kind
-of promise. Bound in the match instead, and the count is back to 0. Found by the
-security gate rather than by a review, which is what that gate is for
-(invariants 5 and 8).
+of promise. Bound in the match instead, and the count is back to 0 — and the
+rebind deleted a redundant third lookup of the same `Option` with it.
+
+**The part worth recording is not the two calls: it is that nothing could have
+caught them.** Each was the honest local shape for *the arm already proved this*,
+added while making the code more correct. `clippy` does not flag `.expect()` by
+default, the mutation run cannot see a call that never fires, and `just check`
+counts no panics at all — so a green build, 0 MISSED and two reviews were all
+silent. The number came out of the PM's security-gate pass by hand, which is where
+invariant 8's half of this lives and is exactly the leak
+[CLAUDE.md § Where a leak would actually happen](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)
+says is the PM's. **A guard is owed**, and it is `tester`'s in a later phase.
 
 ## Decisions made
 
