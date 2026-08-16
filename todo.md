@@ -1200,10 +1200,13 @@ that cites them expects to find them.
       which the kubelet then restarts — rule 15's named false positive, and the
       one object the `restartPolicyRules` box below cannot be written without.
       Four objects, one trip
-- [ ] **`crash_looping`'s `if c.restarts > 0` is the one surviving mutant in
-      `rules.rs`** — `cargo mutants` reports it MISSED at HEAD and in every round
-      of the clean-exit box, in three different line positions, so it is neither
-      new nor drifting: flipping it to `>= 0` ships `0 restarts` on a real card
+- [ ] **`crash_looping`'s `if c.restarts > 0` survives every mutation run** —
+      `cargo mutants` reports it MISSED at HEAD and in every round of the
+      clean-exit box, in three different line positions, so it is neither new
+      nor drifting. **It was written here as *the one* survivor and it is not:**
+      the first whole-file run counted 19 MISSED and this is one of them, so the
+      gate is the box below and what this box owes is this mutant alone.
+      Flipping it to `>= 0` ships `0 restarts` on a real card
       and nothing goes red, because `CrashLoopBackOff` *before* the first restart
       is a state no committed fixture reaches. It is ~15 lines against
       `healthy-retry` with the count zeroed. **Two smaller test-side residues go
