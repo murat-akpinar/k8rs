@@ -621,10 +621,19 @@ fn a_crash_loop_two_steps_under_the_deployment_is_the_same_problem_and_not_a_sec
         .chain([gave_up.clone()])
         .collect();
 
+    // The pod's own card is the premise of every silence below, and it is asked for without
+    // naming the rule that draws it: `scripts/cluster.sh` § `[owned]` certifies the capture in
+    // either half of the backoff loop, so the title is rule 1's or rule 5's depending on the
+    // trip (NOTES § D114).
     let name = owned_pod_name();
+    let says_something = |all: &[Finding]| all.iter().any(|f| f.object.name == name);
     let whole = analyze(&with_workloads(pods.clone(), chain.clone()));
     show(&whole);
-    only(&whole, &name, "CrashLoopBackOff");
+    assert!(
+        says_something(&whole),
+        "the pod has to be drawing a card, or the suppression below is about nothing: {:?}",
+        titles(&whole)
+    );
     assert!(
         whole.iter().all(|f| !f.title.contains("gave up")),
         "the pod under it already says why the rollout never finished: {:?}",
@@ -645,7 +654,12 @@ fn a_crash_loop_two_steps_under_the_deployment_is_the_same_problem_and_not_a_sec
     let no_link = analyze(&with_workloads(pods, vec![gave_up]));
     show(&no_link);
     only(&no_link, "broken-owned", "gave up");
-    only(&no_link, &name, "CrashLoopBackOff");
+    assert!(
+        says_something(&no_link),
+        "and the pod is still saying it — the two cards stand together here, which is the \
+         direction an unresolvable owner has to fail in: {:?}",
+        titles(&no_link)
+    );
 }
 
 /// **A card about a pod that is answering requests does not explain why a rollout has none**
@@ -700,7 +714,16 @@ fn a_pod_that_is_serving_does_not_explain_a_rollout_that_has_no_pods() {
         .collect();
     let with_failing = analyze(&with_workloads(failing, chain));
     show(&with_failing);
-    only(&with_failing, &owned_pod_name(), "CrashLoopBackOff");
+    // The premise, and it is asked without naming a rule: the pod has to draw *something*, or
+    // the silence below is a rollout card nothing was suppressing. Which card it is depends on
+    // where in the backoff loop the capture landed, and `scripts/cluster.sh` § `[owned]`
+    // certifies both faces (NOTES § D114).
+    let name = owned_pod_name();
+    assert!(
+        with_failing.iter().any(|f| f.object.name == name),
+        "the failing pod is what explains the shortfall, so it has to be saying so: {:?}",
+        titles(&with_failing)
+    );
     assert!(
         with_failing.iter().all(|f| !f.title.contains("gave up")),
         "a pod that is not ready is exactly the shortfall, so this stays one card: {:?}",

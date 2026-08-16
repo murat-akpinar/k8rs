@@ -208,9 +208,23 @@ fixtures:
     for p in oom crashloop image config pending hostpath readiness restarts nolimits stuck init \
              resize podlimit \
              exit0 sigterm socket succeeded failed restarts10 restarts10serving startup \
-             notfound wedged unjudged oomserving neverback; do
+             notfound wedged unjudged oomserving neverback probe0 neverrules gang; do
       "${kc[@]}" get pod "broken-$p" -o json | "${jqs[@]}" > "tests/fixtures/$p.json"
     done
+
+    # `verify` proved the *live* object reached its state; the loop above is a
+    # **second** fetch, minutes later. For everything whose state holds still that
+    # is a distinction without a difference — but a crash loop has two faces plus
+    # a ~2s window where the container is up, and a capture taken in that window
+    # is a Running pod carrying a crash history. `cluster.sh`'s [crashloop] and
+    # [init] refuse that window by design (the measurement is on [owned]), and
+    # refusing it in `verify` does nothing about the fetch that comes after. So
+    # the two loop fixtures are re-asserted here, on the bytes, in the shape those
+    # predicates use: an exit 1 on record *and* the container down right now.
+    guard crashloop.json "container in a crash loop — an exit 1 on record with the container down right now, which is the half of the loop verify saw and this second fetch can miss by two seconds" \
+      '[.status.containerStatuses[]? | select(.lastState.terminated.exitCode == 1 and (.state.waiting.reason == "CrashLoopBackOff" or .state.terminated.exitCode == 1))] | length > 0'
+    guard init.json "init container in a crash loop — same two clauses on the init list, and the only capture whose rule (D27) is about the init array at all" \
+      '[.status.initContainerStatuses[]? | select(.lastState.terminated.exitCode == 1 and (.state.waiting.reason == "CrashLoopBackOff" or .state.terminated.exitCode == 1))] | length > 0'
 
     # The fields the first capture could not produce. Each one is a decode that
     # today reads correctly whatever it does, because every committed object
@@ -290,6 +304,28 @@ fixtures:
     # and a two-container capture would silently retire it.
     guard neverback.json "container stopped for good — a terminated run at a non-zero exit, restartCount still 0, under spec.restartPolicy Never, in a pod that is still Running, beside a container that exited 0 and one that is still up (D96)" \
       '.spec.restartPolicy == "Never" and .status.phase == "Running" and ([.status.containerStatuses[]? | select(.restartCount == 0 and (.state.terminated.exitCode // 0) != 0)] | length) > 0 and ([.status.containerStatuses[]? | select(.state.terminated.exitCode == 0)] | length) > 0 and ([.status.containerStatuses[]? | select(.state.running != null)] | length) > 0'
+
+    # NOTES § D90's first door: exit 0 with somebody else's hand on it, on a run
+    # long enough to be on the far side of PROBE_FLOOR. The duration is the
+    # guard, because the exit code alone is `exit0.json` — which is on disk, is
+    # 2s, and is the arm `finished_action` demotes. Written with the same epoch
+    # defaults the cluster.sh predicate uses: `fromdateiso8601` is a hard jq
+    # error on a missing stamp, and an error here would print the message about a
+    # capture that carries nothing rather than the one about a record that lost a
+    # field.
+    guard probe0.json "previous run that ended with exit 0 on a container that is not serving, and lasted longer than the 20s probe floor — the long arm of finished_action, which exit0.json's 2s run is the other side of (D90/D113)" \
+      '[.status.containerStatuses[]? | select(.ready == false and .lastState.terminated.exitCode == 0 and ((((.lastState.terminated.finishedAt // "1970-01-01T00:00:00Z") | fromdateiso8601) - ((.lastState.terminated.startedAt // "1970-01-01T00:00:00Z") | fromdateiso8601)) > 25))] | length > 0'
+    # D97's named false positive for rule 15, and both halves are named because
+    # either alone is another fixture: the field in the spec is a pod nobody
+    # restarted, and the count without it is `broken-restarts` under a different
+    # policy.
+    guard neverrules.json "container restarted under spec.restartPolicy Never by a rule on its own exit code — the restartPolicyRules entry in the spec and the restartCount it bought, on a container now terminated at an exit no rule matches (D97)" \
+      '.spec.restartPolicy == "Never" and ([.spec.containers[]? | select([.restartPolicyRules[]? | select(.action == "Restart" and .exitCodes.operator == "In" and (.exitCodes.values | index(3) != null))] | length > 0)] | length) == 1 and ([.status.containerStatuses[]? | select(.restartCount == 1 and .state.terminated.exitCode == 1)] | length) == 1 and ([.status.containerStatuses[]? | select(.state.running != null)] | length) == 1'
+    # D100's settled gang restart. The two null stamps are asserted as hard as
+    # the reason: they are why rule 5 reads its age off `state.running.startedAt`
+    # instead, and a record that arrived with stamps would retire nothing.
+    guard gang.json "137/RestartingAllContainers carrying neither stamp, beside a live state.running.startedAt on a container that is serving — the synthesized record rule 5 can read no clock off, and the reason nothing else in the corpus holds (D100)" \
+      '([.status.containerStatuses[]? | select(.lastState.terminated.exitCode == 137 and .lastState.terminated.reason == "RestartingAllContainers" and .lastState.terminated.startedAt == null and .lastState.terminated.finishedAt == null and .ready == true and .state.running.startedAt != null and .restartCount >= 3)] | length) > 0 and ([.status.containerStatuses[].ready] | all)'
 
     # D36: the one broken pod that has an owner — every other pod capture above
     # is a bare pod, so the grouping key's workload branches have no positive
@@ -400,9 +436,27 @@ fixtures:
     guard daemonsets.json "DaemonSet whose pods cannot start — desired is per node, and nothing captured had it disagree with ready (D40)" \
       '[.items[]? | select(.metadata.name == "broken-ds" and .status.desiredNumberScheduled > 0 and .status.numberReady == 0)] | length == 1'
 
+    # --- THE ONE THE MACHINE HAS TO MAKE, AND IT GOES HERE ---
+    # Everything above is on disk before a node is touched, and this is the first
+    # step that touches one: `break-runtime` reboots the node broken-reboot is
+    # on. A reboot raises `restartCount` on **every** pod on that worker, and
+    # `restarts.json` is guarded at exactly three a hundred lines up — so this
+    # cannot move earlier, and it is before `break-nodes` because a cordoned,
+    # tainted or kubelet-less worker is not a machine it can be made on.
+    scripts/cluster.sh break-runtime
+    "${kc[@]}" get pod broken-reboot -o json | "${jqs[@]}" > tests/fixtures/reboot.json
+    # `(255, "Unknown")` as a pair, because `ending` reads it as one: 255 with any
+    # other reason is a program that called `exit 255`, which is an ordinary
+    # failure and not a node event.
+    guard reboot.json "restart count past RESTARTS_WARN on a container that is serving, over a last run the runtime ended with 255/Unknown — rule 5's producer without rule 1's, and the capture that retires the plant for Ending::CodeUnknown (D90)" \
+      '[.status.containerStatuses[]? | select(.ready == true and .state.running != null and .restartCount >= 3 and .lastState.terminated.exitCode == 255 and .lastState.terminated.reason == "Unknown")] | length > 0'
+
     # --- THE NODES, LAST ---
-    # Everything above is on disk before a single node is touched, and that
-    # ordering is the whole design: a cordon changes where a pod would go, a
+    # Every pod capture is on disk before the step above rebooted anything, and
+    # every capture of any kind is on disk before this one, which is where the
+    # damage stops being repairable by the machine itself: a reboot ends with the
+    # node back and the pods running, a cordon does not. The ordering is the
+    # whole design: a cordon changes where a pod would go, a
     # NoExecute taint evicts what is already there, and a stopped kubelet turns
     # every pod on that node Unknown within a minute. Any of those lands in a
     # pod capture as a state no manifest asked for. `break-nodes` asserts all

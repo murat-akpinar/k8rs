@@ -172,7 +172,7 @@ fn the_node_that_went_quiet_names_the_workloads_that_went_with_it() {
     );
     assert_eq!(
         card.age(&now()).as_deref(),
-        Some("2 days ago"),
+        Some("13 hours ago"),
         "a duration off the pinned now, not English parsed back into a number"
     );
     assert_eq!(
@@ -419,7 +419,7 @@ fn the_cordoned_node_counts_only_the_pods_a_drain_would_actually_move() {
         "the age is the taint's, which the controller stamps — never `Ready`'s, which does \
          not move when a node is cordoned (D65)"
     );
-    assert_eq!(card.age(&now()).as_deref(), Some("2 days ago"));
+    assert_eq!(card.age(&now()).as_deref(), Some("13 hours ago"));
 }
 
 /// **A node a drain finished with is parked, not broken** — and both of the two shapes a drain
@@ -900,15 +900,30 @@ fn over_promised() -> ClusterSnapshot {
         Some(asked_for.as_str()),
         "one field moved on a decoded copy, to the value the same capture asks for (D40)"
     );
+    // **Which node it landed on is the scheduler's, so it is read rather than named** — the same
+    // reason [`the_quiet_node`] exists. `broken-resize` was on `k8rs-worker3` on the 2026-08-13
+    // trip and on `k8rs-worker` on the 2026-08-16 one; a literal here filtered the planted pod
+    // out of its own snapshot and left N5 with nothing to fire on, which reads as a rule that
+    // stopped working rather than as a pod that moved (NOTES § D114).
+    let placed = landed
+        .node
+        .clone()
+        .expect("the capture records the node the scheduler gave broken-resize");
     let node = captured_nodes()
         .into_iter()
-        .find(|n| n.id.name == "k8rs-worker3")
-        .expect("the capture has the node broken-resize runs on");
+        .find(|n| n.id.name == placed)
+        .unwrap_or_else(|| panic!("the capture has no node {placed}, which broken-resize runs on"));
     let pods: Vec<PodSnapshot> = every_captured_pod()
         .into_iter()
         .chain([landed])
-        .filter(|p| p.node.as_deref() == Some("k8rs-worker3"))
+        .filter(|p| p.node.as_deref() == Some(placed.as_str()))
         .collect();
+    assert!(
+        pods.len() > 1,
+        "the over-promise is one pod asking for the whole machine *plus its neighbours*, so the \
+         node has to have some: {} pods on {placed}",
+        pods.len()
+    );
     cluster(pods, vec![node])
 }
 

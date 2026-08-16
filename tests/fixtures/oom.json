@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-13T22:32:57Z",
+    "creationTimestamp": "2026-08-16T09:44:00Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-oom",
     "namespace": "default",
-    "resourceVersion": "9752",
-    "uid": "970cc73a-9fd7-4342-ae3a-028250fc56f7"
+    "resourceVersion": "5646",
+    "uid": "3562b934-e3bb-4ee5-8afe-4946771f4085"
   },
   "spec": {
     "containers": [
@@ -42,7 +42,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-w48xp",
+            "name": "kube-api-access-fqpzm",
             "readOnly": true
           }
         ]
@@ -50,7 +50,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -75,7 +75,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-w48xp",
+        "name": "kube-api-access-fqpzm",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -121,21 +121,21 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:58Z",
+        "lastTransitionTime": "2026-08-16T09:44:01Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "lastTransitionTime": "2026-08-16T09:44:00Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:31:35Z",
+        "lastTransitionTime": "2026-08-16T10:10:45Z",
         "message": "containers with unready status: [hog]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -144,7 +144,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:31:35Z",
+        "lastTransitionTime": "2026-08-16T10:10:45Z",
         "message": "containers with unready status: [hog]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -153,7 +153,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "lastTransitionTime": "2026-08-16T09:44:00Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -164,16 +164,16 @@
         "allocatedResources": {
           "memory": "64Mi"
         },
-        "containerID": "containerd://afbd55abe58cf112733e2102eba910cd100de9985c7bdc10fc931725516ffb19",
+        "containerID": "containerd://97d18cca1d5b2496ddee0faca2bcea0d7b299cc628156428a2c64d34a5dc0c9f",
         "image": "docker.io/polinux/stress:latest",
         "imageID": "docker.io/polinux/stress@sha256:b6144f84f9c15dac80deb48d3a646b55c7043ab1d83ea0a697c09097aaad21aa",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://afbd55abe58cf112733e2102eba910cd100de9985c7bdc10fc931725516ffb19",
+            "containerID": "containerd://97b0397880670aee0023af7f82f1b96b0f987776b6bf5cd7e15878deb8b416f3",
             "exitCode": 137,
-            "finishedAt": "2026-08-13T23:31:34Z",
+            "finishedAt": "2026-08-16T10:05:43Z",
             "reason": "OOMKilled",
-            "startedAt": "2026-08-13T23:31:34Z"
+            "startedAt": "2026-08-16T10:05:43Z"
           }
         },
         "name": "hog",
@@ -186,12 +186,15 @@
             "memory": "64Mi"
           }
         },
-        "restartCount": 16,
+        "restartCount": 10,
         "started": false,
         "state": {
-          "waiting": {
-            "message": "back-off 5m0s restarting failed container=hog pod=broken-oom_default(970cc73a-9fd7-4342-ae3a-028250fc56f7)",
-            "reason": "CrashLoopBackOff"
+          "terminated": {
+            "containerID": "containerd://97d18cca1d5b2496ddee0faca2bcea0d7b299cc628156428a2c64d34a5dc0c9f",
+            "exitCode": 137,
+            "finishedAt": "2026-08-16T10:10:45Z",
+            "reason": "OOMKilled",
+            "startedAt": "2026-08-16T10:10:45Z"
           }
         },
         "user": {
@@ -216,7 +219,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-w48xp",
+            "name": "kube-api-access-fqpzm",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -246,6 +249,6 @@
         "memory": "64Mi"
       }
     },
-    "startTime": "2026-08-13T22:32:57Z"
+    "startTime": "2026-08-16T09:44:00Z"
   }
 }

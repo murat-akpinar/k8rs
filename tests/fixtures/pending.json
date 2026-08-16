@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-13T22:32:57Z",
+    "creationTimestamp": "2026-08-16T09:44:00Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-pending",
     "namespace": "default",
-    "resourceVersion": "637",
-    "uid": "84d34990-8b59-4db2-8baa-f58e0c803376"
+    "resourceVersion": "685",
+    "uid": "15c5437f-c24e-4931-ab94-869a52d8ae3c"
   },
   "spec": {
     "containers": [
@@ -28,7 +28,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-fkt7s",
+            "name": "kube-api-access-k46gv",
             "readOnly": true
           }
         ]
@@ -70,7 +70,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-fkt7s",
+        "name": "kube-api-access-k46gv",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -113,7 +113,7 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "lastTransitionTime": "2026-08-16T09:44:00Z",
         "message": "0/4 nodes are available: 1 node(s) had untolerated taint(s), 3 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/4 nodes are available: 4 Preemption is not helpful for scheduling.",
         "observedGeneration": 1,
         "reason": "Unschedulable",

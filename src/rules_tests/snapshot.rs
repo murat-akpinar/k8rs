@@ -304,18 +304,19 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
     // this line and fail on the phrase instead, with a message about cards saying when —
     // which is the confusion the check exists to prevent, not to cause.
     //
-    // **The pin is no longer the midnight after the capture day, and the rung moved with
-    // it** (NOTES § D57, § D97). `neverback.json` was captured on 2026-08-15 as a single
-    // fixture while the rest of the corpus is 2026-08-13, so the pin had to clear the
-    // *newest* capture rather than the trip that took most of them: the 23:35 UTC cordon
-    // is now 48h 24m old and prints on the **days** rung, where it printed on the minutes
-    // rung before.
+    // **The pin is the midnight after the *newest* capture, and the rung follows the trip**
+    // (NOTES § D57, § D97). The corpus is one trip again since 2026-08-16 — every fixture
+    // re-captured from one cluster in one morning — so the whole corpus sits inside a single
+    // day of the pin and this cordon prints on the **hours** rung. It has been on three
+    // different rungs across three trips (minutes, then days at 48h 24m, now hours), which is
+    // why the number above is asserted at all: the rung is a property of when the trip
+    // finished, not of anything this test is about.
     //
-    // **And it is 24 minutes past the 48-hour boundary, which is worth knowing before the
-    // next recapture.** `age`'s hours rung runs to 48, so a trip finishing 25 minutes
-    // later in the day puts this phrase back to `47 hours ago` — the same edit as any
-    // other repin, but the one that looks like a bug rather than a clock move. The number
-    // above is the guard: it fails first, with the arithmetic in the message.
+    // **The boundary to know about is 48 hours**, where `age`'s hours rung ends. At 827
+    // minutes this cordon is nowhere near it, but a trip whose capture and pin land more than
+    // two days apart puts the phrase back on the days rung — the same edit as any other repin,
+    // and the one that looks like a bug rather than a clock move. The number above is the
+    // guard: it fails first, with the arithmetic in the message.
     let stamped = cordon.added_at.clone().expect(
         "the controller stamps timeAdded on the taint it mirrors from spec.unschedulable \
          — a capture without it is D64's premise back again",
@@ -323,14 +324,14 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
     let elapsed = now().0.duration_since(stamped.0);
     assert_eq!(
         elapsed.as_mins(),
-        2904,
-        "the cordon is {elapsed:?} before the pinned now, and the phrase below says 2 \
-         days — if `just fixtures` was re-run, repin `fn now()` (see the note there for \
+        827,
+        "the cordon is {elapsed:?} before the pinned now, and the phrase below says 13 \
+         hours — if `just fixtures` was re-run, repin `fn now()` (see the note there for \
          what moves with it) and move both together"
     );
     assert_eq!(
         dated.age(&now()).as_deref(),
-        Some("2 days ago"),
+        Some("13 hours ago"),
         "a cordon the controller stamped has a moment, and the card says when"
     );
     assert_eq!(
@@ -345,7 +346,9 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
     // filled from a field which is future-dated *by design* has to be synthesised, the
     // same licence D40 gives the taint that carries a value and a stamp at once. The
     // moment here is C1's shape: `notAfter` on the healthy committed certificate,
-    // which `certs-test.sh` reports as 363 days out. `Finding::age` flattens it to the
+    // `2027-08-12` — a date `certs-test.sh` pins and which every pin this file has ever
+    // carried is a year behind (`certificate.rs` § C1 on why the date and not a count of
+    // days out). `Finding::age` flattens it to the
     // same blank the missing field draws — `.map` in place of `.and_then` would print
     // it, and `Option<Time>` alone cannot tell the two cases apart because the field
     // is present and perfectly valid.
@@ -607,15 +610,46 @@ fn the_init_container_is_in_the_list_and_marked_as_one() {
          fixture exists for: got {}",
         migrate.restarts
     );
-    assert!(
-        matches!(&migrate.state, ContainerState::Waiting { reason, .. }
-            if reason.as_deref() == Some("CrashLoopBackOff")),
-        "Init:CrashLoopBackOff, got {:?}",
-        migrate.state
-    );
+    // **The state, against the array it came out of — both faces, because the capture reaches
+    // both** (NOTES § D114). A crash-looping container alternates between `waiting:
+    // CrashLoopBackOff` and the `terminated` run it just left, and `scripts/cluster.sh`
+    // § `[init]` accepts either: it measured `state.terminated` in 39 samples of 70 and calls
+    // demanding the waiting reason "the too-tight half". Asserting one of them is asserting
+    // which half `just fixtures` caught, and the 2026-08-16 trip caught the other one.
+    //
+    // What is asserted instead is that the decode agrees with **the JSON it was handed**, which
+    // is the technique this file uses everywhere else and catches the same three defects — a
+    // field dropped, filled from its neighbour, or rewritten.
+    let raw_state = &captured_status(&raw, "initContainerStatuses", "migrate")["state"];
+    match &migrate.state {
+        ContainerState::Waiting { reason, .. } => assert_eq!(
+            reason.as_deref(),
+            Some(captured_str(raw_state, &["waiting", "reason"])),
+            "the reason the capture holds, out of the init array"
+        ),
+        ContainerState::Terminated(run) => assert_eq!(
+            run.exit_code,
+            captured_i32(raw_state, &["terminated", "exitCode"]),
+            "the code the capture holds, out of the init array"
+        ),
+        other => panic!(
+            "a crash-looping init container is in backoff or in the run it just left, and \
+             {other:?} is neither — this fixture stopped being the D27 blind spot"
+        ),
+    }
+    // And the property the fixture has to keep whichever face it was caught in: the run before
+    // this one failed, which is what makes it a *loop* rather than a container doing its job.
     assert_eq!(
         migrate.last_terminated.as_ref().map(|t| t.exit_code),
-        Some(1)
+        Some(captured_i32(
+            captured_status(&raw, "initContainerStatuses", "migrate"),
+            &["lastState", "terminated", "exitCode"]
+        ))
+    );
+    assert_ne!(
+        migrate.last_terminated.as_ref().map(|t| t.exit_code),
+        Some(0),
+        "an init container whose previous run succeeded is `healthy-retry`, not this fixture"
     );
 
     let app = container(&p, "app");
@@ -1046,13 +1080,18 @@ fn the_healthy_pod_offers_no_rule_anything_to_fire_on() {
             )),
         }
     );
-    // **The negative fixture is not a pod nothing has ever happened to.** `healthy.yaml`
-    // ends on a `sleep 3600`, so a capture taken more than an hour into the cluster's
-    // life photographs the shell exiting 0 and the kubelet restarting it — which is the
-    // ordinary shape of a long-lived pod, and the one rule 5 and rule 6 have to stay
-    // silent about. Read off the capture rather than transcribed: the count is however
-    // many hours the trip ran, and the requirement is only that it is under
-    // `RESTARTS_WARN` and that the run it records ended cleanly.
+    // **The negative fixture is not a pod nothing has ever happened to** — but how much has
+    // happened to it is a function of the capture session and not of the fixture.
+    // `healthy.yaml` ends on a `sleep 3600`, so a trip that runs more than an hour photographs
+    // the shell exiting 0 and the kubelet restarting it, and a shorter one photographs a
+    // container that has never finished. Both are `scripts/cluster.sh` § `[healthy_init]`,
+    // which asks for a `Running` pod with every container ready and nothing else; the
+    // 2026-08-13 trip brought the first and the 2026-08-16 trip the second (NOTES § D114).
+    //
+    // So what is asserted is the **pair**, which holds at either count and is the decode
+    // invariant worth having: the kubelet writes `restartCount` and `lastState` together —
+    // `startContainer` increments the count when it leaves the record — so one without the
+    // other is a decode that dropped a field or filled it from its neighbour.
     let app_status = captured_status(&raw, "containerStatuses", "app");
     assert_eq!(app.restarts, captured_i32(app_status, &["restartCount"]));
     assert!(
@@ -1061,14 +1100,42 @@ fn the_healthy_pod_offers_no_rule_anything_to_fire_on() {
          threshold's doing and not the pod's: {} restarts",
         app.restarts
     );
-    let last = app
-        .last_terminated
-        .as_ref()
-        .expect("a container the kubelet has restarted records how the run before it ended");
     assert_eq!(
-        last.exit_code, 0,
-        "and the run it records ended cleanly, which is rule 6's first exemption — the \
-         one `exit0.json` proves fires on a container that is *not* serving"
+        app.last_terminated.is_some(),
+        app.restarts > 0,
+        "a restart and the run it ended are one event the kubelet writes twice, and a decode \
+         that carries one without the other has dropped a field: {} restarts, {:?}",
+        app.restarts,
+        app.last_terminated
+    );
+    if let Some(last) = app.last_terminated.as_ref() {
+        assert_eq!(
+            last.exit_code, 0,
+            "and the run it records ended cleanly, which is rule 6's first exemption — the \
+             one `exit0.json` proves fires on a container that is *not* serving"
+        );
+    }
+    // **And the populated case is asserted over the corpus rather than over this one pod**,
+    // because this pod is no longer guaranteed to hold it. A `lastState` beside a `Running`
+    // state is the shape the branch above goes quiet on, and it has to exist somewhere or the
+    // `if` is a test that cannot fail (CLAUDE.md § A derived list asserts it found something).
+    let with_history: Vec<String> = CAPTURED_PODS
+        .iter()
+        .flat_map(|n| {
+            pod(n)
+                .containers
+                .into_iter()
+                .filter(|c| {
+                    matches!(c.state, ContainerState::Running { .. }) && c.last_terminated.is_some()
+                })
+                .map(move |c| format!("{n}/{}", c.name))
+        })
+        .collect();
+    println!("running containers carrying a previous run: {with_history:?}");
+    assert!(
+        !with_history.is_empty(),
+        "no committed capture decodes a previous run beside a running container, so the \
+         branch above is guarding a shape the corpus cannot produce"
     );
     // The absent case, on the container of this same pod that has never been restarted:
     // `lastState: {}` decodes to `None` and not to a zero-filled `Terminated`.

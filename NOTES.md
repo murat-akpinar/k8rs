@@ -135,6 +135,7 @@ its line moving with it.
 - [D111](#d111--the-guard-list-exists-once-and-ci-gets-no-new-action-for-it-2026-08-16) — the guard list exists once, and CI gets no new action for it
 - [D112](#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16) — `lastState.terminated` has three authors, and the file was reading it as if it had one
 - [D113](#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16) — a card's parts were budgeted separately and never added up, and everything else this family found was reached by fixing that
+- [D114](#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16) — the capture trip that put four objects on disk, and the init arm that is not reachable at all
 
 ## Why it exists — where the gap is
 
@@ -8158,6 +8159,146 @@ silent. The number came out of the PM's security-gate pass by hand, which is whe
 invariant 8's half of this lives and is exactly the leak
 [CLAUDE.md § Where a leak would actually happen](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)
 says is the PM's. **A guard is owed**, and it is `tester`'s in a later phase.
+
+### D114 — the capture trip that put four objects on disk, and the init arm that is not reachable at all (2026-08-16)
+
+**What the box asked for.** Four objects no cluster had produced for this
+repository, named by
+[D90](#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)
+as what its own arms were shipping without: a probe kill reporting `exit 0`, an
+`Init:CrashLoopBackOff` with a clean run behind it, a `restartCount` raised by a
+node reboot, and a container the kubelet restarts under `restartPolicy: Never`.
+Four landed. The one that did not is the most useful thing the trip found.
+
+**A fifth object was folded in, and that is a scope ruling rather than a
+discovery.**
+[D100](#d100--the-field-that-separates-a-settled-restart-from-a-live-one-was-already-in-the-snapshot-and-rule-5-never-read-it-2026-08-15)
+had already parked one more object on *the* capture trip and put it with the PM:
+a settled gang restart. It is the same manifest field as the box's own (d) —
+`spec.containers[].restartPolicyRules` — and no cluster trip is cheap, so it went
+into this manifest rather than earning a second one. **The counter-ruling, made
+in the same breath and in the other direction:** the debt `restarts10_ending`
+names — rule 5 reaching its band through an ending that *finished* — is two more
+pods on the 26-minute backoff climb and a different rule's subject, so it went to
+[`backlog.md`](backlog.md). The line between them is not size. It is whether the
+object was already assigned to this trip by a decision.
+
+**`Init` + `CrashLoopBackOff` + `exit 0` is not reachable, and D90 said it was.**
+That entry reasoned from the kubelet source: `doBackOff` selects by container name
+and `ContainerStateExited` and never reads the exit code, so a sandbox rebuild
+should put a cleanly exiting init container into the same backoff as a failing
+one. **The source read is correct and the conclusion is wrong**, because the two
+are about different objects. Measured on kind v1.36.1:
+
+- `doBackOff` does fire — `describe` carries
+  `Warning BackOff (x9 over 12m) spec.initContainers{warmup}: Back-off restarting failed container warmup`.
+- The **published pod status never rests there**. `state.waiting` was sampled about
+  120 times — across 51 sandbox rebuilds, then 25 spaced rebuilds, then 40
+  consecutive polls immediately after a `crictl stopp`. Zero hits. The init
+  container reads `state.terminated / Completed`, `Ready: true`, every time.
+- The control, on the same cluster in the same minute: `broken-init`, whose init
+  container exits **1**, reads
+  `state.waiting {reason: CrashLoopBackOff, message: "back-off 5m0s restarting failed container=migrate…"}`.
+
+The kubelet publishes that waiting state for an init container it is **waiting to
+retry**. One that exited 0 is *finished*; nothing is waiting to retry it, so the
+event fires at rebuild time and the status has already moved past it.
+[`rules.rs`](src/rules.rs) reads the published status and nothing else. **So the
+`Init` arm of `finished_action` stays planted on a decoded copy permanently**,
+on the same footing as the CRI-O runtime-socket mount — not "until the capture
+trip" ([D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12),
+[D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)).
+The manifest, the predicate and the guard were **removed** rather than left
+failing: a predicate that can never pass blocks every future capture at `verify`,
+which is worse than having no fixture at all.
+
+**A node reboot does not write `ContainerStatusUnknown` either, and the brief that
+said so was quoting D90.** Superseded by the measurement one day later
+([`reports/2026-08-16-terminated-record-stamps-and-authors.md`](reports/2026-08-16-terminated-record-stamps-and-authors.md)
+§ 2, which the `STATUS_LOST` doc comment already carried): containerd's state
+survives the reboot, the containers are *found* dead, and
+`internal/cri/server/restart.go:353-357` writes `(255, "Unknown")` — which is
+`Ending::CodeUnknown`, not `Ending::Unwatched`. `crictl rmp -f` on the sandbox
+is `ContainerStatusUnknown`'s producer and a reboot is not. Caught by `tester`
+against the PM's brief, *before* the predicate was written; one aimed at the
+unmeasured shape would have burned the timeout and then failed a fixture that was
+correct all along. **So `broken-reboot` retires the `CodeUnknown` plant, not the
+`Unwatched` one** — the object the box asked for, answering a different rule than
+the box thought it would.
+
+**What landed, and what each bought — which is less than "four plants retired",
+and the difference is worth writing down.** A capture retires a plant only when it
+carries the *whole* shape the plant was standing in for. Three of these four do
+not, and the plants stay beside a new test that reads the real bytes:
+
+| pod | the bytes | what it bought |
+|---|---|---|
+| `broken-probe0` | a liveness kill the program reported as `exit 0`, on a run of **32s** | **a plant retired** — `each_ending_sends_the_reader_somewhere_the_answer_can_be`'s long arm was `exit0.json` with `startedAt` moved by hand. The *other* `PROBE_FLOOR` plant stays: it needs rule 1's card, and `probe0` draws rule 5's |
+| `broken-reboot` | three restarts a node caused, on a container serving now: `(255, "Unknown")` | `Ending::CodeUnknown` is captured, and `CODE_UNKNOWN`'s doc claim that no committed capture reaches it was false and is corrected. The CRI-O `-1` half stays source-derived |
+| `broken-neverrules` | restarted under `Never` by a rule on its own exit code | `stopped_for_good`'s `restarts != 0` guard gets its first object, and a test that asserts the silence *and* attributes it — the count moved to 0 on a decoded copy makes the card appear |
+| `broken-gang` | `{137, RestartingAllContainers}`, no stamps, on **both** containers, beside a live `startedAt` | **both `RESTART_ALL` plants stay**, and that is the honest outcome: this is a *settled* gang restart, and the parked shape one of them is about lives in `state.waiting` for about two seconds a cycle. A captured test sits beside them |
+
+**The gang object confirmed D100's own reading on first contact**: the synthesized
+record lands in *every* container's `lastState`, the trigger's included, so no card
+drawn off that reason may call this container the innocent one. Both containers
+settled at `restartCount: 3`, `2/2 Ready`.
+
+**A crash loop has two faces, the capture predicates always knew it, and the tests
+did not.** `scripts/cluster.sh`'s `[crashloop]`, `[init]` and `[owned]` each read
+`waiting: CrashLoopBackOff` **or** `state.terminated`, with the measurement beside
+them — sampled 70 times, the container was terminated 39 and waiting 29, and
+demanding the waiting reason is called *the too-tight half* there. This trip's
+captures landed on the other face from the last one's, and 56 tests went red: they
+had been pinned to whichever face the previous capture happened to hold. **The
+bytes were right and the assertions were over-fitted**, so what changed is the
+tests — where a test's subject is an action or a grouping it now selects by
+ending, container and position rather than by the face, which is the shape rule
+3's `ErrImagePull || ImagePullBackOff` already had.
+
+**And the second face was hiding a live defect in rule 13.**
+`nothing_else_to_point_at` counted a container as something to point at only when
+it was `Running`, or `Waiting` with a reason — so a container in
+`state.terminated` counted as neither. On `broken-init` *between* runs, rule 13
+therefore drew *"This pod was given a machine to run on, but it has not been able
+to start · container `app`"* while rules 1, 5 and 6 drew the true card about
+`migrate` one row down: D27's blind spot inverted, live for the ~56% of a crash
+loop that sits in `terminated`, and invisible for as long as the corpus held only
+the other face. The title is the argument for the fix — *has not been able to
+start* is false of a pod holding a container that ran and stopped.
+
+**And the first fix for it was too broad, which the operator review caught by
+running the shape the rule exists for.** Counting *any* `Terminated` container as
+something to point at silences rule 13 on a pod whose init containers **finished**
+and whose main container then cannot be created — a hung image pull, an
+unresponsive containerd, an Istio or `vault-agent-init` sidecar pod. The kubelet
+keeps writing `PodInitializing` onto the regular containers for as long as the pod
+declares init containers at all (`hasInitContainers` is
+`len(pod.Spec.InitContainers) > 0`, nothing about whether they finished —
+`kubelet_pods.go:2119-2125`, `:2499-2501`), and every other rule leaves: 10 and 14
+on `PodScheduled: True`, 1/5/6 on the `lastState` a finished init container does
+not have, 7 on `Running`. Fourteen hours in, `analyze` returned **nothing**. What
+ships is the narrow clause — `Terminated(run) if ending(run) != Ending::Finished`
+— which keeps the original fix (`broken-init` between runs still draws no rule-13
+card, the whole-capture count stays 24) *and* keeps this card. **The clause that
+matters is the clean exit**: a pod whose init step succeeded did get that far, so
+its silence is earned; one whose container ran and *failed* has something better
+to point at. Three states were each measured red or green rather than two.
+
+**Re-pinning `now` is an edit in two ownership rows, and the second one is a
+guard.** The corpus moved to `2026-08-17T00:00:00Z` (midnight after the newest
+capture, the pin's own rule). `src/rules_tests/snapshot.rs` is `dev-core`'s;
+`scripts/certs-test.sh` extracts that same pin and refuses to disagree with it, and
+it is `tester`'s. A repin that stops at the first file is a red build in somebody
+else's tree — which is the guard working, and it is written into both files so the
+next person meets the note before the failure.
+
+**Two findings the run produced that the trip did not fix**, both in
+[`backlog.md`](backlog.md) rather than boxed into a running phase: `assert_states`'
+report pass re-fetches and can therefore contradict the wait loop it just ran — a
+false red on any state that is transient by design, which cost one whole slow pass
+— and rule 5's finishing endings, above. Neither is folded in, because
+`assert_states` is the shared helper every state runs through and CLAUDE.md keeps
+a shared-helper change per box.
 
 ## Decisions made
 

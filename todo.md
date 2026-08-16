@@ -1182,7 +1182,7 @@ that cites them expects to find them.
       Closed — a rule may, under three constraints: it reorders and never
       deletes, the fact must already be on the card, and the threshold is derived —
       [D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)
-- [ ] **The clean-exit boxes left three objects no cluster has produced for us**,
+- [x] **The clean-exit boxes left three objects no cluster has produced for us**,
       and two of them are one command each. **(a)** A probe kill that reports
       `exit 0` — the premise of the first clause on two arms of two rules, and
       nothing in the repo holds one. `scripts/broken.yaml`'s `broken-sigterm` is
@@ -1199,7 +1199,14 @@ that cites them expects to find them.
       container declares a `restartPolicyRules` entry matching its own exit code,
       which the kubelet then restarts — rule 15's named false positive, and the
       one object the `restartPolicyRules` box below cannot be written without.
-      Four objects, one trip
+      Four objects, one trip.
+      Closed — `probe0.json` (a probe kill reported as `exit 0`, on a 32s run),
+      `reboot.json`, `neverrules.json` and D100's `gang.json` are captured and
+      guarded; **(b) is not reachable at all** — the kubelet publishes
+      `waiting: CrashLoopBackOff` only for an init container it is waiting to
+      retry, and one that exited 0 is finished, so the plant stays permanently —
+      and a node reboot writes `(255, "Unknown")`, not the reason D90 named —
+      [D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16)
 - [ ] **`crash_looping`'s `if c.restarts > 0` survives every mutation run** —
       `cargo mutants` reports it MISSED at HEAD and in every round of the
       clean-exit box, in three different line positions, so it is neither new
@@ -1538,6 +1545,31 @@ Goal: the cluster-wide answers no per-object rule can give. Pure functions
 over a `ClusterSnapshot`, so this phase is as testable as Phase 3 and needs no
 cluster either.
 
+- [ ] **Rule 6 and rule 15 disagree about which run is "the last", and the
+      capture trip put the disagreement on a card.** Rule 15's condition table
+      calls `lastState` *the run before this one*; rule 6 titles that same field
+      **"The last run on record failed"**. When a container is sitting in
+      `state.terminated`, `lastState` is the *second to last* run — and
+      `neverrules.json` is the first committed capture where the two differ, so
+      the card is wrong out loud: it draws *"The last run on record failed —
+      exit 3"* about `retry`, which is stopped for good at **exit 1**. Worse for
+      the reader than a wrong number: `--previous` resolves through
+      `lastState.terminated.containerID`, so the command the card hands them
+      returns *"cannot reach the license server, retrying"* while the container's
+      actual last words, *"giving up"*, are what plain `kubectl logs` would
+      return. The generic case is `restartPolicy: OnFailure` — a container that
+      failed once, then exited 0 and sits terminated beside a running sibling,
+      about which rule 6 says the last run failed. `oom`, `notfound` and `init`
+      are all in that face now and only read correctly because both their runs
+      are identical, which is luck and not a design. Found by the operator review
+      of the capture trip
+      ([D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16));
+      boxed here rather than folded in because it needs a decision that box did
+      not make — whether rule 6 reads `state.terminated` when the container is
+      currently terminated, and what that does to rule 15's table and to
+      `one_card_per_action`. Done-when: the card names the run it is actually
+      about on `neverrules.json`, the command beside it reaches that run's log,
+      and a test holds both
 - [ ] **`scripts/check-docs.py` fails on a `### D##` heading with no line in
       NOTES § Decision index** — `tester`'s box, and it closes the one hole
       [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)

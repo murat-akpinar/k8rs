@@ -2235,6 +2235,12 @@ fn ending(run: &Terminated) -> Ending {
 /// `logs --previous` works here. It is the commonest abnormal `lastState` a cluster produces, and
 /// every card about it read as the application's own failure until 2026-08-16.
 ///
+/// **Captured since 2026-08-16** (NOTES § D114): `reboot.json` is that measurement committed —
+/// `broken-reboot`'s container carries `exitCode: 255` / `reason: "Unknown"` in `lastState` with
+/// both stamps and a `containerID`, taken by rebooting the worker under it
+/// (`scripts/cluster.sh` § `break-runtime`, § `[reboot]`). The `255` half of this pair is
+/// therefore read off a real cluster now and not synthesized.
+///
 /// **CRI-O writes `-1` / `"Error"` for the same event, and [`ending`] keys that one on the code
 /// alone.** `server/container_status.go:107-130` at `cri-o/cri-o` `main`: where the exit code
 /// cannot be determined it reports `ExitCode: -1` with `errorReason` and the runtime's own error
@@ -2814,9 +2820,14 @@ fn failed_run_action(run: &Terminated, role: ContainerRole) -> (&'static str, bo
 /// probes and both limits, init containers included, which is the rest of the sentence
 /// (invariant 4; asked and answered three times in this area, so it is written down here).
 ///
-/// **`startup.json` is the captured `Regular` arm** — a `startupProbe` that never passes, killed
-/// at the grace period. **No committed capture reaches the `Init` arm**; it is proved on a
-/// decoded plant off `healthy-retry.json` (NOTES § D40).
+/// **Neither arm is captured, and the `Regular` one stopped being on 2026-08-16** (NOTES § D114).
+/// `startup.json` was its bytes — a `startupProbe` that never passes, killed at the grace
+/// period — but that probe's first kill lands an hour in and the recapture was taken at ~30
+/// minutes, so the capture now carries `restartCount: 0` and no previous run at all. **No
+/// committed `137` reaches this function**: every one in the corpus is labelled by something that
+/// routes elsewhere — `OOMKilled` on `oom`/`oomserving`, `RestartingAllContainers` on `gang`,
+/// `ContainerStatusUnknown` on `failed`. Both arms are decoded plants, the `Regular` one off
+/// `startup.json` and the `Init` one off `healthy-retry.json` (NOTES § D40).
 fn killed_action(role: ContainerRole) -> &'static str {
     match role {
         ContainerRole::Regular | ContainerRole::Sidecar => {
@@ -3458,12 +3469,23 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 /// **Both halves of the band are captured**: `restarts10.json` is past ten restarts and not
 /// serving, and `restarts10serving.json` is the same count on a container that is — read at a
 /// moment inside its run, since at the pinned `now` it has been serving 49 hours and the clause
-/// above has stood it down. **No ending but [`Failed`](Ending::Failed) is**, and no committed
-/// capture reaches one: every captured restart history exits non-zero, and the two objects that do
-/// end cleanly — `exit0.json` and `sigterm.json` — are in `CrashLoopBackOff`, which is this rule's
-/// own exemption. The others are synthesized on decoded copies (NOTES § D40). **No committed
-/// capture holds [`RESTART_ALL`] in `state.waiting` either** — that object is on the capture trip
-/// (NOTES § D100), so the new exemption is proved on a decoded copy and not on bytes.
+/// above has stood it down.
+///
+/// **Two endings are captured and the rest are built** (NOTES § D114). [`Failed`](Ending::Failed)
+/// is, all over the corpus. [`Finished`](Ending::Finished) is, since 2026-08-16: `probe0.json`
+/// reaches thirteen restarts by *finishing* — `exit 0` / `Completed`, a 32-second run — and is
+/// then `Running` and **out** of `CrashLoopBackOff`, which is what this rule needs and what
+/// `exit0.json` and `sigterm.json` cannot give it, both of them sitting in the backoff this rule
+/// exempts. **[`Stopped`](Ending::Stopped) is still owed** — the same shape reached by an
+/// `exit 143` — and the remaining endings are synthesized on decoded copies (NOTES § D40).
+///
+/// **No committed capture holds [`RESTART_ALL`] in `state.waiting`, and the 2026-08-16 trip did
+/// not change that** (NOTES § D114). `gang.json` is a real `RestartAllContainers` firing, but it
+/// is the **settled** state: both containers are back `Running` and `ready` with the record in
+/// `lastState`, which is [`previous_run_failed`]'s subject and not this exemption's. The window
+/// this clause exists for is the ~2s the containers are *parked* in `waiting:
+/// RestartingAllContainers`, and a capture would have to be taken inside it — so the exemption
+/// stays proved on a decoded copy.
 fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     // An init container that has finished successfully is out of this rule's subject altogether,
     // not merely a milder case of it: its count is frozen for the life of the pod, and every
@@ -3692,9 +3714,11 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 /// `sigterm.json`, on containers that are *not* serving, so the exemption rather than
 /// [`doing_its_job`] is what silences them — and `notfound.json` reaches the `126`–`128` action
 /// with no termination message beside it, which `restarts10.json`'s bare `exit 1` and
-/// `init.json`'s are the general *read the logs* arm beside. **`startup.json` reaches the `137`
-/// arm**, whose kill came from outside the application: the general arm sent that reader hunting
-/// an error the container never logged (NOTES § D85).
+/// `init.json`'s are the general *read the logs* arm beside. **No committed capture reaches the
+/// `137` arm** — see [`killed_action`] for why, and it held `startup.json`'s bytes until the
+/// 2026-08-16 recapture (NOTES § D114) — so it is a plant, and the arm exists because that kill
+/// came from outside the application: the general arm sent that reader hunting an error the
+/// container never logged (NOTES § D85).
 ///
 /// **`137` means four things and this rule draws two of them** ([`exit_meaning`],
 /// [`killed_action`], NOTES § D90, § D93). `OOMKilled` and [`RESTART_ALL`] never arrive — both
@@ -3745,10 +3769,15 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 /// reader after *the application's own error* on a number the application never chose, which is
 /// the commonest abnormal `lastState` a cluster produces.
 ///
-/// **No committed capture reaches [`STATUS_LOST`], [`RESTART_ALL`], [`CODE_UNKNOWN`] or the
-/// `Init` side of [`killed_action`]** — the first three were measured on a kind v1.36.1 cluster
-/// and never captured, the fourth needs an init container killed from outside. All are proved on
-/// decoded plants off committed captures (NOTES § D40).
+/// **Two of the four shapes this rule could not read off a capture now can** (NOTES § D114). The
+/// 2026-08-16 trip committed `reboot.json` for [`CODE_UNKNOWN`] — `exit 255` / `"Unknown"` from a
+/// rebooted worker — and `gang.json` for [`RESTART_ALL`], a real `RestartAllContainers` rule
+/// firing, record and null stamps included.
+///
+/// **[`STATUS_LOST`] and the `Init` side of [`killed_action`] stay plants**, and they are not the
+/// same kind of gap: the first was measured on kind v1.36.1 and never captured, the second needs
+/// an init container killed from outside. Both are proved on decoded plants off committed
+/// captures (NOTES § D40).
 fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     let run = c.last_terminated.as_ref()?;
     // `OOMKilled` is rule 2's card and is exempted by its reason: it is a kill, so it stays
@@ -4408,10 +4437,50 @@ const WAITING_ON_A_SIBLING: &str = "PodInitializing";
 /// A container that is `Running` is something to wait for; a container carrying a reason of its
 /// own is something to point at, whoever owns that reason, and the card for it is that rule's
 /// (NOTES § D76).
+///
+/// **A container stopped in a run that *failed* counts too, and leaving it out was a defect on
+/// half of every crash loop** (NOTES § D114). A crash-looping container alternates between
+/// `waiting: CrashLoopBackOff` — which this function has always counted, through
+/// [`EXPLAINED_ELSEWHERE`] — and the `terminated` run it has just left, which it did not; measured
+/// on kind v1.36.1, `state.terminated` is the more common of the two (39 samples of 70,
+/// `scripts/cluster.sh` § `[owned]`). So `init.json` answered this question *differently
+/// depending on which half of the loop the capture caught*: in backoff, silence; between runs,
+/// rule 13 drew a card naming the **app** container and told the reader the machine had not said
+/// which step it was on — while rules 1, 5 and 6 were drawing the real card about the init
+/// container one row down. That is D27's blind spot in the other direction, and the pod's own
+/// evidence never changed.
+///
+/// **[`Ending::Finished`] is excluded from that clause, and the exclusion is the whole wedge this
+/// rule exists for** (NOTES § D114). An init container that succeeded is `Terminated` for the rest
+/// of the pod's life, and the kubelet keeps writing [`WAITING_ON_A_SIBLING`] onto the regular
+/// containers for exactly as long as the pod *declares* an init container — `hasInitContainers`
+/// is `len(pod.Spec.InitContainers) > 0` and nothing about whether they finished
+/// (`kubelet_pods.go:2119-2125`, `:2499-2501`, v1.36). So counting every `Terminated` container
+/// silenced rule 13 on the Istio / `vault-agent-init` / migration pod whose init containers
+/// completed and whose main container then could not be created: rules 10 and 14 leave on
+/// `PodScheduled: True`, rules 1, 5 and 6 need a `lastState` a finished init container has not
+/// got, and rule 7 needs `Running` — so [`analyze`] returned nothing at all about a pod fourteen
+/// hours dead. A success is not something to point the reader at.
+///
+/// **[`Ending::Finished`] alone, and the residual is named rather than assumed.** The same title
+/// argument reaches [`Ending::Stopped`] — a container asked to stop and obeying *did* start — and
+/// a `143` beside nothing but [`WAITING_ON_A_SIBLING`] therefore reaches the same total silence
+/// this fix was about: measured on a decoded copy of `healthy.json`, `bare` is `false` and
+/// [`analyze`] returns nothing. Widening the exclusion is what would give that pod a card, and it
+/// is not done here because no capture or measurement produces the shape — widening a silence on
+/// reasoning alone is how this clause came to be wrong in the first place.
+///
+/// **The title is the argument, as it is for [`is_running`].** *"has not been able to start"* is
+/// false about a pod holding a container that ran and failed; that container started. The two
+/// clauses are the same claim about two states, which is why they sit in one function rather than
+/// as a state check and a special case — and it is the same claim that stops at a clean exit,
+/// because a pod whose init step succeeded *did* get that far.
 fn nothing_else_to_point_at(pod: &PodSnapshot) -> bool {
-    !pod.containers
-        .iter()
-        .any(|c| is_running(c) || waiting(c).is_some_and(|(r, _)| r != WAITING_ON_A_SIBLING))
+    !pod.containers.iter().any(|c| {
+        is_running(c)
+            || matches!(&c.state, ContainerState::Terminated(run) if ending(run) != Ending::Finished)
+            || waiting(c).is_some_and(|(r, _)| r != WAITING_ON_A_SIBLING)
+    })
 }
 
 /// **Is this container up right now?** — [`ContainerState::Running`] and nothing about readiness,

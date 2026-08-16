@@ -72,6 +72,29 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   interesting half is what the allowlist is: `main.rs` will need `expect` on the
   terminal restore, so the rule is *not zero*, it is *named and argued*.
   2026-08-16.
+- **`assert_states`' report pass re-fetches, so it can contradict the wait loop
+  it just ran.** The loop drops a name from `pending_list` the moment its
+  predicate holds; the report then samples the object *again* and prints
+  PASS/FAIL off the second sample. On a fixture whose state is transient by
+  design that is a false red: on 2026-08-16 `[crashloop]` failed the report while
+  passing 3/3 live seconds later, because the re-sample landed in the ~2s window
+  where the container is up — the window that predicate's own comment says it
+  deliberately excludes. `set -e` then ended the run before the slow pass, so one
+  race costs the whole 26-minute climb. The bias is toward a false red and never
+  a false green, which is the safe direction, and the fix is to report the loop's
+  own verdict rather than a fresh sample. Not taken during the capture trip that
+  found it: `assert_states` is the shared helper every state runs through, and
+  CLAUDE.md keeps a shared-helper change per-box. 2026-08-16.
+- **Rule 5 reaches its band only through endings that failed, and the two that
+  finish are still plants.** `src/rules_tests/pod.rs`'s `restarts10_ending` names
+  it exactly: a container that reaches `RESTARTS_WARN` by *finishing* — `exit 0`,
+  and a second on `exit 143` — and is then **running** and out of
+  `CrashLoopBackOff`. `restarts10.json`'s own `spec` is one character away
+  (`[ "$n" -le 10 ] && exit 1`), so the manifest is known; what it costs is two
+  more pods on the 26-minute backoff climb. Ruled out of the 2026-08-16 capture
+  trip by the PM as a different rule's subject
+  ([D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16)),
+  which is what makes it phaseless rather than owed. 2026-08-16.
 - **`PRIOR-ART.md`'s gaps that no ruling has boxed.** The file is evidence and
   never a plan, and a gap becomes a box only by a decision
   ([D89](NOTES.md#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14)

@@ -4,16 +4,32 @@ use super::*;
 
 // --- C1, THE ONE CARD ABOUT THE READER'S OWN MACHINE ---
 //
-// Three committed certificates, whose dates are pinned and asserted by
-// `scripts/certs-test.sh` against the same instant [`now`] spells — 20 days left, 361
-// days left, 7 days past. That script also refuses to let this file and itself disagree
-// about that instant, so the numbers below are guarded rather than transcribed.
+// Three committed certificates, whose `notBefore` and `notAfter` are pinned and asserted
+// by `scripts/certs-test.sh` against the same instant [`now`] spells — 19 days left, 360
+// days left, 8 days past. That script also refuses to let this file and itself disagree
+// about that instant, so a pin moved in one and not the other is a red guard.
 //
-// **The three numbers moved with the pin on 2026-08-16 and the certificates did not**
-// (NOTES § D97). Their `notBefore` and `notAfter` are absolute, so a repin changes what
-// the counts are *at* the pin and nothing about the committed bytes — and both fixtures
-// stay on the side of [`CERT_EXPIRY_WARN`] they were made for, which is the property that
-// would have forced a regeneration if it had failed.
+// **What is guarded is the assertions, and a day-count written into prose is not one**
+// (NOTES § D114). Nothing compares a comment to the script's output, so the three counts
+// above are transcribed — and they are therefore the **only** place below this line where a
+// count taken *at the pin* is written in prose. Every other comment names the committed
+// deadline instead (`2026-09-05`, `2027-08-12`, `2026-08-09`, absolute bytes a repin does
+// not move) or a distance inside its own table, which the pin does not reach. Three prose
+// counts in this file were found stale on 2026-08-16, each having survived the repin that
+// made it wrong and one of them two, which is the drift this convention exists to stop.
+//
+// **The three numbers move with the pin and the certificates do not** (NOTES § D97) —
+// once on 2026-08-16 and again on 2026-08-17, when the capture trip that added the four
+// pod fixtures pushed the pin a day. Their `notBefore` and `notAfter` are absolute, so a
+// repin changes what the counts are *at* the pin and nothing about the committed bytes —
+// and both fixtures stay on the side of [`CERT_EXPIRY_WARN`] they were made for (19 days
+// is inside the 30-day window, 360 days is outside it), which is the property that would
+// have forced a regeneration if it had failed.
+//
+// **A repin is therefore an edit in two ownership rows.** The three numbers above and the
+// three in `scripts/certs-test.sh` are one fact, and that script's `now=` line is compared
+// against `fn now()` on every `just check` — so a pin moved here without moving there is a
+// red guard, not a silent drift.
 //
 // **What no committed fixture can reach is built from bytes here**, and the reason is
 // not convenience: `tests/fixtures/certs/` is a closed set — `certs-test.sh` fails on
@@ -142,8 +158,8 @@ fn the_kubeconfig_certificate_inside_the_window_says_how_long_the_reader_has() {
          card in Alerts that no screen spec has (NOTES § D87)"
     );
     assert!(
-        card.title.contains("20 days"),
-        "the certificate has 20 days left at the pinned `now` and the card says so — \
+        card.title.contains("19 days"),
+        "the certificate has 19 days left at the pinned `now` and the card says so — \
          `scripts/certs-test.sh` asserts that number against the committed bytes: {}",
         card.title
     );
@@ -196,7 +212,8 @@ fn a_kubeconfig_certificate_a_year_out_says_nothing() {
     ));
     nothing(
         &all,
-        "363 days is not news — a rule that speaks here is one whose screen gets ignored",
+        "a certificate good until 2027-08-12 is not news — a rule that speaks here is one \
+         whose screen gets ignored",
     );
 }
 
@@ -220,7 +237,7 @@ fn an_expired_kubeconfig_certificate_is_a_failure_and_not_a_warning() {
          are read in two places, not because one shouts louder (NOTES § D87)"
     );
     assert!(
-        card.title.contains("expired 7 days ago"),
+        card.title.contains("expired 8 days ago"),
         "past the deadline the sentence changes tense and the number is how long ago: {}",
         card.title
     );
@@ -243,10 +260,10 @@ fn an_expired_kubeconfig_certificate_is_a_failure_and_not_a_warning() {
     );
 }
 
-/// **The threshold, which no committed certificate can prove.** 20 days and 361 days sit
-/// either side of a wide gap, so both fixtures pass any threshold between them; the clock
-/// is the snapshot's field precisely so the same bytes can be read at a chosen moment
-/// (invariant 5, NOTES § D18).
+/// **The threshold, which no committed certificate can prove.** The two run out on
+/// `2026-09-05` and `2027-08-12` — 341 days apart, whatever the pin — so both fixtures pass any
+/// threshold between them; the clock is the snapshot's field precisely so the same bytes can be
+/// read at a chosen moment (invariant 5, NOTES § D18).
 ///
 /// The last two rows are the boundary RFC 5280 §4.1.2.5 sets: a certificate is valid
 /// *through* `notAfter`, so the deadline itself is still inside the window.
@@ -265,8 +282,9 @@ fn thirty_days_is_the_threshold_and_the_deadline_itself_is_not_yet_past() {
     // `expiring-client` runs out at 2026-09-05T00:00:00Z (`scripts/certs-test.sh`), so the
     // first two rows are the day either side of the threshold: 31 days out is silence and
     // 30 days out is the card. Written as 31 days first and caught red — the window is
-    // closed at the far end, and a rule that fired a day early would have passed a table
-    // that only ever asked about 22 and 363.
+    // closed at the far end, and a rule that fired a day early would have passed every
+    // other test in this file: they read the two committed certificates at the pin, and
+    // both sit hundreds of days from the day either side of the threshold.
     for (moment, expected) in [
         ("2026-08-05T00:00:00Z", None),
         ("2026-08-06T00:00:00Z", Some(("30 days", Severity::Info))),
@@ -319,7 +337,7 @@ fn thirty_days_is_the_threshold_and_the_deadline_itself_is_not_yet_past() {
 #[test]
 fn a_certificate_that_never_expires_draws_no_card_rather_than_panicking() {
     for (not_after, expected) in [
-        (b"20260901000000Z", Some("16 days")),
+        (b"20260901000000Z", Some("15 days")),
         (b"99991231235959Z", None),
     ] {
         let der = certificate_expiring_at(&tlv(0x18, not_after));

@@ -8,19 +8,25 @@
 #   ./scripts/cluster.sh up          create the cluster
 #   ./scripts/cluster.sh break       apply the deliberately broken pods
 #   ./scripts/cluster.sh verify      assert each pod reached the state its rule needs
+#   ./scripts/cluster.sh break-runtime reboot a node out from under a container
+#                                    that never crashed, and assert it
 #   ./scripts/cluster.sh break-nodes cordon / taint / stop a kubelet, and assert it
 #   ./scripts/cluster.sh status      nodes, demo pods, memory
 #   ./scripts/cluster.sh unbreak     remove them (clears the stuck finalizer,
-#                                    uncordons, untaints, restarts the kubelet)
+#                                    uncordons, untaints, starts a node whose
+#                                    container is stopped, restarts the kubelet)
 #   ./scripts/cluster.sh reset       down + up + break
 #   ./scripts/cluster.sh down        delete the cluster
 #
-# `break-nodes` is deliberately not part of `break`, and it runs *after* the pod
-# fixtures have been captured: it makes one node unschedulable, evicts whatever
-# does not tolerate a NoExecute taint from a second, and kills the kubelet on a
-# third. Any of those changes a pod fixture that is still being settled, so
-# `verify` runs before it and the node capture after it (see the `fixtures`
-# recipe in the justfile, which is the only caller that gets the order right).
+# `break-runtime` and `break-nodes` are deliberately not part of `break`, and
+# both run *after* the pod fixtures have been captured. `break-runtime` reboots
+# the node one pod is on; `break-nodes` makes one node unschedulable, evicts
+# whatever does not tolerate a NoExecute taint from a second, and kills the
+# kubelet on a third. Any of those changes a pod fixture that is still being
+# settled — a reboot alone raises `restartCount` on every pod on that worker — so
+# `verify` runs before them, the two run in that order, and the node capture
+# comes last (see the `fixtures` recipe in the justfile, which is the only caller
+# that gets the order right).
 #
 # This is todo.md Phase 1's `just cluster-up` / `cluster-down`, pulled forward
 # because the design needed a real cluster to check its assumptions against.
@@ -328,6 +334,23 @@ unbreak() {
   # the output say which it was.
   local w state undone=0
   for w in $(workers 2>/dev/null); do
+    # The one residue `break-runtime` can leave, and it is checked before
+    # anything that goes through the API server: `docker restart` is a stop and a
+    # start, so a run that died between the two leaves a node container that is
+    # simply not running. Every `docker exec` below would then fail with the
+    # message about a denied socket, which is the wrong fact — and the kubelet
+    # step in particular would report a stopped kubelet on a machine that is not
+    # switched on. Read first and started only where there is something to start,
+    # like the undos beneath it.
+    if [ "$(docker inspect -f '{{.State.Running}}' "$w" 2>/dev/null)" = "false" ]; then
+      if docker start "$w" >/dev/null; then
+        echo "  started $w — its container was stopped, which is a break-runtime reboot that did not finish"
+        undone=$((undone + 1))
+      else
+        echo "  $w exists as a container and will not start; nothing below can reach it either:" >&2
+        echo "  docker start $w" >&2
+      fi
+    fi
     state=$("${kc[@]}" get node "$w" -o json 2>/dev/null) || {
       echo "  $w is not answering — the API server cannot see it, so nothing here can be undone through it" >&2
       continue
@@ -404,13 +427,23 @@ POD_STATES=(oom crashloop image config pending hostpath readiness restarts
             nolimits stuck init quota w2 owned resize podlimit sts rollout ds
             healthy_init healthy_sidecar healthy_hostpath healthy_podlevel
             exit0 sigterm socket succeeded failed startup notfound wedged
-            unjudged oomserving neverback healthy_retry healthy_unreadysidecar)
+            unjudged oomserving neverback healthy_retry healthy_unreadysidecar
+            probe0 neverrules gang)
 # The two fixtures that cost more than every other one put together, split out
 # so that a failure in the fast set is reported in the usual few minutes instead
 # of behind a half-hour wait. See `verify` for the arithmetic — there is no
 # mechanism that raises a restart count faster than the kubelet's own backoff
 # lets it rise.
 SLOW_POD_STATES=(restarts10 restarts10serving)
+# The one state whose producer is the machine under the pod and not the pod: a
+# node rebooted out from under a container that never crashed. `break-runtime`
+# makes it and asserts it, the way `break-nodes` does the node set — and for the
+# same reason it is a subcommand of its own: it is destructive to whatever else
+# is on that worker, so it may not run before the pod captures are on disk.
+# (An array of one, not a scalar: `assert_states` takes a list, and the reboot
+# stopped being one of two only because D90's Init arm was measured unreachable
+# — see the header of scripts/broken.yaml's last section.)
+RUNTIME_STATES=(reboot)
 NODE_STATES=(cordoned tainted notready)
 
 declare -A want=(
@@ -442,7 +475,13 @@ declare -A want=(
   [restarts]='.status.phase=="Running" and (.status.containerStatuses[0] | .ready==true and .restartCount>=3)'
   [nolimits]='.status.phase=="Running" and (.spec.containers[0].resources.limits==null)'
   [stuck]='.status.phase=="Running" and ((.metadata.finalizers//[])|length)>0'
-  [init]='([.status.initContainerStatuses[]?|select(.state.waiting.reason=="CrashLoopBackOff" or .lastState.terminated.exitCode==1)]|length)>0'
+  # The same two clauses as [crashloop] and [owned], on the init list — an exit 1
+  # already behind it *and* not up right now. It used to say "waiting
+  # CrashLoopBackOff **or** exit 1 behind it", whose second half says nothing
+  # about the current state: the ~2s window [owned]'s comment measures excluded
+  # was let straight through, and so was `healthy-retry`, whose init container
+  # carries exactly that history and finished.
+  [init]='([.status.initContainerStatuses[]?|select(.lastState.terminated.exitCode==1 and (.state.waiting.reason=="CrashLoopBackOff" or .state.terminated.exitCode==1))]|length)>0'
   [quota]='[.items[].status.conditions[]?|select(.type=="ReplicaFailure" and .status=="True")]|length>0'
   [w2]='[.status.conditions[]?|select(.type=="Progressing" and .status=="False" and .reason=="ProgressDeadlineExceeded")]|length>0'
   # Spelled differently from [crashloop] on purpose, and the difference was
@@ -612,6 +651,68 @@ declare -A want=(
   # beside it — started, because a restartable init container must start before
   # the next one runs, and only ready is missing.
   [healthy_unreadysidecar]='.status.phase=="Running" and ([.status.containerStatuses[].ready]|all) and ([.spec.initContainers[]?|select(.restartPolicy=="Always")]|length)>0 and (.status.initContainerStatuses[0] | .ready==false and .started==true and .state.running!=null)'
+  # --- THE THREE THIS TRIP DECLARES (D90, D97, D100) ---
+  # **The duration is in the predicate because the duration is the object.**
+  # `exit0.json` already carries a clean exit on a container that is not serving;
+  # what it does not carry is a run on the far side of `PROBE_FLOOR` (20s), and
+  # `finished_action` orders its doors by exactly that comparison (NOTES § D113).
+  # A `broken-probe0` whose kill landed early is `exit0.json` again under a new
+  # name. `> 25` and not `> 20`: the manifest's probe fires at 30s, so this
+  # leaves five seconds of slack on both sides and fails loudly if that field is
+  # ever tuned down into the arm this fixture is not for.
+  #
+  # The subtraction is written to be **total**, not merely correct on the object
+  # it is about: `fromdateiso8601` is a hard jq error on null, and jq's own error
+  # exit is indistinguishable to `assert_states` from a state that has not
+  # arrived — so a missing stamp has to arrive here as `false` and not as a
+  # 420-second wait ending in a message about the wrong thing. The epoch default
+  # does that, and it makes a record with only one stamp negative rather than
+  # enormous. `Completed` beside the `0`, because that is the reason the kubelet
+  # writes for a clean exit and a fixture that lost it is a fixture whose
+  # `exit_meaning` row is no longer being exercised.
+  [probe0]='.status.containerStatuses[0] | .restartCount>=1 and .ready==false and .lastState.terminated.exitCode==0 and .lastState.terminated.reason=="Completed" and ((((.lastState.terminated.finishedAt // "1970-01-01T00:00:00Z")|fromdateiso8601) - ((.lastState.terminated.startedAt // "1970-01-01T00:00:00Z")|fromdateiso8601)) > 25)'
+  # Rule 15 reads `state.terminated` — the run the container is in **now** — so
+  # this asserts the *settled* run and not the loop: `retry` stopped at exit 1,
+  # which no rule of its own matches, and the count behind it is the restart the
+  # `exit 3` rule bought. Every one of rule 15's four conditions is named except
+  # the one under test, which is the point of the object: pod `Never`, terminated,
+  # a failing ending — and `restartCount == 1`, the guard that is all that stands
+  # between this pod and a card saying nothing will start it again.
+  #
+  # The rule itself is read out of the spec rather than assumed from the count,
+  # because the count alone is `broken-restarts` with a different policy: the
+  # field this fixture exists to put on disk is `restartPolicyRules`, and a
+  # capture that lost it would still satisfy every other clause here.
+  # `exitCodes.values` is checked by membership rather than equality — `[3]` and
+  # `[3,4]` are the same rule as far as this object is concerned.
+  [neverrules]='.spec.restartPolicy=="Never" and .status.phase=="Running" and ([.spec.containers[]?|select(.name=="retry" and ([.restartPolicyRules[]?|select(.action=="Restart" and .exitCodes.operator=="In" and (.exitCodes.values|index(3)!=null))]|length)>0)]|length)==1 and ([.status.containerStatuses[]?|select(.name=="retry" and .restartCount==1 and .state.terminated.exitCode==1)]|length)==1 and ([.status.containerStatuses[]?|select(.name=="keeper" and .state.running!=null)]|length)==1'
+  # D100's settled gang restart, and the two null stamps are asserted as
+  # deliberately as the reason is: the record is **synthesized** by the kubelet
+  # rather than observed, which is why rule 5's age has to come from
+  # `state.running.startedAt` instead — a capture whose `lastState` carried real
+  # stamps would be a different object and would retire nothing.
+  #
+  # Both containers are held to running, ready and past `RESTARTS_WARN`, and the
+  # reason is demanded of only **one**: what the kubelet writes into the
+  # triggering container's own record is measured one way (NOTES § D93) and is
+  # not what this fixture is for — the sibling that was restarted *for* somebody
+  # else's exit is. Asserting it of both would fail a correct capture; asserting
+  # it of none would pass a capture of any restarting pod at all.
+  [gang]='.status.phase=="Running" and ([.status.containerStatuses[].ready]|all) and ([.status.containerStatuses[]?|select(.state.running.startedAt!=null and .restartCount>=3)]|length)==2 and ([.status.containerStatuses[]?|select(.lastState.terminated.exitCode==137 and .lastState.terminated.reason=="RestartingAllContainers" and .lastState.terminated.startedAt==null and .lastState.terminated.finishedAt==null)]|length)>0 and ([.spec.containers[]?|select([.restartPolicyRules[]?|select(.action=="RestartAllContainers")]|length>0)]|length)==1'
+  # --- THE ONE break-runtime MAKES ---
+  # Rule 5's producer without rule 1's: up, serving, and restarted anyway.
+  #
+  # **`255` / `Unknown` and not `137`, and it is measured rather than argued.**
+  # `docker restart` on the node container was run twice — an 11-second outage
+  # and a three-minute one — and both wrote
+  # `exitCode: 255, reason: Unknown` from containerd's own restart path
+  # (`reports/2026-08-16-terminated-record-stamps-and-authors.md` § 2,
+  # `internal/cri/server/restart.go`). `137` with `ContainerStatusUnknown` is the
+  # **other** producer, `crictl rmp -f` on the sandbox, which is what `rules.rs`
+  # says beside `STATUS_LOST` in as many words. Naming both here would pass a
+  # capture from either and leave the fixture unable to say which ending it is
+  # for: this one is `Ending::CodeUnknown`.
+  [reboot]='.status.phase=="Running" and (.status.containerStatuses[0] | .ready==true and .state.running!=null and .restartCount>=3 and .lastState.terminated.exitCode==255 and .lastState.terminated.reason=="Unknown")'
 )
 
 declare -A why=(
@@ -656,6 +757,10 @@ declare -A why=(
   [neverback]="D96 — stopped for good under restartPolicy Never, in a pod still Running (with its own clean-exit negative beside it)"
   [healthy_retry]="D75 — the wait-for-dependency init loop that finished: rules 5 and 6 must be silent"
   [healthy_unreadysidecar]="D75 — a sidecar running but not ready: rule 7 is regular containers only"
+  [probe0]="D90/D113 — a probe kill the program reported as exit 0, on a run past the 20s probe floor"
+  [neverrules]="D97 — restarted under restartPolicy Never by a rule on its own exit code: rule 15's false positive"
+  [gang]="D100 — a settled gang restart: 137/RestartingAllContainers with no stamps, beside a live startedAt"
+  [reboot]="D90 — a restart count raised by a node reboot: rule 5's producer, on a container that never crashed"
 )
 # --- PREDICATES END ---
 
@@ -790,6 +895,86 @@ verify() {
   assert_states "${SLOW_POD_STATES[@]}"
 }
 
+# broken-reboot's restart count, or `0` while the object cannot be read at all.
+# Its own function because the loop below reads it three times a pass and an
+# empty string in an arithmetic test is a syntax error rather than a zero — which
+# is exactly what a `kubectl get` against a node that is still coming back
+# returns.
+reboot_restarts() {
+  local n
+  n=$(kubectl --context "kind-$CLUSTER" get pod broken-reboot \
+        -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null) || n=
+  echo "${n:-0}"
+}
+
+# The one state whose producer is the machine and not the manifest (NOTES
+# § D90). One knob, `K8RS_RUNTIME_TIMEOUT` (default 300s), bounds every wait in
+# here — each loop below is a wait on a machine, and a machine that has stopped
+# answering has stopped answering for all of them.
+#
+# It is damage to a **node**, so this runs after every pod capture is on disk and
+# before `break-nodes` — the `fixtures` recipe in the justfile is the only caller
+# that gets the order right.
+#
+# Nothing here needs undoing and `unbreak` grows no step for it: a rebooted node
+# comes back by itself. The one residue is a reboot that died between
+# `docker stop` and `docker start`, which `unbreak` now starts, because a stopped
+# node container is not something the API server can be asked about.
+break_runtime() {
+  need kubectl; need docker; need jq
+  local kc=(kubectl --context "kind-$CLUSTER")
+  local rnode target=3 before deadline
+
+  rnode=$("${kc[@]}" get pod broken-reboot -o jsonpath='{.spec.nodeName}' 2>/dev/null) || rnode=
+  [ -n "$rnode" ] || {
+    echo "break-runtime: broken-reboot has to be scheduled before the node it is on can be" >&2
+    echo "               read off it. The pod comes first:" >&2
+    echo "                 $0 break, then let it schedule." >&2
+    return 1
+  }
+  # docker is the whole of this step, and the only thing in it that can fail on
+  # permissions: `need docker` proves the binary is on PATH and says nothing
+  # about the socket, which is per-login on the machine this runs on. Discovered
+  # here, with the same call that has to work below — a denial found halfway
+  # through leaves a node stopped and the capture unwritten, which is the same
+  # trap `break_nodes` opens with.
+  docker exec "$rnode" true 2>/dev/null || {
+    echo "break-runtime: docker cannot reach the node container $rnode, and a reboot does not" >&2
+    echo "               go through the API server. Refusing before anything is stopped:" >&2
+    echo "               fix docker access (the docker group is per-login here)." >&2
+    return 1
+  }
+
+  # --- THE NODE REBOOT ---
+  # Counted by the object rather than by the loop: `docker restart` returning
+  # says the container came back, not that the kubelet noticed its containers
+  # were gone. Three, because `RESTARTS_WARN` is 3 and the fixture is rule 5's
+  # band — and the loop re-reads rather than assuming a reboot is worth exactly
+  # one, so a node that came back twice as far still lands on the right side.
+  while [ "$(reboot_restarts)" -lt "$target" ]; do
+    before=$(reboot_restarts)
+    echo "  rebooting $rnode — broken-reboot is at $before of $target restarts"
+    docker restart "$rnode" >/dev/null
+    deadline=$(( SECONDS + ${K8RS_RUNTIME_TIMEOUT:-300} ))
+    while [ $SECONDS -lt $deadline ] && [ "$(reboot_restarts)" -le "$before" ]; do sleep 5; done
+    [ "$(reboot_restarts)" -gt "$before" ] || {
+      echo "break-runtime: $rnode was rebooted and broken-reboot's restart count did not move before" >&2
+      echo "               K8RS_RUNTIME_TIMEOUT ran out. Nothing else here can raise it, so this is" >&2
+      echo "               the node not coming back rather than a slow one:" >&2
+      echo "                 kubectl --context kind-$CLUSTER get node $rnode" >&2
+      return 1
+    }
+  done
+  # `break-nodes` runs next and needs three healthy workers, so this one is not
+  # left half-returned. The pod's own Ready is asserted beside the node's because
+  # the fixture is a container that is **serving** with the restarts behind it.
+  "${kc[@]}" wait --for=condition=Ready node/"$rnode" --timeout=300s
+  "${kc[@]}" wait --for=condition=Ready pod/broken-reboot --timeout=300s
+
+  echo "  rebooted $rnode"
+  assert_states "${RUNTIME_STATES[@]}"
+}
+
 # The three node states, and the only step here that damages what is already
 # running: one worker stops taking new pods, a second evicts everything that
 # does not tolerate a NoExecute taint, and a third loses its kubelet — after
@@ -905,6 +1090,7 @@ case "${1:-}" in
   down)        down ;;
   break)       break_it ;;
   verify)      verify ;;
+  break-runtime) break_runtime ;;
   break-nodes) break_nodes ;;
   unbreak)     unbreak ;;
   status)      status ;;

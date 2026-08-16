@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-13T22:32:57Z",
+    "creationTimestamp": "2026-08-16T09:44:00Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-succeeded",
     "namespace": "default",
-    "resourceVersion": "1682",
-    "uid": "ec5ba2fe-da91-4520-ad31-96337b9dab7b"
+    "resourceVersion": "1930",
+    "uid": "4d90597d-b355-4695-93c9-0aad8b2ac9b0"
   },
   "spec": {
     "containers": [
@@ -35,7 +35,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-2vh8d",
+            "name": "kube-api-access-nqmzn",
             "readOnly": true
           }
         ]
@@ -72,7 +72,7 @@
         "name": "state"
       },
       {
-        "name": "kube-api-access-2vh8d",
+        "name": "kube-api-access-nqmzn",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -115,14 +115,14 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:33:54Z",
+        "lastTransitionTime": "2026-08-16T09:45:04Z",
         "observedGeneration": 1,
         "status": "False",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "lastTransitionTime": "2026-08-16T09:44:00Z",
         "observedGeneration": 1,
         "reason": "PodCompleted",
         "status": "True",
@@ -130,7 +130,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:33:53Z",
+        "lastTransitionTime": "2026-08-16T09:45:03Z",
         "observedGeneration": 1,
         "reason": "PodCompleted",
         "status": "False",
@@ -138,7 +138,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:33:53Z",
+        "lastTransitionTime": "2026-08-16T09:45:03Z",
         "observedGeneration": 1,
         "reason": "PodCompleted",
         "status": "False",
@@ -146,7 +146,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "lastTransitionTime": "2026-08-16T09:44:00Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -154,16 +154,16 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://28f87432c8c3dc6436df006acc2d0b9664ebed2820576cc6f9bed8d28d0a5621",
+        "containerID": "containerd://f43170f801b8051d1a48e385a4184ac6adc627efed410b47a8f89012fff67f0e",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://4b2dd4f934555ae17bc257c31f1b1d042fece60d6a16a3976c6dd215b98be3f0",
+            "containerID": "containerd://8eb4940ebf77d4ce8a0274a014567e17279de2c955c3623a883581ac80da853b",
             "exitCode": 1,
-            "finishedAt": "2026-08-13T22:33:24Z",
+            "finishedAt": "2026-08-16T09:44:35Z",
             "reason": "Error",
-            "startedAt": "2026-08-13T22:33:24Z"
+            "startedAt": "2026-08-16T09:44:35Z"
           }
         },
         "name": "migrate",
@@ -173,11 +173,11 @@
         "started": false,
         "state": {
           "terminated": {
-            "containerID": "containerd://28f87432c8c3dc6436df006acc2d0b9664ebed2820576cc6f9bed8d28d0a5621",
+            "containerID": "containerd://f43170f801b8051d1a48e385a4184ac6adc627efed410b47a8f89012fff67f0e",
             "exitCode": 0,
-            "finishedAt": "2026-08-13T22:33:53Z",
+            "finishedAt": "2026-08-16T09:45:03Z",
             "reason": "Completed",
-            "startedAt": "2026-08-13T22:33:53Z"
+            "startedAt": "2026-08-16T09:45:03Z"
           }
         },
         "user": {
@@ -197,7 +197,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-2vh8d",
+            "name": "kube-api-access-nqmzn",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -220,6 +220,6 @@
     ],
     "qosClass": "BestEffort",
     "resources": {},
-    "startTime": "2026-08-13T22:32:57Z"
+    "startTime": "2026-08-16T09:44:00Z"
   }
 }

@@ -2,23 +2,22 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-16T09:44:00Z",
+    "creationTimestamp": "2026-08-16T09:44:01Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-notfound",
+    "name": "broken-reboot",
     "namespace": "default",
-    "resourceVersion": "5622",
-    "uid": "466ddd50-8d2e-40a9-933b-bdfb1da05490"
+    "resourceVersion": "6321",
+    "uid": "0c58743d-d89b-4258-a488-8519b3fe7c4b"
   },
   "spec": {
     "containers": [
       {
         "command": [
-          "sh",
-          "-c",
-          "exec /usr/local/bin/server --serve"
+          "sleep",
+          "86400"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
@@ -29,7 +28,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-ckkbs",
+            "name": "kube-api-access-c5ml2",
             "readOnly": true
           }
         ]
@@ -37,7 +36,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker2",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -62,7 +61,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-ckkbs",
+        "name": "kube-api-access-c5ml2",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -105,7 +104,7 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:02Z",
+        "lastTransitionTime": "2026-08-16T10:12:19Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
@@ -119,25 +118,21 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T10:10:40Z",
-        "message": "containers with unready status: [app]",
+        "lastTransitionTime": "2026-08-16T10:12:25Z",
         "observedGeneration": 1,
-        "reason": "ContainersNotReady",
-        "status": "False",
+        "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T10:10:40Z",
-        "message": "containers with unready status: [app]",
+        "lastTransitionTime": "2026-08-16T10:12:25Z",
         "observedGeneration": 1,
-        "reason": "ContainersNotReady",
-        "status": "False",
+        "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-16T09:44:01Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -145,30 +140,26 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://47ab6fbc6b2bbc465d89de0efa84b20db2976219d0920159fea432024deb1f57",
+        "containerID": "containerd://92c0316c711372e7c69e29c8a798a829962b7b16948ea95f6176c0c9b0099e4d",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://b99633bbe3598cfbdad448a34c9425bb65651d2b459564bbeb48b13593e3d230",
-            "exitCode": 127,
-            "finishedAt": "2026-08-16T10:05:31Z",
-            "reason": "Error",
-            "startedAt": "2026-08-16T10:05:31Z"
+            "containerID": "containerd://4d16369fe85c295d8a94bb6fd75853021fa148cfc168c348a7f0311d536d3603",
+            "exitCode": 255,
+            "finishedAt": "2026-08-16T10:12:15Z",
+            "reason": "Unknown",
+            "startedAt": "2026-08-16T10:11:59Z"
           }
         },
         "name": "app",
-        "ready": false,
+        "ready": true,
         "resources": {},
-        "restartCount": 10,
-        "started": false,
+        "restartCount": 3,
+        "started": true,
         "state": {
-          "terminated": {
-            "containerID": "containerd://47ab6fbc6b2bbc465d89de0efa84b20db2976219d0920159fea432024deb1f57",
-            "exitCode": 127,
-            "finishedAt": "2026-08-16T10:10:40Z",
-            "reason": "Error",
-            "startedAt": "2026-08-16T10:10:40Z"
+          "running": {
+            "startedAt": "2026-08-16T10:12:25Z"
           }
         },
         "user": {
@@ -184,7 +175,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-ckkbs",
+            "name": "kube-api-access-c5ml2",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }

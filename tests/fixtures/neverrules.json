@@ -2,34 +2,71 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-16T09:44:00Z",
+    "creationTimestamp": "2026-08-16T09:44:01Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
-    "name": "broken-notfound",
+    "name": "broken-neverrules",
     "namespace": "default",
-    "resourceVersion": "5622",
-    "uid": "466ddd50-8d2e-40a9-933b-bdfb1da05490"
+    "resourceVersion": "1532",
+    "uid": "0161273d-9cd0-412d-9fb2-9c33c31cbcf3"
   },
   "spec": {
     "containers": [
       {
+        "args": [
+          "if [ ! -f /state/tried ]; then\n  touch /state/tried\n  echo cannot reach the license server, retrying >&2\n  exit 3\nfi\necho cannot reach the license server, giving up >&2\nexit 1\n"
+        ],
         "command": [
           "sh",
-          "-c",
-          "exec /usr/local/bin/server --serve"
+          "-c"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
-        "name": "app",
+        "name": "retry",
+        "resources": {},
+        "restartPolicy": "Never",
+        "restartPolicyRules": [
+          {
+            "action": "Restart",
+            "exitCodes": {
+              "operator": "In",
+              "values": [
+                3
+              ]
+            }
+          }
+        ],
+        "terminationMessagePath": "/dev/termination-log",
+        "terminationMessagePolicy": "File",
+        "volumeMounts": [
+          {
+            "mountPath": "/state",
+            "name": "runs"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-6pdz5",
+            "readOnly": true
+          }
+        ]
+      },
+      {
+        "command": [
+          "sleep",
+          "86400"
+        ],
+        "image": "busybox",
+        "imagePullPolicy": "Always",
+        "name": "keeper",
         "resources": {},
         "terminationMessagePath": "/dev/termination-log",
         "terminationMessagePolicy": "File",
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-ckkbs",
+            "name": "kube-api-access-6pdz5",
             "readOnly": true
           }
         ]
@@ -37,10 +74,10 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
-    "restartPolicy": "Always",
+    "restartPolicy": "Never",
     "schedulerName": "default-scheduler",
     "securityContext": {},
     "serviceAccount": "default",
@@ -62,7 +99,11 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-ckkbs",
+        "emptyDir": {},
+        "name": "runs"
+      },
+      {
+        "name": "kube-api-access-6pdz5",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -119,8 +160,8 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T10:10:40Z",
-        "message": "containers with unready status: [app]",
+        "lastTransitionTime": "2026-08-16T09:44:27Z",
+        "message": "containers with unready status: [retry]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
         "status": "False",
@@ -128,8 +169,8 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T10:10:40Z",
-        "message": "containers with unready status: [app]",
+        "lastTransitionTime": "2026-08-16T09:44:27Z",
+        "message": "containers with unready status: [retry]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
         "status": "False",
@@ -137,7 +178,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-16T09:44:01Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -145,30 +186,18 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://47ab6fbc6b2bbc465d89de0efa84b20db2976219d0920159fea432024deb1f57",
+        "containerID": "containerd://170c91c3ec3ac0e0310c1ef30d0323379f54dd69cf9ccb5136e296060de88c17",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
-        "lastState": {
-          "terminated": {
-            "containerID": "containerd://b99633bbe3598cfbdad448a34c9425bb65651d2b459564bbeb48b13593e3d230",
-            "exitCode": 127,
-            "finishedAt": "2026-08-16T10:05:31Z",
-            "reason": "Error",
-            "startedAt": "2026-08-16T10:05:31Z"
-          }
-        },
-        "name": "app",
-        "ready": false,
+        "lastState": {},
+        "name": "keeper",
+        "ready": true,
         "resources": {},
-        "restartCount": 10,
-        "started": false,
+        "restartCount": 0,
+        "started": true,
         "state": {
-          "terminated": {
-            "containerID": "containerd://47ab6fbc6b2bbc465d89de0efa84b20db2976219d0920159fea432024deb1f57",
-            "exitCode": 127,
-            "finishedAt": "2026-08-16T10:10:40Z",
-            "reason": "Error",
-            "startedAt": "2026-08-16T10:10:40Z"
+          "running": {
+            "startedAt": "2026-08-16T09:44:24Z"
           }
         },
         "user": {
@@ -184,7 +213,57 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-ckkbs",
+            "name": "kube-api-access-6pdz5",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          }
+        ]
+      },
+      {
+        "containerID": "containerd://99a015436ae9647a73811d18cb3d213d029b7c92eec3ecb095ff1ba68fd4ae23",
+        "image": "docker.io/library/busybox:latest",
+        "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
+        "lastState": {
+          "terminated": {
+            "containerID": "containerd://1aa6cee6d95e085fd727d16855a72e8bcc0a19ee23f9702765e94b90648a519b",
+            "exitCode": 3,
+            "finishedAt": "2026-08-16T09:44:15Z",
+            "reason": "Error",
+            "startedAt": "2026-08-16T09:44:15Z"
+          }
+        },
+        "name": "retry",
+        "ready": false,
+        "resources": {},
+        "restartCount": 1,
+        "started": false,
+        "state": {
+          "terminated": {
+            "containerID": "containerd://99a015436ae9647a73811d18cb3d213d029b7c92eec3ecb095ff1ba68fd4ae23",
+            "exitCode": 1,
+            "finishedAt": "2026-08-16T09:44:26Z",
+            "reason": "Error",
+            "startedAt": "2026-08-16T09:44:26Z"
+          }
+        },
+        "user": {
+          "linux": {
+            "gid": 0,
+            "supplementalGroups": [
+              0,
+              10
+            ],
+            "uid": 0
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/state",
+            "name": "runs"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-6pdz5",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }

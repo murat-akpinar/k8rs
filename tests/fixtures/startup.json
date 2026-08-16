@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-13T22:32:57Z",
+    "creationTimestamp": "2026-08-16T09:44:00Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-startup",
     "namespace": "default",
-    "resourceVersion": "10002",
-    "uid": "ebe2159e-6c1a-47c0-b5d3-e6eec8d69d63"
+    "resourceVersion": "1179",
+    "uid": "33a12322-dd21-4aa5-bb6d-0494a61dca0a"
   },
   "spec": {
     "containers": [
@@ -50,7 +50,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-dz45w",
+            "name": "kube-api-access-nbjzc",
             "readOnly": true
           }
         ]
@@ -58,7 +58,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker2",
+    "nodeName": "k8rs-worker3",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -83,7 +83,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-dz45w",
+        "name": "kube-api-access-nbjzc",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -126,21 +126,21 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:58Z",
+        "lastTransitionTime": "2026-08-16T09:44:02Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "lastTransitionTime": "2026-08-16T09:44:00Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "lastTransitionTime": "2026-08-16T09:44:00Z",
         "message": "containers with unready status: [slowboot]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -149,7 +149,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "lastTransitionTime": "2026-08-16T09:44:00Z",
         "message": "containers with unready status: [slowboot]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -158,7 +158,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:57Z",
+        "lastTransitionTime": "2026-08-16T09:44:00Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -166,26 +166,18 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://1fb249aefc52c635fec013f48507965581f30b3a492d7c2e4e662318b870776c",
+        "containerID": "containerd://ebe620a6a35c7852630990bde53ea8eaae2de490728dac6814dfb5ea13f7be7a",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
-        "lastState": {
-          "terminated": {
-            "containerID": "containerd://9b509273819f8f7cd1ae716095a00a724cfb1c8eb875e58540b5ef7cb9051133",
-            "exitCode": 137,
-            "finishedAt": "2026-08-13T23:33:38Z",
-            "reason": "Error",
-            "startedAt": "2026-08-13T22:33:08Z"
-          }
-        },
+        "lastState": {},
         "name": "slowboot",
         "ready": false,
         "resources": {},
-        "restartCount": 1,
+        "restartCount": 0,
         "started": false,
         "state": {
           "running": {
-            "startedAt": "2026-08-13T23:33:39Z"
+            "startedAt": "2026-08-16T09:44:11Z"
           }
         },
         "user": {
@@ -201,7 +193,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-dz45w",
+            "name": "kube-api-access-nbjzc",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -224,6 +216,6 @@
     ],
     "qosClass": "BestEffort",
     "resources": {},
-    "startTime": "2026-08-13T22:32:57Z"
+    "startTime": "2026-08-16T09:44:00Z"
   }
 }

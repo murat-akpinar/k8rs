@@ -213,8 +213,15 @@ fn captured_item<'a>(list: &'a serde_json::Value, name: &str) -> &'a serde_json:
 /// [`the_pinned_now_is_not_before_the_captures_it_is_read_against`] is what said so. The rule
 /// that survives is the general one: **the pin follows the corpus**, because every capture
 /// ever taken is newer than a clock pinned before it.
+///
+/// **The corpus is one trip again since 2026-08-16** — `just fixtures` re-took all of it from one
+/// cluster in one morning, and four pod captures landed with it — so the two readings agree today
+/// and the general rule is what is written down (NOTES § D114). **A repin is an edit in two
+/// ownership rows**: `scripts/certs-test.sh` extracts this literal, compares it against its own
+/// `now=`, and asserts three certificate day-counts against it, so it moves in the same change or
+/// `just check` goes red on the guard rather than on anything here.
 fn now() -> Time {
-    time("2026-08-16T00:00:00Z")
+    time("2026-08-17T00:00:00Z")
 }
 
 fn container<'a>(pod: &'a PodSnapshot, name: &str) -> &'a ContainerSnapshot {
@@ -234,11 +241,12 @@ fn container<'a>(pod: &'a PodSnapshot, name: &str) -> &'a ContainerSnapshot {
 /// list to keep in step. **The pin guard is why completeness matters**: it walks only what is in
 /// this snapshot, so a capture left out of it is a capture whose timestamps were never compared
 /// against [`now`].
-const CAPTURED_PODS: [&str; 32] = [
+const CAPTURED_PODS: [&str; 36] = [
     "config",
     "crashloop",
     "exit0",
     "failed",
+    "gang",
     "healthy-hostpath",
     "healthy-podlevel",
     "healthy-retry",
@@ -249,13 +257,16 @@ const CAPTURED_PODS: [&str; 32] = [
     "image",
     "init",
     "neverback",
+    "neverrules",
     "nolimits",
     "notfound",
     "oom",
     "oomserving",
     "pending",
     "podlimit",
+    "probe0",
     "readiness",
+    "reboot",
     "resize",
     "restarts",
     "restarts10",

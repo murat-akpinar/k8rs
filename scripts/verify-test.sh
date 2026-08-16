@@ -52,13 +52,27 @@
 #     is "the cluster before the manifest changed" stops being one the moment
 #     the file it was read from is recaptured.
 #   - and the shapes those manifests will produce are composed from them, each
-#     naming the object the capture owes. Those are the entries with no capture
-#     behind them *yet*; re-cut them from the real fixture once it lands.
+#     naming the object the capture owes.
 #   - the last block is the same thing again for the branches todo.md's capture
 #     trip is for: composed out of the captures above, one coherent group of
 #     fields moved, each naming which capture it came from and which field it
-#     changed. Until that trip lands they are the only case those predicates
-#     have, in either direction.
+#     changed.
+#
+# --- THE RE-CUT DEBT, WHICH IS OWED IN FULL AND IS STATED ONLY HERE ---
+# Those last two groups were written while the capture trip was still ahead, and
+# each said in its own words that no capture stood behind it *yet*. **The trip
+# landed on 2026-08-16 and every fixture this file names is now on disk** —
+# checked file by file, all twenty, `resize` and `neverback` and the four new
+# ones among them. Not one composed object below has been re-cut from the bytes
+# that landed.
+#
+# So: a comment below that says a capture is still owed is describing this debt,
+# not the state of tests/fixtures/. Do not read any of them as "that file does
+# not exist". Re-cutting is its own piece of work rather than a line in someone
+# else's — a base object here has up to twenty-two objects derived from it and an
+# assertion under each, and every one of those assertions has to be re-justified
+# for *why* it still refuses, not merely watched stay green.
+#
 #   - field names and nesting cross-checked against the Kubernetes API reference
 #     (PodStatus / ContainerStatus / ContainerState / PodCondition) and the
 #     k8s-openapi v1_36 generated types.
@@ -83,7 +97,8 @@ for canary in oom crashloop image config pending hostpath readiness restarts \
               cordoned tainted notready \
               exit0 sigterm socket succeeded failed restarts10 restarts10serving \
               startup notfound wedged unjudged oomserving neverback healthy_retry \
-              healthy_unreadysidecar; do
+              healthy_unreadysidecar \
+              probe0 neverrules gang reboot; do
   [ -n "${want[$canary]:-}" ] || {
     echo "verify-test: cluster.sh has no predicate '$canary' — the extraction broke, not the predicate"
     exit 1
@@ -1615,9 +1630,9 @@ JSON
 
 # broken-oom, cut for its resources rather than for its kill: the only committed
 # object carrying both what the spec asked for and what the kubelet enacted,
-# which is the pair D51's resize is about. broken-resize does not exist yet —
-# this is the shape it starts in, and the composition below is what the patch
-# turns it into.
+# which is the pair D51's resize is about. This is the shape broken-resize starts
+# in, and the composition below is what the patch turns it into. `resize.json`
+# has landed since — see § THE RE-CUT DEBT.
 obj[resize_base]=$(cat <<'JSON'
 {
   "apiVersion": "v1",
@@ -2005,9 +2020,9 @@ obj[owned_first_exit]=$(jq '.items |= map(.status.containerStatuses |= map(
 # manifests produce the shape they are being changed to produce. Same rules as
 # the six compositions above — built from a capture, one coherent group of
 # fields moved, and the result still an object the API emits — with one
-# difference worth saying out loud: these have no capture *yet* by definition.
-# The trip that follows this box is what replaces them, and until it lands they
-# are the only positive case each of these predicates has.
+# difference worth saying out loud: these were written with no capture behind
+# them, by definition. The trip has since landed and they are still the composed
+# objects — § THE RE-CUT DEBT says what that means and what it does not.
 
 # broken-crashloop with the log tail. `terminationMessagePolicy:
 # FallbackToLogsOnError` makes the kubelet copy the container's last lines into
@@ -2073,8 +2088,9 @@ obj[hostpath_two]=$(jq '.spec.containers[0].volumeMounts =
 # (`k8rs-worker3`, `24277408Ki`) and `status.resources` still holds the 64Mi the
 # kubelet enacted, because the node cannot free that much. Values, condition and
 # message are the ones a v1.36.1 kubelet wrote on 2026-08-12; the condition is
-# added rather than moved, because the pod that carries it does not exist in the
-# committed capture yet and this is the object that says what it must hold.
+# added rather than moved, because at the time no committed capture carried the
+# pod and this is the object that says what it must hold. `resize.json` has
+# landed since — see § THE RE-CUT DEBT.
 #
 # `Deferred` and not `Infeasible`: a request larger than the node's allocatable
 # — the 1Pi this file used to carry — is refused at admission and never reaches
@@ -2358,9 +2374,9 @@ obj[nodes_unreachable_hand_tainted]=$(jq '.items |= map(if .metadata.name == "k8
 # The fourteen predicates this box adds, and their negatives. Same rules as the
 # compositions above — built out of a capture in this file, one coherent group
 # of fields moved, the result still an object the API emits — and the same
-# caveat, louder: **none of these has a capture behind it yet, by definition.**
-# The trip is what replaces them, and until it lands they are the only positive
-# case each of these predicates has.
+# caveat, louder: **none of these had a capture behind it when it was written,
+# by definition.** The trip has since landed and every one of them is still the
+# composed object — § THE RE-CUT DEBT says what that means and what it does not.
 #
 # One thing decides most of the negatives below and is worth reading once. Every
 # rule these fixtures are for is silenced by several clauses `or`-ed together —
@@ -2542,6 +2558,15 @@ obj[oomserving_pod]=$(jq '.metadata.name = "broken-oomserving"
        | .restartCount = 1
        | .state = {running:{startedAt:"2026-08-11T22:47:12Z"}})' <<<"${obj[oom]}")
 
+# broken-init caught in the ~2s window where the init container is **up** — the
+# same window [owned]'s comment in cluster.sh measured (2 samples in 70) and
+# excludes. Only `state` moves, with the two flags the kubelet writes beside a
+# running init container; the crash history behind it is untouched, which is the
+# whole point: an exit 1 on record is not a loop, and a capture taken here is a
+# pod whose init container is running.
+obj[init_up]=$(jq '.status.initContainerStatuses |= map(.started = true
+       | .state = {running:{startedAt:"2026-08-11T22:47:01Z"}})' <<<"${obj[init]}")
+
 # D75's wait-for-dependency loop, finished. The init container's status is
 # broken-init's — a real crash history — with the current run replaced by the
 # success that ended it, grafted onto the healthy pod that is now serving.
@@ -2576,9 +2601,9 @@ obj[healthy_unreadysidecar_pod]=$(jq '.metadata.name = "healthy-unreadysidecar"
 obj[sidecar_running_ready]=$(jq '.status.initContainerStatuses |= map(.ready = true)' \
   <<<"${obj[healthy_unreadysidecar_pod]}")
 
-# D96's shape, which no capture holds yet — `broken-neverback` is the manifest
-# that produces it and the trip after this box is what puts it on disk; re-cut
-# these five from `neverback.json` when it lands. Composed, not written: the pod
+# D96's shape. `broken-neverback` is the manifest that produces it; `neverback.json`
+# has since landed and these five are still composed, so the re-cut from it is
+# owed — see § THE RE-CUT DEBT. Composed, not written: the pod
 # and the running container are `broken-readiness` as captured (Running, one
 # container up, restartCount 0, an empty lastState), and the two terminated runs
 # are the ones already cut out of `broken-restarts` for succeeded_pod (exit 0,
@@ -2656,6 +2681,322 @@ obj[neverback_clean]=$(jq '.status.containerStatuses |= map(if .name == "broke"
 # instead of capturing a fixture with no negative inside it.
 obj[neverback_no_done]=$(jq '.spec.containers |= map(select(.name != "done"))
    | .status.containerStatuses |= map(select(.name != "done"))' <<<"${obj[neverback_pod]}")
+
+# --- THE FOUR OBJECTS THE CAPTURE TRIP IS FOR ---
+# Every one below is derived from a real capture already in this file with one
+# coherent group of fields moved, named in its own comment.
+#
+# All four landed on 2026-08-16 — `probe0.json`, `reboot.json`, `neverrules.json`
+# and `gang.json` — and all four bases below are still composed (§ THE RE-CUT
+# DEBT). A debt is not a claim that they disagree, so this is what was measured
+# against the committed bytes, field by field, for everything the four predicates
+# read:
+#   - `neverrules_pod` — identical to the capture on every such field.
+#   - `reboot_pod` — identical except `spec.restartPolicy`, which the composition
+#     inherits as absent from `obj[restarts]` and the capture carries as
+#     `Always`. `[reboot]` does not read it.
+#   - `gang_pod` — identical except `lastState.terminated.message`, which the
+#     capture carries ("The container is removed because RestartAllContainers in
+#     place") and the composition does not. `[gang]` does not read it.
+#   - `probe0_pod` — the one that diverges in its **face**: composed it wears
+#     `sigterm_pod`'s `waiting: CrashLoopBackOff` with `started: false` and
+#     `restartCount: 6`; the capture is `running` with `started: true` and
+#     `restartCount: 13`. `[probe0]` reads neither `state` nor `started`, so the
+#     verdict is the same either way — but until `probe0_running` below, the face
+#     the cluster actually produces had never been fed to it at all, which is the
+#     hole this file exists to catch and not a hole it may have (D29).
+# One more reason these four in particular were not re-cut on the spot: they are
+# the only fixtures in the corpus that are still **untracked**. Bytes pasted out
+# of a file that is not in git yet can go stale before they are ever committed,
+# and this file would stay green over them.
+#
+# There were five. D90's `Init` arm — an init container re-run by a rebuilt
+# sandbox behind a clean exit 0 — was measured unreachable on containerd/kind
+# v1.36.1 and has no predicate any more; see the header of scripts/broken.yaml's
+# last section for what the cluster said.
+
+# NOTES § D90's first door and § D113's floor: the same liveness kill
+# `sigterm_pod` is, reported by a program whose handler exits 0 instead of 143.
+# Two things move and they are the whole object: the exit code with the reason
+# the kubelet writes beside it, and `startedAt`, pulled back so the run lasted
+# 31s. `exit0.json`'s is 2s, which is the arm below `PROBE_FLOOR`; this is the
+# one above it, and the manifest's `initialDelaySeconds: 30` is where the number
+# comes from.
+#
+# The 31 is subtracted from the object's own `finishedAt`, never written as a
+# literal stamp. `[probe0]` is the one predicate in this file that subtracts two
+# stamps, so a literal here holds only while its ancestor's stamps do not move —
+# and the line above this block says to re-cut that ancestor from the fixture the
+# next trip captures. A literal would then leave a run of days behind a `> 25`
+# clause and this file would be green over a plant that no longer plants
+# anything. Same fix, same reason, as `terminated_now` in src/rules_tests/.
+obj[probe0_pod]=$(jq '.metadata.name = "broken-probe0"
+   | .status.containerStatuses |= map(.restartCount = 6
+       | .lastState.terminated.exitCode = 0
+       | .lastState.terminated.reason = "Completed"
+       | .lastState.terminated.startedAt =
+           ((.lastState.terminated.finishedAt|fromdateiso8601) - 31 | todateiso8601))' \
+  <<<"${obj[sigterm_pod]}")
+
+# and the same clean exit on a run that ended **before** the probe could have
+# fired: 24s, one second under the floor `[probe0]` demands. `exit0_pod` refuses
+# on duration too, but at 2s it sits 23 seconds from the boundary — the clause
+# could be relaxed to `> 1` and this file would stay green. This object is what
+# pins the number, and what it catches is a manifest whose `initialDelaySeconds`
+# drifted under the floor: the run would be short, the exit still 0, and the
+# capture would claim a probe kill nothing had time to make.
+obj[probe0_short]=$(jq '.status.containerStatuses |= map(
+       .lastState.terminated.startedAt =
+         ((.lastState.terminated.finishedAt|fromdateiso8601) - 24 | todateiso8601))' \
+  <<<"${obj[probe0_pod]}")
+
+# and the face `probe0.json` actually landed in, which is not the one this base
+# wears: **running**, `started: true`, still not ready, thirteen restarts behind
+# it. A probe kill on a container whose readiness never passes has no up-and-
+# healthy window to be caught in — it comes up, fails the probe for 30s, dies —
+# so this is where the capture spends its loop, and it must match. It is one
+# field from `probe0_up`, which is the same running container once it is ready.
+obj[probe0_running]=$(jq '.status.containerStatuses |= map(.started = true
+       | .restartCount = 13
+       | .state = {running:{startedAt:"2026-08-11T22:46:45Z"}})' <<<"${obj[probe0_pod]}")
+
+# and the same loop caught while it is up, which is what a manifest without the
+# readiness probe hands over — and `doing_its_job` would then be what silences
+# rule 6, not the exit code this fixture is for (the argument `exit0_up` carries,
+# on the pod that carries the same probe for the same reason).
+obj[probe0_up]=$(jq '.status.containerStatuses |= map(.ready = true | .started = true
+       | .state = {running:{startedAt:"2026-08-11T22:46:45Z"}})' <<<"${obj[probe0_pod]}")
+
+# and the same 31-second run through a handler that exits 143 instead of 0 —
+# `broken-sigterm` with this pod's `initialDelaySeconds` on it. One number apart,
+# and it is the number the whole object is about: `ending` reads 143 as
+# `Stopped`, which is a different card with a different action.
+obj[probe0_143]=$(jq '.status.containerStatuses |= map(.lastState.terminated.exitCode = 143
+       | .lastState.terminated.reason = "Error")' <<<"${obj[probe0_pod]}")
+
+# NOTES § D90's producer asymmetry: `broken-restarts` as captured — Running,
+# ready, three restarts — with the record behind those restarts replaced by the
+# one a node reboot actually writes. The values are not invented: `exitCode:
+# 255`, `reason: Unknown` and these two stamps are read off
+# `reports/2026-08-16-terminated-record-stamps-and-authors.md` § 2, where the
+# same container was rebooted twice and containerd wrote the pair both times.
+obj[reboot_pod]=$(jq '.metadata.name = "broken-reboot"
+   | .status.containerStatuses |= map(.name = "app"
+       | .state = {running:{startedAt:"2026-08-16T01:24:14Z"}}
+       | .lastState.terminated.exitCode = 255
+       | .lastState.terminated.reason = "Unknown"
+       | .lastState.terminated.startedAt = "2026-08-16T01:20:16Z"
+       | .lastState.terminated.finishedAt = "2026-08-16T01:24:13Z")' <<<"${obj[restarts]}")
+
+# and the same pod in the half-minute after the node came back, before the
+# kubelet has the container up again. Everything this fixture is about is
+# already in the object — the count, the record, the reason — and it is still
+# the wrong capture: rule 5's card is about a container that is **serving** with
+# that history behind it, and a capture taken here says the opposite.
+obj[reboot_down]=$(jq '.status.containerStatuses |= map(.ready = false | .started = false
+       | .state = {waiting:{reason:"ContainerCreating"}})' <<<"${obj[reboot_pod]}")
+
+# up and **not** serving, which is rule 5's other band and a different card: the
+# CRITICAL/WARN split is exactly whether the container is serving at the end of
+# its restart history (`restarts10` against `restarts10serving`). One field, and
+# it decides which fixture this is.
+obj[reboot_unready]=$(jq '.status.containerStatuses |= map(.ready = false)' <<<"${obj[reboot_pod]}")
+
+# the same pod one reboot short. Two restarts is below `RESTARTS_WARN`, so rule 5
+# never fires and the fixture would be a healthy pod with a scar: `break-runtime`
+# counts to three off the object for this reason and not because three reboots
+# are worth exactly three restarts.
+obj[reboot_twice]=$(jq '.status.containerStatuses |= map(.restartCount = 2)' <<<"${obj[reboot_pod]}")
+
+# and the one object that separates *the node lost this container* from *the
+# program exited 255*: same code, ordinary reason. `ending` reads the **pair** —
+# `(255, "Unknown")` is `CodeUnknown` and 255 with anything else is an ordinary
+# failure — so a predicate that took the number alone would certify a program
+# that called `exit 255` as a node event.
+obj[reboot_app255]=$(jq '.status.containerStatuses |= map(.lastState.terminated.reason = "Error")' \
+  <<<"${obj[reboot_pod]}")
+
+# and the same pod on a node whose kubelet stopped posting: the count, the record
+# and the running container are all the last thing that kubelet sent, and the
+# phase is the only field that says none of it is current. It is the state
+# `break-nodes` produces on a third of the workers, which is why that step runs
+# after every pod capture and why this fixture refuses the shape rather than
+# trusting the ordering.
+obj[reboot_lost]=$(jq '.status.phase = "Unknown"' <<<"${obj[reboot_pod]}")
+
+# NOTES § D97's named false positive for rule 15, settled. `broken-neverback`
+# with its clean-exit container dropped and `broke` given the two fields that
+# make it this object instead: the restart rule on `exit 3` in the spec, and the
+# restart it bought in the status. The current run is still the exit 1 that no
+# rule matches — which is what keeps the container in `state.terminated` where
+# rule 15 can reach it, and leaves `restartCount != 0` as the only thing
+# refusing the card.
+obj[neverrules_pod]=$(jq '.metadata.name = "broken-neverrules"
+   | .spec.containers = [ (.spec.containers[] | select(.name == "broke") | .name = "retry"
+                           | .restartPolicy = "Never"
+                           | .restartPolicyRules = [{action:"Restart",exitCodes:{operator:"In",values:[3]}}]),
+                          (.spec.containers[] | select(.name == "keeper")) ]
+   | .status.containerStatuses = [
+       (.status.containerStatuses[] | select(.name == "broke") | .name = "retry" | .restartCount = 1
+        | .lastState = {terminated: (.state.terminated | .exitCode = 3
+             | .startedAt = "2026-08-11T22:46:38Z" | .finishedAt = "2026-08-11T22:46:39Z")}),
+       (.status.containerStatuses[] | select(.name == "keeper")) ]' <<<"${obj[neverback_pod]}")
+
+# The window `rules.rs` names as the residual gap and does not guard: the first
+# exit, before the rule has restarted anything. Nothing has moved except the
+# count and the run it is sitting in — the rule is declared, the policy is
+# `Never`, the container is terminated — and rule 15 draws a card here that is
+# wrong for as long as the window lasts. It is not what gets captured, and this
+# is the case that says the count is what tells the two apart.
+obj[neverrules_first]=$(jq '.status.containerStatuses |= map(if .name == "retry"
+       then .restartCount = 0 | .state.terminated.exitCode = 3 | .lastState = {} else . end)' \
+  <<<"${obj[neverrules_pod]}")
+
+# D97 measured this one on a live cluster: a rule matching the exit the container
+# keeps producing, so it never settles — five restarts and sitting in
+# `CrashLoopBackOff`. Rule 15 is refused a line **earlier** than the guard, at
+# `state.terminated`, so a capture of this object would put the field on disk and
+# still prove nothing about the clause it is for. One field apart from the
+# fixture, which is what says the fixture is the settled run and not the loop.
+obj[neverrules_looping]=$(jq '.status.containerStatuses |= map(if .name == "retry"
+       then .lastState = {terminated: .state.terminated}
+            | .state = {waiting:{reason:"CrashLoopBackOff"}} else . end)' <<<"${obj[neverrules_pod]}")
+
+# The same statuses under a policy that brings everything back. One field, and
+# it is the field rule 15's fourth condition reads — `neverback_always` makes the
+# identical point about the pod this one was cut from, and it has to be made
+# again here because a capture of *this* pod under `Always` would carry the rule,
+# the count and the terminated run and still be a container the kubelet is about
+# to restart.
+obj[neverrules_always]=$(jq '.spec.restartPolicy = "Always"' <<<"${obj[neverrules_pod]}")
+
+# and the same object from a cluster that cannot carry the field at all.
+# `restartPolicyRules` arrives at v1.34; `rules.rs` keeps `restarts == 0` as the
+# guard precisely because no older cluster can answer, and a capture taken there
+# writes perfectly valid JSON with the one field this fixture exists for missing.
+# "Found none" reads exactly like "there were none", which is why the spec side
+# is asserted at all.
+obj[neverrules_norule]=$(jq '.spec.containers |= map(del(.restartPolicyRules))' <<<"${obj[neverrules_pod]}")
+
+# The pod that failed on its first run and was never restarted — which is rule
+# 15's **true positive**, wearing this fixture's spec. It says something the rest
+# of this block does not: a container declaring a restart rule is not thereby
+# exempt from the card. Only the count tells the two apart, and this is the
+# object that says so.
+obj[neverrules_settled]=$(jq '.status.containerStatuses |= map(if .name == "retry"
+       then .restartCount = 0 | .lastState = {} else . end)' <<<"${obj[neverrules_pod]}")
+
+# `keeper` has stopped too and the phase has not caught up: the capture taken a
+# second early, which under `Never` is a pod on its way to `Failed` and out of
+# every rule's reach. `neverback_racing` is the same case on the pod this one was
+# cut from.
+obj[neverrules_racing]=$(jq '(.status.containerStatuses[] | select(.name == "retry") | .state) as $stopped
+   | .status.containerStatuses |= map(if .name == "keeper"
+       then .ready = false | .started = false | .state = $stopped else . end)' \
+  <<<"${obj[neverrules_pod]}")
+
+# and that same object a second later, which is the pod that is genuinely over.
+# Under `Never` the phase moves to `Failed` once every container has stopped, and
+# `analyze` skips it before any container rule runs — so the phase clause is the
+# one thing between this fixture and a capture of a pod nothing reads.
+obj[neverrules_over]=$(jq '.status.phase = "Failed"' <<<"${obj[neverrules_racing]}")
+
+# and the same object with only the phase moved: a node whose kubelet stopped
+# posting, where every container status is stale and `keeper` still reads
+# running. One field, and it is the field that says whether any of the rest is
+# current (`neverback_lost` is the same case on the pod this one was cut from).
+obj[neverrules_lost]=$(jq '.status.phase = "Unknown"' <<<"${obj[neverrules_pod]}")
+
+# NOTES § D100's settled gang restart, which nothing in this corpus has any part
+# of: `RestartingAllContainers` appears on no captured object at all. Built off
+# `neverrules_pod` because it is the same family of fields — a container-level
+# policy with a rule beside it — with the action changed to the one that moves
+# the siblings too, and both containers put where the capture has to catch them:
+# up, ready, past RESTARTS_WARN, sharing one `startedAt` because a gang restart
+# restarts them together. **The two null stamps are the fixture**: the kubelet
+# synthesizes this record rather than observing a run, so there is no clock in it
+# and rule 5's age has to come from `state.running.startedAt` instead.
+obj[gang_pod]=$(jq '.metadata.name = "broken-gang"
+   | .spec.containers |= map(if .name == "retry"
+       then .name = "trigger"
+            | .restartPolicyRules = [{action:"RestartAllContainers",exitCodes:{operator:"In",values:[3]}}]
+       else .name = "bystander" end)
+   | .status.containerStatuses |= map((if .name == "retry" then .name = "trigger" else .name = "bystander" end)
+       | .ready = true | .started = true | .restartCount = 3
+       | .state = {running:{startedAt:"2026-08-15T09:12:41Z"}}
+       | .lastState = {terminated:{exitCode:137, reason:"RestartingAllContainers",
+                                   startedAt:null, finishedAt:null}})' <<<"${obj[neverrules_pod]}")
+
+# The same object with the two stamps filled in, and it is the case the whole
+# ruling turns on: a record that carries its own clock is one rule 5 could have
+# read the age off, and D100 exists because this one does not. One group of
+# fields apart, so nothing else can be what the predicate is answering.
+obj[gang_real_stamps]=$(jq '.status.containerStatuses |= map(
+       .lastState.terminated.startedAt = "2026-08-15T09:11:38Z"
+       | .lastState.terminated.finishedAt = "2026-08-15T09:12:40Z")' <<<"${obj[gang_pod]}")
+
+# and the capture taken two seconds early, while the gang restart is still
+# happening: the record is written, the sibling is back up, and `trigger` is
+# still coming. D100 measured the two objects being indistinguishable for the
+# first seconds after a restart — this is that moment, and `2/2 Ready` is what
+# separates the settled pod from it.
+obj[gang_one_ready]=$(jq '.status.containerStatuses |= map(if .name == "trigger"
+       then .ready = false | .started = false | .state = {waiting:{reason:"PodInitializing"}}
+       else . end)' <<<"${obj[gang_pod]}")
+
+# **The same object if the kubelet does not write the synthesized record into the
+# container whose own exit triggered the rule.** NOTES § D93 measured that it
+# does; this is what the capture looks like if that ever changes, and the
+# predicate says `> 0` rather than `all` so that it still passes — the container
+# restarted *for somebody else's exit* is the one this fixture is really about,
+# and it is the sibling either way. A second **match**, not a negative.
+obj[gang_own_exit]=$(jq '.status.containerStatuses |= map(if .name == "trigger"
+       then .lastState = {terminated:{exitCode:3, reason:"Error",
+                                      startedAt:"2026-08-15T09:12:39Z",
+                                      finishedAt:"2026-08-15T09:12:40Z"}}
+       else . end)' <<<"${obj[gang_pod]}")
+
+# and the same pod with **no** gang record anywhere: two containers that both
+# just crashed and came back, which is every other restart fixture in this repo.
+# It is what a capture writes if the rule never fired — valid JSON, right count,
+# nothing of what the object was captured for.
+obj[gang_no_record]=$(jq '.status.containerStatuses |= map(
+       .lastState = {terminated:{exitCode:3, reason:"Error",
+                                 startedAt:"2026-08-15T09:12:39Z",
+                                 finishedAt:"2026-08-15T09:12:40Z"}})' <<<"${obj[gang_pod]}")
+
+# and the same pod carrying the *other* action. Measured on kind v1.36.1 (NOTES
+# § D97): `action: Restart` restarts the failing container alone and never
+# touches its sibling, so it writes no `RestartingAllContainers` at all — one
+# word apart in the spec, and it is the word that decides whether this object
+# holds the reason nothing in the corpus has.
+obj[gang_restart_only]=$(jq '.spec.containers |= map(if .restartPolicyRules
+       then .restartPolicyRules = [{action:"Restart",exitCodes:{operator:"In",values:[3]}}]
+       else . end)' <<<"${obj[gang_pod]}")
+
+# the same pod one gang restart short. Two is below `RESTARTS_WARN`, so the card
+# this object is D100's evidence for would not be drawn at all — the count is not
+# scenery, it is what puts the pod inside rule 5.
+obj[gang_twice]=$(jq '.status.containerStatuses |= map(.restartCount = 2)' <<<"${obj[gang_pod]}")
+
+# and the same 137 written by somebody else. `rules.rs` spends a constant on each
+# of the four meanings of that number — the kernel's `OOMKilled`, the runtime's
+# `ContainerStatusUnknown`, an ordinary `Error`, and this rule's
+# `RestartingAllContainers` — so the code alone says nothing about the author.
+# `ContainerStatusUnknown` is the one of the three that can stand here as a
+# **single** field changed: it is the other record the kubelet synthesizes, so it
+# carries no stamps either, and everything except the author is identical. A card
+# drawn off it says the container was lost; a card drawn off this fixture says
+# the pod got what it asked for.
+obj[gang_lost_record]=$(jq '.status.containerStatuses |= map(
+       .lastState.terminated.reason = "ContainerStatusUnknown")' <<<"${obj[gang_pod]}")
+
+# and the same pod on a node whose kubelet stopped posting: every status is the
+# last one that kubelet sent, so both containers still read running and ready,
+# and the phase is the only field that says the cluster has lost track of all of
+# it. `neverback_lost` is the same case, and it is the reason `break-nodes` runs
+# after every pod capture rather than before.
+obj[gang_lost]=$(jq '.status.phase = "Unknown"' <<<"${obj[gang_pod]}")
 
 # --- CORPUS END ---
 
@@ -2758,6 +3099,8 @@ check stuck     miss  healthy   "the healthy pod, which carries no finalizer"
 check init      match init      "broken-init"
 check init      miss  healthy   "the healthy pod, whose init container completed with exit 0"
 check init      miss  crashloop "a pod whose *app* container crashloops and which has no init container"
+check init      miss  init_up   "the same pod caught in the ~2s window where the init container is up — history is not a loop, and this is the lie the predicate exists to refuse"
+check init      miss  healthy_retry_pod "healthy-retry: the same exit 1 on record, on an init container that finished — a capture taken here is a healthy pod"
 
 # W1. No pod exists at all, so the evidence is a condition on the ReplicaSet.
 check quota     match quota_rs  "the quota-denied ReplicaSet"
@@ -2967,6 +3310,55 @@ check healthy_unreadysidecar match healthy_unreadysidecar_pod "healthy-unreadysi
 check healthy_unreadysidecar miss  sidecar_running_ready "the same sidecar once its readiness probe passes"
 check healthy_unreadysidecar miss  healthy_sidecar_pod "healthy-sidecar as it stands, whose init status is a migration that terminated"
 check healthy_unreadysidecar miss  healthy_spec "a pod with no sidecar at all — an init container that ran to completion"
+
+# D90's first door, D113's floor. The negatives are the three objects that are
+# this one with a single reading changed: the run's length, the number the
+# program reported, and whether it is serving.
+check probe0    match probe0_pod "broken-probe0 in backoff, its previous run killed by the probe 31s in and reported as exit 0"
+check probe0    miss  exit0_pod  "broken-exit0 as captured: the same clean exit on a 2s run — the arm below PROBE_FLOOR, which is the one already on disk"
+check probe0    miss  sigterm_pod "the same probe kill through a handler that exits 143 — rule 6's exemption, not the door that says the number names nobody"
+check probe0    miss  exit0_up   "the same loop caught while it is up and ready, where doing_its_job is what silences the rule"
+check probe0    miss  probe0_up  "the same pod caught while it is up and ready — one field, and it is the field that decides whether the exit code is what silences rule 6 at all"
+check probe0    miss  probe0_143 "the same 31-second run through a handler that exits 143: one number apart, and ending() reads it as Stopped rather than Finished"
+check probe0    miss  probe0_short "the same clean exit 24s in — one second under the floor, which is the only object here that pins the number rather than clearing it by 23 seconds"
+check probe0    match probe0_running "the face probe0.json actually landed in: running and still not ready, which is where this loop spends its time and the one shape the composed base does not wear"
+
+# D90's producer asymmetry: the restarts without the crash.
+check reboot    match reboot_pod "broken-reboot: three restarts the node caused, on a container that is serving now"
+check reboot    miss  restarts   "broken-restarts as captured — the same count, the same serving container, and an application error behind it"
+check reboot    miss  oomserving_pod "a serving container whose last run was killed by the kernel: 137/OOMKilled, which is neither the runtime's 255 nor a crash"
+check reboot    miss  reboot_down "the same pod in the half-minute after the node came back, before the container is up"
+check reboot    miss  healthy    "the healthy pod, which has never restarted"
+check reboot    miss  reboot_unready "the same history on a container that is up and not serving — rule 5's other band, and a different card"
+check reboot    miss  reboot_twice "one reboot short: two restarts is below RESTARTS_WARN, so rule 5 would have had nothing to say"
+check reboot    miss  reboot_app255 "the same 255 with an ordinary reason — a program that called exit 255, which is not a node event (ending reads the pair)"
+check reboot    miss  reboot_lost "the same three restarts on a node whose kubelet stopped posting — the statuses are the last ones it sent and the phase says so"
+
+# D97's false positive for rule 15: restarted under Never, by a rule on its own
+# exit code.
+check neverrules match neverrules_pod "broken-neverrules: stopped at an exit no rule matches, with the restart the exit-3 rule bought behind it"
+check neverrules miss  neverback_pod  "broken-neverback: the same pod without the rule and without the restart — rule 15's true positive"
+check neverrules miss  neverrules_first "the same object at its first exit, before the rule restarted anything — the window rules.rs names and does not guard"
+check neverrules miss  neverrules_looping "D97's measured object, still in CrashLoopBackOff: rule 15 is refused at the state, so the guard is never reached and the capture would prove nothing"
+check neverrules miss  neverrules_always "the identical object under restartPolicy Always — the field rule 15's fourth condition reads"
+check neverrules miss  neverrules_norule "the same status from a cluster too old to serve restartPolicyRules: the one field this fixture exists to put on disk, missing"
+check neverrules miss  neverrules_settled "the container that failed on its first run and was never restarted — rule 15's true positive wearing this spec, and only the count tells them apart"
+check neverrules miss  neverrules_racing "keeper stopped a second ago and the phase has not caught up — the capture taken too early"
+check neverrules miss  neverrules_over "the same object a second later: Failed, and skipped by every rule before a container is looked at"
+check neverrules miss  neverrules_lost "the same object with only the phase moved: stale statuses from a node that stopped reporting"
+
+# D100's settled gang restart, which nothing in the corpus holds any part of.
+check gang      match gang_pod "broken-gang: 2/2 Ready, three restarts each, and a synthesized 137/RestartingAllContainers with no clock in it"
+check gang      miss  gang_real_stamps "the same record carrying its own stamps — a record rule 5 could have read the age off, which is the thing D100 exists because it cannot"
+check gang      miss  gang_one_ready "the capture taken two seconds early, while the sibling is back and the trigger is still coming"
+check gang      miss  oomserving_pod "a serving container with a 137 in lastState written by the kernel — the code without the author"
+check gang      miss  restarts   "three restarts on a serving container with an ordinary crash behind them"
+check gang      match gang_own_exit "the same restart with the trigger keeping its own exit 3 — the sibling still carries the record, which is what the fixture is for"
+check gang      miss  gang_no_record "the same two containers with no gang record anywhere: the right count, the wrong author"
+check gang      miss  gang_restart_only "the same pod declaring action: Restart, which restarts that container alone and writes no such reason (D97)"
+check gang      miss  gang_twice "one gang restart short — two is below RESTARTS_WARN, so rule 5 would not draw the card this object is evidence for"
+check gang      miss  gang_lost_record "the same 137 with the *other* synthesized reason on it — no stamps either, and only the author differs: a container the runtime lost, not one the pod asked to be restarted"
+check gang      miss  gang_lost "the same statuses on a node whose kubelet stopped posting: still reading ready, and the phase says the cluster has lost them"
 
 # Every predicate cluster.sh runs against the cluster has to be exercised in
 # both directions here, and the two loops below are what say so. A count would

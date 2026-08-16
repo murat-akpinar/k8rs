@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-13T22:32:58Z",
+    "creationTimestamp": "2026-08-16T09:44:02Z",
     "generation": 1,
     "labels": {
       "demo": "healthy"
     },
     "name": "healthy-hostpath",
     "namespace": "default",
-    "resourceVersion": "9931",
-    "uid": "e8862a52-a162-4952-aa65-9e31925e9e88"
+    "resourceVersion": "2111",
+    "uid": "88f68714-579d-4672-9dff-271fd56d0366"
   },
   "spec": {
     "containers": [
@@ -42,7 +42,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-rkv2l",
+            "name": "kube-api-access-sc9qr",
             "readOnly": true
           }
         ]
@@ -50,7 +50,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -82,7 +82,7 @@
         "name": "hostlog"
       },
       {
-        "name": "kube-api-access-rkv2l",
+        "name": "kube-api-access-sc9qr",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -129,35 +129,35 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:59Z",
+        "lastTransitionTime": "2026-08-16T09:44:04Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:58Z",
+        "lastTransitionTime": "2026-08-16T09:44:02Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:15Z",
+        "lastTransitionTime": "2026-08-16T09:44:18Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T23:33:15Z",
+        "lastTransitionTime": "2026-08-16T09:44:18Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-13T22:32:58Z",
+        "lastTransitionTime": "2026-08-16T09:44:02Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -169,18 +169,10 @@
           "cpu": "10m",
           "memory": "16Mi"
         },
-        "containerID": "containerd://bb0ca6ad1be597f2152c2c5c42b07a0b51dfd2ec7305df3ab5e47bf7656652ef",
+        "containerID": "containerd://78b1159bc4d098c3007199590830411eb4e8b16f7b977434cb7bd4e6e6efa728",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
-        "lastState": {
-          "terminated": {
-            "containerID": "containerd://9145bbece14a4d998a183fba5b4ae1caaaff8ee7362601806b803c64f0c3115d",
-            "exitCode": 0,
-            "finishedAt": "2026-08-13T23:33:13Z",
-            "reason": "Completed",
-            "startedAt": "2026-08-13T22:33:13Z"
-          }
-        },
+        "lastState": {},
         "name": "reader",
         "ready": true,
         "resources": {
@@ -193,11 +185,11 @@
             "memory": "16Mi"
           }
         },
-        "restartCount": 1,
+        "restartCount": 0,
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-13T23:33:15Z"
+            "startedAt": "2026-08-16T09:44:18Z"
           }
         },
         "user": {
@@ -219,7 +211,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-rkv2l",
+            "name": "kube-api-access-sc9qr",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -250,6 +242,6 @@
         "memory": "16Mi"
       }
     },
-    "startTime": "2026-08-13T22:32:58Z"
+    "startTime": "2026-08-16T09:44:02Z"
   }
 }
