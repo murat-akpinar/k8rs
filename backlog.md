@@ -95,6 +95,31 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   trip by the PM as a different rule's subject
   ([D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16)),
   which is what makes it phaseless rather than owed. 2026-08-16.
+- **`verify` proves the live object, and the capture is a second fetch minutes
+  later.** `assert_states` polls the running pod; the `fixtures` recipe then
+  captures in a separate `kubectl get`, so a capture can still land in the
+  ~2s up-window that `verify` just refused. The `justfile`'s `guard` lines are
+  the only thing that reads the *committed bytes*, and on 2026-08-16 seven
+  captures had none at all — `oom`, `image`, `config`, `readiness`, `nolimits`,
+  `stuck`, `init`. The two crash-loop ones (`crashloop`, `init`) got guards in
+  the capture trip because their state is transient; the other five hold still,
+  and whether they want guards anyway is a ruling nobody has made. Found by
+  `tester` while closing the `[init]` predicate hole
+  ([D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16)).
+  2026-08-16.
+- **Rule 13's terminated clause stops at a clean exit, and the endings past it
+  are a smaller instance of the same silence.** The shipped clause counts a
+  `Terminated` container as something to point at unless it `Finished`. Measured
+  by `dev-core` with a throwaway probe rather than reasoned: a container whose
+  ending is `Stopped` (and by the same route `Unwatched`, `RestartRule`,
+  `CodeUnknown`) beside nothing but a `PodInitializing` sibling makes
+  `nothing_else_to_point_at` false, suppresses the wedge card, and leaves the pod
+  with **no card at all** — the same total silence the rule 13 blocker was about,
+  one ending over. Deliberately not widened in the box that found it: no capture
+  or measurement produces the shape, and widening a silence on reasoning alone is
+  exactly how the clause was got wrong the first time
+  ([D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16)).
+  2026-08-16.
 - **`PRIOR-ART.md`'s gaps that no ruling has boxed.** The file is evidence and
   never a plan, and a gap becomes a box only by a decision
   ([D89](NOTES.md#d89--k9ss-tracker-is-read-as-prior-art-and-twelve-of-its-classes-become-boxes-2026-08-14)

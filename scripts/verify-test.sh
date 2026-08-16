@@ -69,9 +69,10 @@
 # So: a comment below that says a capture is still owed is describing this debt,
 # not the state of tests/fixtures/. Do not read any of them as "that file does
 # not exist". Re-cutting is its own piece of work rather than a line in someone
-# else's — a base object here has up to twenty-two objects derived from it and an
-# assertion under each, and every one of those assertions has to be re-justified
-# for *why* it still refuses, not merely watched stay green.
+# else's — the four bases of the last block alone carry 25 derived objects
+# between them, with an assertion under each, and every one of those assertions
+# has to be re-justified for *why* it still refuses. Watching them stay green
+# proves nothing: a negative that starts missing for a new reason is green too.
 #
 #   - field names and nesting cross-checked against the Kubernetes API reference
 #     (PodStatus / ContainerStatus / ContainerState / PodCondition) and the
@@ -2567,6 +2568,34 @@ obj[oomserving_pod]=$(jq '.metadata.name = "broken-oomserving"
 obj[init_up]=$(jq '.status.initContainerStatuses |= map(.started = true
        | .state = {running:{startedAt:"2026-08-11T22:47:01Z"}})' <<<"${obj[init]}")
 
+# and broken-init at its very first exit: the init container has died once and
+# has not been restarted yet, so restartCount is 0 and lastState is empty. This
+# is the object [init] reads lastState in order to refuse — one exit is not a
+# loop — and it is the exact counterpart of `owned_first_exit` above, which
+# [owned] carries for the same clause. Without it, deleting the lastState clause
+# from [init] left this whole file green: `init_up` and `healthy_retry_pod` both
+# refuse on the *state* clause, so between them they proved only half the
+# predicate. Found by deleting that clause and watching nothing go red.
+obj[init_first_exit]=$(jq '.status.initContainerStatuses |= map(
+       .restartCount = 0 | .state = {terminated: .lastState.terminated} | .lastState = {})' \
+  <<<"${obj[init]}")
+
+# and broken-init in the **other half** of the same loop: the init container has
+# died and the kubelet has not put it back in backoff yet, so `state` is
+# `terminated` and `waiting` is gone. `crashloop_terminated` is this half for the
+# app-container predicates and it is captured live; this is the init list saying
+# the same thing, and the two runs on record are both exit 1 because that is what
+# `init.json` landed carrying.
+#
+# It must **match**, and that is the point: the capture committed on 2026-08-16
+# is in this face, not the `waiting` one `obj[init]` wears. Sampled 70 times the
+# loop was here 39 times (the measurement is on [owned] in cluster.sh), so a
+# predicate that demanded `waiting` alone would burn the whole 420s timeout and
+# then fail a pod that was crashlooping correctly — the too-tight half of what
+# this file exists to catch, and the half nothing was testing for `[init]`.
+obj[init_terminated]=$(jq '.status.initContainerStatuses |= map(
+       .state = {terminated: .lastState.terminated})' <<<"${obj[init]}")
+
 # D75's wait-for-dependency loop, finished. The init container's status is
 # broken-init's — a real crash history — with the current run replaced by the
 # success that ended it, grafted onto the healthy pod that is now serving.
@@ -2726,10 +2755,10 @@ obj[neverback_no_done]=$(jq '.spec.containers |= map(select(.name != "done"))
 # The 31 is subtracted from the object's own `finishedAt`, never written as a
 # literal stamp. `[probe0]` is the one predicate in this file that subtracts two
 # stamps, so a literal here holds only while its ancestor's stamps do not move —
-# and the line above this block says to re-cut that ancestor from the fixture the
-# next trip captures. A literal would then leave a run of days behind a `> 25`
-# clause and this file would be green over a plant that no longer plants
-# anything. Same fix, same reason, as `terminated_now` in src/rules_tests/.
+# and § THE RE-CUT DEBT is a standing instruction to move them. A literal would
+# then leave a run of *days* behind a `> 25` clause, and this file would go green
+# over a plant that no longer plants anything. Same fix, same reason, as
+# `terminated_now` in src/rules_tests/.
 obj[probe0_pod]=$(jq '.metadata.name = "broken-probe0"
    | .status.containerStatuses |= map(.restartCount = 6
        | .lastState.terminated.exitCode = 0
@@ -2751,21 +2780,27 @@ obj[probe0_short]=$(jq '.status.containerStatuses |= map(
   <<<"${obj[probe0_pod]}")
 
 # and the face `probe0.json` actually landed in, which is not the one this base
-# wears: **running**, `started: true`, still not ready, thirteen restarts behind
-# it. A probe kill on a container whose readiness never passes has no up-and-
-# healthy window to be caught in — it comes up, fails the probe for 30s, dies —
-# so this is where the capture spends its loop, and it must match. It is one
-# field from `probe0_up`, which is the same running container once it is ready.
+# wears: **running** and `started: true`, still not ready. A probe kill on a
+# container whose readiness never passes has no up-and-healthy window to be
+# caught in — it comes up, fails the probe for its 30s delay, dies — so this is
+# where the capture spends its loop, and it must match. `restartCount` is left at
+# the base's 6 rather than the capture's 13 on purpose: it is not part of the face
+# and `[probe0]` asks only `>= 1`, so leaving it puts exactly one field between
+# this object and `probe0_up`, which is the same running container once it is
+# ready. The stamp is derived, for the reason on the base above.
 obj[probe0_running]=$(jq '.status.containerStatuses |= map(.started = true
-       | .restartCount = 13
-       | .state = {running:{startedAt:"2026-08-11T22:46:45Z"}})' <<<"${obj[probe0_pod]}")
+       | .state = {running:{startedAt:
+           ((.lastState.terminated.finishedAt|fromdateiso8601) + 2 | todateiso8601)}})' \
+  <<<"${obj[probe0_pod]}")
 
-# and the same loop caught while it is up, which is what a manifest without the
-# readiness probe hands over — and `doing_its_job` would then be what silences
-# rule 6, not the exit code this fixture is for (the argument `exit0_up` carries,
-# on the pod that carries the same probe for the same reason).
+# and the same loop caught while it is up **and ready**, which is what a manifest
+# without the readiness probe hands over — and `doing_its_job` would then be what
+# silences rule 6, not the exit code this fixture is for (the argument `exit0_up`
+# carries, on the pod that carries the same probe for the same reason).
 obj[probe0_up]=$(jq '.status.containerStatuses |= map(.ready = true | .started = true
-       | .state = {running:{startedAt:"2026-08-11T22:46:45Z"}})' <<<"${obj[probe0_pod]}")
+       | .state = {running:{startedAt:
+           ((.lastState.terminated.finishedAt|fromdateiso8601) + 2 | todateiso8601)}})' \
+  <<<"${obj[probe0_pod]}")
 
 # and the same 31-second run through a handler that exits 143 instead of 0 —
 # `broken-sigterm` with this pod's `initialDelaySeconds` on it. One number apart,
@@ -3097,10 +3132,12 @@ check stuck     miss  healthy   "the healthy pod, which carries no finalizer"
 # Init:CrashLoopBackOff says nothing useful in containerStatuses, so a predicate
 # that reads only that array is blind to it.
 check init      match init      "broken-init"
+check init      match init_terminated "the same pod between backoffs, which is where the loop spends most of its time and the face init.json actually landed in"
 check init      miss  healthy   "the healthy pod, whose init container completed with exit 0"
 check init      miss  crashloop "a pod whose *app* container crashloops and which has no init container"
 check init      miss  init_up   "the same pod caught in the ~2s window where the init container is up — history is not a loop, and this is the lie the predicate exists to refuse"
 check init      miss  healthy_retry_pod "healthy-retry: the same exit 1 on record, on an init container that finished — a capture taken here is a healthy pod"
+check init      miss  init_first_exit "the same pod at its first exit, before any restart — the only case here that refuses on lastState rather than on the current state"
 
 # W1. No pod exists at all, so the evidence is a condition on the ReplicaSet.
 check quota     match quota_rs  "the quota-denied ReplicaSet"
