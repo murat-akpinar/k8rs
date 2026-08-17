@@ -192,7 +192,12 @@
 
 ### Non-functional targets
 
-- Memory: < 50MB RSS at ~1000 pods. First paint < 1s, findings < 3s.
+- Memory: < 50MB RSS at ~1000 pods. First paint < 1s, findings < 3s. **The
+  paint figures hold up to a cluster size Phase 5 measures and then states**;
+  the initial LIST has no size-independent bound and nothing may be drawn until
+  it lands, so above that size the first paint says what it is still waiting for
+  rather than silently missing the number
+  ([NOTES § D115](NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
 - Coalesce redraws during event storms (min ~100ms debounce) — otherwise
   CPU spikes during rollouts. 0% CPU at idle is already decided.
 - Minimum terminal 80×24; redraw on resize.

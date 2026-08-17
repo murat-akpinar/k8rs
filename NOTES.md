@@ -136,6 +136,7 @@ its line moving with it.
 - [D112](#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16) — `lastState.terminated` has three authors, and the file was reading it as if it had one
 - [D113](#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16) — a card's parts were budgeted separately and never added up, and everything else this family found was reached by fixing that
 - [D114](#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16) — the capture trip that put four objects on disk, and the init arm that is not reachable at all
+- [D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18) — the prune line bounds memory and was read as if it bounded time, and the paint budget is stated at a cluster size the risk is not
 
 ## Why it exists — where the gap is
 
@@ -8299,6 +8300,85 @@ false red on any state that is transient by design, which cost one whole slow pa
 — and rule 5's finishing endings, above. Neither is folded in, because
 `assert_states` is the shared helper every state runs through and CLAUDE.md keeps
 a shared-helper change per box.
+
+### D115 — the prune line bounds memory and was read as if it bounded time, and the paint budget is stated at a cluster size the risk is not (2026-08-18)
+
+Invariant 6's prune has been corrected twice, and both corrections were about
+*which* fields survive it:
+[D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)
+replaced "metadata + status only" because five rules read `spec`, and
+[D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)
+found `spec.restartPolicy` named by no snapshot type at all. Both are right.
+Neither noticed the thing underneath them: **the prune cannot run on the wire,
+so the field list decides memory and nothing else.**
+
+There is no mechanism to ask the API server for a subset of `status`.
+`PartialObjectMetadata` returns metadata alone, and the pod rules read
+`status.containerStatuses` and `status.conditions` between them — rule 10 and
+the never-judged-pod rule live entirely in the second, which is why "read the
+container statuses only" is not a way out either. So the full object is
+serialized by the API server, sent, and deserialized by us, and *then* fields
+are dropped. **Pruning removes no byte from the network and no
+microsecond from the decode.** It bounds the resident set, which is exactly what
+`REQUIREMENTS.md`'s `< 50MB RSS at ~1000 pods` asks for, and it is the right
+mechanism for that number.
+
+**What made the misreading easy** is that invariant 6 states the prune in the
+same breath as a cost claim — *"a periodic `LIST pods -A` is what makes k9s
+heavy"*. That is true, and watch-not-poll genuinely fixes it: the repetition is
+the cost, and the repetition is gone. But the sentence reads as though pruning
+is also what makes the **first** LIST affordable, and it is not. Nothing has yet
+been *decided* that makes the first LIST affordable — the box that will decide it
+is the pagination box directly below the prune box, and it is unbuilt, not
+missing.
+
+**Which leaves a range nobody has defined.** The budget is written at ~1000 pods
+(`first paint < 1s, findings < 3s`). The pagination box argues from a 10 000-pod
+cluster ([PRIOR-ART § A2](PRIOR-ART.md#a2--the-initial-list-must-be-paginated-and-the-page-size-is-a-decision)).
+No document says what happens between them. And the usual escape — paint the
+first page, let the rest stream in — is closed by the correctness rule sitting
+in the same Phase 5 box: no snapshot is published until every initial LIST has
+landed, because a rule cannot tell a partial list from a small cluster and
+invariant 5 leaves it no way to ask
+([D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)).
+
+Three claims, each correct on its own, and they cannot all hold at every cluster
+size:
+
+1. the prune bounds memory (invariant 6 — and it does not bound latency);
+2. nothing is published until every initial LIST has landed (correctness, D28);
+3. first paint under a second (`REQUIREMENTS.md`).
+
+**That they collide is structural and needs no measurement.** The initial LIST
+grows with the cluster and has no size-independent bound, so above *some* size it
+exceeds any fixed budget, and 2 forbids painting anything before it lands.
+**At what size is unmeasured, and this entry invents no figure for it**: D25's
+rule holds, and the two numbers standing near this box — ~1000 in the budget,
+10 000 in the pagination box — are the sizes those documents were *written* at,
+not a measured crossing point. Finding the crossing point is the work; knowing
+that one exists is not.
+
+**The third claim is the one that gives, and it gives by naming a size.** Not
+because latency matters least — because 1 and 2 are correctness and 3 is a
+target, and a target that silently stops being true above some size nobody has
+measured does not report as a missed target. It reports as *"slow on a large
+cluster"*, which is the sentence k9s carried for six years while the cause sat
+in one unpaginated call. So the budget becomes a budget **at a stated cluster size**,
+with a stated behaviour above it: a first paint that says what it is still
+waiting for and how far along it is, rather than a number that quietly expires.
+
+**No mechanism is decided here** — page size, whether the count is known early
+enough to show progress at all, and what the decode actually costs are Phase 5
+measurements, and
+[D25](#d25--what-this-review-did-not-decide) already refuses to write that from
+a guess. What is decided is which of the three gives, so that the measurement
+has something to report against.
+
+**Invariant 6's wording is left alone.** It says watch-not-poll and
+pruned-to-named-fields, and both are true; what was wrong was only the reading.
+The correction belongs where the reading happens — one sentence in the Phase 5
+box saying what the prune does *not* buy, beside D69's and D97's two sentences
+about which fields it keeps.
 
 ## Decisions made
 

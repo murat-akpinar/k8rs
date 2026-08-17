@@ -262,7 +262,11 @@ code and never touch product files.
 - Redraws are coalesced (~100ms debounce) so rollouts don't spike CPU.
 
 Targets: < 50MB RSS at ~1000 pods · first paint < 1s · findings < 3s ·
-minimum terminal 80×24.
+minimum terminal 80×24. The paint figures are quoted at that cluster size on
+purpose — the initial LIST grows with the cluster and nothing is drawn until it
+lands, so the size they hold up to is measured in Phase 5 and stated, and above
+it the first paint reports what it is waiting for
+([NOTES § D115](../NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
 
 ## Error handling
 

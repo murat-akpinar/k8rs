@@ -634,10 +634,15 @@ that cites them expects to find them.
       Closed — [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12) · [D74](NOTES.md#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13)
 - [x] Node rules N1–N6 (NotReady · cordoned · pressure · kubelet skew ·
       overcommit · what blocks a Pending pod). **N1's card has to reach the
-      pods, not only the node** — every pod rule reads pod *status*, and the
-      status of a pod whose kubelet stopped posting is a fossil that never
-      expires, so on a NotReady node the workload that is actually down
-      produces no card at all. `healthy.json` is exactly that pod (it runs on
+      pods, not only the node** — every rule that diagnoses a *failure* reads
+      pod *status*, and the status of a pod whose kubelet stopped posting is a
+      fossil that never expires, so on a NotReady node the workload that is
+      actually down produces no card at all. (The spec-reading rules — 8 and
+      12 — do still fire there; what goes silent is everything that would say
+      the workload is down, which is what this card replaces. "Every pod rule
+      reads status" is the generalisation
+      [D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)
+      refused, and it survived here.) `healthy.json` is exactly that pod (it runs on
       `k8rs-worker3`, which `break-nodes` made `Ready: Unknown`), which is how
       the gap was found. Without this, Alerts says "node NotReady" in one place
       and nothing about the thing the user cares about
@@ -1817,6 +1822,13 @@ public release.
       only" was never true of this design** and this box said it until
       2026-08-13
       ([NOTES § D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+      **What the prune buys is the resident set and nothing else**: there is no
+      way to ask the API server for a subset of `status` — `PartialObjectMetadata`
+      is metadata alone, and the pod rules read `status.containerStatuses` and
+      `status.conditions` between them — so the whole object is sent and decoded
+      before a field is dropped. It serves the `< 50MB RSS` target and
+      contributes nothing to `first paint < 1s`
+      ([NOTES § D115](NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
       **And no snapshot is published until every initial LIST has landed.** A
       rule cannot tell a partial list from a small cluster — invariant 5 leaves
       it no way to ask — so a snapshot emitted mid-bootstrap makes rule 10 say
@@ -1859,7 +1871,16 @@ public release.
       to paginate one call and carried "slow on a large cluster" the whole time
       ([#663](https://github.com/derailed/k9s/issues/663) 2020 →
       [#3987](https://github.com/derailed/k9s/pull/3987) 2026 ·
-      [PRIOR-ART § A2](PRIOR-ART.md#a2--the-initial-list-must-be-paginated-and-the-page-size-is-a-decision))
+      [PRIOR-ART § A2](PRIOR-ART.md#a2--the-initial-list-must-be-paginated-and-the-page-size-is-a-decision)).
+      **Above some cluster size the budget and the correctness rule cannot both
+      hold, and it is the budget that gives — by naming the size it holds at**,
+      with a first paint above that size saying what it is still waiting for
+      rather than a number that quietly expires
+      ([NOTES § D115](NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
+      That a crossing point exists is structural; **where it sits is this box's
+      output — measure it, do not estimate it**, and neither number already
+      written near it is that measurement
+      ([NOTES § D25](NOTES.md#d25--what-this-review-did-not-decide))
 - [ ] **Find out whether kube-rs rate-limits us, and if it does, put it on
       screen** — client-go ships a client-side QPS limiter, so for years a k9s
       user reporting "slow" was partly reporting a queue inside their own binary

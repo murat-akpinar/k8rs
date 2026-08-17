@@ -69,7 +69,7 @@ whoever is writing — a dev at step 3 as much as the PM at step 7:
 | A **measurement** somebody already made — commands and their real output | [reports/](reports/README.md) — evidence a decision cites, never the decision |
 | The **built** state, for humans outside this repo | [docs/](docs/README.md) — never contains anything not yet true of the code |
 | What a screen actually looks like, key by key | [screens/](screens/README.md) — one file per screen |
-| The v1 rule set (rules 1–11, severities, thresholds) | [NOTES § v1 rule set](NOTES.md#v1-rule-set) |
+| The v1 rule set (rules 1–15 — **9 became a Capacity row and 11 waits on the Events watch in v0.5, so neither is a v1 rule** — severities, thresholds) | [NOTES § v1 rule set](NOTES.md#v1-rule-set) |
 | Node rules · certificate rules · analysis reports | [§ N-series](NOTES.md#node-rules-n-series) · [§ C-series](NOTES.md#certificate-rules-c-series--and-what-is-not-reachable) · [§ Analysis reports](NOTES.md#analysis-reports) |
 | What is deliberately **not** built | [NOTES § Out of scope](NOTES.md#out-of-scope-the-most-important-section) · [docs/architecture § Out of scope](docs/architecture.md#out-of-scope) |
 | Why this build order | [NOTES § Build order](NOTES.md#build-order--why-it-is-what-it-is) |
