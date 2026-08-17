@@ -106,6 +106,7 @@
 - *(docs)* The brief names the regions, and the md files were not the cost ([95bd54a](https://github.com/murat-akpinar/k8rs/commit/95bd54a1a66b3ee5c07a07e4a27f9593f1b714ad)) — A box cost two hours and the markdown files were named as the cause. Measured instead: one cold dev-core dispatch faces pod.rs at 9809 lines, NOTES at 8658, rules.rs at 5186 — and CLAUDE.md at 680, two percent of it. Compressing that file by three percent moved three parts in ten thousand, and an hour went there before anything was measured, which is the error D107 itself records.
 - *(docs)* Nothing counts panics, and the guard that owes is named ([0416a6e](https://github.com/murat-akpinar/k8rs/commit/0416a6e0f28f5feb9539596ac28165fbec61594f))
 - *(docs)* The crash_looping mutant was called the only one and the whole-file run says nineteen ([cd5db3f](https://github.com/murat-akpinar/k8rs/commit/cd5db3fb396f16ba43b5013260ef1e5a52129f75))
+- *(docs)* The prune bounds memory and not first paint ([7ef4e57](https://github.com/murat-akpinar/k8rs/commit/7ef4e57429dc65ad86e629a2a5d9ddaeee5e2517)) — Invariant 6's prune line has been corrected twice about which fields survive it (D69, D97) and neither correction noticed what sits underneath: there is no way to ask the API server for a subset of status, so the prune runs after the decode and decides the resident set and nothing else. It serves the 50MB target and contributes nothing to first paint.
 
 ### 🧪 Testing
 
