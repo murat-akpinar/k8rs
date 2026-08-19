@@ -1497,14 +1497,16 @@ that cites them expects to find them.
       literal's field assignment, and on the snapshot decode it found 1 of the
       32 holes a hand-written field-level sweep found. That sweep is the gate
       for the decode.
-      **Run 2026-08-16: 519 mutants in 19 min — 271 caught, 229 unviable,
-      **19 MISSED**, so the gate is red and this box stays open.** Where they
-      are: `lasted` **10** (the humanised duration — `<` vs `<=`, `/` vs `%`, no
-      unit boundary is asserted), `out_of_memory` **4** and
-      `running_but_not_ready` **2** (both on the `NOT_READY_GRACE` comparison —
-      the threshold is read either side but never *at* it), and one each in
-      `short_of_pods`, `escalated_host_path` and `crash_looping`. Nineteen
-      places where a test cannot fail; each gets a test
+      **Run 2026-08-20, four shards (NOTES § D118): 558 mutants in 11m10s —
+      488 caught, 55 unviable, **15 MISSED**, so the gate is red and this box
+      stays open.** Where they are: `lasted` **10** (the humanised duration —
+      every rung boundary `<` vs `<=` vs `==`, and `/` vs `%` on the days
+      division; no unit boundary is asserted), `running_but_not_ready` **2**
+      (`3982` — the `began.0 > unready_since.0` guard, whose whole condition
+      also mutates to `true`), and one each in `out_of_memory` (`3231`, `>` vs
+      `>=`), `escalated_host_path` (`4207`, `&&` vs `||`) and `short_of_pods`
+      (`5830`, `<` vs `>`). Fifteen places where a test cannot fail; each gets a
+      test
       ([NOTES § D41](NOTES.md#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12))
 - [ ] Temporary `main.rs` shell (~10 lines): load a fixture path from args,
       print findings. It cannot reach a cluster yet — `k8s.rs` is Phase 5, and

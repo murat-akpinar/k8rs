@@ -29,8 +29,9 @@ an earlier run is already going, wait for it in the foreground or restart it;
 do not park on it and hand back a status report.
 
 A foreground call is capped at ten minutes and the whole mutation sweep is
-longer than one, so the phase-close sweep runs in shards — `--shard k/4`, one
-call each, all four green or the gate is not passed
+longer than one, so the phase-close sweep runs in shards — `--shard 0/4` then
+`1/4 2/4 3/4` (`k` is zero-based; `4/4` is an error, and an error prints no
+`MISSED` line), one call each, all four green or the gate is not passed
 ([D118](../../NOTES.md#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)).
 
 Stop only for: a red build, a box no agent can run (credential, login,

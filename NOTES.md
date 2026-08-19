@@ -8562,15 +8562,22 @@ call is capped at ten minutes; the whole mutation sweep is longer than one.**
 
 The numbers are read off runs, not reasoned about
 ([D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)):
-`cargo mutants --list` counts **558** mutants across `rules.rs` and `analysis.rs`
-today, against the **519** the whole run carried on 2026-08-16 — and that run
-took **19 minutes** ([todo.md](todo.md) Phase 3, the sweep box). The file has
-only grown since, so the gap widens; it does not close.
+the sweep is **558** mutants across `rules.rs` and `analysis.rs` today, against
+the **519** it carried on 2026-08-16 ([todo.md](todo.md) Phase 3, the sweep
+box), and the four shards took 2m41s, 2m53s, 2m44s and 2m52s — **11m10s of wall
+clock**, past the cap with the file still growing.
 
 **So the phase-close sweep runs in shards** — `--shard k/4`, one foreground call
-each, **all four green or the gate is not passed**. A shard of sixteen was run to
-prove the flag rather than to trust it: 35 mutants in 57s, of which 18s was the
-baseline build. Two things this does *not* change. The per-turn gate is
+each, **all four green or the gate is not passed**.
+
+**`k` is zero-based**, so the four are `0/4 1/4 2/4 3/4` and `4/4` is not the
+fourth shard but an error — *shard k must be less than n*. That is worth a
+sentence rather than a footnote, because the run that ends in that error prints
+**no `MISSED` line at all**, and a gate read by grepping for `MISSED` therefore
+calls a quarter of the mutants green without having run one of them. This entry
+had it wrong in its first draft and the run is what corrected it: shard `0/4`
+holds ten of the fifteen misses on the file today. Two things this does *not*
+change. The per-turn gate is
 `--in-diff` and already fits in one call, so it is untouched. And `--iterate`
 narrows what a *later* run does, never what one call costs, so it is not a
 substitute for sharding.
