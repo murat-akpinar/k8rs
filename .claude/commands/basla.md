@@ -21,6 +21,18 @@ Then, until told to stop:
    the work commit · CHANGELOG separately · push.
 4. Next box. No "shall I continue" (D98).
 
+This command also runs unattended as a single-turn process (`claude -p`):
+when the turn ends the process exits and every background job dies with it.
+So never end a turn waiting on background work. Anything you must wait for —
+a mutation sweep, a build — runs in the foreground, blocking. If a sweep from
+an earlier run is already going, wait for it in the foreground or restart it;
+do not park on it and hand back a status report.
+
+A foreground call is capped at ten minutes and the whole mutation sweep is
+longer than one, so the phase-close sweep runs in shards — `--shard k/4`, one
+call each, all four green or the gate is not passed
+([D118](../../NOTES.md#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)).
+
 Stop only for: a red build, a box no agent can run (credential, login,
 account), or a reversal of a design decision — which is written into
 `NOTES.md` before it is acted on.

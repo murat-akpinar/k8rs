@@ -139,6 +139,7 @@ its line moving with it.
 - [D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18) — the prune line bounds memory and was read as if it bounded time, and the paint budget is stated at a cluster size the risk is not
 - [D116](#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19) — the environment picker moves to startup, and the tag comes out of the kubeconfig itself
 - [D117](#d117--the-plain-language-pass-and-the-two-things-it-found-that-were-not-sentences-2026-08-19) — the plain-language pass, and the two things it found that were not sentences
+- [D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20) — a foreground call is capped at ten minutes and the phase-close sweep is longer than one
 
 ## Why it exists — where the gap is
 
@@ -8549,6 +8550,34 @@ rather than from memory** — it said the phrase was spelled twice, in rules 1 a
 the same defect class this file keeps recording
 ([D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)):
 a number written from memory instead of from a run.
+
+### D118 — a foreground call is capped at ten minutes and the phase-close sweep is longer than one (2026-08-20)
+
+`/basla` also runs unattended, as a single-turn `claude -p` process: when the
+turn ends the process exits and every background job dies with it, so a sweep
+started in the background is a sweep nobody ever reads. The rule that follows is
+*anything you must wait for runs in the foreground* — and that rule, written on
+its own, cannot be obeyed for the one gate it was written about. **A foreground
+call is capped at ten minutes; the whole mutation sweep is longer than one.**
+
+The numbers are read off runs, not reasoned about
+([D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)):
+`cargo mutants --list` counts **558** mutants across `rules.rs` and `analysis.rs`
+today, against the **519** the whole run carried on 2026-08-16 — and that run
+took **19 minutes** ([todo.md](todo.md) Phase 3, the sweep box). The file has
+only grown since, so the gap widens; it does not close.
+
+**So the phase-close sweep runs in shards** — `--shard k/4`, one foreground call
+each, **all four green or the gate is not passed**. A shard of sixteen was run to
+prove the flag rather than to trust it: 35 mutants in 57s, of which 18s was the
+baseline build. Two things this does *not* change. The per-turn gate is
+`--in-diff` and already fits in one call, so it is untouched. And `--iterate`
+narrows what a *later* run does, never what one call costs, so it is not a
+substitute for sharding.
+
+**The `justfile` keeps its recipe.** `just mutants` is `tester`'s file and a flag
+typed at a gate is not a recipe change; if the sharding should become one, that
+is a box, not an edit the PM makes in passing.
 
 ## Decisions made
 
