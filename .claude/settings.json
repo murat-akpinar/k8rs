@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo:*)",
+      "Bash(just:*)",
+      "Bash(git:*)",
+      "Bash(git-cliff:*)",
+      "Bash(gh pr:*)",
+      "Bash(python3 scripts/:*)",
+      "Bash(bash scripts/:*)",
+      "Bash(kubectl:*)",
+      "Bash(kind:*)",
+      "Bash(ssh ubuntu:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(diff:*)",
+      "Bash(date:*)",
+      "Bash(echo:*)",
+      "Bash(which:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean:*)",
+      "Bash(rm -rf:*)",
+      "Bash(kind delete:*)"
+    ]
+  }
+}
