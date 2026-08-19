@@ -957,6 +957,11 @@ And the taint-blocked cause, same merge, an owned workload this time:
   blocking node's taint `added_at` — the card is about the pod's wait, not the
   node's history, and the two clocks answer different questions even when a
   reader could reach for either.
+- **A one-node cluster gets its own grammar:** `it asks for a node labelled
+  disktype=ssd, and the cluster's one node does not have that label` —
+  `none of the 1 node have that label` is the same defect plain language
+  already fixed for restart counts, and kind, minikube, k3s and Docker
+  Desktop all run exactly one node.
 
 ## W1 and W2 — the two cards whose subject is not a pod
 

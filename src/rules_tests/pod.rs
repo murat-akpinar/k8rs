@@ -161,6 +161,21 @@ fn the_thresholds_and_the_exit_table_are_the_ones_the_documents_write_down() {
         "the one code in this table whose cause the object does not settle says so: \
          {start_failure:?}"
     );
+    // **And the actor it names is the one the rest of the table names** (invariant 14). The two
+    // rows keyed on [`CODE_UNKNOWN`] already tell this reader *the node found the container dead*
+    // and *the node could not tell what code the container ended with*, about the same layer; a
+    // third row introducing `runtime` teaches a word nothing on the card explains, and no card
+    // this translation reaches explains one — the hostpath rules do, two rules away and on a
+    // screen of their own.
+    for code in [-1, 128] {
+        let said =
+            exit_meaning(code, None).unwrap_or_else(|| panic!("the table translates exit {code}"));
+        assert!(
+            said.contains("the node") && !said.contains("runtime"),
+            "exit {code} names the same actor as the rows beside it, in the word they use: \
+             {said:?}"
+        );
+    }
     // **The `0` row may not name an agent, and that is the half the substring above cannot
     // hold**: *the program finished successfully* passes any token about a clean ending while
     // claiming the one thing the code cannot say. It printed one line above an action spending
@@ -655,9 +670,19 @@ fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
     // on — and it stood under [`describe`], which prints no logs at all. The sentence was never
     // the defect; the command under it was.
     assert!(
-        failed.action.contains("read that run's log"),
+        failed.action.contains("read the last run's log"),
         "this is the arm that names a log — the other two say nothing about one and keep \
          `describe`: {}",
+        failed.action
+    );
+    // **And it names *which* run, because two of its three cards give the phrase no antecedent.**
+    // Rule 1's title is *keeps crashing* and rule 5's is a restart count; *that run* had nothing
+    // on either card to attach to, and the run this sentence means is the one `lastState` holds
+    // (invariant 14).
+    assert!(
+        failed.action.contains("--previous"),
+        "and the flag its own command carries is explained on the card, because it is the one \
+         word here a reader in their first month cannot guess: {}",
         failed.action
     );
     assert_eq!(
@@ -1487,7 +1512,7 @@ const PROBE_WORDS: [&str; 4] = ["liveness", "readiness", "startup", "probe"];
 /// and into a negative over the whole corpus (NOTES § D113). The canary under this array is what
 /// caught the change: it asserts every entry is still produced by some card, and this one stopped
 /// being.
-const SENT_TO_THE_LOGS: [&str; 1] = ["read that run's log"];
+const SENT_TO_THE_LOGS: [&str; 1] = ["read the last run's log"];
 
 /// **The sentence that used to be the first entry above, kept as a negative after nothing produced
 /// it any more** (NOTES § D113). [`crash_looping`]'s [`Ending::Failed`](Ending::Failed) arm was its
@@ -1681,6 +1706,32 @@ fn no_card_sends_a_reader_to_a_log_the_command_beside_it_cannot_reach() {
              field the arm that says it cannot have: {f:#?}"
         );
     }
+    // **The flag and its explanation are one thing, checked in both directions over the same
+    // sweep** (invariant 4, invariant 14). `--previous` is the one word on these cards a reader in
+    // their first month cannot guess — it is the difference between the log of the run that failed
+    // and the log of the one running now — so the card that hands it over says what it does; and
+    // an action that talks about the flag without the command under it is the defect this test is
+    // named for, one word smaller.
+    let mut handed_over = 0;
+    for f in &swept {
+        let commanded = f
+            .kubectl_cmd
+            .as_deref()
+            .is_some_and(|c| c.contains("--previous"));
+        assert_eq!(
+            commanded,
+            f.action.contains("--previous"),
+            "a command carrying --previous owes the reader what the flag does, and an action \
+             naming it owes the command that runs it: {f:#?}"
+        );
+        handed_over += usize::from(commanded);
+    }
+    assert!(
+        handed_over > 0,
+        "no card in the sweep hands over --previous, so the pairing above is guarding nothing \
+         (CLAUDE.md § A derived list asserts it found something)"
+    );
+
     // And the positive beside it, or the sweep above passes on a rule set that stopped drawing
     // (CLAUDE.md § A derived list asserts it found something).
     assert!(
@@ -2384,6 +2435,148 @@ fn a_container_backing_off_before_its_first_restart_is_not_told_it_has_zero_rest
             ))),
         "the three facts this object supports and no fourth — the container it is about, how long \
          the run lasted, and the code the cluster recorded for it: {facts:?}"
+    );
+}
+
+/// **A count of one is not spelled with a plural noun** (invariant 14). `1 restarts` reached a
+/// shipped card, and it reached it twice: rules 1 and 2 each hand-rolled `format!("{} restarts")`
+/// where [`counted`] is the one place this file spells a counted noun. **Both are driven here,
+/// because a fix to one leaves the other saying it** — one fact spelled twice is what made this a
+/// defect rather than a typo (NOTES § D85).
+///
+/// **Rule 2's card is a committed capture read at a moment of its own.** `oomserving`'s container
+/// carries `restartCount: 1` beside the kill it survived, and the rule draws inside its recency
+/// grace — the same bytes `an_old_kill_on_a_container_that_has_been_fine_since_…` reads from the
+/// other side.
+///
+/// **Rule 1's is planted, one field**, because the corpus holds no crash loop at one restart and
+/// cannot: `just fixtures` photographs a pod that has been looping for minutes (NOTES § D40,
+/// § D53). `restartCount: 1` is `crashloop.json` eight restarts earlier, and the wait and the
+/// failed run around it are the cluster's own.
+///
+/// **The plural is asserted beside each**, or a fix that reads right at one and wrong at nine
+/// passes on the half it was written for.
+#[test]
+fn a_container_that_has_restarted_once_is_not_told_it_has_one_restarts() {
+    let killed = pod("oomserving");
+    let app = container(&killed, "app");
+    assert_eq!(
+        app.restarts, 1,
+        "the capture has to be the one-restart object, or this proves nothing about one: {app:?}"
+    );
+    let news = Time(
+        app.last_terminated
+            .as_ref()
+            .and_then(|run| run.finished_at.as_ref())
+            .expect("the capture records when the kernel took it")
+            .0
+            .checked_add(SignedDuration::from_mins(5))
+            .expect("a moment after the captured kill"),
+    );
+    let all = findings_at(&["oomserving"], news.clone());
+    show_at(&all, &news);
+    let oom = only(&all, "broken-oomserving", "OOMKilled");
+    assert!(
+        oom.evidence.contains("1 restart") && !oom.evidence.contains("1 restarts"),
+        "one restart is `1 restart` — a number glued to a plural noun is a format string \
+         showing through, not a sentence anyone wrote (invariant 14): {}",
+        oom.evidence
+    );
+
+    // Rule 1, at the same count, one restart before the capture was taken.
+    let second_backoff = capture_but("crashloop", |p| {
+        container_status(p, "quitter").restart_count = 1;
+    });
+    let looping = container(&second_backoff, "quitter");
+    assert!(
+        matches!(waiting(looping), Some(("CrashLoopBackOff", _))) && looping.restarts == 1,
+        "the plant moves the count and leaves the wait it was written under: {looping:?}"
+    );
+    let captured = captured_i32(
+        captured_status(&fixture("crashloop"), "containerStatuses", "quitter"),
+        &["restartCount"],
+    );
+    assert_ne!(
+        captured, 1,
+        "and the count is the one field this plant moves — a capture already reading 1 would \
+         make the assertion below true for free"
+    );
+    let all = analyze(&pods_at(vec![second_backoff], now()));
+    show(&all);
+    let looped = only(&all, "broken-crashloop", "CrashLoopBackOff");
+    assert!(
+        looped.evidence.contains("1 restart") && !looped.evidence.contains("1 restarts"),
+        "rule 1 spells the same fact, so it spells it the same way: {}",
+        looped.evidence
+    );
+
+    // **And the plural still reads as one**, off the untouched capture at nine. A helper that
+    // pluralised nothing would pass both assertions above on its own.
+    let untouched = findings(&["crashloop"]);
+    let nine = only(&untouched, "broken-crashloop", "CrashLoopBackOff");
+    assert!(
+        nine.evidence.contains(&format!("{captured} restarts")),
+        "the capture's own count keeps its plural: {}",
+        nine.evidence
+    );
+}
+
+/// **Rule 2's `if c.restarts > 0`, which is rule 1's guard one rule over and was never fed.**
+/// `cargo mutants` reported `3240:19 -> >=` MISSED the first time the line beside it moved: with
+/// the operator flipped, `0 restarts` ships on a real card and nothing goes red — the same
+/// survivor `crash_looping`'s box closed on 2026-08-19, in the rule that copied the `format!`
+/// (NOTES § D85's class: two rules spelling one fact, and only one of them proved).
+///
+/// **A fact is printed only when it is a fact** (NOTES § v1 rule set, rule 1): `0 restarts` under
+/// a title saying the kernel killed this container reads as *and it has not happened again*, which
+/// is the opposite of the window this shape is.
+///
+/// **The shape is the one before the first restart**, and it is the window
+/// `a_container_backing_off_before_its_first_restart_…` documents: the kubelet moves the
+/// terminated status down into `lastState` and writes the backoff into `state.waiting` without
+/// touching `restartCount`, so the API publishes `CrashLoopBackOff` beside `restartCount: 0` and a
+/// real kill. `just fixtures` photographs a pod that has been looping for minutes, which is why
+/// the corpus holds no such object (NOTES § D40, § D53), and `oom.json`'s own kill is what the
+/// plant is built around — the `OOMKilled` record it fires on is the cluster's.
+#[test]
+fn a_container_the_kernel_killed_before_its_first_restart_is_not_told_it_has_zero_restarts() {
+    let first_kill = capture_but("oom", |p| {
+        backing_off(p, "hog");
+        container_status(p, "hog").restart_count = 0;
+    });
+    let hog = container(&first_kill, "hog");
+    assert!(
+        hog.restarts == 0
+            && matches!(&hog.last_terminated, Some(run) if run.reason.as_deref() == Some("OOMKilled")),
+        "the two facts that put this container in the window under test — the kernel has taken \
+         it once and it has not been restarted yet: {hog:?}"
+    );
+    assert_ne!(
+        captured_i32(
+            captured_status(&fixture("oom"), "containerStatuses", "hog"),
+            &["restartCount"]
+        ),
+        0,
+        "and the count is the one field this plant moves, or the assertion below is true for free"
+    );
+    let all = analyze(&pods_at(vec![first_kill], now()));
+    show(&all);
+    let killed = only(&all, "broken-oom", "OOMKilled");
+    assert!(
+        !killed.evidence.contains("restart"),
+        "`0 restarts` under a card about a kill reads as *and it has not happened again* — the \
+         count is left out until there is one (NOTES § v1 rule set): {}",
+        killed.evidence
+    );
+    // **And the facts the object does support are all still there**, or a rule that had stopped
+    // drawing an evidence line at all would pass the negative on its own.
+    let facts: Vec<&str> = killed.evidence.split(FACTS).collect();
+    assert!(
+        facts.len() == 3
+            && facts[0] == "container hog"
+            && facts[1].starts_with("limit ")
+            && facts[2] == "exit 137",
+        "the three facts this object supports and no fourth: {facts:?}"
     );
 }
 

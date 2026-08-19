@@ -2382,7 +2382,13 @@ fn exit_meaning(code: i32, reason: Option<&str>) -> Option<&'static str> {
         // number to [`failed_run_action`]'s advice one row down without asserting a cause
         // the record cannot carry, and printing the number bare beside that advice was the jargon
         // left unexplained (invariant 14).
-        128 => "usually a container the runtime could not start",
+        //
+        // **The row says *the node* where the paragraph above says *the runtime*, and that is the
+        // sentence's word rather than the doc's carelessness.** The two rows keyed on
+        // [`CODE_UNKNOWN`] already tell this reader *the node found the container dead* and *the
+        // node could not tell what code the container ended with*, about the same layer; a third
+        // row introducing `runtime` teaches a word nothing on the card explains (invariant 14).
+        128 => "usually a container the node could not start",
         _ => return None,
     })
 }
@@ -2738,6 +2744,16 @@ fn stopped_action(role: ContainerRole) -> &'static str {
 /// reader is told where to look and never what they will find, which is also what stops this
 /// promising a diagnosis on a card that cannot know there is one.
 ///
+/// **It names *which* run, and it names the flag, because two of its three cards gave the phrase
+/// nothing to attach to.** It read *read that run's log*, which is exact under
+/// [`previous_run_failed`]'s title — *the last run on record failed* — and dangling under
+/// [`crash_looping`]'s *keeps crashing* and [`restarting_repeatedly`]'s restart count, where no
+/// run has been named at all. The command it always ships with is [`previous_logs`], whose
+/// `--previous` is the one word on these cards a reader in their first month cannot guess — it is
+/// the difference between the log of the run that failed and the log of the one running now. A
+/// flag printed and left is invariant 14 in the small, and the command log is where k8rs teaches
+/// (invariant 4). The gloss goes last because it is the gloss: the instruction is the sentence.
+///
 /// **A labelled kill reaches it deliberately** — [`out_of_memory`] draws beside that card with the
 /// fix, and what this one adds is the question rule 2 does not answer: what the container was
 /// doing when the kernel took it.
@@ -2766,8 +2782,9 @@ fn failed_run_action(run: &Terminated, role: ContainerRole) -> (&'static str, bo
         // output before the kernel took it is, which is a real second question — *what was it
         // allocating* — and it is the one thing rule 2's card does not answer.
         Some(_) => (
-            "read that run's log — it holds the last thing written before the run ended, from \
-             the program or from the shell that started it",
+            "read the last run's log — it holds the last thing written before that run ended, \
+             from the program or from the shell that started it. The --previous flag below is \
+             what fetches it",
             true,
         ),
     }
@@ -3081,7 +3098,7 @@ fn crash_looping(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Finding> {
     }
     let mut facts = vec![container_fact(c)];
     if c.restarts > 0 {
-        facts.push(format!("{} restarts", c.restarts));
+        facts.push(counted(i64::from(c.restarts), "restart"));
     }
     if let Some(run) = &c.last_terminated {
         facts.extend(ran_for(run));
@@ -3221,7 +3238,7 @@ fn out_of_memory(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -> Option
     }
     facts.push(format!("exit {}", run.exit_code));
     if c.restarts > 0 {
-        facts.push(format!("{} restarts", c.restarts));
+        facts.push(counted(i64::from(c.restarts), "restart"));
     }
     Some(Finding {
         severity: Severity::Critical,
@@ -3616,13 +3633,16 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
         } else {
             Severity::Warn
         },
-        title: if serving {
-            format!(
-                "Container has been restarted {} times — it is serving now{claim}",
-                c.restarts
-            )
-        } else {
-            format!("Container has been restarted {} times{claim}", c.restarts)
+        title: {
+            // **The third hand-rolled spelling of the count** (invariant 14). `restarted 1 times`
+            // is out of reach behind [`RESTARTS_WARN`] and the band is one edit from moving, so
+            // the sentence is built where the other two are rather than left to be caught later.
+            let times = counted(i64::from(c.restarts), "time");
+            if serving {
+                format!("Container has been restarted {times} — it is serving now{claim}")
+            } else {
+                format!("Container has been restarted {times}{claim}")
+            }
         },
         evidence: facts.join(FACTS),
         action: action.to_string(),
@@ -5645,9 +5665,17 @@ fn what_is_blocking_it(pod: &PodSnapshot, nodes: &[NodeSnapshot]) -> Option<Bloc
     if let Some(first) = wanted.first() {
         return Some(Blocking {
             evidence: format!(
-                "it asks for a node labelled {}, and none of the {} have {}",
+                "it asks for a node labelled {}, and {} {}",
                 listed(&wanted),
-                counted(nodes.len() as i64, "node"),
+                // **One machine gets a sentence rather than a count in a plural frame** — kind,
+                // minikube, k3s and Docker Desktop are all one node, and `none of the 1 node
+                // have` is `1 restarts`' defect on the cluster this tool is most often pointed
+                // at (invariant 14).
+                if nodes.len() == 1 {
+                    "the cluster's one node does not have".to_string()
+                } else {
+                    format!("none of the {} have", counted(nodes.len() as i64, "node"))
+                },
                 if wanted.len() == 1 {
                     "that label"
                 } else {

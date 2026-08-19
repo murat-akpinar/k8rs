@@ -33,6 +33,25 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   `cargo deny` — except step 2, *build it and run it on the test host*, which
   needs a remote machine and is therefore the one that can be skipped in silence.
   Raised 2026-08-16; the user has not ruled on it.
+- **Rule 5's `Ending::Failed` clause asserts an external killer its own evidence
+  contradicts.** `", but something keeps killing it"` (`rules.rs:3596`) sits, on
+  the committed corpus, over `exit 127 (the command was not found)`, `exit 128`
+  and `exit 1 (the application's own error)` — three endings that name the
+  program, not a killer. `", and the last run on record failed"` would be true
+  on every arm and parallel to the five clauses beside it. Found by the
+  plain-language pass and left alone on purpose
+  ([D117](NOTES.md#d117--the-plain-language-pass-and-the-two-things-it-found-that-were-not-sentences-2026-08-19)):
+  it is a claim about who acted, not a phrasing, and it is pinned in
+  `screens/alerts.md` and in `pod.rs`'s `KILLED_IT` guard, so changing it is a
+  ruling with two files behind it.
+
+- **`node_running_low`'s multi-pressure action joins two whole sentences** —
+  *"free up disk space on this node and free up memory on this node, or move
+  some pods elsewhere"*. Clumsy, not misleading, so the pass left it
+  ([D117](NOTES.md#d117--the-plain-language-pass-and-the-two-things-it-found-that-were-not-sentences-2026-08-19)).
+  The fix is not local: `on this node` would have to come out of the `PRESSURES`
+  table, and `screens/alerts.md` states that table row by row.
+
 - **Rule 1's `Ending::Failed` arm titles a card *"keeps crashing"* on a
   container that has crashed exactly once.** Found while closing the
   `restarts > 0` mutant box, by the first test in the repo that draws that arm

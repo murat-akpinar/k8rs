@@ -1390,16 +1390,22 @@ that cites them expects to find them.
       it is rule *logic*, so the plain-language pass below is the wrong home for
       it, and the capture trip above is not unfinished for having found it.
       Closed — [D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14) · [D84](NOTES.md#d84--a-memory-starved-capture-host-silently-turns-oomkilled-into-error-2026-08-14)
-- [ ] Plain-language pass over every string a user will read — the jargon test
+- [x] Plain-language pass over every string a user will read — the jargon test
       is "would someone in their first month understand this sentence?"
       **Three sentences are already known wrong and are owed to this box** — all
       found by an operator review that read the cards rather than the code, and
       all ruled out of scope where they were found so a fix would not widen
       someone else's box:
       **(a) `1 restarts`.** The card prints it, and `healthy-sidecar.json`'s
-      `restartCount: 1` makes it real. The phrase is spelled twice — rule 1 and
-      rule 5 — so the fix belongs in one shared place or the two rules start
-      disagreeing.
+      `restartCount: 1` makes it real. **Counted 2026-08-19, the box had it
+      wrong in both halves:** it is spelled *three* times, not twice, and the
+      two identical spellings are rules **1 and 2** (`rules.rs:3084`, `:3224`,
+      both `format!("{} restarts", …)`) — rule **5** carries a third wording of
+      the same defect, `Container has been restarted {} times`, which reads
+      `restarted 1 times`. `counted(n, unit)` (`rules.rs:274`) is the shared
+      place and already exists; rule 5's sentence needs a wording call as well
+      as the helper, since *restarted 1 time* is not what a first-month reader
+      would say either.
       **(b) ~~rule 6's 137 title asserts one cause while its own action now
       lists three~~ — closed 2026-08-15 by the `137` box, not owed here.**
       `exit_meaning` said *"killed because it did not stop when it was asked
@@ -1443,7 +1449,20 @@ that cites them expects to find them.
       finding. **The distinction is worth keeping as you go:** a pin that names
       the thing making the claim true survives a rewrite; a pin on a token from
       the sentence does not, and every one of the latter in this file is listed
-      above
+      above.
+      **Closed 2026-08-19** ([NOTES § D117](NOTES.md#d117--the-plain-language-pass-and-the-two-things-it-found-that-were-not-sentences-2026-08-19)):
+      the count goes through `counted` in all three places, the log action names
+      *the last run* and glosses `--previous`, exit 128 says *the node*, and the
+      sweep found a fourth the box did not name — N6's `none of the 1 node have`
+      on the one-node clusters this tool is pointed at most. Whole file swept,
+      all four regions, read as 68 distinct rendered card shapes rather than as
+      literals. Each change reverted alone and watched fail, except rule 5's
+      title, which no test can fail on because the singular is unreachable
+      behind `RESTARTS_WARN` — proved by reverting it and watching the suite
+      stay green, and kept anyway with that stated. `just check` exit 0, 227
+      tests; `cargo mutants --in-diff` 22 mutants, 18 caught, 4 unviable, and
+      the run's first pass named rule 2's unfed `> 0` — rule 1's closed
+      survivor, copied — which is now killed by a test of its own
 - [x] **A container can have a status and no declaration, and the decode's own
       comment says it cannot** — `container_snapshots` explains its missing test
       with *"the API cannot produce the object: both container lists are

@@ -1449,6 +1449,62 @@ fn the_pending_pod_is_told_which_label_nothing_in_the_cluster_has() {
     );
 }
 
+/// **On a one-node cluster the sentence has to still be a sentence.** The count and its noun come
+/// from [`counted`], and the plural frame around it produced *"none of the 1 node have that
+/// label"* — `1 restarts`' own defect, one rule over, on the cluster this tool is most often
+/// pointed at: kind, minikube, k3s and Docker Desktop are all one node (NOTES § D81).
+///
+/// **The four-node sentence is asserted beside it, unchanged**, because it is the string
+/// `screens/alerts.md` § N6 draws and because a fix that reads right at one and wrong at four
+/// passes on the half it was written for.
+#[test]
+fn the_one_node_cluster_is_not_told_none_of_its_1_node_have_the_label() {
+    let nodes = captured_nodes();
+    assert!(
+        nodes.len() > 1,
+        "the capture is the plural half of this test, and a one-node capture would make the \
+         second assertion below true for free: {} nodes",
+        nodes.len()
+    );
+    let only_machine = vec![nodes.first().cloned().expect("the capture has nodes")];
+    let all = analyze(&cluster(vec![pod("pending")], only_machine));
+    show(&all);
+    let card = only(&all, "broken-pending", "will take this pod");
+    assert!(
+        card.evidence
+            .contains("the cluster's one node does not have that label"),
+        "one machine is named as one machine, in words: {}",
+        card.evidence
+    );
+    // **The negative is asked of N6's own sentence and not of the whole line** (NOTES § D29,
+    // § D31). The scheduler's quote beside it says `1 node(s) had untolerated taint(s)` — the
+    // API's words, kept verbatim (NOTES § D37) — and a search over the joined evidence would be
+    // answered by that instead of by the clause under test. N6's sentence is the first fact,
+    // which is the order `screens/alerts.md` § N6 states.
+    let n6 = card
+        .evidence
+        .split(FACTS)
+        .next()
+        .expect("the card has an evidence line");
+    assert!(
+        !n6.contains("1 node"),
+        "and never as a count glued to a plural verb — `none of the 1 node have` is a format \
+         string showing through (invariant 14): {n6}"
+    );
+
+    let many = analyze(&cluster(vec![pod("pending")], nodes.clone()));
+    show(&many);
+    assert!(
+        only(&many, "broken-pending", "will take this pod")
+            .evidence
+            .contains(&format!(
+                "none of the {} nodes have that label",
+                nodes.len()
+            )),
+        "and the sentence the captured cluster draws is the one it always drew"
+    );
+}
+
 /// **The other answer: a taint every machine that could take the pod is carrying.** The
 /// capture's `dedicated=gpu:NoExecute` is on one worker and the Pending pod tolerates it — so
 /// the pod is given the tolerations every *other* pod in the capture has, which is what a pod

@@ -138,6 +138,7 @@ its line moving with it.
 - [D114](#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16) — the capture trip that put four objects on disk, and the init arm that is not reachable at all
 - [D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18) — the prune line bounds memory and was read as if it bounded time, and the paint budget is stated at a cluster size the risk is not
 - [D116](#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19) — the environment picker moves to startup, and the tag comes out of the kubeconfig itself
+- [D117](#d117--the-plain-language-pass-and-the-two-things-it-found-that-were-not-sentences-2026-08-19) — the plain-language pass, and the two things it found that were not sentences
 
 ## Why it exists — where the gap is
 
@@ -8484,6 +8485,70 @@ does not define ([invariant 3](CLAUDE.md)). And context names, tags and server
 addresses are text off a disk file, which is untrusted in exactly the way an
 API string is — same `sanitize()`, same bound on length, and a tag is one
 short column, not a place to render forty characters somebody pasted.
+
+### D117 — the plain-language pass, and the two things it found that were not sentences (2026-08-19)
+
+The box named three defects and struck one out. What the pass actually settled,
+recorded here because a wording chosen by whoever happened to be writing is the
+kind of decision that gets re-argued every time somebody reads the card:
+
+- **The count is spelled by `counted` everywhere, and nowhere by hand.** Rules 1
+  and 2 carried the same `format!("{} restarts", …)` — a copy, not a
+  coincidence — and rule 5 carried a third wording of the same defect in its
+  title. `counted` has existed since the age ladder was written; the sites that
+  did not call it simply predate the habit.
+- **`read the last run's log`, not `read that run's log`.** *That run* is exact
+  under rule 6's title, which names a run, and dangles under rule 1's *keeps
+  crashing* and rule 5's restart count, which name none. One sentence serves
+  three cards, so it has to be true on the card that names the least.
+- **The action glosses `--previous`, at the end.** It is the one word on these
+  cards a first-month reader cannot guess, and it is the difference between the
+  log of the run that failed and the log of the one running now. A flag printed
+  and left is [invariant 14](CLAUDE.md) in the small; the command log is where
+  this tool teaches ([invariant 4](CLAUDE.md)). It goes last because the
+  instruction is the sentence and the gloss is the gloss.
+- **Exit 128 says *the node*, not *the runtime*.** The two `CODE_UNKNOWN` rows
+  beside it already name the node for the same layer
+  ([D112](#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)),
+  and a third row introducing a second word for one actor teaches a term
+  nothing on the card explains.
+- **N6 says *the cluster's one node does not have*, on a one-node cluster.** Not
+  in the box, found by the sweep: `none of the 1 node have that label` is
+  `1 restarts` one rule over, and it lands on kind, minikube, k3s and Docker
+  Desktop — the clusters this tool is pointed at most. The multi-node string is
+  left byte-identical, which is what keeps
+  [screens/alerts.md](screens/alerts.md) § N6 true rather than merely unchanged.
+
+**Rule 5's singular cannot be drawn, and the change was kept anyway.**
+`restarting_repeatedly` returns before its title on any count below
+`RESTARTS_WARN` (3), so `restarted 1 times` reaches no reachable card and **no
+test can fail on it** — the pass proved that by reverting the line and watching
+the suite stay green, which is the honest form of *this has no red*. It is kept
+because the sentence is otherwise one threshold edit away from being wrong, the
+edit is one line through a helper that already exists, and the output is
+byte-identical at every count the rule can reach. What is not claimed is
+coverage: this one line is asserted by nothing, and that is written here rather
+than papered over with a test that cannot fail
+([D26](#d26--a-green-build-that-proves-nothing-2026-08-12)).
+
+**Two things the pass deliberately did not touch**, both because they are claims
+rather than phrasings — the same reason the box's own (b) was moved out of it
+before it started. Rule 2's evidence keeps its bare `exit 137`: routing it
+through `exit_fact` would print the kernel sentence one line under a title that
+already says it, which is
+[D85](#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)'s
+two-spellings-on-one-screen. And rule 5's *", but something keeps killing it"*
+asserts an external killer over evidence that, on the committed corpus, reads
+*the application's own error* — that is a rule's claim about who acted, it is
+pinned in two other files, and it goes to [backlog.md](backlog.md) for a ruling
+rather than into a wording box.
+
+**The box's own text was wrong in both halves and was corrected from a count
+rather than from memory** — it said the phrase was spelled twice, in rules 1 and
+5; it is spelled three times, and the identical pair is rules 1 and 2. That is
+the same defect class this file keeps recording
+([D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)):
+a number written from memory instead of from a run.
 
 ## Decisions made
 
