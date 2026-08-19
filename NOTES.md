@@ -137,6 +137,7 @@ its line moving with it.
 - [D113](#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16) — a card's parts were budgeted separately and never added up, and everything else this family found was reached by fixing that
 - [D114](#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16) — the capture trip that put four objects on disk, and the init arm that is not reachable at all
 - [D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18) — the prune line bounds memory and was read as if it bounded time, and the paint budget is stated at a cluster size the risk is not
+- [D116](#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19) — the environment picker moves to startup, and the tag comes out of the kubeconfig itself
 
 ## Why it exists — where the gap is
 
@@ -8379,6 +8380,110 @@ pruned-to-named-fields, and both are true; what was wrong was only the reading.
 The correction belongs where the reading happens — one sentence in the Phase 5
 box saying what the prune does *not* buy, beside D69's and D97's two sentences
 about which fields it keeps.
+### D116 — the environment picker moves to startup, and the tag comes out of the kubeconfig itself (2026-08-19)
+
+[D16](#d16--the-context-switcher) closed *"switchable"* with `X` and a modal
+picker, and left the launch path exactly where it found it: `k8rs` reads
+`current-context` and connects, silently. That is the wrong default for the
+person this tool is for — someone with `aws-prod`, `aws-staging`, `kind-k8rs`
+and two more in one file, whose `current-context` is whatever the last
+`kubectl` command left behind. The screen then says `ctx: aws-prod` in eleven
+dim characters, which is a header nobody reads until after they have acted on
+it (user, 2026-08-19).
+
+**The startup picker is the `X` picker, called earlier.** No second screen, no
+second key map, no second code path: [screens/context.md](screens/context.md)
+grows a startup section and `connect()` — already re-callable by
+[D16](#d16--the-context-switcher)'s fourth ruling — is what runs on `⏎`. The
+only genuinely new behaviour is *when the modal is on screen before there is
+anything behind it*, and that is one rule: at startup `esc` quits, because
+there is no cluster to go back to. Mid-session `esc` still cancels onto the
+cluster you are already on.
+
+**At startup it opens only when there is a real choice: two or more contexts
+and no `--context`.** One context in the file, or a context named on the command
+line, connects straight through as it does today. *Zero configuration on first
+run* ([§ Positioning](#positioning--lazygit-for-kubernetes-user-2026-08-11),
+item 3) stays literally true — the picker asks nothing that is not already in
+the user's file, the current context is preselected, and `⏎` lands where the
+old default landed. Precedence, once and in one place: `--context` beats the
+picker, the picker beats `current-context`. `--once` and any non-tty stdin
+never open it — a picker in a pipeline is a script that hangs forever, and
+`--once`'s contract is stdout and an exit code.
+
+**The tag is a field of the kubeconfig, not a file of ours.**
+[§ Out of scope](#out-of-scope-the-most-important-section) refuses a config
+file, and a tool that mixes up clusters is not fixed by adding a second file
+that can disagree with the first. The user's own label lives where the context
+lives:
+
+```yaml
+contexts:
+- name: aws-prod
+  context:
+    cluster: prod-eu
+    user: admin
+    extensions:
+    - name: k8rs
+      extension: { tag: "aws · prod" }
+```
+
+`kube::config::Context` already parses that field — `extensions:
+Option<Vec<NamedExtension>>`, verified on docs.rs 2026-08-19 — so this is a
+lookup, not a parser, and no new dependency (invariant 10) and no second reader
+of the file. A tool that rewrites the context entry (`aws eks
+update-kubeconfig` and friends) can drop the tag with it; the column then falls
+back to the derived one, which is the safe direction and the reason the
+fallback is not optional. `X` mid-session is unchanged and still opens on a
+single-context file, saying so — that one is an explicit keypress, and a key
+that appears to do nothing is worse than a screen that explains why.
+
+**k8rs does not write the tag, for the same reason it does not write the
+switch.** Nothing in this repo edits `~/.kube/config`
+([D16](#d16--the-context-switcher)). The picker shows the YAML block above in
+`?` help for a context that has no tag, and shows **YAML, not an invented
+`kubectl config set` line** — `set` does not address a list element under
+`extensions`, and a command log that teaches a command which does not work is
+the dishonesty [D8](#d8--invariant-4-was-not-literally-true) exists to prevent.
+
+**An untagged context still gets a tag, and it names the provider — never the
+environment.** Derived from the API server host and the context name:
+`amazonaws.com` → `aws`, `gke`/`googleapis` → `gcp`, `azmk8s.io` → `azure`,
+loopback or a `kind-`/`minikube`/`docker-desktop` name → `local`, anything
+else → blank. That is the whole heuristic, and the boundary is the point: a
+guessed `prod` on a cluster that is not prod is worse than an empty column,
+because it is the exact mistake the feature was added to prevent. **Only the
+user's own tag may make an environment claim**, and the screen has to show
+which of the two it is looking at — a derived tag is a guess about a hostname,
+a written one is a statement by the person who owns the cluster.
+
+**Four things the screen settled that this decision did not** (drawn in
+[screens/context.md](screens/context.md), which is where the columns and the
+wording live — they are not repeated here):
+
+- **A derived tag is marked on the row, not only coloured** — dim *and*
+  `~`-prefixed (`~aws`, `~local`). Colour alone cannot carry "this is a guess"
+  through a monochrome terminal or a pasted screenshot, which is the rule the
+  severity symbols already follow.
+- **A context whose cluster the file does not define is drawn but unreachable**
+  — dimmed, and the cursor skips it. The kubeconfig parse knows this before the
+  first keypress, so spending a connection attempt to discover it, and a
+  failure modal to report it, would be a round trip for a fact already in hand.
+- **A connect failure after the picker has drawn is a modal, not stderr.** The
+  picker puts the terminal in raw mode *before* the first connection, so two of
+  the three startup errors in [screens/states.md](screens/states.md) now have
+  two forms: stderr and exit when no picker opened, a modal that returns to the
+  list when one did. The stderr path is not replaced, it is narrowed.
+- **`⚠ TLS not verified` beats `(current)`** where a row is both and one badge
+  column has to hold it: the safety warning is the one the user has not already
+  been told by the cursor's own position.
+
+Two things this does not move. The list is still every context in the
+kubeconfig and nothing else: no typed server, no token, no cluster the file
+does not define ([invariant 3](CLAUDE.md)). And context names, tags and server
+addresses are text off a disk file, which is untrusted in exactly the way an
+API string is — same `sanitize()`, same bound on length, and a tag is one
+short column, not a place to render forty characters somebody pasted.
 
 ## Decisions made
 
@@ -8867,11 +8972,13 @@ eyes open.
 Revised by the reversal. Each milestone must produce something a person would
 actually use — the plan is not allowed to have a "useless until the end" phase.
 
-1. **M1 — the Alerts engine.** Pod rules 1–8 and 12, node rules N1–N6 and the
-   kubeconfig certificate rule, headless, tested against real fixtures.
-   Already a useful tool: point it at a fixture or a cluster and it prints
-   what is broken — **and it gets released**, as `k8rs --once`, v0.0.1
-   ([D10](#d10--m1-ships-publicly-as-v001)).
+1. **M1 — the Alerts engine.** The pod rules, the node rules N1–N6 and the
+   kubeconfig certificate rule ([§ v1 rule set](#v1-rule-set) is the list, and
+   it has grown since this line was written), headless, tested against real
+   fixtures. Already a useful tool: point it at a fixture and it prints what is
+   broken. **It is released one milestone later**, as `k8rs --once`, v0.0.1 —
+   [D10](#d10--m1-ships-publicly-as-v001) asks it to read a *cluster*, which is
+   M1.5 and Phase 5 ([todo § Milestones](todo.md#milestones--each-one-is-usable-on-its-own)).
 2. **M2 — operations, headless.** `ops.rs`: scale · restart · delete, each with
    dry-run, the confirmation contract and the audit log. Proven against kind
    before a single pixel is drawn.

@@ -33,7 +33,8 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   `cargo deny` — except step 2, *build it and run it on the test host*, which
   needs a remote machine and is therefore the one that can be skipped in silence.
   Raised 2026-08-16; the user has not ruled on it.
-- **`src/rules_tests/pod.rs` is 9 809 lines, the largest file in the repo**, and
+- **`src/rules_tests/pod.rs` is 12 902 lines (2026-08-19), the largest file in
+  the repo**, and
   every dispatch touching a pod rule pages it
   ([D110](NOTES.md#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16)).
   Splitting it is the obvious next cut and is deliberately not taken on a line

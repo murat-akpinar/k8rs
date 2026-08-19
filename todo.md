@@ -34,7 +34,7 @@ which is why those headings no longer name a branch
 ([NOTES § D32](NOTES.md#d32--one-long-lived-development-branch-not-one-per-phase-2026-08-12)).
 Phases 1 and 2 still name theirs because that is where they actually ran.
 
-## Phase 0 — Design (current phase)
+## Phase 0 — Design
 
 - [x] Decision record → `NOTES.md`
 - [x] Role-based requirements (developer/devops/devsecops) → `REQUIREMENTS.md`
@@ -2012,6 +2012,16 @@ public release.
       already. They sit beside the box above because they *are* startup errors —
       the ones a stranger meets before they ever see a finding
       ([PRIOR-ART § B1](PRIOR-ART.md#b1--kubeconfig-is-harder-than-it-looks))
+- [ ] **The kubeconfig read hands back the context *list*, not just the one in
+      use** — name, API server host, `insecure-skip-tls-verify`, and the tag:
+      the user's own from `contexts[].context.extensions` under the name `k8rs`,
+      or, absent that, derived from the host (`aws` / `gcp` / `azure` / `local`
+      / blank — the provider, never `prod` or `test`). `kube::config::Context`
+      already parses `extensions`, so this is a lookup and not a parser. The box
+      is **here** because the Phase 11 picker needs the list and `k8s.rs` freezes
+      after Phase 6 — the same forward-only correction
+      [D16](NOTES.md#d16--the-context-switcher) made for `connect()`
+      ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19))
 - [ ] **The clock-skew line in the header, which D55 declared binding on later
       boxes and nobody owned.** *"Your computer's clock is 11 minutes behind
       the cluster — the times on this screen are wrong"*, in plain language,
@@ -2380,6 +2390,15 @@ string and key was settled in the design phase, so this phase is drawing.
       again with everything from the old context dropped. Refused while a
       write is in flight; a failed switch stays on the chosen context and says
       why, it does not fall back
+- [ ] **The same picker opens at startup**, with a **tag column** so `aws-prod`
+      and `kind-k8rs` are told apart before anything is touched. Only when the
+      kubeconfig holds two or more contexts and no `--context` was given; the
+      current context is preselected, so `⏎` lands where today's default lands
+      and *zero configuration on first run* stays true. At startup `esc` quits —
+      there is no cluster behind the modal yet. A derived tag and a user-written
+      one are not drawn as the same fact
+      ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19) ·
+      [screens/context.md](screens/context.md))
 - [ ] `--read-only` visibly marked in the header
 
 **🔒 Security gate:** render a fixture containing ANSI escapes, a right-to-left
@@ -2424,6 +2443,12 @@ Goal: one binary, live and safe.
 - [ ] Flags from `std::env::args`: `--read-only`, `--context`, `--namespace`,
       `--once`. Four booleans-and-strings is still not a reason for clap; the
       threshold is a flag needing validation, or a subcommand
+- [ ] **One place decides which context is used, and it is not three**:
+      `--context` beats the startup picker, the picker beats `current-context`.
+      `--once` and a non-tty stdin never open it — a picker in a pipeline is a
+      script that hangs forever. Proven by running `k8rs --once` with two
+      contexts in the file and no terminal attached
+      ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19))
 - [ ] Manual pass of the REQUIREMENTS error-state list (no kubeconfig, 403 on
       read, 403 on write, API down mid-run, watch drop, rejected admission,
       409 conflict)

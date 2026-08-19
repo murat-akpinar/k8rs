@@ -87,6 +87,13 @@ body → Layout::horizontal([
   count reads `nodes …`; a user who cannot list nodes gets an empty left zone.
   Stale vitals stay visible and say how old they are (`nodes 3/3 (40s ago)`),
   the same rule the body obeys ([states.md](states.md)).
+- **Before any cluster is picked, there is no context to put in the right
+  zone.** The startup picker
+  ([context.md § Opening at startup](context.md#opening-at-startup)) is that
+  state: the right zone reads `choose a cluster` plus `admin` / `read-only`
+  (known from the CLI flag before any connection is made), and the left
+  vitals zone is empty for the same reason it is empty while connecting —
+  nothing has been read yet.
 - **Namespace scope and node access are two different permissions, and the
   header must not conflate them.** Being scoped to one namespace for *pods* says
   nothing about *nodes*: the common namespace-scoped screen keeps `nodes 3/3`

@@ -548,7 +548,8 @@ surviving mutant is a test that cannot fail, stated by a tool with no incentive
 ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
 **Per turn it is scoped to the diff** —
 `cargo mutants --timeout 90 --in-diff <(git diff HEAD)` — because the whole file
-is 519 mutants at ~2s each. `just mutants` whole is the *phase-close* gate, and
+was 519 mutants at ~2s each the last time it was run whole (2026-08-16; the file
+has grown since). `just mutants` whole is the *phase-close* gate, and
 `--iterate` skips what an earlier run already caught.
 
 **So `tester` no longer re-runs the author's mutations by hand** — measured, it
@@ -569,8 +570,9 @@ behaviour · what is explicitly out of scope · **and what to read, by region**.
 ([D110](NOTES.md#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16)).
 An agent starts cold and, told only *fix rule 5*, pages the whole file. Name the
 `// --- … START ---` regions and the test modules the turn actually touches, plus
-the shared helpers it must not disagree with — the pod rules are 2 454 lines of
-`rules.rs`, not its 5 186, and the region markers exist for exactly this.
+the shared helpers it must not disagree with — the pod rules are **one**
+`// --- THE POD RULES START ---` region, not the whole of `rules.rs`, and the
+region markers exist for exactly this.
 
 The report, or the work is not received: what changed and where · the exact
 commands run and their real output · the red run and the green run · what could
