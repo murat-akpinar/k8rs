@@ -2290,6 +2290,103 @@ fn the_place_outlasts_the_record(action: &str) {
     );
 }
 
+/// **Rule 1 in the window before the first restart, where the count is `0` and the card must not
+/// print it.** `if c.restarts > 0` in [`crash_looping`] survived every mutation run up to this
+/// test, in three different line positions: flipped to `>= 0` the rule ships **`0 restarts`** on a
+/// real card and the other 223 tests stayed green, because no committed capture holds a
+/// `CrashLoopBackOff` container whose count is still `0`. **This is the test that goes red.**
+///
+/// **`restartCount` is the number of runs that have been *started again*, not the number that have
+/// ended.** The kubelet stamps it on the instance when it creates it, so the first instance carries
+/// `0`, and `convertToAPIContainerStatuses` moves that instance's terminated status down into
+/// `lastState` and writes the backoff into `state.waiting` without touching the count. Between the
+/// first crash and the restart it is waiting to make, the API therefore publishes
+/// `CrashLoopBackOff` beside `restartCount: 0` and a real failed run. The window is one backoff
+/// wide and `just fixtures` photographs a pod that has been looping for minutes, which is why the
+/// corpus does not hold one — the same standing reason [`CODE_UNKNOWN`]'s arm is planted
+/// (NOTES § D40, § D53), and the rule's own doc says the count "can still be `0`" here.
+///
+/// **What the mutant ships is a fact line that argues with its title**: `0 restarts` under
+/// *CrashLoopBackOff* reads as *nothing has crashed*, and a fact is printed only when it is a fact
+/// (NOTES § v1 rule set, rule 1). The count is omitted, not printed as zero.
+///
+/// **The plant is the capture's own failed run, one restart earlier.** `healthy-retry`'s init
+/// container already carries a real `exit 1 / Error` in `lastState` from the trip that captured
+/// it; [`backing_off`] puts `state` back to the wait that record was written under, the count goes
+/// to `0`, and the rest of the pod goes with it ([`sandbox_rebuilt`], [`never_ran`]) because an
+/// init container backing off beside a **ready** app in a `Running` pod is a shape no kubelet
+/// writes — a plant is only worth the shape it builds (NOTES § D40).
+#[test]
+fn a_container_backing_off_before_its_first_restart_is_not_told_it_has_zero_restarts() {
+    let first_backoff = capture_but("healthy-retry", |p| {
+        backing_off(p, "wait-for-db");
+        container_status(p, "wait-for-db").restart_count = 0;
+        never_ran(p, "app", "PodInitializing", None);
+        sandbox_rebuilt(p);
+    });
+    let waiter = container(&first_backoff, "wait-for-db");
+    println!("{waiter:?}");
+    let raw = fixture("healthy-retry");
+    let captured = captured_status(&raw, "initContainerStatuses", "wait-for-db");
+    assert!(
+        matches!(waiting(waiter), Some(("CrashLoopBackOff", _))) && waiter.restarts == 0,
+        "the two facts that put this container in the window under test — the kubelet is waiting \
+         between restarts, and it has not made the first one yet: {waiter:?}"
+    );
+    // **And the run it is backing off from is the cluster's, not the plant's** (NOTES § D53). The
+    // exit code alone is a `1` a hand-written record would have chosen too, so the stamp beside it
+    // is what says the run came off the capture.
+    assert_eq!(
+        waiter
+            .last_terminated
+            .as_ref()
+            .map(|r| (r.exit_code, r.finished_at.clone())),
+        Some((
+            captured_i32(captured, &["lastState", "terminated", "exitCode"]),
+            Some(captured_time(
+                captured,
+                &["lastState", "terminated", "finishedAt"]
+            )),
+        )),
+        "the failed run under test is the one the cluster wrote, with only the wait around it \
+         moved back: {waiter:?}"
+    );
+    assert_ne!(
+        captured_i32(captured, &["restartCount"]),
+        0,
+        "and the count is the one field this plant moves — a capture that already read `0` would \
+         make the line below true for free"
+    );
+
+    let all = analyze(&pods_at(vec![first_backoff], now()));
+    show(&all);
+    let card = only(&all, "healthy-retry", "CrashLoopBackOff");
+    let facts: Vec<&str> = card.evidence.split(FACTS).collect();
+    // **The requirement, both ways round.** A count of `0` is not a fact about restarts, so no
+    // such fact is drawn; and the facts the object *does* support are all still there, or a rule
+    // that had stopped drawing an evidence line at all would pass the negative on its own.
+    assert!(
+        !card.evidence.contains("restarts"),
+        "`0 restarts` under a title saying this container is crash-looping reads as *nothing has \
+         crashed* — the count is left out until there is one (NOTES § v1 rule set, rule 1): {}",
+        card.evidence
+    );
+    // **And counted as well as searched**, because a zero fact worded any other way is the same
+    // card. The duration is not spelled out here for the reason the counts are not: how long a
+    // captured run lasted belongs to the cluster, and a literal would redden on a trip that
+    // changed nothing this test is about.
+    assert!(
+        facts.len() == 3
+            && facts[0].starts_with("init container wait-for-db")
+            && facts.iter().any(|f| f.starts_with(&format!(
+                "exit {}",
+                captured_i32(captured, &["lastState", "terminated", "exitCode"])
+            ))),
+        "the three facts this object supports and no fourth — the container it is about, how long \
+         the run lasted, and the code the cluster recorded for it: {facts:?}"
+    );
+}
+
 /// **A container something outside it keeps stopping, politely** (NOTES § D85) — the same defect
 /// as the capture above with the contradiction fully on the page: a **CRITICAL** headed *"keeps
 /// crashing"* whose own evidence line read *"an ordinary shutdown and not an error"*, one line

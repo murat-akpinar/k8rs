@@ -33,6 +33,18 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   `cargo deny` — except step 2, *build it and run it on the test host*, which
   needs a remote machine and is therefore the one that can be skipped in silence.
   Raised 2026-08-16; the user has not ruled on it.
+- **Rule 1's `Ending::Failed` arm titles a card *"keeps crashing"* on a
+  container that has crashed exactly once.** Found while closing the
+  `restarts > 0` mutant box, by the first test in the repo that draws that arm
+  with `restartCount: 0` — the window between the first crash and the first
+  restart, which no committed capture holds. The `None` arm already had this
+  reasoning applied to it and says so in its own doc; `Ending::Failed` kept the
+  old title. Not fixed here: the box was one mutant wide, the title is
+  `rules.rs`, and whether *keeps crashing* is wrong or merely early is a
+  question for whoever reads rule 1's three sentences together — the same
+  family review [D85](NOTES.md#d85--rule-1-contradicts-itself-on-a-clean-exit-and-it-gets-its-own-box-2026-08-14)
+  came out of.
+
 - **`src/rules_tests/pod.rs` is 12 902 lines (2026-08-19), the largest file in
   the repo**, and
   every dispatch touching a pod rule pages it

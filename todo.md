@@ -1212,7 +1212,7 @@ that cites them expects to find them.
       retry, and one that exited 0 is finished, so the plant stays permanently —
       and a node reboot writes `(255, "Unknown")`, not the reason D90 named —
       [D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16)
-- [ ] **`crash_looping`'s `if c.restarts > 0` survives every mutation run** —
+- [x] **`crash_looping`'s `if c.restarts > 0` survives every mutation run** —
       `cargo mutants` reports it MISSED at HEAD and in every round of the
       clean-exit box, in three different line positions, so it is neither new
       nor drifting. **It was written here as *the one* survivor and it is not:**
@@ -1238,7 +1238,11 @@ that cites them expects to find them.
       2026-08-16**: the shared-sentence sweep and the card-height guard both walk
       a hand-written `(code, reason)` list, so a seventh `Ending` would escape
       both silently while `rules.rs` itself refuses to compile without it
-      ([D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16))
+      ([D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16)).
+      Closed 2026-08-19: `cargo mutants --file src/rules.rs --re crash_looping`
+      reports **6 mutants, 5 caught, 1 unviable, 0 missed** — `3083:19 -> >=` is
+      CAUGHT. Red first: with the operator flipped the new test failed alone,
+      223 others green
 - [x] Exit-code translation table (137/143/1/126/127) — **137 has four readings, the object names three of them, and where it names none the table refuses to guess**: `reason: OOMKilled` is memory, `reason: RestartingAllContainers` is the pod's own restart rules removing the container and is not a failure at all, `reason: ContainerStatusUnknown` is not a kill at all but the number the kubelet writes where it could not read a status, and with none of those the row names the signal and stops. The old "almost always OOM" row was written before the rule had `reason` beside the code ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)); **what replaced it named the opposite cause just as flatly and was corrected on 2026-08-15** — *did not stop when it was asked to* is false of an init container that may hold no probe, of a cgroup kill whose word was lost on a starved host, and of a rebuilt sandbox ([NOTES § D93](NOTES.md#d93--an-exit-code-is-translated-once-for-every-role-and-137-is-read-from-the-object-rather-than-from-the-number-2026-08-15))
 - [x] hostPath: `rules.rs` fires **only** on `/`, a container-runtime socket
       **or any directory one sits under**, or a writable host mount. There is no
