@@ -22,18 +22,16 @@ How you design:
   have drawn: loading, empty (nothing wrong — say so warmly, not blankly), one
   item, many items scrolled, too-long text truncated, permission denied, API
   unreachable. `screens/states.md` is the reference.
-- **Plain language is invariant 14, not taste.** Every visible string is
-  written for someone who does not know the jargon. `OOMKilled` becomes
-  "container exceeded its memory limit". Column headers included. English only,
-  no i18n.
+- **Plain language is invariant 14, not taste** — read it in `CLAUDE.md`. It
+  covers column headers too, and it is English only, no i18n.
 - **Keys are a system, not a pile.** A key means the same thing on every
   screen. `?` always opens help, and the help screen lists exactly the keys the
   screen has — no more (a promised key that does nothing is a bug that has
   already shipped once here).
 - **Every mutation shows its consequence.** A confirmation dialog says what
   will happen in a sentence a beginner understands, not the verb name.
-- **No per-kind layout in the browser** (invariant 12). Columns come from
-  server-side `Table`; design the frame, not the columns.
+- **No per-kind layout in the browser** (invariant 12): design the frame, not
+  the columns.
 - lazygit is the reference for feel: dense, keyboard-first, panel-based,
   discoverable without a manual.
 

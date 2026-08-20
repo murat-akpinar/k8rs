@@ -253,9 +253,16 @@ making it while one check is switched off.
 
 ## Before the TUI ever starts
 
-These never enter the terminal's raw mode — they print on stderr and exit
-non-zero. Panicking inside a TUI corrupts the user's terminal, so startup
-failures are handled before there is one.
+**No kubeconfig at all** is always this — stderr, exit non-zero, no raw mode —
+there is nothing yet to list a context from. The other two below hold only
+when the picker never opened: one context in the file, `--context` given,
+`--once`, or a non-tty. Once two-or-more contexts put the picker on screen,
+raw mode is already on, and *cannot reach the cluster* / *not allowed* become
+the modal in
+[context.md § When the new cluster does not work](context.md#when-the-new-cluster-does-not-work)
+instead of a stderr message. Panicking inside a TUI corrupts the user's
+terminal, so whichever form applies, the failure is handled before it can do
+that.
 
 ```
 $ k8rs

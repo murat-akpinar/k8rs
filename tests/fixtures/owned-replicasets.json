@@ -5,7 +5,7 @@
       "apiVersion": "apps/v1",
       "kind": "ReplicaSet",
       "metadata": {
-        "creationTimestamp": "2026-08-12T20:45:53Z",
+        "creationTimestamp": "2026-08-16T09:44:00Z",
         "generation": 1,
         "labels": {
           "app": "broken-owned",
@@ -21,11 +21,11 @@
             "controller": true,
             "kind": "Deployment",
             "name": "broken-owned",
-            "uid": "b5f27104-8990-4e9c-8640-490652d56bc7"
+            "uid": "960488f1-57b3-4b64-b4ee-282b2efeb1aa"
           }
         ],
-        "resourceVersion": "7805",
-        "uid": "e9ae676c-4825-407e-b6ea-6beae01d1db6"
+        "resourceVersion": "5657",
+        "uid": "1b632d5e-d2e9-4bf2-9629-9dfc5f57dff3"
       },
       "spec": {
         "replicas": 1,

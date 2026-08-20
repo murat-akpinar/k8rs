@@ -469,3 +469,755 @@ spec:
       resources:
         requests: { cpu: "10m" }
         limits: { cpu: "100m" }
+---
+# ============================================================================
+# THE BRANCHES NO COMMITTED FIXTURE CAN REACH — todo.md Phase 3's capture trip.
+#
+# Every pod below exists because a branch in `rules.rs` ships with no test that
+# can fail: the mutation sweep leaves it green because no captured object gets
+# there. Each one names the branch it is for, and the states are all *declared*
+# — nothing here needs a step in `cluster.sh break`, which is what keeps `break`
+# idempotent by construction rather than by a guard (NOTES § D64).
+#
+# Two things every one of them is built around, and neither is decoration:
+#
+#   · **A suppressor proven beside a second suppressor is proven by neither.**
+#     Rule 6 is silenced by four clauses `or`-ed together, one of which is
+#     `doing_its_job` — so a fixture for the *exit code* clause has to be a
+#     container that is demonstrably not doing its job at the instant it is
+#     captured, or deleting the clause under test leaves the suite green. That
+#     is D71's rule-7 finding ("the state gate covers the same ground; deleting
+#     either leaves the other passing") applied before it can happen again, and
+#     it is why the two exit-code pods carry a readiness probe that never
+#     passes.
+#   · **A state the cluster only holds for two seconds at a time is not a
+#     fixture.** Every pod here settles into a state it keeps, or its predicate
+#     reads a field that survives both halves of a crash loop.
+# ============================================================================
+
+# Rule 6's `exit 0` exemption. A batch script deployed as a long-running pod:
+# it finishes, `restartPolicy: Always` starts it again, and the kubelet applies
+# CrashLoopBackOff to repeated restarts **whatever the exit code**. So rule 1
+# fires on it and rule 6 must not — a program that finished is not a failure —
+# and the test is "only rule 1", never "nothing at all".
+#
+# `sleep 2` and not an instant exit: 2s is long enough that the kubelet records
+# an ordinary run rather than a start failure, and short enough that the
+# container is in `waiting: CrashLoopBackOff` for all but a fraction of a
+# percent of each cycle once the backoff reaches its 5-minute ceiling. The
+# predicate does not depend on which half it lands in — `lastState` holds the
+# exit 0 in both — and the readiness probe (see the header) is what makes
+# `ready: false` true in both as well.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-exit0, labels: { demo: broken } }
+spec:
+  containers:
+    - name: batch
+      image: busybox
+      command: ["sh", "-c", "sleep 2; exit 0"]
+      readinessProbe:
+        exec: { command: ["false"] }
+        periodSeconds: 5
+---
+# Rule 6's `exit 143` exemption — a SIGTERM, which is what every rolling update
+# and every liveness kill looks like, and is not a failure.
+#
+# **The obvious manifest produces the opposite number, and the kernel is why.**
+# `command: ["sleep", "3600"]` makes `sleep` PID 1 of the container's PID
+# namespace, and the kernel *discards* any signal PID 1 has no handler for
+# (`SIGNAL_UNKILLABLE`, kernel/signal.c — it is why `kubectl delete pod` on a
+# busybox sleep takes the whole grace period). SIGTERM would do nothing, the
+# kubelet would wait out `terminationGracePeriodSeconds` and SIGKILL, and the
+# capture would land `137 / Error` — which is the one shape D71 says rule 6 must
+# print the *memory* sentence about, i.e. the exact opposite of this fixture.
+#
+# So the shell installs a handler. With a trap the signal is delivered, and 143
+# is the number a process killed by SIGTERM reports (128 + 15): the same value
+# for the same event, from the one process in the container that can be made to
+# receive it. The liveness probe is the killer, because a kill from outside is
+# what this exemption is about — nothing here is deleted or scaled.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-sigterm, labels: { demo: broken } }
+spec:
+  terminationGracePeriodSeconds: 30
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c"]
+      args:
+        - |
+          trap 'exit 143' TERM
+          sleep 86400 &
+          wait
+      livenessProbe:
+        exec: { command: ["false"] }
+        periodSeconds: 5
+        failureThreshold: 1
+      readinessProbe:
+        exec: { command: ["false"] }
+        periodSeconds: 5
+---
+# Rule 8's runtime-socket escalator, and the two halves of it no capture holds:
+# the **exact** socket match (`hostpath.json`'s `nosy` reaches the list through
+# an *ancestor*, `/run/containerd`) and the `/var/run/…` → `/run/…` fold
+# `is_runtime_socket` does at the compare (NOTES § D78).
+#
+# `type: FileOrCreate` is what makes this a *file*: a kind node runs containerd
+# and has no docker socket at all, and an untyped `hostPath` is not checked by
+# the kubelet — the runtime then creates a **directory** at the missing source
+# path, which is both the wrong shape and a worse thing to leave on a machine
+# (`unbreak` removes a file). The rule reads the path either way; the mount is
+# declared as what it is meant to be. `scripts/cluster.sh unbreak` removes the
+# file from every worker.
+#
+# **Mounted read-only on purpose, and that is the case worth proving**: rule 8
+# escalates on the *path* and not on the mode, because a read-only bind of a
+# runtime socket is still full root (NOTES § D78, § D79). A capture where the
+# mount is writable would pass the same predicate through the mode branch and
+# prove nothing.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-socket, labels: { demo: broken } }
+spec:
+  containers:
+    - name: watcher
+      image: busybox
+      command: ["sleep", "86400"]
+      volumeMounts:
+        - { name: runtime, mountPath: /var/run/docker.sock, readOnly: true }
+  volumes:
+    - name: runtime
+      hostPath: { path: /var/run/docker.sock, type: FileOrCreate }
+---
+# `analyze`'s `Succeeded` skip. A pod that finished is not broken now, and its
+# restart count and last exit belong to the Waste report (NOTES § D2, § D71) —
+# but nothing proves that, because no capture is `Succeeded` at all.
+#
+# The counter lives in an `emptyDir` for `broken-restarts`' reason: a restarted
+# container gets a fresh writable layer, so a counter kept inside it resets and
+# the pod never finishes. **Three failures and not two**: `RESTARTS_WARN` is 3,
+# so a pod with two restarts would be skipped by rule 5's own threshold and the
+# fixture would prove the skip for rule 6 only.
+#
+# A bare pod rather than a Job: `restartPolicy: OnFailure` is a pod field, and a
+# Job would add a controller, a generated name (so a List fetch), a TTL that
+# deletes the very object being captured, and a second kind for `unbreak` to
+# clean — for nothing this needs.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-succeeded, labels: { demo: broken } }
+spec:
+  restartPolicy: OnFailure
+  containers:
+    - name: migrate
+      image: busybox
+      command: ["sh", "-c"]
+      args:
+        - |
+          n=$(cat /state/n 2>/dev/null || echo 0)
+          n=$((n + 1))
+          echo "$n" > /state/n
+          [ "$n" -le 3 ] && exit 1
+          echo done
+      volumeMounts:
+        - { name: state, mountPath: /state }
+  volumes:
+    - name: state
+      emptyDir: {}
+---
+# The `Failed` half of the same skip, which D71 records as the one that was
+# missed — an Evicted pod is `Failed`, they are garbage-collected only above
+# 12 500 by default, and every one of them carried a permanent card.
+#
+# `activeDeadlineSeconds` and not a Job with `backoffLimit: 0`, and the
+# difference is what survives to be captured. A Job whose backoff is spent
+# **deletes** the pod under `restartPolicy: OnFailure`, and a `restartPolicy:
+# Never` pod never restarts at all — so its `lastState` is empty and rules 5 and
+# 6 have nothing to fire on, which makes the skip unprovable on it. The kubelet
+# marks a pod past its deadline `Failed / DeadlineExceeded` and stops its
+# containers, leaving the restart count and the failed `lastState` in place: a
+# pod that would draw two cards, in a phase that must draw none. Nothing deletes
+# it — it has no owner.
+#
+# 120 seconds: three restarts cost 0 + 10 + 20 seconds of kubelet backoff plus
+# about four seconds per container start, so the deadline lands after the fourth
+# with room to spare.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-failed, labels: { demo: broken } }
+spec:
+  restartPolicy: OnFailure
+  activeDeadlineSeconds: 120
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c", "echo cannot connect to the database >&2; exit 1"]
+---
+# Rule 5's CRITICAL band, and the `&& !serving` half of it (NOTES § D71). Both
+# pods climb past `RESTARTS_CRITICAL` (10) and then stay up; the only difference
+# between them is whether the container is *serving* at the end of it, which is
+# what decides CRITICAL against WARN. `broken-restarts` sits at 3 on purpose and
+# is not touched — the WARN boundary is its fixture, not this one's.
+#
+# **These two are the whole cost of the trip.** CrashLoopBackOff doubles from
+# 10s and caps at 5 minutes (`init.json` carries the kubelet's own words:
+# "back-off 5m0s restarting failed container"), so ten restarts cost
+# 10+20+40+80+160+300+300+300+300 = 1510 seconds of backoff plus about four
+# seconds per container start — **just over 26 minutes**, measurable but not
+# reducible: the counter is real and no other mechanism raises it. That is why
+# `cluster.sh verify` runs them in a second pass with a deadline of its own,
+# after every fast fixture has already reported.
+#
+# `sleep 86400` and not 3600 at the end: an hour-long sleep *ends*, the shell
+# exits 0, and the container restarts — which would move the count under a
+# capture that is still being taken.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-restarts10, labels: { demo: broken } }
+spec:
+  containers:
+    - name: flaky
+      image: busybox
+      command: ["sh", "-c"]
+      args:
+        - |
+          n=$(cat /state/n 2>/dev/null || echo 0)
+          n=$((n + 1))
+          echo "$n" > /state/n
+          [ "$n" -le 10 ] && exit 1
+          sleep 86400
+      # What makes this one the CRITICAL: it is up, and it is not serving.
+      readinessProbe:
+        exec: { command: ["false"] }
+        periodSeconds: 5
+      volumeMounts:
+        - { name: state, mountPath: /state }
+  volumes:
+    - name: state
+      emptyDir: {}
+---
+# The same history on a container that *is* serving — ten restarts and a
+# working process, which D71 is explicit about: a red card whose own title says
+# it is serving is what teaches people to ignore red. WARN, not CRITICAL.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-restarts10serving, labels: { demo: broken } }
+spec:
+  containers:
+    - name: flaky
+      image: busybox
+      command: ["sh", "-c"]
+      args:
+        - |
+          n=$(cat /state/n 2>/dev/null || echo 0)
+          n=$((n + 1))
+          echo "$n" > /state/n
+          [ "$n" -le 10 ] && exit 1
+          sleep 86400
+      volumeMounts:
+        - { name: state, mountPath: /state }
+  volumes:
+    - name: state
+      emptyDir: {}
+---
+# Rule 7's `!started` suppressor (NOTES § D71). No committed fixture declares a
+# `startupProbe`, so every captured container reports `started: true` and the
+# state gate covers exactly the same ground — delete either and the other keeps
+# the suite green.
+#
+# This pod separates all three readings at once: the container is **Running**,
+# it is **not ready**, and it has **not started**. The readiness probe is one
+# that would pass — `true` always succeeds — and `ready` is still false, which
+# is the whole mechanism: while a startup probe is failing the kubelet does not
+# run the readiness probe at all, so `ready: false` means *not asked yet* and
+# not *asked and failing*. Firing rule 7 here is what would alert on every
+# Cassandra, Elasticsearch and Vault pod during a normal start.
+#
+# `failureThreshold: 720` × 5s is an hour before the kubelet gives up, rather
+# than D71's illustrative 60 × 5s = five minutes: at five minutes the container
+# is killed and restarted in the middle of the trip, and a capture taken in the
+# restart is a pod in neither state. The field under test is the same either
+# way, and a fixture that is a coin flip is worse than none.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-startup, labels: { demo: broken } }
+spec:
+  containers:
+    - name: slowboot
+      image: busybox
+      command: ["sleep", "86400"]
+      startupProbe:
+        exec: { command: ["false"] }
+        periodSeconds: 5
+        failureThreshold: 720
+      readinessProbe:
+        exec: { command: ["true"] }
+        periodSeconds: 5
+---
+# Rule 6's `(None, 126 | 127)` action — "what the command names is not in the
+# image" — which needs a non-zero exit *and* an empty termination message, so
+# that the log-line arm does not answer first.
+#
+# **The command has to fail inside the shell, not at the runtime.** A `command`
+# naming a missing binary directly never becomes a run at all: containerd cannot
+# create the task, and what the kubelet reports is a start error rather than a
+# program that exited — so no exit code of the container's own reaches
+# `lastState`, and 127 is nowhere. A shell that cannot find what its script
+# names exits 127 itself, which is also how this shape reaches a real cluster:
+# an entrypoint script calling a binary that was dropped from the image.
+#
+# `terminationMessagePolicy` is deliberately left at its default (`File`): the
+# kubelet reads /dev/termination-log, nothing writes it, and the message is
+# absent. The "not found" line goes to stderr, which only
+# `FallbackToLogsOnError` would collect — see `broken-crashloop`, which is the
+# fixture for the arm that *does* have a log line.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-notfound, labels: { demo: broken } }
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c", "exec /usr/local/bin/server --serve"]
+---
+# Rule 13's positive side (NOTES § D72, § D76) — the `ContainerCreating` wedge.
+# The pod was given a machine, nothing in it is running, and no other rule
+# explains it: not an image error (rule 3), not a `CreateContainerConfigError`
+# (rule 4), not a crash loop (rule 1).
+#
+# A `configMap` **volume** naming an object that does not exist is the cheapest
+# producer there is, and it wedges permanently — the kubelet retries the mount
+# forever. It is deliberately a *volume* and not `broken-config`'s `envFrom`:
+# that one is resolved while the container is being created and reports
+# `CreateContainerConfigError`, which rule 13 excludes because rule 4 has
+# already drawn the card.
+#
+# **It carries the `False` reading of `PodReadyToStartContainers`, which is the
+# storage branch**: `kubelet.SyncPod` calls `WaitForAttachAndMount` *before*
+# the runtime creates the sandbox, so every volume failure leaves the condition
+# False and `True` means the mounts already succeeded. D76 measured that on this
+# node image after D72 had it backwards, and NOTES is what this manifest
+# follows — todo.md's box still names the branches the other way round.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-wedged, labels: { demo: broken } }
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "86400"]
+      volumeMounts:
+        - { name: config, mountPath: /etc/app }
+  volumes:
+    - name: config
+      configMap: { name: this-configmap-does-not-exist }
+---
+# Rule 14's positive side (NOTES § D74), and the cheapest fixture in this file.
+# `schedulerName` names a scheduler nobody installed, so nothing ever looks at
+# this pod: no `PodScheduled` condition is written at all — not `True`, not
+# `False / Unschedulable` — and `kubectl describe` shows no events. That is the
+# state a beginner cannot get out of alone, and without rule 14 no other rule in
+# the file sees it: D74 records this as the only known input that would make
+# `--once` print "nothing is broken" while nothing runs.
+#
+# No control-plane surgery: `unbreak` only has to delete it, and the rest of the
+# cluster schedules normally throughout.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-unjudged, labels: { demo: broken } }
+spec:
+  schedulerName: does-not-exist
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "86400"]
+---
+# Rule 2's recency clause (NOTES § D75) — a container OOMKilled once that has
+# been serving ever since. `oom.json`'s container is crashlooping, so both
+# directions of "silent only when it is doing its job **and** the kill is old"
+# are proven today on a decoded copy rather than on committed JSON.
+#
+# One capture answers both, because the clock is an input (invariant 5): with
+# `now` near the kill the card must still be there, with `now` an hour later it
+# must be gone.
+#
+# `exec tail /dev/zero` is the kill, and each word of it is load-bearing. `exec`
+# makes tail PID 1, so the process the kernel picks is the one whose death ends
+# the container — an OOM that kills a child leaves the container running and the
+# kubelet reports nothing. `tail` keeps the last lines of its input in memory and
+# /dev/zero never yields a newline, so the buffer grows without bound until the
+# memcg kills it, in seconds, with no swap on a kind node to soften it.
+#
+# It was `exec dd if=/dev/zero of=/dev/null bs=100M count=1`, and `count=1` is
+# exactly why that produced a restart with no kill behind it — `exitCode 0`,
+# `reason=Completed`, on the cluster. A read() may return **short**, and busybox
+# dd counts a short read as its one block: the first read returns before enough
+# of the 100M buffer has been faulted in to cross 64Mi, dd writes the little it
+# got and exits 0, and nothing was ever charged against the limit. Without
+# `count=1` that same dd loops, faults the whole buffer in and *is* killed —
+# which is the trap: D84's harness line has no `count`, so it reported a kill,
+# and the manifest that copied it added the one token that stops the loop before
+# the buffer is ever paid for. Do not reach for `dd` here. `dd` into an
+# `emptyDir { medium: Memory }` is the other dead end: it never starts,
+# `exitCode 128 reason=StartError`.
+#
+# Measured on the capture host's own kernel (D84 makes that part of the
+# contract), one throwaway container per arm at the same 64m cap:
+# `tail /dev/zero` 137/OOMKilled, `dd count=1` 0/not-killed, `dd` without it
+# 137/OOMKilled.
+#
+# The counter in the `emptyDir` is what makes the kill happen exactly once: the
+# second run sleeps, so the pod ends up Running and ready with the OOM in
+# `lastState`, which is the whole shape.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-oomserving, labels: { demo: broken } }
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c"]
+      args:
+        - |
+          n=$(cat /state/n 2>/dev/null || echo 0)
+          n=$((n + 1))
+          echo "$n" > /state/n
+          [ "$n" = 1 ] && exec tail /dev/zero
+          sleep 86400
+      resources:
+        requests: { memory: "64Mi" }
+        limits: { memory: "64Mi" }
+      volumeMounts:
+        - { name: state, mountPath: /state }
+  volumes:
+    - name: state
+      emptyDir: {}
+---
+# D96's permanent shape, and the one `kubectl get pods` already prints `Error`
+# for while every rule k8rs has stays silent: a container that has stopped **for
+# good** inside a pod that is still `Running`. The rule that reads it comes
+# later; this is the object it will be written against, and the silence is
+# measured rather than assumed — run through `analyze` this pod draws nothing,
+# and no existing card moves.
+#
+# `restartPolicy: Never` is what makes "stopped" mean *for good*, and it is the
+# whole condition: the kubelet brings none of these three back, so `restartCount`
+# stays 0 and `lastState` stays empty and there is nothing here for a restart
+# rule to read. **Neither of the two fields that would complicate that is on
+# this pod, and they are off it for different reasons, because only one of the
+# two can only ever point one way:**
+#
+#   - `spec.containers[].restartPolicyRules` can only *add* restarts. The API
+#     rejects `action: DoNotRestart` by name, and both actions it does accept
+#     restart something: `Restart` brings back that container alone,
+#     `RestartAllContainers` its siblings with it (NOTES § D96). So a container
+#     carrying a rule that matches its own exit code comes back even under
+#     `Never`, which is the shape this fixture is not.
+#   - A container-level `restartPolicy` **subtracts as readily as it adds**, so
+#     carrying one says nothing either way. `Never` on a container inside an
+#     `Always` pod is the subtracting shape, and it is why the snapshot's
+#     effective policy is the container's own *falling back to* the pod's rather
+#     than either field alone (`ContainerSnapshot::restart_policy`) — the one
+#     rule 15's fourth condition reads. Measured on a live kind v1.36.1 cluster
+#     (NOTES § D97): such a container exits 1 and then sits at `1/2 Error`
+#     beside its live sibling, `restartCount: 0`, `phase: Running`, for as long
+#     as its sandbox lives — and reboot the node and it does come back, because
+#     the kubelet reads the **pod's** policy, `Always` there, when it recreates
+#     a sandbox. It is off *this* pod because under a pod already `Never` it
+#     would subtract nothing and change no behaviour, while leaving the capture
+#     unable to say which of the two fields the effective policy came from —
+#     and that pod-level fallback is the leg these bytes are here to prove.
+#
+# **Three containers, and each one is load-bearing:**
+#
+#   - `broke` exits 1. **This is the finding**: terminated, permanently, at a
+#     non-zero exit, with nothing scheduled to try again.
+#   - `done` exits 0, and it is the negative *on the same object*. A container
+#     that finishes cleanly under `Never` is doing exactly what `Never` means;
+#     calling that a fault needs the Job above the pod, which k8rs does not watch
+#     (CLAUDE.md invariant 6). Delete it as the redundant twin of `broke` and the
+#     rule's false-positive case has no capture behind it at all.
+#   - `keeper` sleeps, and it is the reason the shape exists. Under `Never` a pod
+#     reaches `Failed` only once **every** container has stopped — so without a
+#     container that never stops, this whole object leaves through
+#     `finished(pod)` and D96's shape is on no disk anywhere.
+#
+# Measured on kind v1.36.1 by the operator review: such a pod sits at
+# `phase: Running`, `Ready: False`, `restartCount: 0` and an empty `lastState`
+# for as long as it is left alone — so `verify` waits for a state that arrives in
+# seconds and then never moves again. Nothing here needs `break-nodes`, a second
+# revision or a subresource patch: it is one `apply` and the kubelet.
+#
+# `terminationMessagePolicy` is left at its default (`File`) on both exits, like
+# `broken-notfound`: nothing writes /dev/termination-log, so neither termination
+# carries a message, and the object tells the two stopped containers apart by
+# their exit code alone. The stderr line is there for a person reading
+# `kubectl logs`.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-neverback, labels: { demo: broken } }
+spec:
+  restartPolicy: Never
+  containers:
+    - name: broke
+      image: busybox
+      command: ["sh", "-c", "echo cannot reach the license server >&2; exit 1"]
+    - name: done
+      image: busybox
+      command: ["sh", "-c", "echo migration complete; exit 0"]
+    - name: keeper
+      image: busybox
+      command: ["sleep", "86400"]
+---
+# NOTES § D90's first clause, and NOTES § D113's floor under it: **a probe kill
+# that reports `exit 0`**, on a run comfortably longer than `PROBE_FLOOR`.
+#
+# `finished_action` opens with *exit 0 does not say who ended the run — check
+# the pod's events for a Killing line*. Nothing in this repo holds an object
+# where that is what happened: `exit0.json` is a batch script that ended by
+# itself, so the first door is the one door its bytes cannot exercise. Here the
+# liveness probe is the killer and the number the container reports is still
+# `0`, which is the whole of D90's *whether an outside killer arrives as 143 or
+# as 0 is decided by the application's own SIGTERM handler*.
+#
+# **The trap is what makes the number `0` rather than `137`**, and the kernel is
+# why — the `SIGNAL_UNKILLABLE` argument written out over `broken-sigterm`
+# above applies unchanged: without a handler the kubelet waits out the grace
+# period and SIGKILLs, and the capture lands `137 / Error`, which is a third
+# object again. One word apart from `broken-sigterm`, and it is a **separate
+# pod** because `sigterm.json` is guarded on `exitCode == 143` and is rule 6's
+# SIGTERM exemption fixture — editing that pod destroys it.
+#
+# **`initialDelaySeconds: 30` is the only field here that is a number rather
+# than a shape.** `PROBE_FLOOR` is 20s and `finished_action` orders its doors by
+# whether the previous run was shorter than it, so a fixture on the short side
+# proves the demoted arm and nothing else — which is exactly what `exit0.json`
+# already is, at 2s. The probe first fires 30s into each run, `failureThreshold:
+# 1` kills on that first failure, and the trap exits immediately, so the
+# committed `finishedAt - startedAt` is ~30s. The predicate asks for `> 25`, so
+# there are five seconds of slack on each side: 25 sits five above the floor, and
+# the run sits five above 25.
+#
+# The readiness probe is the section header's first bullet, unchanged: rule 6 is
+# silenced by `doing_its_job` as well as by the exit code, so a container that is
+# ready at the instant it is captured proves the wrong clause.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-probe0, labels: { demo: broken } }
+spec:
+  terminationGracePeriodSeconds: 30
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c"]
+      args:
+        - |
+          trap 'exit 0' TERM
+          sleep 86400 &
+          wait
+      livenessProbe:
+        exec: { command: ["false"] }
+        initialDelaySeconds: 30
+        periodSeconds: 5
+        failureThreshold: 1
+      readinessProbe:
+        exec: { command: ["false"] }
+        periodSeconds: 5
+---
+# NOTES § D97's named false positive for rule 15, and the one object the boxed
+# `restartPolicyRules` reader cannot be written without: **a container the
+# kubelet restarted under `restartPolicy: Never`**.
+#
+# `stopped_for_good`'s truth table ends at *`Never` is the only policy that
+# reaches this rule on a bad exit*, and its own doc says why that is not the
+# same as *nothing will restart it*: `spec.containers[].restartPolicyRules` can
+# only **add** restarts — the API rejects a `DoNotRestart` action — so a
+# container carrying a rule on its own exit code comes back under `Never`. The
+# guard that stops the rule shipping that card is `restarts == 0`, and until this
+# pod exists no committed object reaches the guard at all.
+#
+# **Reaching the guard is why this pod ends on an exit the rule does *not*
+# match.** Rule 15 reads `state.terminated` — the run the container is in *now* —
+# so an object still in `CrashLoopBackOff` (which is what D97 measured, five
+# restarts on a rule matching `exit 3`) is refused one line earlier, at the
+# state, and the guard under test is never asked. Two runs settle it instead:
+#
+#   - run 1 exits **3**, the rule matches, the kubelet restarts it → `restartCount`
+#     becomes 1, which is the fact the whole object is for.
+#   - run 2 exits **1**, no rule matches, the container's own `Never` applies, and
+#     it stays terminated for good. `ending` reads `Failed`, `restart_policy` reads
+#     `Never`, `state` is `Terminated` — three of rule 15's four conditions hold,
+#     and `restarts != 0` is the only thing left refusing the card.
+#
+# The marker file is in an `emptyDir`, which lives for the pod and not for the
+# container, so it survives the restart that is the point. It is tested with
+# `[ -f ]` and never with a command substitution: Kubernetes expands `$(…)` in
+# `command`/`args` itself, and a script that leans on the shell's version of that
+# syntax is one release away from being read by the wrong reader.
+#
+# `keeper` is here for exactly the reason `broken-neverback`'s is, and that block
+# argues it in full: under `Never` a pod reaches `Failed` only once **every**
+# container has stopped, and a `Failed` pod leaves through `finished(pod)` before
+# any container rule runs. `sleep 86400` and not `3600`: the justfile already
+# carries one fixture that a trip idling past its own hour would have moved.
+#
+# **`restartPolicy: Never` on the container is not a duplicate of the pod's** —
+# it is what the API demands. Measured (NOTES § D100): `restartPolicyRules` is
+# rejected unless the container also sets its own `restartPolicy`, with
+# *must specify restartPolicy when restart rules are used*.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-neverrules, labels: { demo: broken } }
+spec:
+  restartPolicy: Never
+  containers:
+    - name: retry
+      image: busybox
+      restartPolicy: Never
+      restartPolicyRules:
+        - action: Restart
+          exitCodes: { operator: In, values: [3] }
+      command: ["sh", "-c"]
+      args:
+        - |
+          if [ ! -f /state/tried ]; then
+            touch /state/tried
+            echo cannot reach the license server, retrying >&2
+            exit 3
+          fi
+          echo cannot reach the license server, giving up >&2
+          exit 1
+      volumeMounts:
+        - { name: runs, mountPath: /state }
+    - name: keeper
+      image: busybox
+      command: ["sleep", "86400"]
+  volumes:
+    - name: runs
+      emptyDir: {}
+---
+# NOTES § D100's owed object: a **settled gang restart**. Nothing in the corpus
+# holds `RestartingAllContainers` at all, which is one of the four reasons
+# `rules.rs` names as reachable by no committed capture.
+#
+# What the committed bytes have to carry, and every field below is one of them:
+# `lastState.terminated {exitCode: 137, reason: RestartingAllContainers}` with
+# **both stamps null** — the record is synthesized, not observed — beside a live
+# `state.running.startedAt`, on a pod that is `2/2 Ready` and has stopped moving.
+# That pair is the whole of D100's ruling: rule 5's age comes from the running
+# state because the record it would rather read carries no clock at all.
+#
+# **Three exits and then quiet, driven by marker files** for the reason
+# `broken-neverrules` uses them: the `emptyDir` outlives the container, `[ -f ]`
+# needs no command substitution, and the fourth run sleeps, so the object stops
+# where the fixture wants it and stays there. `restartCount` lands on 3 —
+# `RESTARTS_WARN` — on a container that is serving, which is a shape rule 5
+# already has a card for and can now be shown a second producer of.
+#
+# **`RestartAllContainers` and not `Restart`**, and the difference is not
+# cosmetic: measured on kind v1.36.1 (NOTES § D97) `Restart` restarts that
+# container alone and never touches its sibling, so only this action writes the
+# reason this object exists for. The published schema says the only action is
+# `Restart`; the validator accepts both.
+#
+# **The rule is declared on `trigger` alone**, because that is where the field
+# lives — there is no `pod.spec.restartPolicyRules`, only
+# `spec.containers[].restartPolicyRules`, and the rule handles *that container's*
+# exit. `bystander` never exits, so a copy of the rule on it would be text
+# nothing can reach. Its restart is the *effect*, which is what makes its
+# `lastState` the honest place to read the reason off.
+#
+# **`restartPolicy: Never` on both the pod and `trigger` is the argument, not
+# caution.** Under `Never` nothing but the rule can add a restart, so
+# `restartCount: 3` beside `reason: RestartingAllContainers` has one possible
+# author. It is also the shape D97 measured as accepted, and the container-level
+# field is required beside the rules either way (NOTES § D100). **If the kubelet
+# turns out to refuse to bring a `Never` sibling back, `verify` fails before
+# anything is captured and the pod-level policy becomes `Always`** — the record
+# in `lastState` is the provenance either way; the policy only makes the count
+# unambiguous as well.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-gang, labels: { demo: broken } }
+spec:
+  restartPolicy: Never
+  containers:
+    - name: trigger
+      image: busybox
+      restartPolicy: Never
+      restartPolicyRules:
+        - action: RestartAllContainers
+          exitCodes: { operator: In, values: [3] }
+      command: ["sh", "-c"]
+      args:
+        - |
+          if [ ! -f /state/1 ]; then touch /state/1; exit 3; fi
+          if [ ! -f /state/2 ]; then touch /state/2; exit 3; fi
+          if [ ! -f /state/3 ]; then touch /state/3; exit 3; fi
+          sleep 86400
+      volumeMounts:
+        - { name: runs, mountPath: /state }
+    - name: bystander
+      image: busybox
+      command: ["sleep", "86400"]
+  volumes:
+    - name: runs
+      emptyDir: {}
+---
+# ============================================================================
+# THE ONE OBJECT A MANIFEST DECLARES AND ONLY THE MACHINE CAN FINISH — NOTES
+# § D90, and the exception to the section header above.
+#
+# Every pod before this point settles by itself, which is what keeps
+# `cluster.sh break` idempotent by construction. This one does not: what makes
+# it the object it is happens to the **node**, not to the pod, and it is
+# destructive to whatever else is running there. So it is applied here with the
+# rest and finished by `cluster.sh break-runtime`, which runs **after every pod
+# capture is on disk** and before `break-nodes` — a node reboot bumps
+# `restartCount` on every pod on that worker, and `restarts.json` is guarded at
+# exactly three.
+#
+# D90's **`Init` arm has no manifest here and is not getting one.** A pod whose
+# init container exits 0 and is re-run by a rebuilt sandbox was declared here and
+# measured on containerd/kind v1.36.1: the kubelet's `doBackOff` fires for it
+# (the `BackOff` event is real), but the published status never rests at
+# `state.waiting` — an init container that exited 0 is *finished*, so nothing is
+# waiting to retry it, and `rules.rs` reads the published status and nothing
+# else. The shape stays planted on a decoded copy, on the same footing as the
+# CRI-O runtime socket. A predicate that can never pass is worse than no
+# fixture: it blocks every capture trip at `verify`.
+# ============================================================================
+
+# NOTES § D90's producer asymmetry, and the half of it that is argued rather
+# than seen: **a restart count raised by the node, on a container that never
+# crashed.**
+#
+# D90 records that a node reboot is a producer for rule 5 and **not** for rule 1
+# — `kl.backOff` is built in-process by `NewMainKubelet`, so a restarted kubelet
+# has an empty map and nothing to make the re-run wait, and the container comes
+# straight back up. Every restart fixture in the repo reaches its count by
+# crashing, so rule 5's own subject — a container that is up, ready, and has been
+# restarted anyway — has only ever been captured with an application error
+# underneath it.
+#
+# There is nothing to declare beyond a container that stays up: `break-runtime`
+# reboots this pod's node three times, and the count is the node's. What lands in
+# `lastState` is the runtime's own record and not the program's — **measured
+# `exitCode: 255`, `reason: Unknown`** on both a short and a three-minute outage
+# (`reports/2026-08-16-terminated-record-stamps-and-authors.md` § 2), which is
+# `Ending::CodeUnknown` and the fourth ending no committed capture reaches.
+#
+# `sleep 86400` and not `3600`: this pod is on the cluster for the whole trip,
+# and an hour is inside it — `broken-restarts` is already guarded against exactly
+# that (see the justfile), and a pod whose own sleep expired would raise its
+# count without a reboot and make the number say nothing.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-reboot, labels: { demo: broken } }
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "86400"]

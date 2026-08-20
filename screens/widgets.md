@@ -87,6 +87,13 @@ body → Layout::horizontal([
   count reads `nodes …`; a user who cannot list nodes gets an empty left zone.
   Stale vitals stay visible and say how old they are (`nodes 3/3 (40s ago)`),
   the same rule the body obeys ([states.md](states.md)).
+- **Before any cluster is picked, there is no context to put in the right
+  zone.** The startup picker
+  ([context.md § Opening at startup](context.md#opening-at-startup)) is that
+  state: the right zone reads `choose a cluster` plus `admin` / `read-only`
+  (known from the CLI flag before any connection is made), and the left
+  vitals zone is empty for the same reason it is empty while connecting —
+  nothing has been read yet.
 - **Namespace scope and node access are two different permissions, and the
   header must not conflate them.** Being scoped to one namespace for *pods* says
   nothing about *nodes*: the common namespace-scoped screen keeps `nodes 3/3`
@@ -107,6 +114,61 @@ body → Layout::horizontal([
   reaches stderr, so our hook **chains** ratatui's rather than replacing it.
   Replacing it is how the terminal ends up corrupted after a panic.
 
+## 1b. How long ago it happened — one ladder, every screen
+
+Three places draw an age: the header's stale vitals (`nodes 3/3 (40s ago)`,
+[states.md](states.md)), the Alerts card's right edge
+([alerts.md](alerts.md)), and `--once`'s title-line suffix
+([once.md](once.md)). They are one function — `rules::age(now, event)`, low
+enough in the pyramid for both renderers to reach
+([NOTES § D68](../NOTES.md#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13))
+— so the rungs belong here rather than three times over.
+
+**This table is the ladder. A Rust `if`/`else if` chain is read straight off
+it, top to bottom.**
+
+| `now − event` | drawn | widest string on this rung |
+|---|---|---|
+| more than 5 minutes in the future | **nothing** — no age is drawn at all | — |
+| up to 5 minutes in the future, or under one whole second | `just now` | 8 |
+| 1 s … 59 s | `40s ago` | `59s ago` — 7 |
+| 1 min … 59 min | `4 min ago` | `59 min ago` — 10 |
+| 1 h … 47 h | `1 hour ago` · `2 hours ago` | `47 hours ago` — 12 |
+| 48 h and up | `2 days ago` · `6 days ago` | `20678 days ago` — 14 |
+
+- **Every rung truncates**, and each rung names one unit. `min` is abbreviated
+  and never pluralised, because that is how the screens spell it; `hour` and
+  `day` are words and take their singular at one.
+- **The hours rung runs to 48, not to 24**
+  ([NOTES § D83](../NOTES.md#d83--the-hours-rung-runs-to-48-and-the-age-ladder-gets-one-home-2026-08-14)).
+  `1 day ago` used to cover 24h01m through 47h59m — a whole day of
+  resolution thrown away in the one band where the reader's question is *"was
+  this before or after yesterday's change window?"*. `kubectl`'s own
+  `HumanDuration` prints `30h`, `47h`, then `2d3h`, so k8rs was coarser than
+  the command it exists to teach, in the band that matters most. Past 48 h the
+  question stops being *which* window, and one unit is enough — the days rung
+  stays coarse on purpose, and nothing here should be read as inviting
+  `2 days 3 hours ago` later.
+- **`1 day ago` is therefore not a reachable string.** Neither is `0s ago` —
+  the sub-second window says `just now`. Both absences are deliberate; a screen
+  that draws either is drawing something this ladder cannot produce.
+- **The future bound is a wrong-field guard, not a clock feature**
+  ([NOTES § D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+  A moment more than five minutes ahead is a rule reading a deadline instead of
+  an event, and *"no number we cannot produce"* answers it with a blank rather
+  than with a smaller number.
+- **`now` is the caller's moment**, not one global clock: the snapshot's for a
+  finding drawn in that pass, a freshly read one for the header's staleness
+  age, which has to keep advancing while the snapshot does not.
+
+**The widest string is 14 columns**, and that number is what
+[alerts.md](alerts.md#how-wide-a-card-is-and-how-tall) budgets the age column
+against. It comes from the days rung's digit count, not from a real cluster:
+`20678 days ago` is what the epoch draws, which is the case `Option<Time>`
+exists to prevent from ever reaching a screen. A cluster ten years old draws
+`3652 days ago` — 13. Nothing is clamped at 14; a wider string simply takes one
+more column from the name beside it.
+
 ## 2. Element → widget
 
 | Screen element | Widget | State object | Notes |
@@ -115,7 +177,7 @@ body → Layout::horizontal([
 | Outer frame | `Block::bordered()` | — | no titles — the header is its own row |
 | Sidebar (ALERTS / RESOURCES / ANALYSIS + children) | `List` | `ListState` | flat `Vec<NavItem>`; group headers are unselectable rows, `↑↓` skips them |
 | Sidebar counts (`3 ● 7 ▲`, `1 ▲`, `30d`, `12`) | right-aligned `Span` in the same `ListItem` | — | part of the row, not a second column |
-| Finding card (Alerts) | `List` of **multi-line** `ListItem` | `ListState` | one `ListItem` = one card = 3–5 `Line`s + a blank; selection highlights the whole card, and `ListState` does the scrolling for free |
+| Finding card (Alerts) | `List` of **multi-line** `ListItem` | `ListState` | one `ListItem` = one card = **three to twelve `Line`s** + a blank, wrapped and capped by [alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall); selection highlights the whole card, and `ListState` does the scrolling for free. `ListItem` does not wrap — `views.rs` wraps the card's four parts into `Line`s itself, at the pane's current width, every frame |
 | Resource table | `Table` | `TableState` | rows and header both come from the server's `Table` response; widths `Constraint::Min(len(header))` per column, so nothing is hard-coded per kind ([invariant 12](../CLAUDE.md)) |
 | Finding marker in a table row (`●`) | `Span` prepended to the first `Cell` | — | how Alerts bleeds through into the browser |
 | Detail tabs (logs · describe · yaml · events) | `Tabs` | `usize` index in the view state | `[` `]` move it |
@@ -221,6 +283,16 @@ lines, `Table` cells — passes through one `sanitize()` before it becomes a
   characters; `String::truncate` slices bytes and panics in the middle of a
   multi-byte name. Handing the full `Span` to the widget is both shorter and
   correct.
+- **One place truncates on purpose, and it is the exception that proves the
+  rule above:** the Alerts card's evidence line, capped at three wrapped lines
+  with `…` at the cut
+  ([alerts.md § How wide a card is, and how tall](alerts.md#how-wide-a-card-is-and-how-tall)).
+  What § 7 forbids is a *silent* cut and a *byte* cut. That one is neither: it
+  is marked with a character the reader can see, it walks back to a whole word
+  before it cuts, and it steps by characters. The full text is one `⏎` away
+  ([detail.md](detail.md)) — which is what makes cutting it legitimate at all.
+  Everything else on a card is drawn whole and clips at the pane edge like any
+  other string.
 - Long values are bounded *before* they are stored, not at draw time — a 50 MB
   annotation must never become a `Text`.
 

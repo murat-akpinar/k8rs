@@ -13,7 +13,7 @@ plan and belongs in the same edit as the decision behind it
 | [detail.md](detail.md) | Object detail — logs · describe · yaml · events |
 | [dialogs.md](dialogs.md) | Confirmations, the typed-name delete, and a refused write |
 | [help.md](help.md) | The `?` key map |
-| [context.md](context.md) | **Switching cluster** (`X`) — the picker and a failed switch |
+| [context.md](context.md) | **Choosing and switching cluster** — the picker at startup and on `X`, its tag column, and a failed switch |
 | [once.md](once.md) | **`k8rs --once`** — the printed report that ships as v0.0.1, before the TUI |
 | [states.md](states.md) | Empty · loading · disconnected · namespace-scoped · startup errors |
 | [widgets.md](widgets.md) | **How they are drawn** — element → ratatui widget → who owns the state |

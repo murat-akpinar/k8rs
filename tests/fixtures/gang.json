@@ -1,0 +1,297 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "creationTimestamp": "2026-08-16T09:44:01Z",
+    "generation": 1,
+    "labels": {
+      "demo": "broken"
+    },
+    "name": "broken-gang",
+    "namespace": "default",
+    "resourceVersion": "1686",
+    "uid": "33442536-bdf1-4f8e-9843-acddc5472549"
+  },
+  "spec": {
+    "containers": [
+      {
+        "args": [
+          "if [ ! -f /state/1 ]; then touch /state/1; exit 3; fi\nif [ ! -f /state/2 ]; then touch /state/2; exit 3; fi\nif [ ! -f /state/3 ]; then touch /state/3; exit 3; fi\nsleep 86400\n"
+        ],
+        "command": [
+          "sh",
+          "-c"
+        ],
+        "image": "busybox",
+        "imagePullPolicy": "Always",
+        "name": "trigger",
+        "resources": {},
+        "restartPolicy": "Never",
+        "restartPolicyRules": [
+          {
+            "action": "RestartAllContainers",
+            "exitCodes": {
+              "operator": "In",
+              "values": [
+                3
+              ]
+            }
+          }
+        ],
+        "terminationMessagePath": "/dev/termination-log",
+        "terminationMessagePolicy": "File",
+        "volumeMounts": [
+          {
+            "mountPath": "/state",
+            "name": "runs"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-lhqdn",
+            "readOnly": true
+          }
+        ]
+      },
+      {
+        "command": [
+          "sleep",
+          "86400"
+        ],
+        "image": "busybox",
+        "imagePullPolicy": "Always",
+        "name": "bystander",
+        "resources": {},
+        "terminationMessagePath": "/dev/termination-log",
+        "terminationMessagePolicy": "File",
+        "volumeMounts": [
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-lhqdn",
+            "readOnly": true
+          }
+        ]
+      }
+    ],
+    "dnsPolicy": "ClusterFirst",
+    "enableServiceLinks": true,
+    "nodeName": "k8rs-worker3",
+    "preemptionPolicy": "PreemptLowerPriority",
+    "priority": 0,
+    "restartPolicy": "Never",
+    "schedulerName": "default-scheduler",
+    "securityContext": {},
+    "serviceAccount": "default",
+    "serviceAccountName": "default",
+    "terminationGracePeriodSeconds": 30,
+    "tolerations": [
+      {
+        "effect": "NoExecute",
+        "key": "node.kubernetes.io/not-ready",
+        "operator": "Exists",
+        "tolerationSeconds": 300
+      },
+      {
+        "effect": "NoExecute",
+        "key": "node.kubernetes.io/unreachable",
+        "operator": "Exists",
+        "tolerationSeconds": 300
+      }
+    ],
+    "volumes": [
+      {
+        "emptyDir": {},
+        "name": "runs"
+      },
+      {
+        "name": "kube-api-access-lhqdn",
+        "projected": {
+          "defaultMode": 420,
+          "sources": [
+            {
+              "serviceAccountToken": {
+                "expirationSeconds": 3607,
+                "path": "token"
+              }
+            },
+            {
+              "configMap": {
+                "items": [
+                  {
+                    "key": "ca.crt",
+                    "path": "ca.crt"
+                  }
+                ],
+                "name": "kube-root-ca.crt"
+              }
+            },
+            {
+              "downwardAPI": {
+                "items": [
+                  {
+                    "fieldRef": {
+                      "apiVersion": "v1",
+                      "fieldPath": "metadata.namespace"
+                    },
+                    "path": "namespace"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-16T09:44:03Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "PodReadyToStartContainers"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-16T09:44:01Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "Initialized"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-16T09:44:38Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-16T09:44:38Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "ContainersReady"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-16T09:44:01Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "PodScheduled"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-16T09:44:32Z",
+        "status": "False",
+        "type": "AllContainersRestarting"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "containerID": "containerd://b9570cc6da22c7491b7cf23c98bcebe2735b8d48361da94225930f16ec5691cc",
+        "image": "docker.io/library/busybox:latest",
+        "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
+        "lastState": {
+          "terminated": {
+            "exitCode": 137,
+            "finishedAt": null,
+            "message": "The container is removed because RestartAllContainers in place",
+            "reason": "RestartingAllContainers",
+            "startedAt": null
+          }
+        },
+        "name": "bystander",
+        "ready": true,
+        "resources": {},
+        "restartCount": 3,
+        "started": true,
+        "state": {
+          "running": {
+            "startedAt": "2026-08-16T09:44:38Z"
+          }
+        },
+        "user": {
+          "linux": {
+            "gid": 0,
+            "supplementalGroups": [
+              0,
+              10
+            ],
+            "uid": 0
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-lhqdn",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          }
+        ]
+      },
+      {
+        "containerID": "containerd://e2aaf759fa5cd03dd1912183d900df2735a035030565562752bd1e3fd84d506a",
+        "image": "docker.io/library/busybox:latest",
+        "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
+        "lastState": {
+          "terminated": {
+            "exitCode": 137,
+            "finishedAt": null,
+            "message": "The container is removed because RestartAllContainers in place",
+            "reason": "RestartingAllContainers",
+            "startedAt": null
+          }
+        },
+        "name": "trigger",
+        "ready": true,
+        "resources": {},
+        "restartCount": 3,
+        "started": true,
+        "state": {
+          "running": {
+            "startedAt": "2026-08-16T09:44:35Z"
+          }
+        },
+        "user": {
+          "linux": {
+            "gid": 0,
+            "supplementalGroups": [
+              0,
+              10
+            ],
+            "uid": 0
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/state",
+            "name": "runs"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-lhqdn",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          }
+        ]
+      }
+    ],
+    "hostIP": "REDACTED-IP",
+    "hostIPs": [
+      {
+        "ip": "REDACTED-IP"
+      }
+    ],
+    "observedGeneration": 1,
+    "phase": "Running",
+    "podIP": "REDACTED-IP",
+    "podIPs": [
+      {
+        "ip": "REDACTED-IP"
+      }
+    ],
+    "qosClass": "BestEffort",
+    "resources": {},
+    "startTime": "2026-08-16T09:44:01Z"
+  }
+}

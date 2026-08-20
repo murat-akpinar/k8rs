@@ -43,12 +43,20 @@
    (drift tracking).
 
 3. **The k8s-openapi / kube-rs version triangle** *(all three roles)*
-   - Pin the **oldest** supported version feature — verified 2026-08-11 as
-     **`v1_32`**; `v1_30` is no longer offered by k8s-openapi — the k8s
-     API is forward compatible; a client built against an old feature talks
-     to newer clusters.
-   - Document the supported window in the README: pinned ±2 minor
-     (kubectl skew policy).
+   - Pin the **newest** feature k8s-openapi offers — **`v1_36`** as of
+     2026-08-15. **This reverses the original requirement**, which said
+     *oldest* (`v1_32`) on the grounds that the API is forward compatible: true
+     of the wire, false of the diagnosis. An old pin drops every field added
+     since, at decode, and a dropped field is indistinguishable from one the
+     cluster never set. A new pin against an older cluster reads `None`, which
+     invariant 5 already defines as *no finding*
+     ([NOTES § D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).
+   - **The pin is asserted, not documented.** `scripts/fixture-audit.sh` fails
+     when the pin's minor falls below `tests/fixtures/K8S_VERSION` — an
+     inequality, so the crate may run ahead of the kind image.
+   - Document the supported window in the README: types are the pinned
+     version; against an older cluster the fields it did not have read as
+     absent, and the floor is the oldest apiserver kube-rs itself supports.
    - kube-rs + k8s-openapi are coupled: **group them** in Dependabot,
      upgrade together.
    - A stale pin silently produces wrong diagnoses — the most likely
@@ -184,7 +192,12 @@
 
 ### Non-functional targets
 
-- Memory: < 50MB RSS at ~1000 pods. First paint < 1s, findings < 3s.
+- Memory: < 50MB RSS at ~1000 pods. First paint < 1s, findings < 3s. **The
+  paint figures hold up to a cluster size Phase 5 measures and then states**;
+  the initial LIST has no size-independent bound and nothing may be drawn until
+  it lands, so above that size the first paint says what it is still waiting for
+  rather than silently missing the number
+  ([NOTES § D115](NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
 - Coalesce redraws during event storms (min ~100ms debounce) — otherwise
   CPU spikes during rollouts. 0% CPU at idle is already decided.
 - Minimum terminal 80×24; redraw on resize.

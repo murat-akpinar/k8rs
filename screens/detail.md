@@ -39,5 +39,14 @@ Rules for this screen:
   stripped, no unbounded line.
 - The finding that brought you here stays visible at the top — you never lose
   the reason you opened the object.
+- **That block draws the finding's evidence in full**, and it is the only place
+  that does. The Alerts card caps it at three wrapped lines with `…`, because a
+  controller's verbatim message runs past any card
+  ([alerts.md § the height](alerts.md#the-height)); this is where the rest of it
+  is, and the cut is only honest because this screen exists. The block wraps to
+  the pane and **scrolls with it** rather than being pinned — a nine-line quote
+  pinned above a log pane leaves no log pane.
 - On a grouped finding, `⏎` first lists *which* pods of the group are affected,
-  then opens the one you pick.
+  then opens the one you pick. **The finding block is on that step too**, for
+  the same reason: the full message must never be two keypresses away, or the
+  card's `…` is pointing at nothing the reader can find.

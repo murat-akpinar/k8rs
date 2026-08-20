@@ -35,53 +35,27 @@ jobs:
       - name: test
         run: cargo test --locked --all-targets
 
-      # Green tests are not the same as tests that ran (NOTES § D26).
-      - name: honest-test guard
-        run: |
-          python3 scripts/test-guard.py --self-test
-          python3 scripts/test-guard.py
-
-      # Invariant 1, as an allowlist derived from the kube version in the lock
-      # file — never a hand-written denylist.
-      - name: write containment
-        run: |
-          python3 scripts/write-guard.py --self-test
-          python3 scripts/write-guard.py
-
-      # Every fixture is trusted because a jq predicate in cluster.sh said it
-      # reached the state its rule is about. Those predicates only ever ran
-      # against a live cluster, where too-loose and too-tight look identical.
-      - name: fixture-state predicates
-        run: bash scripts/verify-test.sh
-
-      # The sanitizer is a security control: it is fed a poisoned object and
-      # must hand back nothing secret (todo.md, Phase 2 § Security gate).
-      - name: fixture sanitizer
-        run: bash scripts/sanitize-test.sh
-
-      # The certificate fixtures claim pinned dates; C1's positive and negative
-      # tests can only fail while that claim stays true (NOTES § D30).
-      - name: certificate fixture dates
-        run: bash scripts/certs-test.sh
-
-      # sanitize-test proves the filter; this proves the committed bytes. A
-      # fixture can reach tests/fixtures/ without ever meeting the filter.
-      - name: committed fixtures carry nothing secret
-        run: |
-          bash scripts/fixture-audit.sh --self-test
-          bash scripts/fixture-audit.sh
-
-      - name: docs links and anchors
-        run: |
-          python3 scripts/check-docs.py --self-test
-          python3 scripts/check-docs.py
-
-      # The mockups are the spec views.rs has to match, and "fits 80x24" was a
-      # claim nobody had measured. Measured in display columns, not bytes.
-      - name: screen mockups fit 80x24
-        run: |
-          python3 scripts/screens-check.py --self-test
-          python3 scripts/screens-check.py
+      # ONE step, and it deliberately names no guard. The nine steps that used
+      # to be here were a second hand-written copy of the guard list, and a copy
+      # drifts: `todo-guard.py` reached `just check` and never ran on a push, so
+      # a guard that had been proved red-then-green was not guarding anything
+      # (NOTES § D26, D111). Adding a guard is now one line in
+      # `scripts/guards.sh`, in one place, and it runs here by construction —
+      # there is nothing left here to forget to update.
+      #
+      # The script rather than `just guards`: `just` is not on the runner image
+      # and this was its only use in CI, so installing it means a fourth
+      # third-party action for an entry point a shebang gives away free
+      # (NOTES § D111). `just guards` calls the same script, so the local run and
+      # this one cannot differ. The script asserts that `just check` still calls
+      # it and names no `scripts/` guard directly.
+      #
+      # A step that fails with no name is worse at 3am, so the script runs under
+      # `set -x`: the last traced `+ python3 scripts/…` line in this step's log
+      # IS the guard that failed. The names moved into the script beside the
+      # guards they explain, which is also where they stop drifting.
+      - name: guards (scripts/guards.sh — the one list)
+        run: bash scripts/guards.sh
 
   deny:
     name: cargo-deny
@@ -97,6 +71,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # This matrix is the one list of release targets: `just cross` reads the
+      # `- target:` lines straight out of this file rather than keeping a second
+      # copy that could drift (NOTES § D66). Add a target here and the local
+      # gate picks it up; reformat these lines and `just cross` fails loudly
+      # rather than checking an empty list.
       matrix:
         include:
           - target: x86_64-unknown-linux-musl

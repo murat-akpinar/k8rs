@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-12T20:45:54Z",
+    "creationTimestamp": "2026-08-16T09:44:02Z",
     "generation": 1,
     "labels": {
       "demo": "healthy"
     },
     "name": "healthy",
     "namespace": "default",
-    "resourceVersion": "1142",
-    "uid": "00823e0e-95ab-42b5-9198-1b8a9a2c6826"
+    "resourceVersion": "1520",
+    "uid": "8c960838-bc8b-4dc2-b804-e37040579b27"
   },
   "spec": {
     "containers": [
@@ -48,7 +48,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-shtvp",
+            "name": "kube-api-access-bkxht",
             "readOnly": true
           }
         ]
@@ -80,13 +80,13 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-shtvp",
+            "name": "kube-api-access-bkxht",
             "readOnly": true
           }
         ]
       }
     ],
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -111,7 +111,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-shtvp",
+        "name": "kube-api-access-bkxht",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -158,35 +158,35 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:45:54Z",
+        "lastTransitionTime": "2026-08-16T09:44:03Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:46:10Z",
+        "lastTransitionTime": "2026-08-16T09:44:17Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:46:13Z",
+        "lastTransitionTime": "2026-08-16T09:44:25Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:46:13Z",
+        "lastTransitionTime": "2026-08-16T09:44:25Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-12T20:45:54Z",
+        "lastTransitionTime": "2026-08-16T09:44:02Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -198,7 +198,7 @@
           "cpu": "10m",
           "memory": "16Mi"
         },
-        "containerID": "containerd://8af84411068b542d6e8d090cea420e7242a4bffb11a252818a0eb9f1ccda51fc",
+        "containerID": "containerd://0692b3599f144ec3ab00d0f37f5f459e616af61fee9bdbe6c4e4794775600052",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {},
@@ -218,7 +218,7 @@
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-12T20:46:13Z"
+            "startedAt": "2026-08-16T09:44:25Z"
           }
         },
         "user": {
@@ -234,7 +234,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-shtvp",
+            "name": "kube-api-access-bkxht",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -253,7 +253,7 @@
           "cpu": "50m",
           "memory": "16Mi"
         },
-        "containerID": "containerd://465a5f74f3aa2413d883ae030b07b57a246193cbfe868645288b579ac2c012d8",
+        "containerID": "containerd://697cd633985edb3b851dd585ff39c2292345231be19e20aae728b1b2fe13e29e",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {},
@@ -272,11 +272,11 @@
         "started": false,
         "state": {
           "terminated": {
-            "containerID": "containerd://465a5f74f3aa2413d883ae030b07b57a246193cbfe868645288b579ac2c012d8",
+            "containerID": "containerd://697cd633985edb3b851dd585ff39c2292345231be19e20aae728b1b2fe13e29e",
             "exitCode": 0,
-            "finishedAt": "2026-08-12T20:46:09Z",
+            "finishedAt": "2026-08-16T09:44:16Z",
             "reason": "Completed",
-            "startedAt": "2026-08-12T20:46:09Z"
+            "startedAt": "2026-08-16T09:44:16Z"
           }
         },
         "user": {
@@ -292,7 +292,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-shtvp",
+            "name": "kube-api-access-bkxht",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -318,6 +318,6 @@
         "memory": "16Mi"
       }
     },
-    "startTime": "2026-08-12T20:45:54Z"
+    "startTime": "2026-08-16T09:44:02Z"
   }
 }

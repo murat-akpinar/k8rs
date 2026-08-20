@@ -132,6 +132,8 @@ struct Finding {
     owner:       ObjectId,       // the grouping key: Deployment/DaemonSet/…,
                                  // or the pod itself when it has no owner
     object:      ObjectId,       // what the finding is about — the pod, the node
+    timestamp:   Option<Time>,   // when the event happened — the moment, never
+                                 // the phrase; None when no field records it
 }
 
 struct ObjectId {
@@ -159,6 +161,19 @@ counting *findings* would say "4 of 5 pods" about a single pod. The numerator
 is the count of distinct `object`s; the denominator comes from the snapshot.
 The reasons behind the rest of the shape are
 [NOTES § D36](../NOTES.md#d36--the-finding-shape-the-review-sent-back-2026-08-12).
+
+`timestamp` is a moment and never a phrase: `Finding::age(now)` turns it into
+`Some("4 min ago")` at draw time, and it is the one call both the Alerts view
+and `--once` make — two renderers spelling the same finding differently is one
+of them lying. It answers `None` in two cases that draw the same blank: no
+field records when the event happened, so the right edge stays empty rather
+than borrowing a nearby timestamp that answers a different question; or the
+moment is *ahead* of `now` by more than five minutes, which is not a clock the
+tool can absorb but a rule that filled the wrong field, and a plausible phrase
+would hide it. Inside that five-minute window a future moment is the user's
+clock running behind the API server's and draws `just now`
+([NOTES § D18](../NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact) ·
+[§ D68](../NOTES.md#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13)).
 
 ### Rules are pure functions
 
@@ -225,9 +240,16 @@ code and never touch product files.
 ## Performance behaviors
 
 - The Alerts view's own inputs are watched permanently: Pods, Nodes, and
-  Deployments/StatefulSets/DaemonSets (metadata + status only — five
-  low-traffic streams; workload objects are far fewer than pods and barely
-  churn). ReplicaSets are fetched on demand and cached, never watched. Every
+  Deployments/StatefulSets/DaemonSets — five low-traffic streams; workload
+  objects are far fewer than pods and barely churn. **The prune list is the
+  snapshot types in `rules.rs`**, and it spans metadata, spec and status on all
+  three kinds: `spec.volumes` (rule 8), `spec.terminationGracePeriodSeconds`
+  (rule 12), `spec.unschedulable` and the taints under it (N2),
+  `spec.containers[].resources` (rule 2, N5) and `spec.replicas` (the workload
+  `desired`) all sit in the half an earlier "metadata + status only" would have
+  dropped
+  ([NOTES § D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+  ReplicaSets are fetched on demand and cached, never watched. Every
   other kind is listed when its view opens and watched only while it is on
   screen — "browse everything" must not mean forty permanent streams.
 - Drop `metadata.managedFields` at ingest — often a third of the object.
@@ -240,7 +262,11 @@ code and never touch product files.
 - Redraws are coalesced (~100ms debounce) so rollouts don't spike CPU.
 
 Targets: < 50MB RSS at ~1000 pods · first paint < 1s · findings < 3s ·
-minimum terminal 80×24.
+minimum terminal 80×24. The paint figures are quoted at that cluster size on
+purpose — the initial LIST grows with the cluster and nothing is drawn until it
+lands, so the size they hold up to is measured in Phase 5 and stated, and above
+it the first paint reports what it is waiting for
+([NOTES § D115](../NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
 
 ## Error handling
 
@@ -308,11 +334,24 @@ minimum terminal 80×24.
 
 ## Version compatibility
 
-`k8s-openapi` is pinned to the **oldest** supported version feature — the
-Kubernetes API is forward compatible, so a client built against an old
-feature talks to newer clusters. Supported window: pinned version ±2 minor
-(mirrors the kubectl skew policy). kube-rs and k8s-openapi are upgraded
-together, never separately.
+`k8s-openapi` is pinned to the **newest** version feature the crate offers —
+`v1_36` today. The pin decides which fields exist in the generated types, and the
+two ways of getting it wrong are not symmetric: pinned **below** the cluster,
+every field added since is dropped at decode without a word, and a dropped field
+is indistinguishable from one the cluster never set; pinned **above** it, the
+field is simply absent and reads as no finding, which every rule already handles.
+A diagnosis tool cannot afford the first, so the pin leads.
+
+The rule was the opposite until 2026-08-15 — *oldest feature, window ±2 minor* —
+and it is reversed in
+[NOTES § D99](../NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15),
+which also measures what the old pin had been dropping.
+
+`scripts/fixture-audit.sh` fails when the pin's minor falls below the version in
+`tests/fixtures/K8S_VERSION` — an inequality, so the crate may run ahead of the
+kind image. Nothing yet compares the pin with the *user's* cluster at runtime;
+that is an open box. kube-rs and k8s-openapi are upgraded together, never
+separately.
 
 ## Out of scope
 
