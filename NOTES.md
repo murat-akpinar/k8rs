@@ -145,6 +145,7 @@ its line moving with it.
 - [D121](#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20) — the temporary driver, and the three places it does not draw what the console will
 - [D122](#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20) — the strip goes on the value entering the sentence, not on the finished sentence
 - [D123](#d123--the-mutation-gate-has-nothing-to-say-about-mains-body-so-a-test-drives-the-binary-2026-08-20) — the mutation gate has nothing to say about `main`'s body, so a test drives the binary
+- [D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20) — the freeze forbids reaching back into finished logic, and a card the capture proves wrong is not that
 
 ## Why it exists — where the gap is
 
@@ -8908,6 +8909,76 @@ target can have — Linux sizes a pipe at 16 buffers of one page, and the bigges
 page in the matrix is 16 KiB, so 256 KiB rather than the 64 KiB this machine
 has. A hole that opens only on somebody else's kernel is the kind that stays
 silent.
+
+### D124 — the freeze forbids reaching back into finished logic, and a card the capture proves wrong is not that (2026-08-20)
+
+Phase 3 closed with **`rules.rs` frozen** — except the snapshot types and their
+decode, which [D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)
+holds open until Phase 4 close. Phase 4's **first** box needs rule 6 changed. Both
+cannot stand, and the next session would have met the collision cold on box one.
+
+**The defect is real and it is on a committed capture**, reproduced at HEAD
+rather than argued:
+
+```
+$ ./target/release/k8rs tests/fixtures/neverrules.json
+1 pod · 0 nodes · 0 workloads
+
+▲ default/broken-neverrules · 3 days ago
+  The last run on record failed — exit 3
+  container retry · ran for under a second
+  → read the last run's log — it holds the last thing written before that run ended, from the program or from the shell that started it. The --previous flag below is what fetches it
+
+1 warning
+
+$ jq -r '.status.containerStatuses[] | "\(.name): state=\(.state|keys[0]) exit=\(.state.terminated.exitCode // "-") lastState=\(.lastState|keys[0]? // "none") lastExit=\(.lastState.terminated.exitCode // "-")"' tests/fixtures/neverrules.json
+keeper: state=running    exit=- lastState=none       lastExit=-
+retry:  state=terminated exit=1 lastState=terminated lastExit=3
+```
+
+`retry` is sitting in `state.terminated` at **exit 1**; the card names **exit 3**,
+which is the run before that one. And `--previous` resolves through
+`lastState.terminated.containerID`, so the command the card hands the reader
+fetches the log of the run the card should not have been about. That is
+[invariant 4](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+in the small — a record that lies — on the teaching device the whole tool is built
+around.
+
+**What the freeze is for.** Forward-only exists so that nothing built on a layer
+finds the layer moved: `analysis.rs`, `views.rs` and `ui.rs` all consume
+`Finding`, `ObjectId` and `analyze`'s signature, and reshaping those under them is
+the failure the rule names. It was never a rule that a wrong card becomes
+permanent because the phase that drew it has ended. Freezing this one would ship
+v1 with a card that names the wrong run — the freeze defeating its own purpose.
+
+**The precedent is this file's own, twice.**
+[D30](#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)
+broke the CI freeze "deliberately, minimally and in writing, which is what the
+forward-only rule asks for"; D42 made the `rules.rs` freeze per-concern rather
+than per-file. This is the third of the same shape and the narrowest.
+
+**The ruling, and the bounds are the entry.** A frozen `rules.rs` may be changed
+by a box in a later phase when **all five** hold:
+
+1. The defect is **proven on a committed capture**, output pasted. An argument
+   from consistency is not enough — that is
+   [the class two PM rulings already shipped a defect through](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13).
+2. The box was **written into the later phase before that phase opened**. Nothing
+   found mid-phase gets in; CLAUDE.md's *a box is never added to an open phase*
+   already says so and this does not widen it.
+3. It may change what a rule **reads, says or stands down on**. It may **not**
+   add a rule, or touch `Finding`, `ObjectId`, `analyze`'s signature, or a shared
+   helper's — those are the surface everything above is built on, and they are
+   what the freeze actually protects. `ClusterSnapshot` keeps D42's window and no
+   more.
+4. The **whole-file mutation gate for `rules.rs` re-runs at the close of the
+   phase that made the change**. Phase 3's 553 / 0 was taken before it; a gate
+   whose subject moved underneath it is not a gate.
+5. The box names this decision, so the unfreeze is never silent.
+
+**What this does not license.** Phase 4's other twenty boxes are `analysis.rs`,
+`scripts/` and snapshot fields, and none of them touches a rule. If a second
+`rules.rs` box appears in Phase 4 it arrives under condition 2 or not at all.
 
 ## Decisions made
 

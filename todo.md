@@ -1606,6 +1606,40 @@ Goal: the cluster-wide answers no per-object rule can give. Pure functions
 over a `ClusterSnapshot`, so this phase is as testable as Phase 3 and needs no
 cluster either.
 
+**The 21 boxes below are four families, three singles and two closing gates**
+([D109](NOTES.md#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)).
+They are **not reordered** — the brief names them, the file keeps them where the
+text that cites them expects to find them, and the next box is still the first
+unchecked one from the top.
+
+- **Alone, and first — the run a card is about.** Rule 6 versus rule 15. It
+  changes `rules.rs`, which froze at Phase 3 close, and
+  [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  is the one decision that lets it — under five conditions, one of which is that
+  this phase's close re-runs the whole-file mutation gate. Never batched.
+- **Family A — what the build refuses.** The `### D##` index guard · the
+  `reports/` sanitization guard · the 100-column guard · `certs-test.sh`'s stale
+  `(C1 warns)` · the `sanitize.jq` node-name anchor. All `tester`'s, all
+  `scripts/` and `just check`, none of them touching `src/` — so this one runs
+  **alongside** whichever `analysis.rs` box is open, not in a slot of its own.
+- **Family B — the fields the pin made readable.** `restartPolicyRules` ·
+  `terminatingReplicas` · in-place resize. Three
+  [D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)
+  follow-ups with one shape each — snapshot field, prune line, fixture, then the
+  rule — all inside [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+  window, and all riding **one** capture trip.
+- **Alone — the `Report` shape.** Every report box calls it, and a shared
+  contract's blast radius is not a family.
+- **Family C — the reports.** Capacity · Drain safety · Waste · Posture ·
+  Versions · Certificates. Read together or not at all: two reports counting the
+  same thing two different ways is invisible from inside either.
+- **Family D — the restart row.** `tui-designer` answers where it lives, and
+  then it is written — the designer box is step 2 of the second one's cycle, not
+  a turn of its own.
+- **Not in a family:** the `reports/` retention box, which is the PM's and says
+  *at a phase close, not mid-phase*, so it closes **with** this phase; and the
+  last two boxes, which are its gates.
+
 - [ ] **Rule 6 and rule 15 disagree about which run is "the last", and the
       capture trip put the disagreement on a card.** Rule 15's condition table
       calls `lastState` *the run before this one*; rule 6 titles that same field
