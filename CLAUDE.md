@@ -257,9 +257,12 @@ that goes green says nothing about those.
 
 - [ ] Every free-text field (names, messages, annotations, log lines) is
       stripped of control characters before it reaches the screen.
-- [auto] **No API string is ever interpolated into a shell** — the guard proves
-      nothing in `src/` spawns a process at all. When `$EDITOR` lands it is an
-      argument vector, never a command string; a pod named `; rm -rf ~` is boring.
+- [auto] **No API string is ever interpolated into a shell** — the guard reads
+      `src/`, `tests/`, `examples/` and `benches/`, and for every file that spawns
+      at all it refuses a shell program, a `-c` flag and a command string. One
+      file spawns today: `tests/binary.rs`, which runs the built binary through an
+      argument vector. When `$EDITOR` lands it is an argument vector too, never a
+      command string; a pod named `; rm -rf ~` is boring.
 - [ ] The command log is display text. k8rs does not execute it, and nothing in
       it is fed back into a process.
 - [ ] Object names are sanitised before they build a filesystem path — `../` in

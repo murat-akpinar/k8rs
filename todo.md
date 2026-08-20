@@ -1513,14 +1513,27 @@ that cites them expects to find them.
       ([D119](NOTES.md#d119--the-last-surviving-mutant-was-equivalent-and-the-fix-is-to-stop-spelling-the-tie-by-hand-2026-08-20)).
       The count falls 558 → 553 for that reason and the trade is recorded there
       ([NOTES § D41](NOTES.md#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12))
-- [ ] Temporary `main.rs` shell (~10 lines): load a fixture path from args,
+- [x] Temporary `main.rs` shell (~10 lines): load a fixture path from args,
       print findings. It cannot reach a cluster yet — `k8s.rs` is Phase 5, and
       that is where the v0.0.1 release therefore sits. **It strips control
       characters before printing**: the guard that makes this unnecessary is
       Phase 5's ingest strip, and this is the first code that shows a `Finding`
       — two phases earlier. A printer that displays API text with no guard is
       invariant 9 broken for the length of two phases, and "the fixtures are
-      ours" is an argument about today's inputs, not about the code
+      ours" is an argument about today's inputs, not about the code.
+      Closed 2026-08-20 at 349 lines, not ten: the strip, the loader's error
+      paths and the exit codes are where it went. It draws
+      [screens/once.md](screens/once.md)'s card and diverges in three named
+      places ([D121](NOTES.md#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20));
+      the strip runs on a value **entering** a message, never on the finished
+      one ([D122](NOTES.md#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20));
+      and `tests/binary.rs` drives the built binary, because `main`'s body is
+      the one place the mutation gate is silent
+      ([D123](NOTES.md#d123--the-mutation-gate-has-nothing-to-say-about-mains-body-so-a-test-drives-the-binary-2026-08-20)).
+      Two defects were caught by that route and by nothing else: the strip run
+      over the assembled message ate the usage text's line breaks, and
+      `k8rs | head` panicked with exit 101. 25 unit tests + 7 binary tests,
+      `cargo mutants --in-diff` 49 mutants / 0 missed
 
 - [x] **Split `rules_tests.rs` into one file per rule family — at phase close,
       after the last rule box and not before it.** 13 105 lines against the

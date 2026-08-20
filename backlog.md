@@ -232,6 +232,30 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   when a third rule wants the same clause. Found by `dev-core` while anchoring a
   red-proof script, 2026-08-20.
 
+- **Free text from the API is unbounded all the way to the screen, and the
+  temporary driver's header is the instance with a measurement.** Handed one
+  object whose `kind` is 10 MB of `K`, `k8rs` reads it, holds it and prints it:
+  a first line of 10 000 061 bytes, 51 MiB peak RSS, exit 0 — `sanitize` strips
+  and deliberately never truncates
+  ([D122](NOTES.md#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20),
+  `screens/widgets.md` § 7). **The box to write is not *bound the header***, or
+  Phase 5 closes the header and leaves the 50 MB annotation and the endless log
+  line beside it — it is *bound every free-text field at ingest*, which
+  [CLAUDE.md § Security gate](CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions)
+  already states and nothing below Phase 5 implements. Not a blocker today: the
+  input is argv, so only the operator can reach it. Measured by `tester`,
+  2026-08-20.
+- **Rule 6's action line says "the `--previous` flag below" and there is nothing
+  below it in any renderer that exists.** In the console *below* would be the
+  command-log strip, which carries what k8rs ran, not the finding's own
+  `kubectl_cmd`; the Alerts card is four parts and has no command line
+  ([screens/alerts.md](screens/alerts.md)), and the temporary driver draws the
+  same four. So the sentence points a beginner at something no screen shows —
+  [invariant 14](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision).
+  The fix is renderer-independent wording in `rules.rs`, not a line added to a
+  card. Found while reading the driver's real output over the captures, where it
+  printed 8 times. 2026-08-20.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

@@ -112,8 +112,12 @@ impl ObjectId {
 /// One thing that is wrong, in three parts: what happened · what it means · what to do.
 ///
 /// **Every string reachable from here is untrusted, identities included** (invariant 9).
-/// Nothing here or downstream strips control characters yet; where the guard goes is the
-/// decision of this phase's last box, the temporary `main.rs`.
+/// Nothing in this file strips control characters. The guard is `sanitize` in `main.rs`, and
+/// it runs **where a value enters a message, never over the finished message** — every value
+/// read off a `Finding` goes through it at the `format!` that interpolates it, k8rs's own
+/// sentences included, because `title` and `action` interpolate API text
+/// (`screens/widgets.md` § 7). **Phase 5's ingest strip supersedes it**, applying the same rule
+/// one layer earlier so no renderer has to remember.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
     /// How bad it is, and therefore where it lands in the list.

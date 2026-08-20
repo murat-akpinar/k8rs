@@ -53,7 +53,7 @@ frozen. Layer order is the row order below. A file's tests sit beside it in
 | `theme.rs` | Colours and constants — one file, so a change propagates from one place | `dev-ui` | Phase 9 |
 | `views.rs` | The three views, grouping, sorting | `dev-ui` | Phase 10 |
 | `ui.rs` | Drawing, keys, dialogs. A ninth file (`dialog.rs`) is pre-approved if this passes ~800 lines | `dev-ui` | Phase 11 |
-| [main.rs](../src/main.rs) | The event loop and CLI wiring — wired **last** | `dev-core` until Phase 12, then `dev-ui` | placeholder |
+| [main.rs](../src/main.rs) | The event loop and CLI wiring — wired **last**. Until then the **temporary driver**: reads Kubernetes objects out of JSON files named on argv, runs `analyze`, prints `screens/once.md`'s card, and carries `sanitize` — the control-character strip invariant 9 owes every printer, two phases before Phase 5's ingest strip exists ([NOTES § D121](../NOTES.md#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20) · [§ D122](../NOTES.md#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20)) | `dev-core` until Phase 12, then `dev-ui` | **temporary driver** (Phase 3) |
 
 **Tests sit beside the file they test**, never inside it: `src/rules.rs` carries
 `#[cfg(test)] #[path = "rules_tests.rs"] mod tests;` and no test code of its own;
@@ -67,9 +67,11 @@ No `mod.rs`, and `rules.rs` itself stays whole — a module boundary is where a
 second copy of a shared helper grows back
 ([NOTES § D91](../NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15) ·
 [§ D103](../NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
-Still a **child module**, so it sees the private items — and
-the crate still has one `bin` target and no `lib`, which is why nothing under
-`tests/` can reach a product type and why the tests are not there
+`main.rs` splits the same way, into
+[`src/main_tests.rs`](../src/main_tests.rs). Still a **child module**, so it sees
+the private items — and the crate still has one `bin` target and no `lib`, which
+is why nothing under `tests/` can reach a product type and why the tests are not
+there
 ([NOTES § D50](../NOTES.md#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12) ·
 [§ D80](../NOTES.md#d80--the-tests-moved-out-of-rulesrs-and-d50s-ruling-did-not-move-with-them-2026-08-13)).
 
@@ -101,7 +103,8 @@ is missing is a loud error, never a skipped step.
 | [tests/fixtures/](../tests/fixtures/) | Real captures from the pinned kind cluster, sanitized on the way out. **Never edited by hand to make a test pass** ([NOTES § D53](../NOTES.md#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)) |
 | `tests/fixtures/certs/` | Locally generated certificates with pinned dates — no real cluster material, ever |
 | `tests/fixtures/K8S_VERSION` | The version the capture came off, so a fixture cannot silently change cluster |
-| End-to-end tests | `tester`'s, from Phase 7 |
+| [tests/binary.rs](../tests/binary.rs) | `tester`'s. The three things `main` does that no unit test can reach — argv, the choice of stream, the exit code — asserted by **running the built binary** and reading its streams. Not a lib target and no step towards one ([NOTES § D123](../NOTES.md#d123--the-mutation-gate-has-nothing-to-say-about-mains-body-so-a-test-drives-the-binary-2026-08-20)) |
+| End-to-end tests | `tester`'s, from Phase 7 — a different thing: a `--read-only` job that fails if a mutating request reaches the API |
 
 ## `screens/` — the mockups
 

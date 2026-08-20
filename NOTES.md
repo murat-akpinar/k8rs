@@ -142,6 +142,9 @@ its line moving with it.
 - [D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20) — a foreground call is capped at ten minutes and the phase-close sweep is longer than one
 - [D119](#d119--the-last-surviving-mutant-was-equivalent-and-the-fix-is-to-stop-spelling-the-tie-by-hand-2026-08-20) — the last surviving mutant was equivalent, and the fix is to stop spelling the tie by hand
 - [D120](#d120--the-two-things-the-operator-review-measured-that-the-tests-cannot-see-2026-08-20) — the two things the operator review measured that the tests cannot see
+- [D121](#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20) — the temporary driver, and the three places it does not draw what the console will
+- [D122](#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20) — the strip goes on the value entering the sentence, not on the finished sentence
+- [D123](#d123--the-mutation-gate-has-nothing-to-say-about-mains-body-so-a-test-drives-the-binary-2026-08-20) — the mutation gate has nothing to say about `main`'s body, so a test drives the binary
 
 ## Why it exists — where the gap is
 
@@ -8790,6 +8793,121 @@ run began.
 function is not left to rediscover it — and the pre-existing test that pins the
 coupling keeps pinning it, because until the ruling lands, *unpinned* is worse
 than *pinned and documented as wrong*.
+
+### D121 — the temporary driver and the three places it does not draw what the console will (2026-08-20)
+
+Phase 3's last box is a driver that reads Kubernetes objects out of JSON files
+named on argv, runs [`analyze`](#d17--the---once-output) over them and prints
+the result. It is `--once`'s ancestor and is not `--once`: `k8s.rs` is Phase 5,
+so nothing here reaches a cluster. **It may not invent a third format** — two
+renderers over one `rules.rs`, and a third would be the lie
+[screens/once.md](screens/once.md) is built on — so it draws that file's card,
+`● ▲ ○` and all, and diverges in exactly three places, each of which is written
+into the file's own module doc:
+
+1. **No owner grouping and therefore no `3 of 5 pods`.** One card per finding.
+   Grouping is `views.rs`, Phase 10, and doing it twice is how the two copies
+   come to disagree.
+2. **Severity is the whole sort key.** `sort_by_key` is stable, so `analyze`'s
+   own order survives inside a band; recency is Phase 10's second key.
+   [D35](#d35--just-mutants-is-a-check-that-cannot-fail-and-the-justfile-unfreezes-for-one-line-2026-08-12)
+   is where *declaration order is severity order* is ruled, in its own third item.
+3. **It draws the `Info` band, and `--once` will not.** `Severity::Info` says
+   nothing on the Alerts list ([D2](#d2--the-dividing-line-broken-now-vs-risky-later),
+   [D87](#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14)),
+   and `screens/once.md` is the Alerts view with the frame off — so the released
+   renderer takes the band off, and Phase 5's `--once` box owns that. This one
+   keeps it, because a driver whose whole job for two phases is *show me what
+   `analyze` returned* may not silently drop one of them. It is unreachable
+   today anyway: C1 is the only `Info` producer `analyze` calls, C1 needs
+   `client_certificate`, and a file path is not a kubeconfig — which is why the
+   whole capture set prints `20 critical, 9 warnings` and no notes.
+
+**Two additions to the header are this driver's and not the console's**, for one
+reason: *read nothing* and *found nothing* must not print the same line. The
+counts carry `workloads` beside pods and nodes, and a kind no rule reads is
+counted and named — `4 objects no rule reads (CertificateSigningRequest,
+Service)` over the committed captures. `screens/once.md`'s header has neither,
+because a cluster connection cannot be handed the wrong file.
+
+**The label for a document that names no kind is `(no kind)`, one label for four
+shapes** — no `kind` field, `{"kind":42}`, a top-level array, a bare `null`.
+*No kind field* over a document that has one is the same lie, one size down, as
+a report misnaming what it read.
+
+### D122 — the strip goes on the value entering the sentence, not on the finished sentence (2026-08-20)
+
+`sanitize` is `char::is_control` — Unicode's `Cc` category, which is the C0
+range, `DEL` and the C1 range a UTF-8 stream carries as `\u{80}`–`\u{9f}`. That
+is [invariant 9](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
+class exactly, and the strip removes rather than substitutes, because *stripped*
+is the word in both the invariant and
+[screens/widgets.md § 7](screens/widgets.md#7-text-that-came-from-the-api) and a
+substituted space is a character the API did not send.
+
+**Where it is applied is the decision, and the first draft got it wrong in the
+way that only shows up on the unhappy path.** The driver ran the strip over the
+*assembled* stderr message. `'\n'.is_control()` is `true`, so it ate the line
+breaks out of k8rs's own three-line usage text and printed three sentences as
+one run-on line — the first thing a new user sees. Every one of the 255 unit
+tests stayed green through it, because they all asserted on `run`'s `Err`
+*value*, which was correct; what was wrong was what `main` did to it afterwards.
+
+So: **every fragment that came from outside is stripped at the `format!` that
+interpolates it** — a `Finding`'s fields, a path off argv, an error string from
+`serde_json`, the standard library or `jiff` — and every literal in the file is
+ours and stays whole. A `\n` *from the cluster* still dies, and must: it would
+forge a second card. Phase 5's ingest strip supersedes this by applying the same
+rule one layer earlier, on the way in, which is why no renderer after it has to
+remember.
+
+**The `Finding` surface is treated as outside wholesale**, its title and action
+included: those are k8rs's own sentences but they interpolate API text, and a
+per-field judgement call is how one field gets forgotten.
+
+### D123 — the mutation gate has nothing to say about main's body, so a test drives the binary (2026-08-20)
+
+`cargo mutants --in-diff` is [step 4](CLAUDE.md#step-4-is-the-anti-leak-mechanism-so-a-machine-runs-it)'s
+whole gate, and on this box it reported `MISSED 0` **across the entire life of
+the usage-text defect above**. It is not a flaw in the tool: mutants replaces a
+function's body, and the only mutation it has for `fn main()` is *replace with
+`()`* — so a defect in how `main` acts on a correct value from a tested helper
+is not expressible as a mutant of either. The gate is a floor, not a ceiling,
+and `main`'s body is the one place it is silent.
+
+The one mutant it did have — `replace main with ()` — could not be killed from
+`src/`: `CARGO_BIN_EXE_k8rs` is set only for a target under `tests/`. So
+`tests/binary.rs` lands now, two phases before Phase 7's end-to-end box, and it
+asserts the three things `main` does that nothing else can watch: argv, the
+choice of stream, and the exit code.
+
+**This is not the lib target [D50](#d50--the-rule-tests-live-in-rulesrs-and-no-lib-target-is-added-to-change-that-2026-08-12)
+refused, and does not open a door to one.** It links no product type, reaches
+nothing private and calls no function in `src/` — it runs the built binary and
+reads its two streams, which is the use D50 explicitly reserves `tests/` for
+("the Phase 7 end-to-end tests that drive the binary rather than call into it").
+What moved is the timing, not the ruling. Phase 7's box is a different thing —
+a `--read-only` job that fails if a mutating request reaches the API — and is
+untouched.
+
+**It earned itself immediately, on a defect the gate could not see.** Rust masks
+`SIGPIPE`, so `println!` *panics* when the write fails: `k8rs | head` printed a
+backtrace and exited **101**, a code [D17](#d17--the---once-output)'s table does
+not have, on the very pipeline `screens/once.md` sells the `● ▲ ○` symbols for.
+The fix is three cases that are deliberately not collapsed — `BrokenPipe` is the
+reader doing its job and costs exit `0` in silence; any other failed write is
+`k8rs > findings.txt` onto a full disk and costs a sentence and exit `2`,
+because a report truncated in silence is worse than the panic it replaced; a
+failed write to stderr is dropped, there being no third stream to complain on.
+
+**One thing that test has to keep asserting is its own premise.** A report that
+fits in the pipe buffer is one the child finishes writing before any reader can
+go away, so no write ever fails and the test goes green over a binary that still
+panics. It therefore asserts the report exceeds the largest pipe a release
+target can have — Linux sizes a pipe at 16 buffers of one page, and the biggest
+page in the matrix is 16 KiB, so 256 KiB rather than the 64 KiB this machine
+has. A hole that opens only on somebody else's kernel is the kind that stays
+silent.
 
 ## Decisions made
 
