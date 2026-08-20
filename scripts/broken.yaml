@@ -1386,6 +1386,79 @@ spec:
   selector: { app: broken-noendpoints }
   ports: [{ name: http, port: 80, targetPort: 8080 }]
 ---
+# **Box 1753's second field, and the one thing no kind cluster produces by
+# accident: `spec.overhead`.** D46 sent it to Phase 4 as *the RuntimeClass charge
+# the scheduler counts and a `spec`-only sum does not* — and no captured pod has
+# it, because kind runs runc and nothing here ever named a RuntimeClass. So the
+# field ships counting toward nothing and the box cannot close on its own stated
+# reason (NOTES § D124, whose first condition is a defect proven on a committed
+# capture).
+#
+# **The manifest does not set `spec.overhead`, and may not.** The API's own words
+# on the field (k8s-openapi v1_36, `PodSpec.overhead`): *"This field will be
+# autopopulated at admission time by the RuntimeClass admission controller. If
+# the RuntimeClass admission controller is enabled, overhead must not be set in
+# Pod create requests. The RuntimeClass admission controller will reject Pod
+# create requests which have the overhead already set. If RuntimeClass is
+# configured and selected in the PodSpec, Overhead will be set to the value
+# defined in the corresponding RuntimeClass."* So the pod names a class and the
+# apiserver writes the number — which is also why this is a real capture and not
+# a hand-written field: the value on disk was put there by Kubernetes.
+#
+# **Nothing in that sentence is conditioned on the handler**, and the plugin is
+# on: `kube-system-pods.json` carries kubeadm's only admission flag,
+# `--enable-admission-plugins=NodeRestriction`, and no `--disable-admission-plugins`
+# beside it — that flag *adds to* the default-on set, so `RuntimeClass` is
+# running and nothing turns it off.
+#
+# `handler: runc` because the pod has to actually start: the kubelet resolves the
+# handler against the CRI's configured runtimes and refuses a sandbox for one
+# that is not there. `runc` is containerd's own default runtime name — the
+# capture says `containerd://2.3.1` — and it is the example the API description
+# itself gives. If it were ever wrong the pod would not run and `cluster.sh
+# verify` says so at minute two, which is the direction to fail in.
+#
+# No `scheduling` block: *"If scheduling is nil, this RuntimeClass is assumed to
+# be supported by all nodes"*, which is what this needs — a node constraint would
+# make the pod's placement a second variable in a fixture about one number.
+#
+# **The size is the Kubernetes Pod Overhead documentation's own Kata example
+# (250m / 120Mi), and it did not have to be inflated to be visible.** Summed off
+# these two manifests, *every* pod in the corpus that requests anything commits
+# **200m of cpu in total, across four nodes** — so this one pod's overhead is
+# 125% of the whole cluster's committed cpu. The pod itself is charged 100m /
+# 64Mi by a sum that ignores the field and **350m / 184Mi** by one that counts
+# it, and on whichever node it lands that gap is larger than every other request
+# in the cluster put together. A number invented to be big would prove the same
+# thing and be a number nobody could source.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata: { name: broken-overhead, labels: { demo: broken } }
+handler: runc
+overhead:
+  podFixed: { cpu: "250m", memory: "120Mi" }
+---
+# The pod that names it. Its own requests are deliberately *smaller* than the
+# overhead: with the two the other way round the overhead would be a rounding
+# error on the pod's own row, and the whole question is whether the charge the
+# scheduler counts survives into the report.
+#
+# It is otherwise an ordinary healthy pod — running, ready, limits set, no host
+# mount — because nothing may fire on it. The only unusual thing about it is a
+# field the apiserver writes.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-overhead, labels: { demo: broken } }
+spec:
+  runtimeClassName: broken-overhead
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "86400"]
+      resources:
+        requests: { cpu: "100m", memory: "64Mi" }
+        limits: { cpu: "200m", memory: "128Mi" }
+---
 # ============================================================================
 # THE ONE OBJECT A MANIFEST DECLARES AND ONLY THE MACHINE CAN FINISH — NOTES
 # § D90, and the exception to the section header above.

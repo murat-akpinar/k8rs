@@ -208,7 +208,8 @@ fixtures:
     for p in oom crashloop image config pending hostpath readiness restarts nolimits stuck init \
              resize podlimit \
              exit0 sigterm socket succeeded failed restarts10 restarts10serving startup \
-             notfound wedged unjudged oomserving neverback probe0 neverrules gang; do
+             notfound wedged unjudged oomserving neverback probe0 neverrules gang \
+             overhead; do
       "${kc[@]}" get pod "broken-$p" -o json | "${jqs[@]}" > "tests/fixtures/$p.json"
     done
 
@@ -239,6 +240,16 @@ fixtures:
     # admission plugin adds, so "has tolerations" is true of all of them.
     guard pending.json  "nodeSelector with an operator's own toleration beside it (N6's pod side)" \
       '((.spec.nodeSelector // {}) | length) > 0 and ([.spec.tolerations[]? | select(.key == "dedicated" and .value == "gpu")] | length) > 0'
+    # D46's second Phase 4 field, and the only one in this file the *apiserver*
+    # writes rather than the manifest: `spec.overhead` is autopopulated by the
+    # RuntimeClass admission controller, which rejects a create request that
+    # already carries it. So a capture holding it is proof the plugin ran — and
+    # `runtimeClassName` beside it names the class it was read from. The request
+    # clause is not padding: the pod's own 100m is deliberately smaller than the
+    # 250m overhead, which is what makes a sum that ignores the field and one
+    # that counts it give visibly different answers on that node.
+    guard overhead.json "pod carrying the RuntimeClass charge the scheduler counts and a spec-only sum does not (D46)" \
+      '.spec.runtimeClassName == "broken-overhead" and .spec.overhead.cpu == "250m" and .spec.overhead.memory == "120Mi" and .spec.containers[0].resources.requests.cpu == "100m"'
     guard hostpath.json "pair of mounts of one hostPath volume, one narrowed by a subPath and one read-only (D46)" \
       '[.spec.volumes[]? | select(.hostPath) | .name] as $hp | [.spec.containers[].volumeMounts[]? | select(.name as $n | $hp | index($n))] | length == 2 and any(.subPath != null) and any(.readOnly == true) and any(.readOnly != true)'
     # The string, not its existence: `"REDACTED-IP"` is also non-null, and it is

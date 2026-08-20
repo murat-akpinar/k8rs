@@ -349,7 +349,21 @@ unbreak() {
   # Every kind that owns a pod, not only Pod: deleting the pod of an owned
   # fixture deletes nothing, because the controller above it puts one straight
   # back. The Service is the StatefulSet's required headless one.
-  local kinds=pod,deployment,statefulset,daemonset,service
+  #
+  # **And the cluster-wide reports' inputs, which this list did not cover** — a
+  # PDB, two claims, the static PV under one of them and a RuntimeClass all
+  # survived `unbreak` and were residue its own promise did not mention
+  # (NOTES § D129, § D130). Two of them are cluster-scoped (`persistentvolume`,
+  # `runtimeclass`); kubectl resolves each type's scope for itself, so they ride
+  # in the same label-selected delete as the rest.
+  #
+  # Order is not a concern here because `--wait=false` is: the claim's
+  # `pvc-protection` finalizer holds until the pod that mounts it is gone, and
+  # the volume's `pv-protection` until the claim is, and none of that blocks a
+  # delete that does not wait. The static PV is `Retain`, so deleting its claim
+  # would leave it `Released` rather than gone — which is exactly why it is named
+  # here rather than left to a reclaim policy that never runs.
+  local kinds=pod,deployment,statefulset,daemonset,service,poddisruptionbudget,persistentvolumeclaim,persistentvolume,runtimeclass
   "${kc[@]}" delete "$kinds" -l demo=broken --wait=false --ignore-not-found
   "${kc[@]}" delete "$kinds" -l demo=healthy --wait=false --ignore-not-found
   # The W1 fixture lives in its own namespace (a pods: "0" quota would
@@ -465,7 +479,8 @@ POD_STATES=(oom crashloop image config pending hostpath readiness restarts
             healthy_init healthy_sidecar healthy_hostpath healthy_podlevel
             exit0 sigterm socket succeeded failed startup notfound wedged
             unjudged oomserving neverback healthy_retry healthy_unreadysidecar
-            probe0 neverrules gang)
+            probe0 neverrules gang
+            overhead healthy_disk pdb_floor pdb_room pvc_orphan pvc_used)
 # The two fixtures that cost more than every other one put together, split out
 # so that a failure in the fast set is reported in the usual few minutes instead
 # of behind a half-hour wait. See `verify` for the arithmetic — there is no
@@ -750,6 +765,39 @@ declare -A want=(
   # capture from either and leave the fixture unable to say which ending it is
   # for: this one is `Ending::CodeUnknown`.
   [reboot]='.status.phase=="Running" and (.status.containerStatuses[0] | .ready==true and .state.running!=null and .restartCount>=3 and .lastState.terminated.exitCode==255 and .lastState.terminated.reason=="Unknown")'
+  # --- THE CLUSTER-WIDE REPORTS' INPUTS (D129, D130) ---
+  # Six states that are not pod rules: the analysis reports join over kinds no
+  # pod carries, and three of those joins had no object at all. They are here
+  # rather than only behind the justfile's `guard` lines because a claim that
+  # never bound is caught at minute two by this table and after the 26-minute
+  # restart pass by that one — and the trip has an hour from `break`.
+  #
+  # **`spec.overhead` is asserted with the value the apiserver writes, not the
+  # one the manifest asks for**, because the manifest may not ask: the
+  # RuntimeClass admission controller autopopulates the field and rejects a
+  # create request that already carries it. So a match here is proof the plugin
+  # ran, and `runtimeClassName` beside it is what says which class it read.
+  [overhead]='.status.phase=="Running" and ([.status.containerStatuses[].ready]|all) and .spec.runtimeClassName=="broken-overhead" and .spec.overhead.cpu=="250m" and .spec.overhead.memory=="120Mi"'
+  [healthy_disk]='.status.phase=="Running" and ([.status.containerStatuses[].ready]|all) and ([.spec.volumes[]?|select(.persistentVolumeClaim.claimName=="healthy-disk")]|length)==1'
+  # Exact numbers rather than a relation, for [sts]'s reason: the manifest fixes
+  # them, and `disruptionsAllowed==0` alone is also true of a budget blocked
+  # because its workload is unhealthy — which is a different row. Two healthy of
+  # two expected against a minAvailable of 2 is the floor itself.
+  [pdb_floor]='.spec.minAvailable==2 and .status.expectedPods==2 and .status.currentHealthy==2 and .status.desiredHealthy==2 and .status.disruptionsAllowed==0'
+  [pdb_room]='.status.disruptionsAllowed>=1 and .status.currentHealthy>.status.desiredHealthy'
+  # `Bound`, never `Pending` — a claim that reserved nothing is a different row,
+  # and `WaitForFirstConsumer` is exactly what would leave this one Pending
+  # forever if the static PV under it ever stopped being static. The capacity
+  # clause is the second half: a bound claim reports the **PV's** size, so 128Mi
+  # against a 64Mi request is what separates a decode of `status.capacity` from
+  # one of `spec.resources.requests`.
+  [pvc_orphan]='.status.phase=="Bound" and .status.capacity.storage=="128Mi" and .spec.resources.requests.storage=="64Mi"'
+  # `// ""` and not a bare `!= ""`: in jq `null != ""` is **true**, so a claim
+  # whose storageClassName is absent entirely — which is what a cluster with no
+  # default class writes — would have read as dynamically provisioned. The
+  # phase clause hides that today; a predicate that is right for a reason its
+  # neighbour supplies is one the neighbour can stop supplying.
+  [pvc_used]='.status.phase=="Bound" and (.spec.storageClassName // "")!=""'
 )
 
 declare -A why=(
@@ -798,6 +846,12 @@ declare -A why=(
   [neverrules]="D97 — restarted under restartPolicy Never by a rule on its own exit code: rule 15's false positive"
   [gang]="D100 — a settled gang restart: 137/RestartingAllContainers with no stamps, beside a live startedAt"
   [reboot]="D90 — a restart count raised by a node reboot: rule 5's producer, on a container that never crashed"
+  [overhead]="D46/D130 — spec.overhead, written by the RuntimeClass admission controller: the charge the scheduler counts and a spec-only sum does not"
+  [healthy_disk]="D129 — a pod that mounts a claim: the half of Waste's orphan-disk row that lives on a pod"
+  [pdb_floor]="D46/D129 — a PDB at its floor, so a drain of its node never finishes (Drain safety's whole reason for existing)"
+  [pdb_room]="D129 — a PDB with slack, which is what lets the one above fail"
+  [pvc_orphan]="D129 — a claim that is Bound and mounted by nothing (Waste); Bound matters, a Pending one is a different row"
+  [pvc_used]="D129 — a Bound claim a pod does mount, so the join has both sides"
 )
 # --- PREDICATES END ---
 
@@ -817,6 +871,12 @@ fetch() {
     sts)     "${kc[@]}" get statefulset broken-sts -o json ;;
     rollout) "${kc[@]}" get deployment broken-rollout -o json ;;
     ds)      "${kc[@]}" get daemonset broken-ds -o json ;;
+    # The cluster-wide report inputs. `healthy_disk` needs no case of its own —
+    # it is a pod and the `healthy_*` line below already fetches it.
+    pdb_floor)  "${kc[@]}" get poddisruptionbudget broken-pdb-floor -o json ;;
+    pdb_room)   "${kc[@]}" get poddisruptionbudget healthy-pdb-room -o json ;;
+    pvc_orphan) "${kc[@]}" get persistentvolumeclaim broken-unused-disk -o json ;;
+    pvc_used)   "${kc[@]}" get persistentvolumeclaim healthy-disk -o json ;;
     healthy_init) "${kc[@]}" get pod healthy -o json ;;
     healthy_*)    "${kc[@]}" get pod "healthy-${1#healthy_}" -o json ;;
     cordoned|tainted|notready) "${kc[@]}" get nodes -o json ;;
@@ -853,6 +913,23 @@ diagnose() {
            replicas:   ({ want: .spec.replicas } + (.status // {} | {replicas, readyReplicas, updatedReplicas, unavailableReplicas, desiredNumberScheduled, numberReady})
                         | with_entries(select(.value != null))),
            conditions: [ (.status.conditions // [])[] | {type,status,reason} ],
+           # The cluster-wide report inputs (D129, D130). Without these a FAIL on
+           # one of the six printed the name and nothing else, which is the
+           # failure this whole function exists to prevent: an operator with an
+           # hour of trip budget left and no idea which number was wrong. Same
+           # shape as `replicas` above and dropped the same way, so every
+           # existing FAIL line is byte-identical.
+           overhead:   .spec.overhead,
+           runtimeClass: .spec.runtimeClassName,
+           mounts:     [ (.spec.volumes // [])[] | .persistentVolumeClaim.claimName // empty ],
+           budget:     (.status // {} | {expectedPods, currentHealthy, desiredHealthy, disruptionsAllowed}
+                        | with_entries(select(.value != null))),
+           # `class` is kept when it is the empty string and not only when it is
+           # set: an empty storageClassName is what says no provisioner was
+           # involved, which is the difference between the two claims.
+           claim:      ({ asked: .spec.resources.requests.storage, class: .spec.storageClassName,
+                          got: .status.capacity.storage }
+                        | with_entries(select(.value != null))),
            items:      [ (.items // [])[] | { name: .metadata.name,
                            owner:      [ (.metadata.ownerReferences // [])[] | {kind,controller} ],
                            state:      (.status.containerStatuses // [])[0].state,

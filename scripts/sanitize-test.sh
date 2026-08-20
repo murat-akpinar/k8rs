@@ -254,6 +254,119 @@ assert_refused "mixed List" <<<'
   {"kind":"Pod","metadata":{"name":"a"},"spec":{"nodeName":"k8rs-worker"}},
   {"kind":"Pod","metadata":{"name":"b"},"spec":{"nodeName":"ip-10-3-44-201.eu-west-1.compute.internal"}}]}'
 
+# --- SHAPE: `kubectl get endpointslices -A -o json` START ---
+# The fourth shape, and the first kind added to the capture loop since this file
+# was written (NOTES § D129, § D130). It carries a node identifier in a field
+# nothing else in the corpus has — `.endpoints[].nodeName` — and the filter had
+# never been shown it. It *is* covered, and not by luck: `node_names` walks
+# `.. | objects` and picks `.nodeName?` at any depth, which is this file's whole
+# design. Covered is a claim, so it is asserted rather than reasoned about.
+#
+# Field names read off k8s-openapi v1_36's `discovery/v1` `Endpoint` and
+# `EndpointSlice` rather than recalled: addresses, conditions, targetRef,
+# nodeName, deprecatedTopology, hostname, zone.
+endpointslices() { # $1 = nodeName for endpoint 1, $2 = for endpoint 2
+cat <<JSON
+{"apiVersion":"v1","kind":"List","metadata":{"resourceVersion":""},"items":[
+ {"apiVersion":"discovery.k8s.io/v1","kind":"EndpointSlice","addressType":"IPv4",
+  "metadata":{"name":"broken-sts-x7k2m","generateName":"broken-sts-","namespace":"default",
+    "labels":{"kubernetes.io/service-name":"broken-sts",
+              "endpointslice.kubernetes.io/managed-by":"endpointslice-controller.k8s.io"},
+    "annotations":{"endpoints.kubernetes.io/last-change-trigger-time":"2026-08-20T09:00:00Z",
+                   "leak":"hunter2-in-an-annotation"},
+    "ownerReferences":[{"apiVersion":"v1","kind":"Service","name":"broken-sts",
+                        "uid":"6cbd6b71-95b6-4e0d-859f-f51236101a14","controller":true}]},
+  "endpoints":[
+    {"addresses":["10.244.2.9"],"conditions":{"ready":true,"serving":true,"terminating":false},
+     "targetRef":{"kind":"Pod","name":"broken-sts-0","namespace":"default","uid":"aaa"},
+     "nodeName":"$1"},
+    {"addresses":["10.244.3.4"],"conditions":{"ready":false,"serving":false,"terminating":false},
+     "targetRef":{"kind":"Pod","name":"broken-sts-1","namespace":"default","uid":"bbb"},
+     "nodeName":"$2"}],
+  "ports":[{"name":"http","protocol":"TCP","port":80}]},
+ {"apiVersion":"discovery.k8s.io/v1","kind":"EndpointSlice","addressType":"IPv4",
+  "metadata":{"name":"broken-noendpoints-9df4t","generateName":"broken-noendpoints-","namespace":"default",
+    "labels":{"kubernetes.io/service-name":"broken-noendpoints",
+              "endpointslice.kubernetes.io/managed-by":"endpointslice-controller.k8s.io"}},
+  "endpoints":[],"ports":[]}]}
+JSON
+}
+
+# **No `deprecatedTopology` in the document above, and that is a finding rather
+# than an omission.** It carried one at first, holding the same node name as
+# `.nodeName` — and with the `.nodeName` clause deleted from a copy of the
+# filter, this case stayed *green*: the hostname clause was answering for it. A
+# suppressor proven beside a second suppressor is proven by neither, which is
+# the section header of scripts/broken.yaml's own rule read from the other side.
+# The hostname framing has a case of its own further down. (Modern endpointslice
+# controllers leave the field nil anyway — it was deprecated in 1.21.)
+assert_refused "endpointslices List, foreign nodeName" \
+  < <(endpointslices "ip-10-3-44-201.eu-west-1.compute.internal" "k8rs-worker2")
+assert_refused "endpointslices List, foreign nodeName on the second endpoint only" \
+  < <(endpointslices "k8rs-worker" "ip-10-3-44-202.eu-west-1.compute.internal")
+assert_refused "endpointslices List, the review cluster D94 is about" \
+  < <(endpointslices "k8rs-review-control-plane" "k8rs-worker")
+assert_accepted "endpointslices List, kind's own node names" \
+  < <(endpointslices "k8rs-worker" "k8rs-control-plane")
+assert_accepted "endpointslices List, the dotted form the LAN host hands out" \
+  < <(endpointslices "k8rs-worker.lan" "k8rs-worker2.lan")
+
+# The node name is a **reference**: refused when it is foreign, kept byte-for-byte
+# when it is kind's own. A rewritten one would break the joins the N-series is
+# built on, which is why this file asserts the keeping and not only the refusing.
+es_clean=$(endpointslices "k8rs-worker" "k8rs-control-plane" | jq -f "$filter") || es_clean=
+es_kept=$(jq -r '[.items[].endpoints[]?.nodeName] | join(",")' <<<"$es_clean" 2>/dev/null)
+if [ "$es_kept" != "k8rs-worker,k8rs-control-plane" ]; then
+  echo "FAIL  [endpointslices] the node names the N-series joins on did not survive: '$es_kept'"
+  fail=1
+fi
+# And the rest of the treatment this kind is owed, in both directions. The
+# `kubernetes.io/service-name` label is the one the Waste report joins on, and it
+# is also the only stable handle on a slice — the name is generated, and
+# generateName is destroyed.
+es_shape=(
+  "hunter2-in-an-annotation|an annotation on an EndpointSlice"
+  "10.244.2.9|a pod IP in .endpoints[].addresses"
+  "10.244.3.4|the second endpoint's pod IP"
+  "\"generateName\"|the generateName a slice is created from"
+)
+for entry in "${es_shape[@]}"; do
+  if grep -qF -- "${entry%%|*}" <<<"$es_clean"; then
+    echo "FAIL  [endpointslices] ${entry#*|} survived the filter"; fail=1
+  fi
+done
+for entry in "broken-sts|the kubernetes.io/service-name label the Waste report joins on" \
+             "broken-noendpoints|the empty slice's own service label"; do
+  if ! grep -qF -- "${entry%%|*}" <<<"$es_clean"; then
+    echo "FAIL  [endpointslices] ${entry#*|} was destroyed"; fail=1
+  fi
+done
+
+# The other shapes and framings this kind arrives in. `just fixtures` captures
+# endpointslices only as a List, but the filter is shape-agnostic by design and
+# a case that only ever feeds the shape that already works cannot fail.
+assert_refused "a single EndpointSlice, not a List" <<<'
+{"apiVersion":"discovery.k8s.io/v1","kind":"EndpointSlice","addressType":"IPv4",
+ "metadata":{"name":"x-1","namespace":"default"},
+ "endpoints":[{"addresses":["10.244.1.2"],"nodeName":"ip-10-3-44-201.eu-west-1.compute.internal"}]}'
+assert_refused "an endpoint's deprecatedTopology hostname — the node name under its other key" <<<'
+{"apiVersion":"v1","kind":"List","items":[
+ {"kind":"EndpointSlice","metadata":{"name":"x-1"},
+  "endpoints":[{"addresses":["10.244.1.2"],
+   "deprecatedTopology":{"kubernetes.io/hostname":"ip-10-3-44-201.eu-west-1.compute.internal"}}]}]}'
+assert_refused "an endpoint whose targetRef names a Node rather than a Pod" <<<'
+{"apiVersion":"v1","kind":"List","items":[
+ {"kind":"EndpointSlice","metadata":{"name":"x-1"},
+  "endpoints":[{"addresses":["10.244.1.2"],
+   "targetRef":{"kind":"Node","name":"ip-10-3-44-201.eu-west-1.compute.internal"}}]}]}'
+# A hand-managed slice carries no nodeName at all — `kubernetes` in `default` is
+# one on every cluster ever built — and must not be turned away for it.
+assert_accepted "an EndpointSlice whose endpoints carry no nodeName at all" <<<'
+{"apiVersion":"v1","kind":"List","items":[
+ {"kind":"EndpointSlice","metadata":{"name":"kubernetes"},
+  "endpoints":[{"addresses":["172.18.0.2"]}]}]}'
+# --- SHAPE: `kubectl get endpointslices -A -o json` END ---
+
 # --- SHAPE: `kubectl get pods -n kube-system -o json` START ---
 # The third shape: a kubeadm control plane, which is the first thing the filter
 # meets that this repo did not write. It is a List like the one above, but
@@ -633,6 +746,6 @@ done
 # --- CSR REQUESTER IDENTITY END ---
 
 if [ $fail -eq 0 ]; then
-  echo "sanitize-test: single object, List and kube-system List — every planted secret removed (field, message, flag and URL framings), every reference kept, foreign capture, foreign Node owner and foreign requester identity refused; a review cluster refused by both identifier rules, and every node name the fixture cluster produces still accepted"
+  echo "sanitize-test: single object, List, endpointslices List and kube-system List — every planted secret removed (field, message, flag and URL framings), every reference kept, foreign capture, foreign Node owner and foreign requester identity refused; a review cluster refused by both identifier rules, every node name the fixture cluster produces still accepted, and an EndpointSlice's .endpoints[].nodeName refused foreign in every framing and kept intact when it is kind's own"
 fi
 exit $fail

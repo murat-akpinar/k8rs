@@ -9880,6 +9880,57 @@ entire defect class — the class that produced both non-firing reds above. The
 hand-planted reds are not redundant with the gate; here they are the only thing
 covering it.
 
+**The object that makes box 1753 closable, and the half of the mechanism the PM
+had wrong.** A `RuntimeClass` carrying `overhead.podFixed` and a pod naming it
+are now in `scripts/broken.yaml`, so the trip produces the `spec.overhead` D124's
+first condition needs. Two things were read rather than recalled. **The plugin is
+on**: `kube-system-pods.json` shows `--enable-admission-plugins=NodeRestriction`
+and no `--disable-admission-plugins`, and that flag *adds to* the default-on set.
+**And nothing in the mechanism is conditioned on the handler** — the API's own
+description says the value is written whenever a RuntimeClass "is configured and
+selected in the PodSpec". But it also says **`overhead` must not be set in a Pod
+create request — the admission controller rejects one that carries it**. So the
+manifest declares only `runtimeClassName`, which is what makes the captured value
+a genuine one: Kubernetes wrote it, not the manifest.
+
+**The two numbers, sized off the corpus rather than picked.** Every pod in
+`broken.yaml` + `healthy.yaml` that requests anything commits **200m cpu and
+544Mi** in total, across four nodes. The overhead is **250m / 120Mi** — the
+Kubernetes Pod Overhead documentation's own Kata example, so the figure has a
+source — and that is already 125% of the whole cluster's committed CPU. A sum
+that ignores `spec.overhead` reads that pod as **100m / 64Mi**; one that counts it
+reads **350m / 184Mi**, and the gap is larger than every other request in the
+corpus combined. The pod's own request is deliberately the *smaller* of the two,
+because reversed the overhead would be a rounding error on its own row. Against
+*allocatable* nothing pod-sized moves at all — a kind node reports the host's 12
+cpu — so the difference this object proves is against the committed total, which
+is what *the cluster is lying to itself* actually measures.
+
+**Six `verify` predicates, and the guard refused all six on sight.**
+`scripts/verify-test.sh` failed each one with *"has no case it must refuse — a
+predicate that only ever matched proves nothing"*, which is
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) enforced
+by a script; thirteen objects and nineteen checks followed. **The negatives are
+each other** — the budget at its floor against the budget with slack, the orphan
+claim against the claim a pod mounts — plus three *composed* shapes that are the
+real failure modes: the pod with the class named and **no overhead on it** (the
+plugin off), a claim left **Pending** on the default class (the
+`WaitForFirstConsumer` trap as an object), and a budget also at
+`disruptionsAllowed: 0` **because its workload is broken** rather than because of
+its floor. Both deliberate loosenings were caught by exactly the case written for
+them. 45 → 51 predicates.
+
+**Two smaller things, both found by the author's own second pass.**
+`cluster.sh`'s `diagnose()` printed a PDB's *name* and nothing else — an operator
+inside a one-hour trip budget, told which object failed and not which number was
+wrong, which is the failure that function exists to prevent; it now prints the
+five numbers, proven not to change the output for any of the 138 objects that
+existed before. And `[pvc_used]` rested on a jq edge: `null != ""` is `true`, so a
+claim with `storageClassName` **absent** — what a cluster with no default class
+writes — read as dynamically provisioned. Its neighbour's phase clause was hiding
+it, and a predicate that is right for a reason its neighbour supplies is one the
+neighbour can stop supplying.
+
 ## Decisions made
 
 ### Product
