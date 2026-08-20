@@ -149,6 +149,7 @@ its line moving with it.
 - [D125](#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20) — the last run on record is a question about the container, not a field, and `state.terminated` may name a card only where the run is settled
 - [D126](#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20) — the guards Family A added, and the five judgement calls they could not avoid making
 - [D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20) — the `Report` shape, the test that decided its fields, and the two panes it cannot express
+- [D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20) — the six panes, the one rendering of a missing metrics-server, and the badge that does not fit
 
 ## Why it exists — where the gap is
 
@@ -9525,6 +9526,129 @@ therefore prints `No mutants to filter` over an **empty diff** — green for the
 wrong reason, indistinguishable from the honest zero above. `git add -N` before
 the gate is what makes the diff real.
 
+### D128 — the six panes, the one rendering of a missing metrics-server, and the badge that does not fit (2026-08-20)
+
+[D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)
+owed three things to `screens/` **before Family C could be briefed** — three
+contradictory renderings of a missing metrics-server, Waste's scope label, and
+Posture's missing pane — and owed the Capacity pane itself to the operator
+review, which had ruled it should not be a table at all. All four are settled
+here, in one designer turn ahead of the code, because a brief cannot decide
+behaviour the screen contradicts.
+
+**The three renderings, named and killed.** They were: `(needs metrics-server
+for the IN USE column)` drawn as a permanent parenthetical **in the sketch whose
+usage column was full of numbers**; a claim that the missing capability *is what
+the column reads*, which is 52 characters inside the 11 the old sketch gave that
+cell, once per node; and `analysis.rs`'s own [`Row::Prose`] doc citing the first
+as an example while [`Row::NotComputed`]'s doc, in the same file, refused the
+second — *"no `—` in an absent column, and no per-row unknown marker"*. **One
+rendering
+now:** the `using` lines are simply absent and **one** `Row::NotComputed` sits
+under the node rows, in the place their answer would have been. Five cluster
+states are drawn or named — answering · absent · installed but not answering · a
+403 on the metrics API · **the node section itself off, which draws no metrics
+row at all**, because one section may not offer two ways out to a reader who can
+only take one.
+
+**Capacity is not a table, and nothing on the page is.** One row per node, one
+string — `node-2  6.2 of 8 cpu · 30 of 16 GiB` — the band first and never
+mid-line, the `using` line as its `detail`. **Both dimensions on every row:** CPU
+overcommitment stops the next pod from starting, memory overcommitment gets a
+running one killed, and a report that names one teaches the wrong number to
+watch. It also kills the three mid-line bands D127 recorded as unexpressible
+(`9.1 cpu ▲`, `node-2   ● BLOCKS`, `1.31 (1) ▲ too far behind`): the shape was
+right and the drawings were wrong.
+
+**Waste's label, and the distinction that was itself wrong.** The title carries
+the namespace and is not a row, so it cannot scroll away from the number under
+it. But § *What each report needs* had explained Waste's safety as *per-object
+facts, not sums* — and **a count is a sum**. The real line is whether the number
+is measured against something the reader cannot see: `47 pods` is the length of a
+list they can see and is exactly true at any scope, while Capacity's promised
+total is weighed against a node's capacity and comes out silently low
+([PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)).
+
+**Posture has a pane** — one row per host path with a pod count, never one per
+pod, so a DaemonSet mounting `/var/lib/kubelet` on two hundred nodes is one line.
+It opens with a `Row::Prose`, because without it a list of things the cluster is
+supposed to have reads as an accusation.
+
+**A drawing flagged a healthy cluster, and no test can see a mockup.** `1.31 (1)
+▲ too far behind` under a 1.34 control plane is three minors, and
+[N4](#node-rules-n-series) is *more than three* since
+[D81](#d81--the-node-rules-and-the-four-things-a-real-cluster-said-about-them-2026-08-13)
+corrected it from two — so that sketch had been telling a cluster mid-upgrade it
+was unsupported ever since. Redrawn as `node-3 runs kubelet 1.30`, four behind,
+which is the case N4 exists for.
+
+**Ruled, on the PM's second pass: a badge draws its band as a glyph only where
+the value cannot carry it.** The turn's new prose claimed `certificates  30d ▲`
+beside five mockups drawing `certificates  30d`, [`todo.md`](todo.md)'s own
+sketch and `analysis.rs`'s badge doc; the string is also 21 columns in a
+20-column sidebar, which `capacity  1 ▲` escapes only because its label is four
+characters shorter. Deleting the sentence and leaving the band to colour was not
+available either — [§ Design](#design) says `● ▲ ○` never rely on colour alone.
+**So: a count draws its band as a glyph, a duration does not.** On a count the
+glyph is the *unit* — `1` counts nothing, `1 ▲` counts one warning, and a reader
+who copies `capacity  1` out of the terminal has lost what the number was *of*,
+which is § Design's copyability half binding for its own stated reason rather
+than by analogy. A duration is already a complete statement: `30d` survives a
+monochrome terminal, so `Badge::severity` colours it and adds nothing. A plain
+count with no band draws neither. The width agrees independently and is **not**
+the reason.
+
+**What the designer settled that no box had**, kept because a later box would
+otherwise re-decide it:
+
+- **Usage lives in `detail`, not in `text`.** D127's *"the comparison in `text`"*
+  is read as promised-versus-usable; folding a value that is absent on most
+  clusters into the always-present line is the empty-`IN USE`-column defect one
+  layer down.
+- **One band for both dimensions.** A node over on memory and a node over on CPU
+  are both `▲` — the *sentence* differs, because the consequence does, and the
+  kill itself is Alerts' rule 2 ([D2](#d2--the-dividing-line-broken-now-vs-risky-later)).
+- **Worst first, then name**, on Capacity and Drain safety. On a two-hundred-node
+  cluster the alternative puts the one answer the report exists to give below the
+  fold, with a badge saying *there is one in here* and no way to find it.
+- **A healthy row carries no band**; Waste's and Posture's inventory rows carry
+  `○`.
+- **An empty report is one `Row::Prose`, never `rows: []`**, so `views.rs`
+  carries no per-report empty text. `Report::rows`' documented *empty `Vec` says
+  the check ran and had nothing to say* is therefore unreachable on this screen —
+  not a contradiction, but nothing will produce it.
+- **Waste's and Posture's titles carry the namespace and Capacity's does not** —
+  its node rows are cluster-scoped, so it labels the scoped section in place.
+- **`— ⏎ to list` is off every counted row** until the Waste box answers what `⏎`
+  opens on a *set*; the rows stay selectable with `jump: None`, which is exactly
+  what that field means, and the suffix returns to every pane in one edit.
+- **The frames are drawn 15 body lines against a real 16**, so every drawing has
+  one spare line; the old file drew 13.
+- Drain safety's `● BLOCKS` moved into the band, and *"relax the disruption
+  budget"* became *"lower the minimum it must keep"* ([invariant 14](CLAUDE.md)).
+- **Loading maps to no variant, and should not** — there is no `Report` yet, and
+  it is `views.rs`'s state.
+
+**What this owes onward, and to whom:**
+
+1. **`analysis.rs`'s doc comments cite three drawings that no longer exist** —
+   `Row::Prose`'s `NODE  PROMISED  USABLE  IN USE` and its metrics parenthetical,
+   `Row::Answer::severity`'s old table row, and `Row::Answer::jump`'s claim that
+   the screen offers `⏎` on `34 workloads — ⏎ to list`. **The Capacity box fixes
+   them**, since `analysis.rs` does not freeze until this phase closes
+   ([D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+2. **The sixth sidebar entry makes five other screen files stale** — `alerts.md`,
+   `states.md`, `detail.md`, `README.md` and `once.md` all draw the five-entry
+   `ANALYSIS` list. One designer turn, and it waits for Family D in case
+   `restarts` becomes a seventh; otherwise six files are edited twice.
+3. **The badge glyph rule belongs beside `screens/widgets.md` § 2's badge list**,
+   the only place every badge on every screen is written down. Same turn as 2.
+
+2 and 3 are **one** entry in [backlog.md](backlog.md) because they are one turn,
+and that file is read at phase close, never mid-phase
+([D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)).
+1 is not in it: it has an owner and a box already.
+
 ## Decisions made
 
 ### Product
@@ -9794,6 +9918,7 @@ Cluster-wide, computed on demand, each one a join no per-object rule can do:
 | Report | Answers |
 |---|---|
 | **Capacity** | Per node: requests vs allocatable vs actual usage. Where is the cluster lying to itself |
+| **Posture** | The read-only host mounts rule 8 leaves behind — a list to review, not an alarm to answer. One row per host path, never one per pod ([D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)) |
 | **Certificates** | The C-series above, as a dated table sorted by soonest expiry |
 | **Drain safety** | For every node: what a drain would do, and what would block it. A PDB with `minAvailable` equal to the replica count means the drain **never finishes** — admins normally discover this 40 minutes in |
 | **Waste** | PVCs bound to nothing, Evicted/Completed pod pileups, Services whose selector matches no pod (the 503 nobody can explain), replica sets kept at 0 forever |

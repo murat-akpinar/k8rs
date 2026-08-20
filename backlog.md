@@ -402,6 +402,16 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   a doc link that stops resolving in a frozen file cannot be fixed there
   ([D127](NOTES.md#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)).
 
+- **The `ANALYSIS` sidebar grew a sixth entry and five screen files still draw
+  five.** `screens/analysis.md` added `posture`; `alerts.md`, `states.md`,
+  `detail.md`, `README.md` and `once.md` all draw the old list. One
+  `tui-designer` turn, and it is deliberately **not** taken yet: Family D may add
+  `restarts` as a seventh entry, and doing it now edits six files twice. The same
+  turn carries the badge glyph rule — *a count draws its band as a glyph, a
+  duration does not* — into `screens/widgets.md` § 2, the one place every badge
+  on every screen is written down
+  ([D128](NOTES.md#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)).
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
