@@ -147,6 +147,7 @@ its line moving with it.
 - [D123](#d123--the-mutation-gate-has-nothing-to-say-about-mains-body-so-a-test-drives-the-binary-2026-08-20) — the mutation gate has nothing to say about `main`'s body, so a test drives the binary
 - [D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20) — the freeze forbids reaching back into finished logic, and a card the capture proves wrong is not that
 - [D125](#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20) — the last run on record is a question about the container, not a field, and `state.terminated` may name a card only where the run is settled
+- [D126](#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20) — the guards Family A added, and the five judgement calls they could not avoid making
 
 ## Why it exists — where the gap is
 
@@ -9219,6 +9220,104 @@ one more thing than it did: **the field has to be read across siblings, not only
 on the container.** Recorded in [`backlog.md`](backlog.md), not folded in here. `Finding`, `ObjectId` and
 `analyze`'s signature are untouched (D124 condition 3), no rule is added, and
 `rules.rs`'s whole-file mutation gate re-runs at Phase 4 close (condition 4).
+
+### D126 — the guards Family A added, and the five judgement calls they could not avoid making (2026-08-20)
+
+Phase 4's Family A turned four promises into build steps and anchored a fifth
+([`check-docs.py`](scripts/check-docs.py) · new
+[`reports-guard.py`](scripts/reports-guard.py) · new
+[`width-guard.py`](scripts/width-guard.py) ·
+[`sanitize.jq`](scripts/sanitize.jq)). Each needed a call the box did not make,
+and a guard whose thresholds live only in its own source is one nobody can argue
+with later.
+
+**The node anchor is `k8rs-(control-plane|worker[0-9]*)` with an optional
+`.lan`, and it is used twice.** `sanitize.jq` refused node names that did not
+`startswith("k8rs-")`, which
+[D94](#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)
+proved `k8rs-review-control-plane` walks straight past — three agents reached for
+that name, and the only place the string is written in this repo is D94's own
+title. **The anchor is the fix because no wording can fix a string nobody wrote.**
+Measured before it landed: `node_names` over all 55 committed fixtures returns
+exactly `k8rs-control-plane`, `k8rs-worker`, `k8rs-worker2`, `k8rs-worker3`, and
+`fixture-audit.sh` prints a byte-identical line before and after. `k8rs-control-plane2`
+is **refused** — an HA cluster is one nobody can reproduce from the docs.
+
+**And the second use is the one that was actually open.** A CertificateSigningRequest
+is the one object carrying a node name *only* in `.spec.username`, so
+`system:node:k8rs-review-worker` was **accepted** by the committed filter with no
+`nodeName` anywhere in the file — proven by running it. Both rules now share one
+`kind_node_re`, which is [D52](#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12)'s
+lesson applied before it cost anything: `fixture-audit.sh`'s two hand-copies of
+the same rule were anchored in the same edit, because two files disagreeing about
+one name is how a guard prints a verdict the other contradicts.
+
+**`cluster.sh` refuses the `k8rs*` family except exactly `k8rs`, and only in
+`up`.** It is the loud guard, not the load-bearing one — a reviewer runs
+`kind create cluster` directly, because a review is one measurement and not a
+fixture trip, which is why the anchor had to be in the sanitizer. Refusing in
+`up` alone is deliberate: a cluster already built under a bad name must still be
+tearable-down, and a guard that traps a running cluster is one people delete.
+`K8RS_CLUSTER=review` keeps working ([D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)).
+
+**The 100-column guard has exactly one exemption: a markdown table row inside a
+comment.** A table row cannot be wrapped without ceasing to be a table row, which
+is what makes it an exemption rather than an allowance — and the guard **prints
+the exempt count** so the size of the widening is visible rather than assumed.
+`rustfmt`'s `wrap_comments` and `error_on_line_overflow` are nightly-only, so a
+`rustfmt.toml` would be silently ignored on the pinned stable toolchain: a gate
+that looks like one and is not. **Named ceiling**: it counts characters, not
+display columns.
+
+**`reports-guard.py` reads prose, and four of its calls are floors rather than
+rules.** It refuses **any non-`.md` file in `reports/` unread** — a
+`kubectl get -o yaml > reports/x.yaml` is precisely what it exists for and
+precisely what a `*.md` glob never opens. A **redaction is not a leak**:
+`<redacted>`, `<elided>`, `***` pass, because [`reports/README.md`](reports/README.md)
+tells people to name the field instead and refusing that trains them to leave the
+value in. The **base64 floor is 12 encoded characters**, set by the shortest thing
+worth catching — an IPv4 encodes to 15 — not by taste. And two ceilings are named
+out loud: a bare `prod-master-01` is indistinguishable from a pod name, so only
+machine-shaped hostnames are caught, and `K8RS_NODE_IMAGE=kindest/node:v1.36.1`
+is not read as an env value because the README permits pasting that command. The
+README paragraph stays; this is the floor under it, not a replacement for it.
+
+**The canary runs on every invocation, not only in the self-test** — it appends a
+bearer token to bytes it has just read from a real report and asserts the patterns
+fire, so *found nothing* and *read the wrong directory* cannot print the same
+line (CLAUDE.md § *A derived list asserts it found something*).
+
+**The decision-index guard is level-3-only, and finding out why is the useful
+part.** `### Design` and `### Dependencies` are level-3 headings beginning with
+`D`, and `#### D112 is right and narrow…` is a real subsection under D112 — so a
+naive `D\d+` at any depth invents a decision number and then demands an index line
+for the thing it invented. Both shapes are self-test cases. It checks **both
+directions**: a heading with no index line, and an index line whose `D##` has no
+heading.
+
+**One comment block moved rather than wrapped, and the precedent is worth a
+line.** `rules.rs`'s `container_snapshots` carried a comment whose single word is
+a 90-character test name — at indent 12 under `// ` that is 105 columns and no
+break exists inside a test name. The whole 15-line block moved up one nesting
+level, out of the closure to sit above `init.chain(main)` at indent 4, where it
+fits at 98. **Nothing was reworded**: the rule for this box was *rewrap, never
+summarise*, because several of these paragraphs are the only record of a
+measurement and a word lost is a claim lost. Byte-identity of every split string
+literal and every comment's word sequence was proved by a throwaway tokenizer
+(3,067 + 706 + 381 literals, ~106k comment words), itself seen red on a planted
+collapsed space and a dropped word — a rewrap is exactly the edit where *it still
+compiles* proves nothing.
+
+**D31 happened to the guard's author while writing the guard, which is the entry's
+last point.** `DATABASE_PASSWORD=hunter22xyz` was **not** refused —
+`\b(password|token|…)` never matches between `_` and `P` — so the credential class
+was green over the exact framing it exists for. It was caught by planting into a
+*real* report, not by the self-test, which had only ever been fed `token: s3cr3t`
+at line start. Three siblings fell out with it: a JSON key's closing quote sitting
+between name and colon, a base64 finding reporting line 0, and
+`client-key-data: <elided>` being refused because the pattern matched the key
+alone. **A guard is proven only for the framings it was fed** — and the self-test
+is the thing most likely to have fed it only the easy one.
 
 ## Decisions made
 

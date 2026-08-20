@@ -67,7 +67,44 @@ kind_config() {
   for _ in $(seq "$WORKERS"); do echo "  - role: worker"; done
 }
 
+# The early, loud half of the refusal scripts/sanitize.jq anchors. kind names a
+# node `<cluster>-<role>`, and the sanitizer accepts exactly the names *this*
+# cluster produces — so a cluster called `k8rs-review` builds
+# `k8rs-review-control-plane`, whose capture is refused hours later, at the end
+# of a trip, by a filter the person has no reason to be thinking about.
+#
+# Refused: a name wearing the fixture cluster's own as a prefix. `review` — the
+# name D92 gives an ephemeral measurement cluster — is not one and must keep
+# working, which is the whole reason this is a prefix check and not an allowlist
+# of one.
+#
+# It is not the primary refusal and must not be read as one: a reviewer raising a
+# cluster with `kind create cluster` never runs this file. The sanitizer is what
+# makes D92 mechanical; this is what makes it early (todo.md, Phase 4).
+#
+# `up` only, so a cluster somebody already built under a refused name can still
+# be torn down with `down` — a guard that traps a running cluster on the host is
+# one people work around by deleting the guard.
+refuse_family_name() { # $1 = cluster name
+  case "$1" in
+    k8rs) return 0 ;;
+    k8rs*)
+      echo "cluster.sh: refusing to build a cluster named '$1'." >&2
+      echo "  kind would name its nodes '$1-control-plane' and '$1-worker…', which" >&2
+      echo "  wear the fixture cluster's name without being it — scripts/sanitize.jq" >&2
+      echo "  refuses exactly those, so any capture from here dies at the end of the" >&2
+      echo "  trip instead of now (NOTES § D92, § D94)." >&2
+      echo "  The fixture cluster is 'k8rs'. An ephemeral review cluster is" >&2
+      echo "  K8RS_CLUSTER=review — no prefix." >&2
+      return 1 ;;
+  esac
+}
+
 up() {
+  # Before `need`, so the name is refused on a machine that has not installed
+  # kind yet: the wrong answer to "which cluster am I building" does not become
+  # more or less wrong when a binary is missing.
+  refuse_family_name "$CLUSTER"
   need kind; need kubectl
   kind_config | kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --config -
   kubectl --context "kind-$CLUSTER" wait --for=condition=Ready node --all --timeout=120s
@@ -1085,7 +1122,27 @@ status() {
   free -m 2>/dev/null | awk '/^Mem:/{printf "host memory: %s MiB used of %s, %s available\n", $3, $2, $7}'
 }
 
+# A guard nobody has seen fail is not a guard (todo.md, Phase 1). It needs no
+# cluster, no kind and no network — the thing under test is a name.
+self_test() {
+  local n rc sfail=0
+  for n in k8rs review k8s-review my-cluster reviewk8rs; do
+    rc=0; refuse_family_name "$n" 2>/dev/null || rc=$?
+    [ "$rc" -eq 0 ] || { echo "FAIL  self-test: '$n' is a name cluster.sh must build"; sfail=1; }
+  done
+  # `k8rs-review` is the name three agents in a row typed; the rest are the same
+  # mistake spelled differently, and every one of them produces node names
+  # sanitize.jq refuses.
+  for n in k8rs-review k8rs-review-2 k8rs2 k8rs-test k8rs-; do
+    rc=0; refuse_family_name "$n" 2>/dev/null || rc=$?
+    [ "$rc" -eq 1 ] || { echo "FAIL  self-test: '$n' wears the fixture cluster's name and was accepted"; sfail=1; }
+  done
+  [ $sfail -eq 0 ] && echo "cluster.sh: self-test passed — 'k8rs' and any name without that prefix build; 'k8rs-review' and the rest of the family are refused before kind runs"
+  return $sfail
+}
+
 case "${1:-}" in
+  --self-test) self_test ;;
   up)          up ;;
   down)        down ;;
   break)       break_it ;;

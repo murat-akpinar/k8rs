@@ -589,9 +589,50 @@ assert_accepted "a node name with a dot, in both rules at once" <<<'
   {"kind":"CertificateSigningRequest","metadata":{"name":"csr-7"},
    "spec":{"signerName":"kubernetes.io/kube-apiserver-client-kubelet",
            "username":"system:node:k8rs-worker.lan","groups":["system:nodes","system:authenticated"]}}]}'
+# --- THE REVIEW CLUSTER START ---
+# D92 makes *a review cluster cannot produce a committed fixture* mechanical by
+# leaning on this refusal, and until the anchor landed it leaned on nothing:
+# `startswith("k8rs-")` accepted the whole family, so `k8rs-review-control-plane`
+# walked straight through. Three agents in a row reached for that name — it
+# arrives from D94's own title, and no wording change fixes a string nobody wrote
+# (todo.md, Phase 4).
+#
+# Both rules, because a CSR carries a node name in `.spec.username` and nowhere
+# else: refuse_foreign_nodes never sees that object, so a loose identity clause
+# is the same hole one door along.
+assert_refused "a review cluster's node name" <<<'
+{"kind":"Pod","metadata":{"name":"a"},"spec":{"nodeName":"k8rs-review-control-plane"}}'
+
+assert_refused "a review cluster's kubelet identity, with no node name in the capture at all" <<<'
+{"kind":"CertificateSigningRequest","metadata":{"name":"csr-1"},
+ "spec":{"signerName":"kubernetes.io/kube-apiserver-client-kubelet",
+         "username":"system:node:k8rs-review-worker","groups":["system:nodes","system:authenticated"]}}'
+
+# The prefix is not the only way to wear the family name.
+assert_refused "a cluster named k8rs2" <<<'
+{"kind":"Pod","metadata":{"name":"a"},"spec":{"nodeName":"k8rs2-worker"}}'
+assert_refused "a node name that merely starts with a real one" <<<'
+{"kind":"Pod","metadata":{"name":"a"},"spec":{"nodeName":"k8rs-worker-of-someone-elses"}}'
+assert_refused "kind's HA control plane, which cluster.sh does not build" <<<'
+{"kind":"Pod","metadata":{"name":"a"},"spec":{"nodeName":"k8rs-control-plane2"}}'
+
+# The other half, and the one that matters most: every node name the fixture
+# cluster actually produces still passes, or the anchor is a capture trip that
+# cannot run. These are the four in the committed fixtures plus the dotted
+# spelling the LAN host hands out.
+for n in k8rs-control-plane k8rs-worker k8rs-worker2 k8rs-worker3 k8rs-worker.lan; do
+  assert_accepted "the fixture cluster's own node $n" <<<"
+{\"apiVersion\":\"v1\",\"kind\":\"List\",\"items\":[
+  {\"kind\":\"Pod\",\"metadata\":{\"name\":\"a\"},\"spec\":{\"nodeName\":\"$n\"}},
+  {\"kind\":\"CertificateSigningRequest\",\"metadata\":{\"name\":\"csr-2\"},
+   \"spec\":{\"signerName\":\"kubernetes.io/kube-apiserver-client-kubelet\",
+           \"username\":\"system:node:$n\",\"groups\":[\"system:nodes\",\"system:authenticated\"]}}]}"
+done
+# --- THE REVIEW CLUSTER END ---
+
 # --- CSR REQUESTER IDENTITY END ---
 
 if [ $fail -eq 0 ]; then
-  echo "sanitize-test: single object, List and kube-system List — every planted secret removed (field, message, flag and URL framings), every reference kept, foreign capture, foreign Node owner and foreign requester identity refused"
+  echo "sanitize-test: single object, List and kube-system List — every planted secret removed (field, message, flag and URL framings), every reference kept, foreign capture, foreign Node owner and foreign requester identity refused; a review cluster refused by both identifier rules, and every node name the fixture cluster produces still accepted"
 fi
 exit $fail

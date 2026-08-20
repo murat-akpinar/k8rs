@@ -1662,34 +1662,31 @@ unchecked one from the top.
       the callers whose command carries it. 267 + 7 tests, 37 mutants 0 missed,
       three operator-review rounds on kind v1.36.1
       ([reports/](reports/README.md), 2026-08-20 ×2)
-- [ ] **`scripts/check-docs.py` fails on a `### D##` heading with no line in
-      NOTES § Decision index** — `tester`'s box, and it closes the one hole
+- [x] **`scripts/check-docs.py` fails on a `### D##` heading with no line in
+      NOTES § Decision index** — closes the one hole
       [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
-      left open. The index makes the file navigable without reading it, and
-      today a *renamed* heading is caught by the anchor check while a heading
-      **added** with no line at all is caught by nobody — which is the failure
-      that degrades in silence, and the reason CLAUDE.md's rule needs a guard
-      and not a promise. Landed in a later phase than the one that found it,
-      per CLAUDE.md § What to do next. Done-when: a self-test plants a decision
-      with no index line and the guard goes red on it
-- [ ] **The fixture sanitization gate does not run over `reports/`, and that is
+      left open: a *renamed* heading was caught by the anchor check, a heading
+      **added with no line at all** by nobody, which is the failure that
+      degrades in silence. Done, **both directions** — a heading with no index
+      line and an index line with no heading — and level-3 only, because
+      `### Design` and a `#### D112 …` subsection both make a naive `D\d+`
+      invent a decision number. It caught a bad anchor in the PM's own D126 on
+      its first real run ([D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20))
+- [x] **The fixture sanitization gate does not run over `reports/`, and that is
       where raw cluster output now lands** — `reports/` takes an agent's
       measurements into a *committed* file
       ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)),
-      which is the path `scripts/sanitize.jq` exists to guard for fixtures. Today
-      the rule is a paragraph in [`reports/README.md`](reports/README.md) enforced
-      by the PM reading the diff — a promise, and
-      [D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12) is what
-      promises are worth here. The guard is not the fixture sanitizer reused:
-      that one rewrites JSON, this one reads prose and must refuse a token, a
-      PEM block, a kubeconfig, an env value, an annotation payload, a node IP or
-      a hostname wherever it appears in a markdown file. **Feed it every framing**
-      (D31): the value whole, as a substring of a longer line, inside a fenced
-      block, and base64-re-encoded. `tester`'s files, and it runs from
-      `just check` with a `--self-test` like its neighbours. Done-when: each
-      refused class is planted once, seen red, and the clean tree green before
-      and after — and one **canary** proves the guard is reading the directory at
-      all, so *found nothing* cannot print the same line as *nothing to find*
+      the path `scripts/sanitize.jq` exists to guard for fixtures, and the rule
+      was a paragraph in [`reports/README.md`](reports/README.md) enforced by the
+      PM reading the diff. Done:
+      [`scripts/reports-guard.py`](scripts/reports-guard.py) reads **prose** and
+      refuses a token, a PEM block, a kubeconfig, an env value, an annotation
+      payload, a node IP or a hostname — **21 planted values across 7 classes,
+      each proven red whole, as a substring, inside a fence and
+      base64-encoded** (D31), with a **canary** on every invocation so *found
+      nothing* cannot print the same line as *nothing to find*. It refuses any
+      non-`.md` file in `reports/` unread; its floors and two named ceilings are
+      in [D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20)
 - [ ] **`reports/` has no retention rule and this repo's disease is append** —
       the directory grows one file per measurement forever, in the tree
       [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
@@ -1699,73 +1696,39 @@ unchecked one from the top.
 
 *Moved out of Phase 3: `tester`'s files, no rule touched ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))*
 
-- [ ] **`just check` cannot see a comment's width, so the 100-column rule is a
+- [x] **`just check` cannot see a comment's width, so the 100-column rule is a
       convention and not a gate** — `cargo fmt` reflows code and leaves comments
-      alone, and two lines over 100 columns shipped into `rules.rs` on
-      2026-08-15 and were caught by a reviewer counting characters rather than by
-      the build. **Config is not the fix**: `rustfmt`'s `wrap_comments` and
-      `error_on_line_overflow` are both nightly-only options, so a `rustfmt.toml`
-      would be silently ignored on the pinned stable toolchain — which is worse
-      than no gate, because it looks like one. A `scripts/` guard is, and it is
-      `tester`'s: fail on any line in `src/*.rs` past 100 columns, run from
-      `just check` with a `--self-test` like its neighbours. **It needs a decision
-      it cannot make for itself**: the file already carries a deliberate markdown
-      table whose rows are long on purpose, so either the table is rewrapped or
-      the guard learns one narrow, named exemption — an unnamed allowance is how a
-      guard becomes decoration
-- [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
-      in the green line, not an assertion, so nothing fails and that is exactly
-      why it will survive. One word, `tester`'s file, and it goes with whichever
-      of that agent's boxes runs next
-- [ ] **`cluster.sh` accepts the one cluster name that defeats the fixture
-      guard** — `scripts/sanitize.jq` refuses node names that do not
-      `startswith("k8rs-")`, and
-      [D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)
-      leans on that to make *a review cluster cannot produce a committed fixture*
-      mechanical rather than promised. **`k8rs-review` sails straight through
-      it**, and that is exactly what the first agent to raise a review cluster
-      typed, against three committed files that said `review`
-      ([NOTES § D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
-      **The second reviewer reached for the same wrong name and reported it as a
-      repo defect** (2026-08-15) — every committed file still said `review`, and
-      the string had reached it through **D94's own title**, which contains
-      `k8rs-review` because the entry is about that mistake. The brief that told
-      it to read D94 before naming the cluster is what handed it the name. Nothing
-      to fix in the record; it is the sharpest possible argument that the refusal
-      has to be mechanical, since the file warning about the name is itself a way
-      of spreading it. **Third instance, and this one is the sharpest**: the
-      reviewer of the D97 box quoted its own agent definition back as saying
-      **`K8RS_CLUSTER=k8rs-review`, always** — `.claude/agents/k8s-admin.md:54`
-      says `review`, in those words, and every other committed file agrees. It
-      used `review` and filed the difference as a defect in the instructions.
-      **Three agents, three misreadings, zero wrong strings in the repo**: the
-      only place `k8rs-review` is written is D94's own title, and it keeps
-      arriving in working memory from there. No wording change can fix a string
-      nobody wrote; the anchor is the fix **Third instance the same day, and this one actually ran**:
-      the review of the D96 ruling brought its cluster up as `k8rs-review`,
-      against a brief that said `review`, so `k8rs-review-control-plane` existed
-      on a machine and `sanitize.jq` would have waved its node name through.
-      Nothing leaked — a review takes no captures — but the refusal has now been
-      defeated in practice by the second agent to reach for it, which is the
-      argument for anchoring rather than repeating. **One wording fix belongs with
-      the anchor**: `CLAUDE.md` says the sanitizer refuses *a name*, and it
-      refuses a **node-name prefix** — `review` is refused only because kind names
-      the node `review-control-plane`.
-      **The primary fix is in `sanitize.jq`, not in `cluster.sh`** — the reviewer
-      never ran `cluster.sh`, it ran `kind create cluster` directly, because a
-      review is one measurement and not a fixture trip, and the next one will skip
-      that script for the same reason. So: **anchor `refuse_foreign_nodes` to the
-      four node names the fixture cluster actually produces** — control plane and
-      numbered workers, keeping the `.lan` suffix the identity rule already
-      allows — instead of accepting the whole `k8rs-*` family. That refuses
-      `k8rs-review-control-plane` on the only path that matters, whoever made the
-      cluster and however. **Then** give `cluster.sh` its refusal too, as the
-      early and loud one; it must not be the only one. Done-when: both refusals
-      proven by running them, both directions, and the proof is a `just check`
-      step rather than a paragraph. Watch the blast radius — the anchor must still
-      accept every node name in the 50 committed fixtures, so run
-      `fixture-audit.sh` before and after and show it unchanged. `tester`'s files
-
+      alone, and two over-long lines shipped into `rules.rs` on 2026-08-15,
+      caught by a reviewer counting characters. **Config is not the fix**:
+      `wrap_comments` and `error_on_line_overflow` are nightly-only, so a
+      `rustfmt.toml` would be silently ignored on the pinned stable toolchain —
+      worse than no gate, because it looks like one. Done:
+      [`scripts/width-guard.py`](scripts/width-guard.py) in `just check` with a
+      `--self-test`, and **one narrow exemption named by PM ruling** — a
+      markdown table row inside a comment, which cannot be wrapped and stay a
+      table row; the guard prints the exempt count so the widening's size is
+      visible. It found **53** lines the convention had let through, all
+      rewrapped with every claim intact ([D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20))
+- [x] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display
+      text in the green line, not an assertion, so nothing failed and that is
+      exactly why it survived. Now reads `(C1 reports)`; C1 is `Severity::Info`
+      and the window constant is still `CERT_EXPIRY_WARN`, so only the severity
+      claim was false
+- [x] **`cluster.sh` accepts the one cluster name that defeats the fixture
+      guard** — `scripts/sanitize.jq` refused node names that did not
+      `startswith("k8rs-")`, and `k8rs-review-control-plane` sailed straight
+      through it; three agents reached for that name and the only place the
+      string is written in this repo is
+      [D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)'s
+      own title, which is why the anchor and not the wording is the fix. Done:
+      `refuse_foreign_nodes` is anchored to `k8rs-(control-plane|worker[N])`
+      with the `.lan` suffix, **and the same anchor now backs the CSR
+      `system:node:` rule** — a CertificateSigningRequest carries a node name
+      only in `.spec.username`, and `system:node:k8rs-review-worker` was proven
+      **accepted** by the committed filter. `cluster.sh` refuses the family name
+      in `up` as the loud second guard, both refusals run from `just check`, and
+      `fixture-audit.sh` prints a byte-identical line before and after over all
+      55 fixtures ([D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20))
 - [ ] `Report` shape: title · rows · the finding each row can jump to
 - [ ] **Capacity** — per node: requests vs allocatable vs actual usage, plus
       **the workloads with no limits defined** (the old rule 9, which lives

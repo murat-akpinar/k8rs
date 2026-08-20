@@ -130,6 +130,6 @@ if grep -rlE -- "-----BEGIN [A-Z ]*PRIVATE KEY-----" "$certs" 2>/dev/null | grep
 fi
 
 if [ $fail -eq 0 ]; then
-  echo "certs-test: dates pinned at $now (src/rules_tests.rs pins the same instant) — expiring $e days (C1 warns), healthy $h days (C1 silent), expired $x days (C1 says expired); no key material"
+  echo "certs-test: dates pinned at $now (src/rules_tests.rs pins the same instant) — expiring $e days (C1 reports), healthy $h days (C1 silent), expired $x days (C1 says expired); no key material"
 fi
 exit $fail

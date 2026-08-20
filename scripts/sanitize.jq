@@ -54,16 +54,41 @@ def node_names:
       (select(.kind? == "Node") | .name? // empty) ]
   | map(select(type == "string"));
 
+# **The node names the fixture cluster actually produces, and no wider.** kind
+# names a node `<cluster>-<role>`, and scripts/cluster.sh builds one
+# control-plane and `K8RS_WORKERS` workers, so the whole set this repo can ever
+# capture is `k8rs-control-plane`, `k8rs-worker`, `k8rs-worker2`, … — which is
+# exactly the set the committed fixtures hold.
+#
+# It was `startswith("k8rs-")`, a whole *family* of names, and D92 leans on this
+# refusal to make *a review cluster cannot produce a committed fixture*
+# mechanical rather than promised. `k8rs-review` sailed straight through it, and
+# three agents in a row reached for that name — it arrives in working memory from
+# D94's own title, which contains the string because the entry is about the
+# mistake. No wording change fixes a string nobody wrote; the anchor does
+# (todo.md, Phase 4).
+#
+# The optional dotted suffix stays: a node name is a DNS subdomain, the LAN host
+# hands out `k8rs-worker.lan`, and refuse_foreign_identities below reads the same
+# names — the two rules must not disagree about what a node is.
+#
+# Ceiling: one control-plane, because that is what cluster.sh's kind config
+# writes. A second one (`k8rs-control-plane2`) is refused, and loudly, which is
+# the right way round — a capture from a cluster shaped differently from the
+# documented one is a capture nobody can reproduce.
+def kind_node_re: "k8rs-(control-plane|worker[0-9]*)(\\.[a-z0-9-]+)*";
+
 # Refused if *any* identifier is foreign, not only if all of them are: one real
 # node name inside an otherwise-kind capture is the leak, and it is also the
 # shape a half-migrated context produces.
 def refuse_foreign_nodes:
-  (node_names | map(select(startswith("k8rs-") | not)) | unique) as $foreign
+  (node_names | map(select(test("^" + kind_node_re + "$") | not)) | unique) as $foreign
   | if ($foreign | length) > 0
     then error("sanitize: node identifiers are not from the kind test cluster "
-               + "(expected names starting with k8rs-, got \($foreign[0:3])). "
-               + "Fixtures come from kind; refusing to write a capture from "
-               + "anywhere else.")
+               + "(expected k8rs-control-plane or k8rs-worker[N], got "
+               + "\($foreign[0:3])). Fixtures come from the k8rs kind cluster; "
+               + "refusing to write a capture from anywhere else — a review "
+               + "cluster included.")
     else .
     end;
 
@@ -131,10 +156,14 @@ def refuse_foreign_identities:
                      + "|kubeadm:cluster-admins"
                      + "|system:authenticated"
                      + "|system:nodes"
-                     # A DNS subdomain, dots and all: `refuse_foreign_nodes`
-                     # accepts `k8rs-worker.lan`, and the two rules reading the
-                     # same document must not disagree about what a node is.
-                     + "|system:node:k8rs-[a-z0-9.-]+"
+                     # The same names refuse_foreign_nodes accepts, from the
+                     # same definition and not a second copy of it: the two rules
+                     # read one document and must not disagree about what a node
+                     # is. A CSR is the one object that carries a node name in
+                     # this field and nowhere else, so a loose copy here is a
+                     # `system:node:k8rs-review-control-plane` walking past a
+                     # refusal the node rule would have made.
+                     + "|system:node:" + kind_node_re
                      + "|system:bootstrappers"
                      + "|system:bootstrappers:kubeadm:default-node-token"
                      # kind's kubeadm patch pins the bootstrap token, so the id

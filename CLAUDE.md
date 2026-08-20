@@ -438,9 +438,16 @@ and the sanitization gate. An **ephemeral measurement** — bring a cluster up,
 check one claim, tear it down — is `k8s-admin`'s, and nobody else's: a dev with a
 cluster tunes the code until the cluster agrees. It runs under
 **`K8RS_CLUSTER=review`** — the default name is the PM's fixture cluster and
-teardown would delete it, and `review` is additionally a name `scripts/sanitize.jq`
-**refuses**, so a review cluster cannot produce a committed fixture even by
-mistake. **The cluster is ephemeral; the write-up is not** — the measurement
+teardown would delete it. **The sanitizer never sees a cluster name; it reads
+node names**, and since 2026-08-20 `scripts/sanitize.jq` accepts only the four
+the fixture cluster actually produces — `k8rs-control-plane` and
+`k8rs-worker[N]`, `.lan` suffix allowed — instead of the whole `k8rs-*` family
+that `k8rs-review-control-plane` walked straight through three times
+([D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
+So **no cluster but `k8rs` can produce a committed fixture**, which is stronger
+than the old claim about one name, and it holds however the cluster was made —
+`cluster.sh` refuses the family name too, but it is the loud guard and not the
+load-bearing one, because a reviewer runs `kind create cluster` directly. **The cluster is ephemeral; the write-up is not** — the measurement
 lands in [`reports/`](reports/README.md) under that file's sanitization rule,
 which is what keeps *an object from the cluster* on the PM's side of this split
 while *what was observed about it* stays on `k8s-admin`'s

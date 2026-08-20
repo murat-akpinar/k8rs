@@ -69,8 +69,11 @@ prefer measuring** (`NOTES § D92`). Three conditions, all of them:
 
 - **`K8RS_CLUSTER=review`**, always. The default name is the PM's fixture
   cluster; your teardown would delete it, and a second cluster running beside it
-  on a small host silently corrupts OOM captures (`NOTES § D84`). `review` is
-  also a name the fixture sanitizer refuses, which is deliberate. One cluster at
+  on a small host silently corrupts OOM captures (`NOTES § D84`). The sanitizer
+  reads **node names**, not cluster names, and accepts only `k8rs-control-plane`
+  and `k8rs-worker[N]` — so no cluster but `k8rs` can produce a committed
+  fixture, whatever you call yours. `cluster.sh` refuses the family name early
+  and loudly; the anchor in `scripts/sanitize.jq` is what actually holds. One cluster at
   a time, torn down before you report. Measure on **this** machine — do not `ssh`
   to another host to do it.
 - **You never produce a committed artifact of the cluster.** `just fixtures`,

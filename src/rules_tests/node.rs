@@ -298,8 +298,10 @@ fn a_node_that_answered_and_said_no_is_a_different_card_from_one_that_went_quiet
     // as k8rs's own prose, and the reader meets four pieces of jargon with nothing saying who
     // wrote them.
     assert!(
-        card.evidence
-            .contains("the kubelet's own words (the kubelet is the part of Kubernetes that runs on the machine): container runtime network not ready"),
+        card.evidence.contains(
+            "the kubelet's own words (the kubelet is the part of Kubernetes that runs on the \
+             machine): container runtime network not ready"
+        ),
         "the kubelet said what is wrong; the frame says a machine wrote it and glosses the one \
          word the card would otherwise leave bare (D37, invariant 14): {}",
         card.evidence
@@ -2155,7 +2157,8 @@ fn the_managed_actions_say_one_machine_when_there_is_one_and_name_it_in_the_comm
                 names[0]
             ),
             format!(
-                "allow new pods on those machines again once the work is done (kubectl uncordon {} {})",
+                "allow new pods on those machines again once the work is done (kubectl uncordon \
+                 {} {})",
                 names[0], names[1]
             ),
         ),

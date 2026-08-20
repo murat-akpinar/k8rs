@@ -1157,23 +1157,22 @@ fn container_snapshots(
 ) -> Vec<ContainerSnapshot> {
     let init = init.into_iter().flatten().map(|s| (true, s));
     let main = main.into_iter().flatten().map(|s| (false, s));
+    // Container names are unique across both arrays — Kubernetes enforces it — so one scan finds
+    // the declaration this status belongs to, and a scan beats a map per pod for a handful of
+    // containers.
+    //
+    // **The miss happens, and what it costs is asserted rather than argued** — the API *can*
+    // produce a status with no declaration, and immutability is not what would prevent it: a node
+    // implementation that is not a kubelet is. On Tencent TKE virtual nodes the provider injects a
+    // managed logging container into `status.containerStatuses` with no entry in `spec.containers`
+    // (k9s #4145), and virtual-kubelet, serverless nodes and sandboxed runtimes all sit in that
+    // gap. `declared` is then `None`, so the container decodes with no requests and no limits and
+    // takes its role from the list its status arrived in — which is
+    // `a_container_status_with_no_declaration_decodes_with_nothing_the_spec_would_have_given_it`,
+    // not a claim made here. `ephemeralContainers` is a separate matter: that list grows by design
+    // and its statuses are deliberately not read (NOTES § D46).
     init.chain(main)
         .map(|(is_init, s)| {
-            // Container names are unique across both arrays — Kubernetes enforces it — so one
-            // scan finds the declaration this status belongs to, and a scan beats a map per pod
-            // for a handful of containers.
-            //
-            // **The miss happens, and what it costs is asserted rather than argued** — the API
-            // *can* produce a status with no declaration, and immutability is not what would
-            // prevent it: a node implementation that is not a kubelet is. On Tencent TKE virtual
-            // nodes the provider injects a managed logging container into
-            // `status.containerStatuses` with no entry in `spec.containers` (k9s #4145), and
-            // virtual-kubelet, serverless nodes and sandboxed runtimes all sit in that gap.
-            // `declared` is then `None`, so the container decodes with no requests and no limits
-            // and takes its role from the list its status arrived in — which is
-            // `a_container_status_with_no_declaration_decodes_with_nothing_the_spec_would_have_given_it`,
-            // not a claim made here. `ephemeralContainers` is a separate matter: that list grows
-            // by design and its statuses are deliberately not read (NOTES § D46).
             let declared = spec
                 .init_containers
                 .iter()
@@ -1797,13 +1796,12 @@ fn lost_run_yields_to_the_present(cards: Vec<(Reads, Option<Finding>)>) -> Vec<F
 /// one turn: [`crash_looping`] and [`previous_run_failed`] spelled one duration two ways, and on
 /// [`CodeUnknown`](Ending::CodeUnknown) — the one ending whose record carries real stamps — that
 /// left two byte-identical ten-line cards in a sixteen-row pane. (Ten was what those two measured;
-/// the pane's cap is 12 and the number in this sentence is the drawing, not the budget —
-/// NOTES § D113.) **Then the duration turned out
-/// not to belong on that ending at all**: containerd stamps `finishedAt` when it recovers rather
-/// than when the run ended, so [`ran_for`] refuses it, and rule 6 adds nothing to either
-/// neighbour. Two defects, one visible only through this clause. **The inventory is asserted over the corpus and not left here as a claim** —
-/// a rule that starts wording its advice like a neighbour would otherwise begin deleting cards
-/// with nothing going red.
+/// the pane's cap is 12 and the number in this sentence is the drawing, not the budget — NOTES §
+/// D113.) **Then the duration turned out not to belong on that ending at all**: containerd stamps
+/// `finishedAt` when it recovers rather than when the run ended, so [`ran_for`] refuses it, and
+/// rule 6 adds nothing to either neighbour. Two defects, one visible only through this clause.
+/// **The inventory is asserted over the corpus and not left here as a claim** — a rule that starts
+/// wording its advice like a neighbour would otherwise begin deleting cards with nothing going red.
 ///
 /// **One of the keys is free text from the API, and where it lands got the guard stronger**
 /// (invariant 9, NOTES § D113). Rule 6's `Failed` arm handed [`last_words`] a
@@ -2251,15 +2249,15 @@ fn last_run_on_record(c: &ContainerSnapshot) -> Option<(&Terminated, bool)> {
 /// line apart.
 ///
 /// **A fourth and a fifth variant joined them, and that is what makes this an ending rather than a
-/// code** (NOTES § D95). The two `137` reasons the kubelet writes itself arrived on 2026-08-15,
-/// and [`CodeUnknown`](Ending::CodeUnknown) — `255` beside [`CODE_UNKNOWN`], which is what a node
+/// code** (NOTES § D95). The two `137` reasons the kubelet writes itself arrived on 2026-08-15, and
+/// [`CodeUnknown`](Ending::CodeUnknown) — `255` beside [`CODE_UNKNOWN`], which is what a node
 /// restart leaves behind — on 2026-08-16, for the same reason each time: three rules read this
-/// object and a `reason` check inside one of them leaves the other two silently wrong. They were read here as
-/// [`Failed`](Ending::Failed) while [`exit_meaning`] two functions later told the reader the
-/// number meant something else, so rules 1 and 5 printed *keeps crashing* and *something keeps
-/// killing it* over a translation denying both. **Adding them here is what forces the answer**:
-/// every `match` on this enum stops compiling until it says what the two mean, which a `reason`
-/// check inside one rule would not have done.
+/// object and a `reason` check inside one of them leaves the other two silently wrong. They were
+/// read here as [`Failed`](Ending::Failed) while [`exit_meaning`] two functions later told the
+/// reader the number meant something else, so rules 1 and 5 printed *keeps crashing* and *something
+/// keeps killing it* over a translation denying both. **Adding them here is what forces the
+/// answer**: every `match` on this enum stops compiling until it says what the two mean, which a
+/// `reason` check inside one rule would not have done.
 ///
 /// **`OOMKilled` is deliberately not a variant.** Rule 2 owns the labelled kill and draws its own
 /// card; *something keeps killing it* is true of it, so rules 1 and 5 need no arm and rule 6
@@ -2318,9 +2316,9 @@ enum Ending {
 /// pinning behaviour to an object no cluster writes is what NOTES § D29 and § D95 refuse.
 ///
 /// **`-1`: the code no application can write.** CRI-O writes it where it could not read an exit
-/// status ([`CODE_UNKNOWN`]), and `-1` is outside the POSIX range `0..=255`: no process can report it, so
-/// the number is already unambiguous and a reason beside it would narrow nothing. Its reason is
-/// `"Error"`, which is what an ordinary application failure carries, so keying the pair there
+/// status ([`CODE_UNKNOWN`]), and `-1` is outside the POSIX range `0..=255`: no process can report
+/// it, so the number is already unambiguous and a reason beside it would narrow nothing. Its reason
+/// is `"Error"`, which is what an ordinary application failure carries, so keying the pair there
 /// would key on the one field that says nothing.
 ///
 /// **`255` is keyed on the pair for a reason the box that opened it denied.** It asked for a row
@@ -3112,9 +3110,10 @@ fn killed_action(role: ContainerRole) -> &'static str {
 
 /// **What to do about an [`Ending::Unwatched`] — one of the shared sentences, and the first that
 /// was the same for every role** (NOTES § D95). The ordinal it used to carry counted a list that
-/// has since lost a member and gained one, which is what a count in prose does (NOTES § D113). Rules 1, 5 and 6 all draw this ending
-/// and all three say this; it was rule 6's alone until 2026-08-15, while rule 1 sent the reader
-/// to a log the API refuses to serve and rule 5 to a memory limit nothing measured.
+/// has since lost a member and gained one, which is what a count in prose does (NOTES § D113).
+/// Rules 1, 5 and 6 all draw this ending and all three say this; it was rule 6's alone until
+/// 2026-08-15, while rule 1 sent the reader to a log the API refuses to serve and rule 5 to a
+/// memory limit nothing measured.
 ///
 /// **Role-blind because nothing here is a kill**, which is also what keeps it clear of
 /// `validateInitContainers`: a sentence that names no probe cannot name one an init container may
@@ -3627,14 +3626,14 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 ///
 /// **The two `137` reasons the kubelet writes itself get arms rather than an exemption, and the
 /// exemption was the tempting answer** (NOTES § D95). Rule 6 goes silent on
-/// [`RestartRule`](Ending::RestartRule) because *the last run on record failed* is its whole subject
-/// and that ending refuses it. This rule's subject is the **count**, which is real under both
-/// reasons and is the only thing left saying anything at all: one restart-rule firing writes the
-/// same synthesized record into every container's `lastState`, so a rule 5 exemption would leave
-/// a pod thrashing 31 times in six minutes with no card on the screen. What goes instead is the
-/// claim and the action — *something keeps killing it* is a positive claim of repeated killing on
-/// a run nothing is recorded as having killed, and the memory limit and liveness
-/// probe are doors onto a kill under an evidence line saying no kill was seen.
+/// [`RestartRule`](Ending::RestartRule) because *the last run on record failed* is its whole
+/// subject and that ending refuses it. This rule's subject is the **count**, which is real under
+/// both reasons and is the only thing left saying anything at all: one restart-rule firing writes
+/// the same synthesized record into every container's `lastState`, so a rule 5 exemption would
+/// leave a pod thrashing 31 times in six minutes with no card on the screen. What goes instead is
+/// the claim and the action — *something keeps killing it* is a positive claim of repeated killing
+/// on a run nothing is recorded as having killed, and the memory limit and liveness probe are doors
+/// onto a kill under an evidence line saying no kill was seen.
 ///
 /// **Both new claims are worded about the *record* and never about *the last run*, and that is
 /// the whole of their wording** (NOTES § D95). `lastState` does not merely outlive the incident,
@@ -3694,13 +3693,13 @@ fn container_config_missing(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<
 /// what may still hold something, and they are in `describe`.
 ///
 /// **Each role is told what is true of it, and every ending splits by role** — in
-/// [`finished_action`], [`stopped_action`] and [`failed_run_action`], all three *shared* with rule 1
-/// rather than copied beside it: two rules reading one container and disagreeing is where
-/// NOTES § D85 starts, and two byte-identical copies are that defect with a delay on it.
-/// **The splits are not all the same shape.** [`Stopped`](Ending::Stopped) and
-/// [`Failed`](Ending::Failed) split two ways, `Regular` and `Sidecar` sharing a line, because
-/// `validateInitContainers` forbids all three probes on an init container that is not
-/// restartable, so any sentence naming one is a dead end there.
+/// [`finished_action`], [`stopped_action`] and [`failed_run_action`], all three *shared* with rule
+/// 1 rather than copied beside it: two rules reading one container and disagreeing is where NOTES §
+/// D85 starts, and two byte-identical copies are that defect with a delay on it. **The splits are
+/// not all the same shape.** [`Stopped`](Ending::Stopped) and [`Failed`](Ending::Failed) split two
+/// ways, `Regular` and `Sidecar` sharing a line, because `validateInitContainers` forbids all three
+/// probes on an init container that is not restartable, so any sentence naming one is a dead end
+/// there.
 ///
 /// **[`Init`](ContainerRole::Init) is split out on [`Finished`](Ending::Finished) for a reason
 /// neither rule can gate away.** A plain init container whose pod's sandbox was rebuilt — a node
@@ -3830,12 +3829,12 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
     let record = last_run_on_record(c);
     let (claim, action, cmd) =
         match record.map(|(run, sitting_in_it)| (ending(run), run, sitting_in_it)) {
-            // **The duration, and until 2026-08-16 this passed `None`** ([`finished_action`],
-            // NOTES § D113). The reason it did was that this rule's evidence line carried no
-            // duration, so ordering by one would have been a visible order with a hidden reason —
-            // and the line carries one now, added for the fold two paragraphs down. The constraint is
-            // met, so the rule that was waiting on it applies: rules 1 and 5 order this ending the
-            // same way, off a fact both cards show.
+            // **The duration, and until 2026-08-16 this passed `None`** ([`finished_action`], NOTES
+            // § D113). The reason it did was that this rule's evidence line carried no duration, so
+            // ordering by one would have been a visible order with a hidden reason — and the line
+            // carries one now, added for the fold two paragraphs down. The constraint is met, so
+            // the rule that was waiting on it applies: rules 1 and 5 order this ending the same
+            // way, off a fact both cards show.
             Some((Ending::Finished, run, _)) => (
                 ", and the last run on record finished cleanly",
                 finished_action(c.role, run_length(run)).to_string(),
@@ -3866,13 +3865,13 @@ fn restarting_repeatedly(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
                 no_exit_code_action().to_string(),
                 describe(&pod.id),
             ),
-            // **[`failed_run_action`], the third caller and the last** (NOTES § D113). This arm had a
-            // sentence of its own — *check the memory limit and the liveness probe* — and on
-            // `restarts10.json` it stood on the CRITICAL card while rule 6's WARN card below it said
-            // *read that run's log* about the same `exit 1`, whose own translation on this card's
-            // evidence line is *the application's own error*. The count is this rule's subject; how
-            // the run ended is [`ending`]'s, and it is read right here, so there was never a fork
-            // this rule could not ask.
+            // **[`failed_run_action`], the third caller and the last** (NOTES § D113). This arm had
+            // a sentence of its own — *check the memory limit and the liveness probe* — and on
+            // `restarts10.json` it stood on the CRITICAL card while rule 6's WARN card below it
+            // said *read that run's log* about the same `exit 1`, whose own translation on this
+            // card's evidence line is *the application's own error*. The count is this rule's
+            // subject; how the run ended is [`ending`]'s, and it is read right here, so there was
+            // never a fork this rule could not ask.
             Some((Ending::Failed, run, sitting_in_it)) => {
                 let (action, cmd) = failed_run_advice(pod, c, run, sitting_in_it);
                 (", but something keeps killing it", action, cmd)
@@ -4175,10 +4174,10 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
             None,
         ),
         // **Answered ahead of the [`Failed`](Ending::Failed) arm for the same reason
-        // [`Unwatched`](Ending::Unwatched) is, and then some.** Nothing read how this run ended, so *the last run on record failed*
-        // is a
-        // claim the record does not carry — and the general arm below would send the reader after
-        // *the application's own error* on a code the application never chose.
+        // [`Unwatched`](Ending::Unwatched) is, and then some.** Nothing read how this run ended, so
+        // *the last run on record failed* is a claim the record does not carry — and the general
+        // arm below would send the reader after *the application's own error* on a code the
+        // application never chose.
         Ending::CodeUnknown => (
             format!(
                 "The last run on record has no exit code of its own — {}",
@@ -4369,20 +4368,20 @@ fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
 ///
 /// **`Never` is not read as a synonym for *nothing will restart it*, and the field that speaks to
 /// it most directly is not one this rule consults.** `spec.containers[].restartPolicyRules` can
-/// only *add* restarts — the API rejects a `DoNotRestart` action outright — so a container declaring a retry
-/// rule on its own exit code comes back under `Never`, which is KEP-5307's headline use case and
-/// would be this rule's headline false positive: measured on kind v1.36.1, a pod `Never` with one
-/// retry rule on `exit 3` sat in `CrashLoopBackOff` at five restarts. **The generated types carry
-/// that field at the `v1_36` feature `Cargo.toml` pins** — it arrives at `v1_34` — **but nothing
-/// here reads it yet**: no snapshot field names it; reading it is a box of its own (NOTES § D99).
-/// **`restarts == 0` is the guard, and reading the field will not retire it** (NOTES § D97,
-/// unchanged by the pin): a container that has already been restarted is not a container that will
-/// not be restarted, whatever declared it — and **no cluster below 1.34 can carry the field at
-/// all**, while the pin sits above the cluster on purpose (NOTES § D99), so the count is the only
-/// one of the two that answers on every cluster k8rs meets. The field, when this rule learns to
-/// read it, joins the count rather than replacing it. **The residual gap is one window** — the
-/// first exit, before the first retry — and it is a gap rather than a bound: this rule draws a
-/// card that is wrong for as long as that window lasts.
+/// only *add* restarts — the API rejects a `DoNotRestart` action outright — so a container
+/// declaring a retry rule on its own exit code comes back under `Never`, which is KEP-5307's
+/// headline use case and would be this rule's headline false positive: measured on kind v1.36.1, a
+/// pod `Never` with one retry rule on `exit 3` sat in `CrashLoopBackOff` at five restarts. **The
+/// generated types carry that field at the `v1_36` feature `Cargo.toml` pins** — it arrives at
+/// `v1_34` — **but nothing here reads it yet**: no snapshot field names it; reading it is a box of
+/// its own (NOTES § D99). **`restarts == 0` is the guard, and reading the field will not retire
+/// it** (NOTES § D97, unchanged by the pin): a container that has already been restarted is not a
+/// container that will not be restarted, whatever declared it — and **no cluster below 1.34 can
+/// carry the field at all**, while the pin sits above the cluster on purpose (NOTES § D99), so the
+/// count is the only one of the two that answers on every cluster k8rs meets. The field, when this
+/// rule learns to read it, joins the count rather than replacing it. **The residual gap is one
+/// window** — the first exit, before the first retry — and it is a gap rather than a bound: this
+/// rule draws a card that is wrong for as long as that window lasts.
 ///
 /// **Only a [`Regular`](ContainerRole::Regular) container reaches this rule, and by construction
 /// rather than by a check** (NOTES § D96, measured). A [`Sidecar`](ContainerRole::Sidecar) *is* an
@@ -4832,14 +4831,15 @@ const WAITING_ON_A_SIBLING: &str = "PodInitializing";
 /// **[`Ending::Finished`] is excluded from that clause, and the exclusion is the whole wedge this
 /// rule exists for** (NOTES § D114). An init container that succeeded is `Terminated` for the rest
 /// of the pod's life, and the kubelet keeps writing [`WAITING_ON_A_SIBLING`] onto the regular
-/// containers for exactly as long as the pod *declares* an init container — `hasInitContainers`
-/// is `len(pod.Spec.InitContainers) > 0` and nothing about whether they finished
+/// containers for exactly as long as the pod *declares* an init container — `hasInitContainers` is
+/// `len(pod.Spec.InitContainers) > 0` and nothing about whether they finished
 /// (`kubelet_pods.go:2119-2125`, `:2499-2501`, v1.36). So counting every `Terminated` container
 /// silenced rule 13 on the Istio / `vault-agent-init` / migration pod whose init containers
 /// completed and whose main container then could not be created: rules 10 and 14 leave on
 /// `PodScheduled: True`, rules 1, 5 and 6 need a backoff, a restart count or a bad ending that a
-/// finished init container has not got, and rule 7 needs `Running` — so [`analyze`] returned nothing at all about a pod fourteen
-/// hours dead. A success is not something to point the reader at.
+/// finished init container has not got, and rule 7 needs `Running` — so [`analyze`] returned
+/// nothing at all about a pod fourteen hours dead. A success is not something to point the reader
+/// at.
 ///
 /// **[`Ending::Finished`] alone, and the residual is named rather than assumed.** The same title
 /// argument reaches [`Ending::Stopped`] — a container asked to stop and obeying *did* start — and
@@ -4857,7 +4857,10 @@ const WAITING_ON_A_SIBLING: &str = "PodInitializing";
 fn nothing_else_to_point_at(pod: &PodSnapshot) -> bool {
     !pod.containers.iter().any(|c| {
         is_running(c)
-            || matches!(&c.state, ContainerState::Terminated(run) if ending(run) != Ending::Finished)
+            || matches!(
+                &c.state,
+                ContainerState::Terminated(run) if ending(run) != Ending::Finished
+            )
             || waiting(c).is_some_and(|(r, _)| r != WAITING_ON_A_SIBLING)
     })
 }
@@ -5824,9 +5827,10 @@ fn promised(
 ///
 /// **A native sidecar is additive and an ordinary init container is not** (NOTES § D46): a sidecar
 /// runs beside the app for the whole life of the pod, and dropping 100m per meshed pod is six CPUs
-/// invisible on sixty of them. **A pod-level request replaces the container sum** rather than adding
-/// to it — a pod declaring only `spec.resources.requests` decodes with all-`None` containers, and a
-/// summing rule calls the node healthy with four committed CPUs unaccounted for (NOTES § D51).
+/// invisible on sixty of them. **A pod-level request replaces the container sum** rather than
+/// adding to it — a pod declaring only `spec.resources.requests` decodes with all-`None`
+/// containers, and a summing rule calls the node healthy with four committed CPUs unaccounted for
+/// (NOTES § D51).
 ///
 /// **The formula is order-free and upstream's is not** — it carries the sidecar total forward
 /// through the init list in order — so this understates the rare pod that declares a plain init
@@ -6398,8 +6402,8 @@ fn explains_a_shortfall(snapshot: &ClusterSnapshot, f: &Finding) -> bool {
 /// `ProgressDeadlineExceeded` never arrives on a condition that is still `True`.
 ///
 /// **A Deployment merely short of pods says nothing here.** Every `kubectl apply` is short of pods
-/// for a while; `progressDeadlineSeconds` is Kubernetes' own answer to when that stops being normal,
-/// and this rule reads that answer rather than inventing a second one.
+/// for a while; `progressDeadlineSeconds` is Kubernetes' own answer to when that stops being
+/// normal, and this rule reads that answer rather than inventing a second one.
 ///
 /// **The evidence names the counter that is actually short, in [`short_of_pods`]' own order**, so
 /// the number on the card is always the one the band was read off (NOTES § D82). `ready < desired`
