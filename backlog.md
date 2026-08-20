@@ -256,6 +256,69 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   card. Found while reading the driver's real output over the captures, where it
   printed 8 times. 2026-08-20.
 
+### From the Phase 3 close cross-family review (2026-08-20)
+
+*Seven findings, none ruled a blocker, so the phase is not held on them
+(CLAUDE.md § Phase close step 6). Evidence and the exact output for all of them:
+[reports/2026-08-20-phase-3-close-cross-family-review.md](reports/2026-08-20-phase-3-close-cross-family-review.md).*
+
+- **A pod with a `deletionTimestamp` keeps drawing present-tense container
+  cards.** Rules 10, 13 and 14 carry the guard and rule 12 triggers on it; rules
+  1–8 and 15 do not. Measured on a lost node: `● …crashloop` (a container is
+  backing off) and `▲ …crashloop` (this pod was asked to shut down) on one pod,
+  while `kubectl describe` — the command those rules teach — prints
+  `Status: Terminating`. Reachable on a healthy cluster too: any rolling update
+  whose old pod was crash-looping at the moment it was replaced. Rule 10's own
+  doc already holds the reasoning verbatim, so this needs no new ruling — the
+  cheapest of the seven ([D73](NOTES.md#d73--rule-10-and-the-test-that-argued-for-its-own-deletion-2026-08-13)).
+- **N1 says nothing on the node can be trusted, and nine cards on the same
+  screen trust it.** A stopped kubelet's pod status is a fossil that never
+  expires — `phase`, `restartCount` and `lastState.terminated.finishedAt` all
+  measured frozen over six minutes — so a card dated off it ages forever while
+  its subject is over. 9 of the 29 cards on the committed captures are pods on
+  `worker3`, which is `Ready: Unknown`. N1's doc names the mechanism and stops
+  at N1. **Needs a PM ruling before code**: suppress, re-word, or add a fact —
+  all three reverse something.
+- **`failed_run_action` promises a log it cannot promise.** `previous_logs`'
+  own doc says the action "names the log as the place the answer was written
+  **rather than promising to hand it over**"; the string says "is what fetches
+  it", and on a lost node `kubectl logs --previous` returns
+  `dial tcp …:10250: connect: connection refused`. **This is the other half of
+  the `--previous flag below` entry above** — that one is about the word
+  *below*, this one about the promise, and the string belongs to
+  `failed_run_action`, which rules 1, 5 and 6 all print.
+- **Rule 8 hand-spells `container {name}` instead of calling `container_fact`.**
+  `host_path_mounts` walks init containers and regular ones and throws the role
+  away, so one init container gets two names on one screen: `container prep`
+  from rule 8, `init container prep (the app starts only after this one
+  finishes)` from rule 6. A reader taking the first to `kubectl describe` looks
+  under `Containers:` and it is not there. The second copy of a shared helper,
+  which is the class [invariant 11](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+  keeps the product file undivided to prevent.
+- **`out_of_memory` is the only rule that prints an exit code without
+  `exit_fact`.** Rules 2 and 5 co-fire by design and land adjacent, so one fact
+  gets two spellings two lines apart — `exit 137` beside `exit 137 (killed by
+  the kernel …)`, and `10 restarts` beside `restarted 10 times`. `FACTS`' own
+  doc says a screen may not do this.
+- **`explains_a_shortfall`'s doc contradicts itself about rule 14** — one
+  paragraph says any of rules 8, 12 and 14 silencing a dead rollout hides the
+  outage, another twelve lines down says rule 14's shape is the most common true
+  explanation. The code follows the second and is believed right; the first is
+  the stale copy, and it is the paragraph the next editor would fix the code
+  against. This is the one helper where the whole W-series' silence is decided.
+- **The driver heads every card with `object`, and `screens/once.md` heads it
+  with the owner** — a fourth divergence where
+  [D121](NOTES.md#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20)
+  enumerates exactly three. Visible on W1, whose doc says the card files under
+  the ReplicaSet's owner "so the reader sees the name they deployed and not a
+  hashed one": the driver prints `broken-quota-59654c756`. A bug in the
+  decision, not in the code.
+- **Rule 7 not firing on a lost node is reached by accident, not by a check.**
+  `markPodsNotReady` flips the pod-level `Ready` condition and leaves
+  `containerStatuses[].ready` alone, and rule 7 requires `!c.ready` — measured.
+  The right answer, resting on an upstream behaviour nothing in this repo
+  records. Worth a NOTES line whichever way the second entry above is ruled.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
