@@ -146,6 +146,7 @@ its line moving with it.
 - [D122](#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20) — the strip goes on the value entering the sentence, not on the finished sentence
 - [D123](#d123--the-mutation-gate-has-nothing-to-say-about-mains-body-so-a-test-drives-the-binary-2026-08-20) — the mutation gate has nothing to say about `main`'s body, so a test drives the binary
 - [D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20) — the freeze forbids reaching back into finished logic, and a card the capture proves wrong is not that
+- [D125](#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20) — the last run on record is a question about the container, not a field, and `state.terminated` may name a card only where the run is settled
 
 ## Why it exists — where the gap is
 
@@ -6440,7 +6441,25 @@ survives measurement is that **the same record is in `lastState` in the same
 snapshot** — `state.terminated {exit 3}` and `lastState {exit 3, Error}` observed
 together, with rule 6 already firing off the second copy and rule 1's card
 following from the backoff. So refusing the current terminated state **loses
-nothing about any container that comes back**, not merely earliness. And the
+nothing about any container that comes back**, not merely earliness.
+
+**That last sentence is true of the container it was measured on and false in
+general, corrected 2026-08-20 by the operator review of
+[D125](#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20).**
+The container measured here exited `3` every run, so the two halves agreed **by
+construction** and the claim looked general. A container whose runs end
+*differently* holds two different runs in the two halves for the whole backoff —
+measured on a live `Always` pod exiting `10+n` on run `n`, **24 of 25 samples over
+75 seconds** carried `state.terminated {exit N}` beside `lastState {exit N-1}`,
+and rule 6's card named run N-1 while shipping a `--previous` that answered
+`unable to retrieve container logs` with `rc 0`. So what refusing the current
+state loses is **nothing where consecutive runs end the same way, and one run
+everywhere else** — which is smaller than *nothing* and larger than zero. The
+ruling is unchanged: a card drawn off a run another is about to follow is still a
+function of when the sampler looked, which is leg 3's real argument and does not
+depend on the two halves agreeing. What changes is that the residual is named
+rather than denied, and it is filed with the Phase 4 `restartPolicyRules` box in
+[`backlog.md`](backlog.md). And the
 obvious reply — *then debounce it* — is answered by
 [invariant 5](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision): a pure `analyze(&Snapshot)` has nowhere to hold *I
 saw an exit 3 four seconds ago*, so a card drawn from this field would be a
@@ -8979,6 +8998,227 @@ by a box in a later phase when **all five** hold:
 **What this does not license.** Phase 4's other twenty boxes are `analysis.rs`,
 `scripts/` and snapshot fields, and none of them touches a rule. If a second
 `rules.rs` box appears in Phase 4 it arrives under condition 2 or not at all.
+
+### D125 — the last run on record is a question about the container, not a field, and `state.terminated` may name a card only where the run is settled (2026-08-20)
+
+Rule 6 titles its card **"The last run on record failed"** and reads
+`lastState.terminated` to fill it. That field is the last run **only while the
+container has moved on from it**. When the container is sitting in
+`state.terminated`, `lastState` is the run *before* the one it is stopped in, and
+the title is false out loud — proven at HEAD on a committed capture under
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+condition 1:
+
+```
+$ ./target/release/k8rs tests/fixtures/neverrules.json
+▲ default/broken-neverrules · 3 days ago
+  The last run on record failed — exit 3
+  → read the last run's log … The --previous flag below is what fetches it
+
+$ jq … tests/fixtures/neverrules.json
+retry: restarts=1 STATE(exit=1 reason=Error) LAST(exit=3 reason=Error)
+```
+
+`retry` is stopped at **exit 1** and the card names **exit 3**; `--previous`
+resolves through `lastState.terminated.containerID`, so the command reaches the
+run the card should not have been about while plain `kubectl logs` holds the
+container's actual last words.
+
+**The corpus says how far this reaches, and the sweep is the evidence rather than
+the argument.** Ten containers in the 50 committed fixtures sit in
+`state.terminated`, and they account for exactly ten — **the first draft of this
+paragraph said three where the sweep says two and left `neverback`'s pair out
+altogether, reaching nine and not noticing**, which is the third arithmetic
+this entry got from prose instead of from a run:
+
+| how many | which | why the card is right today |
+|---|---|---|
+| 2 | `failed/app`, `succeeded/migrate` | `phase` is terminal, so they leave through [`finished`]'s door before any container rule runs |
+| 3 | `init/migrate`, `notfound/app`, `oom/hog` | both halves carry *identical* runs, so the card reads correctly **by luck** |
+| 3 | `healthy/migrate`, `neverback/broke`, `neverback/done` | no `lastState` at all — there is no second run to disagree with |
+| 1 | `healthy-retry/wait-for-db` | suppressed by `doing_its_job`, an init container that finished |
+| 1 | **`neverrules/retry`** | **the two differ and a card is drawn** |
+
+So `neverrules` is the only committed object where the two halves differ and a
+card is drawn — which is why it took a capture trip to find,
+and why the general defect is bigger than the one fixture: `restartPolicy:
+OnFailure` with a container that failed once, then exited `0` and sits terminated
+beside a running sibling, is the shape every Job produces, and rule 6 calls that
+container's last run a failure.
+
+**The ruling.** *The last run on record* is computed **once**, from the
+container: `state.terminated` when the container is sitting in one, else
+`lastState.terminated`. Rules do not each pick a field.
+
+**And `state.terminated` may source a card only where the run is settled** —
+where nothing is going to start another. That bound is what keeps
+[D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)
+intact rather than reversed, and it is worth being exact about which of D96's
+legs are load-bearing here:
+
+- **Leg 3 stands on its second argument, and this entry repeated its first one
+  after the review had falsified it.** The first — *a container that is coming
+  back has the same record in both halves, so refusing the current one loses
+  nothing* — holds only where consecutive runs end the same way; the operator
+  review measured 24 of 25 samples where they did not, and D96 leg 3 now carries
+  the correction. The argument that actually does the work is the second one and
+  it is untouched: a card drawn off a run another is about to follow is a
+  function of when the sampler looked, which invariant 5 leaves nowhere to
+  debounce.
+- **Leg 4 stands, and it is the one this bound exists for — but not for the
+  reason this entry first gave, and the correction is the entry's own evidence
+  rule turned on itself.** The first draft said the gang-restart trigger's
+  effective policy is `Always`, so it is *coming back*, so a policy-only
+  `settled` leaves it alone. **`gang.json` says otherwise**, and the PM wrote the
+  claim from D96's prose instead of opening the object — the same class as the
+  two rulings [D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)
+  catalogues, one entry after condition 1 was written to stop exactly it:
+
+  ```
+  $ jq '.spec.restartPolicy, (.spec.containers[]|{name,restartPolicy,restartPolicyRules})' tests/fixtures/gang.json
+  "Never"
+  {"name":"trigger","restartPolicy":"Never","restartPolicyRules":[{"action":"RestartAllContainers",…[3]}]}
+  ```
+
+  Pod `Never` **and** the container's own `Never`. A policy-only predicate calls
+  the parked trigger *settled*, and in the 10–30% of samples where its own
+  `exit 3` sits in `state.terminated` rule 6 draws — measured, the exact card D96
+  priced and refused. **So `settled` refuses the ending itself** — a container
+  sitting in an [`Ending::RestartRule`] run is one a firing has removed in order
+  to start again — **and carries a second clause besides**: a container whose
+  `lastState` holds such a record has been taken by the pod's own rules before, so
+  they can take it again. That trace is the only mark
+  `spec.containers[].restartPolicyRules` leaves in a *status*, it is already
+  decoded, it needs no snapshot field, and it can only move a container from
+  settled to coming-back — never the other way. A plain `Restart` rule leaves no
+  trace at all, which is why `neverrules/retry` is untouched by it and why the
+  Phase 4 box that reads the real field is still owed.
+
+  **The `lastState` clause does not hold the first firing, and crediting it with
+  that was an over-claim this entry made twice.** At `restartCount: 0` with no
+  `lastState` there is no trace yet, and `settled` answers *yes* — reproduced.
+  What keeps rules 1, 2, 5 and 6 quiet there is each rule's own guard: rule 6's
+  `restarts == 0` beside a run the container is sitting in, rule 5's count, rule
+  1's `waiting` trigger, rule 2's reason. Rule 15 **does** draw on that first
+  firing, which is D97's own gap and is boxed, not fixed here.
+  `the_gang_restart_triggers_first_firing_is_held_by_the_count` measures it.
+  **The flicker is not reopened; it took the object rather than the argument to
+  keep it shut, and then took a second review to find what the object had not
+  been asked.**
+- **D96's headline — *nothing may put a sentence on the screen from this
+  field* — was already scoped by
+  [D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)**,
+  which built rule 15 on exactly the case D96 named as *what the ruling does not
+  cover*: a container that **cannot come back** is permanent rather than
+  transient. This entry continues that carve-out to rule 6; it does not widen it
+  past *settled*.
+
+**Settled is decidable from the object, and it is one predicate every rule that
+reads a terminated record calls.** `Always` restarts everything; `OnFailure`
+restarts a non-zero exit and lets a clean one lie; `Never` starts nothing.
+
+**But the policy is not the first question, and reading it as the first question
+was a defect the second operator review caught.** Two endings are the kubelet
+already bringing the container back, under **every** policy including `Never`: a
+status it lost ([`Ending::Unwatched`] — *a container the kubelet lost is
+restarted even under `Never`*, which rule 15's own doc had said all along) and a
+`RestartAllContainers` firing ([`Ending::RestartRule`], which removes the
+container in order to start it again). The first draft answered `Never` → settled
+for both, which put the shared predicate in direct contradiction with the rule
+one function over — **the exact class this entry was written to close, reproduced
+inside the thing that was meant to close it**, and measured: it turned a dated
+card with a working `--previous` into an undatable one pointing at `describe`.
+
+**So the predicate answers the ending first and the policy second, and it names
+every variant rather than comparing against one.** That is not a style choice:
+D95's whole mechanism is that adding an `Ending` stops the file compiling until
+every reader says what the new one means, and `== Ending::Finished` opted out of
+it. It is written **once**
+— two rules reading one container and disagreeing is the defect class this repo
+has paid most for, and it is precisely what rule 6 and rule 15 were doing about
+this field.
+
+**A settled failed run draws exactly one card, and it takes three owners to say
+that — not two, which is what the first draft of this paragraph claimed.** Rule
+15 draws where the run is settled **and** `restarts == 0` — D97's proxy for a
+field the snapshot cannot yet see. Rule 6 draws about the settled run where
+`restarts != 0`. **Rule 2 owns the labelled memory kill on both halves**, which
+rule 6 stands down on by name — and until every reader took the same record, that
+container drew *nothing at all*: rule 6 deferred, rule 15's count had spent, and
+rule 2 was reading the earlier run out of `lastState`. The operator review
+measured the silence and it is the sharpest argument in this entry for the *once*
+above. `a_settled_failed_run_draws_exactly_one_card` asserts it over all three
+rules, because the split is the only thing standing between a duplicate and a
+silence, and a split nobody wrote down is one the next edit closes over. **What
+draws neither is a settled run that did not fail** — `OnFailure` with a clean
+exit on top of a failure, the Job shape — and that row is named and counted
+rather than left to be discovered. D97's `restarts == 0` is **not** dropped and its residual gap
+is **not** widened: the Phase 4 box that teaches rule 15
+`spec.containers[].restartPolicyRules` is where that guard is retired, and the
+field can only ever *add* restarts, so it can only move a container from settled
+to coming-back — the upgrade lands in the shared predicate and both rules learn
+at once.
+
+**The command follows the record, and the sentence stops naming a flag it may not
+have.** Where rule 6 is about the run the container is sitting in, the log is
+plain `kubectl logs`; where it is about `lastState`, it is `--previous`. The
+shared action sentence said *The --previous flag below is what fetches it*, which
+is false on the first of those, so it now points at **the command below** without
+naming the flag — and **the caller appends `, using --previous` where its own
+command carries the flag**, so the sentence is true of all three callers and the
+one token a reader in their first month cannot guess is not deleted from the only
+renderer that ships. The clause is eighteen characters because it was *measured*
+and not chosen: an explanatory fifty-seven-character version took the action from
+four wrapped lines to five and pushed 57 cards from ten lines to eleven, against
+`screens/alerts.md`'s budget. The pairing is structural — one helper decides the
+sentence and the command together — rather than a convention repeated in three
+arms.
+
+**It does not buy a referent, and the first draft of this paragraph claimed one.**
+It said the flag is *still on the card, one line down, which is where the reader
+copies it from* — written from the shape of a card rather than from `screens/`.
+No screen puts it there: `screens/alerts.md` § Finding card specifies **four**
+parts — who · what happened · the evidence · what to do — and `kubectl_cmd` is
+not one of them; the pane below the list is the **command log**. `screens/once.md`
+splits harder on purpose, findings on stdout and the commands on stderr, so
+`k8rs --once > findings.txt` puts *the command below* on the other stream. The
+word **below** was already dangling before this change and is dangling one word
+smaller after it; it is filed in [`backlog.md`](backlog.md) and is not this box's
+to close. **The trade this entry priced is real; the reinforcement it claimed as
+consolation was not there to lose.** `failed_run_action`'s signature does not move,
+which D124 condition 3 forbids.
+
+**Rule 5 was scoped out of this entry and the scoping was wrong, measured on a
+cluster within the hour.** The first draft said rule 5 *needs `restarts >= 3` and
+stands down on a `CrashLoopBackOff` wait, so no committed object reaches it in
+the settled shape* — true of the corpus, false of a cluster. With a `Restart`
+restart-rule the container does **not** sit in `CrashLoopBackOff`: 12 of 14
+samples over 2m11s were `state=terminated` while `restartCount` walked 0 → 5. And
+because rules 5 and 6 had until then read the *same* field, their runs, durations
+and stamps matched and [`one_card_per_action`] folded rule 6 away — **so changing
+one of the pair is what broke the fold**, and the operator review measured one
+container drawing two cards that print one sentence over two different commands
+and two different exit codes, the `--previous` one answering *unable to retrieve
+container logs* on stdout with `rc 0`.
+
+**So the *once* is not a tidiness and a partial *once* is worse than none**:
+rules 1, 2 and 5 route through [`last_run_on_record`] too. Rule 1 is a provable
+no-op — its trigger is a `waiting` state, so the container is never sitting in a
+run — and it is routed anyway and pinned by a test, because *provably identical
+today* is what the next reader has to re-derive. The two direct reads of
+`lastState` that survive are the helper's own and rule 13's existence check,
+which asks whether the container has **ever** run and never what the run was.
+
+**What this does not touch.** `settled` still reads a policy and not the rules
+beside it, and the operator review measured what that costs: a **sibling's**
+`RestartAllContainers` un-settles every container in the pod, and rule 15 drew
+*nothing is starting it again* about a container the kubelet restarted 48 seconds
+later. That is rule 15's pre-existing D97 gap, it needs a snapshot field and a
+capture, and it belongs to the Phase 4 `restartPolicyRules` box — which now owes
+one more thing than it did: **the field has to be read across siblings, not only
+on the container.** Recorded in [`backlog.md`](backlog.md), not folded in here. `Finding`, `ObjectId` and
+`analyze`'s signature are untouched (D124 condition 3), no rule is added, and
+`rules.rs`'s whole-file mutation gate re-runs at Phase 4 close (condition 4).
 
 ## Decisions made
 

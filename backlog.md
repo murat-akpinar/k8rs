@@ -352,6 +352,45 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   **49 mutants, 46 caught, 3 unviable, 0 missed**, matching `--list`'s 49 exactly.
   Both are `tester`'s, in a later phase; found by the Phase 3 close second pass.
 
+- **`settled` reads a policy and not the restart rules beside it, and a
+  *sibling's* rule un-settles the whole pod.** Measured on kind v1.36.1
+  (`reports/2026-08-20-settled-and-the-last-run-on-record.md` § 5): rule 15 drew
+  *this container has stopped and nothing is starting it again* about
+  `bystander`, whose sibling declared `RestartAllContainers`, and the kubelet
+  restarted it **48 s later**. A container's own `Restart` rule leaves no trace
+  in the status at all, so the whole backoff window is settled-by-mistake. Rule
+  15's pre-existing D97 gap widened by measurement, not by this box — but it adds
+  a requirement to the Phase 4 `restartPolicyRules` box that was not in it: the
+  field must be read **across siblings**, and `RestartAllContainers` anywhere in
+  a pod un-settles every container in it
+  ([D125](NOTES.md#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20),
+  PRIOR-ART § F3).
+- **A container the pod's own rule killed for good draws nothing.** `gangwait`
+  after a gang restart — `bystander` at `restarts=1`, `state.terminated exit 1`,
+  `lastState 137/RestartingAllContainers` — is `1/2 Error` to `kubectl get pods`
+  and `○ nothing is broken` to k8rs. Not a regression (identical before and
+  after), but D96 leg 4's accepted cost is one container larger than that entry
+  counts, and the `settled` clause makes the silence *decided* rather than
+  accidental (`reports/2026-08-20-settled-and-the-last-run-on-record.md` § 5).
+- **`--once` is the surface where *the command below* costs most, and it ships
+  first.** `screens/once.md` puts findings on stdout and the commands k8rs ran on
+  stderr, so `k8rs --once > findings.txt` leaves every action sentence pointing
+  at something that is not in the file. Sharpens the two `below` entries already
+  in this list rather than replacing them; the flag itself is no longer lost —
+  D125's caller appends `, using --previous` — but the deixis is unresolved and
+  is a `tui-designer` question before Phase 12.
+
+- **Rule 2 and rule 15 draw two CRITICAL cards about one container and the pair
+  overflows the pane.** A never-restarted settled `OOMKilled` container under
+  `Never`: rule 2 at 6 lines, rule 15 at 10, 17 with the blank between them,
+  against `screens/alerts.md` § The height's **16-row** body pane at 80×24.
+  Both actions are genuinely needed — you cannot raise a limit on a pod that has
+  to be replaced, and rule 2's card cannot tell you it has to be — so
+  `one_card_per_action` is working rather than failing; what the operator review
+  wanted at 3am is **one** card carrying both clauses
+  (`reports/2026-08-20-the-settled-record-across-four-rules.md` § 7). A rule-set
+  change, not a fold change, and it needs `tui-designer` before it needs code.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

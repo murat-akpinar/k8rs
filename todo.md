@@ -1640,31 +1640,28 @@ unchecked one from the top.
   *at a phase close, not mid-phase*, so it closes **with** this phase; and the
   last two boxes, which are its gates.
 
-- [ ] **Rule 6 and rule 15 disagree about which run is "the last", and the
-      capture trip put the disagreement on a card.** Rule 15's condition table
-      calls `lastState` *the run before this one*; rule 6 titles that same field
-      **"The last run on record failed"**. When a container is sitting in
-      `state.terminated`, `lastState` is the *second to last* run — and
-      `neverrules.json` is the first committed capture where the two differ, so
-      the card is wrong out loud: it draws *"The last run on record failed —
-      exit 3"* about `retry`, which is stopped for good at **exit 1**. Worse for
-      the reader than a wrong number: `--previous` resolves through
-      `lastState.terminated.containerID`, so the command the card hands them
-      returns *"cannot reach the license server, retrying"* while the container's
-      actual last words, *"giving up"*, are what plain `kubectl logs` would
-      return. The generic case is `restartPolicy: OnFailure` — a container that
-      failed once, then exited 0 and sits terminated beside a running sibling,
-      about which rule 6 says the last run failed. `oom`, `notfound` and `init`
-      are all in that face now and only read correctly because both their runs
-      are identical, which is luck and not a design. Found by the operator review
-      of the capture trip
-      ([D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16));
-      boxed here rather than folded in because it needs a decision that box did
-      not make — whether rule 6 reads `state.terminated` when the container is
-      currently terminated, and what that does to rule 15's table and to
-      `one_card_per_action`. Done-when: the card names the run it is actually
-      about on `neverrules.json`, the command beside it reaches that run's log,
-      and a test holds both
+- [x] **Rule 6 and rule 15 disagree about which run is "the last", and the
+      capture trip put the disagreement on a card.** `lastState` is the last run
+      only while the container has moved on from it; sitting in
+      `state.terminated` it is the *second to last*, so rule 6 drew *"The last
+      run on record failed — exit 3"* about `neverrules.json`'s `retry`, which is
+      stopped at **exit 1**, and handed a `--previous` that fetches that same
+      wrong run. Ruled in
+      [D125](NOTES.md#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20)
+      under
+      [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+      five conditions, which is what let a frozen `rules.rs` change at all — and
+      condition 4 is why this phase's close re-runs the whole-file mutation gate.
+      Done: *the last run on record* is one shared reader
+      (`last_run_on_record`), bounded by one shared predicate (`settled`) that
+      names every `Ending`; **every** rule that reads a terminated record routes
+      through it — rules 1, 2, 5, 6 and 15, because changing one of a pair that
+      had agreed by accident is what broke `one_card_per_action`'s fold and drew
+      two contradictory cards on one container. `neverrules.json` names exit 1
+      and ships plain `kubectl logs`; the action sentence keeps `--previous` on
+      the callers whose command carries it. 267 + 7 tests, 37 mutants 0 missed,
+      three operator-review rounds on kind v1.36.1
+      ([reports/](reports/README.md), 2026-08-20 ×2)
 - [ ] **`scripts/check-docs.py` fails on a `### D##` heading with no line in
       NOTES § Decision index** — `tester`'s box, and it closes the one hole
       [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
