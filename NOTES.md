@@ -140,6 +140,8 @@ its line moving with it.
 - [D116](#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19) — the environment picker moves to startup, and the tag comes out of the kubeconfig itself
 - [D117](#d117--the-plain-language-pass-and-the-two-things-it-found-that-were-not-sentences-2026-08-19) — the plain-language pass, and the two things it found that were not sentences
 - [D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20) — a foreground call is capped at ten minutes and the phase-close sweep is longer than one
+- [D119](#d119--the-last-surviving-mutant-was-equivalent-and-the-fix-is-to-stop-spelling-the-tie-by-hand-2026-08-20) — the last surviving mutant was equivalent, and the fix is to stop spelling the tie by hand
+- [D120](#d120--the-two-things-the-operator-review-measured-that-the-tests-cannot-see-2026-08-20) — the two things the operator review measured that the tests cannot see
 
 ## Why it exists — where the gap is
 
@@ -8585,6 +8587,209 @@ substitute for sharding.
 **The `justfile` keeps its recipe.** `just mutants` is `tester`'s file and a flag
 typed at a gate is not a recipe change; if the sharding should become one, that
 is a box, not an edit the PM makes in passing.
+
+### D119 — the last surviving mutant was equivalent, and the fix is to stop spelling the tie by hand (2026-08-20)
+
+The sweep box closed at **one** survivor, not zero:
+`src/rules.rs:3982` in [`running_but_not_ready`] —
+
+```rust
+let since = match started_at {
+    Some(began) if began.0 > unready_since.0 => began,
+    _ => unready_since,
+};
+```
+
+`>` and `>=` differ on exactly one input, `began.0 == unready_since.0`, and there
+the two arms return the same value: `Time` is
+`pub struct Time(pub jiff::Timestamp)` — a **single-field newtype**, so equality
+of `.0` is equality of the whole, and `since` is only ever read through
+`duration_since(since.0)` and `since.clone()`. Both spellings therefore produce a
+byte-identical card. **It is an equivalent mutant and no test can kill it**;
+writing one would be a test that cannot fail, which
+[D26](#d26--a-green-build-that-proves-nothing-2026-08-12) forbids more strongly
+than the sweep asks for a kill. Verified rather than argued, and **twice**: with
+`>=` applied the suite was green at 231 passed mid-turn, and `tester` re-ran the
+same two spellings against the delivered tree — `>` and `>=` — and got
+**232 passed, 0 failed** from both. The first number is quoted because it is the
+one this ruling was made on; the second because it is the one a reader can
+reproduce, and a claim whose whole point is *verified* has to be re-runnable at
+the count the tree actually has.
+
+**So the ruling is not a test and not an exemption — the tie stops being spelled
+by hand.**
+
+```rust
+let since = started_at.as_ref().map_or(unready_since, |b| b.max(unready_since));
+```
+
+`Time` derives `Ord`, and `Ord::max` **returns its second argument when the two
+compare equal**, so the tie resolves to `unready_since` exactly as the guard did.
+The behaviour is unchanged, the line now says *the later of the two moments*
+instead of making the reader derive it, and there is no binary comparison left
+for the tool to mutate.
+
+**The ruling has a price and it is stated here rather than in the report only:
+the sweep loses five mutable sites and the file goes 558 → 553.** `map_or` and
+`Ord::max` are a method call and not a binary operator, so the tool generates
+nothing there — the floor's correctness is now held by three tests and not by the
+sweep. That is the trade, taken knowingly: the three cells (`began` after,
+before, and equal to the condition) assert the behaviour, where the sweep only
+ever asserted that *some* test noticed a flip. What was **not** given up is the
+rest of the function — the `NOT_READY_GRACE` comparison one line below still
+generates its mutant and is still caught, which is exactly what
+`#[mutants::skip]` would have thrown away.
+
+**That sentence said *six* in its first draft, and 558 − 6 is not 553.** Both
+endpoints had been read off `cargo mutants --list`; the difference between them
+was done in my head, which is the one step of the three nobody ran. It is the
+leak [CLAUDE.md](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)
+names in as many words — *a number written from an estimate instead of a run* —
+landing in the entry that opens by saying the numbers are read off runs. Caught
+by the operator review re-measuring both ends.
+
+**The two rejected options, and why.** `#[mutants::skip]` on the function would
+have blinded the sweep to everything else in it — the `!c.started` gate and the
+`NOT_READY_GRACE` comparison are killable and are killed — to hide one line.
+Recording the survivor and leaving the gate at *1 missed* is worse: a gate whose
+green is a non-zero number is a gate nobody reads, which is the degradation
+[D26](#d26--a-green-build-that-proves-nothing-2026-08-12) and the *derived list
+asserts it found something* rule both exist to prevent. **`rules.rs` is Phase 3's
+own layer**, so this is a change inside the open phase, not a frozen file
+reopened.
+
+**What the turn settled that the brief did not**, recorded because a choice made
+by whoever was writing is the kind that gets re-argued:
+
+- **The duration ladder is asserted at eleven spans, through both `lasted` and
+  `ran_for`.** The spellings come from `lasted`'s own doc, from `counted`
+  ([D68](#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13))
+  and from [D83](#d83--the-hours-rung-runs-to-48-and-the-age-ladder-gets-one-home-2026-08-14)
+  for the 24-hour boundary — not from what the code returned. D83 protected that
+  boundary **in prose**: *`lasted`'s identical `as_hours() < 24` was deliberately
+  left alone … so nobody closes the gap with a find-and-replace*, `age` having
+  moved to 48. `86399s → 23 hours` and `86400s → 1 day` are now asserted, so the
+  find-and-replace D83 asked nobody to do is caught by a test rather than by a
+  sentence.
+- **`short_of_pods` is asserted on a *paused* Deployment whose template
+  changed** — a state where upstream creates no new ReplicaSet, so
+  `updatedReplicas` is absent while nothing is unavailable. The test also asserts
+  `analyze` stays silent there, so it is not arguing that a paused release should
+  page anyone.
+  **The reach of that arm is wider than the first draft of this entry said**, and
+  the correction is `tester`'s: the draft called the paused state *the one stable
+  real state the arm is load-bearing in*, on the reasoning that
+  `unavailableReplicas = sum(rs.spec.replicas) − available` swallows every
+  quota-refused **or surging** rollout. The surging half does not hold at two or
+  more replicas — at `replicas: 2` the defaults resolve to `maxSurge: 1,
+  maxUnavailable: 0`, and in the sync where the surge pod becomes available
+  upstream scales the old ReplicaSet down in the same pass and persists
+  `readyReplicas: 3, updatedReplicas: 1` with `unavailableReplicas` absent, which
+  is this arm, unpaused. **Read out of
+  `pkg/controller/deployment/{sync,rolling}.go`, not measured** — so it is
+  recorded as reasoning and the measurement is boxed in
+  [backlog.md](backlog.md). It does not weaken the test: the arm is load-bearing
+  in *more* states than claimed and the plant is still a real shape. The same
+  over-narrow sentence is in `short_of_pods`' own doc and is corrected with it.
+  **The operator review then sharpened it once more**: the paused state is one
+  W2 can never reach *on a card at all*, because its `Progressing` reason is
+  `DeploymentPaused` and `rollout_gave_up` returns before `short_of_pods` is
+  called. So the arm is load-bearing **on a card** in a *timed-out surging*
+  rollout — `desired 3, maxSurge 1, maxUnavailable 0` giving `ready 3 ≥ 3`,
+  `updated 1 < 3`, `unavailable 1 > 0`, where arm 2 decides the evidence line.
+  The test is a sound helper test and stays; the sentence around it was a degree
+  too strong twice over.
+- **Rule 8's exemption is asserted as a 2×2 truth table**, and the
+  DaemonSet-outside-`kube-system` cell is pinned as **an open ruling**, not as a
+  requirement — this entry's first draft said *requirement* and the operator
+  review sent it back.
+  [D70](#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)
+  does not record a requirement: it records a narrowing *"correct on the cluster
+  it was tested against and known to be wrong beyond it"* and asks for evidence.
+  The test's job is therefore to stop the exemption being widened **silently**,
+  not to say the card is wanted — and the evidence D70 asked for arrived in the
+  same review that caught the wording
+  ([D120](#d120--the-two-things-the-operator-review-measured-that-the-tests-cannot-see-2026-08-20)).
+- **The OOM boundary extended an existing test rather than adding one** — same
+  capture, same subject, one more rung.
+
+**A pre-existing defect found and left alone**, because it is outside this box
+and outside the writer's files: `src/rules_tests.rs:475` and `:487` cite a script
+subcommand `break-nodes`, and `scripts/cluster.sh` has no such subcommand — it is
+`break` / `unbreak`. Boxed in [backlog.md](backlog.md) rather than fixed in
+passing.
+
+### D120 — the two things the operator review measured that the tests cannot see (2026-08-20)
+
+The family review for the mutation boxes stood a cluster up
+(`K8RS_CLUSTER=review`, one worker, torn down) and came back with two findings
+that no test in this repository could have produced, because both are the spec
+being wrong rather than the code disagreeing with it. Measurements:
+[reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md](reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md).
+**Neither is fixed here.** Both are rule behaviour, both reverse something this
+file already decided, and a reversal is a ruling with the user in the room — so
+what this entry does is record them, name what was measured, and put the fix in
+[backlog.md](backlog.md) rather than into a phase that is trying to close.
+
+**1. Rule 8's `/` escalator is the evidence
+[D70](#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)
+asked for, and it points the other way.** D70 narrowed the exemption to
+`kube-system`, weighed the *writable* escalator and the namespace, and closed
+with *"what would settle it is evidence, and there is none yet."* The evidence:
+`prometheus-node-exporter` — the DaemonSet `kube-prometheus-stack` installs by
+default, with `hostRootFsMount.enabled` defaulting to `true` — declares a
+`hostPath: /`. The `/` arm fires **on the path alone**, before the exemption:
+read-only or not, `kube-system` or not, DaemonSet or not. Measured, two pods,
+both `mountsReadOnly=/host/root:true`, both `Severity::Critical`, both
+`timestamp: None` — so **one permanent CRITICAL per node-agent DaemonSet, with
+no clearing condition**, on any cluster running the commonest monitoring stack
+there is. Longhorn, the case D70 argued about, is the *smaller* one: three or
+four cards, on clusters whose operator recognises the names. The action makes it
+worse than noise — *"mount only the directory the container actually needs, not
+the root"* — because the directory node-exporter needs **is** the root
+(`--path.rootfs=/host/root` is how it enumerates mountpoints). A reader who
+follows the loudest card on the screen breaks their monitoring, which is
+[invariant 13](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
+first half failing outright. Note the asymmetry inside one function: the socket
+arm names its legitimate holder
+([D78](#d78--the-socket-the-escalator-could-not-see-and-the-three-mutations-that-survived-the-fix-2026-08-13)),
+and the `/` arm — the one with the commonest legitimate holder in the
+ecosystem — names none.
+
+**2. Rule 7's floor is one variable doing two jobs, and only one of them is
+right.** `since` both dates the card and is the moment `NOT_READY_GRACE` is
+counted from. `Ready` is **pod**-scoped and its `lastTransitionTime` moves only
+when the status changes, so a container replaced under an already-unready pod
+does not move it — measured across seven restarts, `startedAt` walking
+`23:29:37 → 23:34:35 → 23:40:47` while `Ready=False` stayed pinned at
+`23:29:33`. Two consequences, one visible and one silent:
+
+- **The card understates the outage.** A pod out of the Service for three hours
+  whose container restarted fifteen minutes ago renders *"15 min ago"*. The title
+  names the **Service**, and the Service has been short this pod for three hours
+  however many times the container was replaced.
+  [D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)'s
+  argument — *a container cannot have been out of the Service for longer than its
+  current run has existed* — is true of a container and false of the thing the
+  sentence names.
+- **The rule goes silent exactly where it is most needed.** Where the container
+  keeps being replaced, `now − since` never exceeds the restart interval —
+  measured at 60s early and 3m47s at restart 7, and the kubelet's back-off caps
+  at 5 min, all under the 10-minute grace. Rule 5 covers it from `restarts ≥ 3`
+  and rule 6 whenever the ending is `Failed`; a well-behaved app exiting `0` or
+  `143` on SIGTERM is exempt from rule 6, so with a lenient liveness probe there
+  is a window with **no card at all**.
+
+The shape the floor genuinely protects is `c.restarts == 0` — the pod that spent
+twenty minutes pulling an image before any container existed. Past the first
+restart, the restart is itself the proof the pod was already unready before this
+run began.
+
+**What is done in this phase instead of the fix:** the gap is named in
+`running_but_not_ready`'s own doc, citing this entry, so the next reader of that
+function is not left to rediscover it — and the pre-existing test that pins the
+coupling keeps pinning it, because until the ruling lands, *unpinned* is worse
+than *pinned and documented as wrong*.
 
 ## Decisions made
 

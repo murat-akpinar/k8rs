@@ -159,6 +159,79 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   phases; this line is the reminder to read them at each close, not a licence to
   box them mid-phase.
 
+- **`rules_tests.rs` cites a `cluster.sh` subcommand that does not exist.** Lines
+  475 and 487 name `break-nodes`; `scripts/cluster.sh` has `break` and `unbreak`
+  and nothing else. Found by `dev-core` while writing the mutation tests and left
+  alone, because it is outside that box and `scripts/` is `tester`'s tree — the
+  comment is in `dev-core`'s. Two writers, one line each, so it needs a box
+  rather than a fix in passing
+  ([D119](NOTES.md#d119--the-last-surviving-mutant-was-equivalent-and-the-fix-is-to-stop-spelling-the-tie-by-hand-2026-08-20)).
+  2026-08-20.
+
+- **`short_of_pods`' `updated < desired` arm is reachable mid-surge, and nobody
+  has watched it happen.** `tester` read
+  `pkg/controller/deployment/{sync,rolling}.go` and found that at `replicas: 2`
+  (defaults `maxSurge: 1, maxUnavailable: 0`) the sync where the surge pod
+  becomes available persists `readyReplicas: 3, updatedReplicas: 1` with
+  `unavailableReplicas` absent — this arm, on an ordinary unpaused rollout, which
+  both the rule's doc and the first draft of
+  [D119](NOTES.md#d119--the-last-surviving-mutant-was-equivalent-and-the-fix-is-to-stop-spelling-the-tie-by-hand-2026-08-20)
+  said could not happen. Reasoned from upstream source, **not measured**; the
+  wording in both places now says so. What is unknown is how long that window
+  lasts and therefore whether the rule flickers a card during every normal
+  rollout — a `K8RS_CLUSTER=review` measurement, one two-replica rollout watched
+  through. 2026-08-20.
+
+- **Rule 8's `/` escalator draws a permanent CRITICAL on every cluster running
+  `prometheus-node-exporter`, and its action names a fix that pod cannot take.**
+  Measured, two pods, read-only `/host/root`, `Severity::Critical` with
+  `timestamp: None` so the card never clears
+  ([reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md](reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md)
+  § 1). This is the evidence
+  [D70](NOTES.md#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)
+  asked for and it points against the current spec; the ruling is the user's
+  because it reverses `NOTES.md`'s own escalator list
+  ([D120](NOTES.md#d120--the-two-things-the-operator-review-measured-that-the-tests-cannot-see-2026-08-20)).
+  The cheapest half is not a rule change at all: the `/` arm names no legitimate
+  holder where the socket arm names one. 2026-08-20.
+- **Rule 7's floor is the grace clock as well as the timestamp, and past the
+  first restart that is wrong in both directions** — the card understates a
+  three-hour outage as *15 min ago*, and on a restarting container the grace
+  never elapses so the rule is silent altogether. Measured across seven restarts
+  ([reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md](reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md)
+  § 2). The proposed cut is `c.restarts == 0` — the shape the floor genuinely
+  protects — and it reverses
+  [D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13),
+  so it is a ruling and not a fix; the gap is named in the rule's doc meanwhile
+  ([D120](NOTES.md#d120--the-two-things-the-operator-review-measured-that-the-tests-cannot-see-2026-08-20)).
+  2026-08-20.
+- **A `subPathExpr` mount puts a path on the card that `kubectl describe` cannot
+  show, and prints `$(POD_NAME)` at a beginner.** `describe` prints `path=` for
+  `subPath` and nothing for `subPathExpr`, so rule 8's evidence line names a path
+  its own teaching command does not contain — [invariant 4](CLAUDE.md) in the
+  small, and a template variable on a card is [invariant 14](CLAUDE.md).
+  `-o yaml` shows both fields. Pre-existing and D46-sanctioned; named as a cost
+  nowhere until now
+  ([reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md](reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md)
+  § 4). 2026-08-20.
+- **Upstream refuses to overwrite `ProgressDeadlineExceeded` with the paused
+  condition, so pausing a rollout that has already timed out keeps W2's card
+  standing.** Read as correct — the rollout did give up — but recorded nowhere,
+  and the rule's doc is where a reader would look
+  ([reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md](reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md)
+  § 5). 2026-08-20.
+
+- **`out_of_memory` and `restarting_repeatedly` carry a byte-identical grace
+  clause** — `|t| now.0.duration_since(t.0) > NOT_READY_GRACE` — spelled out in
+  both rather than reached through a helper. Two rules reading one field through
+  a copied expression is the class
+  [CLAUDE.md](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it)
+  says has cost this repo most. **It is not a hole today**: both copies are
+  killed by the sweep, and the 2026-08-20 boundary test pins rule 2's at exactly
+  ten minutes. It is a helper waiting to be extracted, and the moment to do it is
+  when a third rule wants the same clause. Found by `dev-core` while anchoring a
+  red-proof script, 2026-08-20.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

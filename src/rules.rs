@@ -365,8 +365,22 @@ const PROBE_FLOOR: SignedDuration = SignedDuration::from_secs(20);
 ///
 /// **`None` and not `0s`**, because those are different sentences: the exit code and the
 /// runtime's message carry the diagnosis, and a duration clause about a run that never began is
-/// noise at best. **One guard here rather than three at the callers** — [`crash_looping`],
-/// [`previous_run_failed`] and [`stopped_for_good`] all reach this through [`ran_for`].
+/// noise at best. **One guard here rather than four at the callers** — [`crash_looping`],
+/// [`restarting_repeatedly`], [`previous_run_failed`] and [`stopped_for_good`] all reach this
+/// through [`ran_for`]. **This paragraph said *three* until 2026-08-20 and named the wrong set:**
+/// rule 5 was given [`ran_for`] on 2026-08-16 for [`one_card_per_action`]'s subset fold
+/// (NOTES § D113), which [`ran_for`]'s own doc records and this one had not caught up with — so a
+/// reader was told rule 5's duration line was unguarded and untested when it is neither.
+///
+/// **A clock that steps *forward* mid-run is not guarded, and that is the state rather than a
+/// choice anybody argued.** [`run_length`] refuses the backwards step and [`ever_started`] refuses
+/// the epoch, both at length; there is no [`SKEW_ALLOWANCE`] here, so a `makestep` forward or a VM
+/// resumed from a snapshot subtracts to days and prints `ran for 6 days` over a run that lasted
+/// seconds. Unlike the epoch it is indistinguishable from a real long run — the record says
+/// nothing either way — so a bound would be a threshold on a plausible value, which is why one is
+/// named here rather than added. The multi-day rungs in
+/// `every_rung_of_the_duration_ladder_is_asserted_at_the_second_it_changes` assert the arithmetic
+/// and claim nothing about the clock behind it.
 fn lasted(run: &Terminated) -> Option<String> {
     let elapsed = run_length(run)?;
     Some(if elapsed.as_secs() < 1 {
@@ -3957,6 +3971,24 @@ fn previous_run_failed(pod: &PodSnapshot, c: &ContainerSnapshot) -> Option<Findi
 /// container's own run start**, because `Ready` is a condition of the *pod* while this rule fires
 /// per container (NOTES § D71, [`Finding::timestamp`]).
 ///
+/// **The floor is right for a container that has never restarted and wrong past that, and the
+/// fix is a ruling this phase does not make** (NOTES § D120, measured). `Ready` is the **pod**'s
+/// condition, and its `lastTransitionTime` does not move when a container is replaced under a pod
+/// that is already unready — measured across seven restarts, `startedAt` walking while
+/// `Ready=False` stayed pinned. So past the first restart `since` is the *current run*'s start,
+/// and it does two jobs badly: the card dates an outage the Service has had for hours to the
+/// fifteen minutes this run has existed, and the grace is counted from a moment that keeps moving,
+/// which can hold the rule silent for as long as the restarts continue. The shape the floor
+/// genuinely protects is `restarts == 0` — twenty minutes pulling an image before any container
+/// existed. Named and not fixed: the fix reverses D71 and that is the user's call, and until it
+/// lands the coupling stays pinned by a test rather than unpinned.
+///
+/// **The floor is [`Ord::max`] and not a comparison written out**, which is a mutation-gate
+/// ruling rather than a style one (NOTES § D119): a hand-spelled `>` and `>=` differ on exactly
+/// one input — the two moments being equal — and there both arms return the same value, so the
+/// tie was an equivalent mutant no test could kill. `max` returns its **second** argument on a
+/// tie, which is `unready_since`, exactly what the guard did.
+///
 /// **`started` is read here as a suppressor, and that is not what D51 rejected.**
 /// `Running && !started` is reachable **only** where a `startupProbe` is declared and has not
 /// passed, and until it does the kubelet does not run the readiness probe at all — so
@@ -3978,10 +4010,9 @@ fn running_but_not_ready(now: &Time, pod: &PodSnapshot, c: &ContainerSnapshot) -
         return None;
     }
     let unready_since = pod.ready.as_ref()?.last_transition.as_ref()?;
-    let since = match started_at {
-        Some(began) if began.0 > unready_since.0 => began,
-        _ => unready_since,
-    };
+    let since = started_at
+        .as_ref()
+        .map_or(unready_since, |b| b.max(unready_since));
     if now.0.duration_since(since.0) <= NOT_READY_GRACE {
         return None;
     }
@@ -5800,12 +5831,21 @@ fn nothing_is_serving(w: &WorkloadSnapshot) -> bool {
 ///   ReplicaSet's `updated` counts the pods it has rather than the pods that work —
 ///   `broken-owned-7bdb7645c8` is one crash-looping pod of one wanted, so its `updated` equals its
 ///   `desired` and nothing else here would see it.
-/// - `updated < desired` — pods on the current template that were **never created**. On a
-///   Deployment this also covers everything the arm above does, because `unavailable == 0` there
-///   can only mean the ReplicaSets have not been scaled up to `desired` yet.
-/// - `unavailable > 0` — the **surge that is not landing**, which is every rollout of one replica:
-///   `maxUnavailable` resolves to 0, the old pod stays up and is counted ready, one pod exists on
-///   the new template, and both arms above read whole ([`WorkloadSnapshot::unavailable`]).
+/// - `updated < desired` — pods on the current template that were **never created**. **Two
+///   different states put `unavailable` at `0` under it**, and an earlier draft of this line named
+///   only the first: the ReplicaSets have not been scaled up to `desired` yet, *or* every pod that
+///   exists is available while the new template still has fewer than `desired` of them —
+///   `unavailableReplicas` is `sum(replicaset.spec.replicas) - available` floored at zero, so a
+///   two-replica rollout at the defaults (`maxSurge: 1`, `maxUnavailable: 0`) reads
+///   `ready 3, updated 1, unavailable` absent in the sync where the surge pod becomes available.
+///   Reported by the operator review of 2026-08-20 (NOTES § D120's round); the arithmetic is
+///   upstream's `calculateStatus` and the numbers are not in the committed measurement, so this
+///   line names the rule rather than citing a run. **The arm is the *class* and not either state.**
+/// - `unavailable > 0` — the **surge that is not landing**, of which a rollout of one replica is
+///   the commonest and not the whole: `maxUnavailable` resolves to 0, the old pod stays up and is
+///   counted ready, one pod exists on the new template, and both arms above read whole
+///   ([`WorkloadSnapshot::unavailable`]). On a **timed-out surging** rollout the second arm and
+///   this one are both true and the second decides the evidence line.
 ///
 /// **The `Option`s are read in two directions, and that is not a slip.** An absent `readyReplicas`,
 /// `updatedReplicas` or `unavailableReplicas` is **zero**; an absent `spec.replicas` is **one**,

@@ -1077,6 +1077,140 @@ fn a_deployment_scaled_to_zero_is_not_short_of_the_pods_it_no_longer_wants() {
     );
 }
 
+/// **The arm that sees a rollout whose new pods do not exist while every old one still answers**
+/// — `updated < desired`, and nothing in this file objected when it was read the other way round.
+///
+/// **`updatedReplicas` counts the pods on the template the workload is *told* to run**, so a
+/// Deployment whose template has changed and whose new ReplicaSet has not been scaled up counts
+/// none of the pods it has. Both other arms read whole there: `readyReplicas` is the old pods,
+/// all of them answering, and `unavailableReplicas` is `sum(replicaset.spec.replicas) -
+/// available`, which is zero while nothing has been scaled up. [`short_of_pods`]' own doc names
+/// the **class** — *pods on the current template that were never created* — and the class is
+/// wider than the state below (NOTES § D82).
+///
+/// **This is a test of the helper and not of a card, and the difference matters** (NOTES § D120).
+/// The state planted is `kubectl rollout pause` followed by a change, which is how a release is
+/// staged: upstream creates no new ReplicaSet while a Deployment is paused, so the counters sit
+/// here until somebody resumes it — and **W2 can never reach this state on a card**, because a
+/// paused Deployment's `Progressing` reason is `DeploymentPaused` and [`rollout_gave_up`] returns
+/// on that before [`short_of_pods`] is called at all. It is chosen because it is *stable*: a
+/// human holds it open, so it is a state a test can name without racing a controller.
+///
+/// **The state where this arm decides something a reader sees is a timed-out surging rollout** —
+/// `ready 3 ≥ 3`, `updated 1 < 3`, `unavailable 1 > 0` — where the first and third arms are both
+/// true and this one picks the counter the evidence line prints. Naming it here so the next reader
+/// does not take the paused plant for the whole of what the arm is for; W2's own tests above cover
+/// the card.
+///
+/// **And the screen stays quiet, which is asserted rather than assumed**: being short of pods is
+/// not on its own a card, the same way `a_deployment_scaled_to_zero_…` is not.
+///
+/// **A plant, and it says so** (NOTES § D112, § D40): `just fixtures` photographs Deployments at
+/// rest and this one is held open by a human, so the trip cannot bring it. **Seven fields move
+/// together** on a decoded copy of `healthy-deploy` — `spec.paused`, `status.updatedReplicas`, and
+/// the `Progressing` condition's status, reason, message **and both of its stamps** — because a
+/// copy carrying some of them is a shape no cluster emits, which is the class [`timed_out`] above
+/// already had to learn.
+///
+/// **Five of the seven are measured and two are derived, and the difference is worth stating.**
+/// The counters, the status, the reason and the message are a real paused Deployment's, field for
+/// field (`reports/2026-08-20-pod-rule-family-clocks-and-host-mounts.md` § 2). The two **stamps**
+/// are not: a review cluster's wall clock is not a value this corpus can carry, so they are
+/// derived from the capture's own `Progressing` condition by upstream's rule for them —
+/// `NewDeploymentCondition` writes both at one instant, and `SetDeploymentCondition` preserves
+/// `lastTransitionTime` only when `Status` does not move. The committed JSON is never touched
+/// (NOTES § D53).
+#[test]
+fn a_rollout_whose_new_pods_were_never_created_is_short_while_every_old_one_answers() {
+    let deployments = fixture("deployments");
+    let raw = captured_item(&deployments, "healthy-deploy");
+    assert_eq!(
+        (
+            raw["spec"]["replicas"].as_i64(),
+            raw["status"]["readyReplicas"].as_i64(),
+            raw["status"]["updatedReplicas"].as_i64(),
+            raw["status"]["unavailableReplicas"].as_i64(),
+        ),
+        (Some(2), Some(2), Some(2), None),
+        "the base is a Deployment at rest with every counter whole, and this test is only \
+         about something while it is"
+    );
+    let at_rest = deployment_but("healthy-deploy", |_| {});
+    assert!(
+        !short_of_pods(&at_rest),
+        "the negative first: two of two ready, two of two on the template it was told to run"
+    );
+
+    // **The instant the pause landed, derived and not invented.** The capture's `Progressing`
+    // stamps are the newest thing it holds about this object, and the pause is later than them by
+    // however long the release sat healthy — the review's own two reads were 15 s apart
+    // (`reports/2026-08-20-…` § 2), which is as good a number as any and the only one measured.
+    // Nothing here reads the value: W2 never draws on a paused Deployment, so what the plant owes
+    // is the *shape* — one instant in both fields, later than the pair it replaces — and the
+    // derivation is that shape. **There is deliberately no assertion on it**: a line that re-reads
+    // the field the plant just wrote cannot fail, which is the one thing a test may not be
+    // (CLAUDE.md § Tests must not lie).
+    let progressing = captured_condition(raw, "Progressing");
+    let was = |field: &str| captured_time(progressing, &[field]);
+    let paused_at = Time(
+        was("lastUpdateTime")
+            .0
+            .max(was("lastTransitionTime").0)
+            .checked_add(SignedDuration::from_secs(15))
+            .expect("a moment after a captured condition"),
+    );
+
+    let paused_mid_change = deployment_but("healthy-deploy", |d| {
+        d.spec
+            .as_mut()
+            .expect("a captured Deployment has a spec")
+            .paused = Some(true);
+        // `updatedReplicas` is `omitempty`, so what the watch delivers at zero is an absent
+        // field — which is also the direction `unwrap_or(0)` has to read it in.
+        d.status
+            .as_mut()
+            .expect("a captured Deployment has a status")
+            .updated_replicas = None;
+        // **Both stamps move, because upstream moves both.** `NewDeploymentCondition` writes
+        // `lastUpdateTime` and `lastTransitionTime` at one instant, and `SetDeploymentCondition`
+        // only carries the old `lastTransitionTime` forward when the `Status` does **not** change
+        // — here it goes `True → Unknown`, so neither is preserved. The first draft of this plant
+        // kept both of the *progressing* condition's stamps beside a paused reason, which is the
+        // shape `timed_out`'s own doc says no cluster emits.
+        let c = deployment_condition(d, "Progressing");
+        c.status = "Unknown".to_string();
+        c.reason = Some("DeploymentPaused".to_string());
+        c.message = Some("Deployment is paused".to_string());
+        c.last_transition_time = Some(paused_at.clone());
+        c.last_update_time = Some(paused_at.clone());
+    });
+    println!(
+        "paused mid-change: desired={:?} ready={:?} updated={:?} unavailable={:?}",
+        paused_mid_change.desired,
+        paused_mid_change.ready,
+        paused_mid_change.updated,
+        paused_mid_change.unavailable
+    );
+    assert!(
+        paused_mid_change.ready >= paused_mid_change.desired
+            && paused_mid_change.unavailable.unwrap_or(0) == 0,
+        "the two other arms read whole here, or the arm under test is not what answers"
+    );
+    assert!(
+        short_of_pods(&paused_mid_change),
+        "a workload none of whose pods are on the template it was told to run is short of \
+         them, however many of the old ones are still answering (D82)"
+    );
+
+    let all = analyze(&with_workloads(Vec::new(), vec![paused_mid_change]));
+    show(&all);
+    nothing(
+        &all,
+        "and being short of pods is not on its own a card: a paused rollout is a human \
+         holding a release open, and W2 asks first whether the controller gave up",
+    );
+}
+
 /// **A ReplicaSet is not short of pods for having no `updatedReplicas`** (NOTES § D82).
 ///
 /// [`short_of_pods`] is a general-looking helper on the shared [`WorkloadSnapshot`], and W2's kind

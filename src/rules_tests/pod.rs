@@ -744,6 +744,30 @@ fn an_old_kill_on_a_container_that_has_been_fine_since_is_not_on_the_broken_now_
          its limit is right is a memory-limit question for the Capacity report (D2)",
     );
 
+    // **The rung itself, which is what neither moment above stands on.** Five minutes and a month
+    // agree with any threshold between them; the clause reads *older than* [`NOT_READY_GRACE`],
+    // so at exactly ten minutes the kill is still news and one second later it is not, and that
+    // pair agrees with ten and nothing else. **Ten is written out rather than read off the
+    // constant**, for the reason `a_pod_out_of_the_service_…` gives about rule 7's own pair: a
+    // boundary computed from the value under test cannot disagree with it.
+    let a_second_past_the_grace = Time(
+        after(10)
+            .0
+            .checked_add(SignedDuration::from_secs(1))
+            .expect("a second after a captured moment"),
+    );
+    assert_eq!(
+        findings_at(&["oomserving"], after(10)).len(),
+        1,
+        "a kill exactly ten minutes old has not aged out yet — serving again is half of what \
+         stands rule 2 down and the age is the other half (D100)"
+    );
+    nothing(
+        &findings_at(&["oomserving"], a_second_past_the_grace),
+        "and one second past it, it has: the two together are what make ten minutes the rung \
+         rather than whatever the code happens to hold",
+    );
+
     // The other direction, and the reason `doing_its_job` alone is the wrong suppressor:
     // the kill is inside the grace, so it is news.
     let all = findings_at(&["oomserving"], after(5));
@@ -1064,6 +1088,178 @@ fn a_pod_out_of_the_service_is_only_a_finding_once_it_has_been_that_way_a_while(
     assert!(
         container(&pod("readiness"), "app").started,
         "the positive fixture has to be past its startup for this rule to reach it"
+    );
+}
+
+/// **Rule 7's floor read the other way round, and this is the commoner of the two shapes** — a
+/// container that has been up for an hour whose readiness probe has just started failing.
+///
+/// The test above has the capture where the container is *younger* than the pod's `Ready`
+/// condition, and asserts the card is dated to the container. Here the run began long before the
+/// pod went unready, so the floor must not apply and the card is dated to the **condition**.
+/// **Without both directions, `max(began, unready_since)` and `began` unconditionally are the same
+/// test** — and the difference is a card that says a container has been out of the Service for an
+/// hour when it has been out for ten minutes.
+///
+/// **The clock is the second half, and it is the half that decides whether the card exists at
+/// all.** Read off the container's start, this pod is an hour past the grace and draws; read off
+/// the condition, it draws only just past ten minutes in. So the pair below is one moment either
+/// side of the *condition's* window, which nothing but the floor being right can produce.
+///
+/// **A plant, and it says so** (NOTES § D112). No capture holds it: `broken-readiness` is a
+/// `sleep 3600` behind an `exit 1` readiness probe on a five-second period
+/// (`scripts/broken.yaml`), so its run and its `Ready` transition are seconds apart by
+/// construction, and an hour of healthy serving before a probe turns is an hour no capture trip
+/// has (NOTES § D53). One field moves on a decoded copy — the container's `startedAt`.
+#[test]
+fn a_probe_that_turns_on_a_long_running_container_is_dated_to_the_pod_and_not_the_run() {
+    let raw = fixture("readiness");
+    let unready_since = captured_time(captured_condition(&raw, "Ready"), &["lastTransitionTime"]);
+    let long_up = Time(
+        unready_since
+            .0
+            .checked_sub(SignedDuration::from_mins(60))
+            .expect("an hour before a captured condition is a moment"),
+    );
+    let serving_for_an_hour = capture_but("readiness", |p| {
+        container_status(p, "app")
+            .state
+            .as_mut()
+            .and_then(|s| s.running.as_mut())
+            .expect("the capture's container is running")
+            .started_at = Some(long_up.clone());
+    });
+    assert!(
+        began_running(&serving_for_an_hour, "app").0 < unready_since.0,
+        "the plant is only this shape while the run began *before* the pod went unready"
+    );
+
+    let after = |mins: i64, secs: i64| {
+        Time(
+            unready_since
+                .0
+                .checked_add(SignedDuration::from_mins(mins) + SignedDuration::from_secs(secs))
+                .expect("a moment after a captured condition"),
+        )
+    };
+    let read_at = |moment: Time| {
+        let all = analyze(&pods_at(vec![serving_for_an_hour.clone()], moment.clone()));
+        show_at(&all, &moment);
+        all
+    };
+
+    nothing(
+        &read_at(after(10, 0)),
+        "ten minutes out of the Service is a readiness probe with an `initialDelaySeconds` — \
+         and an hour of healthy serving before it is not time this pod has been broken for",
+    );
+
+    let all = read_at(after(10, 1));
+    assert_eq!(all.len(), 1, "rule 7 alone, as above: {:?}", titles(&all));
+    let unready = only(&all, "broken-readiness", "not receiving traffic");
+    assert_eq!(
+        unready.timestamp,
+        Some(unready_since.clone()),
+        "the floor is the *later* of the two, and here that is the pod's own condition: a card \
+         dated to the run would tell the reader this has been broken for an hour"
+    );
+    assert_ne!(
+        unready.timestamp,
+        Some(long_up),
+        "and the run's own start is what it must not be"
+    );
+}
+
+/// **The tie — the run began at the very moment the pod went unready** — and the third cell of a
+/// floor that has three.
+///
+/// **This test cannot fail on the spelling of the floor, and that is deliberate** (NOTES § D119).
+/// At a tie every reading of *the later of the two* returns the same instant, which is exactly
+/// why the hand-written `>` was an equivalent mutant and why [`Ord::max`] replaced it: a test
+/// that objected to `>=` here would be a test asserting something the object cannot tell apart.
+/// **Its job is to pin the behaviour, not to kill a mutant** — so that the next rewrite of that
+/// line has something to break. What it does catch is a `since` that stops being either of the
+/// two moments: a card dated by the read, by the pod's arrival, by anything else.
+///
+/// **`PodScheduled` moves too, and the first draft of this test did not move it.** The capture
+/// stamps `PodScheduled` and `Ready` on the same second — this pod failed its first probe in the
+/// second it was placed — so a `since` read off the arrival was indistinguishable here, and the
+/// sentence above was claiming something the object could not tell apart. A minute earlier is
+/// both the ordinary shape and what makes the claim true.
+///
+/// **Both halves, because the floor decides two things.** The stamp on the card *and* the moment
+/// the grace is counted from — a rewrite that moved `since` without moving the card's date would
+/// pass on the first assertion alone.
+///
+/// **A plant, and it says so** (NOTES § D112). Two independently written stamps landing on the
+/// same second is not something a capture trip can be asked for; one field moves on a decoded
+/// copy of `readiness.json`, and the value it moves to is the capture's own (NOTES § D53).
+#[test]
+fn a_run_that_began_exactly_when_the_pod_went_unready_is_dated_to_that_moment() {
+    let raw = fixture("readiness");
+    let unready_since = captured_time(captured_condition(&raw, "Ready"), &["lastTransitionTime"]);
+    let arrived = Time(
+        unready_since
+            .0
+            .checked_sub(SignedDuration::from_mins(1))
+            .expect("a minute before a captured condition is a moment"),
+    );
+    let dead_heat = capture_but("readiness", |p| {
+        container_status(p, "app")
+            .state
+            .as_mut()
+            .and_then(|s| s.running.as_mut())
+            .expect("the capture's container is running")
+            .started_at = Some(unready_since.clone());
+        scheduled_condition(p).last_transition_time = Some(arrived.clone());
+    });
+    assert_ne!(
+        dead_heat
+            .scheduled
+            .as_ref()
+            .and_then(|c| c.last_transition.as_ref()),
+        Some(&unready_since),
+        "the arrival has to be a third value, or *not dated by the pod's arrival* is a claim \
+         this object cannot carry"
+    );
+    assert_eq!(
+        began_running(&dead_heat, "app"),
+        unready_since,
+        "the tie is the shape under test, and the plant is only it while the two are equal"
+    );
+
+    let after = |mins: i64, secs: i64| {
+        Time(
+            unready_since
+                .0
+                .checked_add(SignedDuration::from_mins(mins) + SignedDuration::from_secs(secs))
+                .expect("a moment after a captured condition"),
+        )
+    };
+    let read_at = |moment: Time| {
+        let all = analyze(&pods_at(vec![dead_heat.clone()], moment.clone()));
+        show_at(&all, &moment);
+        all
+    };
+
+    nothing(
+        &read_at(after(10, 0)),
+        "the grace is counted from the tie like from either moment alone, and ten minutes \
+         unready is a probe with an `initialDelaySeconds`",
+    );
+
+    let all = read_at(after(10, 1));
+    assert_eq!(
+        all.len(),
+        1,
+        "rule 7 alone, as in both cells beside it: {:?}",
+        titles(&all)
+    );
+    assert_eq!(
+        only(&all, "broken-readiness", "not receiving traffic").timestamp,
+        Some(unready_since),
+        "and the card is dated to the instant both fields agree on — not to the moment it was \
+         read, and not to anything else the pod carries"
     );
 }
 
@@ -5886,7 +6082,7 @@ fn the_quote_frame_says_who_recorded_the_line_and_never_who_wrote_it() {
 /// that made the shape unthinkable.
 ///
 /// **A mistyped command is one of the commonest broken-pod states there is**, and it reaches
-/// rules 1, 6 and 15 alike, so the guard is in [`lasted`] where all three route through.
+/// rules 1, 5, 6 and 15 alike, so the guard is in [`lasted`] where all four route through.
 ///
 /// **What it is not is *ran for 0s***: nothing ran. The card says nothing about a duration, and
 /// the exit code and the message still carry the diagnosis.
@@ -5974,6 +6170,82 @@ fn a_container_that_never_started_is_not_one_that_ran_since_the_epoch() {
         Some("ran for 26s"),
         "and a run that did start is still measured — the epoch is the whole of what changed"
     );
+}
+
+/// **Every rung of the duration ladder, at the second it changes** — and the days division, which
+/// nothing in this file asserted at all.
+///
+/// **A plant, and it says so** (NOTES § D112). A container does not run for exactly 60 seconds or
+/// exactly 24 hours on a real cluster, so a rung boundary is a shape no capture can carry: what is
+/// under test is the arithmetic between two stamps, and the `Terminated` below is built with
+/// chosen ones. Nothing in `tests/fixtures` is touched, and what is planted is the shape the API
+/// really sends — two RFC3339 stamps on a run that ended (NOTES § D53, § D40).
+///
+/// **The rungs are read off the documents and not off what the code returns.** [`lasted`]'s own
+/// doc writes the four spellings — `2s`, `40 min`, `3 hours`, `6 days` — and the sub-second
+/// answer *"under a second"*; [`counted`] takes the singular at one and never pluralises `min`
+/// (NOTES § D68); and NOTES § D83 is where the days rung is set at **24** hours here against
+/// [`age`]'s 48, which is the one boundary a find-and-replace across the two would break.
+///
+/// **Asserted through [`ran_for`] beside [`lasted`], because that is the seam the rules reach.**
+/// [`crash_looping`], [`restarting_repeatedly`], [`previous_run_failed`] and [`stopped_for_good`]
+/// all print this number and none of them calls `lasted` itself, so a rung proved only on the
+/// inner helper is a rung proved on nothing a reader sees (NOTES § D29). **Four callers and not
+/// three** — rule 5 was given [`ran_for`] for [`one_card_per_action`]'s subset fold (NOTES § D113)
+/// and [`lasted`]'s own doc had not caught up, which is the side this comment first copied.
+#[test]
+fn every_rung_of_the_duration_ladder_is_asserted_at_the_second_it_changes() {
+    const MINUTE: i64 = 60;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+
+    let began = time("2026-08-16T00:00:00Z");
+    // A run of exactly `secs`, on a record that is otherwise the one all three rules read: a
+    // non-zero code beside `Error`, which is the ending that reaches every one of them.
+    let ran = |secs: i64| Terminated {
+        started_at: Some(began.clone()),
+        finished_at: Some(Time(
+            began
+                .0
+                .checked_add(SignedDuration::from_secs(secs))
+                .expect("a span the ladder has a rung for"),
+        )),
+        ..exited_run(1)
+    };
+
+    for (secs, spelling) in [
+        // The sub-second window is a fact rather than a refusal to answer: the run happened, and
+        // an instant crash is what rule 1 exists for. `age` says `just now` on the same span.
+        (0, "under a second"),
+        // ...and one whole second is already a number.
+        (1, "1s"),
+        (59, "59s"),
+        (MINUTE, "1 min"),
+        (HOUR - 1, "59 min"),
+        (HOUR, "1 hour"),
+        (2 * HOUR, "2 hours"),
+        (DAY - 1, "23 hours"),
+        // The rung `age` puts at 48 (NOTES § D83): a span is not a moment, and `30 hours` is not
+        // how long something ran for.
+        (DAY, "1 day"),
+        (2 * DAY, "2 days"),
+        (6 * DAY, "6 days"),
+    ] {
+        let run = ran(secs);
+        println!("{secs}s -> {:?} / {:?}", lasted(&run), ran_for(&run));
+        assert_eq!(
+            lasted(&run).as_deref(),
+            Some(spelling),
+            "{secs} seconds is {spelling:?} on the ladder `lasted`'s own doc writes down — a \
+             rung boundary read one value out is the duration on every card of three rules"
+        );
+        assert_eq!(
+            ran_for(&run),
+            Some(format!("ran for {spelling}")),
+            "and the one spelling every card carries is that rung behind the clause \
+             (NOTES § D113)"
+        );
+    }
 }
 
 /// **The commonest abnormal `lastState` any cluster produces, and it was reading as the
@@ -7204,6 +7476,112 @@ fn kube_systems_node_agents_and_static_pods_are_not_host_mount_findings() {
     );
 }
 
+/// **Rule 8's node-agent exemption is two conditions joined by `and`, and each half is
+/// load-bearing on its own** — the namespace **and** what runs the pod (NOTES § D70).
+///
+/// Read as an `or`, either half alone silences the writable escalator: everything anyone deploys
+/// into `kube-system` goes quiet whatever runs it, and every DaemonSet in the cluster goes quiet
+/// wherever it runs. The test above proves the exempt cell; the three that are not exempt are
+/// what say the `and` is an `and`, and no capture holds one of them.
+///
+/// **The DaemonSet outside `kube-system` is pinned as an open ruling, not asserted as a card
+/// anybody wants.** D70 records no requirement: it records a narrowing *correct on the cluster it
+/// was tested against and known to be wrong beyond it*, with its own example — a CSI driver in
+/// `longhorn-system` gets a card it has not earned — and closes by asking for evidence. What this
+/// cell holds is that the exemption cannot be **widened silently**: change it and this test says
+/// so, in the same turn, rather than a screen quietly going quiet. **The evidence D70 asked for
+/// has since arrived and points at narrowing rather than widening** (NOTES § D120), so this cell
+/// is expected to be rewritten by that ruling — it is written to be reversed, not to argue.
+///
+/// **A plant, and it says so** (NOTES § D112, § D40). `hostpath.json` is captured in `default`
+/// with no controller at all, and every committed pod that is DaemonSet-owned or mirrored is in
+/// `kube-system` — so three of the four cells are shapes the corpus cannot hold. The host volume
+/// is repointed at an ordinary writable directory because the other two escalators fire straight
+/// **through** this exemption and would otherwise answer for the cell under test; the
+/// `ownerReference` is lifted whole off a real node agent in `kube-system-pods.json` rather than
+/// invented, the way `adopted_by_broken_owned` does it. The committed JSON is never touched
+/// (NOTES § D53).
+///
+/// **So the middle card files under `default/kindnet`** — the header is the *owner*
+/// ([`Finding::owner`]), and the owner is the DaemonSet that reference names. That is the
+/// reference being a real one, not the plant being wrong: a DaemonSet called `kindnet` outside
+/// `kube-system` is exactly the cell under test.
+#[test]
+fn rule_eights_exemption_needs_the_namespace_and_the_controller_together() {
+    // A real controlling `DaemonSet` reference, off a real node agent — a synthesized one would
+    // be a shape nothing produced.
+    let node_agent_owner = items::<Pod>("kube-system-pods")
+        .into_iter()
+        .find_map(|p| {
+            p.metadata.owner_references.filter(|refs| {
+                refs.iter()
+                    .any(|o| o.kind == "DaemonSet" && o.controller == Some(true))
+            })
+        })
+        .expect("the kube-system capture holds a DaemonSet-owned pod");
+
+    // The captured host-mount pod, moved into `namespace` and given a controller or not, with
+    // its one host volume repointed at a directory that is neither the node's root nor anywhere
+    // near a runtime socket — [`host_volume_pod`]'s repointing, because it is the same one.
+    // `nosy` mounts it writable and `shipper` read-only, so exactly one card is on the table.
+    let mounted = |namespace: &str, daemonset: bool| {
+        let object = host_volume_pod("/var/lib/node-agent", None, |p| {
+            p.metadata.namespace = Some(namespace.to_string());
+            if daemonset {
+                p.metadata.owner_references = Some(node_agent_owner.clone());
+            }
+        });
+        analyze(&pods_at(vec![object], now()))
+    };
+
+    for (namespace, daemonset, why) in [
+        (
+            "default",
+            false,
+            "an ordinary pod writing to the machine under it is the whole of what rule 8's \
+             writable escalator is for",
+        ),
+        (
+            "default",
+            true,
+            "a DaemonSet outside `kube-system` is where D70's narrowing bites — a storage \
+             driver in `longhorn-system` gets this card — and the cell is pinned so that \
+             widening the exemption cannot happen without saying so, not because the card is \
+             wanted (NOTES § D120)",
+        ),
+        (
+            NODE_NAMESPACE,
+            false,
+            "and `kube-system` is not a blanket exemption either: a Deployment somebody put \
+             there is not a node agent, and its writable host mount is the same escalation it \
+             would be anywhere else",
+        ),
+    ] {
+        let all = mounted(namespace, daemonset);
+        show(&all);
+        // **The cell's own sentence goes on the assertion that fails when the cell flips**, which
+        // is the count: a widened exemption draws nothing here, and a failure has to print why
+        // this cell is supposed to speak rather than prose about an evidence line that is missing
+        // because there is no card at all. `shipper` mounts the same directory read-only, so one
+        // is also the number that says the read-only half stayed quiet.
+        assert_eq!(all.len(), 1, "{why} — got {:?}", titles(&all));
+        let card = only(&all, "broken-hostpath", "change files on the machine");
+        assert_eq!(card.severity, Severity::Critical, "{why}");
+        assert!(
+            card.evidence.contains("/var/lib/node-agent on the node")
+                && card.evidence.contains("writable"),
+            "the card names the path the container really got and the mode it got it in: {}",
+            card.evidence
+        );
+    }
+
+    nothing(
+        &mounted(NODE_NAMESPACE, true),
+        "both halves together, and only both, are the node agent the exemption is written for: \
+         kindnet and kube-proxy write to their node because that is their job (D70)",
+    );
+}
+
 // --- RULE 8'S SOCKET ESCALATOR, ON PLANTED MOUNTS ---
 //
 // No committed capture mounts a runtime socket — kind's own components have no reason
@@ -7221,7 +7599,17 @@ fn kube_systems_node_agents_and_static_pods_are_not_host_mount_findings() {
 /// reads the join and never `path` alone (NOTES § D46), so a socket assembled out of a
 /// directory and a file has to be swept beside the ones written whole.
 fn host_volume(path: &str, sub: Option<&str>) -> Vec<Finding> {
-    let pod = capture_but("hostpath", |p| {
+    analyze(&pods_at(vec![host_volume_pod(path, sub, |_| {})], now()))
+}
+
+/// The same plant as one object rather than as a screenful, with `and` run over the capture
+/// first — the seam
+/// [`rule_eights_exemption_needs_the_namespace_and_the_controller_together`] needs, because the
+/// cell it is asking about is *which pod* rather than *which path* and the repointing is the same
+/// repointing either way.
+fn host_volume_pod(path: &str, sub: Option<&str>, and: impl FnOnce(&mut Pod)) -> PodSnapshot {
+    capture_but("hostpath", |p| {
+        and(p);
         let spec = p.spec.as_mut().expect("a captured pod has a spec");
         let volume = spec
             .volumes
@@ -7243,8 +7631,7 @@ fn host_volume(path: &str, sub: Option<&str>) -> Vec<Finding> {
         {
             mount.sub_path = sub.map(str::to_string);
         }
-    });
-    analyze(&pods_at(vec![pod], now()))
+    })
 }
 
 /// **Every socket in the list, under both of its names and both of its writings.**

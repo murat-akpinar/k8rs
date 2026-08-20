@@ -1489,24 +1489,29 @@ that cites them expects to find them.
       asserted as *a card may not name what the spec never said* rather than as
       today's field values
       ([D112](NOTES.md#d112--laststateterminated-has-three-authors-and-the-file-was-reading-it-as-if-it-had-one-2026-08-16))
-- [ ] Per rule: positive fixture test **and** negative (healthy) fixture test
-- [ ] `cargo mutants --timeout 90` clean over `rules.rs` — a MISSED mutant is a
+- [x] Per rule: positive fixture test **and** negative (healthy) fixture test
+      Closed on an audit, not an assumption: **21 of 21 rules have both**, listed rule
+      by rule in the 2026-08-20 round. Nothing had to be written — the gaps the sweep
+      box found were boundaries inside rules that already had a pair, not missing
+      pairs. Every negative is an unmodified capture; the positives that are plants
+      say so
+      ([D119](NOTES.md#d119--the-last-surviving-mutant-was-equivalent-and-the-fix-is-to-stop-spelling-the-tie-by-hand-2026-08-20))
+- [x] `cargo mutants --timeout 90` clean over `rules.rs` — a MISSED mutant is a
       rule change no test objected to, i.e. a hole in the diagnosis; it gets a
       test, not an excuse. **It proves the rules' logic and not the decode
       beneath them**: it mutates return values and match guards, never a struct
       literal's field assignment, and on the snapshot decode it found 1 of the
       32 holes a hand-written field-level sweep found. That sweep is the gate
       for the decode.
-      **Run 2026-08-20, four shards (NOTES § D118): 558 mutants in 11m10s —
-      488 caught, 55 unviable, **15 MISSED**, so the gate is red and this box
-      stays open.** Where they are: `lasted` **10** (the humanised duration —
-      every rung boundary `<` vs `<=` vs `==`, and `/` vs `%` on the days
-      division; no unit boundary is asserted), `running_but_not_ready` **2**
-      (`3982` — the `began.0 > unready_since.0` guard, whose whole condition
-      also mutates to `true`), and one each in `out_of_memory` (`3231`, `>` vs
-      `>=`), `escalated_host_path` (`4207`, `&&` vs `||`) and `short_of_pods`
-      (`5830`, `<` vs `>`). Fifteen places where a test cannot fail; each gets a
-      test
+      **Closed 2026-08-20: 553 mutants, 498 caught, 55 unviable, 0 MISSED, 0
+      timeouts**, over four shards (NOTES § [D118](NOTES.md#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)),
+      run by the author and again by the PM with identical output. It opened at
+      15 misses — ten of them one defect, the duration ladder asserted at no rung
+      boundary. The fifteenth could not be killed by any test and was ruled
+      instead: it was an equivalent mutant, and the tie it turned on stopped
+      being spelled by hand
+      ([D119](NOTES.md#d119--the-last-surviving-mutant-was-equivalent-and-the-fix-is-to-stop-spelling-the-tie-by-hand-2026-08-20)).
+      The count falls 558 → 553 for that reason and the trade is recorded there
       ([NOTES § D41](NOTES.md#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12))
 - [ ] Temporary `main.rs` shell (~10 lines): load a fixture path from args,
       print findings. It cannot reach a cluster yet — `k8s.rs` is Phase 5, and
