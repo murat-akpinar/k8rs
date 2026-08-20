@@ -412,6 +412,19 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   on every screen is written down
   ([D128](NOTES.md#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)).
 
+- **`kind_node_re` is wider than the comment that justifies it.**
+  `scripts/sanitize.jq`'s `"k8rs-(control-plane|worker[0-9]*)(\.[a-z0-9-]+)*"`
+  allows *any* number of dotted labels, so `k8rs-worker.corp.example.com` is
+  accepted while the comment justifies only the single `.lan` the LAN host hands
+  out. No leak is constructible from it — the `k8rs-` prefix is this project's own
+  cluster name and `k8rs-review-control-plane` is still refused, proven live — and
+  `tester` was right to leave it: it is the **shared** regex
+  `refuse_foreign_identities` also reads, so it is per-box work
+  ([D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)),
+  and the one-character tightening `*` → `?` has a capture trip aborting
+  mid-redirect as its blast radius
+  ([D130](NOTES.md#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)).
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
