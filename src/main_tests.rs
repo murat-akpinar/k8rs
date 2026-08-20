@@ -55,6 +55,38 @@ fn items_in(name: &str) -> usize {
     items
 }
 
+/// **A committed `kind: List` capture with its items taken out**, written where [`load`] can
+/// read it back — and the emptiness belongs to this test rather than to a file.
+///
+/// `poddisruptionbudgets.json` and `persistentvolumeclaims.json` were the only two empty Lists
+/// in the corpus, and the test below read one of them *because* it was empty.
+/// `scripts/broken.yaml` fills both on the next capture trip, at which point that test would
+/// have had no input at all and both its assertions would have failed — found by running the
+/// binary, not by reading the test (NOTES § D129's second blocker, `tester`'s finding).
+///
+/// **A test whose subject is emptiness owns its emptiness.** The source is still a committed
+/// capture, so this is not hand-written JSON (CLAUDE.md § fixtures come from real cluster
+/// captures): what is removed is the array, and [`items_in`] asserts there was one to remove —
+/// otherwise a source that quietly became empty would make this helper a no-op and the test a
+/// tautology.
+fn emptied_list(name: &str) -> String {
+    assert!(items_in(name) > 0, "{name} had nothing to empty");
+    let text = std::fs::read_to_string(fixture(name)).expect("the fixture reads");
+    let mut doc: Value = serde_json::from_str(&text).expect("the fixture is JSON");
+    doc["items"] = Value::Array(Vec::new());
+    // The process id separates two `cargo test` runs and the thread id separates two callers
+    // inside one — `cargo test` runs tests as threads, so the pid alone would let a second
+    // test emptying this same source delete the file this one is about to read. The caller
+    // removes it the moment `load` has read it, so nothing survives the test either way.
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-empty-{name}-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::write(&path, doc.to_string()).expect("a temp file this test owns");
+    path.to_string_lossy().into_owned()
+}
+
 fn finding(severity: Severity, object: ObjectId) -> Finding {
     Finding {
         severity,
@@ -381,10 +413,19 @@ fn a_kind_no_rule_reads_is_counted_and_named() {
 }
 
 /// An empty list is not an error and not a skipped kind: nothing was in it.
+///
+/// **The input is [`emptied_list`]'s and not a fixture that happens to be empty** — see there
+/// for why, and for what running the binary found.
 #[test]
 fn an_empty_list_reads_as_nothing_at_all() {
-    let input = read(&["persistentvolumeclaims.json"]);
+    let path = emptied_list("services.json");
+    let input = load(std::slice::from_ref(&path), now()).expect("an empty list is not an error");
+    std::fs::remove_file(&path).expect("the temp file this test wrote");
 
+    // Every Service the source holds would have been counted as a kind no rule reads — the
+    // test one above asserts exactly that, off the same file — so `skipped` being empty here
+    // is the array's absence and nothing else. How many there are belongs to the cluster and
+    // is deliberately not written down (`items_in`).
     assert!(input.skipped.is_empty(), "{:?}", input.skipped);
     assert_eq!(
         render(&[], &input),

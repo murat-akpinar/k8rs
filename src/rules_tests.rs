@@ -280,6 +280,33 @@ const CAPTURED_PODS: [&str; 36] = [
     "wedged",
 ];
 
+/// **A snapshot on which nothing has been fetched** — the six on-demand lists all `None`, which
+/// is what every rule in `rules.rs` is handed and what a report reads as *nobody looked*
+/// (NOTES § D129). It exists to be spread over: `ClusterSnapshot` has no `Default` on purpose
+/// (`now` would have to be invented), so `..nothing_fetched()` is how a construction site says
+/// *and none of the report inputs*, in one line that a seventh field cannot silently escape.
+///
+/// **`now` is [`now`](now) and the three watched lists are empty**, so every site spreading this
+/// still writes the fields its own test is about — the spread only ever supplies the `None`s.
+fn nothing_fetched() -> ClusterSnapshot {
+    ClusterSnapshot {
+        now: now(),
+        pods: Vec::new(),
+        nodes: Vec::new(),
+        workloads: Vec::new(),
+        server_version: None,
+        context: None,
+        client_certificate: None,
+        namespace_scope: None,
+        replica_sets: None,
+        services: None,
+        endpoint_slices: None,
+        claims: None,
+        disruption_budgets: None,
+        certificate_requests: None,
+    }
+}
+
 /// The snapshot a rule would be handed if it ran over the whole committed capture at
 /// once: every pod, every node, the Deployments, and the pinned [`now`](now).
 fn fixture_snapshot() -> ClusterSnapshot {
@@ -305,6 +332,41 @@ fn fixture_snapshot() -> ClusterSnapshot {
         // `just fixtures` captures `-A`, so this snapshot covers the whole cluster
         // and N2 and N5 are allowed to run over it.
         namespace_scope: None,
+        // **The lists the reports fetch, decoded from the captures that hold one.** Three of
+        // the five are `Some(vec![])` because the fixture cluster genuinely has no such object
+        // — `poddisruptionbudgets.json` and `persistentvolumeclaims.json` are committed empty
+        // lists, and `endpointslices` is not captured at all — which is
+        // [`what_no_committed_capture_can_prove_about_family_cs_inputs`]'s subject, and
+        // NOTES § D129's second blocker.
+        // `certificate_requests` is `None` here on purpose: C3's fetch is a Phase 5 box, and
+        // the one committed CSR is read by its own test rather than smuggled into the snapshot
+        // every rule runs over.
+        replica_sets: Some(
+            items::<ReplicaSet>("healthy-replicasets")
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ),
+        services: Some(
+            items::<Service>("services")
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ),
+        endpoint_slices: None,
+        claims: Some(
+            items::<PersistentVolumeClaim>("persistentvolumeclaims")
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ),
+        disruption_budgets: Some(
+            items::<PodDisruptionBudget>("poddisruptionbudgets")
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ),
+        certificate_requests: None,
     }
 }
 
@@ -316,12 +378,7 @@ fn pods_at(pods: Vec<PodSnapshot>, now: Time) -> ClusterSnapshot {
     ClusterSnapshot {
         now,
         pods,
-        nodes: Vec::new(),
-        workloads: Vec::new(),
-        server_version: None,
-        context: None,
-        client_certificate: None,
-        namespace_scope: None,
+        ..nothing_fetched()
     }
 }
 

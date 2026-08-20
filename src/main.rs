@@ -186,6 +186,18 @@ fn load(paths: &[String], now: Time) -> Result<Input, String> {
             client_certificate: None,
             // Every namespace, as far as this input knows — the files are what they are.
             namespace_scope: None,
+            // **`None` and not `Some(vec![])`, and the difference is the whole point of the
+            // `Option`** (NOTES § D129): this driver dispatches on `kind` and reads no
+            // Service, EndpointSlice, PVC, PDB or CSR, so *nobody looked* is what happened —
+            // and an empty `Vec` would tell a report that nothing is wasted and nothing is
+            // waiting to join, which is the reassuring wrong answer. No rule in `rules.rs`
+            // reads any of these; the Phase 5 fetch is what fills them.
+            replica_sets: None,
+            services: None,
+            endpoint_slices: None,
+            claims: None,
+            disruption_budgets: None,
+            certificate_requests: None,
         },
         skipped: BTreeMap::new(),
     };

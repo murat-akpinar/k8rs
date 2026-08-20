@@ -151,6 +151,7 @@ its line moving with it.
 - [D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20) — the `Report` shape, the test that decided its fields, and the two panes it cannot express
 - [D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20) — the six panes, the one rendering of a missing metrics-server, and the badge that does not fit
 - [D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20) — the reports cannot see the helpers written for them, and the freeze is about logic and not visibility
+- [D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20) — the unblock turn: what the export gap actually cost, and eleven things two agents settled that no box had
 
 ## Why it exists — where the gap is
 
@@ -9756,6 +9757,128 @@ already recorded as a picture promising a row with no data path, so the
 Certificates producer leaves it out and the screen is not changed for it. C3's
 pending-CSR row is the same shape and the same phase — its `Option` field is
 `None` in Phase 4, which is exactly one `Row::NotComputed`.
+
+### D130 — the unblock turn: what the export gap actually cost, and eleven things two agents settled that no box had (2026-08-20)
+
+[D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20)'s
+ruling was carried out and its bounds held: **twelve** items widened, not the
+thirteen proposed — `charged` is reached through `promised`, `SUPPORTED_SKEW`
+through `kubelet_too_far_behind`, and `quantity_milli` has no decided Phase 4
+caller, so all three stayed private. Every changed line in `rules.rs` outside
+§ SNAPSHOT TYPES is a visibility keyword; three signatures became multi-line only
+because rustfmt reflowed them once `pub(crate) ` crossed 100 columns.
+
+**The proof went past what bound 3 asked for.** Green tests say the code still
+compiles; they do not say it still *answers the same*. HEAD was built from
+`git archive` into a scratch tree and both binaries run over all 55 committed
+fixtures: **148 lines, 29 cards, byte for byte identical**. That is the check a
+visibility change should always get, and it is cheap.
+
+**`rules.rs:11`'s `#![expect(dead_code, …)]` is what hid the export gap for a
+whole phase.** With it removed, `never used` prints for `group_key`,
+`SUPPORTED_SKEW`, `kubelet_too_far_behind`, `minor_version`, `node_overcommitted`,
+`promised` and `charged` — the entire N5 chain, written for a consumer that could
+not reach it. `pub(crate)` does not change that today. **The producer box deletes
+that line**: the moment Capacity and Versions call them the expectation goes
+unfulfilled and `-D warnings` rejects the attribute itself, which is
+[D38](#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)'s
+pre-authorised expiry firing exactly as designed.
+
+**The two fields box 1753 names landed as types and count toward nothing, and
+that is not the box closing.** `spec.overhead` and `status.allocatedResources`
+are decodable now, but `charged` and `promised` are frozen and read
+`cpu_request`; a Capacity report adding overhead *on top of* their answer makes
+the report and N5 disagree about one node, which is
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)'s
+named defect and the thing D129 exists to prevent. So the arithmetic is
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+question, whose first condition is a defect **proven on a committed capture** —
+and no captured pod has `spec.overhead`, because kind runs runc and nothing sets
+a RuntimeClass. **That evidence is capturable and the trip should produce it**: a
+RuntimeClass carrying `overhead.podFixed` and a pod naming it, since the
+RuntimeClass admission plugin writes `spec.overhead` whatever the handler is.
+Without that object the box's own stated reason — *a `spec`-only sum does not
+count what the scheduler counts* — can never be demonstrated, and a field nothing
+reads is not what the box asked for.
+
+**`spec.minAvailable` is deliberately not carried**, though
+[`todo.md`](todo.md) § Phase 5 names it. It is an `IntOrString` and
+`minAvailable: "50%"` is legal and common, so a row reading it prints *"wants at
+least 50% copies"* or nothing at all. The API server resolves it **and**
+`maxUnavailable` — which that box does not name — into `status.desiredHealthy`,
+so the status is the one source that is right for every PDB. The capture guard
+fixes both on one object (`minAvailable: 2` and `desiredHealthy: 2`), so the
+reading that is only sometimes correct stays visible.
+
+**Two planted reds did not fire on the first attempt, and that is the finding.**
+`status.allocatedResources` equals `status.resources.requests` on *every*
+committed capture — they diverge only inside the in-place-resize window — so a
+decode reading the neighbour was **green**. The same for the CSR:
+`csr-pending.json` is pending by construction (`make-csr.sh` refuses to write
+anything else), so `conditions: vec![]` and `issued: false` were indistinguishable
+from correct. Both were fixed under [D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12) —
+one field set on the committed capture, in the shape the field exists for. This
+is [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) one
+layer in: a fixture where two fields always agree cannot prove which one was read.
+
+**Four inputs no committed capture can prove, and a test that goes red when one
+lands.** `DisruptionBudgetSnapshot` and `ClaimSnapshot` decode only an empty
+list; `EndpointSliceSnapshot::from` has never run at all; and no captured pod
+carries `spec.overhead` or mounts a PVC. D40 does not reach them — it starts from
+a committed capture and there is no object to start from. The hole is held by one
+named test that **fails the moment the trip lands**, so it cannot be filled
+without its assertions being written.
+
+**The manifest side, and why each object is the one it is.**
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)
+rules out five of the six workloads for the PDB: a DaemonSet is skipped by a
+drain whatever the budget says, `broken-quota` has no pods, two more are blocked
+by being *unhealthy* rather than by their floor, and `broken-rollout` runs three
+pods against `replicas: 2` so *equal to the replica count* stops being readable
+off the object. `healthy-deploy` is the only one where all four numbers agree and
+the zero comes from the floor and nothing else. **The orphan PVC is a static
+`hostPath` PV with `storageClassName: ""` on both halves**, because kind's default
+class is `WaitForFirstConsumer`: a claim nothing mounts never gets a consumer, so
+the provisioner is never asked and it sits `Pending` — the wrong state under the
+right name.
+
+**The sanitizer already covered the new kind, and it was proven rather than
+assumed.** `.endpoints[].nodeName` is caught because `node_names` walks
+`.. | objects` at any depth rather than a fixed path — which is
+[D94](#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)'s
+design holding for a kind it had never seen. Deleting that one clause turned three
+cases red. **The proof is not committed**, and an uncommitted proof is not a gate.
+
+**A test that depended on a fixture staying empty.**
+`an_empty_list_reads_as_nothing_at_all` read `persistentvolumeclaims.json`
+*because* it was empty, and the manifest fills it — so the next capture would
+have broken a test nobody had touched. It now derives its empty list in memory
+from a real capture and asserts the source **had** items, so a source that
+quietly emptied makes the helper a no-op and the test a tautology. A test whose
+subject is emptiness owns its emptiness.
+
+**The smaller settlements, kept so a later box does not re-decide them.**
+`EndpointSliceSnapshot.endpoints` counts every endpoint, ready or not — a pod
+failing its readiness probe is Alerts' rule 7, and counting it as *nothing* here
+would put one pod on two screens saying two different things. `ClaimSnapshot`
+carries `status.capacity.storage` and not the spec request, because a volume
+expansion makes them disagree and the row bills the reader for the disk that
+exists. `CertificateRequestSnapshot` carries `conditions` rather than a
+`pending: bool` — approved-but-not-yet-issued is a real state a boolean flattens —
+and **`issued` is the bit, never the bytes**: no `spec.request`, no `spec.extra`,
+no `status.certificate` contents. `Selector` derives `Default` alone among the new
+types, because an absent `policy/v1` selector matches nothing and
+`Selector::default()` *is* that value. The new `use`s live inside § SNAPSHOT TYPES
+so that no line of the D129 diff falls outside the region it is bounded to.
+
+**And a measurement about the mutation gate itself.** Eleven mutants over ~470
+changed lines, 2 caught and 9 unviable — not vacuous, but not much either, and
+the reason matters: cargo-mutants replaces a function's **return value**, and a
+decode is a struct literal, so all it can offer is `Default::default()` for the
+whole impl. **It cannot swap one field for its neighbour**, which is this diff's
+entire defect class — the class that produced both non-firing reds above. The
+hand-planted reds are not redundant with the gate; here they are the only thing
+covering it.
 
 ## Decisions made
 

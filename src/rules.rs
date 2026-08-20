@@ -467,6 +467,29 @@ fn ran_for(run: &Terminated) -> Option<String> {
 // log lines": also `ownerReferences[].kind` and `.apiVersion`, `metadata.finalizers`, and
 // `status.conditions[].message`, which rule 10 renders whole by design (NOTES § D37).
 
+// **These `use`s are here and not at the top of the file on purpose.** NOTES § D129 widens
+// twelve names and permits nothing else outside this region, and the top-of-file import block is
+// outside it. A `use` is legal anywhere in a module body, so the fetched-list types arrive beside
+// the types that decode them and the D129 diff stays auditable — every line of it either a
+// visibility keyword or inside § SNAPSHOT TYPES.
+use k8s_openapi::Resource;
+use k8s_openapi::api::certificates::v1::{
+    CertificateSigningRequest, CertificateSigningRequestCondition,
+};
+use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Service};
+use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+
+/// The [`ObjectKind`] a generated API type names itself, read off the type rather than written
+/// out — `ObjectKind::from_api` is already the one place a `kind` string and its `apiVersion`
+/// become a variant (NOTES § D36, § D51), and a literal here would be a second copy of that
+/// mapping that no test compares against the first. `Service` answers `Other("Service")`,
+/// `PodDisruptionBudget` answers `Other("PodDisruptionBudget.policy")`.
+fn api_kind<T: Resource>() -> ObjectKind {
+    ObjectKind::from_api(T::API_VERSION, T::KIND)
+}
+
 /// One `status.conditions[]` entry, from whichever object carries it.
 ///
 /// Read by rule 10 (`PodScheduled`), N1 (`Ready` plus its `last_transition`), N3 (the
@@ -501,6 +524,7 @@ macro_rules! condition_from {
     )+ };
 }
 condition_from!(
+    CertificateSigningRequestCondition,
     PodCondition,
     NodeCondition,
     DeploymentCondition,
@@ -522,7 +546,11 @@ fn quantity(map: &Option<BTreeMap<String, Quantity>>, key: &str) -> Option<Strin
 /// What the container was actually **given**, falling back to what it asked for:
 /// `status.resources` is what was *enacted*, `spec` is what was *asked for*, and in-place
 /// resize makes the two disagree, so a spec-first read names a limit the container was never
-/// given (NOTES § D51). `status.allocatedResources` is deliberately not consulted.
+/// given (NOTES § D51). `status.allocatedResources` is deliberately not consulted **here** — it
+/// is a third number, what the kubelet reserved rather than what it enacted, and it has its own
+/// pair of fields for the Capacity report to read
+/// ([`ContainerSnapshot::allocated_cpu`], NOTES § D129). Nothing this function returns comes
+/// from it.
 ///
 /// **The fallback is per key, and upstream computes it the same way** — a key present on
 /// either side falls through rather than the whole side reading as "nothing was enacted"
@@ -724,6 +752,39 @@ pub struct ContainerSnapshot {
     /// Rule 2's evidence: "exceeded its 64Mi limit" — the limit it was actually running
     /// under, never the one a pending resize asked for ([`effective`]).
     pub memory_limit: Option<String>,
+    /// **The other half of the Capacity report's limits row** — the old rule 9 counts a
+    /// workload with *no CPU **or** memory limit*, and until this field there was only one of
+    /// the two to ask about (`screens/analysis.md` § Capacity, todo.md's Capacity box). Read
+    /// through [`effective`] like every other resource field, so a container answers with what
+    /// it is running under and not with what a pending resize asked for.
+    ///
+    /// **Prune line: `status.resources.limits.cpu` and `spec.containers[].resources.limits.cpu`
+    /// (and the init list), both of which the memory sibling already keeps** — one map key
+    /// wider, not one path wider.
+    ///
+    /// No rule in `rules.rs` reads it and none should: a CPU limit is a throttle, not a kill,
+    /// so there is no rule 2 for it (NOTES § D2). It is a report input.
+    pub cpu_limit: Option<String>,
+    /// **What the kubelet actually reserved for this container on the node**
+    /// (`status.allocatedResources`), which is a *third* number beside what the spec asks for
+    /// and what [`effective`] reports as enacted. Carried for the Capacity report under
+    /// NOTES § D42's window, named on its box for exactly this reason (NOTES § D46).
+    ///
+    /// **It diverges from the request during an in-place pod resize**, on the 1.33+ clusters
+    /// this project targets: the kubelet holds the old reservation until it has enacted the new
+    /// one, and a node's real commitment for that window is this number.
+    ///
+    /// **Nothing computes with it yet, and that is a decision and not an omission.**
+    /// [`charged`] and [`promised`] are frozen logic and read
+    /// [`cpu_request`](ContainerSnapshot::cpu_request); a Capacity report that added this on top
+    /// of their answer would make the report and N5 disagree about one node, which is the defect
+    /// NOTES § D46 names. Whether the arithmetic reads it is
+    /// [D124](../NOTES.md)'s question, not D129's.
+    ///
+    /// **Prune line: `status.containerStatuses[].allocatedResources`** — `cpu` and `memory`
+    /// keys, and **not** `allocatedResourcesStatus`, which is device health and is not this.
+    pub allocated_cpu: Option<String>,
+    pub allocated_memory: Option<String>,
 }
 
 /// A hostPath volume as one container actually mounts it. Rule 8 decides which of these is bad
@@ -813,10 +874,17 @@ pub struct PodSnapshot {
     /// containers reports the node healthy while four committed CPUs sit invisible
     /// (NOTES § D51).
     ///
-    /// Pod-level *limits* are not carried, and that is **a known gap, not a clean boundary** —
-    /// under the same KEP the limit that killed a container can sit on the pod while the
-    /// container declares none, and rule 2 would then say "exceeded its memory limit" with no
-    /// figure. The field can wait for Phase 4 under NOTES § D42.
+    /// **Pod-level limits are carried now**, beside these, and the gap this note used to record
+    /// closed only halfway (NOTES § D129). [`memory_limit`](PodSnapshot::memory_limit) and
+    /// [`cpu_limit`](PodSnapshot::cpu_limit) arrived for the Capacity report's limits row, inside
+    /// the Phase 4 window NOTES § D42 opens.
+    ///
+    /// **Rule 2 still does not read them, and that residual is live**: under the same KEP the
+    /// limit that killed a container can sit on the pod while the container declares none, and
+    /// rule 2 then says "exceeded its memory limit" with no figure. The rule is frozen and
+    /// changing what it reads is NOTES § D124's question — five conditions, a defect proven on a
+    /// capture — not D129's, which moves no logic. The field being here is what makes that box
+    /// cheap; it does not make it done.
     pub cpu_request: Option<String>,
     pub memory_request: Option<String>,
     /// `metadata.creationTimestamp` — **rule 14's clock, and the only age of an object any v1
@@ -890,6 +958,66 @@ pub struct PodSnapshot {
     pub node_selector: BTreeMap<String, String>,
     /// N6, the other half of "which taint is blocking it".
     pub tolerations: Vec<Toleration>,
+    /// `metadata.labels` — **the only way a PodDisruptionBudget can be joined to the pods it
+    /// protects**, and the Drain safety report is that join (NOTES § D129, § D42's window).
+    /// A PDB names its subject with a [`Selector`] and nothing else; without these a report
+    /// asking *would this drain finish* has no pods to ask it about, and the answer it would
+    /// give — *"node-1 is ready to drain"* — is a green light for an operation that then hangs.
+    ///
+    /// **Prune line: `metadata.labels`, kept whole.** A selector may name any key, so there is
+    /// no subset to keep — which is the one place this file's prune is a whole map rather than
+    /// a list of paths.
+    ///
+    /// **Untrusted free text on both sides** (invariant 9): a label key and its value are
+    /// user-supplied, and a report row naming one is a row built from them.
+    pub labels: BTreeMap<String, String>,
+    /// **The pod's own limits** (`spec.resources.limits`, KEP-2837) — the gap
+    /// [`cpu_request`](PodSnapshot::cpu_request) already named as *"a known gap, not a clean
+    /// boundary … the field can wait for Phase 4 under NOTES § D42"*, closed here.
+    ///
+    /// **The limits row counts a workload with no limit anywhere, so it has to ask both
+    /// levels**: a pod that declares its limits once, at pod level, decodes with all-`None`
+    /// containers, and a count that asks only the containers reports it as unlimited — the
+    /// same shape, one level up, that made an N5 summing containers call a node healthy with
+    /// four committed CPUs invisible (NOTES § D51).
+    ///
+    /// **They are read like the request and not like the container's** — straight off the pod
+    /// spec, with no [`effective`] fallback, because there is no pod-level `status.resources`
+    /// for one to fall back from.
+    ///
+    /// **Prune line: `spec.resources.limits`, `cpu` and `memory`** — beside the `requests` the
+    /// two fields above already keep.
+    pub cpu_limit: Option<String>,
+    pub memory_limit: Option<String>,
+    /// **`spec.overhead` — what the RuntimeClass costs the node before the pod's own containers
+    /// are counted**, and the scheduler charges it. A sandboxed runtime (Kata, gVisor) declares
+    /// one; a pod on the default runtime has none. Carried for the Capacity report under
+    /// NOTES § D42's window, named on its box (NOTES § D46).
+    ///
+    /// **A `spec`-only sum does not see it**, which is why the box named it: on a node full of
+    /// sandboxed pods the report and the scheduler disagree by the overhead of every pod on it.
+    ///
+    /// **Nothing computes with it yet**, for [`allocated_cpu`](ContainerSnapshot::allocated_cpu)'s
+    /// reason and with the same owner: [`charged`] is frozen, and a report adding overhead on
+    /// top of its answer is the report and N5 disagreeing about one node.
+    ///
+    /// **Prune line: `spec.overhead`, `cpu` and `memory`.** It is set by the RuntimeClass
+    /// admission plugin at create time and is immutable afterwards, so it never arrives late.
+    pub overhead_cpu: Option<String>,
+    pub overhead_memory: Option<String>,
+    /// **The PersistentVolumeClaims this pod mounts**, by name — `spec.volumes[]
+    /// .persistentVolumeClaim.claimName`. The Waste report's *"a disk was reserved for it and
+    /// no pod ever mounted it"* row is this list read from the other side: a claim named by no
+    /// pod in the snapshot is the claim nobody is using (`screens/analysis.md` § Waste).
+    ///
+    /// **A claim name is namespaced to the pod's own namespace** — a PVC cannot be mounted
+    /// across one — so the pod's namespace is the other half of the key and is not repeated
+    /// here.
+    ///
+    /// **Prune line: `spec.volumes[].persistentVolumeClaim.claimName`.** The `readOnly` flag
+    /// beside it is deliberately dropped: a claim mounted read-only is still mounted, and this
+    /// row asks only whether anything mounts it at all.
+    pub claims: Vec<String>,
 }
 
 /// A node taint, N6's other half.
@@ -1015,6 +1143,235 @@ pub struct WorkloadSnapshot {
     pub conditions: Vec<Condition>,
 }
 
+/// **Who a rule about a *set* of pods is about** — a `LabelSelector`, reduced. Read by the
+/// Drain safety report, which cannot join a PodDisruptionBudget to a node without it, and by
+/// nothing in `rules.rs`.
+///
+/// **Both halves, and the second one is the load-bearing one.** A selector written only with
+/// `matchExpressions` is legal and ordinary, and a reader that kept `matchLabels` alone would
+/// match no pod for it — so the PDB would look like one protecting nothing, and the report would
+/// call a node safe to drain that is not. That is the *silent* direction, which is the one this
+/// project refuses (NOTES § D46).
+///
+/// **Matching is the report's, not this type's** — the four operators are behaviour, and this
+/// layer stores the fact (the same line `HostPathMount` draws by holding `read_only` rather than
+/// "dangerous").
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Selector {
+    pub match_labels: BTreeMap<String, String>,
+    pub match_expressions: Vec<SelectorRequirement>,
+}
+
+/// One `matchExpressions[]` entry. `operator` is `In`, `NotIn`, `Exists` or `DoesNotExist`,
+/// carried as the API's own string: a reader that does not know an operator must match nothing
+/// and say so, which an enum with a fallback variant would express no better.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectorRequirement {
+    pub key: String,
+    pub operator: String,
+    /// Empty for `Exists` and `DoesNotExist`, which is what upstream requires of them.
+    pub values: Vec<String>,
+}
+
+impl From<LabelSelector> for Selector {
+    fn from(s: LabelSelector) -> Self {
+        Self {
+            match_labels: s.match_labels.unwrap_or_default(),
+            match_expressions: s
+                .match_expressions
+                .into_iter()
+                .flatten()
+                .map(|r| SelectorRequirement {
+                    key: r.key,
+                    operator: r.operator,
+                    values: r.values.unwrap_or_default(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// One PodDisruptionBudget — **the Drain safety report's whole subject**, and an on-demand fetch
+/// rather than a watch (invariant 6).
+///
+/// **Prune line: `metadata`, `spec.selector`, and `status.disruptionsAllowed`,
+/// `status.currentHealthy`, `status.desiredHealthy`.**
+///
+/// **`spec.minAvailable` is deliberately not carried, and `todo.md` § Phase 5 names it.** It is
+/// an `IntOrString`: `minAvailable: "50%"` is legal and common, and a row reading it would print
+/// *"wants at least 50% copies"* or, worse, fail to parse and print nothing. The API server
+/// resolves both spellings — and `maxUnavailable`, which the same box does not name — into
+/// [`desired_healthy`](DisruptionBudgetSnapshot::desired_healthy), so the status is the one
+/// source that is right for every PDB. Carrying the spec field as well would be a second source
+/// for one sentence, and the wrong one on a percentage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisruptionBudgetSnapshot {
+    pub id: ObjectId,
+    /// Which pods it protects. **An absent selector matches nothing** (upstream: a `null`
+    /// selector in `policy/v1` selects no pods, the reverse of `policy/v1beta1`), and
+    /// [`Selector::default`] is exactly that — an empty match-labels map with no expressions,
+    /// which a matcher reading it as *matches everything* would invert. The report owes that
+    /// reading a test.
+    pub selector: Selector,
+    /// **How many more pods may be evicted right now** — the controller's own answer, and the
+    /// one field that says *this drain blocks*. **`None` is not zero**: the field is absent
+    /// until the disruption controller has looked at this PDB, and reading that as zero calls
+    /// every freshly created budget blocking. `None` fires nothing.
+    pub disruptions_allowed: Option<i32>,
+    /// The two numbers the row's sentence is built from — *"wants at least 5 copies and has
+    /// exactly 5"*. Both `None` until the controller has computed them, for the reason above.
+    pub current_healthy: Option<i32>,
+    pub desired_healthy: Option<i32>,
+}
+
+impl From<PodDisruptionBudget> for DisruptionBudgetSnapshot {
+    fn from(p: PodDisruptionBudget) -> Self {
+        let status = p.status.unwrap_or_default();
+        Self {
+            id: object_id(api_kind::<PodDisruptionBudget>(), &p.metadata),
+            selector: p
+                .spec
+                .and_then(|s| s.selector)
+                .map(Selector::from)
+                .unwrap_or_default(),
+            disruptions_allowed: status.disruptions_allowed,
+            current_healthy: status.current_healthy,
+            desired_healthy: status.desired_healthy,
+        }
+    }
+}
+
+/// One Service — the Waste report's headline row, *the 503 nobody can explain*.
+///
+/// **Prune line: `metadata`, `spec.selector`.** Ports, type and cluster IP are not carried: the
+/// row asks whether anything answers this Service, not how it is reached.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServiceSnapshot {
+    pub id: ObjectId,
+    /// **A plain map, not a [`Selector`]** — a Service's selector is equality-only upstream,
+    /// with no `matchExpressions`, and giving it the richer type would invite a matcher that
+    /// looks for expressions no Service can have.
+    ///
+    /// **Empty is not a defect and the report may not treat it as one.** A Service with no
+    /// selector has its endpoints managed by hand or by another controller — `kubernetes` in
+    /// `default` is one on every cluster ever built — so *matches no pod* is not a thing to say
+    /// about it.
+    pub selector: BTreeMap<String, String>,
+}
+
+impl From<Service> for ServiceSnapshot {
+    fn from(s: Service) -> Self {
+        Self {
+            id: object_id(api_kind::<Service>(), &s.metadata),
+            selector: s.spec.and_then(|s| s.selector).unwrap_or_default(),
+        }
+    }
+}
+
+/// One EndpointSlice — **how the Waste report learns that a Service reaches nothing**, without
+/// matching a selector against every pod in the cluster.
+///
+/// **Prune line: `metadata` (the `kubernetes.io/service-name` label included) and
+/// `endpoints[].addresses`.** Ports, topology, zones and node names are not carried.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EndpointSliceSnapshot {
+    pub id: ObjectId,
+    /// The Service this slice belongs to, from the `kubernetes.io/service-name` label the
+    /// endpoint controller sets. `None` for a slice that carries no such label — hand-managed
+    /// slices exist — and a slice with no Service says nothing about any Service.
+    pub service: Option<String>,
+    /// **How many endpoints the slice holds, ready or not.** The row is *matches no pod*, so
+    /// what it asks is whether anything is behind the Service at all: a pod that exists and is
+    /// failing its readiness probe is Alerts' rule 7, already on the other screen, and counting
+    /// it as *nothing* here would put one pod on two screens saying two different things.
+    ///
+    /// A count and not the addresses: an address is a pod IP, it names no object the reader can
+    /// open, and this row has no use for one.
+    pub endpoints: usize,
+}
+
+impl From<EndpointSlice> for EndpointSliceSnapshot {
+    fn from(e: EndpointSlice) -> Self {
+        Self {
+            id: object_id(api_kind::<EndpointSlice>(), &e.metadata),
+            service: e
+                .metadata
+                .labels
+                .as_ref()
+                .and_then(|l| l.get("kubernetes.io/service-name"))
+                .cloned(),
+            endpoints: e.endpoints.into_iter().flatten().count(),
+        }
+    }
+}
+
+/// One PersistentVolumeClaim — the Waste report's *"a disk was reserved for it and no pod ever
+/// mounted it"*.
+///
+/// **Prune line: `metadata`, `status.phase`, `status.capacity.storage`.**
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimSnapshot {
+    pub id: ObjectId,
+    /// `Pending`, `Bound` or `Lost`. **The row is about a `Bound` claim nothing mounts** — a
+    /// `Pending` one has reserved no disk yet and is somebody else's problem, so the phase is
+    /// what keeps the report from billing the reader for storage that was never provisioned.
+    pub phase: Option<String>,
+    /// `status.capacity.storage` — **what was actually provisioned**, which is the number the
+    /// reader is billed for, and not `spec.resources.requests.storage`, which is what was asked
+    /// for. A volume expansion makes the two disagree, and the row says *"is 100 GiB nobody is
+    /// using"* about the disk that exists. Left as the API's string, like every quantity here.
+    pub capacity: Option<String>,
+}
+
+impl From<PersistentVolumeClaim> for ClaimSnapshot {
+    fn from(c: PersistentVolumeClaim) -> Self {
+        let status = c.status.unwrap_or_default();
+        Self {
+            id: object_id(api_kind::<PersistentVolumeClaim>(), &c.metadata),
+            phase: status.phase,
+            capacity: quantity(&status.capacity, "storage"),
+        }
+    }
+}
+
+/// One CertificateSigningRequest — **rule C3's input**, the kubelet that cannot join because
+/// nobody approved it (NOTES § Certificate rules).
+///
+/// **Prune line: `metadata`, `spec.signerName`, `status.conditions` and whether
+/// `status.certificate` is set.** **Never `spec.request`**, which is the CSR's PEM body, and
+/// never `spec.extra`, which carries the requester's credential id — `scripts/fixture-audit.sh`
+/// refuses both in a committed fixture and this type refuses them one layer earlier.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CertificateRequestSnapshot {
+    pub id: ObjectId,
+    /// Which signer was asked. The row says *kubelets*, not *certificates*, and this is the
+    /// only field that can tell one from the other:
+    /// `kubernetes.io/kube-apiserver-client-kubelet` is a node trying to join, and
+    /// `kubernetes.io/kube-apiserver-client` is a human asking for a kubeconfig.
+    pub signer_name: String,
+    /// `Approved`, `Denied` or `Failed`, as they arrived. **Pending is the absence of all
+    /// three**, which is why the conditions are carried rather than a `pending: bool`: the
+    /// verdict is the report's and the fact is this layer's, and an approved-but-not-yet-issued
+    /// request is a real state that a boolean would flatten into the row's count.
+    pub conditions: Vec<Condition>,
+    /// Whether `status.certificate` is set — **the bit, never the bytes**. A signed certificate
+    /// is public, but nothing on this screen prints one, and a field nothing reads is a field
+    /// that ends up in a `Debug` line (invariant 8).
+    pub issued: bool,
+}
+
+impl From<CertificateSigningRequest> for CertificateRequestSnapshot {
+    fn from(c: CertificateSigningRequest) -> Self {
+        let status = c.status.unwrap_or_default();
+        Self {
+            id: object_id(api_kind::<CertificateSigningRequest>(), &c.metadata),
+            signer_name: c.spec.signer_name,
+            conditions: conditions(status.conditions),
+            issued: status.certificate.is_some(),
+        }
+    }
+}
+
 /// Everything a rule may read, at one instant.
 ///
 /// Assembled by `k8s.rs` from the watch streams (Phase 5), never decoded from a single API
@@ -1071,6 +1428,58 @@ pub struct ClusterSnapshot {
     /// namespace-scoped view of a big one decode identically — a **silent miss**
     /// (NOTES § D43, § D46).
     pub namespace_scope: Option<String>,
+
+    // --- THE LISTS A REPORT FETCHES WHEN ITS PANE OPENS ---
+    //
+    // **Six `Option`s, and `None` is exactly one [`Row::NotComputed`]** — the state
+    // `screens/analysis.md` § *What each report needs* gives every report on that screen. The
+    // precedent is [`server_version`](ClusterSnapshot::server_version) one field up, whose doc
+    // already reads *`None` means it could not be read, and N4 says so instead of comparing
+    // against a guess*; these say it in a row instead of in a card.
+    //
+    // **`None` is not "empty".** *Nothing to find* is `Some(vec![])` and is an answer — every
+    // Service reaches a pod, nothing is waiting to join — while `None` is *nobody looked, or
+    // looking was refused*, and drawing the first for the second teaches a reader their cluster
+    // is clean when it is unread. That is the same distinction NOTES § D127 refused to let the
+    // sidebar badge carry, arriving one layer lower, and it is why none of these is a bare
+    // `Vec`.
+    //
+    // **None of them is watched** (invariant 6): the permanent watch is Pods, Nodes and the
+    // three workload kinds, and ReplicaSets are fetched on demand and never watched. `k8s.rs`
+    // fills these when the pane opens — todo.md § Phase 5, *the typed lists `analysis.rs`
+    // needs* — and **no rule in this file reads one**. A producer never runs on partial input:
+    // a report whose fetch is still in flight has no `Report` at all, it has `views.rs` drawing
+    // the loading pane (`analysis.rs` § *Three states, not two*).
+    /// The Waste report's *ReplicaSets parked at 0 replicas*. **[`WorkloadSnapshot`] again and
+    /// not a new type** — a ReplicaSet already decodes into it, `desired` and `ready` are the
+    /// two numbers the row reads, and a second type would be a second decode of one object.
+    ///
+    /// Separate from [`workloads`](ClusterSnapshot::workloads) because that field is the
+    /// permanent watch and this one is a fetch: folding them would make every W-series rule run
+    /// over ReplicaSets the moment a report opened, which is a rule set changing behaviour
+    /// because a pane was opened.
+    pub replica_sets: Option<Vec<WorkloadSnapshot>>,
+    /// Waste, the Service half of *matches no pod*.
+    pub services: Option<Vec<ServiceSnapshot>>,
+    /// Waste, the other half — a Service with a selector and no endpoint behind it.
+    ///
+    /// **Two fields and one row, so both must be `Some` for it to draw.** Services present and
+    /// slices missing reads as *every Service matches nothing*, which is the loudest possible
+    /// wrong answer; the report owes that pairing a test.
+    pub endpoint_slices: Option<Vec<EndpointSliceSnapshot>>,
+    /// Waste, the disk nobody mounted. Joined against [`PodSnapshot::claims`].
+    pub claims: Option<Vec<ClaimSnapshot>>,
+    /// Drain safety's whole subject. Joined to pods through [`DisruptionBudgetSnapshot::selector`]
+    /// and [`PodSnapshot::labels`].
+    pub disruption_budgets: Option<Vec<DisruptionBudgetSnapshot>>,
+    /// Rule C3's input — the pending-CSR row of the Certificates report.
+    ///
+    /// **`None` through the whole of Phase 4, on purpose** (NOTES § D129): fetching it is a
+    /// Phase 5 box, so the Certificates producer draws one [`Row::NotComputed`] where that row
+    /// would be and the pane is honest about it. `list certificatesigningrequests` is a
+    /// cluster-scoped verb most namespaced roles do not have, so `None` is also the ordinary
+    /// answer on a real cluster and not only the not-yet-built one.
+    pub certificate_requests: Option<Vec<CertificateRequestSnapshot>>,
 }
 
 fn object_id(kind: ObjectKind, meta: &ObjectMeta) -> ObjectId {
@@ -1182,6 +1591,7 @@ fn container_snapshots(
             let requested = declared.and_then(|c| c.resources.as_ref());
             // What the node actually enacted, which is not always what the spec asks for.
             let enacted = s.resources;
+            let allocated = s.allocated_resources;
             // `restartPolicy: Always` on an *init* container is the native sidecar. The regular
             // list is not asked because a regular container answers `Regular` either way, which
             // is a statement about our own behaviour rather than a bet on upstream's
@@ -1217,6 +1627,13 @@ fn container_snapshots(
                 cpu_request: effective(enacted.as_ref(), requested, |r| &r.requests, "cpu"),
                 memory_request: effective(enacted.as_ref(), requested, |r| &r.requests, "memory"),
                 memory_limit: effective(enacted.as_ref(), requested, |r| &r.limits, "memory"),
+                cpu_limit: effective(enacted.as_ref(), requested, |r| &r.limits, "cpu"),
+                // The kubelet's own reservation, straight off the status: there is no spec
+                // counterpart for it to fall back to, which is what makes it a third number
+                // rather than another reading of the first two
+                // ([`ContainerSnapshot::allocated_cpu`]).
+                allocated_cpu: quantity(&allocated, "cpu"),
+                allocated_memory: quantity(&allocated, "memory"),
             }
         })
         .collect()
@@ -1308,6 +1725,18 @@ impl From<Pod> for PodSnapshot {
                 .or(spec.termination_grace_period_seconds),
             finalizers: metadata.finalizers.unwrap_or_default(),
             host_path_mounts,
+            labels: metadata.labels.unwrap_or_default(),
+            cpu_limit: pod_resources.and_then(|r| quantity(&r.limits, "cpu")),
+            memory_limit: pod_resources.and_then(|r| quantity(&r.limits, "memory")),
+            overhead_cpu: quantity(&spec.overhead, "cpu"),
+            overhead_memory: quantity(&spec.overhead, "memory"),
+            claims: spec
+                .volumes
+                .iter()
+                .flatten()
+                .filter_map(|v| v.persistent_volume_claim.as_ref())
+                .map(|c| c.claim_name.clone())
+                .collect(),
             node_selector: spec.node_selector.unwrap_or_default(),
             tolerations: spec
                 .tolerations
@@ -1504,7 +1933,7 @@ const OVERDUE_MARGIN: SignedDuration = SignedDuration::from_secs(60);
 
 /// The namespace whose CNI, kube-proxy and control-plane pods mount the node on purpose —
 /// see [`escalated_host_path`].
-const NODE_NAMESPACE: &str = "kube-system";
+pub(crate) const NODE_NAMESPACE: &str = "kube-system";
 
 /// **Every control socket that is the machine.** A process that can talk to one of these can
 /// start a privileged container on the node, so a **read-only** bind of it is still full root —
@@ -2031,7 +2460,7 @@ fn listed(names: &[String]) -> String {
 /// and it does not. The Alerts half named the **Waste** report as where those counts go, and that
 /// report does not exist and would not hold them: its charter is Evicted/Completed *pileups*, not
 /// a per-pod diagnosis. What is true is that the pod leaves this screen and reaches no other.
-fn finished(pod: &PodSnapshot) -> bool {
+pub(crate) fn finished(pod: &PodSnapshot) -> bool {
     matches!(pod.phase.as_deref(), Some("Succeeded" | "Failed"))
 }
 
@@ -4624,7 +5053,7 @@ fn escalated_host_path(pod: &PodSnapshot) -> Vec<Finding> {
 /// `..` is deliberately **not** resolved — upstream rejects it in both a hostPath and a subPath,
 /// and if one ever arrived, leaving it in the string matches no escalator and lands in the
 /// writable branch, the safe direction.
-fn mounted_path(m: &HostPathMount) -> String {
+pub(crate) fn mounted_path(m: &HostPathMount) -> String {
     let narrowing = m
         .sub_path
         .as_deref()
@@ -4666,7 +5095,7 @@ fn mounted_path(m: &HostPathMount) -> String {
 /// carries `/var/run` as the symlink it is — `/run` on some hosts, `../run` on others — and
 /// either form resolves inside the container's own mount namespace. The fold is `/var`-only and
 /// one-directional, not a symlink resolver (NOTES § D78, § D79).
-fn is_runtime_socket(path: &str) -> bool {
+pub(crate) fn is_runtime_socket(path: &str) -> bool {
     let path = path.strip_prefix("/var").unwrap_or(path);
     !path.is_empty()
         && RUNTIME_SOCKETS.iter().any(|socket| {
@@ -5411,7 +5840,10 @@ fn node_condition<'a>(node: &'a NodeSnapshot, type_: &str) -> Option<&'a Conditi
 
 /// The pods this node is carrying that are still a going concern — the join N1, N2 and N5 are.
 /// A pod that finished is charged to nobody and was not *running* anywhere ([`finished`]).
-fn pods_on<'a>(snapshot: &'a ClusterSnapshot, node: &NodeSnapshot) -> Vec<&'a PodSnapshot> {
+pub(crate) fn pods_on<'a>(
+    snapshot: &'a ClusterSnapshot,
+    node: &NodeSnapshot,
+) -> Vec<&'a PodSnapshot> {
     snapshot
         .pods
         .iter()
@@ -5435,7 +5867,7 @@ fn pods_on<'a>(snapshot: &'a ClusterSnapshot, node: &NodeSnapshot) -> Vec<&'a Po
 /// The two filters that are deliberately **not** here are `localStorageFilter` and
 /// `unreplicatedFilter`: those make a drain *refuse* rather than skip, which is more reason to
 /// count the pod, not less.
-fn a_drain_would_move(pod: &PodSnapshot) -> bool {
+pub(crate) fn a_drain_would_move(pod: &PodSnapshot) -> bool {
     !pod.mirror && pod.owner.kind != ObjectKind::DaemonSet && pod.deletion_timestamp.is_none()
 }
 
@@ -5674,7 +6106,10 @@ fn node_running_low(node: &NodeSnapshot) -> Option<Finding> {
 /// **`get nodes -o wide` and not `kubectl version`**: the number this card is *about* is this
 /// node's kubelet, which that command prints for every node at once; the control-plane half is
 /// `kubectl version`, and no single command shows both (invariant 4).
-fn kubelet_too_far_behind(server_version: Option<&str>, node: &NodeSnapshot) -> Option<Finding> {
+pub(crate) fn kubelet_too_far_behind(
+    server_version: Option<&str>,
+    node: &NodeSnapshot,
+) -> Option<Finding> {
     let (server_major, server_minor) = minor_version(server_version?)?;
     let kubelet = node.kubelet_version.as_deref()?;
     let (major, minor) = minor_version(kubelet)?;
@@ -5713,7 +6148,7 @@ fn kubelet_too_far_behind(server_version: Option<&str>, node: &NodeSnapshot) -> 
 /// `v1.36.1` → `(1, 36)`, and `v1.29.7-gke.1104000` → `(1, 29)` — the major and minor of a version
 /// string, which is all N4 compares. Anything that does not start with two numbers answers `None`
 /// and N4 says nothing rather than guessing at a distance.
-fn minor_version(version: &str) -> Option<(u32, u32)> {
+pub(crate) fn minor_version(version: &str) -> Option<(u32, u32)> {
     let mut parts = version.trim_start_matches('v').split('.');
     let number = |part: Option<&str>| -> Option<u32> {
         let digits: String = part?.chars().take_while(char::is_ascii_digit).collect();
@@ -5734,7 +6169,10 @@ fn minor_version(version: &str) -> Option<(u32, u32)> {
 /// **The arithmetic is [`charged`]'s**, and its two traps are what the rule is for: a native
 /// sidecar is *added* rather than maxed, and a pod-level request **replaces** the container sum
 /// rather than adding to it (NOTES § D46, § D51).
-fn node_overcommitted(snapshot: &ClusterSnapshot, node: &NodeSnapshot) -> Option<Finding> {
+pub(crate) fn node_overcommitted(
+    snapshot: &ClusterSnapshot,
+    node: &NodeSnapshot,
+) -> Option<Finding> {
     if snapshot.namespace_scope.is_some() {
         return None;
     }
@@ -5807,7 +6245,7 @@ fn node_overcommitted(snapshot: &ClusterSnapshot, node: &NodeSnapshot) -> Option
 /// request understates a sum whose entire job is to notice that a node is over-promised, and a
 /// missing card is the safe direction where a wrong number is not (invariant 5). An overflow takes
 /// the same road, which is what `checked_add` is for.
-fn promised(
+pub(crate) fn promised(
     pods: &[&PodSnapshot],
     allocatable: Option<&str>,
     of_pod: impl Fn(&PodSnapshot) -> Option<&str>,
@@ -5964,7 +6402,7 @@ fn trimmed(text: String) -> String {
 
 /// `12`, `9.1`, `0.001` — millicores as the decimal `screens/analysis.md` § Capacity draws, and
 /// the only place a cpu number stops being an integer.
-fn cpu_text(milli: i64) -> String {
+pub(crate) fn cpu_text(milli: i64) -> String {
     trimmed(format!("{}.{:03}", milli / 1000, milli % 1000))
 }
 
@@ -5975,7 +6413,7 @@ fn cpu_text(milli: i64) -> String {
 /// it is. **Below a kibibyte it prints the bare number, which is how Kubernetes itself spells
 /// bytes** — and no node's allocatable is ever that small, so the card cannot reach it: it is the
 /// arithmetic's floor, not a case with a screen behind it.
-fn bytes(milli: i64) -> String {
+pub(crate) fn bytes(milli: i64) -> String {
     let value = milli / 1000;
     for (unit, scale) in [
         ("Gi", 1024_i64.pow(3)),

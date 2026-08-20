@@ -172,8 +172,23 @@ pub enum Row {
         /// The indented explanation under it — *"This Service points at nothing. Anything
         /// calling it gets a 503."* **Empty is drawn by leaving the line out**, never by
         /// drawing a blank one: the same convention [`Finding::evidence`] states, so a
-        /// renderer needs one rule and not two.
-        detail: String,
+        /// renderer needs one rule and not two, and an empty `Vec` is that empty.
+        ///
+        /// **One element per paragraph, and that is why it is a `Vec` and not a `String`**
+        /// (NOTES § D129). Capacity's flagged node draws *two* indented paragraphs — the
+        /// measurement `using 3.4 cpu and 12 GiB`, then the sentence that says what the
+        /// numbers mean — a healthy node draws one, and a node on a cluster with no
+        /// metrics-server draws none. A `String` could hold both only with a `\n` in it, which
+        /// is the wrap [`Row::Answer::text`] forbids for the reason that applies here too:
+        /// this layer cannot see the pane's width, so it cannot be the layer that breaks a
+        /// line. **Each element obeys `text`'s rule on its own** — one line before wrapping,
+        /// no `\n`, no glyph — and `views.rs` wraps each and leaves a blank line between them.
+        ///
+        /// **Not folded into the row's `text`, and not folded into the explanation.** D128 put
+        /// the measurement in `detail` because a value absent on most clusters may not ride
+        /// the always-present line; joining the two paragraphs into one sentence would put it
+        /// back on a line the reader reads as a single fact.
+        detail: Vec<String>,
         /// **What to do** about it, on its own line. `views.rs` prefixes the `→ `
         /// (`screens/alerts.md` § the four parts of a card), so the value here starts at the
         /// word. Empty is drawn by leaving the line out, as `detail` is.

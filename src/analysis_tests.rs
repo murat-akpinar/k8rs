@@ -34,11 +34,14 @@ fn prose(text: &str) -> Row {
     Row::Prose(text.to_string())
 }
 
-fn answer(severity: Option<Severity>, text: &str, detail: &str, jump: Option<Jump>) -> Row {
+/// **`detail` is a slice of paragraphs and not one string** (NOTES § D129), so the empty case
+/// is `&[]` and reads as what it is: a row with nothing indented under it. Every builder below
+/// passes its paragraphs in the order the pane draws them.
+fn answer(severity: Option<Severity>, text: &str, detail: &[&str], jump: Option<Jump>) -> Row {
     Row::Answer {
         severity,
         text: text.to_string(),
-        detail: detail.to_string(),
+        detail: detail.iter().map(|d| (*d).to_string()).collect(),
         action: String::new(),
         jump,
     }
@@ -131,7 +134,7 @@ fn text_of(row: &Row) -> &str {
     }
 }
 
-fn detail_of(row: &Row) -> &str {
+fn detail_of(row: &Row) -> &[String] {
     match row {
         Row::Answer { detail, .. } => detail,
         Row::Prose(_) | Row::NotComputed { .. } => {
@@ -172,7 +175,11 @@ fn strings_of(report: &Report) -> Vec<&str> {
                 detail,
                 action,
                 ..
-            } => out.extend([text.as_str(), detail.as_str(), action.as_str()]),
+            } => {
+                out.push(text.as_str());
+                out.extend(detail.iter().map(String::as_str));
+                out.push(action.as_str());
+            }
             Row::Prose(text) => out.push(text.as_str()),
             Row::NotComputed { reason, ask_for } => out.extend([reason.as_str(), ask_for.as_str()]),
         }
@@ -207,23 +214,23 @@ fn capacity() -> Report {
             answer(
                 None,
                 "node-1  7.4 cpu  8 cpu  2.1 cpu",
-                "",
+                &[],
                 Some(node("node-1")),
             ),
             answer(
                 Some(Severity::Warn),
                 "node-2  9.1 cpu  8 cpu  3.4 cpu",
-                "",
+                &[],
                 Some(node("node-2")),
             ),
             answer(
                 None,
                 "node-3  1.2 cpu  8 cpu  0.4 cpu",
-                "",
+                &[],
                 Some(node("node-3")),
             ),
             prose("node-2 has promised more CPU than it has. Nothing new can start there."),
-            answer(None, "No CPU/memory limit: 34 workloads", "", None),
+            answer(None, "No CPU/memory limit: 34 workloads", &[], None),
             prose("(needs metrics-server for the IN USE column)"),
         ],
     }
@@ -304,7 +311,7 @@ fn capacity_scoped_to_one_namespace() -> Report {
                     .to_string(),
             },
             prose("Still counted, from what you can see:"),
-            answer(None, "No CPU/memory limit: 6 workloads", "", None),
+            answer(None, "No CPU/memory limit: 6 workloads", &[], None),
         ],
     }
 }
@@ -355,10 +362,10 @@ fn capacity_with_nothing_overcommitted() -> Report {
             answer(
                 None,
                 "node-1  7.4 cpu  8 cpu  2.1 cpu",
-                "",
+                &[],
                 Some(node("node-1")),
             ),
-            answer(None, "No CPU/memory limit: 34 workloads", "", None),
+            answer(None, "No CPU/memory limit: 34 workloads", &[], None),
         ],
     }
 }
@@ -393,6 +400,111 @@ fn a_check_that_ran_and_found_nothing_is_not_a_check_that_did_not_run() {
     );
 }
 
+/// The three `detail` lengths `screens/analysis.md` § Capacity draws, in one report — the pane
+/// NOTES § D129 widened this field for. **This builder is post-D128 and the three above are
+/// not**: it is the row as the screen draws it now, `<promised> of <usable> cpu · <promised> of
+/// <usable> GiB`, the band first and never mid-line, the measurement in `detail` and never in
+/// `text`.
+///
+/// - the flagged node draws **two** indented paragraphs — what it is using, then what the
+///   numbers mean;
+/// - a healthy node draws **one**, the measurement alone, because there is nothing to explain;
+/// - and on a cluster with no metrics-server there is **no** measurement to draw, so the row
+///   has none at all and the pane says why once, under the node rows, in a `Row::NotComputed`.
+fn capacity_as_the_screen_draws_it_now() -> Report {
+    Report {
+        title: "What each node promised, and what it has".to_string(),
+        badge: Some(Badge {
+            value: "1".to_string(),
+            severity: Severity::Warn,
+        }),
+        rows: vec![
+            Row::Answer {
+                severity: Some(Severity::Warn),
+                text: "node-2   6.2 of 8 cpu · 30 of 16 GiB".to_string(),
+                detail: vec![
+                    "using 3.4 cpu and 12 GiB".to_string(),
+                    "Almost twice the memory is promised as node-2 has. If these pods use what \
+                     they asked for, one of them is killed."
+                        .to_string(),
+                ],
+                action: "move a workload off, or ask for less".to_string(),
+                jump: Some(node("node-2")),
+            },
+            answer(
+                None,
+                "node-1   7.4 of 8 cpu · 11 of 16 GiB",
+                &["using 2.1 cpu and 6 GiB"],
+                Some(node("node-1")),
+            ),
+            answer(
+                None,
+                "node-3   1.2 of 8 cpu · 3 of 16 GiB",
+                &[],
+                Some(node("node-3")),
+            ),
+            answer(
+                None,
+                "34 workloads have no memory or CPU limit",
+                &["Nothing stops one taking a whole node."],
+                None,
+            ),
+        ],
+    }
+}
+
+#[test]
+fn a_row_carries_as_many_indented_paragraphs_as_the_pane_draws_under_it() {
+    // **The test `detail: String` cannot pass** (NOTES § D129). One string could hold both of
+    // node-2's paragraphs only with a `\n` in it, and the sweep at the foot of this file —
+    // `nothing_a_report_carries_spells_a_glyph_or_breaks_its_own_line`, which reaches every
+    // paragraph of every report — refuses that over this very report. This layer cannot see the
+    // pane's width, so it may not be the layer that breaks a line.
+    let report = capacity_as_the_screen_draws_it_now();
+
+    assert_eq!(
+        report
+            .rows
+            .iter()
+            .map(|row| detail_of(row).len())
+            .collect::<Vec<_>>(),
+        vec![2, 1, 0, 1],
+        "the flagged node draws a measurement and an explanation, a healthy node the \
+         measurement alone, and a node with no metrics-server neither"
+    );
+
+    // **Order is the claim, not just the count.** The measurement comes first and the sentence
+    // that interprets it second; swapped, the reader meets the consequence before the number it
+    // is about, and a `Vec` is exactly what makes that assertable.
+    let flagged = detail_of(&report.rows[0]);
+    assert!(
+        flagged[0].starts_with("using "),
+        "the measurement is the first paragraph: {:?}",
+        flagged[0]
+    );
+    assert!(
+        flagged[1].contains("killed"),
+        "the explanation is the second, and it says what happens: {:?}",
+        flagged[1]
+    );
+
+    // **Empty is `&[]` and is drawn by leaving the line out** — not by an element that is the
+    // empty string, which would draw the blank line [`Finding::evidence`]'s convention refuses.
+    assert!(detail_of(&report.rows[2]).is_empty());
+    assert!(
+        report
+            .rows
+            .iter()
+            .all(|row| detail_of(row).iter().all(|p| !p.is_empty())),
+        "no paragraph is the empty string — absence is length, never a blank element"
+    );
+
+    // The band is the first thing on the row and never inside it: `6.2 of 8 cpu` carries no
+    // glyph, and neither does any paragraph under it. Swept for the whole report below.
+    assert_eq!(severity_of(&report.rows[0]), Some(Severity::Warn));
+    assert_eq!(severity_of(&report.rows[1]), None);
+}
+
 // --- DRAIN SAFETY ---
 
 /// `screens/analysis.md` § Drain safety.
@@ -401,20 +513,22 @@ fn drain_safety() -> Report {
         title: "If you drained each node, what happens?".to_string(),
         badge: None,
         rows: vec![
-            answer(None, "node-1  ok  18 pods move", "", Some(node("node-1"))),
+            answer(None, "node-1  ok  18 pods move", &[], Some(node("node-1"))),
             Row::Answer {
                 severity: Some(Severity::Critical),
                 text: "node-2  BLOCKS  never finishes".to_string(),
-                detail: "payments/web wants at least 5 copies and has exactly 5. Draining would \
-                         take one away, so it waits forever."
-                    .to_string(),
+                detail: vec![
+                    "payments/web wants at least 5 copies and has exactly 5. Draining would take \
+                     one away, so it waits forever."
+                        .to_string(),
+                ],
                 action: "run one more copy, or relax the disruption budget first".to_string(),
                 jump: Some(node("node-2")),
             },
             answer(
                 Some(Severity::Warn),
                 "node-3  2 pods nothing would restart",
-                "(started by hand, no Deployment)",
+                &["(started by hand, no Deployment)"],
                 Some(node("node-3")),
             ),
         ],
@@ -437,8 +551,9 @@ fn drain_safety_carries_the_blocked_nodes_explanation_and_its_way_out() {
     let Row::Answer { detail, action, .. } = &report.rows[1] else {
         unreachable!("built as an answer above");
     };
+    assert_eq!(detail.len(), 1, "this row draws one indented paragraph");
     assert!(
-        detail.contains("waits forever"),
+        detail[0].contains("waits forever"),
         "the explanation says what a drain would do"
     );
     assert_eq!(
@@ -518,32 +633,32 @@ fn waste() -> Report {
             answer(
                 Some(Severity::Critical),
                 "shop/api-svc  matches no pod",
-                "This Service points at nothing. Anything calling it gets a 503.",
+                &["This Service points at nothing. Anything calling it gets a 503."],
                 Some(Jump::Object(service)),
             ),
             answer(
                 Some(Severity::Warn),
                 "data/pgdata-old  reserved, unused, 100Gi",
-                "",
+                &[],
                 Some(Jump::Object(claim)),
             ),
             answer(
                 Some(Severity::Warn),
                 "47 pods  Evicted / Completed",
-                "",
+                &[],
                 None,
             ),
             answer(
                 Some(Severity::Info),
                 "12 replicasets  parked at 0 replicas",
-                "",
+                &[],
                 None,
             ),
             prose("Worth knowing (not broken):"),
             answer(
                 Some(Severity::Info),
                 "9 pods mount a path from the node",
-                "",
+                &[],
                 None,
             ),
         ],
@@ -598,8 +713,11 @@ fn waste_spans_all_three_bands_and_its_first_row_jumps_to_an_object_no_rule_name
     assert_eq!(id.kind, ObjectKind::Other("Service".to_string()));
     assert_eq!(id.namespace.as_deref(), Some("shop"));
     assert_eq!(id.name, "api-svc");
+    // **Every paragraph is swept, not the first**, which is the assertion `Vec<String>` made
+    // possible to get wrong: a row's explanation may now arrive in more than one, and a check
+    // that reads element 0 passes over whatever the second one says (NOTES § D129).
     assert!(
-        detail_of(&report.rows[0]).contains("503"),
+        detail_of(&report.rows[0]).iter().any(|p| p.contains("503")),
         "the explanation is what makes this row readable at 3am"
     );
 
@@ -673,19 +791,19 @@ fn certificates() -> Report {
             answer(
                 Some(Severity::Warn),
                 "your kubeconfig certificate  30 days",
-                "After that, kubectl stops working for you until it is renewed.",
+                &["After that, kubectl stops working for you until it is renewed."],
                 Some(Jump::Finding(Box::new(kubeconfig_certificate_expiring()))),
             ),
             answer(
                 Some(Severity::Info),
                 "API server certificate  210 days",
-                "",
+                &[],
                 None,
             ),
             answer(
                 Some(Severity::Critical),
                 "2 kubelets waiting to join  pending CSR",
-                "Two nodes cannot join until someone approves them.",
+                &["Two nodes cannot join until someone approves them."],
                 None,
             ),
             prose("Versions:  control plane 1.34 · kubelets 1.34 (2) · 1.31 (1) too far behind"),
@@ -756,7 +874,7 @@ fn restarts() -> Report {
         rows: vec![answer(
             None,
             "payments/web-7d9f4 · retry  47 restarts  this run 3 min",
-            "",
+            &[],
             Some(Jump::Object(object(
                 ObjectKind::Pod,
                 Some("payments"),
@@ -795,6 +913,10 @@ fn the_restart_row_jumps_to_a_pod_and_never_to_a_finding() {
 fn every_report() -> Vec<(&'static str, Report)> {
     vec![
         ("capacity", capacity()),
+        (
+            "capacity, as the screen draws it now",
+            capacity_as_the_screen_draws_it_now(),
+        ),
         (
             "capacity, one namespace",
             capacity_scoped_to_one_namespace(),
