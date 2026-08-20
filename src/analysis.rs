@@ -29,10 +29,10 @@
 //! certificate of a TLS handshake, which kube-rs does not expose: reaching it needs **a second
 //! outbound connection**, and that is a Security gate question (the gate counts the outbound paths,
 //! and the only connection is the API server in the user's kubeconfig) before it is a snapshot
-//! field. Capacity's `IN USE` column is metrics, which is not a list call
-//! either: it needs a capability probe first, and what it may do afterwards is already fenced —
-//! 30s+, capability-gated, and only for what is on screen (`screens/widgets.md` § 1a). A box
-//! meeting one of these adds a decision, not a field.
+//! field. Capacity's `using …` line is metrics, which is not a list call either: it needs a
+//! capability probe first, and what it may do afterwards is already fenced — 30s+,
+//! capability-gated, and only for what is on screen (`screens/widgets.md` § 1a). A box meeting
+//! one of these adds a decision, not a field.
 //!
 //! **Three states, not two** (PRIOR-ART § C2, NOTES § D20): a producer **never runs on partial
 //! input**. A report whose inputs are still arriving is `views.rs` holding an `Option<Report>` and
@@ -103,6 +103,12 @@ pub struct Report {
     /// The body, top to bottom, in the order it is drawn. **A report that could not be
     /// computed at all is not an empty `Vec`** — it is one [`Row::NotComputed`]; an empty
     /// `Vec` says the check ran and had nothing to say.
+    ///
+    /// **That second state stays legal and no pane on `screens/analysis.md` asks for it**
+    /// (NOTES § D128): a report with nothing to say says so in its own words, as one
+    /// [`Row::Prose`], so `views.rs` carries no per-report empty text. Unreachable is not the
+    /// same as forbidden — the line the first sentence draws is the one a renderer keys on,
+    /// and a screen having no use for one side of it does not erase the other.
     pub rows: Vec<Row>,
 }
 
@@ -139,7 +145,9 @@ pub struct Badge {
 /// `⏎ open` from the footer — which costs nothing, the footer being rebuilt every frame
 /// (`screens/widgets.md` § 2). The two states that reach it are ordinary, not corner cases: a
 /// report that could not run is one [`Row::NotComputed`], and one that ran with nothing to say is
-/// no rows at all. (A body of nothing but `Prose` would be a third and is equally legal.) Selecting
+/// one [`Row::Prose`] in that report's own words (NOTES § D128) — which is the *body of nothing but
+/// `Prose`* this sentence used to call a third case. An empty `Vec` is a fourth and is equally
+/// legal; nothing on this screen builds one ([`Report::rows`]). Selecting
 /// row 0 regardless would park the highlight on the *could not run* line and advertise a key that
 /// opens nothing.
 ///
@@ -152,10 +160,10 @@ pub enum Row {
     /// Something the report computed, **and a row the cursor may land on**.
     Answer {
         /// How bad it is, or **nothing at all**. `None` is not a fourth band — it is a
-        /// **selectable row that makes no judgement**: `node-1  7.4 cpu  8 cpu  2.1 cpu`,
-        /// `No CPU/memory limit: 34 workloads`. A table header or a heading is not this; it is
-        /// a [`Row::Prose`]. The scale is [`Severity`], shared with `rules.rs` and never
-        /// re-declared here.
+        /// **selectable row that makes no judgement**: `node-1   7.4 of 8 cpu · 11 of 16 GiB`,
+        /// `node-1 is ready to drain — 18 pods move`, `34 workloads have no memory or CPU
+        /// limit`. A heading is not this; it is a [`Row::Prose`]. The scale is [`Severity`],
+        /// shared with `rules.rs` and never re-declared here.
         severity: Option<Severity>,
         /// The row itself, one line before wrapping — and **one line**: a `\n` here is a wrap
         /// `views.rs` did not make, and row-height accounting is the layer above's. Alignment
@@ -174,22 +182,30 @@ pub enum Row {
         /// it is an `Answer`; this field says only whether a destination is recorded.
         ///
         /// `None` is **a selectable row with no destination recorded**, which today is always
-        /// a counted row standing for a *set* of objects: `No CPU/memory limit: 34 workloads`,
-        /// Waste's `47 pods` / `12 replicasets` / `9 pods`, Certificates' `2 kubelets waiting
-        /// to join`. The screen offers `⏎` on these; what it opens is unanswered, and [`Jump`]
-        /// has a case for one object and a case for one finding but none for a set. **The
-        /// Waste box owes that answer**, not Capacity: its per-object rows are unbounded —
-        /// every Service matching no pod, every PVC bound to nothing — so what it needs is a
-        /// cap and an overflow row (`and 812 more — ⏎ to list`), not merely a destination.
+        /// a counted row standing for a *set* of objects: Capacity's `34 workloads have no
+        /// memory or CPU limit`, Waste's `47 pods` / `12 replicasets`, Certificates' `2
+        /// kubelets are waiting to be let in`, and **every row Posture draws**, each standing
+        /// for the pods that mount one host path. [`Jump`] has a case for one object and a
+        /// case for one finding but none for a set — so **`— ⏎ to list` is drawn on none of
+        /// them** (NOTES § D128). The cursor still lands, because the row is an `Answer`; the
+        /// suffix returns to every pane in one edit once there is somewhere for it to go.
+        /// **The Waste box owes that answer**, not Capacity: its per-object rows are unbounded
+        /// — every Service matching no pod, every PVC bound to nothing — so what it needs is a
+        /// cap and an overflow row (`and 812 more`), not merely a destination.
         /// Capacity builds its one counted row `jump: None` in the meantime, which is exactly
         /// what this field's `None` means — selectable, destination not recorded — and costs
         /// nothing before `views.rs` exists in Phase 9, so no reader meets a key that does
         /// nothing.
         jump: Option<Jump>,
     },
-    /// **A line that is read, never selected** — the column header `NODE  PROMISED  USABLE  IN
-    /// USE`, the sentence under the table, `Worth knowing (not broken):`, the `Versions:`
-    /// summary, *(needs metrics-server for the IN USE column)*.
+    /// **A line that is read, never selected.** `screens/analysis.md` § *How a report is drawn*
+    /// names three — `Still counted, from what you can see:`, the `Versions` heading at the foot
+    /// of the Certificates pane, and Posture's opening paragraph — and its rule 8 adds a fourth,
+    /// the sentence a report with nothing to say says in its own words.
+    ///
+    /// **The control-plane line under `Versions` is not among them and is not added here.**
+    /// Which variant carries it is the Versions box's to settle; a shape file guessing at a row
+    /// is how the drawings this doc has just stopped citing came to be written.
     ///
     /// It exists because the shape had no way to say it: a heading and a counted row were both
     /// `Answer { severity: None, jump: None }`, so `views.rs` — which arrives in Phase 9, after
@@ -199,9 +215,10 @@ pub enum Row {
     ///
     /// **No band and no detail.** A line the cursor cannot reach cannot be acted on, so a
     /// severity on it would be a colour with nothing behind it; a row that needs one is an
-    /// [`Row::Answer`]. (The `▲` inside `1.31 (1) ▲ too far behind` is the mid-line band the
-    /// shape does not carry either way — NOTES § D127's second unexpressible pane, and not this
-    /// variant's problem to solve.)
+    /// [`Row::Answer`]. **And no line on this screen carries a band inside it any more**: the
+    /// three that did — `9.1 cpu ▲`, `node-2   ● BLOCKS`, `1.31 (1) ▲ too far behind` — were
+    /// redrawn rather than given a field, because the shape was right and the drawings were
+    /// wrong (NOTES § D128, answering D127's second unexpressible pane).
     Prose(String),
     /// **A check that could not run, in the place its answer would have been** — the state
     /// `screens/analysis.md` § *What each report needs* gives every report on the screen.

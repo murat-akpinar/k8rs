@@ -16,6 +16,17 @@ use crate::rules::ObjectKind;
 // change). So is the line break: a row is one line, and where it wraps is measured a layer up.
 // `nothing_a_report_carries_spells_a_glyph_or_breaks_its_own_line` is the sweep that holds
 // both, over every string in every report this file builds — titles and badges included.
+//
+// **The wording below is the pre-D128 sketch's and the claim it proves is not.** Four of the
+// panes were redrawn after this box landed — Capacity stopped being a table, `● BLOCKS` moved
+// into the band, `Worth knowing (not broken):` left the Waste pane, and `1.31 (1) ▲ too far
+// behind` turned out to flag a healthy cluster (NOTES § D128). What each builder asserts is
+// that the *shape* carries a pane of that kind: a banded row beside an unbanded one, a
+// selectable row beside a line the cursor skips, a jump to a finding beside a jump to an
+// object beside none at all. Every one of those is still true of the redrawn panes, and no
+// assertion here reads a sentence for its own sake. **Each builder is replaced by its report's
+// producer as that box lands**, which is where the current wording gets asserted — against a
+// snapshot, not against a literal typed out of a mockup.
 
 /// A line that is read and never selected. Every one of these is a line `screens/analysis.md`
 /// draws with no `⏎` on it, and after NOTES § D127's correction the *variant* is what says so.

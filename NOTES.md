@@ -150,6 +150,7 @@ its line moving with it.
 - [D126](#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20) — the guards Family A added, and the five judgement calls they could not avoid making
 - [D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20) — the `Report` shape, the test that decided its fields, and the two panes it cannot express
 - [D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20) — the six panes, the one rendering of a missing metrics-server, and the badge that does not fit
+- [D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20) — the reports cannot see the helpers written for them, and the freeze is about logic and not visibility
 
 ## Why it exists — where the gap is
 
@@ -9648,6 +9649,113 @@ otherwise re-decide it:
 and that file is read at phase close, never mid-phase
 ([D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)).
 1 is not in it: it has an owner and a box already.
+
+### D129 — the reports cannot see the helpers written for them, and the freeze is about logic and not visibility (2026-08-20)
+
+Family C was briefed as one turn and stopped on its first box. Five of the six
+reports call functions that exist, are correct, and are **private** to `rules.rs`
+— and `analysis.rs` is that file's *sibling*, not its child (invariant 11: eight
+flat files, no `mod.rs` pyramid). The dev did not work around it, which was
+right: working around it is a second implementation of exactly the code
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)
+says two reports must not disagree about.
+
+**Proven by the compiler, not argued** — a temporary call in `analysis.rs`, then
+reverted: `E0603` on `pods_on`, `a_drain_would_move`, `node_overcommitted`,
+`kubelet_too_far_behind`, `quantity_milli`, `minor_version`, `finished`,
+`mounted_path`, `is_runtime_socket`, `charged`, `cpu_text`, `bytes`, and the
+constants `SUPPORTED_SKEW` and `NODE_NAMESPACE`. `rules.rs` exports exactly four
+functions: `ObjectId::group_key`, `Finding::age`, `age` and `analyze`.
+
+**And two rules are in no `Vec<Finding>` at all.** `analyze`'s node loop calls
+`node_stopped_being_ready`, `cordoned_with_work_left_on_it` and
+`node_running_low` — nothing else (`rules.rs:1574`–1576, read at HEAD).
+`node_overcommitted` (N5) and `kubelet_too_far_behind` (N4) are defined at 5737
+and 5677 and called **only from `src/rules_tests/node.rs`**. That is not dead
+code and must not be deleted as such: [§ N-series](#node-rules-n-series) says N4
+is *"computed here but shown in the Versions report, not in Alerts"*, and N5's own
+doc says *"`Info`, and it does not reach Alerts: it is the Capacity report's
+input"*. **They were written for a consumer that could not reach them.** So the
+brief's escape hatch — [D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)'s
+*the producers take the findings `analyze` already returned* — closes the gap for
+C1 and rule 8 and does not close it for N4 or N5.
+
+**Ruled: the freeze forbids reaching back into finished logic, and widening a
+name's visibility is not that.**
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+answers *may a later box change what a rule does*, under five conditions, and the
+first is a defect proven on a capture. **This is not that question.** Nothing here
+changes what a rule reads, says or stands down on; D124's condition 3 protects
+`Finding`, `ObjectId`, `analyze`'s signature and the shared helpers' signatures
+from being *reshaped*, and this reshapes none of them. It is an **export gap** —
+the plan built a layer above `rules.rs` and never gave it the door — and
+[CLAUDE.md § architecture workflow](CLAUDE.md#architecture-workflow) says exactly
+what to do with one: *if a later step needs a frozen file changed, the plan is
+wrong: stop, fix the order, record it in `NOTES.md`, continue.*
+
+**The bounds, and they are the ruling:**
+
+1. **`fn` → `pub(crate) fn`, and nothing else.** No body, no signature, no name,
+   no argument order, no return type, no `#[cfg]`, no doc claim about behaviour.
+   A diff line that is not a visibility keyword is outside this decision.
+2. **Only the items a Phase 4 report actually calls**, named in the turn's report
+   so the list is auditable. A helper widened *in case* a later report wants it
+   is not covered — the export surface is grown by demand, once, with a caller in
+   the same commit.
+3. **`just check` green is the proof it changed nothing** — every existing caller
+   compiles unchanged and all 285 tests pass, which is what distinguishes this
+   from a reshape.
+4. **The whole-file mutation gate on `rules.rs` re-runs at this phase's close**
+   anyway, because D125 already changed the file under D124's condition 4. This
+   decision adds no new obligation; it inherits that one.
+5. **Not a licence to move logic.** If a report needs a helper to behave
+   *differently*, that is D124's question and its five conditions, not this one's.
+
+**A third pane the shape cannot express, and it is ruled here because
+`analysis.rs` unfreezes at this phase's close.** `screens/analysis.md`'s flagged
+Capacity node draws **two** indented paragraphs — `using 3.4 cpu and 12 GiB`,
+then the explanation — and `Row::Answer::detail` is one `String` whose doc forbids
+a `\n` (*"a `\n` here is a wrap `views.rs` did not make"*). A healthy node draws
+one paragraph, a node with no metrics-server draws none. **`detail` becomes
+`Vec<String>`, one paragraph per element**, and the empty vector keeps the
+existing convention that *empty is drawn by leaving the line out*. The
+alternative — folding the measurement into the explanation, or into the row's
+`text` — is a screen change, and
+[D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)
+put usage in `detail` for a stated reason: a value absent on most clusters may not
+ride the always-present line. D127's own inclusion test decides it — *a field is
+in only if a screen draws it today* — and two paragraphs are drawn today.
+
+**Three inputs have no committed capture, so box 1871 cannot close on them yet.**
+Read, not assumed: `poddisruptionbudgets.json` and `persistentvolumeclaims.json`
+are both `"items": []`, `endpointslices` is not in the `justfile` capture loop at
+all, and all three Services in `services.json` match pods — so **Drain safety's
+whole reason for existing** (a PDB whose `minAvailable` equals the replica count)
+and **Waste's headline row** (the Service matching no pod, the 503 nobody can
+explain) each have no positive fixture, and hand-writing one is what
+[D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
+refuses. `scripts/broken.yaml` grows a PDB at its floor, a bound-but-unmounted
+PVC and a Service whose selector matches nothing; the capture loop grows
+`endpointslices`. **That is `tester`'s manifest and the PM's capture**
+([D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)),
+and it is the same trip Family B already owes — one trip, not two.
+
+**What the PM got wrong in the brief, recorded because it caused the stop.** It
+said *write the shared readers once, and name them*, which reads as *write them in
+`analysis.rs`* and was written without knowing `pods_on`, `a_drain_would_move`,
+`charged` and `quantity_milli` already existed. The brief named `rules.rs`'s
+region markers and its line numbers and still did not check what was **public**.
+The gap a brief cannot close by naming regions is the one the reader has to
+compile to find.
+
+**C2 is not this phase's, and the screen already knows.** `screens/analysis.md`
+draws `○ the API server certificate has 210 days`; C2 needs the TLS peer
+certificate, which kube-rs does not expose, and it is a Phase 5 box
+([`todo.md`](todo.md) § Phase 5, *Certificate rules that need the wire*). This is
+already recorded as a picture promising a row with no data path, so the
+Certificates producer leaves it out and the screen is not changed for it. C3's
+pending-CSR row is the same shape and the same phase — its `Option` field is
+`None` in Phase 4, which is exactly one `Row::NotComputed`.
 
 ## Decisions made
 
