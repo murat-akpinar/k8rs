@@ -318,6 +318,39 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   `containerStatuses[].ready` alone, and rule 7 requires `!c.ready` — measured.
   The right answer, resting on an upstream behaviour nothing in this repo
   records. Worth a NOTES line whichever way the second entry above is ruled.
+- **The driver hands the rules `namespace_scope: None`, which is the value that
+  means *I can see every pod in this cluster*, and `load()` cannot know that.**
+  Its input is whatever files were named on argv. Reproduced on committed
+  fixtures, no cluster: `k8rs tests/fixtures/nodes.json tests/fixtures/healthy.json`
+  draws N1 on `k8rs-worker3` with **no pod line at all**; add
+  `tests/fixtures/kube-system-pods.json` and the same card reads
+  `kube-system/kindnet and kube-system/kube-proxy were running here (2 pods)`.
+  N1's own doc comment refuses exactly this — *"one pod was running here" about a
+  node carrying forty reads as complete* — and N2's count and N5's sum are gated
+  on the same field. Visible in this phase's own close review, where the operator
+  fed it `kubectl get pods -n default` and the card counted 2 on a kind worker
+  that also carries kindnet and kube-proxy
+  ([reports/2026-08-20](reports/2026-08-20-phase-3-close-cross-family-review.md) § 2).
+  A **fifth** divergence where [D121](NOTES.md#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20)
+  enumerates three, and the `object`-versus-owner entry above is a fourth. Ruled
+  not a blocker at the Phase 3 close — the header names what was read, and Phase
+  5's *Namespace scoping: `--namespace/-n`* box is where the field first gets a
+  value a caller can support — but the fix
+  is not *set it to `Some`*, which would trade a soft wrong number for hard
+  silence in the only harness that exercises the node rules.
+- **`just mutants` names a file that does not exist and does not name `main.rs`,
+  and `cargo mutants` is silent about both.** The recipe is
+  `cargo mutants --timeout 90 --file src/rules.rs --file src/analysis.rs`;
+  `analysis.rs` arrives in Phase 4, and measured at HEAD
+  `cargo mutants --list --file src/analysis.rs` prints **nothing and exits 0** —
+  so a path that drifts or is mistyped makes the phase-close gate go green having
+  mutated nothing, which is [CLAUDE.md § a derived list asserts it found
+  something](CLAUDE.md#code-phase-rules) one layer out. `main.rs` is product code
+  with branches and is in no `--file`; its coverage came from the per-turn
+  `--in-diff` run, which for a new file happened to be the whole of it —
+  re-measured at HEAD as `cargo mutants --timeout 90 --file src/main.rs`,
+  **49 mutants, 46 caught, 3 unviable, 0 missed**, matching `--list`'s 49 exactly.
+  Both are `tester`'s, in a later phase; found by the Phase 3 close second pass.
 
 ## Ruled out
 

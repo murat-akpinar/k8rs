@@ -440,7 +440,20 @@ unable to do what the justfile itself instructs it to.
 Goal: k8rs diagnoses correctly, headless. Still the core — everything else in
 this plan is delivery mechanism for what this phase produces.
 
-**The open boxes below are two families, and each is briefed and reviewed as one
+> **This phase is CLOSED (2026-08-20).** 46 boxes, 264 tests, `just check`
+> exit 0. The product works: the real binary, built and run on the test host,
+> prints 29 cards over the committed captures byte-identically to the dev
+> machine, and `○ nothing is broken` over the healthy ones. The whole-file
+> mutation gate is clean — `rules.rs` 553 mutants / 0 missed, `main.rs` 49 / 0
+> missed. The close found nothing that had to be fixed before it: seven
+> findings from the cross-family review
+> ([reports/2026-08-20](reports/2026-08-20-phase-3-close-cross-family-review.md))
+> and two from the closing second pass, all nine triaged non-blocking and
+> written into [backlog.md](backlog.md). **`rules.rs` is frozen from here** —
+> except the snapshot types and their decode, which freeze at Phase 4 close
+> ([D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+
+**The boxes below were two families, and each was briefed and reviewed as one
 turn** ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16)).
 They are not reordered — the brief names them, the file keeps them where the text
 that cites them expects to find them.
