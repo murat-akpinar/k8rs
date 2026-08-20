@@ -391,6 +391,17 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   (`reports/2026-08-20-the-settled-record-across-four-rules.md` § 7). A rule-set
   change, not a fold change, and it needs `tui-designer` before it needs code.
 
+- **`just check` runs no rustdoc step, so every intra-doc link in the codebase is
+  ungated.** Found while landing the `Report` shape, which is almost entirely doc
+  comments: `analysis.rs` gained links to `Finding::title`, `Row::Answer::jump`,
+  `Jump` and `Row::NotComputed` and nothing in the gate reads them. Proven live
+  rather than asserted — `RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo
+  doc --no-deps --document-private-items` exits 0 on the tree, and exits 101 with
+  a planted `[`Row::NoSuchVariant`]`. It is one line in `justfile` and `tester`'s
+  tree, not `dev-core`'s. The cost of the gap grows with every frozen file, since
+  a doc link that stops resolving in a frozen file cannot be fixed there
+  ([D127](NOTES.md#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)).
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

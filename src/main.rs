@@ -14,6 +14,7 @@
 
 // A module no `mod` line reaches is not in the crate at all, so `rules.rs` is declared the
 // moment it exists rather than when something calls it (NOTES § D34).
+mod analysis;
 mod rules;
 
 #[cfg(test)]

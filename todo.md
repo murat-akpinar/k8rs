@@ -1729,7 +1729,27 @@ unchecked one from the top.
       in `up` as the loud second guard, both refusals run from `just check`, and
       `fixture-audit.sh` prints a byte-identical line before and after over all
       55 fixtures ([D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20))
-- [ ] `Report` shape: title · rows · the finding each row can jump to
+- [x] **`Report` shape: title · rows · the finding each row can jump to** — the
+      contract all six report boxes fill, written alone because a shared
+      contract's blast radius is not a family. Done: a plain-language pane
+      title, an optional sidebar badge, and a body of
+      `Row::Answer | Prose | NotComputed` where **the variant says whether the
+      cursor may land on the row** — a field cannot, and a table header and a
+      `⏎ to list` row were otherwise identical in the type, which would have
+      left Phase 9 parking the cursor where `⏎` does nothing. `Jump::Finding |
+      Object` says where it goes, the second case carrying the rows no rule
+      fired on. Producers take the snapshot **and** the findings `analyze`
+      already returned, because the rule functions are private to a sibling
+      module and a snapshot-only signature could build neither `Jump::Finding`
+      nor four of the six reports. The fields were decided by one test — *a
+      field is in only if a screen draws it today* — which kept the badge,
+      refused the per-pane kubectl strip, and refused a `Jump::Set` no screen
+      specifies. 278 + 7 tests, every new assertion proven red before it was
+      trusted; the mutation gate is **vacuous, not passed**, over a file of
+      types, and D35's control was re-run to say so. Two panes the shape still
+      cannot express are owed to the Waste and Capacity boxes, and four further
+      findings to named boxes — all inside this phase, all before the freeze
+      ([D127](NOTES.md#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20))
 - [ ] **Capacity** — per node: requests vs allocatable vs actual usage, plus
       **the workloads with no limits defined** (the old rule 9, which lives
       here now — it is a risk, not an outage). Two snapshot fields are added

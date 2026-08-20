@@ -148,6 +148,7 @@ its line moving with it.
 - [D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20) — the freeze forbids reaching back into finished logic, and a card the capture proves wrong is not that
 - [D125](#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20) — the last run on record is a question about the container, not a field, and `state.terminated` may name a card only where the run is settled
 - [D126](#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20) — the guards Family A added, and the five judgement calls they could not avoid making
+- [D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20) — the `Report` shape, the test that decided its fields, and the two panes it cannot express
 
 ## Why it exists — where the gap is
 
@@ -9318,6 +9319,211 @@ between name and colon, a base64 finding reporting line 0, and
 `client-key-data: <elided>` being refused because the pattern matched the key
 alone. **A guard is proven only for the framings it was fed** — and the self-test
 is the thing most likely to have fed it only the easy one.
+
+### D127 — the Report shape, the test that decided its fields, and the two panes it cannot express (2026-08-20)
+
+Phase 4's shared contract, written alone because six report boxes call it. The
+box named three things — *title · rows · the finding each row can jump to* — and
+the shape landed with five, so the question that mattered was not what to build
+but **what to refuse**.
+
+**The inclusion test: a field is in only if a screen draws it today.** The
+asymmetry is what makes it cheap. `analysis.rs` freezes at the *end* of Phase 4,
+and all six report boxes are inside it — so a field the reports turn out to need
+can still be added by the box that needs it, while a speculative field cannot be
+removed and is [D14](#d14--three-plan-corrections)'s violation in a file nobody
+may touch again. Omission is recoverable here; inclusion is not.
+
+Run over the candidates, it kept four and refused one:
+
+| Candidate | Drawn today? | |
+|---|---|---|
+| pane title, rows, per-row band, text, detail | `screens/analysis.md`, every pane | in |
+| a jump target with three cases | the `⏎` footer; the restart-row box demands the finding-less one | in |
+| the section that could not be computed | a third of `screens/analysis.md` | in |
+| the sidebar badge | `capacity  1 ▲`, `certificates  30d` | in |
+| a per-pane `$ kubectl …` line | drawn — **but it is not the report's** | **out** |
+
+The refusal is the one worth recording. The `$ kubectl get nodes -o json` strip
+under each pane is the **global command log**, which shows the calls k8rs
+actually made ([screens/context.md](screens/context.md) § *What the command log
+shows*), and `analysis.rs` is pure and makes none. A row that needs a teaching
+command reaches it through `Finding::kubectl_cmd`, which already exists. A
+finding-less row that wants one is a real question, and it belongs to whichever
+report box first has one — still before the freeze.
+
+The badge went in for the opposite reason: it is on four panes and in
+[screens/widgets.md](screens/widgets.md) § 1a, and deferring it would have put
+the same field in six boxes' diffs, which is the *two reports counting the same
+thing two different ways* defect Family C is grouped to prevent. One constraint
+came with it and it is in the type: **no glyph** — `▲` is `theme.rs`'s, so the
+badge carries a value and a band.
+
+**A second constraint was written into that doc and it was wrong.** The first
+draft made the badge a discriminator — `None` meaning *not checked* while a
+report that ran and found nothing carried `Some("0")` — and three of the box's
+own six panes falsify it: `drain safety`, `waste` and `restarts` all badge
+`None` and all ran, `waste` with a `Critical` row. The screen agrees with the
+panes: across all five mockups exactly **two** sidebar entries badge,
+`capacity  1 ▲` and `certificates  30d`, and `drain safety` carries nothing in
+the very mockup that draws `node-2  ● BLOCKS`. So there is a third state the
+binary had no room for — *this report does not badge*.
+
+Ruled, and against one reviewer: `Some("0")` goes. `screens/widgets.md` § 1a
+settles it in its own words — the badge *"has room for a number, not for a
+reason, so the report itself carries the reason"*. **`None` means nothing is
+drawn beside the name**, for any of three reasons, and the single record of
+*did not run* is a [`Row::NotComputed`] in the body, which the screen needs
+anyway. A badge valued `0` carries nothing the body does not already say, and
+the sidebar has no room for the reason either way. It is **not** that
+`Some("0")` and `None` were one fact twice — *ran and found nothing* and *did
+not run* are opposite facts, and `capacity  0 ○` and a blank `capacity` are
+visibly different. The distinction is real; the body is where it is drawn, and
+a renderer must not read this as suppress-the-badge-on-zero.
+
+**Selection is a property of the row, and two drafts tried to derive it from a
+field.** The first defined `jump: None` as *a row that cannot be selected at
+all* while the tests used that same value on `No CPU/memory limit: 34
+workloads — ⏎ to list`, a row the screen offers `⏎` on. That contradiction was
+caught and the doc corrected to *no destination is recorded, over two different
+rows, and nothing may key selection on it* — which removed a wrong mechanism
+and supplied no right one, so a table header and a counted row were still
+identical in the type.
+
+**Ruled: `Row::Prose(String)`, and no fourth `Jump` case.** The two questions
+are not one. *Where does `⏎` go* is unspecified — `screens/` does not say what
+`⏎ to list` opens and [screens/resources.md](screens/resources.md) carries the
+same unanswered pattern (`⏎ to see`) — so `Jump::Set` would be a case no screen
+has specified, and the inclusion test refuses it. But *may the cursor land here*
+**is** specified: every pane draws `↑↓ move  ⏎ open`, six drawn rows are prose
+(the column header, the sentence under the table, the metrics-server
+parenthetical, `Still counted, from what you can see:`, `Worth knowing (not
+broken):`, the `Versions:` summary), and the consumer is `views.rs` in **Phase
+9, after this file freezes**. By the box's own test that is an *in*.
+[screens/widgets.md](screens/widgets.md) § 2 had already answered the identical
+question one pane to the left — the sidebar is a flat list whose group headers
+are unselectable rows that `↑↓` skips. So the variant says whether the cursor
+may land, `Answer::jump` says only where it goes, and `Answer::severity: None`
+narrows to *a selectable row that makes no judgement*.
+
+**`NotComputed` is unselectable too** — the author's extension, not the ruling's,
+and kept: a row saying *this check could not run* carries no destination, and
+`⏎` on it would have to invent one.
+
+**The producer signature could not build four of the six reports, and could not
+construct `Jump::Finding` at all.** The module doc stated
+`fn(&ClusterSnapshot) -> Report` as binding, and six cold-dispatched boxes would
+have read it that way. [`ClusterSnapshot`] carries no PodDisruptionBudgets
+(Drain safety), no Services, EndpointSlices, PVCs or ReplicaSets (Waste) and no
+CSR list (Certificates). Worse, the rule functions are **private** to `rules.rs`
+and `analysis` is its *sibling*, not its child — so the Certificates producer's
+only routes to the C1 card its drawn row jumps to were to run `analyze` a second
+time or to re-derive the expiry here, which is two implementations of one rule.
+The shape was offering a case no producer could fill. Fixed in the doc, not the
+shape: producers take the snapshot **and the findings `analyze` has already
+returned** — they are in hand, since `analyze` runs continuously for Alerts —
+and a paragraph names the un-watched inputs so the box that needs one knows it
+is expected to add it under [D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+window rather than meeting the gap cold.
+
+**A hand-written fixture contradicted the rule it was named after.** The tests'
+C1 `Finding` carried `uid: Some(…)` and a `timestamp` a year before the
+reference `now`; the real rule emits **`uid: None`** and **`timestamp: None`**,
+two states this file's own docs declare impossible — `rules.rs` says the
+kubeconfig certificate is the only `None` uid, and
+[D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)
+says the two bands of one rule may not draw a right edge on one card and a blank
+on the other. A Phase 9 detail view built on that row would have drawn *"365
+days ago"* on the one card that must have no age. The cause was a test helper
+that hardcoded `uid: Some(…)`, so **`uid: None` was a shape the file could not
+express**, and the one place it is mandatory got the wrong value in silence.
+This is CLAUDE.md § *fixtures come from real cluster captures, never
+hand-written* applied one layer up: the fixture is now copied field for field
+off the rule, and the helper can express both.
+
+**Two panes the shape still cannot express.**
+
+1. **A row standing for a set of objects has no jump case** — five of them:
+   Capacity's `34 workloads`, Waste's `47 pods` / `12 replicasets` / `9 pods`,
+   Certificates' `2 kubelets waiting to join`. **Owed by the Waste box, not
+   Capacity**, and that moved on review: Capacity has one such row, while Waste
+   has three plus *unbounded* per-object rows — every Service matching no pod,
+   every PVC bound to nothing — over inputs that are on-demand fetches and
+   deliberately not watches. So what is actually needed is a cap and an overflow
+   row, not merely a destination, and settled by Capacity in isolation it would
+   be re-answered by Waste. Capacity emits `jump: None` meanwhile, which is
+   exactly what that field now means and costs nothing before `views.rs` exists.
+2. **Three panes draw the band *inside* the line** — `node-2  9.1 cpu ▲`,
+   `node-2   ● BLOCKS`, `1.31 (1) ▲ too far behind` — and a `Row` carries one
+   band and one string, not cells. The sharper half: Capacity's `NODE / PROMISED
+   / USABLE / IN USE` table would force `analysis.rs` to pre-align four columns,
+   which is layout two layers too low. The tests hold those rows as
+   single-spaced semantic text and assert band, count and jump — never spacing.
+   **The operator review's answer is that it should not be a table at all**: the
+   sketch shows CPU only where memory is what kills a workload, the IN USE
+   column is empty on any cluster without metrics-server, and aligning cells
+   would make `views.rs` split a rendered string back into values — which is
+   [PRIOR-ART § F1](PRIOR-ART.md)'s single stated cause, arriving through the
+   back door. One row per node, the comparison in `text`. The Capacity box rules.
+
+Neither is a defect in this box; both are the shape meeting a screen it was
+written from, and both are cheaper to answer with the first real report in hand
+than in the abstract.
+
+**Four more findings were ruled out of this box and owed to a named one**, all
+inside Phase 4 and so all before the freeze: `Row` carries no moment, so a row
+printing a duration freezes it → the restart-row box; a Certificates badge
+reading `30d ▲` while the section it did not check is `Critical` → the
+Certificates box; three contradictory renderings of a missing metrics-server,
+Waste's scope label over a pane that mixes sums with facts, and Posture's
+missing pane → `screens/`, before those boxes are briefed.
+
+**What the author settled that the brief did not**, kept because a later box
+would otherwise re-decide it:
+
+- **`Row` is an enum, not a struct with an optional `not_computed`.** The variant
+  makes *reason* and *way out* both mandatory; the `Option` lets an author write
+  the reason and forget the way out, which is the half a reader cannot act on.
+- **`NotComputed` carries no cause enum.** Missing capability, missing permission
+  and missing scope share one sentence shape and the screen explicitly cannot
+  tell them apart, so a cause field would be drawn by nothing.
+- **`detail` and `action` are `String`, empty meaning *leave the line out*** —
+  `Finding::evidence`'s stated convention rather than an `Option<String>` beside
+  it, so a renderer needs one rule and not two. `action` is its own field because
+  `views.rs` draws the `→ `, and folding it into `detail` would spell a glyph
+  here.
+- **`Jump::Finding` is boxed.** Unboxed, `Row::Answer` measured 393 bytes against
+  `NotComputed`'s 48 and clippy refused it at `-D warnings` — numbers read off the
+  tool, not estimated ([D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
+- **The dead-code expectation is `#![cfg_attr(not(test), expect(…))]`, and
+  `rules.rs` needed no such gate.** The lint is per-target; this file's tests
+  construct and read *every* item, so under `cargo test` the expectation is
+  fulfilled by nothing and `-D warnings` rejects the attribute itself.
+  `rules.rs` never hit it because two of its items stay dead in the test target
+  too — the asymmetry [D38](#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)
+  records. Gating keeps D38's expiry on the binary and leaves `dead_code` live
+  under test, where a field no test reads is a field no test asserts. **D38's
+  pre-authorisation carries over unchanged: whichever box constructs the last
+  item deletes the line.**
+- **Derives are `Clone, Debug, PartialEq, Eq`** — `Finding`'s exact set. `Clone`
+  has no consumer today and is kept deliberately: `views.rs` arrives in Phase 9,
+  after this file freezes, and adding a derive to a frozen file is a process stop.
+
+**The mutation gate is silent over this box and that is honest, not passed.**
+`analysis.rs` holds types and no functions, so `--in-diff` reports no mutants —
+exactly [D35](#d35--just-mutants-is-a-check-that-cannot-fail-and-the-justfile-unfreezes-for-one-line-2026-08-12)'s
+position when `rules.rs` was in the same state. The author ran D35's own control
+rather than asserting it: `cargo mutants --list --file src/analysis.rs` and
+`--file src/does-not-exist.rs` print identical nothing, against 571 lines for
+`rules.rs`. What stands in for it is expressibility — every pane the screen draws
+is built and read back, with row counts, bands and jump targets asserted, and
+three planted defects proven red.
+
+**A trap every future box that creates a file will hit**, found live here: a new
+file is untracked, `git diff HEAD` cannot see it, and `cargo mutants --in-diff`
+therefore prints `No mutants to filter` over an **empty diff** — green for the
+wrong reason, indistinguishable from the honest zero above. `git add -N` before
+the gate is what makes the diff real.
 
 ## Decisions made
 
