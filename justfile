@@ -390,7 +390,7 @@ fixtures:
     # mount on it would leave rule 8 with two positives and no negative, and an
     # init container that restarts forever would end its "never restarted".
     for h in healthy healthy-hostpath healthy-sidecar healthy-podlevel \
-             healthy-retry healthy-unreadysidecar; do
+             healthy-retry healthy-unreadysidecar healthy-disk; do
       "${kc[@]}" get pod "$h" -o json | "${jqs[@]}" > "tests/fixtures/$h.json"
     done
     guard healthy.json "resources on its init container — the list the spec lookup would otherwise never read (D40)" \
@@ -410,6 +410,13 @@ fixtures:
       '[.status.initContainerStatuses[]? | select(.restartCount >= 3 and .state.terminated.exitCode == 0 and .lastState.terminated.exitCode == 1)] | length > 0'
     guard healthy-unreadysidecar.json "sidecar that is running and not ready, beside a workload container that is serving — the third container role in the state no capture holds (D75)" \
       '([.spec.initContainers[]? | select(.restartPolicy == "Always")] | length) > 0 and ([.status.initContainerStatuses[]? | select(.ready == false and .started == true and .state.running != null)] | length > 0) and ([.status.containerStatuses[].ready] | all)'
+    # Waste's orphan-PVC row is a **join**, and this is the half of it that lives
+    # on a pod: in a corpus where no pod mounts any claim, a report that does the
+    # join and one that names every Bound claim print the same row (NOTES § D129).
+    # The pod is asserted ready as well as mounting, because it is a `healthy-*`
+    # fixture and nothing may fire on it.
+    guard healthy-disk.json "pod that mounts a PersistentVolumeClaim, ready — the half of Waste's orphan-disk row that lives on a pod" \
+      '([.spec.volumes[]? | select(.persistentVolumeClaim.claimName == "healthy-disk")] | length) == 1 and ([.status.containerStatuses[].ready] | all)'
     # W1 and W2 read a ReplicaSet, so their negative has to be one too — the
     # healthy Deployment in deployments.json cannot show the absence of a
     # ReplicaFailure condition that only ever appears on the ReplicaSet.
@@ -421,7 +428,15 @@ fixtures:
 
     # The cluster-wide snapshot analysis.rs reports are computed from. `nodes` is
     # not in this loop: it is captured last, after the nodes have been broken.
-    for kind in deployments statefulsets daemonsets services persistentvolumeclaims poddisruptionbudgets; do
+    #
+    # **`endpointslices` rides beside `services` and not on its own line**, because
+    # Waste's headline row reads the pair: a Service says which pods it *wants*,
+    # and only the slice says whether anything is behind it. Capturing one without
+    # the other is what left `services.json` unable to prove the row at all
+    # (NOTES § D129) — the three Services in it all matched pods, and nothing on
+    # disk said so.
+    for kind in deployments statefulsets daemonsets services endpointslices \
+                persistentvolumeclaims poddisruptionbudgets; do
       "${kc[@]}" get "$kind" -A -o json | "${jqs[@]}" > "tests/fixtures/$kind.json"
     done
     # The three workload kinds, each in the state that separates `desired` from
@@ -435,6 +450,59 @@ fixtures:
       '[.items[]? | select(.metadata.name == "broken-rollout" and .spec.replicas == 2 and .status.replicas == 3 and .status.readyReplicas == 2 and .status.updatedReplicas == 1 and .status.unavailableReplicas == 1)] | length == 1'
     guard daemonsets.json "DaemonSet whose pods cannot start — desired is per node, and nothing captured had it disagree with ready (D40)" \
       '[.items[]? | select(.metadata.name == "broken-ds" and .status.desiredNumberScheduled > 0 and .status.numberReady == 0)] | length == 1'
+
+    # --- THE THREE REPORT INPUTS THAT HAD NO POSITIVE AT ALL (NOTES § D129) ---
+    # `poddisruptionbudgets.json` and `persistentvolumeclaims.json` were both
+    # `"items": []` and every Service in `services.json` matched pods, so Drain
+    # safety's whole reason for existing and Waste's headline row had nothing to
+    # be proven on. Each of the three is asserted **with its negative in the same
+    # List**, because that is the shape these arrive in: a file with one item in
+    # it cannot tell a report that reads the field from one that names everything
+    # it finds.
+    #
+    # Exact numbers rather than relations, for `statefulsets.json`'s reason: the
+    # manifest fixes them, and `disruptionsAllowed == 0` is also true of a budget
+    # that is blocked because its workload is broken — which is a different row.
+    # 2 healthy of 2 expected against a `minAvailable` of 2 is the floor itself.
+    guard poddisruptionbudgets.json "PDB at its floor — minAvailable equal to the replica count of a workload whose pods are all healthy, which is the budget that makes a drain of its node loop until the operator gives up (D46)" \
+      '[.items[]? | select(.metadata.name == "broken-pdb-floor" and .spec.minAvailable == 2 and .status.expectedPods == 2 and .status.currentHealthy == 2 and .status.desiredHealthy == 2 and .status.disruptionsAllowed == 0)] | length == 1'
+    guard poddisruptionbudgets.json "PDB with room left in it, in the same List — the negative that makes the row above falsifiable" \
+      '[.items[]? | select(.metadata.name == "healthy-pdb-room" and .status.disruptionsAllowed >= 1)] | length == 1'
+
+    # `Bound`, never `Pending`: a claim that reserved nothing is somebody else's
+    # row. And the two sizes disagree because `ClaimSnapshot` reads
+    # `status.capacity.storage` — what was actually provisioned — while
+    # `spec.resources.requests.storage` is what was asked for; with both at 64Mi
+    # a decode reading the request would be indistinguishable from the right one.
+    guard persistentvolumeclaims.json "claim that is Bound and mounted by nothing — Waste's row for a disk that was reserved and then used by nothing, with the provisioned size differing from the requested one" \
+      '[.items[]? | select(.metadata.name == "broken-unused-disk" and .status.phase == "Bound" and .status.capacity.storage == "128Mi" and .spec.resources.requests.storage == "64Mi")] | length == 1'
+    guard persistentvolumeclaims.json "Bound claim a captured pod does mount (healthy-disk.json is the other half) — without it the report cannot be shown to do the join" \
+      '[.items[]? | select(.metadata.name == "healthy-disk" and .status.phase == "Bound")] | length == 1'
+
+    # Both sides of Waste's headline row on one capture, and the second guard is
+    # the one that is easy to lose: `kubernetes` in `default` carries **no
+    # selector at all**, which `ServiceSnapshot` says in so many words is not a
+    # thing to report — a rule that flagged every Service with no endpoints would
+    # flag it, and this is what keeps that object in the file.
+    guard services.json "Service whose selector matches no pod — Waste's headline row, the 503 nobody can explain, beside the three whose selectors do match" \
+      '[.items[]? | select(.metadata.name == "broken-noendpoints" and ((.spec.selector // {}) | length) > 0)] | length == 1'
+    guard services.json "selector-less Service — endpoints managed elsewhere, which is never this row" \
+      '[.items[]? | select(((.spec.selector // {}) | length) == 0)] | length > 0'
+
+    # *Matches no pod* is a claim about what is behind the Service, and the
+    # endpoint controller is what writes it down: a placeholder slice carrying no
+    # endpoints. Keyed on the `kubernetes.io/service-name` label and never on the
+    # slice's name — the controller generates that from `generateName`, which the
+    # sanitizer deletes, so the name differs on every capture and the label is
+    # the only stable handle (it is also the field `EndpointSliceSnapshot` reads).
+    guard endpointslices.json "empty EndpointSlice behind that Service — the Service on its own cannot say whether anything answers it" \
+      '[.items[]? | select(.metadata.labels["kubernetes.io/service-name"] == "broken-noendpoints")] | length == 1 and ((.[0].endpoints // []) | length) == 0'
+    # And a populated one, which is both the negative of the row and the proof
+    # that the sanitizer kept a node identifier it had never been shown in this
+    # kind: `.endpoints[].nodeName` is a node name in a field no other capture
+    # has, refused when it is foreign and kept intact when it is kind's own.
+    guard endpointslices.json "EndpointSlice that does carry endpoints, one of them naming the node it runs on" \
+      '[.items[]? | .endpoints[]? | select(.nodeName != null)] | length > 0'
 
     # --- THE ONE THE MACHINE HAS TO MAKE, AND IT GOES HERE ---
     # Everything above is on disk before a node is touched, and this is the first
