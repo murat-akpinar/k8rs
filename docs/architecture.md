@@ -319,10 +319,14 @@ it the first paint reports what it is waiting for
   never had it. Pruning is verified against live watch data in the client
   layer, where the field actually arrives
   ([NOTES § D30](../NOTES.md#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)).
-- **A decode test may set one field on a real capture** — the cluster the
-  fixtures came from had no cordoned node, no partially-ready workload and no
-  pod with an owner, and a branch whose input the capture cannot contain is a
-  branch no test can reach. It starts from a committed capture, changes one
+- **A decode test may set one field on a real capture** — a branch whose input
+  the capture cannot contain is a branch no test can reach, and the corpus has
+  always lacked *something*. The three shapes that licence was written for are
+  no longer among them: a cordoned node, a partially-ready workload and a pod
+  with an owner have each since been captured (`nodes.json`'s `k8rs-worker`,
+  `statefulsets.json`'s `broken-sts` at 1 ready of 2, `owned-pods.json`), and
+  each plant was retired by the trip that brought its object back. That is the
+  licence working, not an exception to it. It starts from a committed capture, changes one
   field to a value the API demonstrably produces, says why the capture lacks
   it, and names the object the next capture trip should bring back to replace
   it. A **rule's** positive fixture is still a real capture — this never

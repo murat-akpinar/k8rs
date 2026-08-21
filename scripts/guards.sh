@@ -84,6 +84,10 @@ bash scripts/certs-test.sh
 # can reach tests/fixtures/ without ever meeting the filter.
 bash scripts/fixture-audit.sh --self-test
 bash scripts/fixture-audit.sh
+# The mutation gate's own honesty: cargo-mutants files a failed build as
+# `unviable`, so a full disk reads as a pass (NOTES § D133). Self-test only —
+# the real run is the phase-close sweep and is eleven minutes long.
+bash scripts/mutants.sh --self-test
 # The other half of D92's "a review cluster cannot produce a committed fixture":
 # sanitize.jq anchors the refusal, and this is the loud early one, on the path
 # that builds the cluster in the first place.

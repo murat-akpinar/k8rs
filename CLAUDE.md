@@ -508,7 +508,7 @@ gives sixteen boxes of work one changelog line and no way back to box eleven.
 | 1 | Read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking |
 | 2 | Screen spec, **only if a screen changes** | `tui-designer` | the mockup covers every state, not just the happy one |
 | 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
-| 4 | Prove the tests can fail | the author, before reporting | `cargo mutants --in-diff` over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
+| 4 | Prove the tests can fail | the author, before reporting | `just mutants-diff` over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
 | 5 | Attack it, then the full run | `tester` | the assertions attacked and the unfed shapes fed · `just check` green **and** the code exercised for real |
 | 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting. **Batched by rule family, not by rule** — see below |
 | 7 | Land it | PM | see below |
@@ -556,11 +556,21 @@ still proves its own change red then green and pastes both** — that is step 3'
 not a separate turn. What checks the *claim* is a mutation run, because a
 surviving mutant is a test that cannot fail, stated by a tool with no incentive
 ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
-**Per turn it is scoped to the diff** —
-`cargo mutants --timeout 90 --in-diff <(git diff HEAD)` — because the whole file
-was 519 mutants at ~2s each the last time it was run whole (2026-08-16; the file
-has grown since). `just mutants` whole is the *phase-close* gate, and
-`--iterate` skips what an earlier run already caught.
+**Per turn it is scoped to the diff** — **`just mutants-diff`**, never a raw
+`cargo mutants` line — because the whole file was 519 mutants at ~2s each the last
+time it was run whole (2026-08-16; the file has grown since). `just mutants` whole
+is the *phase-close* gate, and `--iterate` skips what an earlier run already
+caught. **Both go through `scripts/mutants.sh`, and that is not a convenience.**
+cargo-mutants files *any* build failure as `unviable`, so a mutant that never got
+built because the scratch volume was full reads exactly like one that cannot
+compile — and this box's `/tmp` is a 12 GiB tmpfs that has been at 94% while
+`$HOME` had 916 GB free
+([D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)).
+The script names its own scratch volume, refuses to start without headroom, and
+**reads the run's logs afterwards** — an honest `unviable` names a type, a
+dishonest one names a filesystem, and the *count* cannot tell them apart (the last
+phase close had 55 legitimate unviables). A shard that dies for space prints no
+`MISSED` line, which is exactly what a passing shard prints.
 
 **So `tester` no longer re-runs the author's mutations by hand** — measured, it
 found zero defects for fourteen minutes and 120k tokens

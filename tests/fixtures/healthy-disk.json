@@ -2,36 +2,46 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-20T22:42:54Z",
+    "creationTimestamp": "2026-08-20T22:42:55Z",
     "generation": 1,
     "labels": {
-      "demo": "broken"
+      "demo": "healthy"
     },
-    "name": "broken-crashloop",
+    "name": "healthy-disk",
     "namespace": "default",
-    "resourceVersion": "5808",
-    "uid": "eadf8a2f-4b9a-412a-8d50-ca98e8461183"
+    "resourceVersion": "2153",
+    "uid": "d5e07928-d903-4756-af5b-2d486c98d475"
   },
   "spec": {
     "containers": [
       {
-        "args": [
-          "echo starting\nsleep 2\necho 'panic: dial tcp db.payments.svc:5432: connect: connection refused' >&2\nexit 1\n"
-        ],
         "command": [
-          "sh",
-          "-c"
+          "sleep",
+          "86400"
         ],
         "image": "busybox",
         "imagePullPolicy": "Always",
-        "name": "quitter",
-        "resources": {},
+        "name": "app",
+        "resources": {
+          "limits": {
+            "cpu": "100m",
+            "memory": "64Mi"
+          },
+          "requests": {
+            "cpu": "10m",
+            "memory": "16Mi"
+          }
+        },
         "terminationMessagePath": "/dev/termination-log",
-        "terminationMessagePolicy": "FallbackToLogsOnError",
+        "terminationMessagePolicy": "File",
         "volumeMounts": [
           {
+            "mountPath": "/data",
+            "name": "data"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-kr8dz",
+            "name": "kube-api-access-76h8q",
             "readOnly": true
           }
         ]
@@ -39,7 +49,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker",
+    "nodeName": "k8rs-worker2",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -64,7 +74,13 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-kr8dz",
+        "name": "data",
+        "persistentVolumeClaim": {
+          "claimName": "healthy-disk"
+        }
+      },
+      {
+        "name": "kube-api-access-76h8q",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -104,42 +120,42 @@
     ]
   },
   "status": {
+    "allocatedResources": {
+      "cpu": "10m",
+      "memory": "16Mi"
+    },
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-20T22:42:55Z",
+        "lastTransitionTime": "2026-08-20T22:43:00Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-20T22:42:54Z",
+        "lastTransitionTime": "2026-08-20T22:42:59Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-20T23:09:38Z",
-        "message": "containers with unready status: [quitter]",
+        "lastTransitionTime": "2026-08-20T22:43:12Z",
         "observedGeneration": 1,
-        "reason": "ContainersNotReady",
-        "status": "False",
+        "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-20T23:09:38Z",
-        "message": "containers with unready status: [quitter]",
+        "lastTransitionTime": "2026-08-20T22:43:12Z",
         "observedGeneration": 1,
-        "reason": "ContainersNotReady",
-        "status": "False",
+        "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-20T22:42:54Z",
+        "lastTransitionTime": "2026-08-20T22:42:59Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -147,28 +163,31 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://15fc24cab8a3448e4b2e32690e39f4eb3fa61978557a0e8fc9fca2db4f309b6a",
+        "allocatedResources": {
+          "cpu": "10m",
+          "memory": "16Mi"
+        },
+        "containerID": "containerd://3a6e4cc8133f4c372d6cbb3964e3302254dfd041adac730433b3d2d26b2d3b33",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
-        "lastState": {
-          "terminated": {
-            "containerID": "containerd://15fc24cab8a3448e4b2e32690e39f4eb3fa61978557a0e8fc9fca2db4f309b6a",
-            "exitCode": 1,
-            "finishedAt": "2026-08-20T23:09:38Z",
-            "message": "starting\npanic: dial tcp db.payments.svc:5432: connect: connection refused\n",
-            "reason": "Error",
-            "startedAt": "2026-08-20T23:09:36Z"
+        "lastState": {},
+        "name": "app",
+        "ready": true,
+        "resources": {
+          "limits": {
+            "cpu": "100m",
+            "memory": "64Mi"
+          },
+          "requests": {
+            "cpu": "10m",
+            "memory": "16Mi"
           }
         },
-        "name": "quitter",
-        "ready": false,
-        "resources": {},
-        "restartCount": 10,
-        "started": false,
+        "restartCount": 0,
+        "started": true,
         "state": {
-          "waiting": {
-            "message": "back-off 5m0s restarting failed container=quitter pod=broken-crashloop_default(eadf8a2f-4b9a-412a-8d50-ca98e8461183)",
-            "reason": "CrashLoopBackOff"
+          "running": {
+            "startedAt": "2026-08-20T22:43:12Z"
           }
         },
         "user": {
@@ -183,8 +202,12 @@
         },
         "volumeMounts": [
           {
+            "mountPath": "/data",
+            "name": "data"
+          },
+          {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-kr8dz",
+            "name": "kube-api-access-76h8q",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -205,8 +228,16 @@
         "ip": "REDACTED-IP"
       }
     ],
-    "qosClass": "BestEffort",
-    "resources": {},
-    "startTime": "2026-08-20T22:42:54Z"
+    "qosClass": "Burstable",
+    "resources": {
+      "limits": {
+        "cpu": "100m",
+        "memory": "64Mi"
+      },
+      "requests": {
+        "memory": "16Mi"
+      }
+    },
+    "startTime": "2026-08-20T22:42:59Z"
   }
 }

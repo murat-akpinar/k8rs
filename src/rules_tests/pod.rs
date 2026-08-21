@@ -645,7 +645,7 @@ fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
     );
     assert_eq!(
         looping.age(&now()).as_deref(),
-        Some("13 hours ago"),
+        Some("50 min ago"),
         "a duration, not English parsed back into a number"
     );
 
@@ -4493,7 +4493,7 @@ fn an_undated_lost_run_yields_to_a_card_about_what_the_container_is_doing_now() 
 /// **The second mechanism is the *conditions* and not the state, which
 /// [`lost_run_yields_to_the_present`]'s doc claimed until 2026-08-20** (NOTES § D125). *No
 /// `Reads::Now` rule can draw about a container sitting in `state.terminated`* is false —
-/// [`restarting_repeatedly`] does it on `init.json` — and the row below asserts that
+/// [`restarting_repeatedly`] does it on `failed.json` — and the row below asserts that
 /// counterexample, because it is what makes the narrower claim ([`RESTARTS_WARN`] against rule 15's
 /// `restarts == 0`) the load-bearing one.
 ///
@@ -4563,18 +4563,25 @@ fn every_rule_that_reads_the_present_is_proved_to_be_one() {
     }
 
     // **The counterexample first, because it is what the claim below has to be narrow enough to
-    // survive** (NOTES § D125). `init.json`'s init container is sitting in `state.terminated` and
-    // rule 5 draws about it, so *the state* is not what keeps a `Reads::Now` neighbour off rule
-    // 15's subject — the counts are. A doc that says otherwise is one edit from a suppressor
-    // deleting a card nobody decided to delete.
-    let init = pod("init");
-    let migrate = container(&init, "migrate");
+    // survive** (NOTES § D125). A container is sitting in `state.terminated` and rule 5 draws
+    // about it, so *the state* is not what keeps a `Reads::Now` neighbour off rule 15's subject
+    // — the counts are. A doc that says otherwise is one edit from a suppressor deleting a card
+    // nobody decided to delete.
+    //
+    // **The object is `failed.json` and not `init.json`, and that is the coin flip being taken
+    // out of the assertion** (NOTES § D114). A crash loop is photographed in `state.terminated`
+    // on some trips and in `state.waiting` on others — `init.json` was terminated on 2026-08-16
+    // and waiting on 2026-08-20, and this row demanded the first face. A pod whose **phase** is
+    // `Failed` cannot hold a container in any other state, so the counterexample is now on an
+    // object whose face is a property of the phase rather than of the trip.
+    let over = pod("failed");
+    let app = container(&over, "app");
     assert!(
-        matches!(migrate.state, ContainerState::Terminated(_)) && migrate.restarts > RESTARTS_WARN,
-        "the capture: an init container stopped in a run, restarted well past rule \
-         5's          threshold: {migrate:?}"
+        matches!(app.state, ContainerState::Terminated(_)) && app.restarts > RESTARTS_WARN,
+        "the capture: a container stopped in a run, restarted well past rule 5's threshold: \
+         {app:?}"
     );
-    let on_a_terminated_container: Vec<&str> = every_container_rule(&now(), &init, migrate)
+    let on_a_terminated_container: Vec<&str> = every_container_rule(&now(), &over, app)
         .iter()
         .map(|(r, _)| *r)
         .collect();
@@ -4582,7 +4589,7 @@ fn every_rule_that_reads_the_present_is_proved_to_be_one() {
     assert!(
         on_a_terminated_container.contains(&"rule 5"),
         "a `Reads::Now` rule draws about a container sitting in `state.terminated`, which is \
-         the          claim this file used to deny: {on_a_terminated_container:?}"
+         the claim this file used to deny: {on_a_terminated_container:?}"
     );
 
     // **(ii) The two whose label is *not* what holds them, and saying so is the point.** No rule
@@ -8651,10 +8658,10 @@ fn ten_restarts_is_red_unless_the_container_is_still_answering() {
 ///
 /// **Half of what a capture trip owed here arrived on 2026-08-16** (NOTES § D114). The `exit 0`
 /// shape — a container that reaches [`RESTARTS_WARN`] by *finishing*, then **running** and out of
-/// `CrashLoopBackOff` — is `probe0.json`: 13 restarts, `lastState.terminated` `0` / `Completed`,
-/// `state.running`, `ready: false`. It is read directly by
-/// [`each_ending_sends_the_reader_somewhere_the_answer_can_be`], which stopped stretching a plant
-/// to get it.
+/// `CrashLoopBackOff` — is `probe0.json`: a count past [`RESTARTS_CRITICAL`], with
+/// `lastState.terminated` `0` / `Completed`, `state.running` and `ready: false`. It is read
+/// directly by [`each_ending_sends_the_reader_somewhere_the_answer_can_be`], which stopped
+/// stretching a plant to get it.
 ///
 /// **What is still owed is the `exit 143` half** — the same shape reached by a `SIGTERM` the
 /// program handles — and the manifest for it is one character away in the capture's own `spec`:
@@ -8840,7 +8847,22 @@ fn each_ending_sends_the_reader_somewhere_the_answer_can_be() {
     );
     let all = findings(&["probe0"]);
     show(&all);
-    let card = only(&all, "broken-probe0", "restarted 13 times");
+    // **The count is the capture's and the band is the requirement's.** A number transcribed
+    // here asserts the trip that produced it — `probe0`'s probe keeps killing the container,
+    // so the counter is higher on every capture (13 on 2026-08-16, 14 on 2026-08-20). What may
+    // not move is which side of [`RESTARTS_CRITICAL`] it sits on, because that is what puts
+    // this ending in front of the arm the rest of this test reads.
+    let restarts = container(&capture, "app").restarts;
+    assert!(
+        restarts >= RESTARTS_CRITICAL,
+        "a capture below the red band draws a different card and this test would assert the \
+         other arm's action against it: {restarts} restarts"
+    );
+    let card = only(
+        &all,
+        "broken-probe0",
+        &format!("restarted {restarts} times"),
+    );
     // **Both readings stay open.** An application that traps SIGTERM and shuts down tidily
     // reports `0`, and the kubelet writes `0` / `Completed` whichever of the two happened — so
     // an action that says nothing killed it is wrong about every gracefully-stopping program in
@@ -8886,8 +8908,9 @@ fn each_ending_sends_the_reader_somewhere_the_answer_can_be() {
     // this rule's is not bounded that way and the run may have ended hours ago, where
     // `Events: <none>` reads to a beginner as *nothing stopped it* — which is the reading that
     // walks them into the Job door for a Deployment that is fine. **This capture is the case
-    // exactly**: `broken-probe0`'s clean run ended 13 hours before the pinned `now`, so the
-    // `Killing` line the action sends the reader after has already expired (NOTES § D114).
+    // exactly**: `broken-probe0`'s clean run ended hours before the pinned `now` — three on the
+    // 2026-08-20 corpus — so the `Killing` line the action sends the reader after has already
+    // expired (NOTES § D114).
     assert!(
         card.action.contains("kept an hour"),
         "the reader is told the events expire, or an empty Events list reads as a verdict: {}",
@@ -9928,8 +9951,8 @@ fn the_pending_pod_carries_the_schedulers_verdict_and_the_sentence_behind_it() {
     assert_eq!(
         unplaced.severity,
         Severity::Critical,
-        "this capture is three hours past its refusal, which is well outside the window \
-         below — nothing is going to place it until a human acts"
+        "this capture is an hour and a quarter past its refusal, which is well outside \
+         the window below — nothing is going to place it until a human acts"
     );
     assert!(
         unplaced.title.contains("No machine in the cluster") && unplaced.title.contains("Pending"),
@@ -9971,7 +9994,7 @@ fn the_pending_pod_carries_the_schedulers_verdict_and_the_sentence_behind_it() {
     );
     assert_eq!(
         unplaced.age(&now()).as_deref(),
-        Some("14 hours ago"),
+        Some("1 hour ago"),
         "a duration, not English parsed back into a number"
     );
 
@@ -10354,8 +10377,8 @@ fn a_pod_with_a_machine_already_being_cleared_for_it_is_not_a_pod_nothing_will_t
 /// the hardest negatives in the file because nothing about them is synthetic.
 ///
 /// `image.json` and `config.json` are both `phase: Pending`, both `PodScheduled: True`,
-/// both have a container that has never run, and both are **three hours** older than the
-/// pinned `now` — so they clear the ten-minute grace with room to spare and satisfy
+/// both have a container that has never run, and both are **an hour and a quarter** older
+/// than the pinned `now` — so they clear the ten-minute grace with room to spare and satisfy
 /// every clause of [`placed_but_never_started`] except the one that matters. Dropping
 /// either exclusion — [`EXPLAINED_ELSEWHERE`] or [`UNUSABLE_IMAGE`] — puts a second card
 /// on each: *"it has not been able to start"* beside *"the image is not usable"*, which
@@ -10481,10 +10504,10 @@ fn an_init_container_still_doing_its_work_is_not_a_pod_that_never_started() {
 
     nothing(
         &analyze(&pods_at(vec![running], now())),
-        "the pod was placed three hours ago and its app container has never started, so \
-         every other clause of rule 13 holds — and it is a migration doing its job. The \
-         running init container is both what `PodInitializing` is pointing at and what \
-         makes *it has not been able to start* false about this pod; firing here would \
+        "the pod was placed an hour and a quarter ago and its app container has never \
+         started, so every other clause of rule 13 holds — and it is a migration doing its \
+         job. The running init container is both what `PodInitializing` is pointing at and \
+         what makes *it has not been able to start* false about this pod; firing here would \
          put a card on every slow migration in the cluster (D2)",
     );
 }
@@ -10690,8 +10713,8 @@ fn a_pod_that_only_ever_says_podinitializing_is_the_wedge_the_rule_was_added_for
     assert_eq!(
         all.len(),
         1,
-        "one card: this pod has been on a machine for three hours, nothing in it has \
-         started, and `PodInitializing` is the only thing it has said — which is exactly \
+        "one card: this pod has been on a machine for an hour and a quarter, nothing in \
+         it has started, and `PodInitializing` is the only thing it has said — which is exactly \
          as wedged as one saying `ContainerCreating`, and was silence before: {:?}",
         titles(&all)
     );
@@ -10869,14 +10892,30 @@ fn two_containers_stuck_for_different_reasons_are_both_named() {
 /// about starting that blamed a disk. Two typos, two unrecognisably different answers.
 ///
 /// The moment below is **seven seconds** after the pod was placed — well inside rule
-/// 13's grace — so this asserts the answer arrives *now*, which is half the point.
+/// 13's grace — so this asserts the answer arrives *now*, which is half the point. It is
+/// **derived from the capture**, the way
+/// [`a_pod_only_just_placed_is_a_slow_pull_and_not_a_wedge`] derives its pair. The literal that
+/// stood here was one trip's own placement and no later trip repinned it, so by 2026-08-20 it sat
+/// eight days *before* the capture it claimed to be seven seconds after. **No verdict moved** —
+/// the exclusion below is what keeps rule 13 off these pods, at any age — so nothing went red and
+/// nothing was going to: it is the sentence above that had stopped being true, and a moment read
+/// off the capture cannot go stale the way a transcribed one does (NOTES § D114).
 ///
 /// **One list, so this is one test for two rules.** [`UNUSABLE_IMAGE`] is rule 3's
 /// trigger and rule 13's exclusion at the same time, so a reason added to rule 3 that
 /// somebody forgot to exclude from the residual is not a shape that exists.
 #[test]
 fn every_unusable_image_reason_is_rule_threes_card_and_arrives_at_once() {
-    let just_placed = time("2026-08-12T20:46:00Z");
+    let just_placed = Time(
+        pod("config")
+            .scheduled
+            .as_ref()
+            .and_then(|c| c.last_transition.clone())
+            .expect("the capture says when it was placed")
+            .0
+            .checked_add(SignedDuration::from_secs(7))
+            .expect("seven seconds after a captured placement is a moment"),
+    );
     for reason in UNUSABLE_IMAGE {
         let broken = capture_but("config", |pod| {
             never_ran(pod, "app", reason, Some("the runtime's own sentence"));
@@ -10904,7 +10943,7 @@ fn every_unusable_image_reason_is_rule_threes_card_and_arrives_at_once() {
             card.evidence
         );
 
-        // ...and three hours later it is still rule 3's card, never the residual's.
+        // ...and an hour and a quarter later it is still rule 3's card, never the residual's.
         let later = analyze(&pods_at(vec![broken], now()));
         assert_eq!(
             titles(&later),
@@ -11527,8 +11566,9 @@ fn the_whole_capture_through_the_rules_at_once() {
         // both ways off these same bytes.
         "oomserving",
         // **The same shape, one rule over, since D100.** Both of these are containers that used
-        // their restarts and have been serving for the 49 hours between the capture and the pin,
-        // and `restartCount` never comes down — so at *this* moment they are old news, and at a
+        // their restarts and have been serving for the hours between the capture and the pin —
+        // four on the 2026-08-20 corpus, against a [`NOT_READY_GRACE`] of ten minutes — and
+        // `restartCount` never comes down, so at *this* moment they are old news, and at a
         // moment inside their run they are two of the cards this screen exists for.
         // `a_container_that_looks_fine_…` and `ten_restarts_is_red_…` read both directions off
         // these same bytes.
@@ -11562,6 +11602,15 @@ fn the_whole_capture_through_the_rules_at_once() {
         "nolimits",
         "podlimit",
         "resize",
+        // **The 2026-08-20 trip's two, and both are silent for a reason a later phase reads.**
+        // `overhead` is a Capacity input and nothing else — its container is `Running`, `ready`,
+        // never restarted, and what makes it worth capturing is `spec.overhead` (250m/120Mi from
+        // the RuntimeClass admission controller, on top of a 100m/64Mi request), which no rule in
+        // this box reads. `healthy-disk` is the pod half of the claim join and is healthy by
+        // construction. Neither is an Alerts card, and a card here would mean a rule started
+        // reading a report's field (NOTES § D129, § D130).
+        "overhead",
+        "healthy-disk",
         "succeeded",
         "failed",
     ];
@@ -12379,9 +12428,9 @@ fn the_one_reader_of_the_current_terminated_state_asks_only_whether_an_init_cont
 ///   (NOTES § D114). The claim was *nothing in this state is a fault unless somebody built one*,
 ///   and it was true of a corpus in which every crash loop happened to have been photographed in
 ///   `waiting: CrashLoopBackOff`. That is a coin-flip — `scripts/cluster.sh` § `[owned]` measured
-///   `state.terminated` in 39 samples of 70 — and the 2026-08-16 trip photographed four of them
-///   on the other face. `init/migrate`, `notfound/app` and `oom/hog` are all sitting in a failed
-///   run right now, and all three are perfectly ordinary crash loops.
+///   `state.terminated` in 39 samples of 70 — and the 2026-08-16 trip photographed three of them
+///   on the other face: `init/migrate`, `notfound/app` and `oom/hog` were all sitting in a failed
+///   run, and all three are perfectly ordinary crash loops.
 ///
 ///   **What survives is sharper than what it replaces, and it is rule 15's own condition.** The
 ///   thing that separates *a container something is restarting* from *a container nothing will
@@ -12389,23 +12438,48 @@ fn the_one_reader_of_the_current_terminated_state_asks_only_whether_an_init_cont
 ///   the field still puts no card on the screen that another rule was not already drawing, and
 ///   the one object that is neither is the one rule 15 exists for. The ruling did not move; the
 ///   corpus finally contains the case it was reasoning about.
+///
+///   **Then the coin came back twice more, and that is what decides the shape of this test.** The
+///   first 2026-08-20 trip put all three back in `waiting: CrashLoopBackOff`; the fourth put
+///   `init/migrate` and `oom/hog` on the terminated face again — one cluster, one set of
+///   manifests, three answers. A roster over the whole sweep therefore has to be hand-edited
+///   every trip, and the repair anybody reaches for under time pressure is to paste in what the
+///   run printed, which is the one thing CLAUDE.md § *Tests must not lie* forbids.
+///
+///   **So the sweep is split where the coin lands, and only the side the coin cannot reach is a
+///   roster.** A container that stopped for good — a finished init container, anything under
+///   `Never`, a retry rule that ran out — sits in this field because of the manifest, and its
+///   whole line is fixed. A crash loop sits in it because of the second the shutter opened.
+///   [`restarted_after_a_bad_run`] is the one that separates them and is also what the restart
+///   arm is asserted against, so the two cannot drift: it names those objects on whichever face
+///   they landed, and this sweep asks it rather than re-reading the fields itself.
 /// - The captures that hold a **bad** exit in this field hold it on a pod that is **over**, and
 ///   [`analyze`] never looks at those (NOTES § D2) — proved, on these same two objects, by
 ///   [`a_pod_that_finished_is_charged_to_nobody_and_alarms_about_nothing`], which is why the
 ///   skip is cited here and not re-asserted.
-/// - **And the exception has to be exactly one object.** `neverback.json` is named as a whole
-///   `pod/container` string, not waved through as *any Regular container that draws a card*, so a
-///   second capture landing in this state reddens this test the way the first one did — which is
-///   the only reason the narrowing is not a weakening (CLAUDE.md § Code phase rules).
+/// - **And the exceptions are named objects and never a class.** [`CAPTURED_TO_BE_A_FINDING`]
+///   holds them as whole `pod/container` strings — two since NOTES § D125, not the one
+///   `neverback.json` this bullet was written for — rather than waving through *any Regular
+///   container that draws a card*, so a third capture landing in this state reddens this test
+///   the way the first one did, which is the only reason the narrowing is not a weakening
+///   (CLAUDE.md § Code phase rules).
 ///
 /// **A derived list, so it asserts what it found** — the sweep names every container rather
 /// than counting them, or a decode that stopped producing [`ContainerState::Terminated`] would
-/// print the same green line as a corpus with nothing in it.
+/// print the same green line as a corpus with nothing in it. The naming is on the settled half
+/// and on [`restarted_after_a_bad_run`], which between them cover every container the sweep can
+/// reach, so nothing is exempted from being named by being moved to the printed half.
 #[test]
 fn every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_captured_finding() {
-    let mut serving: Vec<String> = Vec::new();
+    // **The two halves of the sweep, split by whether anything is going to start another run**
+    // (NOTES § D114, § D131). `settled` is where a container stops for good, which is a property
+    // of the manifest; `mid_loop` is a crash loop the shutter happened to catch between runs,
+    // which is a property of the second the capture was taken. Only the first can be a roster.
+    let mut settled: Vec<String> = Vec::new();
+    let mut mid_loop: Vec<String> = Vec::new();
     let mut over: Vec<String> = Vec::new();
-    let (mut mid_loop, mut clean_endings) = (0usize, 0usize);
+    let mut clean_endings = 0usize;
+    let restarting = restarted_after_a_bad_run();
     for name in CAPTURED_PODS {
         let p = pod(name);
         for c in &p.containers {
@@ -12420,6 +12494,7 @@ fn every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_cap
                 c.restarts,
                 exit_fact(run)
             );
+            let named = format!("{name}/{}", c.name);
             if finished(&p) {
                 over.push(seen);
             } else {
@@ -12433,9 +12508,7 @@ fn every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_cap
                 // name and never by a class** — a third capture landing in this state reddens
                 // this test the way the first one did, which is the only reason narrowing it is
                 // not weakening it.
-                if !["neverback/broke", "neverrules/retry"]
-                    .contains(&format!("{name}/{}", c.name).as_str())
-                {
+                if !CAPTURED_TO_BE_A_FINDING.contains(&named.as_str()) {
                     assert!(
                         ending(run) == Ending::Finished || c.restarts != 0,
                         "{seen}: a container sitting in a terminated run inside a live pod has \
@@ -12445,55 +12518,91 @@ fn every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_cap
                          run. A container nothing is going to start again is named above instead \
                          (NOTES § D96, § D97, § D114, § D125)"
                     );
+                    // **Counted inside the branch that made the assertion, and that is not a
+                    // tidy-up** (NOTES § D131). Outside it, the exempted objects fed the counter
+                    // too — and on the first 2026-08-20 corpus `neverrules/retry` was the *only*
+                    // thing reaching the restart arm, so the guard that exists to prove both arms
+                    // of the `||` are asked was being answered by a container the `||` is never
+                    // asked about.
+                    if ending(run) == Ending::Finished {
+                        clean_endings += 1;
+                    }
                 }
-                if ending(run) == Ending::Finished {
-                    clean_endings += 1;
-                } else if c.restarts != 0 {
-                    mid_loop += 1;
+                // **Which side it lands on is [`restarted_after_a_bad_run`]'s answer and not a
+                // second reading of the fields** — that function is what the restart arm is
+                // proved against below, so a container it names and this split does not would be
+                // two lists disagreeing about one container, which is the defect class this
+                // repository has paid most for (CLAUDE.md § Code phase rules).
+                if restarting.contains(&named) {
+                    mid_loop.push(seen);
+                } else {
+                    settled.push(seen);
                 }
-                serving.push(seen);
             }
         }
     }
     println!(
-        "inside a pod that is still going:\n  {}",
-        serving.join("\n  ")
+        "inside a pod that is still going, and stopped there for good:\n  {}",
+        settled.join("\n  ")
+    );
+    println!(
+        "inside a pod that is still going, caught between two runs:\n  {}",
+        mid_loop.join("\n  ")
     );
     println!("inside a pod that is over:\n  {}", over.join("\n  "));
     assert_eq!(
-        serving,
+        settled,
         [
             "healthy-retry/wait-for-db (Init, Running, 3 restarts) exit 0 (the run ended without \
              an error)",
             "healthy/migrate (Init, Running, 0 restarts) exit 0 (the run ended without an error)",
-            "init/migrate (Init, Pending, 10 restarts) exit 1 (the application's own error)",
             "neverback/broke (Regular, Running, 0 restarts) exit 1 (the application's own error)",
             "neverback/done (Regular, Running, 0 restarts) exit 0 (the run ended without an \
              error)",
             "neverrules/retry (Regular, Running, 1 restarts) exit 1 (the application's own error)",
-            "notfound/app (Regular, Running, 10 restarts) exit 127 (the command was not found)",
-            "oom/hog (Regular, Running, 10 restarts) exit 137 (killed by the kernel for using \
-             more memory than it was allowed)",
         ],
-        "every capture that carries the field inside a pod that is still going, named — a sweep \
-         that found nothing prints the same line as one that found nothing wrong. **`done` is on \
-         this list and is not the exception**: it exited `0`, which under `Never` is the policy \
-         doing what it says, so it is the healthy shape reached by a third road (NOTES § D96, \
-         leg 7). **The four with a bad ending and a count are the 2026-08-16 trip's**, and they \
-         are the case the ruling was always reasoning about (NOTES § D114)"
+        "every capture that stops in this field for good, named — a sweep that found nothing \
+         prints the same line as one that found nothing wrong. **`done` is on this list and is \
+         not the exception**: it exited `0`, which under `Never` is the policy doing what it \
+         says, so it is the healthy shape reached by a third road (NOTES § D96, leg 7). \
+         **A change here is a finding to read and never a line to paste** — every one of these \
+         five is a container nothing will start again, so its role, phase, count and exit are \
+         fixed by the manifest and survive any recapture. If this list moved, a capture changed \
+         shape or a decode did, and that is the thing to go and look at (NOTES § D131)"
     );
     // **Both arms of the claim are reached**, or the `||` above is satisfied by one constant and
     // the restart arm is a branch nothing takes (CLAUDE.md § Code phase rules). Counted off the
     // objects rather than off the strings above — a first draft matched `"0 restarts"` as a
     // substring and scored `10 restarts` as a first run.
-    println!(
-        "{} mid-loop with a bad ending, {} clean",
-        mid_loop, clean_endings
-    );
+    println!("{clean_endings} of the settled containers simply finished");
     assert!(
-        mid_loop > 0 && clean_endings > 0,
-        "the corpus has to hold both a container something is restarting after a bad run and one \
-         that simply finished, or the two arms of this claim are not both being asked: {serving:?}"
+        clean_endings > 0,
+        "the corpus has to hold a container that simply finished, or the first arm of this claim \
+         is not being asked at all: {settled:?}"
+    );
+    // **The second arm's subjects, on whichever face the trip caught them** (NOTES § D114).
+    // `mid_loop` holds the ones photographed *between* runs, and it is deliberately **printed and
+    // not rostered**: it held three objects after the 2026-08-16 trip, none after the first
+    // 2026-08-20 one and two after the fourth, from an unchanged cluster and unchanged manifests.
+    // `scripts/cluster.sh` § `[owned]` measured the toss at 39 of 70. A roster over it asserts
+    // the second the shutter opened, and the repair under time pressure is to paste in whatever
+    // the run printed (CLAUDE.md § Code phase rules).
+    //
+    // What does not move is which captures can reach that arm at all — a container the kubelet is
+    // restarting after a bad run carries the ending and the count on either face — so **that** is
+    // the list asserted, and it is the same function this sweep split itself on.
+    assert_eq!(
+        restarted_after_a_bad_run(),
+        [
+            "crashloop/quitter",
+            "init/migrate",
+            "notfound/app",
+            "oom/hog",
+            "sigterm/app"
+        ],
+        "the captures whose container the kubelet is restarting after a bad run — the restart \
+         arm's subjects, named rather than counted, and named on both faces so a trip that \
+         flips the coin does not turn the arm into dead code"
     );
     assert_eq!(
         over,
@@ -12526,6 +12635,51 @@ fn every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_cap
         "the one capture exempted above is exempt because a rule reads it, not because a claim \
          was widened to let it past"
     );
+}
+
+/// **The captures taken *because* a container stopped in this state is a finding**, by exact
+/// `pod/container` name and never by a class — a third capture landing there reddens
+/// [`every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_captured_finding`]
+/// the way the first one did, which is the only reason narrowing it is not weakening it
+/// (NOTES § D96, § D125).
+const CAPTURED_TO_BE_A_FINDING: [&str; 2] = ["neverback/broke", "neverrules/retry"];
+
+/// **Every captured container the kubelet is restarting after a run that went wrong, on whichever
+/// face the trip photographed it** — in the backoff (`state.waiting`) or between two runs
+/// (`state.terminated`). The pair of fields differs; the ending and the count do not, which is
+/// what makes this list a property of the manifests rather than of the second the capture was
+/// taken (NOTES § D114).
+///
+/// The ones already
+/// [captured to be a finding](CAPTURED_TO_BE_A_FINDING) are left out, because they are exempt
+/// from the claim this list exists to keep answerable.
+fn restarted_after_a_bad_run() -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for name in CAPTURED_PODS {
+        let p = pod(name);
+        if finished(&p) {
+            continue;
+        }
+        for c in &p.containers {
+            let run = match (&c.state, &c.last_terminated) {
+                (ContainerState::Terminated(run), _) => Some(run),
+                (ContainerState::Waiting { reason, .. }, last)
+                    if reason.as_deref() == Some("CrashLoopBackOff") =>
+                {
+                    last.as_ref()
+                }
+                _ => None,
+            };
+            let named = format!("{name}/{}", c.name);
+            if run.is_some_and(|r| ending(r) != Ending::Finished)
+                && c.restarts != 0
+                && !CAPTURED_TO_BE_A_FINDING.contains(&named.as_str())
+            {
+                found.push(named);
+            }
+        }
+    }
+    found
 }
 
 /// **The one committed object whose two halves disagree, and the card that was wrong about it**
@@ -13557,7 +13711,7 @@ fn the_captured_pod_that_stopped_for_good_draws_one_card_and_the_clean_exit_besi
     );
     // **The moment, not the rendered age** (NOTES § D18, § D69). The phrase is a function of the
     // pin as well as of the rule — this card drew *no age at all* until `fn now()` was repinned in
-    // the same change that added the capture, and it reads `12 hours ago` now — so a test written
+    // the same change that added the capture, and it reads `1 hour ago` now — so a test written
     // against the phrase would move every time the corpus is recaptured, while asserting nothing
     // this rule decides. The field is the claim: when *this* run finished, off `state.terminated`
     // and not off a `lastState` this container has never had.

@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-16T09:44:00Z",
+    "creationTimestamp": "2026-08-20T22:42:55Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-wedged",
     "namespace": "default",
-    "resourceVersion": "841",
-    "uid": "38d45f3f-012a-48db-9a34-24cecf35787e"
+    "resourceVersion": "802",
+    "uid": "70453973-3722-4915-932d-b761e2011084"
   },
   "spec": {
     "containers": [
@@ -32,7 +32,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-j7bmj",
+            "name": "kube-api-access-8zkvj",
             "readOnly": true
           }
         ]
@@ -72,7 +72,7 @@
         "name": "config"
       },
       {
-        "name": "kube-api-access-j7bmj",
+        "name": "kube-api-access-8zkvj",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -115,21 +115,21 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:01Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "observedGeneration": 1,
         "status": "False",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:01Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:01Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "message": "containers with unready status: [app]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -138,7 +138,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:01Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "message": "containers with unready status: [app]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -147,7 +147,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:01Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -174,7 +174,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-j7bmj",
+            "name": "kube-api-access-8zkvj",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -191,6 +191,6 @@
     "phase": "Pending",
     "qosClass": "BestEffort",
     "resources": {},
-    "startTime": "2026-08-16T09:44:01Z"
+    "startTime": "2026-08-20T22:42:55Z"
   }
 }

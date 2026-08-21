@@ -133,12 +133,19 @@ fn captured_str<'a>(value: &'a serde_json::Value, path: &[&str]) -> &'a str {
     })
 }
 
+/// `i64` because that is what the API declares `metadata.generation` and every
+/// `observedGeneration` as — and [`captured_i32`] narrows this one rather than reading the
+/// capture a second time.
+fn captured_i64(value: &serde_json::Value, path: &[&str]) -> i64 {
+    at(value, path).as_i64().unwrap_or_else(|| {
+        panic!("the capture carries no number at {path:?}, so nothing here is compared against it")
+    })
+}
+
 /// `i32` because that is what the API declares a restart count and every replica
 /// counter as, and what the snapshot types carry.
 fn captured_i32(value: &serde_json::Value, path: &[&str]) -> i32 {
-    let n = at(value, path).as_i64().unwrap_or_else(|| {
-        panic!("the capture carries no number at {path:?}, so nothing here is compared against it")
-    });
+    let n = captured_i64(value, path);
     i32::try_from(n)
         .unwrap_or_else(|_| panic!("{path:?} is {n}, which is not the i32 the API declares"))
 }
@@ -214,14 +221,15 @@ fn captured_item<'a>(list: &'a serde_json::Value, name: &str) -> &'a serde_json:
 /// that survives is the general one: **the pin follows the corpus**, because every capture
 /// ever taken is newer than a clock pinned before it.
 ///
-/// **The corpus is one trip again since 2026-08-16** — `just fixtures` re-took all of it from one
-/// cluster in one morning, and four pod captures landed with it — so the two readings agree today
-/// and the general rule is what is written down (NOTES § D114). **A repin is an edit in two
-/// ownership rows**: `scripts/certs-test.sh` extracts this literal, compares it against its own
-/// `now=`, and asserts three certificate day-counts against it, so it moves in the same change or
-/// `just check` goes red on the guard rather than on anything here.
+/// **The corpus is one trip again since 2026-08-20** — `just fixtures` re-took all of it from
+/// one cluster in one afternoon, and four captures landed with it — `healthy-disk`, `overhead`,
+/// `endpointslices` and, on the 2026-08-21 re-run, `healthy-deploy-pods` — so the two readings
+/// agree today and the general rule is what is written down (NOTES § D114). **A repin is an
+/// edit in two ownership rows**: `scripts/certs-test.sh` extracts this literal, compares it
+/// against its own `now=`, and asserts three certificate day-counts against it, so it moves in
+/// the same change or `just check` goes red on the guard rather than on anything here.
 fn now() -> Time {
-    time("2026-08-17T00:00:00Z")
+    time("2026-08-21T00:00:00Z")
 }
 
 fn container<'a>(pod: &'a PodSnapshot, name: &str) -> &'a ContainerSnapshot {
@@ -231,22 +239,24 @@ fn container<'a>(pod: &'a PodSnapshot, name: &str) -> &'a ContainerSnapshot {
         .unwrap_or_else(|| panic!("{} has no container {name}", pod.id.name))
 }
 
-/// **Every pod capture in the repository**, and the claim is checked rather than assumed:
-/// `just fixtures` guards each file, and `the_whole_capture_through_the_rules_at_once` names
-/// which of these are allowed to draw nothing, so a fixture added to `tests/fixtures` and not
-/// to this list shows up as a capture no test reads.
+/// **Every single-object pod capture in the repository** — the `kubectl get pods` captures are
+/// [`CAPTURED_POD_LISTS`], because a `List` cannot decode as a `Pod`. Both claims are checked
+/// rather than assumed, in both directions, by
+/// [`every_committed_pod_capture_is_named_in_the_list_that_claims_to_hold_them_all`], so a
+/// fixture added to `tests/fixtures` and named in neither array shows up as a capture no test
+/// reads.
 ///
-/// Named once because four things read the same set — the join, the pin guard, the whole-capture
-/// run and every node-rule join through [`every_captured_pod`] — and a second copy is a second
-/// list to keep in step. **The pin guard is why completeness matters**: it walks only what is in
-/// this snapshot, so a capture left out of it is a capture whose timestamps were never compared
-/// against [`now`].
-const CAPTURED_PODS: [&str; 36] = [
+/// Named once because three things read this set — [`fixture_snapshot`], the whole-capture run,
+/// and [`every_captured_pod`] together with the lists — and a second copy is a second list to
+/// keep in step. `the_whole_capture_through_the_rules_at_once` names which of these are allowed
+/// to draw nothing.
+const CAPTURED_PODS: [&str; 38] = [
     "config",
     "crashloop",
     "exit0",
     "failed",
     "gang",
+    "healthy-disk",
     "healthy-hostpath",
     "healthy-podlevel",
     "healthy-retry",
@@ -262,6 +272,7 @@ const CAPTURED_PODS: [&str; 36] = [
     "notfound",
     "oom",
     "oomserving",
+    "overhead",
     "pending",
     "podlimit",
     "probe0",
@@ -279,6 +290,20 @@ const CAPTURED_PODS: [&str; 36] = [
     "unjudged",
     "wedged",
 ];
+
+/// **Every `kubectl get pods` capture in the repository** — the `List` counterpart of
+/// [`CAPTURED_PODS`], which holds only the single-object files because a `List` cannot decode
+/// as a `Pod`.
+///
+/// **It exists because the gap between the two lists was invisible.** `every_captured_pod`
+/// chained `kube-system-pods` by name and nothing else, so `owned-pods` was outside the join
+/// for weeks and `healthy-deploy-pods` was outside it from the moment it landed — and
+/// [`every_committed_pod_capture_is_named_in_the_list_that_claims_to_hold_them_all`] could not
+/// say so, because it filters on `kind: Pod` and a `List` is structurally outside it. A trip
+/// captured two pods that a tripwire existed to notice, and every test stayed green (NOTES
+/// § D131). Naming the lists is what lets that same sweep read this array too, in both
+/// directions, so the fourth one cannot arrive in silence the way the third did.
+const CAPTURED_POD_LISTS: [&str; 3] = ["healthy-deploy-pods", "kube-system-pods", "owned-pods"];
 
 /// **A snapshot on which nothing has been fetched** — the six on-demand lists all `None`, which
 /// is what every rule in `rules.rs` is handed and what a report reads as *nobody looked*
@@ -307,8 +332,16 @@ fn nothing_fetched() -> ClusterSnapshot {
     }
 }
 
-/// The snapshot a rule would be handed if it ran over the whole committed capture at
-/// once: every pod, every node, the Deployments, and the pinned [`now`](now).
+/// The snapshot a rule would be handed if it ran over the whole committed capture at once:
+/// every [`CAPTURED_PODS`] pod, every node, the Deployments, and the pinned [`now`](now).
+///
+/// **Not [`every_captured_pod`]**, and the difference is deliberate: this is what
+/// `the_whole_capture_through_the_rules_at_once` enumerates card-by-card, and the `kube-system`
+/// DaemonSet and static pods would add fourteen objects that box is not about. The node joins
+/// use the wider set, because a per-node sum computed without them is wrong (NOTES § D46).
+/// **The one reader that needs both is the pin guard**, which spreads this and replaces the pod
+/// list — a capture whose timestamps are never compared against [`now`] is the whole of what it
+/// exists to prevent (NOTES § D131).
 fn fixture_snapshot() -> ClusterSnapshot {
     ClusterSnapshot {
         now: now(),
@@ -332,12 +365,11 @@ fn fixture_snapshot() -> ClusterSnapshot {
         // `just fixtures` captures `-A`, so this snapshot covers the whole cluster
         // and N2 and N5 are allowed to run over it.
         namespace_scope: None,
-        // **The lists the reports fetch, decoded from the captures that hold one.** Three of
-        // the five are `Some(vec![])` because the fixture cluster genuinely has no such object
-        // — `poddisruptionbudgets.json` and `persistentvolumeclaims.json` are committed empty
-        // lists, and `endpointslices` is not captured at all — which is
-        // [`what_no_committed_capture_can_prove_about_family_cs_inputs`]'s subject, and
-        // NOTES § D129's second blocker.
+        // **The lists the reports fetch, decoded from the captures that hold one.** All five
+        // hold objects since the 2026-08-20 trip — `poddisruptionbudgets.json`,
+        // `persistentvolumeclaims.json` and the new `endpointslices.json` were the three that
+        // decoded only an empty list or had never run at all, which was NOTES § D129's second
+        // blocker and [`what_family_cs_inputs_still_have_no_object_for`]'s subject before it.
         // `certificate_requests` is `None` here on purpose: C3's fetch is a Phase 5 box, and
         // the one committed CSR is read by its own test rather than smuggled into the snapshot
         // every rule runs over.
@@ -353,7 +385,12 @@ fn fixture_snapshot() -> ClusterSnapshot {
                 .map(Into::into)
                 .collect(),
         ),
-        endpoint_slices: None,
+        endpoint_slices: Some(
+            items::<EndpointSlice>("endpointslices")
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ),
         claims: Some(
             items::<PersistentVolumeClaim>("persistentvolumeclaims")
                 .into_iter()
@@ -503,17 +540,23 @@ fn captured_nodes() -> Vec<NodeSnapshot> {
     items::<Node>("nodes").into_iter().map(Into::into).collect()
 }
 
-/// **Every pod the capture holds, in both namespaces it photographed.** The node rules are
-/// joins, and joining only the twelve `default` pods hides the two shapes N2 exists to skip:
-/// `kube-system` is where the DaemonSet and the static pods are, and on this cluster they are
-/// the only ones there are.
+/// **Every pod the capture holds** — [`CAPTURED_PODS`] and every list of [`CAPTURED_POD_LISTS`],
+/// which is the whole of `tests/fixtures` and is asserted to be by
+/// [`every_committed_pod_capture_is_named_in_the_list_that_claims_to_hold_them_all`].
+///
+/// The node rules are joins, and joining only the `default` pods hides the two shapes N2 exists
+/// to skip: `kube-system` is where the DaemonSet and the static pods are. **A pod left out of
+/// this set is a pod on a node whose per-node sum is then wrong** — D46's named defect class,
+/// and the reason the membership is a checked claim rather than a chain of names somebody
+/// maintains (NOTES § D131).
 fn every_captured_pod() -> Vec<PodSnapshot> {
     CAPTURED_PODS
         .iter()
         .map(|n| pod(n))
         .chain(
-            items::<Pod>("kube-system-pods")
-                .into_iter()
+            CAPTURED_POD_LISTS
+                .iter()
+                .flat_map(|n| items::<Pod>(n))
                 .map(PodSnapshot::from),
         )
         .collect()

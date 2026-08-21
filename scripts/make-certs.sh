@@ -9,9 +9,9 @@
 # (NOTES § D18), so the test states the date it is asking about and the
 # fixture never expires:
 #
-#   reference now  = 2026-08-17
-#   expiring cert  = notAfter 2026-09-05  → 19 days left  → C1 warns (< 30)
-#   healthy cert   = notAfter 2027-08-12  → 360 days left → C1 says nothing
+#   reference now  = 2026-08-21
+#   expiring cert  = notAfter 2026-09-05  → 15 days left  → C1 reports it (< 30)
+#   healthy cert   = notAfter 2027-08-12  → 356 days left → C1 says nothing
 #
 # The dates below are absolute, so moving that reference instant (NOTES § D57)
 # changes what the certificates *mean*, never the bytes this script writes —
@@ -61,7 +61,7 @@ gen expiring-client "kubernetes-admin-expiring" 20260812000000Z 20260905000000Z
 gen healthy-client  "kubernetes-admin"          20260812000000Z 20270812000000Z
 
 # A certificate that is already past its notAfter: C1 must say "expired", not
-# "expires in -8 days", and the renderer must not produce a negative duration.
+# "expires in -12 days", and the renderer must not produce a negative duration.
 gen expired-client  "kubernetes-admin-expired"  20250812000000Z 20260809000000Z
 
 echo "certificate fixtures written to tests/fixtures/certs (dates pinned; they do not expire)"

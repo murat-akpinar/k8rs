@@ -425,6 +425,99 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   mid-redirect as its blast radius
   ([D130](NOTES.md#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)).
 
+- **Drain safety's composed sentence has no fixture: the cordoned node carries
+  none of the budget's pods.** `broken-pdb-floor`'s two protected pods sit on
+  `k8rs-worker2` (NoExecute) and `k8rs-worker3` (kubelet stopped); `k8rs-worker`,
+  the node `break-nodes` cordons and N2 is about, carries none — so *cordoned*
+  **and** *its drain will never finish because of a budget* is unrepresentable.
+  Needs a manifest that lands one replica on the cordoned node, which is a fixture
+  design and not a defect. Operator review 2026-08-21,
+  [reports/](reports/README.md) ·
+  [D132](NOTES.md#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21)
+- **`kubectl drain` aborts on unreplicated pods before it ever reaches a budget,
+  and the pane ranks the two the other way round.** Measured on kind:
+  `drain k8rs-worker3 --dry-run=client --ignore-daemonsets` fails on
+  `cannot delete Pods that declare no controller` and never touches the eviction
+  API. Drain safety ranks *would never finish draining* (PDB) above *pods nothing
+  would restart* (unreplicated), which is the inverse of the order kubectl hits
+  them. `k8rs-worker3` carries both, so the corpus can prove the ordering matters
+  and nothing has decided it. Operator review 2026-08-21
+- **The PDB join needs `deletionTimestamp`, because the controller's own counter
+  skips terminating pods.** `countHealthyPods` skips a pod carrying a
+  `deletionTimestamp` (and the 2-minute `disruptedPods` window); a join on `Ready`
+  alone over-counts by one during every rolling update and prints *"has exactly
+  5"* where the API server says 4 — on the pane whose credibility is agreeing with
+  the eviction API. `PodSnapshot.deletion_timestamp` is already carried; the
+  corpus cannot feed the shape (`broken-stuck` is the only terminating pod and
+  carries no budget label), so it is a
+  [D40](NOTES.md#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+  plant. Operator review 2026-08-21
+- **`EndpointSliceSnapshot` is per-slice and has only ever been fed one slice per
+  Service.** Past `maxEndpointsPerSlice` (100) a Service gets several and the
+  controller can leave one empty, so *is there a slice with 0 endpoints* prints
+  *"matches no pod — anything calling it gets a 503"* about a Service with 250
+  healthy backends. The right question is the **sum** over every slice carrying
+  that `kubernetes.io/service-name` in that namespace; the type supports it and
+  [D29](NOTES.md#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)
+  says it is proven only for the shape it was fed. Operator review 2026-08-21
+- **Waste's orphan-claim row is false about a StatefulSet scaled to zero.** Its
+  PVCs stay `Bound` and unmounted **on purpose**, so the data survives; nothing on
+  disk exercises it (`broken-sts` has no `volumeClaimTemplates`) and
+  `ClaimSnapshot` carries neither labels nor `ownerReferences`, so the type could
+  not tell them apart. Contained today only because
+  [`screens/analysis.md`](screens/analysis.md) gives that row no `→` action.
+  Operator review 2026-08-21
+- **Nothing detects a mixed-trip corpus.** Today's is provably one trip — every
+  pod capture's `creationTimestamp` sits in a 32-second window — but that is an
+  observation, not a gate. A `just fixtures` that dies partway leaves some
+  fixtures from the new cluster and the rest from HEAD, and `just check` goes
+  green if the shapes line up. One assertion over the spread closes it.
+  [D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16)
+  states the one-trip property and nothing enforces it. Operator review 2026-08-21
+- **A cluster-total allocatable row would print 48 cpu on a 12-cpu machine.** All
+  four kind nodes report the host's `allocatable: cpu 12`, so any Capacity row
+  that sums allocatable across nodes is counting one machine four times. Per-node
+  rows are unaffected, which is why this is a row to refuse rather than a bug to
+  fix. Operator review 2026-08-21
+
+- **Only the cordoned worker keeps its pods past `break-nodes`, and one fixture
+  out of thirty-eight is on it.** A cordon evicts nothing; `k8rs-worker2`'s
+  `dedicated=gpu:NoExecute` and `k8rs-worker3`'s unreachable taint both do — so
+  the corpus places 14 pods on worker2 and 12 on worker3 that the cluster deletes
+  or un-Readies minutes later, against 10 on `k8rs-worker`. Measured: worker2
+  reads **190m over 16 pods** in the corpus and **100m over 3** live. Any fixture
+  whose *node* is part of what a report prints has to live on the cordoned worker
+  or carry tolerations that survive the sequence; `overhead.json` is the only
+  object the rule has been applied to, by `nodeName`. **Drain safety's join is the
+  urgent instance**: both `broken-pdb-floor` pods sit in the eviction zone, so
+  `currentHealthy` is 2 in the corpus and 0 live, and `snapshot.rs`'s *"draining
+  either one is blocked by this budget"* is true of the budget and of neither
+  node. A two-replica Deployment cannot use `nodeName`; the one-line answer is
+  `dedicated=gpu` plus an unreachable toleration with no `tolerationSeconds` on
+  the template. **Ruled a box and not a blocker on 2026-08-21**: the corpus is not
+  wrong about what it photographed (both pods Running and Ready at capture,
+  `disruptionsAllowed: 0`), no producer reads these fields yet, and pinning one
+  more workload leaves the general rule unenforced while buying a fifth trip.
+  Operator review 2026-08-21 round 2, [reports/](reports/README.md) ·
+  [D132](NOTES.md#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21)
+- **`spec.unhealthyPodEvictionPolicy` turns Drain safety's `●` into a false alarm
+  on the corpus's own budget.** Read off the live v1.36 apiserver: under the
+  default `IfHealthyBudget`, a Running-but-not-Ready pod is evictable while
+  `currentHealthy >= desiredHealthy` — which `broken-pdb-floor` satisfies at
+  `2 >= 2`. So a report that stops at `disruptionsAllowed: 0` prints *"would never
+  finish draining"* over a drain that finishes, at CRITICAL, on the pane whose
+  promise is *only what is broken*. **No field is owed for the default case** —
+  pod `Ready`, `current_healthy` and `desired_healthy` are all carried; only
+  `AlwaysAllow` needs the spec field. Report logic with no fixture behind it.
+  Operator review 2026-08-21 round 2
+- **A pod covered by two PodDisruptionBudgets is refused outright, and nothing
+  tests it.** The eviction subresource refuses rather than choosing;
+  [`scripts/broken.yaml`](scripts/broken.yaml) already records it and keeps the two
+  committed budgets deliberately disjoint, so the corpus cannot show it. Nothing
+  is owed at ingest — two selectors, pod labels and namespaces are all carried —
+  but it is a refusal path one relabelled workload away, with no object and no
+  test. Operator review 2026-08-21 round 2
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

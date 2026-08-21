@@ -147,9 +147,40 @@ run *ARGS:
 
 # Phase 3 turns this on for rules.rs, Phase 4 for analysis.rs (NOTES § D26).
 #
+# **Both mutation recipes go through `scripts/mutants.sh`**, which names the
+# scratch volume and reads the run's logs afterwards. cargo-mutants builds a whole
+# copy of the tree per mutant and files *any* failed build as `unviable`, so a run
+# on a full disk reports untested mutants in a word that reads like a pass — that
+# is what happened on 2026-08-21 with `/tmp` a 12 GiB tmpfs at 94% and `/home` 916
+# GB free (NOTES § D133). The script is the one place that knows it; a flag typed
+# at the gate reaches cargo-mutants unchanged.
+#
+# `*ARGS` is what makes the phase-close sweep's `--shard k/4` (D118) go through
+# the guard instead of round it — sharding stays a flag typed at the gate and does
+# not become a recipe, which is what D118 ruled.
+#
 # Mutation testing over the two pure files: a surviving mutant is a diagnosis change no test objected to
-mutants:
-    cargo mutants --timeout 90 --file src/rules.rs --file src/analysis.rs
+mutants *ARGS:
+    bash scripts/mutants.sh --timeout 90 --file src/rules.rs --file src/analysis.rs {{ARGS}}
+
+# The per-turn gate CLAUDE.md § step 4 names — the author's own diff, not the
+# whole file. It is a recipe rather than a command in a doc for one reason: typed
+# by hand it inherits whatever `TMPDIR` the box hands it, which is the tmpfs, and
+# it is the invocation that runs most often. `--file` is deliberately absent —
+# the diff decides the scope, and a filter beside it would silently drop a mutant
+# in a file the turn actually changed.
+#
+# Mutation testing over the author's own diff — the per-turn gate, not the sweep
+mutants-diff:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    diff=$(mktemp); trap 'rm -f "$diff"' EXIT
+    git diff HEAD > "$diff"
+    # An empty diff yields `0 mutants tested` and exit 0, which is this file's own
+    # subject wearing a different hat: nothing to test reads exactly like nothing
+    # got past. Refuse instead.
+    [ -s "$diff" ] || { echo "mutants-diff: 'git diff HEAD' is empty, so there are no mutants to run and a green run would prove nothing (NOTES § D26, § D133)" >&2; exit 1; }
+    bash scripts/mutants.sh --timeout 90 --in-diff "$diff"
 
 # --- the test cluster (scripts/cluster.sh does the work) ---
 
@@ -205,27 +236,160 @@ fixtures:
       | jq -e '.metadata.deletionTimestamp != null and ((.metadata.finalizers // []) | length > 0)' >/dev/null \
       || { echo "fixtures: broken-stuck is not Terminating behind a finalizer — rule 12 has no fixture" >&2; exit 1; }
 
-    for p in oom crashloop image config pending hostpath readiness restarts nolimits stuck init \
+    # `crashloop`, `exit0`, `sigterm`, `probe0`, `restarts` and `init` are not in
+    # this list: they are the six fixtures whose container is still cycling *and*
+    # whose tests name the face it has to be caught in, and they are fetched under
+    # their own retry below. One writer per file — a bulk fetch here and a re-fetch
+    # there means the bytes that land depend on which one ran last.
+    for p in oom image config pending hostpath readiness nolimits stuck \
              resize podlimit \
-             exit0 sigterm socket succeeded failed restarts10 restarts10serving startup \
-             notfound wedged unjudged oomserving neverback probe0 neverrules gang \
+             socket succeeded failed restarts10 restarts10serving startup \
+             notfound wedged unjudged oomserving neverback neverrules gang \
              overhead; do
       "${kc[@]}" get pod "broken-$p" -o json | "${jqs[@]}" > "tests/fixtures/$p.json"
     done
 
-    # `verify` proved the *live* object reached its state; the loop above is a
-    # **second** fetch, minutes later. For everything whose state holds still that
-    # is a distinction without a difference — but a crash loop has two faces plus
-    # a ~2s window where the container is up, and a capture taken in that window
-    # is a Running pod carrying a crash history. `cluster.sh`'s [crashloop] and
-    # [init] refuse that window by design (the measurement is on [owned]), and
-    # refusing it in `verify` does nothing about the fetch that comes after. So
-    # the two loop fixtures are re-asserted here, on the bytes, in the shape those
-    # predicates use: an exit 1 on record *and* the container down right now.
-    guard crashloop.json "container in a crash loop — an exit 1 on record with the container down right now, which is the half of the loop verify saw and this second fetch can miss by two seconds" \
-      '[.status.containerStatuses[]? | select(.lastState.terminated.exitCode == 1 and (.state.waiting.reason == "CrashLoopBackOff" or .state.terminated.exitCode == 1))] | length > 0'
-    guard init.json "init container in a crash loop — same two clauses on the init list, and the only capture whose rule (D27) is about the init array at all" \
+    # `verify` proved the *live* object reached its state, minutes ago. A crash
+    # loop has two faces — `waiting: CrashLoopBackOff` and the `terminated` run it
+    # just left — plus a ~2s window where the container is up, and a capture taken
+    # in that window is a Running pod carrying a crash history.
+    #
+    # **The live predicate and the byte guard ask different questions, and asking
+    # them with one jq is what shipped the 2026-08-20 defect.** `cluster.sh`
+    # § `[crashloop]` asks whether a *live* pod cycles, and it is right to accept
+    # either face: sampled 70 times on the owned crashlooping pod the container was
+    # `terminated` 39 times and `waiting` 29, so demanding the waiting reason there
+    # fails a pod that is crashlooping correctly. This asks whether the *committed
+    # bytes* can carry the tests written against them, and there the faces are not
+    # interchangeable: `crashloop.json` in the terminated face takes
+    # `crashloop_pod_decodes_what_rules_1_5_and_6_read` red with "a crashlooping
+    # container must decode as waiting", and `exit0.json` in that face draws rule
+    # 5's card where its test reads rule 1's. Both landed wrong on 2026-08-20,
+    # under the disjunction this replaces, and were found hours later by the suite.
+    #
+    # So the face is named per fixture — the answer is `git show
+    # HEAD:tests/fixtures/<name>.json`, never a guess — and the fetch retries until
+    # the bytes carry it. Bounded and loud: a silent give-up commits the fixture
+    # the tests cannot read, which is the bug. **Do not carry the tightening back
+    # into `cluster.sh`** — there it is the too-tight half `verify-test.sh` exists
+    # to catch.
+    #
+    # **The 300s is one full backoff cap plus a sample, not a measurement.** Nobody
+    # has timed how long a single face persists on `broken-crashloop` itself — the
+    # 39/29/2 split above is the owned pod, sampled, and says nothing about run
+    # lengths. So if this ever fails on the bound, suspect the bound before the
+    # cluster: watch `kubectl get pod broken-<stem> -o json` for a cycle and raise
+    # `FETCH_BUDGET`, rather than loosening the face back into a disjunction.
+    #
+    # **One budget for all six calls, not six of them** (the 2026-08-21 operator
+    # review). Six independent 300s timers is thirty minutes nobody added up, inside
+    # a trip that has to finish within an hour of `break` and that carries
+    # `broken-restarts`, whose `sleep 3600` fuse makes `restartCount == 3` expire on
+    # a wall clock — the retry that saved one fixture would have quietly spent the
+    # budget of another. A shared deadline is also the honest statement of what is
+    # being bought: five minutes of this trip, total, spent waiting for faces. It is
+    # still one full backoff cap, so every fixture's face recurs at least once
+    # inside it.
+    FETCH_BUDGET=300
+    fetch_deadline=$((SECONDS + FETCH_BUDGET))
+    # **The capture that fails never reaches the tree.** The old shape wrote
+    # `tests/fixtures/$1.json` on every attempt and then exited, leaving on disk
+    # exactly the file whose own error message says committing it is the defect —
+    # one `git add -A` away from being the bug it refuses. The fetch lands in a temp
+    # and is copied over the fixture only once the bytes pass, so a failed trip
+    # leaves the previous good capture in place and `git status` clean for that file.
+    #
+    # **Copied through a redirect and not `mv`d**, which is not a style choice:
+    # `mktemp` creates at 0600 and `mv` carries that mode across, so the six loop
+    # fixtures would sit at 0600 beside every other capture at 0644 — and git tracks
+    # only the executable bit, so that drift is invisible forever. The redirect is
+    # what every other capture in this recipe uses, so the mode matches by
+    # construction and there is no second rule to remember. The cost is a truncate
+    # window of one `cat` on local disk, entered only after the bytes have already
+    # passed the guard, against a permanent silent difference: worth it.
+    fetch_until() { # $1 fixture stem  $2 the face the bytes must carry  $3 the jq that finds it
+      local tmp; tmp=$(mktemp) || return 1
+      while :; do
+        "${kc[@]}" get pod "broken-$1" -o json | "${jqs[@]}" > "$tmp"
+        if jq -e "$3" "$tmp" >/dev/null; then
+          cat "$tmp" > "tests/fixtures/$1.json"
+          rm -f "$tmp"
+          return 0
+        fi
+        [ "$SECONDS" -lt "$fetch_deadline" ] || {
+          echo "fixtures: $1.json never landed on $2 inside the ${FETCH_BUDGET}s this trip budgets for all six loop fixtures together — the capture is on a face its own tests cannot read, and committing it is the 2026-08-20 defect again. tests/fixtures/$1.json is untouched; the bytes that failed are in $tmp" >&2
+          exit 1
+        }
+        sleep 3
+      done
+    }
+
+    # Rule 1's card is drawn from `state.waiting.reason` — the word the reader saw in
+    # `kubectl get pods`. The exit 1 is the run behind it, which is what separates a
+    # loop from a container that has never started.
+    fetch_until crashloop "rule 1's card — the CrashLoopBackOff reason, over an exit 1 on record" \
+      '[.status.containerStatuses[]? | select(.lastState.terminated.exitCode == 1 and .state.waiting.reason == "CrashLoopBackOff")] | length > 0'
+    # The same card over the opposite ending, and that pairing is the whole fixture
+    # (D71/D88): a program that finished and is being restarted forever, not one
+    # that crashed. `ready == false` is rule 6's exemption clause — the guard that
+    # used to sit further down this file, folded in here because a second guard
+    # weaker than this one is a guard that cannot fail.
+    fetch_until exit0 "rule 1's card over a previous run that ended exit 0, on a container that is not serving (D71)" \
+      '[.status.containerStatuses[]? | select(.ready == false and .lastState.terminated.exitCode == 0 and .state.waiting.reason == "CrashLoopBackOff")] | length > 0'
+    # The third ending, same card. `sigterm.json` was not part of the 2026-08-20
+    # defect — it landed on the waiting face, as it has every trip — but its guard
+    # named no face at all, and three tests demand one:
+    # `the_three_ways_into_a_restart_loop_do_not_get_the_same_card` asserts
+    # `matches!(waiting(c), Some(("CrashLoopBackOff", _)))` for `crashloop`, `exit0`
+    # and `sigterm` alike, and `broken-sigterm`'s own test reads rule 1's card off it. A
+    # 13-restart container in a 5-minute backoff is one sample away from
+    # `crashloop.json`'s Tuesday, so it is fetched the same way rather than left to
+    # luck. Its old guard — `ready == false` with exit 143 — is folded in here for
+    # the reason `exit0.json`'s was: strictly weaker than this, it could not fail.
+    fetch_until sigterm "rule 1's card over a run that ended on exit 143 — 128 + SIGTERM, the container asked to stop and did, and not the 137 a PID 1 with no handler produces after the grace period" \
+      '[.status.containerStatuses[]? | select(.ready == false and .lastState.terminated.exitCode == 143 and .state.waiting.reason == "CrashLoopBackOff")] | length > 0'
+    # **`init.json` is the one that must not be tightened**, and the reason is in
+    # git rather than in an opinion. Read `migrate`'s state across every committed
+    # revision of this file: `waiting` on 2026-08-12, -08-12, -08-13 and -08-14,
+    # `terminated` on -08-16 and again on -08-20. `crashloop.json`'s `quitter` is
+    # `waiting` in all five and the -08-20 capture is the first terminated one; that
+    # is the difference. So this fixture genuinely arrives on both faces, its decode
+    # test reads whichever one it holds by design (NOTES § D114), and demanding
+    # `waiting` here would be a new bug wearing this one's clothes. What the retry
+    # still buys is the ~2s window: an init container that is up right now is
+    # history, not a loop.
+    fetch_until init "an init container in a crash loop — an exit 1 on record and the container not up right now, either face (D27, D114)" \
       '[.status.initContainerStatuses[]? | select(.lastState.terminated.exitCode == 1 and (.state.waiting.reason == "CrashLoopBackOff" or .state.terminated.exitCode == 1))] | length > 0'
+    # **`probe0.json` is the mirror: the one cycling fixture whose face must not be
+    # `CrashLoopBackOff`.** 13 restarts, so it cycles like the three above it and can
+    # land in backoff on any trip — and if it does, rule 1 fires and
+    # `each_ending_sends_the_reader_somewhere_the_answer_can_be` loses the rule 5
+    # card it reads. `src/rules_tests/pod.rs` § `restarts10_ending` names the shape
+    # positively — "13 restarts, `lastState.terminated` `0` / `Completed`,
+    # `state.running`, `ready: false`", the container that reached RESTARTS_WARN by
+    # *finishing* and is out of `CrashLoopBackOff` — so `state.running` is what the
+    # tests read and what this names. Only the guard ever spelled it as an absence.
+    #
+    # The duration clause is the old guard's, unchanged (D90/D113): the exit code
+    # alone is `exit0.json`'s 2s run, the arm `finished_action` demotes, so the long
+    # arm is the run length and not the code. Same epoch defaults the cluster.sh
+    # predicate uses — `fromdateiso8601` is a hard jq error on a missing stamp, and
+    # under a retry an error would spin out the whole bound instead of printing.
+    fetch_until probe0 "a container running and not serving, over a previous run that ended exit 0 and lasted longer than the 20s probe floor — the long arm of finished_action, out of CrashLoopBackOff (D90/D113)" \
+      '[.status.containerStatuses[]? | select(.state.running != null and .ready == false and .lastState.terminated.exitCode == 0 and ((((.lastState.terminated.finishedAt // "1970-01-01T00:00:00Z") | fromdateiso8601) - ((.lastState.terminated.startedAt // "1970-01-01T00:00:00Z") | fromdateiso8601)) > 25))] | length > 0'
+    # The sweep's own find, and the same shape as `probe0`: `flaky` has restarted
+    # three times and is up, so its face can move, and two tests read it. The decode
+    # asserts `ContainerState::Running { started_at }` outright, and rule 5's card is
+    # *dated* from `state.running.startedAt` (D100) — a capture caught between runs
+    # has no such stamp and no such card, and `all.len() == 1` breaks besides, rule 1
+    # having joined in.
+    #
+    # **The restart count is deliberately not in here.** It only ever goes up, so
+    # re-fetching cannot mend it: `guard restarts.json` keeps asking that question
+    # further down, immediately and in its own words, because the answer to a four
+    # is unbreak-and-recapture and not another five minutes of waiting.
+    fetch_until restarts "the container up and serving — rule 5's 'looks healthy now, but something is wrong', which is read off state.running and dated from its startedAt (D100)" \
+      '[.status.containerStatuses[]? | select(.state.running != null and .ready == true and (.state.running.startedAt // "") != "")] | length > 0'
 
     # The fields the first capture could not produce. Each one is a decode that
     # today reads correctly whatever it does, because every committed object
@@ -248,16 +412,43 @@ fixtures:
     # clause is not padding: the pod's own 100m is deliberately smaller than the
     # 250m overhead, which is what makes a sum that ignores the field and one
     # that counts it give visibly different answers on that node.
-    guard overhead.json "pod carrying the RuntimeClass charge the scheduler counts and a spec-only sum does not (D46)" \
-      '.spec.runtimeClassName == "broken-overhead" and .spec.overhead.cpu == "250m" and .spec.overhead.memory == "120Mi" and .spec.containers[0].resources.requests.cpu == "100m"'
+    #
+    # **And the node is asserted by name**, because the whole point of the
+    # `nodeName` the manifest gained on 2026-08-21 is that this placement stops
+    # being a lottery (the operator review; `scripts/broken.yaml` § broken-overhead
+    # carries the reasoning). The 2026-08-20 trip landed it on `k8rs-worker2`,
+    # which `nodes.json` — captured after `break-nodes`, correctly — shows carrying
+    # `dedicated=gpu:NoExecute`: the object built to make a per-node sum provably
+    # wrong, on the one node the same snapshot says evicts everything on it. A
+    # `nodeName` nothing checks is a `nodeName` a future edit drops in silence.
+    guard overhead.json "pod carrying the RuntimeClass charge the scheduler counts and a spec-only sum does not, on the cordoned worker its manifest pins it to and not on the node break-nodes evicts (D46)" \
+      '.spec.runtimeClassName == "broken-overhead" and .spec.overhead.cpu == "250m" and .spec.overhead.memory == "120Mi" and .spec.containers[0].resources.requests.cpu == "100m" and .spec.nodeName == "k8rs-worker"'
     guard hostpath.json "pair of mounts of one hostPath volume, one narrowed by a subPath and one read-only (D46)" \
       '[.spec.volumes[]? | select(.hostPath) | .name] as $hp | [.spec.containers[].volumeMounts[]? | select(.name as $n | $hp | index($n))] | length == 2 and any(.subPath != null) and any(.readOnly == true) and any(.readOnly != true)'
     # The string, not its existence: `"REDACTED-IP"` is also non-null, and it is
     # exactly what a sanitizer that treated this line as an address would leave
     # behind. The manifest prints a hostname for that reason — so the assertion
     # has to be the one thing a filter could destroy without emptying the field.
+    # **The waiting `message` is checked here and not in the retry above, and the split is the
+    # same one `restarts.json`'s count gets.** The 2026-08-21 review was right that
+    # rule 1 never reads it — `crash_looping` does `let (reason, _) = waiting(c)?`
+    # and drops the sentence — but the rule is not the only reader: the very test
+    # this whole hunk exists for asserts it, at `src/rules_tests/snapshot.rs:431`,
+    # `message…contains("back-off")` inside
+    # `crashloop_pod_decodes_what_rules_1_5_and_6_read`. Drop the check and that
+    # test goes red on a capture the byte guard just certified, which is the defect
+    # this file is fixing.
+    #
+    # It is a plain `guard` because the string does not alternate. The face does —
+    # retrying is the right answer to a face. `back-off` is the kubelet's own
+    # `fmt.Sprintf` and not an API contract, so if it is ever reworded upstream no
+    # amount of re-fetching mends it, and retrying would spend the shared budget and
+    # then fail with a message about a face. Here it fails at once, naming the
+    # string, which is the sentence whoever has to change `snapshot.rs:431` needs.
+    guard crashloop.json "kubelet back-off sentence beside the reason — the string src/rules_tests/snapshot.rs:431 asserts, which no rule reads and one test does" \
+      '[.status.containerStatuses[]? | select((.state.waiting.message // "") | contains("back-off"))] | length > 0'
     guard crashloop.json "log tail in a termination, which is what terminationMessagePolicy FallbackToLogsOnError makes the kubelet write (D51)" \
-      '[.status.containerStatuses[]? | (.lastState.terminated.message // .state.terminated.message) | select(type == "string" and contains("db.payments.svc:5432"))] | length > 0'
+      '[.status.containerStatuses[]? | .lastState.terminated.message | select(type == "string" and contains("db.payments.svc:5432"))] | length > 0'
     guard resize.json   "limit the spec asks for and the kubelet did not enact (D51)" \
       '.status.containerStatuses[0].resources.limits.memory != .spec.containers[0].resources.limits.memory and (.status.containerStatuses[0].resources.limits.memory | . != null)'
     guard podlimit.json "memory limit in the container status that its spec never declared (D53)" \
@@ -282,10 +473,13 @@ fixtures:
     # silenced by several clauses at once, so a capture taken while the
     # container happened to be up would satisfy a different clause and the
     # branch under test would still have nothing behind it (NOTES § D71).
-    guard exit0.json "previous run that ended with exit 0, on a container that is not serving — rule 6's exemption, which doing_its_job would otherwise be the one silencing (D71)" \
-      '[.status.containerStatuses[]? | select(.ready == false and .lastState.terminated.exitCode == 0)] | length > 0'
-    guard sigterm.json "termination carrying exit 143 — a SIGTERM the container received, and not the 137 a PID 1 with no handler for it produces after the grace period" \
-      '[.status.containerStatuses[]? | select(.ready == false and .lastState.terminated.exitCode == 143)] | length > 0'
+    #
+    # `exit0.json`'s clause — rule 6's exemption, which doing_its_job would
+    # otherwise be the one silencing (D71) — moved into `fetch_until exit0` above,
+    # which asserts it and the face together. Left here it was strictly weaker than
+    # a check that had already run: a guard that cannot fail.
+    # `sigterm.json`'s clause moved into `fetch_until sigterm` above, with exit0's
+    # and for the same reason.
     guard socket.json "read-only mount of the runtime socket under its /var/run spelling — the fold and the exact match, neither of which hostpath.json reaches (D78)" \
       '[.spec.volumes[]? | select(.hostPath.path == "/var/run/docker.sock") | .name] as $s | [.spec.containers[].volumeMounts[]? | select(.name as $n | $s | index($n))] | length == 1 and all(.readOnly == true)'
     guard succeeded.json "Succeeded pod whose container still carries three restarts and a failed previous run — the two cards analyze() must skip" \
@@ -316,16 +510,9 @@ fixtures:
     guard neverback.json "container stopped for good — a terminated run at a non-zero exit, restartCount still 0, under spec.restartPolicy Never, in a pod that is still Running, beside a container that exited 0 and one that is still up (D96)" \
       '.spec.restartPolicy == "Never" and .status.phase == "Running" and ([.status.containerStatuses[]? | select(.restartCount == 0 and (.state.terminated.exitCode // 0) != 0)] | length) > 0 and ([.status.containerStatuses[]? | select(.state.terminated.exitCode == 0)] | length) > 0 and ([.status.containerStatuses[]? | select(.state.running != null)] | length) > 0'
 
-    # NOTES § D90's first door: exit 0 with somebody else's hand on it, on a run
-    # long enough to be on the far side of PROBE_FLOOR. The duration is the
-    # guard, because the exit code alone is `exit0.json` — which is on disk, is
-    # 2s, and is the arm `finished_action` demotes. Written with the same epoch
-    # defaults the cluster.sh predicate uses: `fromdateiso8601` is a hard jq
-    # error on a missing stamp, and an error here would print the message about a
-    # capture that carries nothing rather than the one about a record that lost a
-    # field.
-    guard probe0.json "previous run that ended with exit 0 on a container that is not serving, and lasted longer than the 20s probe floor — the long arm of finished_action, which exit0.json's 2s run is the other side of (D90/D113)" \
-      '[.status.containerStatuses[]? | select(.ready == false and .lastState.terminated.exitCode == 0 and ((((.lastState.terminated.finishedAt // "1970-01-01T00:00:00Z") | fromdateiso8601) - ((.lastState.terminated.startedAt // "1970-01-01T00:00:00Z") | fromdateiso8601)) > 25))] | length > 0'
+    # `probe0.json`'s clause — NOTES § D90's first door, exit 0 with somebody else's
+    # hand on it on a run past PROBE_FLOOR — moved into `fetch_until probe0` above,
+    # which asserts it and the `state.running` face together.
     # D97's named false positive for rule 15, and both halves are named because
     # either alone is another fixture: the field in the spec is a pod nobody
     # restarted, and the count without it is `broken-restarts` under a different
@@ -432,6 +619,49 @@ fixtures:
     # healthy Deployment in deployments.json cannot show the absence of a
     # ReplicaFailure condition that only ever appears on the ReplicaSet.
     "${kc[@]}" get replicasets -l app=healthy-deploy -o json | "${jqs[@]}" > tests/fixtures/healthy-replicasets.json
+    # **The other side of Drain safety's join** (NOTES § D130). `broken-pdb-floor`
+    # selects `app=healthy-deploy`, and until this line the corpus held the budget
+    # and never a pod it covers — the headline row is *a budget, the pods it covers,
+    # the node they are on*, and a report that does that join and one that prints
+    # the budget's own counters back were indistinguishable on disk. `healthy-deploy`
+    # is the workload D130 picked for the budget precisely because all four of its
+    # numbers agree and its zero comes from the floor and nothing else, so its pods
+    # are the ones the row is about. **`broken-rollout`'s are deliberately not
+    # captured**: D130 rules that workload blocked by being unhealthy rather than by
+    # its budget, so it is a different row, and three broken pods would add cards to
+    # the whole-capture run for a join nothing needs today.
+    #
+    # **The position is the assertion.** It is here, in the pod-capture phase, and
+    # not down beside `nodes.json`, because `break-nodes`' NoExecute taint evicts
+    # them: read live after that step they are `Pending` with no node at all, against
+    # a committed `poddisruptionbudgets.json` that says `currentHealthy: 2`. A capture
+    # taken there contradicts the very object it exists to be joined against.
+    "${kc[@]}" get pods -l app=healthy-deploy -o json | "${jqs[@]}" > tests/fixtures/healthy-deploy-pods.json
+    # Exactly two, for the reason the `statefulsets.json` guard gives: the partner
+    # object fixes the number. `poddisruptionbudgets.json` is asserted at
+    # `expectedPods: 2` / `currentHealthy: 2`, so a list of one or three is a fixture
+    # that contradicts its own other half, and `all` over an empty list is `true` —
+    # "extracted nothing" and "nothing to extract" print the same line, and the count
+    # is what separates them. The label is asserted because it is the join key and a
+    # capture of the wrong selector writes perfectly valid JSON; `nodeName` and Ready
+    # because the row's whole output is *which node a drain would block on*, and a
+    # Pending pod names no node and is counted by no budget.
+    #
+    # **No `cluster.sh verify` predicate lands with this, and that is a ruling with
+    # evidence, not an omission.** `verify` proves the live object; `[pdb_floor]`
+    # already does it for these exact pods, through the same selector: it demands
+    # `expectedPods == 2` and `currentHealthy == 2` on the budget whose selector *is*
+    # `app=healthy-deploy`, and `scripts/broken.yaml` § broken-pdb-floor states in
+    # the repo's own words that those counters are over *ready* pods (it rules
+    # `broken-owned` out for having `currentHealthy` below `desiredHealthy` while it
+    # crashloops). A pod-list predicate beside it would restate the budget's own
+    # arithmetic against the same objects and could not fail while `[pdb_floor]`
+    # passes — a fourth of the kind this file shed three of today, added rather than
+    # inherited. What
+    # `verify` cannot cover is drift between it and this fetch minutes later, and
+    # that is the byte guard's half of the split, below.
+    guard healthy-deploy-pods.json "pair of ready pods on nodes carrying the label broken-pdb-floor selects — the covered side of Drain safety's join, which the budget alone cannot show (D130)" \
+      '([.items[]?] | length) == 2 and all(.items[]?; .metadata.labels.app == "healthy-deploy" and .status.phase == "Running" and ((.spec.nodeName // "") != "") and ([.status.conditions[]? | select(.type == "Ready" and .status == "True")] | length) == 1)'
 
     # W1: no pod exists at all — the truth is on the ReplicaSet.
     "${kc[@]}" get deployment broken-quota -n k8rs-quota -o json | "${jqs[@]}"       > tests/fixtures/quota-deployment.json

@@ -152,6 +152,9 @@ its line moving with it.
 - [D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20) — the six panes, the one rendering of a missing metrics-server, and the badge that does not fit
 - [D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20) — the reports cannot see the helpers written for them, and the freeze is about logic and not visibility
 - [D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20) — the unblock turn: what the export gap actually cost, and eleven things two agents settled that no box had
+- [D131](#d131--a-fixture-is-asked-two-different-questions-and-one-disjunction-was-answering-both-2026-08-21) — a fixture is asked two different questions, and one disjunction was answering both
+- [D132](#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21) — the trip that took four runs, and the sixteen things three agents settled under it
+- [D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21) — the mutation gate files a failed build as `unviable`, so a full disk reads as a pass
 
 ## Why it exists — where the gap is
 
@@ -9897,10 +9900,20 @@ a genuine one: Kubernetes wrote it, not the manifest.
 `broken.yaml` + `healthy.yaml` that requests anything commits **200m cpu and
 544Mi** in total, across four nodes. The overhead is **250m / 120Mi** — the
 Kubernetes Pod Overhead documentation's own Kata example, so the figure has a
-source — and that is already 125% of the whole cluster's committed CPU. A sum
-that ignores `spec.overhead` reads that pod as **100m / 64Mi**; one that counts it
-reads **350m / 184Mi**, and the gap is larger than every other request in the
-corpus combined. The pod's own request is deliberately the *smaller* of the two,
+source. A sum that ignores `spec.overhead` reads that pod as **100m / 64Mi**;
+one that counts it reads **350m / 184Mi**.
+
+> **Corrected 2026-08-21 — the denominator in this paragraph was incomplete, and
+> that is [PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)
+> committed inside the section that cites it.** *"125% of the whole cluster's
+> committed CPU"* and *"larger than every other request in the corpus combined"*
+> counted `broken.yaml` + `healthy.yaml` and called that the cluster.
+> `kube-system-pods.json` is part of the corpus and commits roughly **950m** on
+> the control plane alone, so the corpus commits about **1450m**, not 200m, and
+> the overhead is a **sixth** of it rather than a multiple. The claim the object
+> was built to make survives **per node**, which is the only scope a Capacity row
+> reports in anyway — measured in
+> [D132](#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21). The pod's own request is deliberately the *smaller* of the two,
 because reversed the overhead would be a rounding error on its own row. Against
 *allocatable* nothing pod-sized moves at all — a kind node reports the host's 12
 cpu — so the difference this object proves is against the committed total, which
@@ -9930,6 +9943,458 @@ claim with `storageClassName` **absent** — what a cluster with no default clas
 writes — read as dynamically provisioned. Its neighbour's phase clause was hiding
 it, and a predicate that is right for a reason its neighbour supplies is one the
 neighbour can stop supplying.
+
+### D131 — a fixture is asked two different questions, and one disjunction was answering both (2026-08-21)
+
+**The capture trip of 2026-08-20 came back with two fixtures on a face their own
+tests cannot read.** `crashloop.json`'s `quitter` and `exit0.json`'s `batch` both
+landed in `state.terminated` with no `state.waiting`, and rule 1's card is drawn
+from `state.waiting.reason == "CrashLoopBackOff"`. Forty-seven tests went red;
+`crashloop_pod_decodes_what_rules_1_5_and_6_read` said it in one line — *"a
+crashlooping container must decode as waiting"*.
+
+**Nothing was wrong with the cluster, and nothing was wrong with `verify`.** The
+container really was crashlooping. It is in `state.terminated` for a large part
+of every cycle — `scripts/cluster.sh` already carried the measurement, sampled 70
+times on this cluster: `state.terminated` 39, `waiting: CrashLoopBackOff` 29,
+`running` 2. A `verify` predicate demanding the waiting face would fail a pod that
+is behaving correctly, which is the too-tight half `scripts/verify-test.sh` exists
+to catch.
+
+**What was wrong is that the guard on the committed bytes was spelled like the
+predicate on the live pod.** Both read
+`(.state.waiting.reason == "CrashLoopBackOff" or .state.terminated.exitCode == 1)`,
+and the disjunction is correct for exactly one of them. They are two different
+questions:
+
+- **`cluster.sh verify` asks about a live object**: *did this pod reach the state
+  its rule is about?* A cycling container answers yes on either face, so the
+  predicate must accept both or it fails a correct cluster.
+- **The `guard` in `just fixtures` asks about committed bytes**: *can the corpus
+  carry the tests written against it?* Those tests read one face. A guard that
+  accepts the other passes a capture that reddens the suite.
+
+So the rule, and it is the general one: **the byte guard names the face its tests
+read; the live predicate names the state the rule is about.** Unifying them
+breaks whichever end it is moved to. The comment recording the split sits above
+both.
+
+**The face is now fetched rather than hoped for.** `fetch_until` in the `fixtures`
+recipe re-fetches a stem until its byte guard passes, bounded at 300s and failing
+loudly by name when the bound is hit — a silent give-up would be the original bug
+with a longer fuse. Six stems went into it. **The 300s is one full backoff cap
+plus a sample, not a measurement**: nobody has timed how long a single face
+persists on `broken-crashloop` itself, and the 39/29/2 split above is a different
+pod. A failure on the bound is therefore a reason to watch a cycle and raise it,
+never to loosen the face back into a disjunction.
+
+**Four of the six were found by sweeping, and only two had failed.** `sigterm` was
+the same hole, latent: it carries `CrashLoopBackOff` with 13 restarts at HEAD,
+`the_three_ways_into_a_restart_loop_do_not_get_the_same_card` asserts the waiting
+face for it as much as for the other two, and its guard named no face at all — it
+survived on luck. `probe0` is the mirror image: its tests need rule 5's card and
+`src/rules_tests/pod.rs` states the shape positively — *13 restarts,
+`lastState.terminated` `0`/`Completed`, **`state.running`**, `ready: false`* — so
+a trip that catches it in backoff fires rule 1 and breaks it. `restarts.json`'s
+guard read `restartCount == 3` and nothing else, while two tests date rule 5's
+card from `state.running.startedAt`; caught between runs the stamp does not exist.
+**That count guard deliberately stayed outside the retry**: a restart count only
+goes up, so re-fetching cannot mend a four — retrying it would delay a loud
+failure by five minutes and then print the wrong sentence.
+
+**`init.json` is the case that proves the rule is about faces and not about
+`waiting`.** Its guard keeps the disjunction, because its tests genuinely read
+whichever face the capture holds, and the corpus history is the evidence rather
+than the claim: `migrate` is `waiting` in the 2026-08-12, -08-12, -08-13 and
+-08-14 revisions and `terminated` in -08-16 and -08-20. A tightening there would
+have been a new defect wearing the fix's clothes.
+
+**Two tests that were green and asking nothing.** The face flip exposed both.
+`every_rule_that_reads_the_present_is_proved_to_be_one` demanded D125's
+counterexample of `init.json`, whose predicate accepts either face — it now reads
+`failed.json`, where the pod's phase is `Failed` and no container can hold any
+other state, so the shape is stable by construction rather than by luck. And
+`every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_captured_finding`
+incremented the two counters that prove both arms of its `||` are exercised
+**outside** the branch that makes the assertion, so exempt objects fed them: on
+this corpus `mid_loop` was 1 and that one was `neverrules/retry`, which the `||`
+is never asked about. The counters moved inside the branch, `mid_loop` is honestly
+0, and the arm is now held by a named, face-independent list —
+`crashloop/quitter`, `init/migrate`, `notfound/app`, `oom/hog`, `sigterm/app`.
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) one layer
+in: a guard is proven only for the shapes it was fed, and a corpus that has only
+ever shown it one face has fed it one shape.
+
+**And a third one, found by the trip that was supposed to close it.** The Drain
+safety join had no pod: neither committed budget selected anything the repository
+had captured, so the positive half of the join ran on a
+[D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+one-field plant and the emptiness of the real join was left as a tripwire —
+*"a trip that captures one of those pods reddens this test"*. A third trip
+captured two of them. **The test stayed green.** `every_captured_pod()` chained
+`CAPTURED_PODS` with `kube-system-pods` by name and nothing else, so a new
+`List` of pods was invisible to it; and the corpus sweep that couples
+`tests/fixtures` to the arrays that read it filtered `kind == "Pod"`, so a `List`
+of pods was coupled to **nothing at all**. Two helpers, one hole, and the guard
+written for exactly this event did not fire on it.
+
+The fix is the coupling and not the call site: `CAPTURED_POD_LISTS` names the
+three `kubectl get pods` captures, `every_captured_pod` chains the array rather
+than the names (52 → 55 pods), and the sweep now checks singles and lists in both
+directions, so the fourth `List` cannot arrive the same way. **The cascade was
+measured before it was feared** — growing the helper moved exactly one test,
+because every node join derives its expectation from the pod list it is handed
+rather than from a transcribed total — the habit
+[D65](#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13)
+bought when a bigger cluster reddened a row of pasted-in literals, and this is the
+first trip that spent it. The one that moved is the join
+itself, and it now runs on the two captured pods against the committed budget,
+namespaced, cross-checked against the controller's own `status.currentHealthy`,
+on two distinct nodes — which is not what makes the budget blocking but is what
+makes *two* nodes blocked, and a trip that co-located the replicas would have
+narrowed Drain safety's only positive case in silence.
+
+**What is still owed and is asserted rather than described**: `healthy-pdb-room`
+selects `app=broken-rollout`, whose pods are still not captured — D130 rules that
+workload blocked by being unhealthy rather than by its floor, so it is a different
+row — and the test fails the day a trip takes them.
+
+### D132 — the trip that took four runs, and the sixteen things three agents settled under it (2026-08-21)
+
+**The capture trip [D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)
+prepared ran three times.** Trip 1 committed two fixtures on a face their tests
+cannot read, which is [D131](#d131--a-fixture-is-asked-two-different-questions-and-one-disjunction-was-answering-both-2026-08-21).
+Trip 2 was clean and landed, and then the landing found that **no captured pod
+carried either committed PodDisruptionBudget's label** — Drain safety's join had a
+budget on one side and nothing on the other. Trip 3 added `healthy-deploy`'s pods
+and closed it. The corpus is **59 files from one cluster**, kind v1.36.1,
+2026-08-20 21:0x–21:31 UTC; the pin moved `2026-08-17` → `2026-08-21T00:00:00Z`;
+`CAPTURED_PODS` went 36 → 38 and `every_captured_pod()` 52 → 55.
+
+**Re-running the whole trip was cheaper than landing twice**, and that is the
+scheduling rule worth keeping: the expensive part of a capture is not the cluster,
+it is re-deriving every age and every per-node sum against a moved pin. Doing that
+once over the final corpus cost one dev turn; doing it after each trip would have
+cost three.
+
+**Thirteen things settled that no box had decided.**
+
+**The pin is spelled in four places and a fifth count hides from the guard.**
+`scripts/certs-test.sh` extracts the literal out of `fn now()` and refuses to
+disagree with it ([D57](#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)),
+but it reads `tests/fixtures/certs/` — and `certificate.rs`'s control row builds a
+certificate **from bytes in the test**, so its day-count is outside anything the
+guard can see. It moved 15 → 11 with this repin and only a human noticed. Named in
+the file as the fourth, so the next repinner is told rather than trusted.
+
+**A count that rises every trip is derived, never transcribed.** `probe0.json`
+arrived at 13 restarts, then 14, then 13 again. The title fragment is now read off
+the capture and the assertion keeps the property that actually selects the arm —
+`restarts >= RESTARTS_CRITICAL` — instead of a number a trip can move. Same
+convention as `the_quiet_node`.
+
+**D125's counterexample moved from `init.json` to `failed.json`.** It needs a
+container sitting in `state.terminated`, and `init`'s capture predicate accepts
+either face by design ([D114](#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16)),
+so the test was pinned to a face the corpus does not promise. A pod whose phase is
+`Failed` cannot hold a container in any other state, so the shape is now stable by
+construction. **The cost is stated rather than hidden**: `analyze` charges nothing
+to a finished pod, so the counterexample now lives at the rule level — which is the
+level D125's claim is made at, and weaker than a live pod would be.
+
+**The budget-to-pod matcher lives in the test file, bounded and dated.** Eight
+lines, `matchLabels` only, confined to the assertions that need it, with the real
+one owed to `analysis.rs` in a later box. A second implementation of a matcher is
+what [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)
+warns about, so this one is written to be deleted.
+
+**The join is namespaced, and that clause could not be reddened by anything
+committed** — every captured budget and every pod it selects are in `default`. So
+it is proven by a [D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+plant: a `kube-system` pod wearing `app=healthy-deploy`. A clause nothing can fail
+is not a clause.
+
+**The join is cross-checked against the controller's own arithmetic** —
+`protected.len() == status.currentHealthy` — which ties two files from the same
+trip together, **with its precondition stated**: the controller counts *healthy*
+pods and the join counts *matching* ones, so the equality holds only while every
+matched pod is Ready, and that is asserted beside it rather than assumed.
+
+**Two nodes, not one, and the reason is not what it looks like.** The two protected
+pods sit on two different workers. That is not what makes the budget blocking — the
+floor is — but it is what makes *two* nodes blocked, and a trip that co-located the
+replicas would narrow Drain safety's only positive case with nothing going red.
+
+**`fixture_snapshot()` deliberately did not grow with `every_captured_pod()`.** It
+feeds the whole-capture run, which enumerates cards per pod; adding fourteen
+`kube-system` objects is a different box. Its doc now says `CAPTURED_PODS` and says
+why, instead of claiming "every pod".
+
+**`healthy-deploy-pods.json` is guarded at exactly two, not at one or more.** The
+budget's own capture fixes `expectedPods: 2` / `currentHealthy: 2`, so a list of
+one or three is a fixture that contradicts the object it exists to be joined
+against. The count also closes an empty-list hole in the same clause: jq's `all`
+over `[]` is `true`, so without it the guard passes on `{"items":[]}`.
+
+**`cluster.sh verify` gained no predicate for those pods, and the refusal is
+recorded.** `[pdb_floor]` already asserts `expectedPods == 2 and currentHealthy == 2`
+over the same objects through the same selector, and Ready implies Running and
+scheduled — so a pod-list predicate beside it could not fail while `[pdb_floor]`
+passes. A fourth guard that cannot fail, added rather than inherited, on the day
+this repo deleted three.
+
+**The mutation gate has nothing to say about a test-only diff, and that was
+measured twice rather than assumed.** `cargo mutants --in-diff` reports *No mutants
+to filter* — it does not mutate `#[cfg(test)]`. Run instead over the `rules.rs`
+decodes the new tests cover: 5 mutants, 1 caught, 4 unviable, none missed, which is
+[D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)'s
+own measurement repeating — the tool replaces a return value and a decode is a
+struct literal, so it cannot swap one field for its neighbour, which is this
+diff's entire defect class. **Twenty-one hand-planted reds are not redundant with
+the gate here; they are the gate.**
+
+**And a doc that had become false rather than merely old.**
+`docs/architecture.md` justified the one-field licence with *"the cluster the
+fixtures came from had no cordoned node, no partially-ready workload and no pod
+with an owner"*. All three are in the corpus now — `nodes.json`'s `k8rs-worker`,
+`statefulsets.json`'s `broken-sts` at 1 ready of 2, `owned-pods.json` — each
+brought back by the trip that retired its plant. The licence is unchanged; the
+sentence defending it was reporting a cluster that stopped existing.
+
+**Round two — the operator review, two blockers, and a reviewer corrected by its
+own evidence.** The family review read the landed tree and returned twelve
+findings; six went to [`backlog.md`](backlog.md), one is the Capacity box's own
+question, and the rest landed here.
+
+**Blocker 1 — the object built to make a per-node sum legible landed on the one
+node whose pod set is fiction.** `break-nodes` taints a worker `NoExecute` *after*
+the pod captures, correctly, and `nodes.json` is captured after that — so the
+committed snapshot holds pods Running on a node that in the same snapshot evicts
+them. Measured: fifteen committed pod rows name `k8rs-worker2`, and only
+`kindnet` and `kube-proxy` carry a toleration that survives it. **The contradiction
+predates this trip and is not what was fixed.** What was fixed is that placement is
+a **lottery**: `broken-config` moved `k8rs-worker` → `k8rs-worker2` between two
+trips with no manifest change, and `broken-overhead` — the object
+[D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)
+created so that a `spec`-only sum can be shown wrong — drew the fiction node.
+`nodeName: k8rs-worker` pins it, and the reasoning is better than the one the
+ruling gave: `break_nodes` picks the cordon node dynamically — the first worker in
+sorted order running a movable `demo` pod — so pinning a movable pod to
+`k8rs-worker` makes **the whole node assignment deterministic** rather than merely
+stable. **And a consequence nobody had asked about**: kind names nodes after the
+cluster, so a hardcoded `k8rs-worker` leaves the pod `Pending` forever on
+`k8s-admin`'s own `K8RS_CLUSTER=review` cluster and blocks the reviewer at minute
+two. One anchored `sed` on the apply path rewrites the prefix, byte-identical on
+the fixture cluster.
+
+**Blocker 2 — `DisruptionBudgetSnapshot` dropped the two fields that say whether
+its own numbers are trustworthy**, on the one pane that draws a green light before
+a destructive operation. `observedGeneration < generation` makes the eviction
+handler refuse **every** eviction with `TooManyRequests` whatever
+`disruptionsAllowed` says — *"this node is ready to drain"*, and then it hangs —
+and `reason: SyncFailed` means `disruptionsAllowed: 0` was never computed rather
+than genuinely zero. Both are in the committed bytes and both were being thrown
+away: [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)'s
+class verbatim, closed inside [D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+window. **Both shapes are carried, and the reason neither alone was enough is the
+decision**: the `DisruptionAllowed` condition carries its own `observedGeneration`
+but nothing to compare it against, and two generation fields carry no reason. So
+two `Option<i64>` — never a pre-computed `stale: bool`, because the comparison is
+the report's and a boolean hides which generation it saw — beside the conditions
+carried **whole**, since picking one condition out of the list and reading its
+reason is a verdict, and the verdict is the report's. `metav1::Condition` declares
+`reason`/`message` as required strings and both committed budgets carry `""`, so
+an empty required string decodes to `None` rather than drawing a blank line under
+every budget in the corpus. The upstream claim was read rather than repeated:
+`eviction.go` returns the **same** `TooManyRequests` text for a stale budget as for
+a genuinely full one, so the failure does not explain itself — which is why the
+field has to be carried rather than inferred.
+
+**A reviewer corrected by the code, which is the review working in both
+directions.** The `back-off` clause in `crashloop`'s byte guard was called out as
+guarding a field rule 1 never reads — true of the rule, and `crash_looping` does
+drop the sentence. But `crashloop_pod_decodes_what_rules_1_5_and_6_read` asserts
+it, so by this repo's own rule — *the byte guard names what its tests read*
+([D131](#d131--a-fixture-is-asked-two-different-questions-and-one-disjunction-was-answering-both-2026-08-21))
+— the clause stays. **The concern underneath it was real and was fixed**: the face
+alternates and is worth retrying, the kubelet's sentence does not and never will,
+so retrying it only spends the budget and then fails naming the wrong thing. It
+left the retry and became a plain guard that fails at once.
+
+**And `fetch_until` learned two things the first version did not know.** Its six
+calls were six independent 300s timers — thirty minutes worst case inside a trip
+that must finish within an hour of `break`, and that contains `broken-restarts`,
+whose `sleep 3600` fuse expires on a wall clock. One shared deadline now covers
+all six, proven shared rather than written that way. And on the failure path it
+had been leaving the bad fixture on disk while its own message said committing that
+file was the defect; it fetches to a temp and publishes only on success. **The
+second pass caught the fix's own defect**: `mktemp` creates at 0600 and `mv`
+carries the mode, so six fixtures would have sat at 0600 beside every other capture
+at 0644 — and git tracks only the executable bit, so that drift would have been
+invisible forever. The publish is a redirect, which matches the mode by
+construction.
+
+**The corrected arithmetic, measured twice by two agents.** Over the committed
+corpus: `k8rs-control-plane` 950m, `k8rs-worker` 100m, `k8rs-worker2` 250m,
+`k8rs-worker3` 170m — **1470m** total, of which `kube-system` alone is 1250m,
+against the 220m that `broken.yaml` + `healthy.yaml` request between them. The
+overhead is 250m. So the claim the object supports, restated with its denominator
+named: the pod asks 100m and is charged 350m, a spec-only sum undercounts **that
+pod** by 71%; 250m on one pod is more than every request in both manifests put
+together; and on the node it is now pinned to, the sum reads 200m ignoring the
+field and 450m counting it. What does **not** survive is *125% of the whole
+cluster's committed CPU* — see the correction on D130.
+
+**Round three — the roster that was a coin flip, and a green test whose premise
+was eight days wrong.** The fourth trip caught `init/migrate` and `oom/hog` on the
+terminated face instead of the backoff face, and
+`every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_captured_finding`
+asserted an **exact roster** of those containers. Its own message already admitted
+*"which crash loops appear here at all is the coin flip"* — which is the problem,
+not a caveat: a roster that must be hand-edited every trip is one whose repair
+under time pressure is to paste in whatever the run printed, and that is the single
+thing [D26](#d26--a-green-build-that-proves-nothing-2026-08-12) forbids.
+
+**The shape it took: the sweep splits where the coin lands, and only the side the
+coin cannot reach stays a roster.** A container that stopped *for good* — a
+finished init container, anything under `Never`, a retry rule that ran out — sits
+there because of the manifest, so its whole line survives any recapture and is
+rostered exactly. A crash loop caught between runs sits there because of the second
+the shutter opened, so it is **printed and never rostered**: that population held 3
+objects after 2026-08-16, 0 after the first trip of 2026-08-20 and 2 after the
+fourth, from an unchanged cluster and unchanged manifests. Nothing escapes being
+named — every container the sweep reaches is in one of two asserted lists, the
+settled roster or `restarted_after_a_bad_run()`'s, and the split is computed **by
+asking that same function** rather than by re-reading the fields, so the two cannot
+disagree about one container. The roster now carries its own instruction: *a change
+here is a finding to read and never a line to paste.*
+
+**And the repin falsified prose nobody had been reading.** Seven comments in the
+test files stated ages — *"three hours"*, *"12 hours ago"* — about objects now
+seventy minutes from the pin. A wrong number in a comment is the same class as a
+wrong number in an assertion
+([D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)),
+so they moved with it. One was worse than stale:
+`every_unusable_image_reason_is_rule_threes_card_and_arrives_at_once` pinned its
+moment to a transcribed literal that no trip had ever repinned, and against this
+corpus it sat **eight days before** the capture it claimed to be seven seconds
+after. It is derived from the capture's own `PodScheduled` now — and the honest
+half is recorded with it: **no verdict ever moved**, because `UNUSABLE_IMAGE` is
+rule 13's exclusion at any age, so the perturbation stays green at +11 minutes too.
+The lie was the sentence, not the assertion, and it is said that way rather than
+dressed up as a caught bug.
+
+**Round four — the review's own second round, and the ruling that stopped the
+loop.** It confirmed the second blocker closed completely and the first closed for
+the object it was applied to, then found the same shape one report over: **Drain
+safety's join is entirely inside the eviction zone.** Both pods `broken-pdb-floor`
+protects sit on the two workers `break-nodes` empties, so the corpus says
+`currentHealthy: 2` where the cluster it came from now says 0, and the assertion
+*"draining either one is blocked by this budget"* is true of the budget and of
+neither node. Underneath it is the general fact, which is the part worth keeping:
+**a cordon evicts nothing and the other two breakages do, so exactly one worker
+keeps its pods — and ten fixtures out of thirty-eight are on it.**
+
+**Ruled a box rather than a fifth trip**, and the reasoning is the ruling. The
+corpus is not *wrong* about what it photographed: at capture both pods were Running
+and Ready with `disruptionsAllowed: 0`, and the snapshot is a photograph, not a
+promise about the cluster afterwards. No producer reads these fields yet — Phase 4
+has written none — so nothing ships a false number today. And the fix that was
+available was one more workload's tolerations, which leaves the *rule* unenforced
+across the other thirteen and buys a fifth trip for a fraction of the problem. Four
+trips in one night is already the shape
+[CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+warns about — *an unbounded go back to the start means the last nit found is the one
+that decides whether the phase ever ends* — and each review round here found the
+**next instance of one structural fact**, not a new defect. The fact is written down
+now, with its measurement, and the box it becomes is a fixture-design box with a
+done-when rather than another capture.
+
+**Two things the round found that were tonight's own contradictions were fixed in
+the same turn**, because they are not instances of anything: a test message still
+claiming rule 1 renders the kubelet's sentence, after the same night's work
+established in `justfile` that it does not; and `$CLUSTER` interpolated unescaped
+into a `sed` replacement on the path that exists precisely because that variable is
+user-supplied.
+
+### D133 — the mutation gate files a failed build as `unviable`, so a full disk reads as a pass (2026-08-21)
+
+**`cargo mutants` reported `1 caught, 3 unviable` and one of those three had not
+been tested at all.** Its log said `No space left on device (os error 28)` — not a
+type error. cargo-mutants classifies **any** build failure as *unviable*, which is
+correct for a mutant that cannot compile and catastrophically wrong for one that
+never got the chance. Re-run with `TMPDIR` on a volume with room, the same mutant
+came back **caught**.
+
+The machine: `/tmp` is a **12 GiB tmpfs at 94%**, holding eight
+`cargo-mutants-k8rs-*.tmp` directories (~4 GB) left behind by runs that did not
+clean up, beside 7 GB of agent scratchpads. `/home` had 916 GB free the whole time.
+The gate builds a full copy of the tree per mutant, so it is the single hungriest
+thing this repo runs and it was pointed at the smallest filesystem on the box.
+
+**This is the exact shape [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)
+is about, one level up.** D26 says a green build can prove nothing;
+[D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)
+answered it by handing the proof to a tool *with no incentive to lie* — and the
+tool's honesty turns out to be conditional on a resource nobody was watching. A
+surviving mutant is a test that cannot fail; an **unviable** mutant is a claim that
+there was nothing to test, and the two are one word apart in the output.
+
+Three things follow, and the first is the only one that is a fix:
+
+- **`just mutants` pins `TMPDIR` off tmpfs.** The gate names its own scratch
+  volume rather than inheriting whatever the box happens to hand it.
+- **`unviable` is read, not skipped.** A run whose unviable count moves is a run
+  whose reason has to be looked at — the honest ones here are
+  `the trait bound rules::Condition: Default is not satisfied`, which names a type;
+  a line naming a filesystem is not a mutation result.
+- **And the phase-close sweep is where this would have cost most.** It runs whole,
+  in four shards
+  ([D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)),
+  over hundreds of mutants — the run with the most to say and the one most likely
+  to fill a disk saying it. A shard that goes green because it ran out of room
+  prints no `MISSED` line, which is exactly what a passing shard prints.
+
+**Found by an agent reading its own tool's log rather than its summary line**, on a
+turn whose gate had already reported green once.
+
+**The fix is two checks, because neither subsumes the other.** Refusing to start
+without headroom catches the common case in one second instead of after eleven
+minutes of sharded sweep, but cannot see a disk filled *during* a run by something
+else. Reading the run's logs afterwards is the only check that can tell *nothing to
+test* from *could not test*, and the only one that survives a mid-run fill. **The
+count cannot do it**: the last phase close was `498 caught, 55 unviable, 0 MISSED`,
+and those 55 were legitimate — so any count-based rule is either useless or
+permanently red. The scan runs **before the exit code decides anything**, because
+cargo-mutants also exits non-zero for a `MISSED` mutant and a `set -e` that stopped
+at the run would skip the check on exactly the runs worth checking.
+
+**Sized off a measurement, not a guess**: 499–510 MB per scratch tree, read with
+`du` off the eight abandoned directories themselves, and the floor set at 2 GiB —
+four times the largest — so `--jobs` above 1 does not need the number to know about
+it. The first guarded run then made the case better than any argument: ten of ten
+mutants unviable, with cargo-mutants itself printing *"perhaps there is a problem
+with building in a scratch directory"* — a summary indistinguishable from the disk
+failure. The logs named `the trait bound ObjectKind: Default is not satisfied`.
+All ten honest, and **a count-based guard would have failed that run**.
+
+**Two things this cannot reach, said rather than implied.** The scan reads
+`mutants.out` by name, so a run given `--output` writes where nothing looks; and no
+disk was actually filled to prove it end to end — what is proven is the scan
+against captured tool output in five framings and the whole path against a planted
+log. **And the sweep already recorded in `todo.md` cannot be re-checked**: Phase
+3's close logged `553 mutants, 498 caught, 55 unviable, 0 MISSED`, it ran before
+any of this, and `mutants.out` has been overwritten since. Those 55 were never read
+against ENOSPC and the logs are gone. The honest statement is not that they were
+fine — it is that the next sweep will be checked and that one cannot be.
+
+**The guard's own self-test had the defect it exists to catch.** Written first, it
+read the *live* filesystem — so it asserted something about the box rather than the
+code, and **would have gone red on a full disk, in the one file whose entire
+subject is that a full disk must not be mistaken for a result.** It runs against two
+captured `df -Pk` lines now. Five of its six planted breaks could not fail either:
+the ENOSPC fixture carried both spellings on one line, the way the tool really
+prints it, so deleting half the pattern stayed green.
 
 ## Decisions made
 

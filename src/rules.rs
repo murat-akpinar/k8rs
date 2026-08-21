@@ -479,7 +479,7 @@ use k8s_openapi::api::certificates::v1::{
 use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Service};
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{Condition as MetaCondition, LabelSelector};
 
 /// The [`ObjectKind`] a generated API type names itself, read off the type rather than written
 /// out — `ObjectKind::from_api` is already the one place a `kind` string and its `apiVersion`
@@ -493,7 +493,9 @@ fn api_kind<T: Resource>() -> ObjectKind {
 /// One `status.conditions[]` entry, from whichever object carries it.
 ///
 /// Read by rule 10 (`PodScheduled`), N1 (`Ready` plus its `last_transition`), N3 (the
-/// three pressure types), W1 (`ReplicaFailure`) and W2 (`Progressing`).
+/// three pressure types), W1 (`ReplicaFailure`), W2 (`Progressing`) — and by the Drain safety
+/// report through [`DisruptionBudgetSnapshot::conditions`], which is the one that arrives
+/// through the second `From` below rather than the macro.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Condition {
     pub type_: String,
@@ -507,7 +509,8 @@ pub struct Condition {
 }
 
 // Six condition types across core/v1 and apps/v1, field-for-field identical, with no
-// trait in common upstream. The macro is what keeps that mapping written once.
+// trait in common upstream. The macro is what keeps that mapping written once. It covers six
+// and not seven: `metav1::Condition` below has a different shape, not a different mapping.
 macro_rules! condition_from {
     ($($t:ty),+ $(,)?) => { $(
         impl From<$t> for Condition {
@@ -532,6 +535,33 @@ condition_from!(
     StatefulSetCondition,
     DaemonSetCondition,
 );
+
+/// The seventh shape, and the reason the macro above stops at six. `metav1::Condition` is the
+/// newer spelling — what `policy/v1`'s PodDisruptionBudget carries — and it declares `reason`,
+/// `message` and `lastTransitionTime` as **required strings** rather than optional ones, so
+/// there is no body the macro could share with the six.
+///
+/// **An empty required string decodes to `None`.** `""` is how a field that cannot be omitted
+/// spells *absent*, `Option` is how this layer spells it, and both committed budgets carry
+/// `"message": ""` — carrying that as `Some("")` would put a blank explanation line under every
+/// budget on the screen.
+///
+/// **Its own `observedGeneration` is deliberately dropped.** The number upstream's eviction
+/// handler compares against `metadata.generation` is `status.observedGeneration`, one level up,
+/// and [`DisruptionBudgetSnapshot::observed_generation`] carries that one; the per-condition
+/// copy is written by the same controller in the same update, and a second source for one fact
+/// is the copy that drifts (NOTES § D46).
+impl From<MetaCondition> for Condition {
+    fn from(c: MetaCondition) -> Self {
+        Self {
+            type_: c.type_,
+            status: c.status,
+            reason: (!c.reason.is_empty()).then_some(c.reason),
+            message: (!c.message.is_empty()).then_some(c.message),
+            last_transition: Some(c.last_transition_time),
+        }
+    }
+}
 
 fn conditions<T: Into<Condition>>(src: Option<Vec<T>>) -> Vec<Condition> {
     src.into_iter().flatten().map(Into::into).collect()
@@ -1194,8 +1224,9 @@ impl From<LabelSelector> for Selector {
 /// One PodDisruptionBudget — **the Drain safety report's whole subject**, and an on-demand fetch
 /// rather than a watch (invariant 6).
 ///
-/// **Prune line: `metadata`, `spec.selector`, and `status.disruptionsAllowed`,
-/// `status.currentHealthy`, `status.desiredHealthy`.**
+/// **Prune line: `metadata` (its `generation` load-bearing, below), `spec.selector`, and
+/// `status.observedGeneration`, `status.disruptionsAllowed`, `status.currentHealthy`,
+/// `status.desiredHealthy`, `status.conditions`.**
 ///
 /// **`spec.minAvailable` is deliberately not carried, and `todo.md` § Phase 5 names it.** It is
 /// an `IntOrString`: `minAvailable: "50%"` is legal and common, and a row reading it would print
@@ -1213,15 +1244,53 @@ pub struct DisruptionBudgetSnapshot {
     /// which a matcher reading it as *matches everything* would invert. The report owes that
     /// reading a test.
     pub selector: Selector,
+    /// **`metadata.generation` and `status.observedGeneration` — the two numbers upstream's own
+    /// eviction handler compares, carried as two numbers.** It refuses *every* eviction on a
+    /// budget whose status has not caught up with its spec — `TooManyRequests`, whatever
+    /// [`disruptions_allowed`](Self::disruptions_allowed) says — so a report reading the three
+    /// counters without these draws *this node is ready to drain* over a drain that then hangs.
+    /// A **false green light in front of a destructive operation** is the direction this project
+    /// refuses (NOTES § D46), and the shapes that produce one are ordinary: a PDB edited a
+    /// moment ago, or a wedged kube-controller-manager.
+    ///
+    /// **And the failure does not explain itself.** Upstream's refusal here is
+    /// `createTooManyRequestsError`, the *same* error it returns for a budget that is genuinely
+    /// full — *"Cannot evict pod as it would violate the pod's disruption budget."* — so an
+    /// operator who drains anyway is told the one thing that is not true. This field is where
+    /// the difference is.
+    ///
+    /// **Not a `stale: bool`.** The comparison belongs to the report (invariant 5 — a rule is a
+    /// pure function over what is here), and a boolean would hide *which* generation it saw,
+    /// which is the thing a reader has to see before believing the row. **Both `Option`, and
+    /// `None` is not zero** (NOTES § D129): a generation nobody wrote is not generation 0, and
+    /// what `None` means against a `Some` is a comparison this layer must not invent.
+    pub generation: Option<i64>,
+    pub observed_generation: Option<i64>,
     /// **How many more pods may be evicted right now** — the controller's own answer, and the
     /// one field that says *this drain blocks*. **`None` is not zero**: the field is absent
     /// until the disruption controller has looked at this PDB, and reading that as zero calls
-    /// every freshly created budget blocking. `None` fires nothing.
+    /// every freshly created budget blocking. `None` fires nothing. **A `Some` is worth no more
+    /// than [`observed_generation`](Self::observed_generation) says it is** — read that first.
     pub disruptions_allowed: Option<i32>,
     /// The two numbers the row's sentence is built from — *"wants at least 5 copies and has
     /// exactly 5"*. Both `None` until the controller has computed them, for the reason above.
     pub current_healthy: Option<i32>,
     pub desired_healthy: Option<i32>,
+    /// `status.conditions` — in practice the single one the disruption controller writes,
+    /// `DisruptionAllowed`, and **`reason` is the load-bearing field on it**. A
+    /// `disruptionsAllowed: 0` means *the workload is at its floor* under `InsufficientPods`,
+    /// and *the controller could not compute the number at all* under `SyncFailed` — a workload
+    /// whose `scale` subresource does not resolve, a CRD owner, a missing verb. The first is
+    /// answered by **run one more copy**; the second is not answered by it at all, and a row
+    /// that printed *"wants at least 5 copies and has exactly 5"* off numbers the controller
+    /// says it could not compute would be inventing the sentence. One field separates them.
+    ///
+    /// **Carried whole, and picking `DisruptionAllowed` out of it is the report's job** —
+    /// exactly as [`CertificateRequestSnapshot::conditions`] is carried rather than a
+    /// `pending: bool`: the verdict is the report's and the fact is this layer's. `status`
+    /// rides along with `reason`, which is what lets a row check the controller's own tri-state
+    /// against the counter it is about to print.
+    pub conditions: Vec<Condition>,
 }
 
 impl From<PodDisruptionBudget> for DisruptionBudgetSnapshot {
@@ -1229,14 +1298,17 @@ impl From<PodDisruptionBudget> for DisruptionBudgetSnapshot {
         let status = p.status.unwrap_or_default();
         Self {
             id: object_id(api_kind::<PodDisruptionBudget>(), &p.metadata),
+            generation: p.metadata.generation,
             selector: p
                 .spec
                 .and_then(|s| s.selector)
                 .map(Selector::from)
                 .unwrap_or_default(),
+            observed_generation: status.observed_generation,
             disruptions_allowed: status.disruptions_allowed,
             current_healthy: status.current_healthy,
             desired_healthy: status.desired_healthy,
+            conditions: conditions(status.conditions),
         }
     }
 }

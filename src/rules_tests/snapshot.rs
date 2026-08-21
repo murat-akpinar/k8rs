@@ -306,17 +306,18 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
     //
     // **The pin is the midnight after the *newest* capture, and the rung follows the trip**
     // (NOTES § D57, § D97). The corpus is one trip again since 2026-08-16 — every fixture
-    // re-captured from one cluster in one morning — so the whole corpus sits inside a single
-    // day of the pin and this cordon prints on the **hours** rung. It has been on three
-    // different rungs across three trips (minutes, then days at 48h 24m, now hours), which is
-    // why the number above is asserted at all: the rung is a property of when the trip
-    // finished, not of anything this test is about.
+    // re-captured from one cluster in one sitting — so the whole corpus sits inside a single
+    // day of the pin, and where inside that day decides the rung. This cordon has stood on
+    // three different rungs — minutes, then days at 48h 24m, then hours, and minutes again now
+    // at 47m 52s — which is why the number above is asserted at all: the rung is a property of
+    // the hour the trip finished and of nothing this test is about.
     //
-    // **The boundary to know about is 48 hours**, where `age`'s hours rung ends. At 827
-    // minutes this cordon is nowhere near it, but a trip whose capture and pin land more than
-    // two days apart puts the phrase back on the days rung — the same edit as any other repin,
-    // and the one that looks like a bug rather than a clock move. The number above is the
-    // guard: it fails first, with the arithmetic in the message.
+    // **This cordon now sits 12 minutes under the hours rung**, which is the near boundary —
+    // a trip finishing a quarter of an hour earlier against the same midnight pin prints
+    // `1 hour ago` here. The far one is 48 hours, where the hours rung ends and the days rung
+    // starts. Crossing either is the same edit as any other repin, and the one that looks like
+    // a bug rather than a clock move. The number above is the guard: it fails first, with the
+    // arithmetic in the message.
     let stamped = cordon.added_at.clone().expect(
         "the controller stamps timeAdded on the taint it mirrors from spec.unschedulable \
          — a capture without it is D64's premise back again",
@@ -324,14 +325,14 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
     let elapsed = now().0.duration_since(stamped.0);
     assert_eq!(
         elapsed.as_mins(),
-        827,
-        "the cordon is {elapsed:?} before the pinned now, and the phrase below says 13 \
-         hours — if `just fixtures` was re-run, repin `fn now()` (see the note there for \
+        47,
+        "the cordon is {elapsed:?} before the pinned now, and the phrase below says 47 \
+         min — if `just fixtures` was re-run, repin `fn now()` (see the note there for \
          what moves with it) and move both together"
     );
     assert_eq!(
         dated.age(&now()).as_deref(),
-        Some("13 hours ago"),
+        Some("47 min ago"),
         "a cordon the controller stamped has a moment, and the card says when"
     );
     assert_eq!(
@@ -429,7 +430,10 @@ fn crashloop_pod_decodes_what_rules_1_5_and_6_read() {
             assert_eq!(reason.as_deref(), Some("CrashLoopBackOff"), "rule 1");
             assert!(
                 message.as_deref().unwrap_or_default().contains("back-off"),
-                "rule 1 shows the kubelet's own sentence, got {message:?}"
+                "the capture has to carry `state.waiting.message`, which is the field \
+                 `justfile`'s `back-off` guard is anchored to — no rule renders it on a \
+                 `CrashLoopBackOff` container, so a capture that lost it would be a capture of \
+                 the wrong shape and nothing else would say so (NOTES § D131). Got {message:?}"
             );
         }
         other => panic!("a crashlooping container must decode as waiting, got {other:?}"),
@@ -1724,15 +1728,27 @@ fn deployments_and_daemonsets_decode_their_own_desired_and_ready() {
 /// left behind after its file goes is a `CAPTURED_PODS` entry that panics in [`fixture`] the next
 /// time anyone touches it.
 ///
-/// **`kind: Pod` and not "a file with pods in it"**, which is what excludes `owned-pods.json` and
-/// `kube-system-pods.json` structurally rather than by name: those are `List`s, read through
-/// [`items`], and a `List` in this array would not decode. **There is no exclusion list, because
-/// nothing is excluded** — if a Pod capture ever has to stay out, it goes in a named list with
-/// its reason beside it, never in the gap between this assertion and the array.
+/// **`kind: Pod` and not "a file with pods in it"**: a `List` cannot decode into that array, so
+/// the single-object captures and the `kubectl get pods` captures are two arrays and the sweep
+/// checks both. [`CAPTURED_POD_LISTS`] is the second, and it is why this test now walks the
+/// directory twice. **There is no exclusion list, because nothing is excluded** — if a Pod
+/// capture ever has to stay out, it goes in a named list with its reason beside it, never in the
+/// gap between this assertion and an array.
+///
+/// **The `List` half is here because its absence cost a trip** (NOTES § D131). Until 2026-08-21
+/// only `kind: Pod` was swept, so a `List` of pods was coupled to nothing: `owned-pods.json` sat
+/// outside [`every_captured_pod`] for weeks and `healthy-deploy-pods.json` arrived outside it,
+/// which left [`the_pods_the_blocking_budget_protects_and_the_ones_no_budget_can_be_joined_to`]
+/// green on a trip that had just captured the two pods it was written to notice.
+///
+/// **What it still cannot see is an empty `List`**, which carries no `items[].kind` to be
+/// identified by — `kubectl` stamps the kind on the items and on nothing else. A capture of zero
+/// pods is a capture with no shape for any test here, and the assertion says so rather than
+/// pretending otherwise.
 #[test]
 fn every_committed_pod_capture_is_named_in_the_list_that_claims_to_hold_them_all() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
-    let mut on_disk: Vec<String> = std::fs::read_dir(dir)
+    let stems: Vec<String> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("{dir} could not be read: {e}"))
         .map(|entry| entry.expect("a readable directory entry").path())
         .filter(|path| path.extension().is_some_and(|x| x == "json"))
@@ -1742,34 +1758,71 @@ fn every_committed_pod_capture_is_named_in_the_list_that_claims_to_hold_them_all
                 .to_string_lossy()
                 .into_owned()
         })
-        // [`fixture`] does the read and the parse, and panics with the path on either.
-        .filter(|stem| fixture(stem)["kind"] == "Pod")
         .collect();
-    on_disk.sort();
-    let mut listed: Vec<String> = CAPTURED_PODS.iter().map(|n| (*n).to_string()).collect();
-    listed.sort();
+
+    // [`fixture`] does the read and the parse, and panics with the path on either.
+    let holds_pods = |stem: &String| {
+        let capture = fixture(stem);
+        capture["kind"] == "List"
+            && capture["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|item| item["kind"] == "Pod")
+    };
+    let (mut lists, mut singles): (Vec<String>, Vec<String>) =
+        stems.into_iter().partition(holds_pods);
+    singles.retain(|stem| fixture(stem)["kind"] == "Pod");
+    lists.sort();
+    singles.sort();
+
+    let mut named_singles: Vec<String> = CAPTURED_PODS.iter().map(|n| (*n).to_string()).collect();
+    let mut named_lists: Vec<String> = CAPTURED_POD_LISTS
+        .iter()
+        .map(|n| (*n).to_string())
+        .collect();
+    named_singles.sort();
+    named_lists.sort();
     println!(
-        "{} Pod captures on disk, {} named",
-        on_disk.len(),
-        listed.len()
+        "on disk: {} Pod captures, {} pod Lists {lists:?} · named: {} and {}",
+        singles.len(),
+        lists.len(),
+        named_singles.len(),
+        named_lists.len()
     );
+
     // A found-nothing sweep and a nothing-to-find sweep print the same line, and a `read_dir`
-    // that returned nothing would satisfy the equality below against an emptied array. Canaries
+    // that returned nothing would satisfy both equalities below against emptied arrays. Canaries
     // rather than a count, so a capture legitimately retired does not redden this line with a
-    // message about the wrong thing (CLAUDE.md § Code phase rules).
+    // message about the wrong thing (CLAUDE.md § Code phase rules). **One per array**, because
+    // the two halves are two sweeps and a canary in one says nothing about the other.
     for canary in ["healthy", "healthy-retry", "failed"] {
         assert!(
-            on_disk.iter().any(|n| n == canary),
+            singles.iter().any(|n| n == canary),
             "{canary}.json is a Pod capture this file reads by name and the sweep did not find \
-             it, so the sweep is not reading {dir}: {on_disk:?}"
+             it, so the sweep is not reading {dir}: {singles:?}"
+        );
+    }
+    for canary in ["kube-system-pods", "healthy-deploy-pods"] {
+        assert!(
+            lists.iter().any(|n| n == canary),
+            "{canary}.json is a `kubectl get pods` capture this file joins on and the sweep did \
+             not classify it as one, so the `List` half is reading nothing: {lists:?}"
         );
     }
     assert_eq!(
-        on_disk, listed,
+        singles, named_singles,
         "`tests/fixtures` and `CAPTURED_PODS` disagree. A capture on disk and not in the array is \
          one no test reads — and it can falsify a claim this file makes about the corpus without \
          reddening anything (NOTES § D96). A name in the array with no file is an entry that \
          panics the moment it is read."
+    );
+    assert_eq!(
+        lists, named_lists,
+        "`tests/fixtures` and `CAPTURED_POD_LISTS` disagree. A `List` of pods on disk and not in \
+         the array is a set of pods outside [`every_captured_pod`], which is a set of pods \
+         outside every node-rule join — a per-node sum computed without them is wrong and \
+         nothing else here would say so (NOTES § D46, § D131)."
     );
 }
 
@@ -1955,7 +2008,14 @@ fn snapshot_times(s: &ClusterSnapshot) -> Vec<Swept<'_>> {
 /// add any of them.
 #[test]
 fn the_pinned_now_is_not_before_the_captures_it_is_read_against() {
-    let snapshot = fixture_snapshot();
+    // **[`every_captured_pod`] and not [`fixture_snapshot`]'s own list**, which is the narrower
+    // one: the three `kubectl get pods` captures hold timestamps too, and until 2026-08-21
+    // nothing compared them against the pin — 86 of the 339 moments this walks were never
+    // checked against it (NOTES § D131). `owned-pods.json` had been outside this walk for weeks.
+    let snapshot = ClusterSnapshot {
+        pods: every_captured_pod(),
+        ..fixture_snapshot()
+    };
     let times = snapshot_times(&snapshot);
     let reached: BTreeSet<&str> = times.iter().map(|&(label, _, _)| label).collect();
     println!(
@@ -3889,9 +3949,13 @@ fn a_label_selector_decodes_its_expressions_and_not_only_its_labels() {
     assert!(none.match_labels.is_empty() && none.match_expressions.is_empty());
 }
 
-/// The three captured Services, **including the one with no selector at all**. `kubernetes` in
+/// The four captured Services, **including the one with no selector at all**. `kubernetes` in
 /// `default` exists on every cluster ever built and its endpoints are written by the apiserver,
 /// so *matches no pod* is not a thing the Waste report may say about it.
+///
+/// **The fourth arrived with the 2026-08-20 trip** — `broken-noendpoints`, the Service Waste's
+/// headline row is about, whose own EndpointSlice is
+/// [`the_service_that_reaches_nothing_is_a_slice_with_no_endpoints`]'s subject.
 #[test]
 fn the_captured_services_decode_and_an_absent_selector_is_not_an_empty_one() {
     let raw = fixture("services");
@@ -3899,7 +3963,7 @@ fn the_captured_services_decode_and_an_absent_selector_is_not_an_empty_one() {
         .into_iter()
         .map(Into::into)
         .collect();
-    assert_eq!(services.len(), 3, "the capture holds three");
+    assert_eq!(services.len(), 4, "the capture holds four");
 
     let by = |name: &str| {
         services
@@ -3932,6 +3996,32 @@ fn the_captured_services_decode_and_an_absent_selector_is_not_an_empty_one() {
         by("kube-dns").selector.contains_key("k8s-app"),
         "and the third one is selected by a key that is not `app`, so nothing here is \
          hardcoded to one label name"
+    );
+
+    // **The fourth has a selector and still reaches nothing**, which is the pair Waste needs:
+    // the Service is well-formed, so the emptiness is a fact about its EndpointSlice and not
+    // about this object. A row that read *no selector* here would file `kubernetes` as the
+    // outage and this one as fine — exactly backwards.
+    assert_eq!(
+        by("broken-noendpoints")
+            .selector
+            .get("app")
+            .map(String::as_str),
+        Some("broken-noendpoints"),
+        "read off spec.selector, and the capture agrees: {}",
+        captured_str(
+            captured_item(&raw, "broken-noendpoints"),
+            &["spec", "selector", "app"]
+        )
+    );
+    let pods = every_captured_pod();
+    assert!(pods.len() > 40, "walked {} pods", pods.len());
+    assert!(
+        !pods
+            .iter()
+            .any(|p| p.labels.get("app").map(String::as_str) == Some("broken-noendpoints")),
+        "and no captured pod carries that label — the emptiness of its slice is a property \
+         of the cluster the capture was taken from, not of the decode"
     );
 }
 
@@ -4022,121 +4112,1047 @@ fn a_pending_certificate_request_decodes_as_pending_and_carries_no_credential() 
     println!("csr: signer {} · issued {}", snap.signer_name, snap.issued);
 }
 
-/// **Everything Family C's inputs cannot prove today, in one list, so the gap cannot close in
-/// silence** (NOTES § D129). Five items, and none of them is skippable-by-omission: this test
-/// **goes red the moment the capture trip lands**, so whoever adds the objects has to come here
-/// and write the assertions that were impossible before, rather than leaving a decode that only
-/// ever saw an empty list.
+// --- THE FIVE FAMILY C INPUTS THE 2026-08-20 TRIP PUT AN OBJECT BEHIND ---
+//
+// **These five were one test until 2026-08-20, and it was called
+// `what_no_committed_capture_can_prove_about_family_cs_inputs`.** It asserted that a PDB, a PVC,
+// an EndpointSlice, a `spec.overhead` and a pod mounting a claim were all absent, so that it
+// would **go red the moment the capture trip landed** and the gap could not be filled without
+// its assertions being written (NOTES § D129, § D130). The trip landed, it went red, and what
+// replaces it is one positive test per item. A test named *what no capture can prove* that
+// proves five things is the defect this repository keeps paying for, so the name went with the
+// gap it was holding; [`what_family_cs_inputs_still_have_no_object_for`] holds what is left.
+
+/// **The two committed PodDisruptionBudgets — the one that blocks a drain and the one that does
+/// not** (NOTES § D129, § D130). Drain safety's whole reason for existing is the first: a node
+/// carrying `broken-pdb-floor`'s pods can be cordoned and drained forever and the drain never
+/// finishes, because the budget's floor is already the number of healthy pods there are.
 ///
-/// Three are whole types. `scripts/broken.yaml` creates no PodDisruptionBudget and no
-/// PersistentVolumeClaim, and `endpointslices` is not in the `justfile`'s capture loop — so
-/// [`EndpointSliceSnapshot::from`] has never run at all, and Drain safety's whole reason for
-/// existing and Waste's headline row have no positive fixture. Hand-writing one is what
-/// NOTES § D53 refuses, and NOTES § D40's one-field licence does not reach them either: it
-/// starts from a *committed capture*, and for these there is no object to start from.
+/// **The row reads `status.desiredHealthy` and never `spec.minAvailable`** (NOTES § D130).
+/// `minAvailable` is an `IntOrString` and `minAvailable: "50%"` is legal and common, so a row
+/// reading it prints *"wants at least 50% copies"* or nothing at all; the API server resolves it
+/// **and** `maxUnavailable` into the status field. The capture fixes both on one object —
+/// `minAvailable: 2` beside `desiredHealthy: 2` — so the reading that is only sometimes correct
+/// stays visible, and the half below moves the spec field on a decoded copy to prove which one
+/// the decode actually read (NOTES § D40, § D29: a fixture whose two fields always agree cannot
+/// prove which one was read).
 ///
-/// Two are fields on a pod. No captured pod declares `spec.overhead` — the fixture cluster runs
-/// runc, with no RuntimeClass to charge — and none mounts a PersistentVolumeClaim, because
-/// there is none to mount.
+/// **Two more facts joined it on 2026-08-21, and neither is a counter: whether the counters are
+/// current, and why they are what they are** (NOTES § D46's class — a field the API sends and
+/// the contract drops at ingest). Upstream refuses every eviction while `metadata.generation`
+/// is ahead of `status.observedGeneration`, and `DisruptionAllowed`'s `reason` is the only
+/// thing separating a workload at its floor from a controller that could not compute the number
+/// at all. Both interesting shapes are **plants** (NOTES § D40), each carrying what a trip
+/// would have to do to replace it; the current-and-`InsufficientPods` pair is the capture.
 #[test]
-fn what_no_committed_capture_can_prove_about_family_cs_inputs() {
-    let budgets: Vec<DisruptionBudgetSnapshot> =
-        items::<PodDisruptionBudget>("poddisruptionbudgets")
-            .into_iter()
-            .map(Into::into)
-            .collect();
-    let claims: Vec<ClaimSnapshot> = items::<PersistentVolumeClaim>("persistentvolumeclaims")
+fn the_blocking_disruption_budget_and_the_one_with_room() {
+    let raw = fixture("poddisruptionbudgets");
+    let budgets = disruption_budgets();
+    let by = |name: &str| {
+        budgets
+            .iter()
+            .find(|b| b.id.name == name)
+            .unwrap_or_else(|| panic!("no {name} among {budgets:?}"))
+    };
+    // The one condition the disruption controller writes. **Picking it out of the list is a
+    // report's job and is done here, not in the decode** — which is the whole reason the
+    // conditions are carried whole (`DisruptionBudgetSnapshot::conditions`); what this layer
+    // owes is that it can be found at all.
+    fn allowed(b: &DisruptionBudgetSnapshot) -> &Condition {
+        b.conditions
+            .iter()
+            .find(|c| c.type_ == "DisruptionAllowed")
+            .unwrap_or_else(|| panic!("no DisruptionAllowed condition on {}", b.id.name))
+    }
+
+    let blocking = by("broken-pdb-floor");
+    assert_eq!(
+        blocking.id.kind,
+        ObjectKind::Other("PodDisruptionBudget.policy".to_string()),
+        "a kind in a real API group is qualified by it (NOTES § D36) — asserted here off a \
+         decoded object rather than off `api_kind` alone, which is what the whole-type absence \
+         used to leave it as"
+    );
+    assert_eq!(blocking.id.namespace.as_deref(), Some("default"));
+    assert_eq!(
+        blocking.disruptions_allowed,
+        Some(captured_i32(
+            captured_item(&raw, "broken-pdb-floor"),
+            &["status", "disruptionsAllowed"]
+        )),
+        "the controller's own answer, and it is the one field that says *this drain blocks*"
+    );
+    assert_eq!(
+        blocking.disruptions_allowed,
+        Some(0),
+        "and the capture is on the blocking side of it, or this object is not this test's fixture"
+    );
+    assert_eq!(
+        (blocking.current_healthy, blocking.desired_healthy),
+        (Some(2), Some(2)),
+        "the two numbers the row's sentence is built from — *wants at least 2 copies and has \
+         exactly 2* — and their being equal is what leaves no room to evict into"
+    );
+    assert_eq!(
+        blocking
+            .selector
+            .match_labels
+            .get("app")
+            .map(String::as_str),
+        Some("healthy-deploy"),
+        "and the selector says which pods it protects, or the join has a budget and no way to \
+         find the pods it is about"
+    );
+    assert!(
+        blocking.selector.match_expressions.is_empty(),
+        "this one is `matchLabels` alone — the expression half is \
+         `a_label_selector_decodes_its_expressions_and_not_only_its_labels`'s subject"
+    );
+
+    // --- WHETHER THOSE THREE NUMBERS ARE CURRENT, AND WHY THEY ARE WHAT THEY ARE ---
+    //
+    // Both facts were in the committed bytes and dropped by this type until 2026-08-21, which
+    // is NOTES § D46's class exactly. Upstream's eviction handler compares
+    // `status.observedGeneration` against `metadata.generation` and refuses **every** eviction
+    // while the spec is ahead — `TooManyRequests`, whatever `disruptionsAllowed` says — and
+    // `reason` is the only field separating *the workload is at its floor* from *the controller
+    // could not compute this at all*.
+    let raw_blocking = captured_item(&raw, "broken-pdb-floor");
+    assert_eq!(
+        (blocking.generation, blocking.observed_generation),
+        (
+            Some(captured_i64(raw_blocking, &["metadata", "generation"])),
+            Some(captured_i64(
+                raw_blocking,
+                &["status", "observedGeneration"]
+            )),
+        ),
+        "both sides of the comparison the API server itself makes, each read off the field it \
+         lives in — one filled from the other would pass every *are these numbers current* \
+         check that could ever be written against it"
+    );
+    assert_eq!(
+        (blocking.generation, blocking.observed_generation),
+        (Some(1), Some(1)),
+        "and on the capture the controller has caught up, so the three counters above are ones \
+         an eviction would actually be judged by — the plants below are the shapes where they \
+         are not"
+    );
+
+    let raw_condition = &at(raw_blocking, &["status", "conditions"])[0];
+    assert_eq!(
+        captured_str(raw_condition, &["type"]),
+        "DisruptionAllowed",
+        "the capture carries the disruption controller's own condition, or everything below is \
+         asserted about a condition this object does not have"
+    );
+    assert_eq!(
+        allowed(blocking).reason.as_deref(),
+        Some(captured_str(raw_condition, &["reason"])),
+        "the controller's own word for *why*, carried verbatim (NOTES § D37)"
+    );
+    assert_eq!(
+        (
+            allowed(blocking).reason.as_deref(),
+            allowed(blocking).status.as_str()
+        ),
+        (Some("InsufficientPods"), "False"),
+        "*the workload is at its floor* — the reading whose action is **run one more copy**, \
+         and the tri-state agrees with the zero above rather than being inferred from it"
+    );
+    assert_eq!(
+        captured_str(raw_condition, &["message"]),
+        "",
+        "the committed bytes hold an empty message on this shape of condition, or the next \
+         assertion is proving nothing"
+    );
+    assert_eq!(
+        allowed(blocking).message,
+        None,
+        "`metav1::Condition` declares `message` a required string, so `\"\"` is how it spells \
+         *absent* — `Some(\"\")` here would draw a blank explanation line under every budget \
+         in the corpus, both of which carry exactly that"
+    );
+    assert_eq!(
+        allowed(blocking).last_transition,
+        Some(captured_time(raw_condition, &["lastTransitionTime"])),
+        "and the moment the controller last changed its mind survives the required-to-optional \
+         crossing — off the captured string, so a decode filling it from any other time on the \
+         object is not the same as one that carried it"
+    );
+
+    // **The negative, and it is what lets the positive fail.** Without a budget that allows an
+    // eviction, *disruptions_allowed is 0* is satisfied by a decode that hardcodes zero, or by
+    // one reading a field that is absent on every PDB.
+    let room = by("healthy-pdb-room");
+    assert_eq!(
+        room.disruptions_allowed,
+        Some(1),
+        "one pod may go, so a drain of its node finishes — the shape the blocking card must not \
+         be drawn on"
+    );
+    assert_eq!(
+        room.selector.match_labels.get("app").map(String::as_str),
+        Some("broken-rollout"),
+        "and it protects a different workload, so the two budgets are told apart by their \
+         selectors and not only by their names"
+    );
+    assert_ne!(
+        blocking.selector, room.selector,
+        "a decode that dropped the selector would give both budgets `Selector::default` and \
+         every assertion about *which pods* would pass on both"
+    );
+    assert_eq!(
+        (
+            allowed(room).reason.as_deref(),
+            allowed(room).status.as_str()
+        ),
+        (Some("SufficientPods"), "True"),
+        "and the reason is the other one of the pair, so a decode returning a fixed string — or \
+         the first condition of whichever object it was handed — is caught here"
+    );
+    assert_eq!(
+        allowed(room).message,
+        None,
+        "and this one's message is empty in the committed bytes too, which is what makes \
+         `Some(\"\")` a blank line under *every* budget in the corpus rather than one"
+    );
+    assert_eq!(
+        (room.generation, room.observed_generation),
+        (Some(1), Some(1)),
+        "this budget is current too, which is what makes the plant below a difference of one \
+         field rather than a difference between two objects"
+    );
+
+    // --- `status.desiredHealthy`, NOT `spec.minAvailable` (NOTES § D130) ---
+    //
+    // The committed bytes have the two agreeing on both objects, so on the capture alone a
+    // decode reading the spec is green. One field moved, in the shape the field exists for: a
+    // percentage, which is what `minAvailable` is an `IntOrString` for and what a spec reader
+    // would print as *"wants at least 50% copies"*.
+    let mut percentage: PodDisruptionBudget =
+        serde_json::from_value(captured_item(&raw, "broken-pdb-floor").clone())
+            .expect("the same capture");
+    percentage
+        .spec
+        .get_or_insert_with(Default::default)
+        .min_available =
+        Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::String("50%".to_string()));
+    let still = DisruptionBudgetSnapshot::from(percentage);
+    assert_eq!(
+        still.desired_healthy,
+        Some(2),
+        "the API server resolved the floor into the status and that is the only field read — a \
+         decode reaching into `spec.minAvailable` cannot even name this value"
+    );
+    assert_eq!(
+        still.disruptions_allowed, blocking.disruptions_allowed,
+        "and nothing else moved with it"
+    );
+
+    // --- A STATUS THAT HAS NOT CAUGHT UP WITH ITS SPEC (NOTES § D40) ---
+    //
+    // **The false green light, and it is the budget with room that produces it.** Upstream's
+    // eviction handler refuses every eviction while `metadata.generation` is ahead of
+    // `status.observedGeneration`, so this object says *one pod may go* and the API server would
+    // say `TooManyRequests` to all of them — a drain the report called ready that then hangs.
+    //
+    // **The capture does not hold it, and an ordinary trip could not**: the API server bumps the
+    // generation on a spec write and the disruption controller answers well inside the time a
+    // capture takes, so a photographed PDB has the two equal — `broken-pdb-floor` and
+    // `healthy-pdb-room` both do, asserted above. **What a trip would have to do to replace this
+    // plant, and it is not an ordinary one**: stop
+    // kube-controller-manager on the control-plane node (move its static-pod manifest out of
+    // `/etc/kubernetes/manifests`), `kubectl patch` the budget's `minAvailable`, capture, then
+    // put the manifest back — a wedged controller is the same shape and the operator case the
+    // finding is about. One field is moved here instead, to the value the API server itself
+    // writes on any spec edit.
+    let mut edited: PodDisruptionBudget =
+        serde_json::from_value(captured_item(&raw, "healthy-pdb-room").clone())
+            .expect("the same capture");
+    edited.metadata.generation = Some(2);
+    let stale = DisruptionBudgetSnapshot::from(edited);
+    assert_eq!(
+        stale.disruptions_allowed,
+        Some(1),
+        "the counter still says a pod may be evicted — which is exactly why the report may not \
+         stop at it"
+    );
+    assert_eq!(
+        (stale.generation, stale.observed_generation),
+        (Some(2), Some(1)),
+        "and the two numbers disagree, in the direction that means *the controller has not seen \
+         this budget yet*, with both values on the screen for the reader to check"
+    );
+    assert_eq!(
+        (
+            stale.disruptions_allowed,
+            stale.current_healthy,
+            stale.desired_healthy,
+            stale.observed_generation
+        ),
+        (
+            room.disruptions_allowed,
+            room.current_healthy,
+            room.desired_healthy,
+            room.observed_generation
+        ),
+        "and nothing else moved with it — the plant differs from the object it was made from in \
+         `metadata.generation` alone, which is what makes the disagreement above attributable \
+         to that field and not to a second one nobody named"
+    );
+
+    // --- `SyncFailed`: THE SAME ZERO, A DIFFERENT SENTENCE (NOTES § D40) ---
+    //
+    // `disruptionsAllowed: 0` has two causes and one of them is not the workload's fault: under
+    // `SyncFailed` the controller could not resolve the workload's `scale` subresource at all —
+    // a CRD owner, a missing verb — so the counters beside it are not a measurement of
+    // anything, and *"wants at least 2 copies and has exactly 2 → run one more copy"* would be
+    // a sentence invented out of numbers nobody computed.
+    //
+    // **The capture cannot hold this either**: producing it takes a workload whose scale
+    // subresource fails, and `scripts/broken.yaml` has none — a trip would have to add a PDB
+    // selecting the pods of a CRD the controller has no `scale` access to. The value is the
+    // API's own: `PodDisruptionBudgetStatus.conditions` in k8s-openapi v1_36 documents
+    // `SyncFailed`, `InsufficientPods` and `SufficientPods` as the three the disruption
+    // controller writes, so the plant is a value upstream demonstrably produces.
+    let mut unsynced: PodDisruptionBudget =
+        serde_json::from_value(captured_item(&raw, "broken-pdb-floor").clone())
+            .expect("the same capture");
+    unsynced
+        .status
+        .as_mut()
+        .and_then(|s| s.conditions.as_mut())
         .into_iter()
-        .map(Into::into)
+        .flatten()
+        .find(|c| c.type_ == "DisruptionAllowed")
+        .expect("the captured budget carries the condition the plant moves")
+        .reason = "SyncFailed".to_string();
+    let failed = DisruptionBudgetSnapshot::from(unsynced);
+    assert_eq!(
+        (
+            failed.disruptions_allowed,
+            failed.current_healthy,
+            failed.desired_healthy
+        ),
+        (
+            blocking.disruptions_allowed,
+            blocking.current_healthy,
+            blocking.desired_healthy
+        ),
+        "every number is the blocking budget's — the two objects are indistinguishable on the \
+         counters, which is what makes the reason the only field that can tell them apart"
+    );
+    assert_eq!(
+        allowed(&failed).reason.as_deref(),
+        Some("SyncFailed"),
+        "and it says the controller could not compute those numbers, so a row built from them \
+         would be inventing its sentence"
+    );
+    assert_ne!(
+        allowed(&failed).reason,
+        allowed(blocking).reason,
+        "the one field of difference, or the decode is not reading the reason at all"
+    );
+
+    // --- `None` IS NOT ZERO (the type's own doc) ---
+    //
+    // The three counters are absent until the disruption controller has looked at the budget,
+    // and reading that as zero calls every freshly created budget blocking. No capture holds
+    // that moment — the controller answers in well under the time a capture takes — so the
+    // status is removed from a decoded copy, which is the shape the API emits in the seconds
+    // after a `kubectl apply`.
+    let mut fresh: PodDisruptionBudget =
+        serde_json::from_value(captured_item(&raw, "broken-pdb-floor").clone())
+            .expect("the same capture");
+    fresh.status = None;
+    let unanswered = DisruptionBudgetSnapshot::from(fresh);
+    assert_eq!(
+        (
+            unanswered.disruptions_allowed,
+            unanswered.current_healthy,
+            unanswered.desired_healthy
+        ),
+        (None, None, None),
+        "nobody has looked yet, and that is not the same fact as *nothing may be evicted* — a \
+         zero here puts a blocking card on every budget created in the last second"
+    );
+    assert_eq!(
+        unanswered.selector, blocking.selector,
+        "and the selector is in the spec, so it survives a status nobody has written"
+    );
+    assert_eq!(
+        (unanswered.observed_generation, unanswered.conditions.len()),
+        (None, 0),
+        "nobody has looked, so there is no generation the controller has observed and no reason \
+         it could have given — *nobody looked* and *nothing to find* stay different facts \
+         (NOTES § D129)"
+    );
+    assert_eq!(
+        (unanswered.generation, blocking.generation),
+        (Some(1), Some(1)),
+        "while the generation is in the metadata and survives — which is what makes a \
+         freshly-applied budget read as *not caught up* rather than as *caught up at zero*, the \
+         two `None`s a report would otherwise compare"
+    );
+
+    println!(
+        "budgets: {}",
+        budgets
+            .iter()
+            .map(|b| format!(
+                "{} allows {:?} (healthy {:?}/{:?}) for {:?} — gen {:?}/observed {:?}, {:?}",
+                b.id.name,
+                b.disruptions_allowed,
+                b.current_healthy,
+                b.desired_healthy,
+                b.selector.match_labels,
+                b.generation,
+                b.observed_generation,
+                allowed(b).reason
+            ))
+            .collect::<Vec<String>>()
+            .join(" · ")
+    );
+    println!(
+        "planted: {} allows {:?} but gen {:?}/observed {:?} · {} allows {:?} because {:?}",
+        stale.id.name,
+        stale.disruptions_allowed,
+        stale.generation,
+        stale.observed_generation,
+        failed.id.name,
+        failed.disruptions_allowed,
+        allowed(&failed).reason
+    );
+}
+
+/// **The join a budget's selector is, on both sides real: the captured pods' labels against the
+/// captured budgets' `matchLabels`** (NOTES § D129, § D131).
+///
+/// **The matcher itself is Phase 5's and does not exist yet**, so what is proved here is that
+/// both halves arrive in a form one can be written against — the labels whole (that is
+/// [`a_pod_carries_the_labels_a_disruption_budget_is_matched_against`]) and the selector as a
+/// key-value map rather than as an opaque string.
+///
+/// **This test used to assert that the join was empty**, because the trip photographed
+/// `scripts/broken.yaml`'s pods and neither budget selects one of those. It was written to redden
+/// the moment a trip captured one — and on 2026-08-20 a trip captured two, and it stayed green,
+/// because [`every_captured_pod`] chained `kube-system-pods` by name and the new `List` was
+/// invisible to it (NOTES § D131). The tripwire is gone because the gap it held is closed on one
+/// side; what replaces it is the join run for real, plus the *other* side still saying it is
+/// open.
+///
+/// **The asymmetry is the point.** `broken-pdb-floor` protects `app=healthy-deploy` and the
+/// corpus holds those two pods; `healthy-pdb-room` protects `app=broken-rollout` and the corpus
+/// holds none of those, so the *has room* budget has no pods to prove it with. That half is
+/// asserted, not described: a trip that captures `broken-rollout`'s pods reddens this test, which
+/// is how the remaining half gets written instead of forgotten.
+///
+/// **The join is namespaced**, like the claim join above it: a PodDisruptionBudget protects pods
+/// in its own namespace and nowhere else, and since `kube-system`'s pods entered
+/// [`every_captured_pod`] a namespace-blind matcher is one relabelled DaemonSet away from
+/// matching across the boundary.
+#[test]
+fn the_pods_the_blocking_budget_protects_and_the_ones_no_budget_can_be_joined_to() {
+    let budgets = disruption_budgets();
+    let pods = every_captured_pod();
+    assert!(pods.len() > 50, "walked {} pods", pods.len());
+
+    // A `matchLabels`-only selector matches when every pair of it is a pair of the pod's labels.
+    // Written here and not in `rules.rs`: the report that owns the real matcher is a later box,
+    // and a second implementation of it is what NOTES § D46 forbids — this one is confined to
+    // this test and reads `matchLabels` alone, which is all any committed selector carries.
+    let selects = |selector: &Selector, labels: &BTreeMap<String, String>| {
+        selector.match_expressions.is_empty()
+            && !selector.match_labels.is_empty()
+            && selector
+                .match_labels
+                .iter()
+                .all(|(k, v)| labels.get(k) == Some(v))
+    };
+    let budget = |name: &str| {
+        budgets
+            .iter()
+            .find(|b| b.id.name == name)
+            .unwrap_or_else(|| panic!("no {name} among {budgets:?}"))
+    };
+    let matches = |b: &DisruptionBudgetSnapshot, p: &PodSnapshot| {
+        p.id.namespace == b.id.namespace && selects(&b.selector, &p.labels)
+    };
+    let protects = |b: &DisruptionBudgetSnapshot| -> Vec<String> {
+        let mut names: Vec<String> = pods
+            .iter()
+            .filter(|p| matches(b, p))
+            .map(|p| p.id.name.clone())
+            .collect();
+        names.sort();
+        names
+    };
+
+    let floor = budget("broken-pdb-floor");
+    let room = budget("healthy-pdb-room");
+    println!(
+        "{} pods · {} {:?} -> {:?} · {} {:?} -> {:?}",
+        pods.len(),
+        floor.id.name,
+        floor.selector.match_labels,
+        protects(floor),
+        room.id.name,
+        room.selector.match_labels,
+        protects(room),
+    );
+
+    // --- THE COVERED SIDE: THE BLOCKING BUDGET AND THE PODS IT BLOCKS ---
+    //
+    // **The names come out of the capture, never out of this file.** A ReplicaSet mints a
+    // five-character suffix on every trip, so a literal here would assert the trip and not the
+    // join — the same reason [`owned_pod_name`] exists.
+    let mut expected: Vec<String> = items::<Pod>("healthy-deploy-pods")
+        .into_iter()
+        .map(|p| PodSnapshot::from(p).id.name)
         .collect();
-    let slices = std::path::Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/endpointslices.json"
-    ))
-    .exists();
-
-    assert!(
-        budgets.is_empty(),
-        "a PDB is captured now — write the blocking case: minAvailable at the replica count, \
-         disruptions_allowed 0, and the selector matched against a pod's labels. Got {budgets:?}"
+    expected.sort();
+    assert_eq!(
+        expected.len(),
+        2,
+        "`healthy-deploy` runs two replicas, and the budget's floor of 2 is only a floor because \
+         there are exactly that many: {expected:?}"
     );
-    assert!(
-        claims.is_empty(),
-        "a PVC is captured now — write the bound-but-unmounted case, its phase and its \
-         capacity, against a pod that does not name it. Got {claims:?}"
-    );
-    assert!(
-        !slices,
-        "endpointslices.json exists now — write the Service that reaches nothing: a slice with \
-         no endpoints, and the `kubernetes.io/service-name` label that ties it to its Service"
+    assert_eq!(
+        protects(floor),
+        expected,
+        "the blocking budget selects the two pods the capture holds for it, and no others — this \
+         is the positive half Drain safety had never had (NOTES § D129)"
     );
 
-    // What *is* proven today: both lists decode, and an empty answer is `Some(vec![])` and never
-    // `None`. That distinction is the whole reason these fields are `Option` — *nothing to find*
-    // is an answer and *nobody looked* is not (NOTES § D129).
-    let snapshot = fixture_snapshot();
-    assert_eq!(snapshot.disruption_budgets.as_deref(), Some(&[][..]));
-    assert_eq!(snapshot.claims.as_deref(), Some(&[][..]));
-    assert_eq!(
-        snapshot.endpoint_slices, None,
-        "not captured at all, which is a different fact and is drawn as one"
-    );
-    assert_eq!(
-        snapshot.certificate_requests, None,
-        "C3's fetch is a Phase 5 box, so Phase 4 draws one `Row::NotComputed` for it"
-    );
+    // **The controller's own count and this join's count are the same number, and that is the
+    // assertion.** `status.currentHealthy` is what the disruption controller found by running
+    // this same selector server-side; a matcher that read the wrong key, or the wrong namespace,
+    // or matched everything, disagrees with it. It is a comparison against the requirement — the
+    // join must find what the API server found — and not against what this code returns.
+    let protected: Vec<&PodSnapshot> = pods.iter().filter(|p| matches(floor, p)).collect();
     assert!(
-        snapshot
-            .replica_sets
-            .as_ref()
-            .is_some_and(|r| !r.is_empty()),
-        "the one on-demand list the capture does fill"
+        protected
+            .iter()
+            .all(|p| p.ready.as_ref().is_some_and(|c| c.status == "True")),
+        "every pod the budget selects is Ready in this capture, which is the only reason the \
+         equality below holds: the controller counts the *healthy* ones and this join counts the \
+         matching ones. A capture with an unready replica makes those two different numbers, and \
+         it is the capture that would have to say so first: {:?}",
+        protected
+            .iter()
+            .map(|p| (&p.id.name, &p.ready))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        i32::try_from(protected.len()).ok(),
+        floor.current_healthy,
+        "the disruption controller ran this selector server-side and counted {:?}; a join that \
+         disagrees with it is the join that is wrong, because one of them is the API server",
+        floor.current_healthy
+    );
+    assert_eq!(
+        (floor.desired_healthy, floor.disruptions_allowed),
+        (Some(2), Some(0)),
+        "and the floor is already the count, which is what makes a drain of either of these \
+         nodes never finish"
     );
 
-    // **The kinds of the three types no object can be decoded into**, which is the one thing
-    // about them that can be asserted with no capture at all: `api_kind` reads the group off the
-    // type, so these are proven even though `From` has never run on a real object.
+    // **Two pods, two nodes** — the property this fixture has to keep for the report to be about
+    // more than one machine. Both replicas on one node still blocks that node's drain, so this is
+    // not what makes the budget blocking; it is what makes *two* nodes blocked, and a trip that
+    // co-locates them narrows Drain safety's only positive case to a single node without
+    // changing a line of code.
+    let mut nodes: Vec<&str> = protected
+        .iter()
+        .map(|p| {
+            p.node
+                .as_deref()
+                .expect("a Running pod has been given a node")
+        })
+        .collect();
+    nodes.sort();
+    nodes.dedup();
     assert_eq!(
-        api_kind::<PodDisruptionBudget>(),
-        ObjectKind::Other("PodDisruptionBudget.policy".to_string())
+        nodes.len(),
+        2,
+        "the two protected pods sit on two different nodes, so draining either one is blocked \
+         by this budget: {nodes:?}"
     );
+
+    // **The namespace clause, which the corpus on its own cannot exercise.** No `kube-system`
+    // pod carries `app=healthy-deploy`, so deleting the namespace comparison from `matches`
+    // leaves every assertion above green — the clause is proved instead against a decoded copy
+    // of a `kube-system` pod wearing the label (NOTES § D40). A budget protects its own
+    // namespace and nowhere else, and a matcher that forgot it counts a DaemonSet pod towards a
+    // `default` budget's floor and reports a drain as safe.
+    let mut elsewhere = PodSnapshot::from(items::<Pod>("kube-system-pods").remove(0));
     assert_eq!(
-        api_kind::<EndpointSlice>(),
-        ObjectKind::Other("EndpointSlice.discovery.k8s.io".to_string())
+        elsewhere.id.namespace.as_deref(),
+        Some("kube-system"),
+        "`kube-system-pods.json` is the other namespace the trip photographs, and this plant is \
+         the whole reason it is not enough for the pod to carry the label"
     );
+    elsewhere
+        .labels
+        .insert("app".to_string(), "healthy-deploy".to_string());
+    assert!(
+        selects(&floor.selector, &elsewhere.labels),
+        "the labels alone do match, which is what leaves the namespace as the only thing \
+         standing between this pod and a `default` budget's floor: {:?}",
+        elsewhere.labels
+    );
+    assert!(
+        !matches(floor, &elsewhere),
+        "and the join still refuses it, because a PodDisruptionBudget in `default` protects \
+         nothing in `{}`",
+        elsewhere.id.namespace.as_deref().unwrap_or("(none)")
+    );
+
+    // --- THE UNCOVERED SIDE: THE BUDGET WITH ROOM, AND NO PODS TO PROVE IT WITH ---
+    //
+    // This is the half the old tripwire held for both, and it is held the same way: it goes red
+    // the moment a trip captures `broken-rollout`'s pods, and the join above is then written for
+    // this budget too.
+    assert!(
+        protects(room).is_empty(),
+        "a captured pod now matches `healthy-pdb-room` — write its half of the join here, so the \
+         *drain finishes* case has real pods behind it too (NOTES § D129, § D131). Got {:?}",
+        protects(room)
+    );
+
+    // **And the emptiness is a fact about the corpus, not about the matcher.** An empty result
+    // and a matcher that never matches print the same green line, so the one committed pod whose
+    // labels are not `healthy-deploy`'s is relabelled on a decoded copy (NOTES § D40) and the
+    // same selector finds it.
+    let mut captured = items::<Pod>("owned-pods");
     assert_eq!(
-        api_kind::<PersistentVolumeClaim>(),
+        captured.len(),
+        1,
+        "`broken-owned` runs one replica, and the plant below names *the* pod"
+    );
+    let mut stand_in = PodSnapshot::from(captured.remove(0));
+    assert!(
+        !selects(&room.selector, &stand_in.labels),
+        "the pod starts outside the selector, or the plant below proves nothing: {:?} against \
+         {:?}",
+        room.selector.match_labels,
+        stand_in.labels
+    );
+    let wanted = room
+        .selector
+        .match_labels
+        .get("app")
+        .expect("the budget with room selects on `app`, like every committed selector")
+        .clone();
+    assert_eq!(
+        wanted, "broken-rollout",
+        "and it is the workload `scripts/broken.yaml` deploys but the trip does not photograph \
+         — that is the whole of the gap above"
+    );
+    stand_in.labels.insert("app".to_string(), wanted);
+    assert!(
+        selects(&room.selector, &stand_in.labels),
+        "`healthy-pdb-room`'s selector matches a pod carrying its label, so the empty join above \
+         is a corpus with no such pod and not a selector that arrived broken: {:?} against {:?}",
+        room.selector.match_labels,
+        stand_in.labels
+    );
+    assert_ne!(
+        floor.selector, room.selector,
+        "the two budgets are told apart by their selectors — a decode that dropped both would \
+         give them `Selector::default`, which matches nothing, and the empty half above would be \
+         free"
+    );
+}
+
+/// **The two committed PersistentVolumeClaims, and both halves of the join Waste's unused-disk
+/// row is** (NOTES § D129, § D130). `broken-unused-disk` is `Bound` and mounted by nothing;
+/// `healthy-disk` is `Bound` and `healthy-disk.json` is the pod that mounts it.
+///
+/// **The orphan is a static `hostPath` PV with `storageClassName: ""`**, because kind's default
+/// class is `WaitForFirstConsumer`: a claim nothing mounts never gets a consumer, so the
+/// provisioner is never asked and it sits `Pending` — the wrong state under the right name. The
+/// row is about a **`Bound`** claim, so the phase is what keeps the report from billing the
+/// reader for storage that was never provisioned.
+///
+/// **The capacity is `status.capacity.storage` and never the spec request** (NOTES § D130), and
+/// the orphan is the object that proves it: it asked for `64Mi` and the static PV gave it
+/// `128Mi`, so the two fields disagree on a committed capture and a decode reading the neighbour
+/// is red rather than indistinguishable (NOTES § D29).
+#[test]
+fn the_bound_claim_nothing_mounts_and_the_pod_that_mounts_the_other_one() {
+    let raw = fixture("persistentvolumeclaims");
+    let claims = persistent_volume_claims();
+    let by = |name: &str| {
+        claims
+            .iter()
+            .find(|c| c.id.name == name)
+            .unwrap_or_else(|| panic!("no {name} among {claims:?}"))
+    };
+
+    let orphan = by("broken-unused-disk");
+    assert_eq!(
+        orphan.id.kind,
         ObjectKind::Other("PersistentVolumeClaim".to_string()),
-        "core group, so unqualified — the same branch the captured Services take"
+        "core group, so the kind is unqualified — the same branch the captured Services take"
+    );
+    assert_eq!(orphan.id.namespace.as_deref(), Some("default"));
+    assert_eq!(
+        orphan.phase.as_deref(),
+        Some("Bound"),
+        "a `Pending` claim has reserved no disk yet and is somebody else's problem — this one \
+         has, which is what makes nobody mounting it a waste rather than a queue"
     );
 
-    // **And the two pod fields with no object behind them.** Named here rather than left as a
-    // decode nobody exercises: `overhead_*` and `claims` are read off paths the pinned API
-    // emits and that this cluster never produces, so the assertion available today is that they
-    // are absent everywhere — which turns red on the first capture that carries one.
+    let asked_for = captured_str(
+        captured_item(&raw, "broken-unused-disk"),
+        &["spec", "resources", "requests", "storage"],
+    );
+    let provisioned = captured_str(
+        captured_item(&raw, "broken-unused-disk"),
+        &["status", "capacity", "storage"],
+    );
+    assert_ne!(
+        asked_for, provisioned,
+        "this capture's two storage numbers disagree, and that is the property the assertion \
+         below rests on — a claim whose request and capacity are equal cannot say which field \
+         was read (NOTES § D29, § D130)"
+    );
+    assert_eq!(
+        orphan.capacity.as_deref(),
+        Some(provisioned),
+        "what was actually provisioned, which is the number the reader is billed for"
+    );
+    assert_eq!(
+        orphan.capacity.as_deref(),
+        Some("128Mi"),
+        "and it is the static PV's size, not the `64Mi` the claim asked for"
+    );
+
+    // **The other half: a claim a pod does mount, so *nothing mounts it* is a fact about the
+    // first one and not the shape of the join.**
+    let used = by("healthy-disk");
+    assert_eq!(used.phase.as_deref(), Some("Bound"));
+    assert_eq!(used.capacity.as_deref(), Some("64Mi"));
+
+    let mounter = pod("healthy-disk");
+    assert_eq!(
+        mounter.claims,
+        vec!["healthy-disk".to_string()],
+        "`spec.volumes[].persistentVolumeClaim.claimName`, and only that volume — the projected \
+         service-account token beside it is not a claim and must not be counted as one"
+    );
+
+    // The join, both directions, over every pod the repository has captured. A claim is unused
+    // when no pod in the same namespace names it.
+    let pods = every_captured_pod();
+    let mounted_somewhere = |claim: &ClaimSnapshot| {
+        pods.iter()
+            .any(|p| p.id.namespace == claim.id.namespace && p.claims.contains(&claim.id.name))
+    };
+    let unused: Vec<&str> = claims
+        .iter()
+        .filter(|c| !mounted_somewhere(c))
+        .map(|c| c.id.name.as_str())
+        .collect();
+    println!(
+        "claims {:?} · mounted by {:?} · unused {unused:?}",
+        claims
+            .iter()
+            .map(|c| format!("{} {:?} {:?}", c.id.name, c.phase, c.capacity))
+            .collect::<Vec<String>>(),
+        pods.iter()
+            .filter(|p| !p.claims.is_empty())
+            .map(|p| format!("{}:{:?}", p.id.name, p.claims))
+            .collect::<Vec<String>>()
+    );
+    assert_eq!(
+        unused,
+        ["broken-unused-disk"],
+        "exactly one claim nothing mounts — and the other one being mounted is what makes this \
+         a join rather than a list of every claim in the cluster"
+    );
+    assert!(
+        mounted_somewhere(used),
+        "the claim `healthy-disk.json` mounts is found from the claim's side too, or the \
+         direction above is the only one that works"
+    );
+}
+
+/// **The Service that reaches nothing, which is Waste's headline row** — a slice with zero
+/// endpoints, and the `kubernetes.io/service-name` label that ties it to the Service it is about
+/// (NOTES § D129). `EndpointSliceSnapshot::from` had never run on a real object before the
+/// 2026-08-20 trip.
+///
+/// **`endpoints` counts every endpoint, ready or not** (NOTES § D130), and `broken-sts` is the
+/// object that proves it: two endpoints, one of them `ready: false`. A pod failing its readiness
+/// probe is Alerts' rule 7, already on the other screen, and counting it as *nothing* here would
+/// put one pod on two screens saying two different things.
+#[test]
+fn the_service_that_reaches_nothing_is_a_slice_with_no_endpoints() {
+    let raw = fixture("endpointslices");
+    let slices = endpoint_slices();
+    let by = |service: &str| {
+        slices
+            .iter()
+            .find(|s| s.service.as_deref() == Some(service))
+            .unwrap_or_else(|| panic!("no slice for {service} among {slices:?}"))
+    };
+
+    let empty = by("broken-noendpoints");
+    assert_eq!(
+        empty.id.kind,
+        ObjectKind::Other("EndpointSlice.discovery.k8s.io".to_string()),
+        "a kind in a real API group is qualified by it (NOTES § D36)"
+    );
+    assert_eq!(empty.id.namespace.as_deref(), Some("default"));
+    assert_eq!(
+        empty.endpoints, 0,
+        "nothing is behind this Service, which is the 503 nobody can explain"
+    );
+    assert!(
+        empty.id.name.starts_with("broken-noendpoints-"),
+        "the controller mints the slice's name with a suffix of its own, so the Service is found \
+         through the label and never through the name: {}",
+        empty.id.name
+    );
+    // And the Service it names is a captured object, or the row points at nothing.
+    assert!(
+        items::<Service>("services")
+            .into_iter()
+            .map(ServiceSnapshot::from)
+            .any(|s| s.id.name == "broken-noendpoints" && s.id.namespace == empty.id.namespace),
+        "the label ties the slice to a Service the capture also holds — the pair is the row"
+    );
+
+    // **Ready or not** (NOTES § D130). The negative that makes the count mean something, and the
+    // one endpoint that is `ready: false` is why it is this slice and not `kube-dns`'s.
+    let statefulset = by("broken-sts");
+    let conditions: Vec<Option<bool>> =
+        at(captured_item(&raw, &statefulset.id.name), &["endpoints"])
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|e| e["conditions"]["ready"].as_bool())
+            .collect();
+    let ready = conditions.iter().filter(|r| **r == Some(true)).count();
+    let not_ready = conditions.iter().filter(|r| **r == Some(false)).count();
+    assert_eq!(
+        (ready, not_ready),
+        (1, 1),
+        "this capture holds one endpoint that is ready and one that is not — a slice whose \
+         endpoints all agree cannot tell *every endpoint* from *the ready ones* (NOTES § D29). \
+         Counted rather than compared in order: the controller writes the array in whatever \
+         order it walked the pods, and asserting that is asserting the trip. Got {conditions:?}"
+    );
+    assert_eq!(
+        statefulset.endpoints, 2,
+        "both are counted: a pod failing its readiness probe is Alerts' rule 7 and is not \
+         *nothing behind the Service*"
+    );
+
+    // The other two, so the sweep found more than the one object it is about.
+    assert_eq!(by("kubernetes").endpoints, 1);
+    assert_eq!(by("kube-dns").id.namespace.as_deref(), Some("kube-system"));
+    assert_eq!(slices.len(), 4, "the capture holds four");
+
+    // **A slice with no `kubernetes.io/service-name` says nothing about any Service.**
+    // Hand-managed slices exist and carry no such label; no capture holds one, so the label is
+    // removed from a decoded copy (NOTES § D40).
+    let mut hand_managed: EndpointSlice =
+        serde_json::from_value(captured_item(&raw, &statefulset.id.name).clone())
+            .expect("the same capture");
+    hand_managed
+        .metadata
+        .labels
+        .as_mut()
+        .expect("the controller labels its own slices")
+        .remove("kubernetes.io/service-name");
+    let orphan = EndpointSliceSnapshot::from(hand_managed);
+    assert_eq!(
+        orphan.service, None,
+        "no Service is named, and inventing one from the object's name would file a row under a \
+         Service that may not exist"
+    );
+    assert_eq!(
+        orphan.endpoints, statefulset.endpoints,
+        "and the count is unaffected by the label, or one of the two fields is being read from \
+         the other"
+    );
+
+    println!(
+        "slices: {}",
+        slices
+            .iter()
+            .map(|s| format!(
+                "{} -> {:?} ({} endpoints)",
+                s.id.name, s.service, s.endpoints
+            ))
+            .collect::<Vec<String>>()
+            .join(" · ")
+    );
+}
+
+/// **The one captured pod the RuntimeClass admission controller charged more for than its
+/// container asked for** (NOTES § D124, § D130). `spec.overhead` is what the *scheduler* counts
+/// on top of the container requests, and no capture carried one until 2026-08-20 because kind
+/// runs runc with no RuntimeClass to charge — which is why D124's first condition, *a defect
+/// proven on a committed capture*, could not be met and the Capacity arithmetic stayed frozen.
+///
+/// **The controller writes it, not the manifest.** A create request carrying `spec.overhead` is
+/// rejected outright, so this field can only come from a RuntimeClass with `overhead.podFixed`
+/// — which is what makes it a genuine capture rather than a manifest the fixture author typed.
+///
+/// **Nothing computes with it yet** and this test does not make it: [`charged`] is frozen and
+/// reads `cpu_request`, and a report adding overhead on top of its answer is the report and N5
+/// disagreeing about one node, which is NOTES § D46's named defect. What is asserted is that the
+/// number is on disk and decodes, so the arithmetic box has the evidence it was blocked on.
+#[test]
+fn the_runtime_class_charged_this_pod_for_more_than_its_container_asked_for() {
+    let raw = fixture("overhead");
+    let charged = pod("overhead");
+
+    assert_eq!(
+        charged.overhead_cpu.as_deref(),
+        Some(captured_str(&raw, &["spec", "overhead", "cpu"])),
+        "read off `spec.overhead`, and the capture agrees"
+    );
+    assert_eq!(
+        charged.overhead_memory.as_deref(),
+        Some(captured_str(&raw, &["spec", "overhead", "memory"])),
+    );
+    assert_eq!(
+        (
+            charged.overhead_cpu.as_deref(),
+            charged.overhead_memory.as_deref()
+        ),
+        (Some("250m"), Some("120Mi")),
+        "the RuntimeClass's `overhead.podFixed`, which the admission plugin copied onto the pod"
+    );
+    assert_eq!(
+        captured_str(&raw, &["spec", "runtimeClassName"]),
+        "broken-overhead",
+        "and it came from a RuntimeClass, which is the only writer there is — a manifest \
+         carrying `spec.overhead` is rejected at create"
+    );
+
+    // **The container's own request, which is the number every frozen sum already counts.** The
+    // two differ in both dimensions, so a decode reading `resources.requests` for either
+    // overhead key is red rather than indistinguishable (NOTES § D29), and the gap between them
+    // is what a Capacity row that reads only the container would leave off the node.
+    let app = container(&charged, "app");
+    assert_eq!(
+        (app.cpu_request.as_deref(), app.memory_request.as_deref()),
+        (Some("100m"), Some("64Mi")),
+        "what the container asked for, beside a pod-level charge two and a half times larger"
+    );
+    assert_ne!(app.cpu_request, charged.overhead_cpu);
+    assert_ne!(app.memory_request, charged.overhead_memory);
+
+    // **And it is the only one**, so the field is read off the path it names rather than filled
+    // in from a neighbour every pod has. A derived list asserts it found something: the sweep is
+    // the same one that used to hold this item's tripwire.
     let pods = every_captured_pod();
     let with_overhead: Vec<&str> = pods
         .iter()
         .filter(|p| p.overhead_cpu.is_some() || p.overhead_memory.is_some())
         .map(|p| p.id.name.as_str())
         .collect();
-    let with_claims: Vec<&str> = pods
-        .iter()
-        .filter(|p| !p.claims.is_empty())
-        .map(|p| p.id.name.as_str())
-        .collect();
-    assert!(
-        with_overhead.is_empty(),
-        "a pod with a RuntimeClass overhead is captured now — assert both keys, and settle \
-         whether the Capacity arithmetic reads them (that is NOTES § D124's question, not \
-         D129's). Got {with_overhead:?}"
-    );
-    assert!(
-        with_claims.is_empty(),
-        "a pod mounting a PVC is captured now — assert the claim name against the PVC list, which \
-         is the join Waste's unused-disk row is. Got {with_claims:?}"
-    );
-    // The sweep found pods to look at, so an empty answer above means *none carried one* and
-    // never *nothing was walked* (CLAUDE.md § a derived list asserts it found something).
     assert!(pods.len() > 40, "walked {} pods", pods.len());
+    assert_eq!(
+        with_overhead,
+        ["broken-overhead"],
+        "one pod in the corpus carries a RuntimeClass overhead and the rest carry none"
+    );
+    println!(
+        "{}: overhead {:?}/{:?} on top of container {:?}/{:?}",
+        charged.id.name,
+        charged.overhead_cpu,
+        charged.overhead_memory,
+        app.cpu_request,
+        app.memory_request
+    );
+}
+
+/// **What Family C's inputs still have no object for** — the successor to
+/// `what_no_committed_capture_can_prove_about_family_cs_inputs`, which held five items until the
+/// 2026-08-20 trip landed all five (NOTES § D129, § D130). One is left, and it is held the same
+/// way: this test **goes red the moment the fetch lands**, so the gap cannot close in silence.
+///
+/// `certificate_requests` is `None` because C3's fetch is a Phase 5 box — the one committed CSR
+/// is read by [`a_pending_certificate_request_decodes_as_pending_and_carries_no_credential`]
+/// rather than smuggled into the snapshot every rule runs over, so Phase 4 draws one
+/// `Row::NotComputed` for it.
+///
+/// **The other half is the distinction the `Option` exists for**: an empty answer is
+/// `Some(vec![])` and *nobody looked* is `None`, and the five lists that are fetched now all
+/// answer with objects. A list that quietly emptied would satisfy every *is it `Some`* assertion
+/// in this file, so each is asserted non-empty and named.
+#[test]
+fn what_family_cs_inputs_still_have_no_object_for() {
+    let snapshot = fixture_snapshot();
+
+    let filled: Vec<(&str, usize)> = vec![
+        (
+            "replica_sets",
+            snapshot.replica_sets.as_ref().map_or(0, Vec::len),
+        ),
+        ("services", snapshot.services.as_ref().map_or(0, Vec::len)),
+        (
+            "endpoint_slices",
+            snapshot.endpoint_slices.as_ref().map_or(0, Vec::len),
+        ),
+        ("claims", snapshot.claims.as_ref().map_or(0, Vec::len)),
+        (
+            "disruption_budgets",
+            snapshot.disruption_budgets.as_ref().map_or(0, Vec::len),
+        ),
+    ];
+    println!("fetched: {filled:?} · certificate_requests: not fetched");
+    for (name, held) in &filled {
+        assert!(
+            *held > 0,
+            "{name} is fetched and the capture fills it — a list that decoded to nothing would \
+             leave every reader of it green and every report of it blank"
+        );
+    }
+    assert_eq!(
+        filled.iter().map(|(_, n)| n).sum::<usize>(),
+        1 + 4 + 4 + 2 + 2,
+        "and the counts are the capture's: one ReplicaSet, four Services, four EndpointSlices, \
+         two claims, two budgets — a number that moves when a trip adds an object, which is the \
+         only thing that brings a reader back to this file"
+    );
+
+    assert_eq!(
+        snapshot.certificate_requests, None,
+        "C3's fetch is a Phase 5 box, so Phase 4 draws one `Row::NotComputed` for it — when it \
+         lands, replace this with the assertions the CSR list deserves (NOTES § D129)"
+    );
+}
+
+/// The three on-demand lists the 2026-08-20 trip filled, decoded once each. Local to this module
+/// because nothing outside it reads them yet — the reports that will are a later phase, and a
+/// helper hoisted to `rules_tests.rs` before it has a second caller is the divergence the split
+/// exists to avoid (NOTES § D91).
+fn disruption_budgets() -> Vec<DisruptionBudgetSnapshot> {
+    items::<PodDisruptionBudget>("poddisruptionbudgets")
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+fn persistent_volume_claims() -> Vec<ClaimSnapshot> {
+    items::<PersistentVolumeClaim>("persistentvolumeclaims")
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+fn endpoint_slices() -> Vec<EndpointSliceSnapshot> {
+    items::<EndpointSlice>("endpointslices")
+        .into_iter()
+        .map(Into::into)
+        .collect()
 }

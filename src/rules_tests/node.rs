@@ -172,7 +172,7 @@ fn the_node_that_went_quiet_names_the_workloads_that_went_with_it() {
     );
     assert_eq!(
         card.age(&now()).as_deref(),
-        Some("13 hours ago"),
+        Some("47 min ago"),
         "a duration off the pinned now, not English parsed back into a number"
     );
     assert_eq!(
@@ -421,7 +421,7 @@ fn the_cordoned_node_counts_only_the_pods_a_drain_would_actually_move() {
         "the age is the taint's, which the controller stamps — never `Ready`'s, which does \
          not move when a node is cordoned (D65)"
     );
-    assert_eq!(card.age(&now()).as_deref(), Some("13 hours ago"));
+    assert_eq!(card.age(&now()).as_deref(), Some("47 min ago"));
 }
 
 /// **A node a drain finished with is parked, not broken** — and both of the two shapes a drain
@@ -1447,7 +1447,8 @@ fn the_pending_pod_is_told_which_label_nothing_in_the_cluster_has() {
         card.severity,
         Severity::Critical,
         "`screens/alerts.md` draws N6 amber, and rule 10's ladder overrides it: this card is \
-         the same card, and three hours unplaced is past the ten minutes anything resolves in"
+         the same card, and an hour and a quarter unplaced is past the ten minutes anything \
+         resolves in"
     );
 }
 

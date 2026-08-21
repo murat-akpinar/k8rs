@@ -271,7 +271,23 @@ break_it() {
   # destroys the evidence this reads.
   scan_second_revisions "${SECOND_REVISION[@]}"
 
-  "${kc[@]}" apply -f "$BROKEN"
+  # **The one field in broken.yaml that names a node, made relative to this
+  # cluster.** `broken-overhead` carries `nodeName: k8rs-worker` (its manifest says
+  # why), and kind names nodes after the cluster — so on the ephemeral review
+  # cluster, `K8RS_CLUSTER=review`, that node does not exist and the pod sits
+  # Pending forever while `[overhead]` waits for `Running`. A trip on the fixture
+  # cluster substitutes `k8rs` for `k8rs` and nothing changes, so the file stays
+  # exactly what `kubectl apply -f scripts/broken.yaml` does by hand; only a
+  # differently-named cluster sees a difference, which is the only place there is
+  # one. Anchored to the `nodeName:` key so it cannot touch an object *name* that
+  # happens to start `k8rs-`, and `$CLUSTER` is safe in the replacement because
+  # `refuse_unusable_name` has already refused every character that is not.
+  #
+  # **The node name is spelled in three places** and they agree by construction
+  # only on the fixture cluster: `scripts/broken.yaml`'s `nodeName: k8rs-worker`,
+  # the `k8rs-` prefix in this expression, and the `.spec.nodeName == "k8rs-worker"`
+  # clause in `justfile` § fixtures. Change one and the other two do not follow.
+  sed "s/^\( *nodeName: \)k8rs-/\1$CLUSTER-/" "$BROKEN" | "${kc[@]}" apply -f -
   # The healthy side goes up with the broken one: a rule needs both fixtures,
   # and capturing them from the same cluster at the same time is what makes
   # the negative test comparable to the positive one.
@@ -503,6 +519,17 @@ declare -A want=(
   # The `or` is the same fix, and for the same measured reason, as [owned]
   # below: a crash loop is not one state, and this predicate used to name only
   # the half of it that was on screen when it was written.
+  #
+  # **The looseness is deliberate and it does not travel.** This predicate asks
+  # about a *live* pod, where either face is the pod cycling correctly — the
+  # 70-sample measurement is under [owned]. `just fixtures` § `fetch_until` asks a
+  # different question of the same container: whether the bytes it is about to
+  # commit can carry the tests written against them, and there `crashloop.json`
+  # and `exit0.json` must land in `waiting: CrashLoopBackOff` because that is the
+  # face rule 1's card is drawn from. That guard is tight, this one stays loose,
+  # and unifying them breaks whichever end it is moved to — tightening here fails
+  # a correct pod and burns the 420s timeout, which is the too-tight half
+  # verify-test.sh exists to catch.
   #
   # The message clause is D51's: `terminationMessagePolicy:
   # FallbackToLogsOnError` is what makes the kubelet copy the container's last
@@ -1199,6 +1226,43 @@ status() {
   free -m 2>/dev/null | awk '/^Mem:/{printf "host memory: %s MiB used of %s, %s available\n", $3, $2, $7}'
 }
 
+# **The second refusal, and it is not the one above.** That one is *policy* — a
+# name whose node names `sanitize.jq` refuses — and it is `up`-only on purpose, so
+# a cluster already built under it can still be torn down. This one is
+# *arithmetic*, and it applies to every subcommand because it can trap nothing: a
+# name outside the class below cannot become a kind cluster at all. kind builds a
+# container called `<name>-control-plane`, and the docker daemon refuses it in
+# these words, measured against the daemon on 2026-08-21 rather than read off a
+# doc:
+#
+#   Invalid container name (a/b-control-plane), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed
+#
+# It exists because `break_it` substitutes `$CLUSTER` into a **sed replacement**
+# (the `nodeName:` rewrite), where `&` is the whole match and `/` ends the
+# expression — and `K8RS_CLUSTER` is user-supplied, which is the entire reason
+# that rewrite exists. Escaping at the one site would also work; refusing here is
+# the same length, and the two sets are identical — docker's class holds no `/`,
+# no `&` and no backslash — so this is not a guard invented for a case that cannot
+# arise. It is docker's own rule, said early enough to be a sentence instead of a
+# Pending pod at minute two.
+#
+# `LC_ALL=C` because a bracket range is collation-ordered and not byte-ordered: a
+# locale where `[A-Za-z]` means something else would refuse a name docker accepts,
+# which is the one direction this must not fail in. A here-string and not a pipe,
+# because `grep -q` closes early and `set -o pipefail` would read the writer's
+# EPIPE as a failed match.
+refuse_unusable_name() { # $1 = cluster name
+  LC_ALL=C grep -qE '^[A-Za-z0-9][A-Za-z0-9_.-]*$' <<<"$1" && return 0
+  echo "cluster.sh: '$1' cannot name a kind cluster." >&2
+  echo "  kind would build a container called '$1-control-plane', and the docker daemon" >&2
+  echo "  allows only [a-zA-Z0-9][a-zA-Z0-9_.-] in a container name — so no cluster can" >&2
+  echo "  exist under this name and there is nothing here to operate on." >&2
+  echo "  It is also the name this file substitutes into a sed replacement (the nodeName" >&2
+  echo "  rewrite in \`break\`), where '&' and '/' would rewrite the manifest into garbage." >&2
+  echo "  The fixture cluster is 'k8rs'; an ephemeral review cluster is 'review'." >&2
+  return 1
+}
+
 # A guard nobody has seen fail is not a guard (todo.md, Phase 1). It needs no
 # cluster, no kind and no network — the thing under test is a name.
 self_test() {
@@ -1214,9 +1278,24 @@ self_test() {
     rc=0; refuse_family_name "$n" 2>/dev/null || rc=$?
     [ "$rc" -eq 1 ] || { echo "FAIL  self-test: '$n' wears the fixture cluster's name and was accepted"; sfail=1; }
   done
-  [ $sfail -eq 0 ] && echo "cluster.sh: self-test passed — 'k8rs' and any name without that prefix build; 'k8rs-review' and the rest of the family are refused before kind runs"
+  # The names docker's own message says it will and will not accept — including
+  # the three that break a sed replacement, which is why this refusal exists.
+  for n in k8rs review my-cluster A_b.c-1 x; do
+    rc=0; refuse_unusable_name "$n" 2>/dev/null || rc=$?
+    [ "$rc" -eq 0 ] || { echo "FAIL  self-test: '$n' is a name docker accepts as a container and this refused it"; sfail=1; }
+  done
+  for n in 'a/b' 'a&b' 'a b' '-lead' '.lead' '' 'a$b' 'a\\b' "a'b"; do
+    rc=0; refuse_unusable_name "$n" 2>/dev/null || rc=$?
+    [ "$rc" -eq 1 ] || { echo "FAIL  self-test: '$n' cannot name a container and was accepted — and it reaches a sed replacement"; sfail=1; }
+  done
+  [ $sfail -eq 0 ] && echo "cluster.sh: self-test passed — 'k8rs' and any name without that prefix build; 'k8rs-review' and the rest of the family are refused before kind runs; and a name outside docker's container-name class, which is every name that would break the nodeName rewrite, is refused on every subcommand"
   return $sfail
 }
+
+# Before the dispatch, so it covers every subcommand rather than `up` alone, and
+# before anything has run. See the function for why this one is universal and
+# `refuse_family_name` is not.
+refuse_unusable_name "$CLUSTER" || exit 1
 
 case "${1:-}" in
   --self-test) self_test ;;

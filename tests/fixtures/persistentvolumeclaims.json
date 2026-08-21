@@ -1,6 +1,85 @@
 {
   "apiVersion": "v1",
-  "items": [],
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "PersistentVolumeClaim",
+      "metadata": {
+        "creationTimestamp": "2026-08-20T22:42:55Z",
+        "finalizers": [
+          "kubernetes.io/pvc-protection"
+        ],
+        "labels": {
+          "demo": "broken"
+        },
+        "name": "broken-unused-disk",
+        "namespace": "default",
+        "resourceVersion": "1167",
+        "uid": "983ee88f-754e-4d07-a805-15dd524563f7"
+      },
+      "spec": {
+        "accessModes": [
+          "ReadWriteOnce"
+        ],
+        "resources": {
+          "requests": {
+            "storage": "64Mi"
+          }
+        },
+        "storageClassName": "",
+        "volumeMode": "Filesystem",
+        "volumeName": "broken-unused-disk"
+      },
+      "status": {
+        "accessModes": [
+          "ReadWriteOnce"
+        ],
+        "capacity": {
+          "storage": "128Mi"
+        },
+        "phase": "Bound"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "PersistentVolumeClaim",
+      "metadata": {
+        "creationTimestamp": "2026-08-20T22:42:55Z",
+        "finalizers": [
+          "kubernetes.io/pvc-protection"
+        ],
+        "labels": {
+          "demo": "healthy"
+        },
+        "name": "healthy-disk",
+        "namespace": "default",
+        "resourceVersion": "1017",
+        "uid": "412b171b-d9ae-4a1f-8237-c5ea51b232f1"
+      },
+      "spec": {
+        "accessModes": [
+          "ReadWriteOnce"
+        ],
+        "resources": {
+          "requests": {
+            "storage": "64Mi"
+          }
+        },
+        "storageClassName": "standard",
+        "volumeMode": "Filesystem",
+        "volumeName": "pvc-412b171b-d9ae-4a1f-8237-c5ea51b232f1"
+      },
+      "status": {
+        "accessModes": [
+          "ReadWriteOnce"
+        ],
+        "capacity": {
+          "storage": "64Mi"
+        },
+        "phase": "Bound"
+      }
+    }
+  ],
   "kind": "List",
   "metadata": {
     "resourceVersion": ""

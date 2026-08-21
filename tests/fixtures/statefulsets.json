@@ -5,15 +5,15 @@
       "apiVersion": "apps/v1",
       "kind": "StatefulSet",
       "metadata": {
-        "creationTimestamp": "2026-08-16T09:44:00Z",
+        "creationTimestamp": "2026-08-20T22:42:55Z",
         "generation": 2,
         "labels": {
           "demo": "broken"
         },
         "name": "broken-sts",
         "namespace": "default",
-        "resourceVersion": "1552",
-        "uid": "693f37c0-bb70-4e75-b807-67a9c99a8ace"
+        "resourceVersion": "1568",
+        "uid": "61959fd1-2fa1-4e39-a54a-682bc749ed44"
       },
       "spec": {
         "persistentVolumeClaimRetentionPolicy": {

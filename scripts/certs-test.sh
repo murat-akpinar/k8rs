@@ -20,7 +20,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 certs="$here/../tests/fixtures/certs"
 
-now="2026-08-17 00:00:00Z"   # the reference `now` C1's tests ask about
+now="2026-08-21 00:00:00Z"   # the reference `now` C1's tests ask about
 warn_days=30                 # C1's threshold
 now_s=$(date -u -d "$now" +%s)
 
@@ -56,9 +56,9 @@ fi
 
 # name | notBefore | notAfter | days left at the reference `now`
 pinned=(
-  "expiring-client|2026-08-12 00:00:00Z|2026-09-05 00:00:00Z|19"
-  "healthy-client |2026-08-12 00:00:00Z|2027-08-12 00:00:00Z|360"
-  "expired-client |2025-08-12 00:00:00Z|2026-08-09 00:00:00Z|-8"
+  "expiring-client|2026-08-12 00:00:00Z|2026-09-05 00:00:00Z|15"
+  "healthy-client |2026-08-12 00:00:00Z|2027-08-12 00:00:00Z|356"
+  "expired-client |2025-08-12 00:00:00Z|2026-08-09 00:00:00Z|-12"
 )
 
 # --- PINNED DATES START ---
