@@ -28,31 +28,61 @@ fail=0
 note() { echo "FAIL  $*"; fail=1; }
 declare -A left              # fixture name -> days of validity at `now`
 
-# --- ONE INSTANT, TWO FILES START ---
-# `now` above and `fn now()` in src/rules_tests.rs are the same fact written twice —
-# the dates below are asserted against this one, and C1's `Snapshot` is built
-# with that one. Nothing else compares them, so a drift is silent: both files
-# keep passing while "22 days left" and "expires in" are computed from
-# different instants. Compared as seconds, because the two spell the same
-# moment differently (`... 00:00:00Z` here, RFC 3339 `...T00:00:00Z` there).
+# --- ONE INSTANT, THREE FILES START ---
+# `now` above and `fn now()` in each file below are the same fact written twice —
+# the dates below are asserted against this one, and the `Snapshot` every
+# certificate assertion is built with comes from those. Nothing else compares
+# them, so a drift is silent: every file keeps passing while "22 days left" and
+# "expires in" are computed from different instants. Compared as seconds, because
+# they spell the same moment differently (`... 00:00:00Z` here, RFC 3339
+# `...T00:00:00Z` there).
+#
+# **Two files became three on 2026-08-21** and the check read one of them: the
+# analysis reports pin the same instant in `src/analysis_tests.rs`, and the
+# Certificates pane's `15d` badge and `expired 12 days ago` row are measured from
+# *that* pin against *these* bytes. A guard that reads only `rules_tests.rs` says
+# nothing when the second pin moves — and the repair a moved pin invites is to
+# edit `15d` to match, which is the failure this whole file exists to prevent.
+#
+# The spelling differs per file (`time("…")` there, a bare `Time("…".parse())`
+# here), so the pattern takes the first date-shaped string inside `fn now()`
+# rather than one call's shape. A second one landing in the same body hands two
+# lines to `date`, which fails to parse and fails loudly — the property the old
+# comment about `/^    }/` was about, kept.
 #
 # An extraction that finds nothing must fail loudly, not pass quietly
 # (CLAUDE.md — a derived list asserts it found something).
-#
-# `fn now()` is a top-level item of that file, so its closing brace is in column
-# 0. The old range end `/^    }/` — right while the tests were a nested `mod
-# tests` — matches nothing there and runs on to the next four-space brace, dozens
-# of lines past the function. It still extracts the correct value today, purely
-# because the next `time("...")` call site happens to be thousands of lines away:
-# a second time helper landing under this one hands two pins to `date` and the
-# comparison stops meaning what it says.
-rust_pin=$(sed -n '/fn now() -> Time {/,/^}/s/^ *time("\([^"]*\)").*/\1/p' "$here/../src/rules_tests.rs")
-if [ -z "$rust_pin" ]; then
-  note "no pin found in src/rules_tests.rs — this check expects one time(\"...\") inside fn now(), and without it compares nothing"
-elif [ "$(date -u -d "$rust_pin" +%s 2>/dev/null || echo unparseable)" != "$now_s" ]; then
-  note "src/rules_tests.rs pins now at '$rust_pin', this file at '$now' — C1's certificates are asserted against one instant and its Snapshot built from the other"
-fi
-# --- ONE INSTANT, TWO FILES END ---
+pins_in=(src/rules_tests.rs src/analysis_tests.rs)
+for file in "${pins_in[@]}"; do
+  # `|| true`, and stderr dropped, so a file that has moved is reported by the
+  # sentence below rather than by sed killing the run under `set -e`.
+  rust_pin=$(sed -n '/fn now() -> Time {/,/^}/{s/.*"\([0-9][0-9][0-9][0-9]-[^"]*\)".*/\1/p}' "$here/../$file" 2>/dev/null || true)
+  if [ -z "$rust_pin" ]; then
+    note "no pin found in $file — this check expects one date-shaped string inside fn now(), and without it compares nothing"
+  elif [ "$(date -u -d "$rust_pin" +%s 2>/dev/null || echo unparseable)" != "$now_s" ]; then
+    note "$file pins now at '$rust_pin', this file at '$now' — C1's certificates are asserted against one instant and its Snapshot built from the other"
+  fi
+done
+
+# **And the list above is itself a derived claim**: a fourth module reading these
+# certificates would measure them from a pin nothing here compares. Every file
+# under src/ that names the fixture directory has to be one of the files above,
+# or sit in the module directory one of them owns
+# (`src/analysis_tests/certificates.rs` -> `src/analysis_tests.rs`, invariant 11).
+# `src/main_tests.rs` pins a different instant on purpose — it is about card ages,
+# not certificates — and needs no exception written for it: it reads none of
+# these files, so it never appears in the list this loop walks.
+readers=$(cd "$here/.." && grep -rl 'fixtures/certs' src) || true
+[ -n "$readers" ] ||
+  note "no file under src/ names tests/fixtures/certs — either the certificates are read by nothing, or this scan is looking in the wrong place and the pin check above just passed on a list it did not build"
+for file in $readers; do
+  owner="$(dirname "$file").rs"
+  case " ${pins_in[*]} " in
+    *" $file "*|*" $owner "*) ;;
+    *) note "$file reads the committed certificates and nothing here checks which instant it measures them from — add the file holding its \`fn now()\` to pins_in above" ;;
+  esac
+done
+# --- ONE INSTANT, THREE FILES END ---
 
 # name | notBefore | notAfter | days left at the reference `now`
 pinned=(
@@ -130,6 +160,6 @@ if grep -rlE -- "-----BEGIN [A-Z ]*PRIVATE KEY-----" "$certs" 2>/dev/null | grep
 fi
 
 if [ $fail -eq 0 ]; then
-  echo "certs-test: dates pinned at $now (src/rules_tests.rs pins the same instant) — expiring $e days (C1 reports), healthy $h days (C1 silent), expired $x days (C1 says expired); no key material"
+  echo "certs-test: dates pinned at $now (${pins_in[*]} pin the same instant, and no other file under src/ reads these certificates) — expiring $e days (C1 reports), healthy $h days (C1 silent), expired $x days (C1 says expired); no key material"
 fi
 exit $fail
