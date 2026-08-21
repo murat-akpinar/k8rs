@@ -28,6 +28,7 @@
 - *(rules)* The report shape, where the variant says what the cursor may do ([bc0970f](https://github.com/murat-akpinar/k8rs/commit/bc0970f5e4ad4ef750b09df3cb95ddf8e595a5a4)) — Phase 4's shared contract, written alone because six report boxes fill it: a plain-language pane title, an optional sidebar badge, and a body of Row::Answer | Prose | NotComputed.
 - *(rules)* Open the door the reports were always going to knock on ([533f123](https://github.com/murat-akpinar/k8rs/commit/533f12348c67a473563212a7a7a14148762f9110)) — Twelve items become pub(crate) under D129's bounds — not the thirteen proposed: charged is reached through promised, SUPPORTED_SKEW through kubelet_too_far_behind, and quantity_milli has no decided caller, so all three stay private. Every changed line outside the snapshot region is a visibility keyword.
 - *(rules)* The six analysis reports, over a cluster snapshot ([1ef9e3f](https://github.com/murat-akpinar/k8rs/commit/1ef9e3fbfdc5dce694310781f3e820774f791fa7)) — Capacity, Drain safety, Waste, Posture, Versions and Certificates — Phase 4's Family C, pure functions taking the snapshot and the findings `analyze` already returned. NOTES § D134 holds the decisions.
+- *(rules)* Read the declared restart rules, and name the pods a rollout is losing ([c1eafbb](https://github.com/murat-akpinar/k8rs/commit/c1eafbbb5284bb27df744fb3d43e3136f525bd55)) — Two Phase 4 boxes, one turn. Both are a snapshot field, a prune line and then a rule, inside the window D42 leaves open before the types freeze.
 
 ### 🐛 Bug Fixes
 
