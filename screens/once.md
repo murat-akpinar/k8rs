@@ -187,7 +187,7 @@ ever enters raw mode — one text, both paths
 
 | Not offered | Why |
 |---|---|
-| Analysis reports (capacity, drain safety, waste, certificates, versions) | Choosing *which* report needs an argument, and an argument that takes a value is the threshold that would pull `clap` in ([docs/tech-stack](../docs/tech-stack.md)). The reports are a console feature; `--once` answers one question. |
+| Analysis reports (capacity, drain safety, waste, posture, restarts, certificates, versions) | Choosing *which* report needs an argument, and an argument that takes a value is the threshold that would pull `clap` in ([docs/tech-stack](../docs/tech-stack.md)). The reports are a console feature; `--once` answers one question. |
 | `-o json` / `-o yaml` | Nobody has asked. It is one function over `Vec<Finding>` when someone does, and inventing an output schema now means maintaining it forever ([NOTES § Out of scope](../NOTES.md#out-of-scope-the-most-important-section)). |
 | `--watch` | That is the TUI. |
 

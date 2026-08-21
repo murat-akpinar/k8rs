@@ -4,8 +4,8 @@ Whole-cluster answers no per-object rule can give, computed when opened. This
 is where *risky, wasteful and expiring* live — Alerts keeps only *broken right
 now* ([NOTES § D2](../NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)).
 
-Six reports, six sidebar entries, five panes: **Versions** is drawn at the foot
-of the Certificates pane and still has its own entry
+Seven reports, seven sidebar entries, six panes: **Versions** is drawn at the
+foot of the Certificates pane and still has its own entry
 ([NOTES § D127](../NOTES.md#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)).
 
 ## How a report is drawn — the grammar every pane on this page obeys
@@ -38,7 +38,7 @@ land on it
 | `  node-1   7.4 of 8 cpu · 9.8Gi of 16Gi` | `Row::Answer`, `severity: None` — a fact that makes no judgement | lands |
 | the indented sentence under a row | that row's `detail` | — |
 | the `→ ` line under it | that row's `action`; `views.rs` draws the arrow | — |
-| `Versions` · `Still counted, from what you can see:` · Posture's opening paragraph | `Row::Prose` | skipped |
+| `Versions` · `Still counted, from what you can see:` · Posture's and Restarts' opening paragraphs | `Row::Prose` | skipped |
 | `Not checked here. …` followed by `Ask for …` | one `Row::NotComputed { reason, ask_for }` | skipped |
 | the value beside a name in the sidebar | `Report::badge` | — |
 
@@ -94,9 +94,9 @@ Eight rules follow from that table, and every pane below obeys all eight.
 │   certificates  30d│        requests)                              │
 │   drain safety     │    node-1   7.4 of 8 cpu · 9.8Gi of 16Gi      │
 │   posture          │      using 2.1 cpu and 6.4Gi                  │
-│   waste            │    node-3   1.2 of 8 cpu · 3.5Gi of 16Gi      │
-│   versions         │      using 0.4 cpu and 950Mi                  │
-│                    │    34 workloads have no memory or CPU limit   │
+│   restarts         │    node-3   1.2 of 8 cpu · 3.5Gi of 16Gi      │
+│   waste            │      using 0.4 cpu and 950Mi                  │
+│   versions         │    34 workloads have no memory or CPU limit   │
 │                    │      Nothing stops one taking a whole node.   │
 ├────────────────────┴───────────────────────────────────────────────┤
 │  $ kubectl get nodes -o json                                       │
@@ -273,9 +273,9 @@ have been ([states.md](states.md#you-can-only-see-some-namespaces)).
 │   certificates  30d│                                               │
 │   drain safety     │  Still counted, from what you can see:        │
 │   posture          │    6 workloads have no memory or CPU limit    │
-│   waste            │      Nothing stops one taking a whole node.   │
+│   restarts         │      Nothing stops one taking a whole node.   │
+│   waste            │                                               │
 │   versions         │                                               │
-│                    │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
 │  $ kubectl get pods -n payments --watch                            │
 │                                                                    │
@@ -425,9 +425,9 @@ three each get a row, because assuming any of them away is either a false
 │   certificates  30d│        and reachable?                         │
 │▸  drain safety     │  ▲ node-2 has 2 pods nothing would restart    │
 │   posture          │      They were started by hand, with no       │
-│   waste            │      Deployment behind them. A drain deletes  │
-│   versions         │      them and nothing brings them back.       │
-│                    │      → save what you need off them first      │
+│   restarts         │      Deployment behind them. A drain deletes  │
+│   waste            │      them and nothing brings them back.       │
+│   versions         │      → save what you need off them first      │
 │                    │    node-1 is ready to drain — 18 pods move    │
 ├────────────────────┴───────────────────────────────────────────────┤
 │  $ kubectl get pdb -A                                              │
@@ -1110,9 +1110,9 @@ answer.
 │   certificates  30d│      somebody deletes it.                     │
 │   drain safety     │  ○ 47 pods finished and were never removed    │
 │   posture          │      Kubernetes keeps a few finished Jobs by  │
-│▸  waste            │      default, so some of this is normal. They │
-│   versions         │      use no CPU or memory — they only make    │
-│                    │      every pod list longer.                   │
+│   restarts         │      default, so some of this is normal. They │
+│▸  waste            │      use no CPU or memory — they only make    │
+│   versions         │      every pod list longer.                   │
 │                    │  ○ 12 replicasets are parked at 0 replicas    │
 ├────────────────────┴───────────────────────────────────────────────┤
 │  $ kubectl get svc,endpointslices -A                               │
@@ -1325,9 +1325,9 @@ to review, not an alarm to answer
 │   certificates  30d│  ○ /var/lib/kubelet                           │
 │   drain safety     │      Read-only, mounted by 3 pods in          │
 │▸  posture          │      kube-system.                             │
-│   waste            │  ○ /etc/cni/net.d                             │
-│   versions         │      Read-only, mounted by 3 pods in          │
-│                    │      kube-system.                             │
+│   restarts         │  ○ /etc/cni/net.d                             │
+│   waste            │      Read-only, mounted by 3 pods in          │
+│   versions         │      kube-system.                             │
 ├────────────────────┴───────────────────────────────────────────────┤
 │  $ kubectl get pods -A --watch                                     │
 │                                                                    │
@@ -1418,6 +1418,292 @@ That is rarer than it sounds — most clusters run a
 network or storage agent that does.
 ```
 
+## Restarts
+
+**The row [D101](../NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)
+named and left homeless.** Four rules stand down on a container that is
+serving right now, so a container that OOMs every thirty minutes or dies on
+the nightly batch draws a card for a few minutes after each restart and
+nothing the rest of the time. A card cannot say more without lying about
+whether it is broken *now* — but a report can print two facts and assert
+nothing: how many times, and how long the current run has lasted. This pane
+is that report, one row per container.
+
+**Why its own pane, and not a row bent into one of the other five.** Waste's
+title is *Things that cost you something for nothing* — nothing here costs
+anything, the container is running — and Capacity, Drain safety, Posture and
+Certificates each answer one different, unrelated question. Widening any of
+their titles to also cover *"has this container been dying"* would blur the
+one thing each already answers cleanly, which is the same invariant-14
+problem the box was raised to fix, just moved to a different heading. One
+report, one question, matches every pane already on this screen.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│ ALERTS      3 ● 7 ▲│  Containers that keep restarting              │
+│ RESOURCES          │                                               │
+│   workloads        │  Every container below is serving right       │
+│   network          │  now. A restart count never clears itself     │
+│   storage          │  — the second number, how long this run       │
+│   config           │  has lasted, is the signal.                   │
+│   cluster          │                                               │
+│ ANALYSIS           │  ○ payments/worker-7f9c · container api       │
+│   capacity      1 ▲│    Restarted 9 times since this pod started.  │
+│   certificates  30d│    This run started 6 hours ago.              │
+│   drain safety     │                                               │
+│   posture          │  ○ shop/api · sidecar container proxy (it     │
+│▸  restarts         │  runs beside the app the whole time)          │
+│   waste            │    Restarted 4 times since this pod started.  │
+│   versions         │    This run started 2 days ago.               │
+├────────────────────┴───────────────────────────────────────────────┤
+│  $ kubectl get pods -A --watch                                     │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- **The opening paragraph does not say nothing is broken, and that is a
+  correction, not a style choice.** Rule 5's *serving* card is suppressed
+  only once a container's current run is older than `NOT_READY_GRACE` (ten
+  minutes), and this pane qualifies a container the moment it is serving and
+  above the threshold — so for the first ten minutes after every restart the
+  two sets overlap, measured on a real cluster: `▲ default/cycler · 2 min
+  ago` — *"Container has been restarted 8 times — it is serving now, but
+  something keeps killing it"* — on Alerts, at the same moment this pane
+  drew `default/cycler` with nothing wrong in its own words. The reader most
+  likely to open this pane is the one who just came from that card. The
+  paragraph may say what the pane is and which of its two numbers is the
+  signal; it may not tell the reader nothing is broken, because a point
+  sample cannot know that ([D101](../NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)).
+- **Both numbers, never divided** ([PRIOR-ART § F2](../PRIOR-ART.md#f2--a-number-that-cannot-be-defended),
+  D101). `restarts` and the current run's age sit one under the other in
+  `detail`, side by side on the row, and are never combined into a rate.
+- **The row's identity is `container_fact(c)`, verbatim — never a second
+  spelling.** `container api` for the ordinary case; `sidecar container
+  proxy (it runs beside the app the whole time)` and `init container migrate
+  (the app starts only after this one finishes)` for the other two roles —
+  the exact three strings [`rules.rs`'s `container_fact`](../src/rules.rs)
+  already produces for every Alerts card that names a container, gloss and
+  all. `ContainerRole`'s own doc names a second, differently-worded spelling
+  of a role wrong in these terms — *"the init container `istio-proxy` is
+  crashlooping" is wrong, not merely unclear* — so this row calls the same
+  function rather than re-describing what a sidecar or an init container is,
+  and it always calls it, even for the ordinary one-container pod where the
+  role never shows: one function, one place the words come from, never a
+  conditional over whether the pod happens to have more than one.
+  **The gloss does not sit mid-sentence.** *"sidecar container proxy (it runs
+  beside the app the whole time) restarted 9 times"* asks a reader to parse a
+  parenthetical about when the app starts and then keep going, in one
+  breath — so the row is built around the gloss instead of the gloss being
+  squeezed into a sentence about restarts: `container_fact`'s string, prefixed
+  with the object's name, is the whole of `text`; the count and the age move
+  to `detail`, one paragraph each, the same split Capacity already uses to
+  keep a raw measurement off its own text line.
+- **"since this pod started" is not decoration — it is the qualifier D101
+  requires**, because `restarts` resets to 0 on a new pod (a rollout, an
+  eviction, a drain). Without it a reader could take the count as the
+  container's whole history and misjudge a young pod as calm.
+- **The current run's age is a second clock, not the same one, and the
+  wording keeps them apart on purpose.** "Since this pod started" answers
+  for the *count*, in the first `detail` paragraph; "This run started 6
+  hours ago" answers for the *current run*, in the second — which began at
+  the last restart, not at the pod's creation. Reusing the word "started"
+  for both in one breath is what would make the row misleading, so the two
+  paragraphs name what is doing the starting each time — "this pod" against
+  "this run" — and the run's own age is drawn from `rules::age`, the one
+  ladder every age on every screen already uses
+  ([widgets.md § 1b](widgets.md#1b-how-long-ago-it-happened--one-ladder-every-screen)),
+  appended after "started" exactly as the header and every Alerts card
+  already do.
+- **What may not appear: how the run ended.** `ending` and `exit_meaning`
+  are private to `rules.rs`
+  ([D101](../NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)),
+  and no row here spells `exit 137` or a reason. There is nothing to fix in
+  this row's own words — that is what a card is for, and this container has
+  none right now.
+- **Qualifies at `matches!(state, Running { .. }) && doing_its_job(c) &&
+  restarts ≥ RESTARTS_WARN` — two clauses about health, doing two different
+  jobs, not one rule reopened as two.** `doing_its_job` is the one reader of
+  *is this container healthy*, and this pane never re-derives that question
+  for itself — it is the suppressor `restarting_repeatedly`,
+  `previous_run_failed` and `out_of_memory` already share, widened to
+  `pub(crate)` the same one-keyword way `RESTARTS_WARN` was. But *healthy*
+  is not *healthy in a run right now*: `doing_its_job`'s one `Terminated`
+  arm answers for an init container that failed and then finished cleanly —
+  `healthy-retry`'s `wait-for-db` in the corpus, three failures then `exit
+  0` — and that is the health of a run already over, not a current one. The
+  `Running` clause is what keeps this pane to a *current* run, because its
+  second number is that run's age; a finished init container has no current
+  run to put one on, and this pane has nothing to say about a container that
+  already did its job and stopped — that is what `doing_its_job` answering
+  *yes* means for it, and it is a different question from the one this pane
+  asks. A container that is `Running` but failing its readiness check is
+  excluded, and the guarantee that it is not excluded into silence is rule
+  5's own non-serving branch, named because it was measured and not assumed:
+  `restarting_repeatedly` fires for any `Running && !ready` container at or
+  above `RESTARTS_WARN`, whatever its role, and never ages out — so the
+  exact set this pane declines to draw a row for is a set rule 5 already
+  covers permanently. Rule 7's card, *"Running, but not receiving traffic,"*
+  is the extra one a *regular* container also gets, not the reason this
+  exclusion is safe: `running_but_not_ready` opens with `if c.role !=
+  ContainerRole::Regular { return None; }`, so a native sidecar failing the
+  identical probe carries no rule 7 card at all — the Istio/Linkerd shape
+  the whole role split exists for — and rule 5's branch is what still
+  catches it. `RESTARTS_WARN` (3) is reused rather than invented, the same
+  number the suppressed rule-5 card already used.
+- **A set that qualifies but cannot yet print an age draws no row, and the
+  empty sentence is not drawn either.** `state.running.started_at` reads
+  `None` for under eight seconds after a restart (D100), and `rules::age`
+  itself declines a moment past its future-skew allowance — either way, a
+  container is serving and above the threshold with nothing yet for the
+  second `detail` paragraph. The pane's empty sentence claims that nothing
+  qualifies by serving and count, which would be false here — a container
+  above the line is above the line — so this state keeps the opening
+  paragraph and draws nothing under it: no row, no claim either way. It
+  clears on the next redraw once Kubernetes reports the timestamp, which
+  costs nothing on a screen that draws on events
+  ([invariant 7](../CLAUDE.md)).
+- **`findings` is unread, for its own reason and not Capacity's.** Capacity's
+  producer ignores it because N5 never reaches `analyze`'s slice at all; this
+  one ignores it on purpose — the pane does not cross-check against what
+  Alerts is currently showing, and a container can appear here whether or not
+  it also carries a live card. The row's claim is narrower than a card's —
+  count and age, nothing about current health — so there is nothing to
+  reconcile.
+- **Worst first: highest restart count first, and a tie no longer throws
+  away the second number to get there.** `restarts` is the pane's subject
+  and D101's own *worst*, so it stays primary — but a tie now breaks on the
+  younger current run first (the one that started more recently, still
+  mid-cycle rather than long settled), then `namespace/pod`, then the
+  container name, alphabetically. Alerts sorts severity then recency; this
+  pane had the recency already computed one line above the comparator, for
+  the row's own second number, and was throwing it away at the tie-break
+  instead of reading it.
+- **`⏎` jumps to the pod, and the type already has the case.**
+  [`Jump::Object`]'s own doc names this exact row as
+  its reason to exist — *"the container that keeps dying between its
+  restarts"* — so `jump: Some(Jump::Object(pod_id))` on every row here is
+  not a new case, it is the case that was already written with this pane in
+  mind. Two qualifying containers in one pod jump to the same pod; the
+  reader sees both containers from there.
+- **No badge, and the reasoning is Posture's, extended rather than
+  repeated.** Every row on this pane is `severity: Some(Info)` — a point
+  sample cannot tell a container that is still cycling from one that hiccuped
+  once and has been solid for a month, so the pane refuses to imply either
+  ([D101](../NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)).
+  A badge that is a count draws its band as a glyph
+  ([widgets.md § 2](widgets.md#2-element--widget)), and the only band this
+  pane could ever offer is `○` — a glyph that says *no judgement* sitting
+  beside a number, which teaches nothing a reader can act on and would be
+  the first `○` badge on this screen. Worse, the *count of qualifying
+  containers* only grows: a settled restart from a node reboot last month
+  never leaves the tally until its pod is replaced, so on any cluster with
+  real age the badge would read nonzero most of the time — Posture's own
+  reason for refusing one ("a permanent number beside `posture` in the
+  sidebar would nag about a list that is correct") applies here at least as
+  strongly, on a badge with even less reason to move. `drain safety`, `posture` and
+  `waste` already badge nothing; `restarts` joins them.
+- **No `NotComputed` state.** This report reads only pod data, which is
+  already permanently watched and needs no permission Alerts does not
+  already have — the same reason Posture has none. A namespace scope
+  narrows the list; it never turns the check off.
+- **One container is one row, nothing else on the pane changes.** Unlike
+  Capacity's single-node laptop cluster, there is no table to collapse and no
+  neighbouring column to hide — the mockup above already shows what a second
+  row looks like next to a first, and a pane with only one just stops there.
+- **This pane scrolls, and does not cap — the earlier cap did not survive a
+  real cluster.** Waste's five-row cap is a *per-section* budget: four
+  sections share Waste's sixteen lines, and cutting the loudest one is what
+  stops it starving the other three. This pane has exactly one section, so
+  there is nothing left for an unbounded list to starve — the cap was reused
+  from Waste's number without re-deriving Waste's reason, and it broke on a
+  one-node kind cluster where three node reboots took the qualifying set
+  from 6 to 17: the five slots it would have kept went to five containers
+  that had already stopped restarting, and the one still on a live
+  ten-minute cycle — the exact container this pane exists for — fell into
+  `and 1 more`. `Row::Prose` is not selectable, so a folded row is not one
+  keypress away, it is gone from the screen. The pane simply scrolls, the
+  way Capacity's node list and every Posture row already do.
+
+### Restarts under one namespace
+
+Runs unchanged, scoped to what is visible — pod data is namespaced like the
+rest. The title carries the scope, and so does every row, in its own
+`namespace/pod` prefix:
+
+```
+Containers in payments that keep restarting
+
+Every container below is serving right now. A
+restart count never clears itself — the second
+number, how long this run has lasted, is the
+signal.
+
+○ payments/worker-7f9c · container api
+    Restarted 9 times since this pod started.
+    This run started 6 hours ago.
+```
+
+- **Per-object rows carry their own scope, and keep the namespace prefix
+  even under one** — `payments/worker-7f9c`, unchanged from the unscoped
+  pane, the same rule Waste and Posture's own rows already follow
+  ([README rule 5](README.md#the-five-rules-every-screen-obeys)).
+- **The empty sentence has no row to carry the scope, so it says the
+  namespace itself — the same rule the title already follows, on the one
+  line that would otherwise quantify over the whole cluster.** Unscoped,
+  the sentence claims something about every serving container k8rs can see;
+  under `--namespace payments`, or the 403 fallback that fills the same
+  field, only `payments` was ever read, and `kube-system/etcd` sitting at
+  forty restarts and serving makes the unscoped wording false while the
+  title above it says `payments`:
+
+```
+Nothing here has restarted enough to matter. Every
+container serving right now in payments has
+restarted 2 or fewer times since its pod started.
+```
+
+### Empty, and nothing qualifies
+
+**One sentence, and it has to stay true across every cluster it can be drawn
+on.** Nothing has restarted at all; something has but stayed under the
+threshold; or a container is not serving right now — crash-looping and
+already carrying a card, or `Running` but failing its readiness check and
+already carrying rule 5's own non-serving card, which fires for that shape
+regardless of role — so it was never in this pane's set to begin with. The
+pane's filter is the qualifying rule above, and the sentence has to
+quantify over exactly that and nothing wider, or a cluster in the third
+state reads a claim about a container it can see a card for one screen
+over:
+
+```
+Nothing here has restarted enough to matter. Every
+container serving right now has restarted 2 or fewer
+times since its pod started.
+```
+
+- **"Every container" was too wide, and a not-ready container makes the gap
+  visible on top of a crash-looping one.** The pane only ever draws a
+  container that is `doing_its_job`, so its empty sentence may only ever
+  claim something about *those* — "every container serving right now," not
+  "every container running right now" and not "every container." `Running`
+  alone is not enough: a container that is `Running` but not `ready` can sit
+  at thirteen restarts, already carry rule 5's non-serving card — the one
+  that fires on this exact shape for any role and never ages out — and never
+  appear in this pane's set at all. "Running right now" would have swept it
+  into "has had two or fewer" exactly the way "every container" once did,
+  just one exclusion later. Scoping the sentence to the pane's own filter —
+  serving, not merely running — is what keeps it true across every cluster,
+  not only the ones this box happened to check.
+- **`2 or fewer`, digits, not the word — the same rule
+  [§ Certificates and Versions](#certificates-and-versions) already states
+  for this page: every count here is a digit, and spelling one out is the
+  inconsistency invariant 14 exists to catch.** The number is still
+  `RESTARTS_WARN - 1`, derived by the producer off the constant it already
+  reads for the qualifying test, never retyped — the digit is what changes if
+  rule 5's threshold ever moves, not the word.
+
 ## Certificates and Versions
 
 ```
@@ -1435,6 +1721,7 @@ network or storage agent that does.
 │▸  certificates  30d│        kubeconfig before that date — k8rs     │
 │   drain safety     │        cannot renew it, and after it kubectl  │
 │   posture          │        stops working for you too              │
+│   restarts         │                                               │
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
@@ -1636,13 +1923,14 @@ shared notice ([states.md](states.md#the-second-paragraph-is-the-point-of-this-s
 | **Drain safety** | every pod on a node, plus PodDisruptionBudgets across namespaces | not computed. This is the same join N2 and N5 use, and a partial answer here is the worst of the three: *"18 pods move, node-1 is ok"* is a green light for an operation that then hangs on a pod the report could not see |
 | **Waste** | Services and EndpointSlices — namespaced, like the rest | **runs unchanged**, scoped to what is visible: a shorter list, never a wrong number. The title says which namespace |
 | **Posture** | pod specs — namespaced, and already watched | **runs unchanged**, scoped, title and all, for the same reason Waste does. It needs no permission Alerts does not already have |
+| **Restarts** | pod specs — namespaced, and already watched | **runs unchanged**, scoped, title and all, for the same reason Posture does. No `NotComputed` state exists for it |
 | **Certificates** | the kubeconfig for C1; a cluster-wide CSR list for the pending-kubelet row | C1 always runs — it reads a file on disk and needs no cluster permission at all. The CSR row is dropped and named; `list certificatesigningrequests` is a cluster-scoped verb most namespaced roles do not have |
 | **Versions** | the node list | not computed. The control-plane version is a separate read and stands on its own, so the section shows it and says the kubelet comparison is missing |
 
 - **A report that still works must not be made to look broken**, which is why
-  Waste and Posture are in this table saying *runs unchanged*. The instinct to
-  grey out the whole Analysis screen under a partial view would hide four
-  answers that are completely true.
+  Waste, Posture and Restarts are in this table saying *runs unchanged*. The
+  instinct to grey out the whole Analysis screen under a partial view would
+  hide answers that are completely true.
 - **The distinction is not sums versus facts — a count is a sum.** It is
   whether the number is measured against something the reader cannot see.
   `47 pods` is the length of a list they can see, and it is honest at any
@@ -1667,13 +1955,14 @@ shared notice ([states.md](states.md#the-second-paragraph-is-the-point-of-this-s
   ([NOTES § D127](../NOTES.md#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)).
   A key this page draws is a key that does something, and the help screen lists
   exactly the keys the screen has ([help.md](help.md)).
-- **The restart row is not on this page.** Where it lives is Family D's
-  designer box, and the Waste heading it was measured against is gone
+- **The restart row has landed, as its own pane** — [§ Restarts](#restarts) —
+  rather than bent into the Waste heading it was originally measured against,
+  which is gone
   ([NOTES § D101](../NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)).
 - **No key changed.** The footer is the same on every pane, `?` opens the same
   help, and this page adds nothing to the key map
-  ([help.md](help.md)) — a sixth report is a sixth sidebar entry, not a sixth
-  keystroke.
+  ([help.md](help.md)) — a seventh report is a seventh sidebar entry, not a
+  seventh keystroke.
 - **The badge glyph rule has moved to
   [widgets.md § 2](widgets.md#2-element--widget)**, beside the `3 ● 7 ▲` ·
   `1 ▲` · `30d` · `12` list that is the only place every badge on every screen

@@ -2309,7 +2309,11 @@ impl From<DaemonSet> for WorkloadSnapshot {
 const FACTS: &str = " · ";
 
 /// Rule 5's two bands (REQUIREMENTS: restarts ≥3 warn, ≥10 critical).
-const RESTARTS_WARN: i32 = 3;
+///
+/// **`pub(crate)` for the Restarts report's second reader** — the pane asks rule 5's own
+/// question of a container rule 5 is silent about, so it qualifies at the same number rather
+/// than at a second `3` in a second file (NOTES § D101, `screens/analysis.md` § Restarts).
+pub(crate) const RESTARTS_WARN: i32 = 3;
 const RESTARTS_CRITICAL: i32 = 10;
 
 /// **How long something may be misbehaving before it counts as a failure** — ten minutes, and
@@ -2897,7 +2901,11 @@ fn waiting(c: &ContainerSnapshot) -> Option<(&str, Option<&str>)> {
 /// a claim about this pod** — rules 5 and 6 also reach an init container that finished long ago
 /// inside a pod that is serving happily. **A regular container gets no gloss**: it *is* the
 /// application, and a clause on every card teaches the reader to skip the line.
-fn container_fact(c: &ContainerSnapshot) -> String {
+///
+/// **`pub(crate)` for the Restarts report's second reader** — that row's identity is this string
+/// verbatim, gloss and all, because a second wording of a role is what [`ContainerRole`]'s own
+/// doc calls wrong rather than merely unclear (NOTES § D101, `screens/analysis.md` § Restarts).
+pub(crate) fn container_fact(c: &ContainerSnapshot) -> String {
     match c.role {
         ContainerRole::Regular => format!("container {}", c.name),
         ContainerRole::Init => format!(
@@ -2934,7 +2942,19 @@ fn container_fact(c: &ContainerSnapshot) -> String {
 ///
 /// **The init branch is captured**: `healthy-retry.json` is an init container that failed three
 /// times before it exited `0`, so both rules have something to suppress on a real object.
-fn doing_its_job(c: &ContainerSnapshot) -> bool {
+///
+/// **`pub(crate)` for the Restarts report, which qualifies a container on this **and** on
+/// [`ContainerState::Running`]** — health and *in a run right now* are two questions, and that
+/// pane's second number is the age of a run (NOTES § D101, `screens/analysis.md` § Restarts).
+///
+/// **The container it excludes is not excluded into silence, and the guarantee is
+/// [`restarting_repeatedly`]'s non-serving branch — not rule 7's card.** That rule ages out only
+/// where this function answers `true`, so a `Running && !ready` container at or above
+/// [`RESTARTS_WARN`] keeps its card permanently, whatever its role.
+/// [`running_but_not_ready`] returns `None` for any role but
+/// [`Regular`](ContainerRole::Regular), so a native sidecar failing the identical probe carries no
+/// rule 7 card at all — the Istio/Linkerd shape the role split exists for.
+pub(crate) fn doing_its_job(c: &ContainerSnapshot) -> bool {
     match (&c.state, c.role) {
         (ContainerState::Running { .. }, _) => c.ready,
         (ContainerState::Terminated(run), ContainerRole::Init) => match ending(run) {

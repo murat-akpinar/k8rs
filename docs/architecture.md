@@ -19,7 +19,7 @@ Three views, one content pane at a time:
 |---|---|---|
 | **Alerts** *(default)* | per-object findings from `rules.rs`, severity-sorted | live |
 | **Resources** | browser over every kind the cluster serves; the operations live here | list + watch while open |
-| **Analysis** | cluster-wide reports from `analysis.rs` — capacity, certificates, drain safety, posture, waste, versions | on demand |
+| **Analysis** | cluster-wide reports from `analysis.rs` — capacity, certificates, drain safety, posture, restarts, waste, versions | on demand |
 
 One question decides which view a finding belongs to: **is it broken right
 now, or is it risky, wasteful or expiring?** The first goes to Alerts, the

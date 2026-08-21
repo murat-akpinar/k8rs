@@ -12,10 +12,10 @@
 //! Phase 5's `--once` box takes the band off (NOTES § D121).
 //! It may not invent a third format: one `rules.rs`, one set of strings.
 //!
-//! **`--analysis` prints `analysis.rs`'s six reports under the cards**, which is what makes them
+//! **`--analysis` prints `analysis.rs`'s seven reports under the cards**, which is what makes them
 //! runnable at all before `views.rs` exists: until this flag nothing outside `#[cfg(test)]` had
-//! ever rendered a `Report`, so invariant 9's strip was unexercised for every string in all six
-//! ([`pane`]). The five lists those reports join — Services, EndpointSlices, PVCs,
+//! ever rendered a `Report`, so invariant 9's strip was unexercised for every string in all of
+//! them ([`pane`]). The five lists those reports join — Services, EndpointSlices, PVCs,
 //! PodDisruptionBudgets and CertificateSigningRequests — are read here from whatever files are
 //! named, so a pane's *not checked* state is still reachable by simply not naming one ([`take`]).
 
@@ -98,12 +98,12 @@ const USAGE: &str = "usage: k8rs [--analysis] <file.json>...\n\
     This build reads files only — it cannot reach a cluster yet.";
 
 /// **The one flag this driver has**, and it is scaffolding like the driver itself: `analysis.rs`'s
-/// six reports are whole-cluster answers rather than per-object cards, so they are a second
+/// seven reports are whole-cluster answers rather than per-object cards, so they are a second
 /// report under the first rather than more findings in it. Phase 9 draws them in panes and this
 /// goes away with the rest of the temporary main (NOTES § D34).
 ///
 /// **A flag and not the default**, because the default output is what `tests/binary.rs` pins as
-/// the report on stdout — and because a driver that printed six panes for every `k8rs pod.json`
+/// the report on stdout — and because a driver that printed seven panes for every `k8rs pod.json`
 /// would bury the cards it exists to show.
 const ANALYSIS: &str = "--analysis";
 
@@ -480,17 +480,18 @@ fn plural(n: usize, unit: &str) -> String {
 
 // --- THE ANALYSIS REPORTS START ---
 
-/// **The six reports, in the order the sidebar lists them** (`screens/analysis.md`) — printed
+/// **The seven reports, in the order the sidebar lists them** (`screens/analysis.md`) — printed
 /// under the cards when `--analysis` is passed.
 ///
 /// **This is the first time anything outside `#[cfg(test)]` has rendered a `Report`**, and until
-/// it existed invariant 9 was unexercised for all six: `analysis_tests`' own `pane` is a reading
-/// aid that strips nothing, and Posture's row text is a `hostPath.path` **verbatim and whole**, so
-/// a crafted path arrived at the terminal as an escape sequence. The strip is [`pane`]'s, below.
+/// it existed invariant 9 was unexercised for all of them: `analysis_tests`' own `pane` is a
+/// reading aid that strips nothing, and Posture's row text is a `hostPath.path` **verbatim and
+/// whole**, so a crafted path arrived at the terminal as an escape sequence. The strip is
+/// [`pane`]'s, below.
 ///
 /// **The label beside each pane is this file's, not the report's.** [`analysis::Report`] carries
 /// no sidebar name on purpose — which pane a report is drawn in is `screens/`'s ruling — so the
-/// driver spells its own six, and `Versions` is drawn beside `certificates` on the real screen
+/// driver spells its own seven, and `Versions` is drawn beside `certificates` on the real screen
 /// rather than as a pane of its own.
 fn reports(snapshot: &ClusterSnapshot, findings: &[Finding]) -> String {
     [
@@ -501,6 +502,7 @@ fn reports(snapshot: &ClusterSnapshot, findings: &[Finding]) -> String {
         ("certificates", analysis::certificates),
         ("drain safety", analysis::drain_safety),
         ("posture", analysis::posture),
+        ("restarts", analysis::restarts),
         ("waste", analysis::waste),
         ("versions", analysis::versions),
     ]

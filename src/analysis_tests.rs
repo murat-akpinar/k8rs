@@ -23,9 +23,6 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 // over every producer at once. A helper copied into two modules is the divergence the split is
 // not allowed to grow.
 
-#[path = "analysis_tests/shape.rs"]
-mod shape;
-
 #[path = "analysis_tests/capacity.rs"]
 mod capacity;
 
@@ -43,6 +40,9 @@ mod versions;
 
 #[path = "analysis_tests/certificates.rs"]
 mod certificates;
+
+#[path = "analysis_tests/restarts.rs"]
+mod restarts;
 
 // --- THE CORPUS THIS FILE READS ---
 //
@@ -237,40 +237,18 @@ fn corpus() -> ClusterSnapshot {
     snapshot(captured_pods(), captured_nodes())
 }
 
-// --- BUILDING A ROW BY HAND ---
+// --- NOTHING ON THIS SCREEN IS BUILT BY HAND ANY MORE ---
 //
-// **One report is still built here and it is the last one**: `restarts`, Family D's, whose home
-// and wording `tui-designer` has not settled. Every other pane on this screen is its producer's
-// output now, asserted against a snapshot rather than against a literal typed out of a mockup —
-// which is what the hand-built panes were for and why each one went as its box landed.
+// The last pane written out of a mockup was `restarts`, and it went the way the other six did:
+// its box landed and its producer replaced it. Every claim below is now read off a `Report` a
+// producer built from a snapshot, so a pane and its test can no longer agree with each other
+// while both disagree with the screen.
 //
 // **The glyphs are absent on purpose.** `● ▲ ○` belong to `theme.rs`, `→ ` and `⏎` to
 // `views.rs`; what a row carries is the band and the sentence (CLAUDE.md § single point of
 // change). So is the line break: a row is one line, and where it wraps is measured a layer up.
 // `nothing_a_report_carries_spells_a_glyph_or_breaks_its_own_line` is the sweep that holds
 // both, over every string in every report this file builds — titles and badges included.
-
-/// **`detail` is a slice of paragraphs and not one string** (NOTES § D129), so the empty case
-/// is `&[]` and reads as what it is: a row with nothing indented under it. Every builder below
-/// passes its paragraphs in the order the pane draws them.
-fn answer(severity: Option<Severity>, text: &str, detail: &[&str], jump: Option<Jump>) -> Row {
-    Row::Answer {
-        severity,
-        text: text.to_string(),
-        detail: detail.iter().map(|d| (*d).to_string()).collect(),
-        action: String::new(),
-        jump,
-    }
-}
-
-fn object(kind: ObjectKind, namespace: Option<&str>, name: &str) -> ObjectId {
-    ObjectId {
-        kind,
-        namespace: namespace.map(str::to_string),
-        name: name.to_string(),
-        uid: Some(format!("uid-{name}")),
-    }
-}
 
 // --- READING A ROW BACK ---
 //
@@ -645,20 +623,44 @@ fn every_report() -> Vec<(&'static str, Report)> {
                 Vec::new(),
             )),
         ),
-        ("restarts", shape::restarts()),
+        // **Restarts, computed** — the pane that folds, the namespace scope, and the cluster
+        // where nothing has restarted enough to matter.
+        (
+            "restarts",
+            super::restarts(&restarts::restarts_corpus(), &[]),
+        ),
+        (
+            "restarts, one namespace",
+            super::restarts(
+                &ClusterSnapshot {
+                    namespace_scope: Some("payments".to_string()),
+                    ..restarts::restarts_corpus()
+                },
+                &[],
+            ),
+        ),
+        (
+            "restarts, nothing qualifying",
+            super::restarts(
+                &ClusterSnapshot {
+                    pods: vec![captured_pod("healthy")],
+                    ..corpus()
+                },
+                &[],
+            ),
+        ),
     ]
 }
 
 #[test]
 fn every_pane_the_screen_draws_is_expressible() {
-    // **What this covers, exactly**: all six Family C reports, computed, in every state
+    // **What this covers, exactly**: all seven reports on the screen, computed, in every state
     // `screens/analysis.md` gives them — the panes it sketches, the *could not run* rows its
     // § *What each report needs* table names, and the empty pane rule 8 gives each one — plus the
     // states the shape reaches that no mockup draws, which today is the login that could read
-    // none of Waste's four lists, plus the restart row Phase 4 adds later, the one thing here
-    // still built by hand.
+    // none of Waste's four lists.
     //
-    // **Six reports and five panes is not a defect**: `Versions` is drawn at the foot of the
+    // **Seven reports and six panes is not a defect**: `Versions` is drawn at the foot of the
     // Certificates pane rather than as a pane of its own, and which panes exist is `screens/`'s
     // ruling and not this type's ([`Report`]).
     for (name, report) in every_report() {
@@ -720,7 +722,7 @@ fn both_sweeps_are_reading_something() {
     let reports = every_report();
     assert_eq!(
         reports.len(),
-        25,
+        27,
         "a pane that left this list takes both sweeps below with it, and every claim they make \
          about it goes quiet rather than red: {:?}",
         reports.iter().map(|(name, _)| *name).collect::<Vec<_>>()

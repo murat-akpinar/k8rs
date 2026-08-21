@@ -158,6 +158,7 @@ its line moving with it.
 - [D134](#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21) — Family C: the six reports, the frozen file they had to move, and the two green lights a review took away
 - [D135](#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21) — Family B: the trip that already ran, the resize box's stale premise, and the shape a capture cannot catch
 - [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21) — three claims that were reasoned instead of measured, and the one sentence that catches all three
+- [D137](#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22) — Family D: the restart row got a pane of its own, and a real cluster took four claims away
 
 ## Why it exists — where the gap is
 
@@ -9376,7 +9377,7 @@ badge carries a value and a band.
 **A second constraint was written into that doc and it was wrong.** The first
 draft made the badge a discriminator — `None` meaning *not checked* while a
 report that ran and found nothing carried `Some("0")` — and three of the box's
-own six panes falsify it: `drain safety`, `waste` and `restarts` all badge
+own six panes falsify it: `drain safety`, `waste` and `posture` all badge
 `None` and all ran, `waste` with a `Critical` row. The screen agrees with the
 panes: across all five mockups exactly **two** sidebar entries badge,
 `capacity  1 ▲` and `certificates  30d`, and `drain safety` carries nothing in
@@ -11789,3 +11790,114 @@ first read carried a section that no longer existed. Nothing was lost this time
 because the rewrite was the correct one. The existing rule already covers it —
 **one writer per file tree** — and what failed is that a *re-dispatch to fix a
 finding* was filed under the row that lets reviewers overlap.
+
+### D137 — Family D: the restart row got a pane of its own, and a real cluster took four claims away (2026-08-22)
+
+[D101](#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)
+ruled that a container which is fine right now and keeps dying belongs in a
+report row rather than an alert card, and left the screen two constraints it
+did not settle. Family D settled them and then spent four rounds losing claims
+that were true of the fixture corpus and false of a cluster.
+
+**The row is a seventh pane, not a row bent into Waste.** Waste's title —
+*Things that cost you something for nothing* — is wrong for a container that
+costs nothing and is running, and widening any of the other five titles to also
+cover *has this container been dying* recreates the invariant-14 defect one
+heading over. The bill was paid in the same turn: the `ANALYSIS` sidebar block is
+drawn in six files, and every one of them gained the entry — together with
+`posture`, which had been deferred since [D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)
+precisely until this box answered.
+
+**Two of the box's premises had gone stale and the brief carried them
+re-checked**, which is [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+working: *Worth knowing (not broken)* had already left Waste with the hostPath
+rows, and *Waste is the one pane the sidebar never badges* was never true —
+`drain safety`, `posture` and `waste` all badge nothing. **`restarts` does not
+badge either, and the cluster is what proved that right**: three node reboots on
+a one-node kind cluster took the qualifying set from 6 to 17 containers with
+nothing broken, and a count badge would have read `17`.
+
+**Three private items in a frozen `rules.rs` became `pub(crate)`, by ruling, and
+no logic moved with them** — `RESTARTS_WARN`, `doing_its_job` and
+`container_fact`. Each alternative was a second copy: a second `3`, a second
+readiness reading, a second wording of a role. D101 forbids widening a private
+item *quietly*; this is the loud path, and the precedent is `NODE_NAMESPACE` and
+`listed()`.
+
+**The filter is three clauses answering three questions, and the third is not
+redundant.** `matches!(state, Running { .. }) && doing_its_job(c) && restarts >=
+RESTARTS_WARN`. `doing_its_job` answers *healthy* and is never re-derived here;
+`Running` answers *in a run right now*, which is what the row's second number
+measures. Without it `healthy-retry`'s `wait-for-db` — an init container that
+failed three times and then exited `0` — qualifies for ever and can never be
+drawn, so a cluster whose only such container is that one draws an opening
+paragraph with nothing under it, permanently.
+
+**What the corpus could not show, and a kind cluster did.** Four findings, each
+with an object behind it:
+
+1. **The opening paragraph denied what Alerts was saying in the same
+   snapshot.** Rule 5 stands down on a serving container only once its current
+   run is older than `NOT_READY_GRACE`, and this pane qualifies it the moment it
+   is serving — **the two overlap by construction for ten minutes after every
+   restart**. `default/cycler` carried *"restarted 8 times — it is serving now,
+   but something keeps killing it"* while the pane printed *"Nothing below is
+   broken"* about it. The corpus shows none of that because its five runs are
+   all past the grace: a property of five pinned timestamps, not of a cluster.
+   **The sentence was the defect, not the set** — the paragraph now says what
+   the pane is and points at the second number as the signal, and `_findings`
+   stays unread.
+2. **The cap was Waste's number borrowed without Waste's reason.** Five is a
+   *per-section* budget for a pane whose four sections share sixteen lines; this
+   pane has one section and nothing to starve. Measured, the five slots went to
+   five containers that had stopped restarting for good while the one on a live
+   ten-minute cycle became an unselectable `and 1 more`. **This pane scrolls**,
+   like Capacity and Posture.
+3. **The sort discarded the second number.** Count stays primary — it is D101's
+   own *worst* — but a tie now breaks on the **younger current run**, which the
+   producer had already computed one line above the comparator. It compares the
+   moment and not `age`'s string: two runs three seconds apart both spell
+   `22 hours ago`, and a comparator reading the rung ties.
+4. **The reason a not-ready container is excluded was false, and had been
+   written into the frozen file.** Four sites said *it already carries rule 7's
+   card*. `running_but_not_ready` opens `if c.role != ContainerRole::Regular {
+   return None; }`, so a native sidecar failing the identical probe gets no rule
+   7 card at all — the Istio/Linkerd shape the role split exists for; two pods in
+   that state produced one rule 7 card and it was not the sidecar's. **The
+   guarantee is rule 5's non-serving branch**, which ages out only where
+   `doing_its_job` is true and therefore never for that container, whatever its
+   role. The behaviour was right; the reason was reasoned from a definition.
+
+**The empty sentence was rewritten three times and each rewrite closed a false
+claim.** *Every container* swept in the crash-loopers it never looks at; *every
+container running* swept in the `Running && !ready` ones the filter drops; and
+unscoped, it asserted something about the whole cluster while the title above it
+named one namespace — `kube-system/etcd` at forty restarts is what makes that
+false. It now reads *every container serving right now in `<namespace>`*, with
+the number derived from `RESTARTS_WARN` and drawn as a digit, which is every
+other count on that page.
+
+**Three smaller rulings, recorded so they are not re-opened.**
+`src/analysis_tests/shape.rs` is deleted: it held only the hand-built placeholder
+pane, whose title and `severity: None` the landed spec contradicts, and the real
+producer makes its claims. **The tests' `qualifying()` and `drawable()` keep
+restating the filter rather than calling the producer** — [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+is about two *product* readers of one container; a restatement written from the
+screen is the second opinion, and a test that calls the function it tests
+asserts a tautology. And **a count is not always evidence about the container the
+row names**: `broken-gang`'s `bystander` never failed — the pod's
+`RestartAllContainers` rule restarted it for a sibling's exit — and the row may
+not say so, because that would mean naming the ending. D101's own cost list did
+not carry it; the producer's doc does now.
+
+**One correction inside an earlier entry.** D127 listed `drain safety`, `waste`
+and `restarts` as the three panes that falsified the badge discriminator. There
+was no `restarts` pane on 2026-08-20; D128, written later the same day, names the
+real trio. The word is now `posture`.
+
+**The lesson this family adds to D136's.** Every one of the four findings above
+was invisible to 420 passing tests over 59 committed fixtures, and each fell out
+of one kind cluster in one afternoon. A corpus is a set of pinned moments; a
+claim about *what happens over time* — a card that ages out, a count that never
+comes back down, a pane that fills up after a reboot — cannot be checked against
+one. **When a claim's subject is time, the fixture cannot be the witness.**

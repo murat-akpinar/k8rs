@@ -634,6 +634,18 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   widths only, so nothing mechanical sees it. Either the pin or the disclaimer
   should go. Found by `tui-designer` while re-pinning the same file, 2026-08-21
 
+- **A row's own text can now exceed the pane width, and nothing says how it
+  wraps.** Every `Row::Answer` before Restarts fitted one line; that pane's rows
+  carry `container_fact`'s gloss — `sidecar container proxy (it runs beside the
+  app the whole time)` — so a wrap is reachable in normal output for the first
+  time. `Row::Answer::text` forbids a `\n` and puts wrapping on `views.rs`, which
+  is correct, but no screen states whether a continuation line aligns under the
+  glyph or under the text, and `screens/analysis.md`'s own mockup draws it under
+  the glyph while every `detail` line indents. Phase 11's question, and the mockup
+  is a de-facto answer nobody ruled on. Found by the PM's step-7 pass over Family
+  D, 2026-08-22
+  ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

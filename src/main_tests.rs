@@ -10,7 +10,7 @@
 use super::*;
 
 // `main.rs` itself never names a kind, only matches on the strings the API sends.
-use crate::rules::ObjectKind;
+use crate::rules::{ContainerState, ObjectKind};
 
 fn fixture(name: &str) -> String {
     format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
@@ -87,13 +87,18 @@ fn emptied_list(name: &str) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// The six labels [`reports`] prints, in the order the sidebar lists them — named here so a
+/// The seven labels [`reports`] prints, in the order the sidebar lists them — named here so a
 /// producer that stopped being printed is a red test rather than a pane nobody misses.
-const PANES: [&str; 6] = [
+///
+/// **`[restarts]` was missing until its box landed**, which made the claim above untrue of it:
+/// the list only fails on a pane that *leaves*, so one that never joined is a producer this file
+/// would not have missed either.
+const PANES: [&str; 7] = [
     "[capacity]",
     "[certificates]",
     "[drain safety]",
     "[posture]",
+    "[restarts]",
     "[waste]",
     "[versions]",
 ];
@@ -183,19 +188,26 @@ fn no_control_character_from_a_finding_reaches_the_report() {
     );
 }
 
-/// **The same invariant over the six analysis reports, which nothing outside `#[cfg(test)]` had
+/// **The same invariant over the seven analysis reports, which nothing outside `#[cfg(test)]` had
 /// ever rendered.** `analysis_tests`' own `pane` strips nothing, so until this box every string in
 /// every report was unexercised — and **Posture's row text is a `hostPath.path` verbatim and
 /// whole**, not a value inside a sentence, so a crafted path arrived at the terminal as an escape
 /// sequence (`reports/2026-08-21-family-c-analysis-report-family-review.md` § 8).
 ///
-/// **Three framings, because a guard is proven only for the framing it was written for**
+/// **Four framings, because a guard is proven only for the framing it was written for**
 /// (NOTES § D31): the whole of a row's `text` (the host path), a value inside a sentence (the
-/// namespace in Posture's `in {namespace}`), and a value inside a *row's* sentence built by a
-/// different producer (the node name on Capacity's row).
+/// namespace in Posture's `in {namespace}`), a value inside a *row's* sentence built by a
+/// different producer (the node name on Capacity's row), and **three values joined into one row's
+/// `text` by a fourth** (the pod's namespace, its name and its container's, on a Restarts row).
+///
+/// **`restarts.json` is in the input for that last one, and its absence was the gap**
+/// (NOTES § D29). The pane draws nothing on a cluster of `healthy-hostpath` and nodes, so none of
+/// its three untrusted interpolations ever reached this sweep, and a guard that is never fed the
+/// shape is not a guard for it.
 #[test]
 fn no_control_character_from_a_report_reaches_the_terminal() {
-    let mut input = read(&["healthy-hostpath.json", "nodes.json"]);
+    // `restarts.json` second, so the plants below still land on `healthy-hostpath`'s pod at 0.
+    let mut input = read(&["healthy-hostpath.json", "restarts.json", "nodes.json"]);
     let pod = &mut input.snapshot.pods[0];
     assert_eq!(pod.host_path_mounts.len(), 1, "the capture mounts one path");
     // `ESC`, `CR`, `BEL`, `DEL` and a C1 control — the whole `Cc` category, in the middle of a
@@ -205,6 +217,25 @@ fn no_control_character_from_a_report_reaches_the_terminal() {
     input.snapshot.nodes[0].id.name = "node\x07-\x7f1".to_string();
     // The pod has to be on the node whose name is crafted, or Capacity's row never names it.
     pod.node = Some(input.snapshot.nodes[0].id.name.clone());
+
+    // **The Restarts row, whose text is three untrusted values joined by that producer's own
+    // `separator`.** All three are crafted, because the row builds them in one `format!` and a
+    // per-field judgement call is how one of the three gets forgotten.
+    let restarting = &mut input.snapshot.pods[1];
+    assert_eq!(
+        restarting.containers.len(),
+        1,
+        "the capture carries the one restarting container"
+    );
+    restarting.id.namespace = Some("sh\x1bop".to_string());
+    restarting.id.name = "che\u{9b}ckout".to_string();
+    restarting.containers[0].name = "ap\x07p".to_string();
+    // The capture was taken after this file's pin, so its own `startedAt` sits four days in the
+    // future and `rules::age` declines it — which is the pane's *no age yet* state, not its row.
+    // This test is about the strip and not about the ladder, so the start moves onto the pin.
+    restarting.containers[0].state = ContainerState::Running {
+        started_at: Some(four_minutes_ago()),
+    };
 
     let printed = reports(&input.snapshot, &analyze(&input.snapshot));
     println!("{printed}");
@@ -230,6 +261,10 @@ fn no_control_character_from_a_report_reaches_the_terminal() {
     assert!(
         printed.contains("node-1   "),
         "the node name enters another producer's sentence and came back short: {printed:?}"
+    );
+    assert!(
+        printed.contains("shop/checkout \u{b7} container app"),
+        "three values joined into one Restarts row, and one came back short: {printed:?}"
     );
 }
 
@@ -278,11 +313,11 @@ fn a_row_with_nothing_to_do_draws_no_arrow_and_one_with_something_does() {
     );
 }
 
-/// **The flag, and that it is not read as a path.** Six panes under the cards when it is passed,
+/// **The flag, and that it is not read as a path.** Seven panes under the cards when it is passed,
 /// none when it is not — and the cards themselves are the same either way, because the driver
 /// prints one report under the other rather than folding the reports into the findings.
 #[test]
-fn the_analysis_flag_adds_six_panes_and_is_not_a_file() {
+fn the_analysis_flag_adds_every_pane_and_is_not_a_file() {
     let paths = [fixture("nodes.json"), fixture("kube-system-pods.json")];
     let plain = run(&paths).expect("the captures load");
     let with_reports = run(&[paths[0].clone(), ANALYSIS.to_string(), paths[1].clone()])

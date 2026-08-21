@@ -65,13 +65,16 @@
 )]
 
 use crate::rules::{
-    CertificateRequestSnapshot, ClaimSnapshot, ClusterSnapshot, ContainerSnapshot,
+    CertificateRequestSnapshot, ClaimSnapshot, ClusterSnapshot, ContainerSnapshot, ContainerState,
     DisruptionBudgetSnapshot, EndpointSliceSnapshot, Finding, HostPathMount, Metrics,
-    NODE_NAMESPACE, NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, Selector, SelectorRequirement,
-    ServiceSnapshot, Severity, a_drain_would_move, bytes, cpu_text, expires_at, finished,
-    is_runtime_socket, kubelet_too_far_behind, listed, minor_version, mounted_path,
-    node_overcommitted, pods_on, promised, qualified, quantity_milli,
+    NODE_NAMESPACE, NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, RESTARTS_WARN, Selector,
+    SelectorRequirement, ServiceSnapshot, Severity, a_drain_would_move, age, bytes, container_fact,
+    cpu_text, doing_its_job, expires_at, finished, is_runtime_socket, kubelet_too_far_behind,
+    listed, minor_version, mounted_path, node_overcommitted, pods_on, promised, qualified,
+    quantity_milli,
 };
+
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -2206,6 +2209,293 @@ fn left_by_rule_8(pod: &PodSnapshot, mount: &HostPathMount) -> bool {
 }
 
 // --- THE POSTURE REPORT END ---
+
+// --- THE RESTARTS REPORT START ---
+
+/// **The containers that are serving right now and keep dying** — the hole rules 1, 2, 5 and 6
+/// leave visible (NOTES § D101, `screens/analysis.md` § Restarts).
+///
+/// **A row and never a card.** A container that is serving at the instant the snapshot was taken
+/// has rules 2, 5 and 6 stood down on it by [`doing_its_job`] — the three that share it as a
+/// suppressor — and rule 1 never reaches it at all, because a `CrashLoopBackOff` reason is only
+/// readable off a [`ContainerState::Waiting`] container. So Alerts says nothing until the next
+/// restart. A point sample cannot tell a container still cycling from one that hiccuped once
+/// a month ago, so this pane prints two facts and asserts nothing: how many times, and how long
+/// the run it is in has lasted.
+///
+/// **This pane and rule 5's cards overlap by construction, and the overlap is the first
+/// `NOT_READY_GRACE` after every restart.** Rule 5 stands down on a serving container only once
+/// its *current run* is older than ten minutes (`restarting_repeatedly`); this pane qualifies it
+/// the moment it is serving. So a container that restarted two minutes ago is on both screens at
+/// once, measured on a real cluster: `default/cycler` carried *"Container has been restarted 8
+/// times — it is serving now, but something keeps killing it"* on Alerts while this pane drew a
+/// row for it. The committed corpus shows none of that only because its five runs are all past
+/// the grace — a property of five pinned timestamps, not of a cluster, and not something any
+/// sentence on this pane may lean on. **That is what the opening paragraph is worded around**,
+/// and it is why `_findings` stays unread rather than subtracted: nothing here depends on the two
+/// sets being disjoint, because they are not.
+///
+/// **Both numbers, never divided** (PRIOR-ART § F2). They sit one under the other in `detail`, one
+/// paragraph each, and are never combined into a rate, never summed across a workload's pods —
+/// whose count and age would be two different domains — and never grouped on
+/// [`crate::rules::PodSnapshot::owner`], which is the ReplicaSet until Phase 5 and loses the count
+/// on every deploy.
+///
+/// **The run's age comes from `state.running.started_at` and not from
+/// [`crate::rules::ContainerSnapshot::last_terminated`]**: the two synthesized `137`s of a gang
+/// restart leave `finished_at` null, so the field that looks equivalent is the one that is absent
+/// on the shape this pane most exists for (NOTES § D100).
+///
+/// **A count is not always evidence about the container the row names, and this pane cannot say
+/// so.** `broken-gang`'s `bystander` never failed: the pod's `RestartAllContainers` rule restarted
+/// it because a *sibling* exited, and its count went up for its neighbour's fault. Saying that
+/// would mean naming the ending, which is the line below — so the row prints a number that is true
+/// and an explanation that is not available. Neither NOTES § D101's cost list nor this doc named
+/// it before 2026-08-22, and it is exactly the shape this pane most exists for.
+///
+/// **What may not appear: how the run ended.** `ending` and `exit_meaning` are private to
+/// `rules.rs`, and no row here spells a reason or an `exit 137` — re-spelling that translation in
+/// a second file is the defect NOTES § D85 exists to prevent. There is nothing to fix in this
+/// row's own words, which is what a card is for and this container has none.
+///
+/// **A set that qualifies and cannot yet be drawn draws nothing, and says nothing either — and
+/// that state is transient.** A container in a run, healthy in it and above the threshold, but
+/// whose `state.running.started_at` has not arrived — under eight seconds after a restart
+/// (NOTES § D100) — or whose start sits past [`crate::rules::age`]'s future-skew allowance has no
+/// second paragraph to print. The empty sentence would be false about it, so this pane keeps its
+/// opening paragraph and draws neither.
+///
+/// **`findings` is unread on purpose, and not for Capacity's reason.** The pane does not
+/// cross-check against what Alerts is currently showing: the row's claim is narrower than a
+/// card's — count and age, nothing about current health — so a container appears here whether or
+/// not it also carries a live card, and there is nothing to reconcile.
+///
+/// **No [`Row::NotComputed`], ever.** This reads pod data alone, which is permanently watched and
+/// needs no permission Alerts does not already have; a namespace scope narrows the list and never
+/// switches the check off (`screens/analysis.md` § Restarts).
+///
+/// **This pane scrolls and does not cap.** [`MOST_ROWS_PER_SECTION`] is a *per-section* budget:
+/// Waste's four sections share one pane's lines, and cutting the loudest is what stops it starving
+/// the other three. This pane has one section, so there is nothing left to starve — and the cap it
+/// borrowed from Waste's number without Waste's reason broke on a one-node kind cluster, where
+/// three node reboots took the qualifying set from 6 to 17 and the five kept slots went to five
+/// containers that had stopped restarting for good, while the one still on a live ten-minute cycle
+/// became the `and 1 more` line. A [`Row::Prose`] is not selectable, so a folded row is not one
+/// keypress away — it is off the screen. Capacity's node list and Posture's rows already scroll
+/// for the same reason (`screens/analysis.md` § Restarts).
+///
+/// **No badge**, for Posture's reason carried one step further: the only band this pane could
+/// offer is `Info`, and the count of qualifying containers only grows — a settled restart from a
+/// node reboot last month stays in the tally until its pod is replaced, so on any cluster with
+/// real age the badge would read nonzero permanently.
+pub fn restarts(snapshot: &ClusterSnapshot, _findings: &[Finding]) -> Report {
+    // Rule 6: a title names a namespace only where there is one.
+    let title = match snapshot.namespace_scope.as_deref() {
+        Some(namespace) => format!("Containers in {namespace} that keep restarting"),
+        None => "Containers that keep restarting".to_string(),
+    };
+    // **The qualifying set is decided before any age is asked for**, because the empty sentence
+    // below claims that *nothing* qualifies by serving and count — and a container above the line
+    // whose run has no printable age qualifies, it just cannot be drawn yet
+    // (`screens/analysis.md` § Restarts).
+    let qualifying = serving_and_restarting(snapshot);
+    if qualifying.is_empty() {
+        // **One sentence, and it has to stay true on every cluster it can be drawn on**
+        // (`screens/analysis.md` § *Empty, and nothing qualifies*): nothing has restarted at all,
+        // something has but stayed under the threshold, or something is above the threshold and
+        // not serving — crash-looping, or `Running` and failing its readiness check — and so was
+        // never in this pane's set. **So it quantifies over this producer's own filter and
+        // nothing wider** — *every container serving right now*, which is [`doing_its_job`] and
+        // not `Running`. `broken-probe0` sits at 13 restarts, `Running`, not ready, and carrying
+        // rule 5's non-serving card — the one that fires on that shape for any role and never ages
+        // out: *running right now* would have swept it into *2 or fewer*.
+        //
+        // **The number is computed off [`RESTARTS_WARN`] and never retyped**, so if rule 5's
+        // threshold moves this sentence moves with it instead of going stale in a file nothing
+        // recompiles. It is drawn as a digit, which is every count on this page
+        // (`screens/analysis.md` § *Certificates and Versions*).
+        //
+        // **And it names the namespace, which the rows do not have to.** A row carries its scope
+        // in its own `namespace/pod` prefix; this line has no row to carry it, so under a scope —
+        // `--namespace`, or the 403 fallback that fills the same field — it would otherwise assert
+        // something about every serving container in the cluster while the title above it says
+        // one namespace. `kube-system/etcd` at forty restarts and serving is what makes that
+        // false (`screens/analysis.md` § *Restarts under one namespace*).
+        return Report {
+            title,
+            badge: None,
+            rows: vec![Row::Prose(format!(
+                "Nothing here has restarted enough to matter. Every container serving right \
+                 now{} has restarted {} or fewer times since its pod started.",
+                match snapshot.namespace_scope.as_deref() {
+                    Some(namespace) => format!(" in {namespace}"),
+                    None => String::new(),
+                },
+                RESTARTS_WARN - 1
+            ))],
+        };
+    }
+    // **What can actually be drawn** — a qualifying container whose current run has a printable
+    // age. The rest keep the opening paragraph and draw no row and no claim either way: the row
+    // is both numbers, and the pane draws them on the next redraw once Kubernetes reports the
+    // timestamp (NOTES § D100, `screens/analysis.md` § Restarts).
+    let mut cycling: Vec<Cycling<'_>> = qualifying
+        .into_iter()
+        .filter_map(|(pod, container)| {
+            let ContainerState::Running {
+                started_at: Some(started),
+            } = &container.state
+            else {
+                return None;
+            };
+            Some(Cycling {
+                pod,
+                container,
+                run: age(&snapshot.now, started)?,
+                started,
+            })
+        })
+        .collect();
+    // **Worst first, and a tie no longer throws away the second number to get there.** The count
+    // is the pane's subject and D101's own *worst*, so it stays primary; a tie then breaks on the
+    // **younger current run** — the one that started more recently, still mid-cycle rather than
+    // long settled — which this producer had already computed one line above for the row's own
+    // second paragraph and was discarding at the comparator. Then `namespace/pod` as the screen
+    // spells it, then the container's own name, so the two containers of one gang-restarted pod
+    // come out in a fixed order rather than in whichever order the kubelet listed them.
+    cycling.sort_by(|a, b| {
+        b.container
+            .restarts
+            .cmp(&a.container.restarts)
+            .then_with(|| b.started.cmp(a.started))
+            .then_with(|| qualified(&a.pod.id).cmp(&qualified(&b.pod.id)))
+            .then_with(|| a.container.name.cmp(&b.container.name))
+    });
+    // **The opening paragraph is part of the report**, not a caption `views.rs` adds: without it
+    // a pane of restart counts reads as a list of things to go and fix, and every container on it
+    // is serving.
+    //
+    // **It may not tell the reader nothing is broken.** It said so until 2026-08-22, and the
+    // sentence was false for the first ten minutes after every restart — the window rule 5 is
+    // still carding, and the reader most likely to open this pane is the one who just came from
+    // that card. What it says instead is what the pane *is*, and which of the two numbers carries
+    // the signal (`screens/analysis.md` § Restarts).
+    let mut rows = vec![Row::Prose(
+        "Every container below is serving right now. A restart count never clears itself — the \
+         second number, how long this run has lasted, is the signal."
+            .to_string(),
+    )];
+    rows.extend(cycling.into_iter().map(Cycling::row));
+    Report {
+        title,
+        badge: None,
+        rows,
+    }
+}
+
+/// One container that qualifies, with the run age already spelled — **the age is resolved before
+/// the row is built and not inside it**, because a run whose age cannot be spelled is not drawn
+/// at all ([`serving_and_restarting`]).
+struct Cycling<'a> {
+    pod: &'a PodSnapshot,
+    container: &'a ContainerSnapshot,
+    /// [`crate::rules::age`]'s own string — `6 hours ago`, the one ladder every age on every
+    /// screen uses.
+    run: String,
+    /// **The same moment `run` spells, kept as a moment** — the tie-break orders by it, and a
+    /// rung of the ladder cannot be compared: `50 min ago` and `1 hour ago` sort by their first
+    /// character, and every run inside one rung compares equal.
+    started: &'a Time,
+}
+
+impl Cycling<'_> {
+    /// **Always names the container, even where the pod has only one.**
+    /// [`crate::rules::ContainerSnapshot::restarts`] is a per-container count, and *name it only
+    /// when there is more than one* is a branch this producer would carry to save one word. Two
+    /// qualifying containers in one pod draw two rows and never one merged one.
+    fn row(self) -> Row {
+        Row::Answer {
+            // **`Info` on every row, always.** The pane makes no judgement — that is the whole of
+            // NOTES § D101 — and a band that varied would be one.
+            severity: Some(Severity::Info),
+            // **The identity is [`container_fact`] verbatim, gloss and all** — never a second
+            // wording of a role, which [`crate::rules::ContainerRole`]'s own doc calls wrong
+            // rather than unclear. **And the gloss is why the numbers are not on this line**: a
+            // reader asked to parse *"(it runs beside the app the whole time) restarted 9
+            // times"* in one breath loses the count, so the row is built around the gloss and
+            // both numbers move down (`screens/analysis.md` § Restarts).
+            text: format!(
+                "{} · {}",
+                qualified(&self.pod.id),
+                container_fact(self.container)
+            ),
+            // **Two paragraphs, one clock each, and the words keep them apart on purpose.**
+            // *this pod* answers for the count — `restarts` resets to 0 on a new pod, so without
+            // that qualifier a reader could take it as the container's whole history and read a
+            // young pod as calm. *this run* answers for the run, which began at the last restart
+            // and not at the pod's creation.
+            detail: vec![
+                format!(
+                    "Restarted {} times since this pod started.",
+                    self.container.restarts
+                ),
+                format!("This run started {}.", self.run),
+            ],
+            // Nothing to do — the container is serving.
+            action: String::new(),
+            // **To the pod, and there is no finding to go to** — which is the whole reason the
+            // row exists ([`Jump::Object`]'s own doc). Two qualifying containers in one pod jump
+            // to the same pod, and the reader sees both from there.
+            jump: Some(Jump::Object(self.pod.id.clone())),
+        }
+    }
+}
+
+/// **In a run right now, healthy in it, and at rule 5's own threshold** — the pane's whole filter,
+/// in one place, and its three clauses answer three different questions.
+///
+/// **[`doing_its_job`] answers *healthy*, and `analysis.rs` never re-derives it.** It is the
+/// suppressor rules 2, 5 and 6 already share, so a container that is up but failing its readiness
+/// check is excluded here for the same reason those rules stand down elsewhere. `broken-probe0` at
+/// 13 restarts and `broken-restarts10` at 10 are both that shape in the committed corpus.
+///
+/// **What makes that exclusion safe is rule 5's own non-serving branch, and not rule 7's card.**
+/// `restarting_repeatedly` ages out only when the container *is* serving, so a `Running && !ready`
+/// container at or above [`RESTARTS_WARN`] keeps its card permanently, whatever its role. Rule 7's
+/// *"Running, but not receiving traffic"* is the extra card a **regular** container also gets:
+/// `running_but_not_ready` opens `if c.role != ContainerRole::Regular { return None; }`, so a
+/// native sidecar failing the identical probe — the Istio/Linkerd shape the role split exists for
+/// — carries no rule 7 card at all, and only rule 5's branch still catches it. Measured on a real
+/// cluster: two pods in the identical state produced one rule 7 card, and it was not the
+/// sidecar's.
+///
+/// **[`ContainerState::Running`] answers *in a run right now*, which is a different question and
+/// is what this pane's second number is.** [`doing_its_job`]'s `Init` arm answers *finished well*
+/// — an init container that exited `0` is doing its job — and that container is `Terminated`, so
+/// it has no current run to age and never can have one. Without this clause
+/// `healthy-retry/wait-for-db` sat in the qualifying set permanently, suppressing the empty
+/// sentence on a cluster it was the only member of: an opening paragraph over nothing, for ever,
+/// instead of the true sentence (NOTES § D101).
+///
+/// **It answers for the empty sentence as well as for the rows**, which is why it stops here and
+/// does not also demand an age: a container that qualifies and cannot yet be drawn must not let
+/// the pane claim that nothing qualifies. With the state clause in place that gap is D100's
+/// eight-second window and the skew allowance, and nothing else — transient, which is what
+/// `screens/analysis.md` § Restarts says it is ([`restarts`]).
+fn serving_and_restarting(snapshot: &ClusterSnapshot) -> Vec<(&PodSnapshot, &ContainerSnapshot)> {
+    snapshot
+        .pods
+        .iter()
+        .flat_map(|pod| pod.containers.iter().map(move |container| (pod, container)))
+        .filter(|(_, container)| {
+            matches!(container.state, ContainerState::Running { .. })
+                && doing_its_job(container)
+                && container.restarts >= RESTARTS_WARN
+        })
+        .collect()
+}
+
+// --- THE RESTARTS REPORT END ---
 
 // --- THE VERSIONS REPORT START ---
 

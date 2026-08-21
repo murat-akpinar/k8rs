@@ -16,10 +16,10 @@ The default view. k8rs never opens on a pod list; it opens on what is broken.
 │   capacity      1 ▲│    Running, but not receiving traffic — the   │
 │   certificates  30d│    readiness check is failing                 │
 │   drain safety     │    → check the app's /healthz endpoint        │
-│   waste            │                                               │
-│   versions         │  ▲ node-3                        2 hours ago  │
-│                    │    This node refuses new pods (cordoned)      │
-│                    │    2 pods here would still have to move       │
+│   posture          │                                               │
+│   restarts         │  ▲ node-3                        2 hours ago  │
+│   waste            │    This node refuses new pods (cordoned)      │
+│   versions         │    2 pods here would still have to move       │
 │                    │    → allow new pods once the work is done     │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get pods -A --watch                                      │
@@ -379,10 +379,10 @@ the shape the rule set is coming back to rather than one it is safely inside:
 │   capacity      1 ▲│      check the pod's events for a Killing line and the  │
 │   certificates  30d│      node for a memory killer. If nothing stopped it    │
 │   drain safety     │      the program ends itself, and this one must run as  │
-│   waste            │      long as the app does: finishing at all is the bug  │
-│   versions         │                                                         │
-│                    │  ▲ shop/api  ·  2 of 6 pods                 12 min ago  │
-│                    │    Running, but not receiving traffic — the readiness   │
+│   posture          │      long as the app does: finishing at all is the bug  │
+│   restarts         │                                                         │
+│   waste            │  ▲ shop/api  ·  2 of 6 pods                 12 min ago  │
+│   versions         │    Running, but not receiving traffic — the readiness   │
 │                    │    check is failing                                     │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
 │ $ kubectl get pods -A --watch                                                │

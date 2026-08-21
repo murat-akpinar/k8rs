@@ -1869,7 +1869,7 @@ unchecked one from the top.
       `DisruptionBudgetSnapshot::selector` became `Option<Selector>` here — an
       empty selector protects a whole namespace and an absent one protects
       nothing, and flattened they were one value ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
-- [ ] **`tui-designer` answers where the restart row lives, before it is
+- [x] **`tui-designer` answers where the restart row lives, before it is
       written** —
       [D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)
       hands the screen two constraints and settles neither. Waste is the only pane
@@ -1880,7 +1880,15 @@ unchecked one from the top.
       Alerts silence lands where nothing sends the reader. Re-title, re-home or
       badge it — in `screens/analysis.md`, with the wording of the two columns,
       which says **since this pod started** because a rollout resets the count
-- [ ] **Restarts, as a counted row and never an alert card** — the hole D101
+      Answered: **a seventh pane of its own**, `Containers that keep restarting`,
+      and **no badge** — a count badge would have read `17` on a one-node cluster
+      where three reboots broke nothing. The `ANALYSIS` sidebar block is drawn in
+      six files and every one gained the entry, together with `posture`, deferred
+      since [D128](NOTES.md#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)
+      until this box answered. Two of the box's own premises were stale and the
+      brief carried them re-checked
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
+- [x] **Restarts, as a counted row and never an alert card** — the hole D101
       left visible: a container that is fine right now and keeps dying on a long
       cycle draws nothing from rules 1, 2, 5 or 6 between its restarts. **One row
       per container, both numbers that container's own**: `restarts`, and how long
@@ -1901,6 +1909,18 @@ unchecked one from the top.
       exists to prevent. That one is a convention with no gate behind it —
       `Terminated`'s `reason` and `exit_code` are `pub`, so a raw `exit 137` in a
       row is reachable and is wrong
+      Done: one row per container, the count and the current run's age in two
+      `detail` paragraphs, `Jump::Object` to the pod, `Info` throughout. The filter
+      is three clauses answering three questions —
+      `Running && doing_its_job(c) && restarts >= RESTARTS_WARN` — and three private
+      items in a frozen `rules.rs` became `pub(crate)` by ruling rather than being
+      copied. **A kind cluster took four claims a 420-test corpus could not see**:
+      the opening paragraph denied a card Alerts was drawing in the same snapshot,
+      the cap was Waste's number without Waste's reason, the sort discarded the
+      second number at a tie, and the not-ready exclusion cited a rule that never
+      fires for a sidecar
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22) ·
+      [reports/](reports/README.md), 2026-08-22)
 - [x] **Posture** rows: the plain read-only hostPath mounts that no longer
       appear in Alerts — CNI/CSI/node agents are supposed to have them, so
       they are a list to review, not an alarm to answer. Computed **here**,
