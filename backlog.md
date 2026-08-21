@@ -517,6 +517,77 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   is owed at ingest — two selectors, pod labels and namespaces are all carried —
   but it is a refusal path one relabelled workload away, with no object and no
   test. Operator review 2026-08-21 round 2
+- **A node at `Ready: Unknown` has every pod deletion-stamped, so Drain safety's
+  local-storage and orphan facts vanish on the one node the row exists for.** The
+  node controller stamps every pod on an unreachable node once its tolerations
+  expire — 16 of 19 on the live cluster — and `a_drain_would_move`'s
+  `deletion_timestamp.is_none()` then drops them all, so `local` and `orphans`
+  come out `0`. The reader powers the machine back on, drains, and meets
+  `cannot delete Pods with local storage`. `a_drain_would_move` is shared with N2,
+  so this is a per-box change and not a family one; its doc also cites
+  `skipDeletedFilter`, which is inert at kubectl's default
+  (`--skip-wait-for-delete-timeout=0`). Operator review 2026-08-21 round 2, § 2
+- **Which of several blocking budgets wins a drain row's text is alphabetical.**
+  The row's `action` differs materially by branch — *check what X points at*
+  against *run one more copy* against *get the pods healthy again first* — and
+  position 0 of a `(namespace, name)` sort decides it, so `aaa-pdb-syncfailed`
+  wins on an `a`. The sort itself is right for the *list*; using it as a severity
+  ranking is [PRIOR-ART § F1](PRIOR-ART.md#f1--sorting)'s class.
+  Operator review 2026-08-21 round 2, § 6
+- **The pin under *N1 is the only Critical node rule* asserts over one cluster's
+  output, not over the rule set.** `not_ready` picks N1 by kind + name +
+  `Critical` because a `Finding` carries no rule id
+  ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21)).
+  The claim is true today, verified from source. The test builds one cluster, and
+  N4 and N5 never fire on it — so a future Critical node rule keyed on a shape
+  that cluster lacks lands green and puts its sentence under *would never finish
+  draining*. The honest gate is a `scripts/` guard counting `Severity::Critical`
+  inside the node-rules region; that is `tester`'s.
+  Operator review 2026-08-21 round 2, § 7
+- **`N workloads have no memory or CPU limit` counts controllers ∪ bare pods, and
+  the pane does not say which.** 42 uncapped pods were 29 group keys and 9
+  controllers on the test cluster. Counting a bare pod as its own workload is
+  defensible — it is the object you edit — but nothing on the row says so, and it
+  carries no detail line to say it in. Second-order: `owner` is the ReplicaSet
+  until Phase 5 resolves it up, so this row's answer changes then and that is not
+  a regression. Operator review 2026-08-21 round 2, § 8
+- **Waste stacks two `NotComputed` rows over an empty pane when exactly two of its
+  three lists are unread.** All three unread folds to one row; two do not, because
+  the folded sentence names all four lists and would be false about the one that
+  *was* read. Closing it needs either a dynamically built ask list — a second copy
+  of the three `is_none()` predicates — or a sentence that lies. Tested and
+  documented at both ends. Found by the author, 2026-08-21
+- **The temporary driver's badge prints `1` without its unit.**
+  `screens/widgets.md` § 2's new rule is that a count badge draws its band as a
+  glyph because *"a reader who copies `capacity  1` out of the terminal has lost
+  what the number was of"* — and `main.rs`'s `pane()` prints exactly that line. It
+  is the temporary driver, so it is a nit; the rule is the thing that just got
+  written down. Operator review 2026-08-21 round 2, § 10
+- **`unhealthyPodEvictionPolicy: AlwaysAllow` can make *would never finish
+  draining* wrong.** Read off the live v1.36 API server: `AlwaysAllow` lets every
+  running pod be evicted regardless of the budget, so the block itself can be
+  false. On no snapshot type and in no prune line. A false red, which is why it
+  ranks below the false greens. Operator review 2026-08-21 round 1, § 13
+- **`kubectl get pdb -A` cannot show the two fields the new drain branches turn
+  on.** The command log's line is the equivalent call and invariant 4 holds, but
+  `observedGeneration` and the `DisruptionAllowed` reason are not in that table —
+  so the teaching half fails for the stale-counters and `SyncFailed` rows.
+  Operator review 2026-08-21 round 1, § 16
+- **`drain_row`'s *"One other rule on this node has not caught up either."* is the
+  last word-spelled count on the analysis page.** Every other counted paragraph
+  now spells the digit; this one was out of scope for the round that fixed the
+  blocking budgets' line. Found by the author, 2026-08-21
+- **`just mutants-diff` cannot see an untracked product file.** It scopes to
+  `git diff HEAD`, which excludes untracked files, so a brand-new `src/*.rs` is
+  invisible to the per-turn gate until it is staged. Harmless for a test module;
+  a new product file would be a silent gap of exactly the kind
+  [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
+  and [D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21)
+  are both about. Found by the author, 2026-08-21
+- **`scripts/certs-test.sh` has no `--self-test`.** It grew a second check this
+  turn — the two files that pin an instant against the committed certificates —
+  and its red was proven on scratch copies rather than by a self-test, which every
+  other guard in `scripts/` carries. `tester`'s, raised 2026-08-21
 
 ## Ruled out
 

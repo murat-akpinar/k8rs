@@ -3943,10 +3943,13 @@ fn a_label_selector_decodes_its_expressions_and_not_only_its_labels() {
         "the labels half is untouched by the expressions half"
     );
 
-    // An absent selector is `Selector::default`, which matches nothing — and in `policy/v1` that
-    // is upstream's own answer, the reverse of the `v1beta1` it replaced.
-    let none = Selector::default();
-    assert!(none.match_labels.is_empty() && none.match_expressions.is_empty());
+    // `Selector::default` is the value a **present** selector written `{}` decodes to, and
+    // upstream reads it as *every object* — `all` over two empty halves. An **absent** selector
+    // is not this value and stopped sharing it on 2026-08-21: it is `None` on the field, which
+    // `policy/v1` reads as *selects no pods*, the reverse of the `v1beta1` it replaced
+    // ([`the_two_ways_a_budget_can_say_nothing_about_which_pods_and_they_are_not_one_value`]).
+    let empty = Selector::default();
+    assert!(empty.match_labels.is_empty() && empty.match_expressions.is_empty());
 }
 
 /// The four captured Services, **including the one with no selector at all**. `kubernetes` in
@@ -4194,8 +4197,7 @@ fn the_blocking_disruption_budget_and_the_one_with_room() {
          exactly 2* — and their being equal is what leaves no room to evict into"
     );
     assert_eq!(
-        blocking
-            .selector
+        selector_of(blocking)
             .match_labels
             .get("app")
             .map(String::as_str),
@@ -4204,7 +4206,7 @@ fn the_blocking_disruption_budget_and_the_one_with_room() {
          find the pods it is about"
     );
     assert!(
-        blocking.selector.match_expressions.is_empty(),
+        selector_of(blocking).match_expressions.is_empty(),
         "this one is `matchLabels` alone — the expression half is \
          `a_label_selector_decodes_its_expressions_and_not_only_its_labels`'s subject"
     );
@@ -4292,15 +4294,18 @@ fn the_blocking_disruption_budget_and_the_one_with_room() {
          be drawn on"
     );
     assert_eq!(
-        room.selector.match_labels.get("app").map(String::as_str),
+        selector_of(room)
+            .match_labels
+            .get("app")
+            .map(String::as_str),
         Some("broken-rollout"),
         "and it protects a different workload, so the two budgets are told apart by their \
          selectors and not only by their names"
     );
     assert_ne!(
         blocking.selector, room.selector,
-        "a decode that dropped the selector would give both budgets `Selector::default` and \
-         every assertion about *which pods* would pass on both"
+        "a decode that dropped the selector would give both budgets the same `None` and every \
+         assertion about *which pods* would pass on both"
     );
     assert_eq!(
         (
@@ -4506,7 +4511,7 @@ fn the_blocking_disruption_budget_and_the_one_with_room() {
                 b.disruptions_allowed,
                 b.current_healthy,
                 b.desired_healthy,
-                b.selector.match_labels,
+                selector_of(b).match_labels,
                 b.generation,
                 b.observed_generation,
                 allowed(b).reason
@@ -4562,13 +4567,15 @@ fn the_pods_the_blocking_budget_protects_and_the_ones_no_budget_can_be_joined_to
     // Written here and not in `rules.rs`: the report that owns the real matcher is a later box,
     // and a second implementation of it is what NOTES § D46 forbids — this one is confined to
     // this test and reads `matchLabels` alone, which is all any committed selector carries.
-    let selects = |selector: &Selector, labels: &BTreeMap<String, String>| {
-        selector.match_expressions.is_empty()
-            && !selector.match_labels.is_empty()
-            && selector
-                .match_labels
-                .iter()
-                .all(|(k, v)| labels.get(k) == Some(v))
+    let selects = |selector: Option<&Selector>, labels: &BTreeMap<String, String>| {
+        // **`None` is `policy/v1`'s *selects no pods***, and a present one is read on
+        // `matchLabels` alone — all any committed selector carries. The `all` is upstream's,
+        // including over an empty map, where it answers *every pod in the namespace*; the
+        // guard that used to sit here answering `false` there is the fold NOTES § D46 caught.
+        selector.is_some_and(|s| {
+            s.match_expressions.is_empty()
+                && s.match_labels.iter().all(|(k, v)| labels.get(k) == Some(v))
+        })
     };
     let budget = |name: &str| {
         budgets
@@ -4577,7 +4584,7 @@ fn the_pods_the_blocking_budget_protects_and_the_ones_no_budget_can_be_joined_to
             .unwrap_or_else(|| panic!("no {name} among {budgets:?}"))
     };
     let matches = |b: &DisruptionBudgetSnapshot, p: &PodSnapshot| {
-        p.id.namespace == b.id.namespace && selects(&b.selector, &p.labels)
+        p.id.namespace == b.id.namespace && selects(b.selector.as_ref(), &p.labels)
     };
     let protects = |b: &DisruptionBudgetSnapshot| -> Vec<String> {
         let mut names: Vec<String> = pods
@@ -4595,10 +4602,10 @@ fn the_pods_the_blocking_budget_protects_and_the_ones_no_budget_can_be_joined_to
         "{} pods · {} {:?} -> {:?} · {} {:?} -> {:?}",
         pods.len(),
         floor.id.name,
-        floor.selector.match_labels,
+        selector_of(floor).match_labels,
         protects(floor),
         room.id.name,
-        room.selector.match_labels,
+        selector_of(room).match_labels,
         protects(room),
     );
 
@@ -4697,7 +4704,7 @@ fn the_pods_the_blocking_budget_protects_and_the_ones_no_budget_can_be_joined_to
         .labels
         .insert("app".to_string(), "healthy-deploy".to_string());
     assert!(
-        selects(&floor.selector, &elsewhere.labels),
+        selects(floor.selector.as_ref(), &elsewhere.labels),
         "the labels alone do match, which is what leaves the namespace as the only thing \
          standing between this pod and a `default` budget's floor: {:?}",
         elsewhere.labels
@@ -4733,14 +4740,13 @@ fn the_pods_the_blocking_budget_protects_and_the_ones_no_budget_can_be_joined_to
     );
     let mut stand_in = PodSnapshot::from(captured.remove(0));
     assert!(
-        !selects(&room.selector, &stand_in.labels),
+        !selects(room.selector.as_ref(), &stand_in.labels),
         "the pod starts outside the selector, or the plant below proves nothing: {:?} against \
          {:?}",
-        room.selector.match_labels,
+        selector_of(room).match_labels,
         stand_in.labels
     );
-    let wanted = room
-        .selector
+    let wanted = selector_of(room)
         .match_labels
         .get("app")
         .expect("the budget with room selects on `app`, like every committed selector")
@@ -4752,10 +4758,10 @@ fn the_pods_the_blocking_budget_protects_and_the_ones_no_budget_can_be_joined_to
     );
     stand_in.labels.insert("app".to_string(), wanted);
     assert!(
-        selects(&room.selector, &stand_in.labels),
+        selects(room.selector.as_ref(), &stand_in.labels),
         "`healthy-pdb-room`'s selector matches a pod carrying its label, so the empty join above \
          is a corpus with no such pod and not a selector that arrived broken: {:?} against {:?}",
-        room.selector.match_labels,
+        selector_of(room).match_labels,
         stand_in.labels
     );
     assert_ne!(
@@ -4878,6 +4884,207 @@ fn the_bound_claim_nothing_mounts_and_the_pod_that_mounts_the_other_one() {
         "the claim `healthy-disk.json` mounts is found from the claim's side too, or the \
          direction above is the only one that works"
     );
+}
+
+/// **A generic ephemeral volume is a claim the pod mounts, under the name the API server gives
+/// it** — `<pod name>-<volume name>`, off `kubectl explain
+/// pod.spec.volumes.ephemeral.volumeClaimTemplate` (NOTES § D131,
+/// `reports/2026-08-21-family-c-analysis-report-family-review.md` § 4).
+///
+/// **The plant is the only way to reach the shape**: no pod on the fixture cluster declares one,
+/// so `just fixtures` has never captured it (NOTES § D40). A trip that runs a workload with an
+/// `ephemeral:` volume replaces it.
+///
+/// **Three framings of one field, all fed** (NOTES § D29): the claim a pod names outright, the
+/// claim it never names because the API server derives it, and the projected token volume that is
+/// neither and must not be counted as one.
+#[test]
+fn a_generic_ephemeral_volume_is_a_claim_under_the_name_the_api_server_derives() {
+    let plain = pod("healthy-disk");
+    assert_eq!(
+        plain.claims,
+        vec!["healthy-disk".to_string()],
+        "the captured pod names one claim and mounts a projected token beside it"
+    );
+    assert!(
+        !plain.local_storage_disk && !plain.local_storage_memory,
+        "a claim is not local storage — a drain does not throw it away, and the fields must not \
+         be reading one volume list the same way"
+    );
+
+    // **The pod is renamed on the way in, and that is the whole of this plant** (NOTES § D40).
+    // `healthy-disk.json` is a pod named `healthy-disk` mounting a claim named `healthy-disk`, so
+    // the pod's name, the claim it already names and the prefix the API server derives are one
+    // string — an assertion over that pod cannot tell a derivation off `metadata.name` from one
+    // off `claimName`, which is the review's own finding
+    // (`reports/2026-08-21-family-c-drain-rows-and-the-two-new-decodes.md` § 6).
+    let with_ephemeral = capture_but("healthy-disk", |pod| {
+        pod.metadata.name = Some("mounts-a-disk".to_string());
+        pod.spec
+            .as_mut()
+            .expect("the capture has a spec")
+            .volumes
+            .get_or_insert_with(Vec::new)
+            .push(Volume {
+                name: "scratch".to_string(),
+                ephemeral: Some(EphemeralVolumeSource {
+                    volume_claim_template: Some(PersistentVolumeClaimTemplate::default()),
+                }),
+                ..Volume::default()
+            });
+    });
+    println!(
+        "{} claims: {:?}",
+        with_ephemeral.id.name, with_ephemeral.claims
+    );
+    assert_eq!(
+        with_ephemeral.claims,
+        vec![
+            "healthy-disk".to_string(),
+            "mounts-a-disk-scratch".to_string()
+        ],
+        "the derived name is the **pod's** own name and the volume's, joined by a hyphen — not \
+         the claim the pod already mounts, which on the unrenamed capture is the same string. \
+         The claim is `Bound`, mounted by a running pod, and named by no `claimName` anywhere, \
+         so a Waste report reading only `claimName` calls a disk in use nobody's"
+    );
+    assert!(
+        !with_ephemeral.local_storage_disk && !with_ephemeral.local_storage_memory,
+        "and it is deliberately not local storage: the claim outlives the pod's container \
+         filesystem, and `kubectl drain` does not warn about one"
+    );
+}
+
+/// **`local_storage_disk` is the `emptyDir` a bare `kubectl drain` refuses on**, and the two pods
+/// it named are captured: `default/broken-gang` and `default/broken-restarts`
+/// (`reports/2026-08-21-family-c-analysis-report-family-review.md` § 1).
+///
+/// **Every volume shape the field can meet, fed** (NOTES § D29): an `emptyDir`, a
+/// `persistentVolumeClaim`, a generic `ephemeral` (above), and a pod with neither.
+#[test]
+fn local_storage_is_the_empty_dir_a_bare_kubectl_drain_refuses_on() {
+    for name in ["gang", "restarts"] {
+        let pod = pod(name);
+        println!(
+            "{}: disk={} memory={}",
+            pod.id.name, pod.local_storage_disk, pod.local_storage_memory
+        );
+        assert!(
+            pod.local_storage_disk,
+            "`kubectl drain k8rs-worker` refused on {} for local storage, so the field a \
+             report asks that question of has to say so",
+            pod.id.name
+        );
+        assert!(
+            !pod.local_storage_memory,
+            "and the corpus carries no tmpfs — the capture's own `emptyDir`s name no medium \
+             (`reports/2026-08-21-family-c-drain-rows-and-the-two-new-decodes.md` § 2)"
+        );
+    }
+    assert!(
+        !pod("healthy").local_storage_disk && !pod("healthy").local_storage_memory,
+        "a pod with no volume at all keeps files on nothing"
+    );
+
+    // The plant is the presence of the entry and nothing inside it: an `emptyDir: {}` is what a
+    // manifest usually writes, and a field read off `sizeLimit` would miss it.
+    let planted = capture_but("healthy", |pod| {
+        pod.spec
+            .as_mut()
+            .expect("the capture has a spec")
+            .volumes
+            .get_or_insert_with(Vec::new)
+            .push(Volume {
+                name: "scratch".to_string(),
+                empty_dir: Some(EmptyDirVolumeSource::default()),
+                ..Volume::default()
+            });
+    });
+    assert!(
+        planted.local_storage_disk && !planted.local_storage_memory,
+        "`emptyDir: {{}}` is the ordinary spelling and is the whole of the disk trigger"
+    );
+    assert!(
+        planted.claims.is_empty(),
+        "and an emptyDir reserves no disk, so it is not a claim either"
+    );
+}
+
+/// **`medium` splits one volume kind into two facts that do not point the same way** — the drain
+/// still refuses, and nothing is lost (NOTES § D134, `screens/analysis.md` § *One volume kind, two
+/// mediums*). Istio's injector adds a `Memory` one to every meshed pod, so the undifferentiated
+/// field would have put *copy your files off first* on every node of every meshed cluster.
+///
+/// **The plant is the only way to reach the shape**: no pod on the fixture cluster and nothing in
+/// the corpus names a medium at all (NOTES § D40,
+/// `reports/2026-08-21-family-c-drain-rows-and-the-two-new-decodes.md` § 2). A trip that runs a
+/// pod with `emptyDir: {medium: Memory}` replaces it.
+///
+/// **All four spellings the field can meet, fed** (NOTES § D29): absent, the explicit empty
+/// string the API server writes for the default, `Memory`, and one pod naming both kinds.
+#[test]
+fn an_empty_dir_backed_by_memory_is_a_second_fact_and_not_the_first_one_again() {
+    let with_mediums = |mediums: &[Option<&str>]| {
+        let mediums: Vec<Option<String>> = mediums
+            .iter()
+            .map(|m| m.map(std::string::ToString::to_string))
+            .collect();
+        capture_but("healthy", |pod| {
+            let volumes = pod
+                .spec
+                .as_mut()
+                .expect("the capture has a spec")
+                .volumes
+                .get_or_insert_with(Vec::new);
+            for (n, medium) in mediums.into_iter().enumerate() {
+                volumes.push(Volume {
+                    name: format!("scratch{n}"),
+                    empty_dir: Some(EmptyDirVolumeSource {
+                        medium,
+                        ..EmptyDirVolumeSource::default()
+                    }),
+                    ..Volume::default()
+                });
+            }
+        })
+    };
+    let read = |pod: &PodSnapshot| (pod.local_storage_disk, pod.local_storage_memory);
+
+    let absent = with_mediums(&[None]);
+    println!("absent: {:?}", read(&absent));
+    assert_eq!(
+        read(&absent),
+        (true, false),
+        "unset is the default medium, which is the node's own disk"
+    );
+
+    // **The explicit empty string is the same volume**, and the shape the API server writes back:
+    // a check that compared against `None` alone would call this a tmpfs.
+    let explicit = with_mediums(&[Some("")]);
+    println!("explicit empty: {:?}", read(&explicit));
+    assert_eq!(read(&explicit), (true, false));
+
+    let memory = with_mediums(&[Some("Memory")]);
+    println!("Memory: {:?}", read(&memory));
+    assert_eq!(
+        read(&memory),
+        (false, true),
+        "a tmpfs is not the machine's disk — there is nothing on it to copy off, and a row that \
+         says otherwise is wrong about every meshed pod on the cluster"
+    );
+
+    // **A pod can name both, and it counts once in each** — the same deliberate
+    // non-deduplication the orphan and local-storage counts already practise on each other.
+    let both = with_mediums(&[None, Some("Memory")]);
+    println!("both: {:?}", read(&both));
+    assert_eq!(read(&both), (true, true));
+
+    // **A value neither of the two legal ones is read as neither**, which is the direction that
+    // invents nothing: `medium` is `""` or `Memory` and nothing else
+    // (`kubectl explain pod.spec.volumes.emptyDir.medium`).
+    let unknown = with_mediums(&[Some("HugePages-2Mi")]);
+    println!("unknown: {:?}", read(&unknown));
+    assert_eq!(read(&unknown), (false, false));
 }
 
 /// **The Service that reaches nothing, which is Waste's headline row** — a slice with zero
@@ -5130,6 +5337,78 @@ fn what_family_cs_inputs_still_have_no_object_for() {
         "C3's fetch is a Phase 5 box, so Phase 4 draws one `Row::NotComputed` for it — when it \
          lands, replace this with the assertions the CSR list deserves (NOTES § D129)"
     );
+}
+
+/// **The two ways a PodDisruptionBudget can say nothing about *which pods*, and they are not one
+/// answer** — the decode half of the change Drain safety's report proved through a pane
+/// ([`DisruptionBudgetSnapshot::selector`], NOTES § D46).
+///
+/// Upstream states both on the field itself: *"A null selector will match no pods, while an
+/// empty ({}) selector will select all pods within the namespace"* — read off
+/// `k8s-openapi`'s generated docs for `policy/v1 PodDisruptionBudgetSpec`, in this tree. Until
+/// 2026-08-21 an `unwrap_or_default()` folded the first onto the second, so a budget written
+/// `{}` decoded to the value the matcher reads as *nothing*.
+///
+/// **Both shapes are plants and neither is an edit to a capture** (NOTES § D40, § D53): every
+/// PDB a cluster ever writes down carries the selector its author typed, so a capture cannot
+/// hold either one.
+#[test]
+fn the_two_ways_a_budget_can_say_nothing_about_which_pods_and_they_are_not_one_value() {
+    let plant = |edit: fn(&mut PodDisruptionBudget)| -> DisruptionBudgetSnapshot {
+        let mut object = items::<PodDisruptionBudget>("poddisruptionbudgets")
+            .into_iter()
+            .find(|b| b.metadata.name.as_deref() == Some("broken-pdb-floor"))
+            .expect("poddisruptionbudgets.json has no broken-pdb-floor");
+        edit(&mut object);
+        DisruptionBudgetSnapshot::from(object)
+    };
+
+    assert_eq!(
+        plant(|b| b.spec.get_or_insert_with(Default::default).selector = None).selector,
+        None,
+        "absent is `None` — *selects no pods*, and never a shape a matcher has to read"
+    );
+    assert_eq!(
+        plant(|b| {
+            b.spec.get_or_insert_with(Default::default).selector = Some(LabelSelector::default());
+        })
+        .selector,
+        Some(Selector::default()),
+        "present and empty is `Some` — upstream's `labels.Everything()`, every pod in the \
+         namespace, and a decode folding it onto the line above calls a drain safe that hangs"
+    );
+
+    // **And the spec itself missing is the absent one too**, which is the third shape the
+    // pipeline can hand this decode (NOTES § D29): a PDB whose whole spec the prune dropped
+    // says nothing about which pods, not everything about them.
+    assert_eq!(
+        plant(|b| b.spec = None).selector,
+        None,
+        "no spec at all is not a selector that selects the namespace"
+    );
+
+    // The negative that keeps all three honest: the committed object writes a real selector, so
+    // a decode returning `None` for everything would pass the first assertion and nothing else.
+    assert_eq!(
+        plant(|_| ()).selector,
+        Some(Selector {
+            match_labels: BTreeMap::from([("app".to_string(), "healthy-deploy".to_string())]),
+            match_expressions: Vec::new(),
+        }),
+        "and the capture's own selector survives untouched"
+    );
+}
+
+/// The selector a captured budget carries. **Both committed budgets write one**, so `None` here
+/// is a decode that dropped the field rather than a `policy/v1` *selects no pods* — and the two
+/// stopped being one value on 2026-08-21
+/// ([`DisruptionBudgetSnapshot::selector`]), which is why this unwraps loudly instead of
+/// falling back to a default that would make every assertion below pass on nothing.
+fn selector_of(budget: &DisruptionBudgetSnapshot) -> &Selector {
+    budget
+        .selector
+        .as_ref()
+        .unwrap_or_else(|| panic!("{} was captured with a selector", budget.id.name))
 }
 
 /// The three on-demand lists the 2026-08-20 trip filled, decoded once each. Local to this module

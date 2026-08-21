@@ -891,6 +891,13 @@ pub struct PodSnapshot {
     /// would hand rule 7 a `ready: false` for every container that has not started yet. The
     /// cost is that an unscheduled pod contributes no requests, which is right for N5.
     ///
+    /// **So a pod the kubelet has not reported on decodes with an *empty* list — not with
+    /// all-`None` containers**, and anything reading this list has to say which of the two it
+    /// means. `pending.json` is that shape: one container in `spec`, none in
+    /// `status.containerStatuses`, phase `Pending`. A sweep over an empty list answers *yes, all
+    /// of them* to any question, so a caller that reads a declaration off the containers is
+    /// answering about a pod nobody looked at ([`crate::analysis::capped`]).
+    ///
     /// `ephemeralContainerStatuses` is left out: a container someone attached with
     /// `kubectl debug` is not a workload (NOTES § D46).
     ///
@@ -1006,10 +1013,19 @@ pub struct PodSnapshot {
     /// boundary … the field can wait for Phase 4 under NOTES § D42"*, closed here.
     ///
     /// **The limits row counts a workload with no limit anywhere, so it has to ask both
-    /// levels**: a pod that declares its limits once, at pod level, decodes with all-`None`
-    /// containers, and a count that asks only the containers reports it as unlimited — the
-    /// same shape, one level up, that made an N5 summing containers call a node healthy with
-    /// four committed CPUs invisible (NOTES § D51).
+    /// levels** — but not for the reason first written here. A *running* pod that declares its
+    /// limits once at pod level does **not** decode with all-`None` containers: the kubelet
+    /// writes the pod-level limit down into `status.containerStatuses[].resources` and
+    /// [`effective`] reports it as the container's own, which `podlimit.json` shows — pod-level
+    /// `limits.memory 128Mi`, and the container status carrying `cpu 100m` *and* `memory 128Mi`
+    /// where its `spec` declares only the cpu one.
+    ///
+    /// **Where it does decode with nothing is the gap [`containers`](PodSnapshot::containers)
+    /// names**: a container status carrying no `resources` whose name matches no `spec` entry —
+    /// virtual-kubelet, serverless nodes, sandboxed runtimes — and there the pod-level limit is
+    /// the only thing capping the pod. That shape is what makes this field load-bearing, and it
+    /// is the same shape, one level up, that made an N5 summing containers call a node healthy
+    /// with four committed CPUs invisible (NOTES § D51).
     ///
     /// **They are read like the request and not like the container's** — straight off the pod
     /// spec, with no [`effective`] fallback, because there is no pod-level `status.resources`
@@ -1027,9 +1043,10 @@ pub struct PodSnapshot {
     /// **A `spec`-only sum does not see it**, which is why the box named it: on a node full of
     /// sandboxed pods the report and the scheduler disagree by the overhead of every pod on it.
     ///
-    /// **Nothing computes with it yet**, for [`allocated_cpu`](ContainerSnapshot::allocated_cpu)'s
-    /// reason and with the same owner: [`charged`] is frozen, and a report adding overhead on
-    /// top of its answer is the report and N5 disagreeing about one node.
+    /// **[`charged`] adds it**, which is the one thing NOTES § D124 unfroze in this file: it is a
+    /// third term beside the container sum and the pod-level request, charged whatever those two
+    /// say, and it is added *there* rather than on top of their answer by the Capacity report —
+    /// or the report and N5 would disagree about one node (NOTES § D130).
     ///
     /// **Prune line: `spec.overhead`, `cpu` and `memory`.** It is set by the RuntimeClass
     /// admission plugin at create time and is immutable afterwards, so it never arrives late.
@@ -1044,10 +1061,104 @@ pub struct PodSnapshot {
     /// across one — so the pod's namespace is the other half of the key and is not repeated
     /// here.
     ///
-    /// **Prune line: `spec.volumes[].persistentVolumeClaim.claimName`.** The `readOnly` flag
-    /// beside it is deliberately dropped: a claim mounted read-only is still mounted, and this
-    /// row asks only whether anything mounts it at all.
+    /// **A generic ephemeral volume is one of these too, and its name is derived rather than
+    /// read** — `spec.volumes[].ephemeral` is a sibling of `persistentVolumeClaim` on the same
+    /// entry, and the claim it stands up is named `<pod name>-<volume name>` by the API server
+    /// itself (`kubectl explain pod.spec.volumes.ephemeral.volumeClaimTemplate`). It is `Bound`,
+    /// it is mounted by a running pod, and it is named by no `claimName` anywhere — so a Waste
+    /// report reading only the field above draws *"nobody is using it"* about a disk a running
+    /// pod has open (NOTES § D131).
+    ///
+    /// **Read from the pod side, which is the side that knows both halves.** The other end is the
+    /// claim's `ownerReference` back to its pod, which would be a new field on
+    /// [`ClaimSnapshot`] and a second list to keep in scope with the first; the name is
+    /// upstream's own and needs neither.
+    ///
+    /// **Prune line: `spec.volumes[].persistentVolumeClaim.claimName`, and
+    /// `spec.volumes[].ephemeral` beside `spec.volumes[].name`** — presence and the volume's own
+    /// name, never the template inside it. The `readOnly` flag is deliberately dropped: a claim
+    /// mounted read-only is still mounted, and this row asks only whether anything mounts it at
+    /// all.
     pub claims: Vec<String>,
+    /// **Whether this pod keeps files on the machine's own disk** — an `emptyDir` in
+    /// `spec.volumes[]` whose `medium` is unset or empty, which is the volume kind `kubectl
+    /// drain`'s own `localStorageFilter` reads and the reason it names `--delete-emptydir-data`
+    /// (`screens/analysis.md` § *A node that would throw away files*). A bare `kubectl drain`
+    /// refuses on it, and the flag that gets past it deletes the data with the pod.
+    ///
+    /// **Deliberately not `spec.volumes[].ephemeral`**, the sibling above: a generic ephemeral
+    /// volume is backed by a PersistentVolumeClaim that outlives the pod's own container
+    /// filesystem the same way a `persistentVolumeClaim` does, `kubectl` does not warn about one,
+    /// and telling a reader a drain would throw away files that survive it is the wrong sentence
+    /// in the dangerous direction (invariant 14).
+    ///
+    /// **Presence and not a list.** The row counts pods, not directories — *"they keep files on
+    /// this machine's own disk"* is true of a pod with one `emptyDir` and of a pod with six —
+    /// and a name would be the container's mount point rather than anything on the node.
+    ///
+    /// **Prune line: `spec.volumes[].emptyDir.medium`** — the whole of the sibling below, and the
+    /// reason the prune line names a field rather than a presence.
+    pub local_storage_disk: bool,
+    /// **Whether this pod keeps files in memory only** — an `emptyDir` with `medium: Memory`,
+    /// which is a tmpfs and not the machine's disk.
+    ///
+    /// **Two facts that do not point the same way, which is why this is a second field and not a
+    /// second reading of the first** (NOTES § D134). `hasLocalStorage` in
+    /// `kubectl/pkg/drain/filters.go` asks presence only, so a bare `kubectl drain` refuses on
+    /// this exactly as it refuses on the sibling above — **and there is nothing to copy off**: the
+    /// volume is empty again the moment any container in the pod restarts. Istio's sidecar
+    /// injector adds one to every meshed pod, so one undifferentiated field would have put a
+    /// Critical *copy your files off first* row on every node of every meshed cluster.
+    ///
+    /// **`medium`'s only two legal values are `""` and `Memory`** (`kubectl explain
+    /// pod.spec.volumes.emptyDir.medium`), and unset is the first — so a value this code does not
+    /// know is read as neither, which is the direction that invents nothing.
+    ///
+    /// **A pod naming both kinds counts once in each**, the same deliberate non-deduplication the
+    /// orphan and local-storage counts already practise on each other.
+    ///
+    /// **Prune line: `spec.volumes[].emptyDir.medium`, with the sibling above.**
+    pub local_storage_memory: bool,
+}
+
+/// **The answer to *what is each node actually using?*, or which way the question failed** —
+/// [`ClusterSnapshot::metrics`], and the four wordings `screens/analysis.md` § *Live usage* gives
+/// the one slot that says so.
+///
+/// Four cases and not a `Result`: three of them are ordinary states of a real cluster rather than
+/// errors, and the pane draws a different sentence and a different way out for each. *Nobody
+/// asked* is the `Option` around this and deliberately not a fifth case here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Metrics {
+    /// metrics-server answered, per node, by [`NodeSnapshot::id`]'s name.
+    ///
+    /// **A node missing from the map is a node it did not report on** — one that joined between
+    /// polls, or one whose kubelet is quiet — and that node draws no `using` line while every
+    /// other node keeps its own. It is not the same fact as *no metrics at all*, and nothing
+    /// names metrics-server on a cluster that answered: a dependency that is working is not news.
+    Read(BTreeMap<String, NodeUsage>),
+    /// No metrics-server on this cluster, which is most clusters (`screens/widgets.md` § 1a) —
+    /// the ordinary case, not the exception.
+    NotInstalled,
+    /// Installed and did not answer: the API is registered and the request failed or timed out.
+    Silent,
+    /// A 403 on the metrics API. **Distinct from [`Metrics::NotInstalled`] because the way out
+    /// is** — one asks for an install, the other for a permission, and a reader can only act on
+    /// the right one.
+    Denied,
+}
+
+/// One node's live usage, as the metrics API wrote it.
+///
+/// **Quantities stay strings**, like every other quantity on these types ([`quantity`]): parsing
+/// is judgement and the caller that needs a number owns it. The Capacity report parses with
+/// [`quantity_milli`] and prints with [`cpu_text`] / [`bytes`], so `using 3.4 cpu and 12Gi` is
+/// spelled by the same two functions as the row it sits under — printing the API's string raw
+/// would put two spellings of one number on adjacent lines.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeUsage {
+    pub cpu: String,
+    pub memory: String,
 }
 
 /// A node taint, N6's other half.
@@ -1238,12 +1349,20 @@ impl From<LabelSelector> for Selector {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisruptionBudgetSnapshot {
     pub id: ObjectId,
-    /// Which pods it protects. **An absent selector matches nothing** (upstream: a `null`
-    /// selector in `policy/v1` selects no pods, the reverse of `policy/v1beta1`), and
-    /// [`Selector::default`] is exactly that — an empty match-labels map with no expressions,
-    /// which a matcher reading it as *matches everything* would invert. The report owes that
-    /// reading a test.
-    pub selector: Selector,
+    /// Which pods it protects — **`None` is *absent* and `Some` is *present*, and upstream reads
+    /// the two differently.** It says so on this exact field: *"A null selector will match no
+    /// pods, while an empty ({}) selector will select all pods within the namespace"*, and on
+    /// [`LabelSelector`] itself: *"An empty label selector matches all objects. A null label
+    /// selector matches no objects."* So `None` selects nothing — `policy/v1`'s reading, the
+    /// reverse of `policy/v1beta1` — and a `Some` whose two halves are both empty is upstream's
+    /// `labels.Everything()`: every pod in this budget's own namespace.
+    ///
+    /// **They were one value until 2026-08-21**, an `unwrap_or_default()` folding *absent* onto
+    /// *empty*, and the fold was wrong in the one direction this report may not be wrong in: a
+    /// budget written `selector: {}` came out protecting nothing, and Drain safety answered
+    /// *"node-1 is ready to drain"* over a drain that then hangs (NOTES § D46). Matching is still
+    /// the report's and not this type's.
+    pub selector: Option<Selector>,
     /// **`metadata.generation` and `status.observedGeneration` — the two numbers upstream's own
     /// eviction handler compares, carried as two numbers.** It refuses *every* eviction on a
     /// budget whose status has not caught up with its spec — `TooManyRequests`, whatever
@@ -1299,11 +1418,7 @@ impl From<PodDisruptionBudget> for DisruptionBudgetSnapshot {
         Self {
             id: object_id(api_kind::<PodDisruptionBudget>(), &p.metadata),
             generation: p.metadata.generation,
-            selector: p
-                .spec
-                .and_then(|s| s.selector)
-                .map(Selector::from)
-                .unwrap_or_default(),
+            selector: p.spec.and_then(|s| s.selector).map(Selector::from),
             observed_generation: status.observed_generation,
             disruptions_allowed: status.disruptions_allowed,
             current_healthy: status.current_healthy,
@@ -1552,6 +1667,27 @@ pub struct ClusterSnapshot {
     /// cluster-scoped verb most namespaced roles do not have, so `None` is also the ordinary
     /// answer on a real cluster and not only the not-yet-built one.
     pub certificate_requests: Option<Vec<CertificateRequestSnapshot>>,
+    /// **What each node is actually using**, or the reason there is no number — the Capacity
+    /// report's `using …` line and the one slot `screens/analysis.md` § *Live usage* keeps for
+    /// saying why it is absent.
+    ///
+    /// **Not a list fetch and not a watch**, which is why it is an enum where the six fields
+    /// above are `Option<Vec<_>>`: metrics is a *capability*, and asking for it is a probe that
+    /// can be answered four different ways. It arrives on a poll — 30s+, capability-gated, and
+    /// only for what is on screen (`screens/widgets.md` § 1a) — so there is no prune line to
+    /// state; a `NodeMetrics` object is two quantities and a name.
+    ///
+    /// **`None` is *k8rs did not ask*, and it is the value through the whole of Phase 4.** The
+    /// poll is a Phase 5 box. It is a fifth state and not a fifth spelling of one of
+    /// [`Metrics`]'s four: *nobody probed* and *the probe came back empty-handed* are the same
+    /// distinction the six fetched lists draw between `None` and `Some(vec![])`, and the pane
+    /// says a different sentence for it — the only one of the five that names k8rs rather than
+    /// the cluster.
+    ///
+    /// **A `Report` is never built on a probe still in flight** — that is `views.rs` holding an
+    /// `Option<Report>` and drawing the loading pane, not a `None` here (NOTES § D20,
+    /// `crate::analysis`'s module doc).
+    pub metrics: Option<Metrics>,
 }
 
 fn object_id(kind: ObjectKind, meta: &ObjectMeta) -> ObjectId {
@@ -1762,6 +1898,32 @@ impl From<Pod> for PodSnapshot {
             status.init_container_statuses,
             status.container_statuses,
         );
+        // **Two volume kinds are one list here** ([`PodSnapshot::claims`]): the claim a pod names
+        // outright, and the one a generic ephemeral volume stands up, whose name is the API
+        // server's own `<pod name>-<volume name>` and is derived rather than read.
+        let claims = spec
+            .volumes
+            .iter()
+            .flatten()
+            .filter_map(|volume| match &volume.persistent_volume_claim {
+                Some(claim) => Some(claim.claim_name.clone()),
+                None => volume
+                    .ephemeral
+                    .as_ref()
+                    .map(|_| format!("{}-{}", id.name, volume.name)),
+            })
+            .collect();
+        // `kubectl drain`'s own `localStorageFilter`, read off the spec the same way and split by
+        // medium ([`PodSnapshot::local_storage_disk`], [`PodSnapshot::local_storage_memory`]).
+        let mediums = || {
+            spec.volumes
+                .iter()
+                .flatten()
+                .filter_map(|volume| volume.empty_dir.as_ref())
+                .map(|dir| dir.medium.as_deref().unwrap_or_default())
+        };
+        let local_storage_disk = mediums().any(|medium| medium.is_empty());
+        let local_storage_memory = mediums().any(|medium| medium == "Memory");
         let host_path_mounts = host_path_mounts(&spec);
         let pod_resources = spec.resources.as_ref();
         let cpu_request = pod_resources.and_then(|r| quantity(&r.requests, "cpu"));
@@ -1802,13 +1964,9 @@ impl From<Pod> for PodSnapshot {
             memory_limit: pod_resources.and_then(|r| quantity(&r.limits, "memory")),
             overhead_cpu: quantity(&spec.overhead, "cpu"),
             overhead_memory: quantity(&spec.overhead, "memory"),
-            claims: spec
-                .volumes
-                .iter()
-                .flatten()
-                .filter_map(|v| v.persistent_volume_claim.as_ref())
-                .map(|c| c.claim_name.clone())
-                .collect(),
+            claims,
+            local_storage_disk,
+            local_storage_memory,
             node_selector: spec.node_selector.unwrap_or_default(),
             tolerations: spec
                 .tolerations
@@ -2502,7 +2660,7 @@ fn in_namespace(id: &ObjectId) -> String {
 /// **`payments/web`, or `node-3` for something cluster-scoped** — how a card names an object in a
 /// line of prose, which is how `screens/alerts.md` writes both. Spelled once because N1's evidence
 /// names owners and the renderers name the same objects in the title (Phase 9).
-fn qualified(id: &ObjectId) -> String {
+pub(crate) fn qualified(id: &ObjectId) -> String {
     match &id.namespace {
         Some(ns) => format!("{ns}/{}", id.name),
         None => id.name.clone(),
@@ -2512,7 +2670,11 @@ fn qualified(id: &ObjectId) -> String {
 /// **`a` · `a and b` · `a, b and 2 more`** — the list `screens/alerts.md` § N1 spells, and the
 /// only shape a card ever lists names in. Two is the cap on purpose: the third name is worth less
 /// than the sentence's readability, and the count that follows it carries the total anyway.
-fn listed(names: &[String]) -> String {
+///
+/// **`pub(crate)` for Drain safety's second reader** — a row naming every budget that blocks a
+/// node is the same *up to two, then and N more* question, and the second copy of it is what
+/// CLAUDE.md § *Write function-based* refuses (NOTES § D129 bound 1, § D134).
+pub(crate) fn listed(names: &[String]) -> String {
     match names {
         [] => String::new(),
         [one] => one.clone(),
@@ -6254,12 +6416,14 @@ pub(crate) fn node_overcommitted(
         node.allocatable_cpu.as_deref(),
         |p| p.cpu_request.as_deref(),
         |c| c.cpu_request.as_deref(),
+        |p| p.overhead_cpu.as_deref(),
     );
     let memory = promised(
         &pods,
         node.allocatable_memory.as_deref(),
         |p| p.memory_request.as_deref(),
         |c| c.memory_request.as_deref(),
+        |p| p.overhead_memory.as_deref(),
     );
     let mut over: Vec<(&str, String, String)> = Vec::new();
     // **Strictly greater, on integers.** A node packed to exactly its allocatable is legal and
@@ -6322,18 +6486,19 @@ pub(crate) fn promised(
     allocatable: Option<&str>,
     of_pod: impl Fn(&PodSnapshot) -> Option<&str>,
     of_container: impl Fn(&ContainerSnapshot) -> Option<&str>,
+    of_overhead: impl Fn(&PodSnapshot) -> Option<&str>,
 ) -> Option<(i64, i64)> {
     let has = quantity_milli(allocatable?)?;
     let mut asked: i64 = 0;
     for pod in pods {
-        asked = asked.checked_add(charged(pod, &of_pod, &of_container)?)?;
+        asked = asked.checked_add(charged(pod, &of_pod, &of_container, &of_overhead)?)?;
     }
     Some((asked, has))
 }
 
 /// **What the scheduler charges this pod to the node it is on** —
-/// `max( max over the init containers , sum(regular) + sum(restartable-init) )`, or the pod-level
-/// request where one is declared.
+/// `max( max over the init containers , sum(regular) + sum(restartable-init) ) + spec.overhead`,
+/// or the pod-level request where one is declared, **plus the same overhead**.
 ///
 /// **A native sidecar is additive and an ordinary init container is not** (NOTES § D46): a sidecar
 /// runs beside the app for the whole life of the pod, and dropping 100m per meshed pod is six CPUs
@@ -6346,13 +6511,27 @@ pub(crate) fn promised(
 /// through the init list in order — so this understates the rare pod that declares a plain init
 /// container *after* a sidecar. [`PodSnapshot::containers`] promises no order, so the exact one is
 /// not computable here ([`ContainerRole`]).
+///
+/// **`spec.overhead` is a third term and is added whatever the containers do**
+/// ([`PodSnapshot::overhead_cpu`], NOTES § D46): upstream's `resource.PodRequests` adds it after
+/// the init/sidecar max *and* after a pod-level request has replaced the container sum, so it is
+/// the one number here that neither of the other two branches can absorb. It is charged in the
+/// **shared** reader rather than added on top of it by the Capacity report, or the report and N5
+/// would answer different numbers for one node — D46's named defect (NOTES § D124, § D130).
 fn charged(
     pod: &PodSnapshot,
     of_pod: impl Fn(&PodSnapshot) -> Option<&str>,
     of_container: impl Fn(&ContainerSnapshot) -> Option<&str>,
+    of_overhead: impl Fn(&PodSnapshot) -> Option<&str>,
 ) -> Option<i64> {
+    // Nothing declared is nothing charged — a pod on the default runtime has no `spec.overhead`,
+    // and its absence is not a number that could not be read.
+    let overhead = match of_overhead(pod) {
+        None => 0,
+        Some(q) => quantity_milli(q)?,
+    };
     if let Some(whole_pod) = of_pod(pod) {
-        return quantity_milli(whole_pod);
+        return quantity_milli(whole_pod)?.checked_add(overhead);
     }
     let mut running: i64 = 0;
     let mut init_peak: i64 = 0;
@@ -6370,7 +6549,7 @@ fn charged(
             }
         }
     }
-    Some(running.max(init_peak))
+    running.max(init_peak).checked_add(overhead)
 }
 
 /// **A Kubernetes quantity as an integer, in the API's own unit ×1000** — millicores for a cpu
@@ -6406,7 +6585,7 @@ fn charged(
 ///
 /// `None` for a suffix this does not know, for a negative — a request cannot be one, and the minus
 /// sign is not even scanned — and for a value past `i64`, which is an exabyte node nobody has.
-fn quantity_milli(q: &str) -> Option<i64> {
+pub(crate) fn quantity_milli(q: &str) -> Option<i64> {
     let end = q
         .find(|c: char| !c.is_ascii_digit() && c != '.')
         .unwrap_or(q.len());
@@ -7021,7 +7200,7 @@ const CERT_EXPIRY_WARN: SignedDuration = SignedDuration::from_hours(30 * 24);
 /// **The bytes are assumed to be bounded already.** This reads whatever slice it is handed;
 /// refusing a kubeconfig big enough to matter belongs to the read, which is `k8s.rs`'s in Phase 5
 /// (CLAUDE.md § Security gate — *sizes are bounded*).
-fn expires_at(pem: &[u8]) -> Option<Timestamp> {
+pub(crate) fn expires_at(pem: &[u8]) -> Option<Timestamp> {
     // Only the first block, which is the leaf: a kubeconfig that carries a chain writes the
     // client's own certificate first, and it is the one whose expiry locks the user out.
     let (_, block) = parse_x509_pem(pem).ok()?;

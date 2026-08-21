@@ -795,6 +795,7 @@ fn what_a_node_is_charged_for_a_pod_is_the_number_the_scheduler_uses() {
             p,
             |p| p.cpu_request.as_deref(),
             |c| c.cpu_request.as_deref(),
+            |p| p.overhead_cpu.as_deref(),
         )
         .expect("every captured request parses")
     };
@@ -864,11 +865,195 @@ fn what_a_node_is_charged_for_a_pod_is_the_number_the_scheduler_uses() {
         charged(
             &broken,
             |p| p.cpu_request.as_deref(),
-            |c| c.cpu_request.as_deref()
+            |c| c.cpu_request.as_deref(),
+            |p| p.overhead_cpu.as_deref(),
         ),
         None,
         "and it says so rather than guessing low"
     );
+}
+
+/// **The RuntimeClass charge is a third term, and a `spec`-only sum is short by it**
+/// (NOTES § D46, § D124). `spec.overhead` is what a sandboxed runtime — Kata, gVisor — costs the
+/// node before the pod's own containers are counted, and upstream's `resource.PodRequests` adds
+/// it *after* the init/sidecar max and *after* a pod-level request has replaced the container
+/// sum, so neither of the other two branches can absorb it.
+///
+/// **Not planted: `broken-overhead` was captured for exactly this**, and every number below is
+/// read out of the capture rather than transcribed — the overhead is written by the RuntimeClass
+/// admission plugin, not by the manifest, so a literal here would assert the trip that took it.
+#[test]
+fn the_runtime_class_overhead_is_charged_on_top_of_whatever_the_containers_ask_for() {
+    let cpu = |p: &PodSnapshot| {
+        charged(
+            p,
+            |p| p.cpu_request.as_deref(),
+            |c| c.cpu_request.as_deref(),
+            |p| p.overhead_cpu.as_deref(),
+        )
+    };
+    let memory = |p: &PodSnapshot| {
+        charged(
+            p,
+            |p| p.memory_request.as_deref(),
+            |c| c.memory_request.as_deref(),
+            |p| p.overhead_memory.as_deref(),
+        )
+    };
+    let milli = |q: &str| quantity_milli(q).unwrap_or_else(|| panic!("{q} is a captured quantity"));
+
+    let raw = fixture("overhead");
+    let charge = milli(captured_str(&raw, &["spec", "overhead", "cpu"]));
+    let charge_memory = milli(captured_str(&raw, &["spec", "overhead", "memory"]));
+    let asked = milli(captured_str(
+        &raw["spec"]["containers"][0],
+        &["resources", "requests", "cpu"],
+    ));
+    let asked_memory = milli(captured_str(
+        &raw["spec"]["containers"][0],
+        &["resources", "requests", "memory"],
+    ));
+    assert!(
+        charge > 0 && charge_memory > 0,
+        "the capture still declares a RuntimeClass overhead, or this test proves nothing: \
+         {charge}m cpu, {charge_memory} milli-bytes"
+    );
+
+    // **The positive and its negative are one capture and one field.** Taking `spec.overhead` off
+    // the same object leaves the pod as its container alone, so the difference between the two is
+    // the charge and nothing else — an assertion that read only the sum could be satisfied by a
+    // container the capture happens to carry.
+    let sandboxed = pod("overhead");
+    let plain = capture_but("overhead", |p| {
+        p.spec.as_mut().expect("a captured pod has a spec").overhead = None;
+    });
+    println!(
+        "broken-overhead charged {:?}m cpu / {:?} milli-bytes, and {:?}m / {:?} without its \
+         RuntimeClass",
+        cpu(&sandboxed),
+        memory(&sandboxed),
+        cpu(&plain),
+        memory(&plain)
+    );
+    assert_eq!(
+        cpu(&plain),
+        Some(asked),
+        "with no overhead it is its container"
+    );
+    assert_eq!(memory(&plain), Some(asked_memory));
+    assert_eq!(
+        cpu(&sandboxed),
+        Some(asked + charge),
+        "the scheduler charges the sandbox as well as the container it holds"
+    );
+    assert_eq!(memory(&sandboxed), Some(asked_memory + charge_memory));
+
+    // **A pod-level request replaces the container sum; it does not replace the overhead.**
+    // Planted the D40 way, out of the corpus's own strings: `healthy-podlevel` declares its
+    // request once at pod level and runs on the default runtime, and the value written on is the
+    // one `overhead.json` carries in its own spec.
+    let pod_level = milli(captured_str(
+        &fixture("healthy-podlevel"),
+        &["spec", "resources", "requests", "cpu"],
+    ));
+    let sandboxed_pod_level = capture_but("healthy-podlevel", |p| {
+        let spec = p.spec.as_mut().expect("a captured pod has a spec");
+        assert_eq!(
+            spec.overhead, None,
+            "the capture runs on the default runtime"
+        );
+        spec.overhead = Some(BTreeMap::from([(
+            "cpu".to_string(),
+            Quantity(captured_str(&raw, &["spec", "overhead", "cpu"]).to_string()),
+        )]));
+    });
+    println!(
+        "pod-level pod with a sandbox charged {:?}m cpu",
+        cpu(&sandboxed_pod_level)
+    );
+    assert_eq!(
+        cpu(&sandboxed_pod_level),
+        Some(pod_level + charge),
+        "upstream adds the overhead after the pod-level request has replaced the sum, so a \
+         branch that returns early on the pod-level number drops it"
+    );
+
+    // An overhead that cannot be read stops the node rather than being skipped — the same
+    // direction every other quantity in this sum takes, because an understated sum is a card
+    // that says the node is fine.
+    let unreadable = capture_but("overhead", |p| {
+        p.spec
+            .as_mut()
+            .expect("a captured pod has a spec")
+            .overhead
+            .as_mut()
+            .expect("the capture declares one")
+            .insert("cpu".to_string(), Quantity("not a number".to_string()));
+    });
+    assert_eq!(
+        cpu(&unreadable),
+        None,
+        "and it says so rather than guessing low"
+    );
+}
+
+/// **What the change above is worth on the corpus: one node's whole sum** (NOTES § D124's first
+/// condition). The node is read out of the capture — the scheduler picks it, and `broken-overhead`
+/// has moved between trips.
+///
+/// `|_| None` is the arithmetic exactly as it was before the overhead landed, which is what makes
+/// this a measurement rather than a restatement of the code.
+#[test]
+fn a_spec_only_sum_is_short_by_every_sandbox_charge_on_the_node() {
+    let sandboxed = pod("overhead");
+    let placed = sandboxed
+        .node
+        .clone()
+        .expect("the capture records the node the scheduler gave broken-overhead");
+    let node = captured_nodes()
+        .into_iter()
+        .find(|n| n.id.name == placed)
+        .unwrap_or_else(|| panic!("the capture has no node {placed}"));
+    let here: Vec<PodSnapshot> = every_captured_pod()
+        .into_iter()
+        .filter(|p| p.node.as_deref() == Some(placed.as_str()))
+        .collect();
+    let borrowed: Vec<&PodSnapshot> = here.iter().collect();
+
+    for (dimension, of_pod, of_container, of_overhead, allocatable) in [
+        (
+            "cpu",
+            (|p: &PodSnapshot| p.cpu_request.as_deref()) as fn(&PodSnapshot) -> Option<&str>,
+            (|c: &ContainerSnapshot| c.cpu_request.as_deref())
+                as fn(&ContainerSnapshot) -> Option<&str>,
+            (|p: &PodSnapshot| p.overhead_cpu.as_deref()) as fn(&PodSnapshot) -> Option<&str>,
+            node.allocatable_cpu.as_deref(),
+        ),
+        (
+            "memory",
+            |p: &PodSnapshot| p.memory_request.as_deref(),
+            |c: &ContainerSnapshot| c.memory_request.as_deref(),
+            |p: &PodSnapshot| p.overhead_memory.as_deref(),
+            node.allocatable_memory.as_deref(),
+        ),
+    ] {
+        let charge =
+            of_overhead(&sandboxed).map(|q| quantity_milli(q).expect("a captured quantity"));
+        let (with, has) = promised(&borrowed, allocatable, of_pod, of_container, of_overhead)
+            .expect("every captured quantity on this node parses");
+        let (without, _) = promised(&borrowed, allocatable, of_pod, of_container, |_| None)
+            .expect("every captured quantity on this node parses");
+        println!(
+            "{placed} {dimension}: {} pods promise {without} spec-only against {with} with \
+             overhead, of {has} allocatable",
+            here.len()
+        );
+        assert_eq!(
+            Some(with - without),
+            charge,
+            "{placed}'s {dimension} sum is short by exactly the sandbox charges on it"
+        );
+    }
 }
 
 /// **A node over-promised, out of the capture's own strings.** No node in the capture is:
@@ -1301,6 +1486,7 @@ fn a_quoted_exponent_is_a_number_and_not_a_node_lost_from_the_report() {
         node.allocatable_cpu.as_deref(),
         |p| p.cpu_request.as_deref(),
         |c| c.cpu_request.as_deref(),
+        |p| p.overhead_cpu.as_deref(),
     );
     println!("cpu sum for {}: {sum:?}", node.id.name);
     let (asked, _) = sum.expect(
@@ -1810,6 +1996,7 @@ fn busiest() -> (NodeSnapshot, Vec<PodSnapshot>, i64) {
         Some("1"),
         |p| p.cpu_request.as_deref(),
         |c| c.cpu_request.as_deref(),
+        |p| p.overhead_cpu.as_deref(),
     )
     .expect("every captured request parses");
     assert!(
@@ -1897,6 +2084,7 @@ fn n5_is_silent_at_the_memory_line_too() {
         Some("1"),
         |p| p.memory_request.as_deref(),
         |c| c.memory_request.as_deref(),
+        |p| p.overhead_memory.as_deref(),
     )
     .expect("every captured memory request parses");
     assert!(

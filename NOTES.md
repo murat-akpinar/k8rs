@@ -155,6 +155,7 @@ its line moving with it.
 - [D131](#d131--a-fixture-is-asked-two-different-questions-and-one-disjunction-was-answering-both-2026-08-21) — a fixture is asked two different questions, and one disjunction was answering both
 - [D132](#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21) — the trip that took four runs, and the sixteen things three agents settled under it
 - [D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21) — the mutation gate files a failed build as `unviable`, so a full disk reads as a pass
+- [D134](#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21) — Family C: the six reports, the frozen file they had to move, and the two green lights a review took away
 
 ## Why it exists — where the gap is
 
@@ -11354,3 +11355,165 @@ Fallback if the name is ever lost: **k8ray** ("the X-ray of k8s").
 - [rusternetes](https://github.com/calfonso/rusternetes) — ⚠️ not a TUI, a web console (see the design section)
 - [goldpinger](https://github.com/bloomberg/goldpinger) — source of the v4 mesh idea
 - [Keda HTTP scaling](https://github.com/SevginGalibov/Keda-HTTP-Add-On-Scaling)
+
+### D134 — Family C: the six reports, the frozen file they had to move, and the two green lights a review took away (2026-08-21)
+
+Phase 4's Family C — Capacity, Drain safety, Waste, Posture, Versions,
+Certificates — written as one turn. This entry is the decisions; the boxes keep
+their titles and link here.
+
+**`spec.overhead` goes into `charged`, not on top of it.**
+[D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)
+had already refused the alternative in writing — a report adding the overhead on
+top of `promised`'s answer makes N5 and the Capacity row disagree about one node,
+which is
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)'s
+named defect. So it is summed once, in the reader both consumers already call,
+under
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+five conditions. Proven with the tool's own numbers rather than the corpus
+report's: `k8rs-worker` 200m spec-only against 450m with overhead, and the row
+moves with it. It matches upstream `resourcehelper.PodRequests` — a pod-level
+request replaces the container aggregate per resource, then the overhead is added
+once, after both branches.
+
+**Condition 3 protects the surface consumers are built on, and a helper's first
+consumer is not that.** `charged` gained a fourth accessor and `promised` a
+fifth, which condition 3 forbids on its face. But `promised` was **private** at
+Phase 3 close and became `pub(crate)` a day earlier under
+[D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20)
+with no caller above `rules.rs`; Capacity is its first. A parameter appended in
+the same commit that gives a helper its first consumer breaks nothing above it,
+so the protection is vacuous for that one name. **This narrows condition 3, it
+does not widen D124.** The rejected alternative was a per-pod clone with the
+request fields swapped for the overhead ones, which is the clever thing nobody
+can read at 3am.
+
+**The export surface reached sixteen, each by demand with a caller in the same
+commit** (D129 bound 2, visibility keyword only): `qualified` — the second copy of
+a four-line formatter is what CLAUDE.md § *Write function-based* refuses;
+`expires_at` — the badge is a *different* spelling of the same subtraction
+(`30d` against `30 days`), so `in_days` was never reusable and the real second
+implementation would have been re-parsing the PEM; `quantity_milli` — `using 3.4
+cpu` sits directly under `6.2 of 8 cpu`, and printing the usage raw would put two
+spellings of one number on adjacent lines; `listed` — naming several blocking
+budgets is the *up to two, then and N more* convention N1's own evidence line
+already uses. **`rules.rs:11`'s `#![expect(dead_code, …)]` stays**, and D130's
+claim that the producer box deletes it is corrected here: measured by removing
+it, `ObjectId::group_key` and the `Metrics` variants are still unfulfilled, so it
+expires at Phase 9 and not now.
+
+**Three snapshot fields inside D42's window, and the window is why they are now.**
+`ClusterSnapshot::metrics` (six states, five of which no cluster here can produce
+— Phase 5's polling box would otherwise have needed a second unfreeze);
+`DisruptionBudgetSnapshot::selector` becoming `Option<Selector>`; and
+`PodSnapshot::local_storage`. `PodSnapshot::claims` also grew the claim a generic
+ephemeral volume stands up. Refused under the same window: `PodSnapshot::reason`,
+because
+[D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)
+names it as an example from Phase 2 and the screen, written later and more
+specifically, draws **one** row over Evicted and Completed together — `finished()`
+already is that predicate, and a field with no row behind it is what D42 itself
+calls a guess.
+
+**`selector: {}` and `selector: null` stopped being one value.** Read out of
+`k8s-openapi`'s own generated docs rather than taken on a PM's word: *"A null
+selector will match no pods, while an empty ({}) selector will select all pods
+within the namespace."* Flattened to `Selector::default()` they were the same
+value, so a budget protecting an entire namespace read as protecting nothing —
+*"node-1 is ready to drain"* over a drain that will hang, the one direction D46
+refuses.
+
+**Two green lights the operator review took away, and both were the same shape.**
+A row that says *ready to drain* is a verdict; `a_drain_would_move` answers a
+different question — *which pods does a drain relocate*. Bare `kubectl drain`
+refuses on three classes, measured live: DaemonSet-managed pods, pods with local
+storage, and pods with no controller. Only the third was drawn. And it refuses
+**after cordoning**, which is N2's own subject. So: the `--ignore-daemonsets`
+assumption is stated once as the pane's opening line, local storage became its own
+row, and *ready to drain* now means something a named command actually does.
+
+The second was a node at `Ready: Unknown` drawn *ready to drain* while **N1's
+Alerts card about the same object said it had stopped responding** — one object,
+two screens, opposite advice. The fix needed no new export: `analyze` already
+returns N1's finding and D127 already hands the producers that slice.
+
+**Then the same review took the fix's own first draft away.** `Ready: False` was
+ruled *not* the stopped-responding case, on the argument that a kubelet still
+talking can carry out an eviction. It answers the wrong question: a drain waits on
+the kubelet to **confirm the container is gone**, and `KubeletNotReady: container
+runtime is down` is a kubelet that is posting status and cannot stop anything —
+it hangs exactly as `Unknown` does, while `NetworkPluginNotReady` does not.
+`conditions[Ready].status` cannot separate them, so **neither** verdict is
+defensible and the row is the pane's *k8rs cannot answer this yet* kind.
+`Ready: False` is also the **ordinary** shape of a broken node — dead containerd,
+full disk, CNI never up — so the first draft fixed the rarer half.
+
+**A row may not be built on a premise that is false for a common pod.**
+`emptyDir: {medium: Memory}` is a tmpfs: `kubectl drain` still refuses it, and
+there is nothing to copy off. Istio's injector adds one to every meshed pod, so
+one field would have put a Critical row with an impossible action on every node of
+every meshed cluster. The field splits by medium — the refusal and the data loss
+are two facts and the prune line has to carry both, because D42's window shuts at
+this phase's close and `medium` dropped now could never be recovered.
+
+**Picking a finding by identity needs more identity than a kind and a name.**
+D127's mechanism works for C1 because `ObjectKind::Other("kubeconfig")` is unique.
+For a node it is not: N1's two branches, N2 and N3 all file under the node's own
+name and a `Finding` carries no rule id. The pick is kind + name + `Critical`,
+resting on **N1 being the only Critical node rule** — verified from source (N2 and
+N3 are `Warn`, N4 and N5 `Info`) and pinned by a test. The pin is weaker than the
+claim: it asserts over one cluster's output, and a future Critical node rule keyed
+on a shape that cluster lacks lands green. Boxed.
+
+**The mutation gate had been reporting false passes, and it is the gate that
+proves every box here.** `justfile`'s `export RUSTFLAGS := "-D warnings"` reached
+`cargo mutants`; a mutant's replaced body leaves its parameters unused; `-D
+warnings` made that a **build failure**; and cargo-mutants files any build failure
+as `unviable`. Same tree, same 141 mutants: **64 caught / 77 unviable** through
+`just`, **123 caught / 18 unviable / 0 missed** with the flag cleared — 63 never
+tested. It hid a real survivor (`>` → `>=` in `drain_row`, which would have drawn
+*"0 pods here were started by hand"* under every blocked node), and Capacity's own
+*0 missed* had been measured through the same lens. This is
+[D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
+one class wider — D133 caught the disk, and *a failed build reads as a pass*
+walked back in through the toolchain flags. `scripts/mutants.sh` now passes
+cargo-mutants' own `--cap-lints=true` (in the script, so a direct `bash` call is
+fixed too, and it beats an inherited flag rather than avoiding one) and refuses a
+**lint-denied** unviable the way it already refused a disk-failed one. D133's
+sentence — *an honest unviable names a type, a dishonest one names a filesystem,
+and the count cannot tell them apart* — was one class short.
+
+**The strip stays at the printer, and the brief that said otherwise was wrong.**
+`sanitize` lives in `main.rs`, the **top** of the pyramid; `analysis.rs` calling
+up into it inverts the build order. It runs field by field where a value enters a
+line, never over the assembled block, which is
+[D122](#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20)'s
+substance; the location was the only thing in question and it was not available.
+Phase 5's ingest strip is still the permanent answer.
+
+**Smaller settlements, kept so a later box does not re-decide them.** An empty
+`nodes` list is *no permission to list nodes* — the type cannot say *nobody
+looked* and the screen's own premise is that a cluster always has nodes. A row
+that is already an **aggregate** scrolls (Capacity's nodes, Posture's paths); a
+row that is **one per object** caps at five with a `Row::Prose` overflow (Waste's
+Services and disks) — the rule the two panes were accused of contradicting, and
+Waste's own counted rows obey it too. Waste folds its three per-section
+`NotComputed`s into one when every section is unread, which is rule 7's stated
+reason applied at the pane. The `Versions` heading is the report's own first
+`Row::Prose`, because `Row::Prose`'s doc had already ruled it and `views.rs`
+would otherwise hard-code a per-report string. The expired certificate badge reads
+`out`: `0d` reads as *expires today*, `-12d` teaches a minus sign, and a blank
+sidebar is worst exactly when things got worse. `uncapped_workloads` counts
+distinct owners, not pods — 42 pods were nine controllers on the test cluster —
+and its answer changes at Phase 5 when `owner` resolves past the ReplicaSet, which
+is not a regression.
+
+**Two frozen doc claims a committed capture disproves, corrected.**
+`PodSnapshot::cpu_limit` said a pod declaring its limits at pod level decodes with
+all-`None` containers; `podlimit.json` shows the kubelet writes the pod-level
+limit down onto the container status. `PodSnapshot::containers` said the same of
+an unreported pod; `pending.json` decodes with an **empty** list, which answers
+*yes, all of them* to any sweep. A doc sentence is not logic, so this is inside
+D42's window and not a reshape — but it is the same defect class D124 unfroze a
+file for.

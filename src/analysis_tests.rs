@@ -1,38 +1,254 @@
 use super::*;
 
-use crate::rules::ObjectKind;
+use crate::rules::{NodeUsage, ObjectKind, WorkloadSnapshot};
 
-// --- BUILDING THE PANES screens/analysis.md DRAWS ---
+use std::collections::{BTreeMap, BTreeSet};
+
+use k8s_openapi::api::apps::v1::ReplicaSet;
+use k8s_openapi::api::core::v1::{Node, PersistentVolumeClaim, Pod, Service};
+use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+
+// --- ONE MODULE PER REGION OF analysis.rs ---
 //
-// The claim under test is that `Report` can say what each pane says — the row that has a
-// severity and the row that has none, the row the cursor may land on and the line it must
-// skip, the row that jumps to a finding, to an object no rule named, and to nothing at all,
-// and the section that could not be computed sitting where its answer would have been. No
-// report is computed in this box, so every pane below is built by hand from the screen and
-// then read back.
+// Each child below holds the tests for the `analysis.rs` region it is named after
+// (invariant 11, NOTES § D91). **The product file did not split with them**, which is the half
+// of that rule that matters: two producers reading one container and disagreeing is the defect
+// this repo has paid most for, and a module boundary is where the second copy of a shared
+// helper grows back.
+//
+// What stays in *this* file is what more than one of them reads — the corpus loaders, the
+// plant helper, the row builders, the read-back helpers, `pane`, and the two sweeps that run
+// over every producer at once. A helper copied into two modules is the divergence the split is
+// not allowed to grow.
+
+#[path = "analysis_tests/shape.rs"]
+mod shape;
+
+#[path = "analysis_tests/capacity.rs"]
+mod capacity;
+
+#[path = "analysis_tests/drain.rs"]
+mod drain;
+
+#[path = "analysis_tests/waste.rs"]
+mod waste;
+
+#[path = "analysis_tests/posture.rs"]
+mod posture;
+
+#[path = "analysis_tests/versions.rs"]
+mod versions;
+
+#[path = "analysis_tests/certificates.rs"]
+mod certificates;
+
+// --- THE CORPUS THIS FILE READS ---
+//
+// **A producer is asserted against a capture, never against a literal typed out of a mockup** —
+// which is what the builders below used to be, and what each of them stops being as its report's
+// box lands. The loaders are this module's own: `rules_tests` has the same three and they are
+// private to it, and no `lib.rs` exists to share them through (invariant 11, NOTES § D50).
+//
+// **Not the whole corpus, and each report names the slice it needs.** Capacity is a per-node sum
+// and a per-pod count, so what it needs is nodes, a pod list spread across them, and the four pods
+// that each break a different naive version of the limits count. Drain safety adds the two
+// PodDisruptionBudgets and the Deployment's pods they protect; Waste adds the four on-demand
+// lists. Naming the wider set here would be a second copy of `rules_tests`' `CAPTURED_PODS` to
+// keep in step.
+
+fn fixture(name: &str) -> serde_json::Value {
+    let path = format!("{}/tests/fixtures/{name}.json", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("fixture {path} could not be read: {e}"));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("fixture {path} is not JSON: {e}"))
+}
+
+/// A capture with one field changed on the way in — the D40 plant `rules_tests` uses, and the
+/// only way to reach a shape `just fixtures` has never captured.
+fn captured_pod_but(name: &str, edit: impl FnOnce(&mut Pod)) -> PodSnapshot {
+    let mut object: Pod = serde_json::from_value(fixture(name))
+        .unwrap_or_else(|e| panic!("{name}.json is not a Pod: {e}"));
+    edit(&mut object);
+    PodSnapshot::from(object)
+}
+
+fn captured_pod(name: &str) -> PodSnapshot {
+    let pod: Pod = serde_json::from_value(fixture(name))
+        .unwrap_or_else(|e| panic!("{name}.json is not a Pod: {e}"));
+    PodSnapshot::from(pod)
+}
+
+/// `kubectl get -A` answers with `kind: List`, which `k8s_openapi::List<T>` refuses — it wants
+/// `PodList` — so the items come out by hand.
+fn captured_items<T: k8s_openapi::serde::de::DeserializeOwned>(name: &str) -> Vec<T> {
+    fixture(name)["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{name}.json has no items array"))
+        .iter()
+        .map(|v| {
+            serde_json::from_value(v.clone())
+                .unwrap_or_else(|e| panic!("{name}.json item does not decode: {e}"))
+        })
+        .collect()
+}
+
+fn captured_nodes() -> Vec<NodeSnapshot> {
+    captured_items::<Node>("nodes")
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+/// The four single-pod captures the limits row is about, plus every `kube-system` pod — which is
+/// what puts pods on all four nodes and is where the DaemonSet and static pods live.
+fn captured_pods() -> Vec<PodSnapshot> {
+    [
+        "overhead",
+        "nolimits",
+        "podlimit",
+        "healthy",
+        "healthy-podlevel",
+    ]
+    .iter()
+    .map(|n| captured_pod(n))
+    .chain(
+        captured_items::<Pod>("kube-system-pods")
+            .into_iter()
+            .map(PodSnapshot::from),
+    )
+    .collect()
+}
+
+/// The two committed PodDisruptionBudgets — `broken-pdb-floor` at its floor and
+/// `healthy-pdb-room` with a pod to spare (`reports/2026-08-21-family-c-corpus-drain-and-\
+/// capacity.md` § 1).
+fn captured_budgets() -> Vec<DisruptionBudgetSnapshot> {
+    captured_items::<PodDisruptionBudget>("poddisruptionbudgets")
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+/// **One item of a captured list, with one field moved on the way in** — [`captured_pod_but`]'s
+/// mechanism (NOTES § D40) for the four on-demand lists, and the only way to reach a shape
+/// `just fixtures` has never captured. One helper for all four kinds, keyed on the name the
+/// capture wrote, because a per-kind copy of six lines is where a second reading of a field
+/// grows back.
+fn captured_item_but<T, S>(fixture: &str, name: &str, edit: impl FnOnce(&mut T)) -> S
+where
+    T: k8s_openapi::Metadata<Ty = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>
+        + k8s_openapi::serde::de::DeserializeOwned,
+    S: From<T>,
+{
+    let mut object = captured_items::<T>(fixture)
+        .into_iter()
+        .find(|o| o.metadata().name.as_deref() == Some(name))
+        .unwrap_or_else(|| panic!("{fixture}.json has no {name}"));
+    edit(&mut object);
+    S::from(object)
+}
+
+/// The same, for the object every drain plant is made from: the disruption controller answers
+/// well inside the time a capture takes, so a photographed budget always has its status caught up
+/// with its spec, and every interesting counter shape has to be planted.
+fn captured_budget_but(
+    name: &str,
+    edit: impl FnOnce(&mut PodDisruptionBudget),
+) -> DisruptionBudgetSnapshot {
+    captured_item_but("poddisruptionbudgets", name, edit)
+}
+
+/// The Deployment's two pods — **the only workload in the corpus a budget row can be read off**
+/// (NOTES § D130): they carry `app: healthy-deploy`, which is what `broken-pdb-floor` selects,
+/// and they sit on two different nodes.
+fn captured_deploy_pods() -> Vec<PodSnapshot> {
+    captured_items::<Pod>("healthy-deploy-pods")
+        .into_iter()
+        .map(PodSnapshot::from)
+        .collect()
+}
+
+fn captured_services() -> Vec<ServiceSnapshot> {
+    captured_items::<Service>("services")
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+fn captured_slices() -> Vec<EndpointSliceSnapshot> {
+    captured_items::<EndpointSlice>("endpointslices")
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+fn captured_claims() -> Vec<ClaimSnapshot> {
+    captured_items::<PersistentVolumeClaim>("persistentvolumeclaims")
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+fn captured_replica_sets() -> Vec<WorkloadSnapshot> {
+    captured_items::<ReplicaSet>("healthy-replicasets")
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+/// **The pin `rules_tests` uses, for the same reason**: a moment of its own would make every
+/// captured timestamp read differently on every run. Nothing in Capacity reads the clock — it is
+/// here because `ClusterSnapshot` has no `Default` and `now` cannot be invented away.
+fn now() -> Time {
+    Time(
+        "2026-08-21T00:00:00Z"
+            .parse()
+            .expect("the pin is a timestamp"),
+    )
+}
+
+/// A snapshot with the two lists Capacity reads and nothing else fetched. Spread over, so a
+/// fifteenth field on `ClusterSnapshot` cannot arrive here in silence.
+fn snapshot(pods: Vec<PodSnapshot>, nodes: Vec<NodeSnapshot>) -> ClusterSnapshot {
+    ClusterSnapshot {
+        now: now(),
+        pods,
+        nodes,
+        workloads: Vec::new(),
+        server_version: None,
+        context: None,
+        client_certificate: None,
+        namespace_scope: None,
+        replica_sets: None,
+        services: None,
+        endpoint_slices: None,
+        claims: None,
+        disruption_budgets: None,
+        certificate_requests: None,
+        metrics: None,
+    }
+}
+
+/// The whole committed corpus this file reads, cluster-wide — the snapshot Capacity is handed on
+/// a cluster nobody has broken.
+fn corpus() -> ClusterSnapshot {
+    snapshot(captured_pods(), captured_nodes())
+}
+
+// --- BUILDING A ROW BY HAND ---
+//
+// **One report is still built here and it is the last one**: `restarts`, Family D's, whose home
+// and wording `tui-designer` has not settled. Every other pane on this screen is its producer's
+// output now, asserted against a snapshot rather than against a literal typed out of a mockup —
+// which is what the hand-built panes were for and why each one went as its box landed.
 //
 // **The glyphs are absent on purpose.** `● ▲ ○` belong to `theme.rs`, `→ ` and `⏎` to
 // `views.rs`; what a row carries is the band and the sentence (CLAUDE.md § single point of
 // change). So is the line break: a row is one line, and where it wraps is measured a layer up.
 // `nothing_a_report_carries_spells_a_glyph_or_breaks_its_own_line` is the sweep that holds
 // both, over every string in every report this file builds — titles and badges included.
-//
-// **The wording below is the pre-D128 sketch's and the claim it proves is not.** Four of the
-// panes were redrawn after this box landed — Capacity stopped being a table, `● BLOCKS` moved
-// into the band, `Worth knowing (not broken):` left the Waste pane, and `1.31 (1) ▲ too far
-// behind` turned out to flag a healthy cluster (NOTES § D128). What each builder asserts is
-// that the *shape* carries a pane of that kind: a banded row beside an unbanded one, a
-// selectable row beside a line the cursor skips, a jump to a finding beside a jump to an
-// object beside none at all. Every one of those is still true of the redrawn panes, and no
-// assertion here reads a sentence for its own sake. **Each builder is replaced by its report's
-// producer as that box lands**, which is where the current wording gets asserted — against a
-// snapshot, not against a literal typed out of a mockup.
-
-/// A line that is read and never selected. Every one of these is a line `screens/analysis.md`
-/// draws with no `⏎` on it, and after NOTES § D127's correction the *variant* is what says so.
-fn prose(text: &str) -> Row {
-    Row::Prose(text.to_string())
-}
 
 /// **`detail` is a slice of paragraphs and not one string** (NOTES § D129), so the empty case
 /// is `&[]` and reads as what it is: a row with nothing indented under it. Every builder below
@@ -53,53 +269,6 @@ fn object(kind: ObjectKind, namespace: Option<&str>, name: &str) -> ObjectId {
         namespace: namespace.map(str::to_string),
         name: name.to_string(),
         uid: Some(format!("uid-{name}")),
-    }
-}
-
-/// **The one identity in the product that carries no uid** — C1's kubeconfig, a file on the
-/// reader's own disk that was never an API object (`rules.rs` § the certificate rules,
-/// NOTES § D51). It gets its own builder because [`object`] cannot express `uid: None`, and the
-/// one place `None` is mandatory is exactly where a derived `Some("uid-…")` went in silently.
-fn kubeconfig(context: &str) -> ObjectId {
-    ObjectId {
-        kind: ObjectKind::Other("kubeconfig".to_string()),
-        namespace: None,
-        name: context.to_string(),
-        uid: None,
-    }
-}
-
-fn node(name: &str) -> Jump {
-    Jump::Object(object(ObjectKind::Node, None, name))
-}
-
-/// C1's finding, the one row on these panes a rule already answered (NOTES § D87).
-///
-/// **Copied field for field off `kubeconfig_certificate_expiring` in `rules.rs`**, at 30 days
-/// out so the pane stays the one `screens/analysis.md` draws — the title's sentence, the
-/// evidence's `valid until … · …` shape, the action, `kubectl_cmd: None` (no such command
-/// exists), `owner == object`, **`uid: None`** and **`timestamp: None`**. The last two are not
-/// wording: `ObjectId::uid` names this as the only `None` in the product, and D69 refuses a
-/// timestamp because `notAfter` is a deadline — a stamp here draws an age on the one card that
-/// must have none.
-///
-/// It is hand-built because the rule is private to `rules.rs` and this module is its sibling,
-/// not its child. That is the same wall the module doc's producer signature answers: a real
-/// producer receives this finding from [`crate::rules::analyze`] rather than rebuilding it.
-fn kubeconfig_certificate_expiring() -> Finding {
-    Finding {
-        severity: Severity::Info,
-        title: "Your kubeconfig certificate expires in 30 days".to_string(),
-        evidence: "valid until 2026-09-16T00:00:00Z · this is the file on your own machine that \
-                   proves who you are — nothing in the cluster is broken"
-            .to_string(),
-        action: "ask whoever gave you access for a new kubeconfig before that date — k8rs cannot \
-                 renew it, and after it kubectl stops working for you too"
-            .to_string(),
-        kubectl_cmd: None,
-        owner: kubeconfig("prod-eu"),
-        object: kubeconfig("prod-eu"),
-        timestamp: None,
     }
 }
 
@@ -161,20 +330,30 @@ fn jump_of(row: &Row) -> Option<&Jump> {
     }
 }
 
-/// Every string a report carries, **title and badge included**. The sweep reads this rather
-/// than the rows directly, so the exhaustive `match` makes a new [`Row`] variant a compile
-/// error here instead of a silently unswept string (`tester` planted a `●` in `Report::title`
-/// and the whole suite stayed green).
+/// Every string a report carries, **title and badge included**. The sweeps read this rather than
+/// the rows directly, so the exhaustive `match` makes a new [`Row`] variant a compile error here
+/// instead of a silently unswept string (`tester` planted a `●` in `Report::title` and the
+/// whole suite stayed green).
+///
+/// **The `Row::Answer` arm names every field and carries no `..`**, which is the other half of
+/// that: under a `..` a new *field* on an existing variant compiles and goes unswept, and only a
+/// new variant is an error. The two that hold no string are named and dropped — `severity` is a
+/// band and `jump` an identity.
+///
+/// **It is a derived list, so [`CANARIES`] asserts it found something**: what this returns is only
+/// ever checked for absences, and *extracted nothing* and *nothing to extract* print the same
+/// green (CLAUDE.md § Tests must not lie).
 fn strings_of(report: &Report) -> Vec<&str> {
     let mut out = vec![report.title.as_str()];
     out.extend(report.badge.iter().map(|badge| badge.value.as_str()));
     for row in &report.rows {
         match row {
             Row::Answer {
+                severity: _,
                 text,
                 detail,
                 action,
-                ..
+                jump: _,
             } => {
                 out.push(text.as_str());
                 out.extend(detail.iter().map(String::as_str));
@@ -185,6 +364,111 @@ fn strings_of(report: &Report) -> Vec<&str> {
         }
     }
     out
+}
+
+/// **The pane as a reader would see it**, for `cargo test -- --nocapture`. The glyphs belong to
+/// `theme.rs` and the `→ ` to `views.rs`; they are spelled here — and only here in this file — so
+/// that running it prints something a human can read, exactly as `rules_tests`' `card` does. The
+/// sweep at the foot of this file reads [`strings_of`] and not this, so nothing below can smuggle
+/// a glyph into a report through it.
+fn pane(report: &Report) -> String {
+    let mark = |severity: Option<Severity>| match severity {
+        Some(Severity::Critical) => "\u{25cf} ",
+        Some(Severity::Warn) => "\u{25b2} ",
+        Some(Severity::Info) => "\u{25cb} ",
+        None => "  ",
+    };
+    // **The sidebar label is `views.rs`'s and is deliberately not a field on `Report`**
+    // ([`Report::title`]), so this printer cannot name the entry — it prints the badge beside it
+    // and nothing else. It said `capacity` while Capacity was the only producer, which read as a
+    // lie the moment a second pane was printed through it.
+    // **A badge that is a count draws its band as a glyph; a badge that is a duration does not**
+    // (`screens/widgets.md` § 2). On a count the glyph is the *unit* — `capacity  1` has lost what
+    // the number was of — while `certificates  30d` and `certificates  out` already state the
+    // fact in words that survive a monochrome terminal, so the band only colours them. This
+    // printer drew `15d▲` and `out●`, which is the shape the rule forbids; the rule stands and
+    // the printer is what was wrong
+    // (`reports/2026-08-21-family-c-analysis-report-family-review.md` § 9).
+    let mut out = match &report.badge {
+        Some(badge) => format!(
+            "[sidebar]  {}{}\n",
+            badge.value,
+            match badge.value.parse::<u64>() {
+                Ok(_) => mark(Some(badge.severity)).trim_end_matches(' '),
+                Err(_) => "",
+            }
+        ),
+        None => "[sidebar]\n".to_string(),
+    };
+    out.push_str(&format!("\n{}\n", report.title));
+    for row in &report.rows {
+        match row {
+            Row::Answer {
+                severity,
+                text,
+                detail,
+                action,
+                ..
+            } => {
+                out.push_str(&format!("{}{text}\n", mark(*severity)));
+                for paragraph in detail {
+                    out.push_str(&format!("      {paragraph}\n"));
+                }
+                if !action.is_empty() {
+                    out.push_str(&format!("      \u{2192} {action}\n"));
+                }
+            }
+            Row::Prose(text) => out.push_str(&format!("\n{text}\n")),
+            Row::NotComputed { reason, ask_for } => {
+                out.push_str(&format!("\n{reason}\n\n{ask_for}\n"));
+            }
+        }
+    }
+    out
+}
+
+/// Where a node sits in the snapshot's list, by name — the way a plant reaches one field of one
+/// machine without rebuilding the corpus around it.
+fn index_of(cluster: &ClusterSnapshot, name: &str) -> usize {
+    cluster
+        .nodes
+        .iter()
+        .position(|n| n.id.name == name)
+        .unwrap_or_else(|| panic!("the capture has no node {name}"))
+}
+
+/// The row whose text begins with this node's name.
+fn row_for<'a>(report: &'a Report, name: &str) -> &'a Row {
+    report
+        .rows
+        .iter()
+        .find(|row| {
+            matches!(row, Row::Answer { text, .. }
+                if text.split_whitespace().next() == Some(name))
+        })
+        .unwrap_or_else(|| panic!("no row on this pane names {name}"))
+}
+
+/// The two sentences of every `NotComputed` row on a pane, in order — what is switched off
+/// and what to ask for. Read as a pair, because a report that names the check without naming
+/// the way out is the half a reader cannot act on.
+fn not_computed(report: &Report) -> Vec<(&str, &str)> {
+    report
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::NotComputed { reason, ask_for } => Some((reason.as_str(), ask_for.as_str())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// One label map, spelled the way a capture writes one.
+fn labels(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect()
 }
 
 /// The rows the cursor may land on, in order — the `Answer`s, by their text.
@@ -199,750 +483,184 @@ fn selectable(report: &Report) -> Vec<&str> {
         .collect()
 }
 
-// --- CAPACITY ---
-
-/// `screens/analysis.md` § Capacity, cluster-wide.
-fn capacity() -> Report {
-    Report {
-        title: "What each node promised, and what it has".to_string(),
-        badge: Some(Badge {
-            value: "1".to_string(),
-            severity: Severity::Warn,
-        }),
-        rows: vec![
-            prose("NODE  PROMISED  USABLE  IN USE"),
-            answer(
-                None,
-                "node-1  7.4 cpu  8 cpu  2.1 cpu",
-                &[],
-                Some(node("node-1")),
-            ),
-            answer(
-                Some(Severity::Warn),
-                "node-2  9.1 cpu  8 cpu  3.4 cpu",
-                &[],
-                Some(node("node-2")),
-            ),
-            answer(
-                None,
-                "node-3  1.2 cpu  8 cpu  0.4 cpu",
-                &[],
-                Some(node("node-3")),
-            ),
-            prose("node-2 has promised more CPU than it has. Nothing new can start there."),
-            answer(None, "No CPU/memory limit: 34 workloads", &[], None),
-            prose("(needs metrics-server for the IN USE column)"),
-        ],
-    }
-}
-
-#[test]
-fn capacity_draws_one_warned_node_among_three_and_a_row_that_judges_nothing() {
-    let report = capacity();
-
-    assert_eq!(report.rows.len(), 7, "seven lines are drawn in the pane");
-
-    // The table: one node over its allocatable, two under. The `▲` sits beside `9.1 cpu` on
-    // screen; where the glyph lands is `views.rs`'s, the band is the row's.
-    assert_eq!(severity_of(&report.rows[1]), None);
-    assert_eq!(severity_of(&report.rows[2]), Some(Severity::Warn));
-    assert_eq!(severity_of(&report.rows[3]), None);
-
-    // The old rule 9 is a count, not an alarm: a row with no severity at all, which is why
-    // `severity` is an `Option` rather than a fourth band.
-    assert_eq!(severity_of(&report.rows[5]), None);
-    assert_eq!(
-        text_of(&report.rows[5]),
-        "No CPU/memory limit: 34 workloads"
-    );
-
-    // The badge is a count and its band, and it carries no symbol.
-    let badge = report
-        .badge
-        .expect("the capacity badge is drawn when the check ran");
-    assert_eq!(badge.value, "1");
-    assert_eq!(badge.severity, Severity::Warn);
-}
-
-#[test]
-fn the_cursor_lands_on_the_rows_the_screen_offers_enter_on_and_skips_the_lines_it_does_not() {
-    // The pane the whole `Row::Prose` split exists for. `screens/analysis.md` draws
-    // `↑↓ move  ⏎ open` under it, and three of its seven lines are read-only: a column
-    // header, the sentence under the table, and the metrics-server parenthetical.
-    let report = capacity();
-    assert_eq!(
-        selectable(&report),
-        vec![
-            "node-1  7.4 cpu  8 cpu  2.1 cpu",
-            "node-2  9.1 cpu  8 cpu  3.4 cpu",
-            "node-3  1.2 cpu  8 cpu  0.4 cpu",
-            "No CPU/memory limit: 34 workloads",
-        ],
-        "the header, the sentence and the parenthetical are not rows `⏎` may land on"
-    );
-
-    // **The pair that makes `jump.is_some()` the wrong test** (NOTES § D127): a selectable row
-    // with no destination recorded, and an unselectable line that also has none. Keying a
-    // cursor on the field would have skipped the first — the one the screen prints
-    // `— ⏎ to list` on — in a file frozen by Phase 9.
-    assert!(
-        matches!(&report.rows[5], Row::Answer { jump: None, .. }),
-        "`No CPU/memory limit: 34 workloads` is selectable and its destination is undecided"
-    );
-    assert!(
-        matches!(&report.rows[6], Row::Prose(_)),
-        "`(needs metrics-server …)` is not a row at all, and that is a different fact"
-    );
-}
-
-/// `screens/analysis.md` § Capacity when you can only see one namespace.
-fn capacity_scoped_to_one_namespace() -> Report {
-    Report {
-        title: "What each node promised, and what it has".to_string(),
-        badge: None,
-        rows: vec![
-            Row::NotComputed {
-                reason: "Not checked here. Adding up what a node has promised needs every pod \
-                         on it, and you can only see payments — so every number would come out \
-                         too low."
-                    .to_string(),
-                ask_for: "Ask for cluster-wide read access, or drop the --namespace flag if you \
-                          set one."
-                    .to_string(),
-            },
-            prose("Still counted, from what you can see:"),
-            answer(None, "No CPU/memory limit: 6 workloads", &[], None),
-        ],
-    }
-}
-
-#[test]
-fn a_switched_off_section_sits_where_its_answer_would_have_been_and_the_rest_still_answers() {
-    let report = capacity_scoped_to_one_namespace();
-
-    assert_eq!(report.rows.len(), 3);
-
-    // The report is not empty and is not an error: one section off, two rows still true.
-    let Row::NotComputed { reason, ask_for } = &report.rows[0] else {
-        panic!("the promised/usable table is the section that switches off");
-    };
-    assert!(
-        reason.contains("Not checked here"),
-        "it names the check that is off"
-    );
-    assert!(
-        !reason.contains("403") && !reason.contains("RBAC"),
-        "it does not say 403 or RBAC (screens/analysis.md)"
-    );
-    // Both causes, because the screen cannot tell a --namespace flag from a 403 fallback.
-    assert!(ask_for.contains("read access"));
-    assert!(ask_for.contains("--namespace"));
-
-    // The limits row keeps counting, and counts what is in scope.
-    assert_eq!(text_of(&report.rows[2]), "No CPU/memory limit: 6 workloads");
-
-    // Nothing is drawn where nothing was computed: the three node rows are **gone**, not
-    // filled with dashes, so no row on this pane names a node at all.
-    assert!(
-        !strings_of(&report).iter().any(|s| s.contains("node-")),
-        "there is no table here, so there is no row to put a `—` in — and no line of any \
-         kind names a node, which asserting over the `Answer`s alone would not have caught"
-    );
-}
-
-/// The state `screens/widgets.md` § 1a says the sidebar cannot draw: the check **ran** and
-/// found nothing overcommitted, so nothing is badged — the same blank
-/// [`capacity_scoped_to_one_namespace`] draws for the opposite reason.
-fn capacity_with_nothing_overcommitted() -> Report {
-    Report {
-        title: "What each node promised, and what it has".to_string(),
-        badge: None,
-        rows: vec![
-            prose("NODE  PROMISED  USABLE  IN USE"),
-            answer(
-                None,
-                "node-1  7.4 cpu  8 cpu  2.1 cpu",
-                &[],
-                Some(node("node-1")),
-            ),
-            answer(None, "No CPU/memory limit: 34 workloads", &[], None),
-        ],
-    }
-}
-
-#[test]
-fn a_check_that_ran_and_found_nothing_is_not_a_check_that_did_not_run() {
-    let ran = capacity_with_nothing_overcommitted();
-    let did_not = capacity_scoped_to_one_namespace();
-
-    assert_eq!(ran.rows.len(), 3, "the pane still draws its table");
-
-    // **Both badges are blank, and that is the point.** The sidebar has room for a number and
-    // not for a reason, so it cannot be the thing that tells these two apart
-    // (`screens/widgets.md` § 1a). An earlier draft badged the first `0`; it carried nothing
-    // the body does not already say, and the sidebar has no room for the reason either way.
-    assert_eq!(ran.badge, None);
-    assert_eq!(did_not.badge, None);
-
-    // The discriminator is in the body, in the one place the screen has to print it anyway.
-    assert!(
-        !ran.rows
-            .iter()
-            .any(|r| matches!(r, Row::NotComputed { .. })),
-        "a report that ran says nothing about what it could not do"
-    );
-    assert!(
-        did_not
-            .rows
-            .iter()
-            .any(|r| matches!(r, Row::NotComputed { .. })),
-        "the badge has no room for a sentence, so the body carries it"
-    );
-}
-
-/// The three `detail` lengths `screens/analysis.md` § Capacity draws, in one report — the pane
-/// NOTES § D129 widened this field for. **This builder is post-D128 and the three above are
-/// not**: it is the row as the screen draws it now, `<promised> of <usable> cpu · <promised> of
-/// <usable> GiB`, the band first and never mid-line, the measurement in `detail` and never in
-/// `text`.
-///
-/// - the flagged node draws **two** indented paragraphs — what it is using, then what the
-///   numbers mean;
-/// - a healthy node draws **one**, the measurement alone, because there is nothing to explain;
-/// - and on a cluster with no metrics-server there is **no** measurement to draw, so the row
-///   has none at all and the pane says why once, under the node rows, in a `Row::NotComputed`.
-fn capacity_as_the_screen_draws_it_now() -> Report {
-    Report {
-        title: "What each node promised, and what it has".to_string(),
-        badge: Some(Badge {
-            value: "1".to_string(),
-            severity: Severity::Warn,
-        }),
-        rows: vec![
-            Row::Answer {
-                severity: Some(Severity::Warn),
-                text: "node-2   6.2 of 8 cpu · 30 of 16 GiB".to_string(),
-                detail: vec![
-                    "using 3.4 cpu and 12 GiB".to_string(),
-                    "Almost twice the memory is promised as node-2 has. If these pods use what \
-                     they asked for, one of them is killed."
-                        .to_string(),
-                ],
-                action: "move a workload off, or ask for less".to_string(),
-                jump: Some(node("node-2")),
-            },
-            answer(
-                None,
-                "node-1   7.4 of 8 cpu · 11 of 16 GiB",
-                &["using 2.1 cpu and 6 GiB"],
-                Some(node("node-1")),
-            ),
-            answer(
-                None,
-                "node-3   1.2 of 8 cpu · 3 of 16 GiB",
-                &[],
-                Some(node("node-3")),
-            ),
-            answer(
-                None,
-                "34 workloads have no memory or CPU limit",
-                &["Nothing stops one taking a whole node."],
-                None,
-            ),
-        ],
-    }
-}
-
-#[test]
-fn a_row_carries_as_many_indented_paragraphs_as_the_pane_draws_under_it() {
-    // **The test `detail: String` cannot pass** (NOTES § D129). One string could hold both of
-    // node-2's paragraphs only with a `\n` in it, and the sweep at the foot of this file —
-    // `nothing_a_report_carries_spells_a_glyph_or_breaks_its_own_line`, which reaches every
-    // paragraph of every report — refuses that over this very report. This layer cannot see the
-    // pane's width, so it may not be the layer that breaks a line.
-    let report = capacity_as_the_screen_draws_it_now();
-
-    assert_eq!(
-        report
-            .rows
-            .iter()
-            .map(|row| detail_of(row).len())
-            .collect::<Vec<_>>(),
-        vec![2, 1, 0, 1],
-        "the flagged node draws a measurement and an explanation, a healthy node the \
-         measurement alone, and a node with no metrics-server neither"
-    );
-
-    // **Order is the claim, not just the count.** The measurement comes first and the sentence
-    // that interprets it second; swapped, the reader meets the consequence before the number it
-    // is about, and a `Vec` is exactly what makes that assertable.
-    let flagged = detail_of(&report.rows[0]);
-    assert!(
-        flagged[0].starts_with("using "),
-        "the measurement is the first paragraph: {:?}",
-        flagged[0]
-    );
-    assert!(
-        flagged[1].contains("killed"),
-        "the explanation is the second, and it says what happens: {:?}",
-        flagged[1]
-    );
-
-    // **Empty is `&[]` and is drawn by leaving the line out** — not by an element that is the
-    // empty string, which would draw the blank line [`Finding::evidence`]'s convention refuses.
-    assert!(detail_of(&report.rows[2]).is_empty());
-    assert!(
-        report
-            .rows
-            .iter()
-            .all(|row| detail_of(row).iter().all(|p| !p.is_empty())),
-        "no paragraph is the empty string — absence is length, never a blank element"
-    );
-
-    // The band is the first thing on the row and never inside it: `6.2 of 8 cpu` carries no
-    // glyph, and neither does any paragraph under it. Swept for the whole report below.
-    assert_eq!(severity_of(&report.rows[0]), Some(Severity::Warn));
-    assert_eq!(severity_of(&report.rows[1]), None);
-}
-
-// --- DRAIN SAFETY ---
-
-/// `screens/analysis.md` § Drain safety.
-fn drain_safety() -> Report {
-    Report {
-        title: "If you drained each node, what happens?".to_string(),
-        badge: None,
-        rows: vec![
-            answer(None, "node-1  ok  18 pods move", &[], Some(node("node-1"))),
-            Row::Answer {
-                severity: Some(Severity::Critical),
-                text: "node-2  BLOCKS  never finishes".to_string(),
-                detail: vec![
-                    "payments/web wants at least 5 copies and has exactly 5. Draining would take \
-                     one away, so it waits forever."
-                        .to_string(),
-                ],
-                action: "run one more copy, or relax the disruption budget first".to_string(),
-                jump: Some(node("node-2")),
-            },
-            answer(
-                Some(Severity::Warn),
-                "node-3  2 pods nothing would restart",
-                &["(started by hand, no Deployment)"],
-                Some(node("node-3")),
-            ),
-        ],
-    }
-}
-
-#[test]
-fn drain_safety_carries_the_blocked_nodes_explanation_and_its_way_out() {
-    let report = drain_safety();
-
-    assert_eq!(report.rows.len(), 3, "one row per node");
-    assert_eq!(
-        severity_of(&report.rows[0]),
-        None,
-        "a node that drains cleanly is not a finding"
-    );
-    assert_eq!(severity_of(&report.rows[1]), Some(Severity::Critical));
-    assert_eq!(severity_of(&report.rows[2]), Some(Severity::Warn));
-
-    let Row::Answer { detail, action, .. } = &report.rows[1] else {
-        unreachable!("built as an answer above");
-    };
-    assert_eq!(detail.len(), 1, "this row draws one indented paragraph");
-    assert!(
-        detail[0].contains("waits forever"),
-        "the explanation says what a drain would do"
-    );
-    assert_eq!(
-        action,
-        "run one more copy, or relax the disruption budget first"
-    );
-
-    // The screen draws exactly one `→` line on this pane: empty is drawn by leaving the line
-    // out, never by drawing a blank one, and the contrast is what proves it — an assertion
-    // that only read the two empty strings back would be reading the builder, not the pane.
-    assert_eq!(
-        report
-            .rows
-            .iter()
-            .filter(|row| !action_of(row).is_empty())
-            .count(),
-        1,
-        "only the blocked node has something to do about it"
-    );
-
-    // Every row goes somewhere, and no rule fired for any of them: a drain verdict is a
-    // report's answer, not a finding.
-    for row in &report.rows {
-        assert!(
-            matches!(jump_of(row), Some(Jump::Object(_))),
-            "a drain row jumps to its node"
-        );
-    }
-}
-
-/// `screens/analysis.md` § *What each report needs*: drain safety without a cluster-wide pod
-/// list and PodDisruptionBudgets is **not computed, full stop** — the whole report is the one
-/// row. It is the report whose partial answer is worst of the three, because *"18 pods move,
-/// node-1 is ok"* is a green light for an operation that then hangs on a pod nobody could see.
-fn drain_safety_not_computed() -> Report {
-    Report {
-        title: "If you drained each node, what happens?".to_string(),
-        badge: None,
-        rows: vec![Row::NotComputed {
-            reason: "Not checked here. Working out whether a drain finishes needs every pod on \
-                     every node, and the rules that say how many copies must stay up — and a \
-                     half-answer here would call a node safe that is not."
-                .to_string(),
-            ask_for: "Ask for cluster-wide read access, or drop the --namespace flag if you set \
-                      one."
-                .to_string(),
-        }],
-    }
-}
-
-// --- WASTE ---
-//
-// **Three rows below carry `jump: None` because no destination is recorded for them yet**,
-// which is what [`Row::Answer::jump`] now means and all it means. `47 pods`, `12 replicasets`
-// and `9 pods` each stand for a *set* of objects, as do Capacity's `No CPU/memory limit: 34
-// workloads — ⏎ to list` and Certificates' `2 kubelets waiting to join` — five counted rows
-// across three panes. [`Jump`] has a case for one object and a case for one finding; a set is
-// neither, and what `⏎` opens for one is unanswered (NOTES § D127). They are `Answer`s, so the
-// cursor still reaches them, which is the half the first draft got wrong.
-
-/// `screens/analysis.md` § Waste.
-fn waste() -> Report {
-    let service = object(
-        ObjectKind::Other("Service".to_string()),
-        Some("shop"),
-        "api-svc",
-    );
-    let claim = object(
-        ObjectKind::Other("PersistentVolumeClaim".to_string()),
-        Some("data"),
-        "pgdata-old",
-    );
-    Report {
-        title: "Things that cost you something for nothing".to_string(),
-        badge: None,
-        rows: vec![
-            answer(
-                Some(Severity::Critical),
-                "shop/api-svc  matches no pod",
-                &["This Service points at nothing. Anything calling it gets a 503."],
-                Some(Jump::Object(service)),
-            ),
-            answer(
-                Some(Severity::Warn),
-                "data/pgdata-old  reserved, unused, 100Gi",
-                &[],
-                Some(Jump::Object(claim)),
-            ),
-            answer(
-                Some(Severity::Warn),
-                "47 pods  Evicted / Completed",
-                &[],
-                None,
-            ),
-            answer(
-                Some(Severity::Info),
-                "12 replicasets  parked at 0 replicas",
-                &[],
-                None,
-            ),
-            prose("Worth knowing (not broken):"),
-            answer(
-                Some(Severity::Info),
-                "9 pods mount a path from the node",
-                &[],
-                None,
-            ),
-        ],
-    }
-}
-
-/// The other side of [`Report::rows`]'s line: the check **ran** and had nothing to say, which
-/// is an empty `Vec` and never a [`Row::NotComputed`]. Waste is where it happens —
-/// `screens/analysis.md` § *What each report needs* has it *run unchanged* under any scope,
-/// because its rows are per-object facts rather than sums, so a cluster with nothing wasteful
-/// in it draws a pane with no rows at all.
-fn waste_with_nothing_wasted() -> Report {
-    Report {
-        title: "Things that cost you something for nothing".to_string(),
-        badge: None,
-        rows: Vec::new(),
-    }
-}
-
-#[test]
-fn waste_spans_all_three_bands_and_its_first_row_jumps_to_an_object_no_rule_named() {
-    let report = waste();
-
-    assert_eq!(report.rows.len(), 6);
-    assert_eq!(
-        selectable(&report).len(),
-        5,
-        "`Worth knowing (not broken):` is a heading and the other five are rows"
-    );
-    assert_eq!(
-        report
-            .rows
-            .iter()
-            .filter(|row| matches!(row, Row::Answer { .. }))
-            .map(severity_of)
-            .collect::<Vec<_>>(),
-        vec![
-            Some(Severity::Critical),
-            Some(Severity::Warn),
-            Some(Severity::Warn),
-            Some(Severity::Info),
-            Some(Severity::Info),
-        ],
-        "the 503 first, `Info` under the heading"
-    );
-
-    // The Service is the case the whole report exists for: nothing is broken enough for a
-    // rule to have fired, so there is no finding to jump to — only the object.
-    let Some(Jump::Object(id)) = jump_of(&report.rows[0]) else {
-        panic!("the Service row jumps to the Service, and no finding names it");
-    };
-    assert_eq!(id.kind, ObjectKind::Other("Service".to_string()));
-    assert_eq!(id.namespace.as_deref(), Some("shop"));
-    assert_eq!(id.name, "api-svc");
-    // **Every paragraph is swept, not the first**, which is the assertion `Vec<String>` made
-    // possible to get wrong: a row's explanation may now arrive in more than one, and a check
-    // that reads element 0 passes over whatever the second one says (NOTES § D129).
-    assert!(
-        detail_of(&report.rows[0]).iter().any(|p| p.contains("503")),
-        "the explanation is what makes this row readable at 3am"
-    );
-
-    // `Worth knowing (not broken):` is a heading — read, never selected.
-    assert!(
-        matches!(&report.rows[4], Row::Prose(text) if text == "Worth knowing (not broken):"),
-        "a heading is prose, not an answer with its band left off"
-    );
-}
-
-#[test]
-fn a_report_that_could_not_run_is_one_row_and_a_report_with_nothing_to_say_is_no_rows() {
-    let could_not = drain_safety_not_computed();
-    let nothing_to_say = waste_with_nothing_wasted();
-
-    // **Neither pane has a cursor**, which is the state NOTES § D127's unselectable
-    // `NotComputed` made reachable. It leads the test because it is a fact about the panes
-    // rather than about what they say, and because it is what Phase 9 meets first: a reflex
-    // `ListState::select(Some(0))` parks the highlight on the *could not run* line of the one
-    // and points at a row the other does not have. Neither pane draws `⏎ open` ([`Row`]'s doc).
-    assert!(
-        selectable(&could_not).is_empty(),
-        "a lone `NotComputed` is a line, not a row `⏎` may land on"
-    );
-    assert!(
-        selectable(&nothing_to_say).is_empty(),
-        "a report with no rows has no row to select either"
-    );
-
-    // The lone `NotComputed`: the whole report, not a section of one, and it still names the
-    // check and the way out — the two halves the variant makes mandatory.
-    assert_eq!(could_not.rows.len(), 1);
-    let Row::NotComputed { reason, ask_for } = &could_not.rows[0] else {
-        panic!("drain safety without a cluster-wide read is not computed at all");
-    };
-    assert!(
-        !reason.contains("403")
-            && !reason.contains("RBAC")
-            && !reason.contains("PodDisruptionBudget"),
-        "the reason is in plain language, and `PodDisruptionBudget` is the jargon this \
-         report's own rows spell as `disruption budget`: {reason}"
-    );
-    assert!(
-        ask_for.contains("read access") && ask_for.contains("--namespace"),
-        "one sentence covering both causes, as Capacity's does"
-    );
-
-    // The empty `Vec`: nothing to say is not the same as nothing to show for it.
-    assert!(nothing_to_say.rows.is_empty());
-    assert!(
-        !nothing_to_say.title.is_empty(),
-        "the pane still has its heading — an empty report is a pane, not a blank screen"
-    );
-
-    // Neither badges, so — again — the badge cannot tell them apart and the body must.
-    assert_eq!(could_not.badge, None);
-    assert_eq!(nothing_to_say.badge, None);
-}
-
-// --- CERTIFICATES AND VERSIONS ---
-
-/// `screens/analysis.md` § Certificates and Versions.
-fn certificates() -> Report {
-    Report {
-        title: "What expires, soonest first".to_string(),
-        badge: Some(Badge {
-            value: "30d".to_string(),
-            severity: Severity::Warn,
-        }),
-        rows: vec![
-            answer(
-                Some(Severity::Warn),
-                "your kubeconfig certificate  30 days",
-                &["After that, kubectl stops working for you until it is renewed."],
-                Some(Jump::Finding(Box::new(kubeconfig_certificate_expiring()))),
-            ),
-            answer(
-                Some(Severity::Info),
-                "API server certificate  210 days",
-                &[],
-                None,
-            ),
-            answer(
-                Some(Severity::Critical),
-                "2 kubelets waiting to join  pending CSR",
-                &["Two nodes cannot join until someone approves them."],
-                None,
-            ),
-            prose("Versions:  control plane 1.34 · kubelets 1.34 (2) · 1.31 (1) too far behind"),
-        ],
-    }
-}
-
-#[test]
-fn the_certificate_row_jumps_to_the_finding_a_rule_already_made() {
-    let report = certificates();
-
-    assert_eq!(report.rows.len(), 4);
-    assert_eq!(severity_of(&report.rows[0]), Some(Severity::Warn));
-    assert_eq!(severity_of(&report.rows[1]), Some(Severity::Info));
-    assert_eq!(severity_of(&report.rows[2]), Some(Severity::Critical));
-
-    // C1 is a rule and its answer is a `Finding`, carried whole so the detail view can draw
-    // it without a registry to look it up in.
-    let Some(Jump::Finding(finding)) = jump_of(&report.rows[0]) else {
-        panic!("the kubeconfig row jumps to C1's finding");
-    };
-    assert_eq!(finding.severity, Severity::Info);
-    assert!(finding.title.contains("expires in 30 days"));
-    assert_eq!(
-        finding.kubectl_cmd, None,
-        "no kubectl command shows this, which is why C1 exists"
-    );
-
-    // **The two fields a hand-written finding gets wrong.** `rules.rs` builds C1's `ObjectId`
-    // with no uid — the only `None` in the product — and no timestamp, because `notAfter` is a
-    // deadline rather than the moment anything happened (NOTES § D69). A stamp here draws
-    // *"365 days ago"* on the one card that must draw no age at all.
-    assert_eq!(
-        finding.object.uid, None,
-        "a kubeconfig is a file on a laptop and never had a uid"
-    );
-    assert_eq!(
-        finding.owner, finding.object,
-        "there is nothing above a file"
-    );
-    assert_eq!(finding.timestamp, None, "and so this card carries no age");
-
-    // The badge is a duration here and a count on Capacity — one field, because the sidebar
-    // draws both as the same right-aligned span.
-    let badge = report
-        .badge
-        .expect("certificates badges its soonest expiry");
-    assert_eq!(badge.value, "30d");
-    assert_eq!(badge.severity, Severity::Warn);
-
-    // The `Versions:` summary is prose: it is read, never selected.
-    assert!(
-        matches!(&report.rows[3], Row::Prose(text) if text.starts_with("Versions:")),
-        "the versions summary is a line, not a row the cursor stops on"
-    );
-}
-
-// --- THE RESTART ROW ---
-
-/// Phase 4's later box: a container that keeps dying between its restarts draws nothing from
-/// rules 1, 2, 5 or 6, so the row exists precisely because there is no finding
-/// (NOTES § D101). Its title and its home are `tui-designer`'s to settle; what is asserted
-/// here is only the shape's half of the claim.
-fn restarts() -> Report {
-    Report {
-        title: "Containers that keep dying and coming back".to_string(),
-        badge: None,
-        rows: vec![answer(
-            None,
-            "payments/web-7d9f4 · retry  47 restarts  this run 3 min",
-            &[],
-            Some(Jump::Object(object(
-                ObjectKind::Pod,
-                Some("payments"),
-                "web-7d9f4",
-            ))),
-        )],
-    }
-}
-
-#[test]
-fn the_restart_row_jumps_to_a_pod_and_never_to_a_finding() {
-    let report = restarts();
-    let row = &report.rows[0];
-
-    let Some(Jump::Object(id)) = jump_of(row) else {
-        panic!("there is no finding here — that is the whole reason the row exists");
-    };
-    assert_eq!(id.kind, ObjectKind::Pod);
-    assert_eq!(id.name, "web-7d9f4");
-
-    // The container is not broken right now, so the row makes no judgement.
-    assert_eq!(severity_of(row), None);
-
-    // It may not re-spell how the last run ended: `ending` and `exit_meaning` are private to
-    // `rules.rs` and a raw `exit 137` here is the defect D85 exists to prevent.
-    assert!(
-        !text_of(row).contains("exit "),
-        "no exit code is spelled in a report row"
-    );
-}
-
 // --- THE SHAPE ITSELF ---
 
 /// Every `Report` this file builds, named. What each one *draws* is its own test's claim; the
 /// rules below hold over all of them.
 fn every_report() -> Vec<(&'static str, Report)> {
     vec![
-        ("capacity", capacity()),
+        // **Capacity is computed, not built** — the four hand-written panes that stood here
+        // were replaced by its producer when its box landed, and the sweeps below now read the
+        // real strings. Five states: a flagged node among healthy ones, a namespace scope, a
+        // login that may not list nodes, a cluster with nothing to say, and a metrics-server
+        // that answered.
         (
-            "capacity, as the screen draws it now",
-            capacity_as_the_screen_draws_it_now(),
+            "capacity",
+            super::capacity(&capacity::one_node_over_on_cpu("k8rs-worker3"), &[]),
         ),
         (
             "capacity, one namespace",
-            capacity_scoped_to_one_namespace(),
+            super::capacity(&capacity::scoped("payments"), &[]),
+        ),
+        (
+            "capacity, no nodes",
+            super::capacity(&capacity::no_nodes(), &[]),
         ),
         (
             "capacity, nothing overcommitted",
-            capacity_with_nothing_overcommitted(),
+            super::capacity(&corpus(), &[]),
         ),
-        ("drain safety", drain_safety()),
-        ("drain safety, not computed", drain_safety_not_computed()),
-        ("waste", waste()),
-        ("waste, nothing wasted", waste_with_nothing_wasted()),
-        ("certificates and versions", certificates()),
-        ("restarts", restarts()),
+        ("capacity, metrics answering", {
+            let cluster = capacity::one_node_over_on_cpu("k8rs-worker3");
+            super::capacity(
+                &capacity::with_metrics(cluster.clone(), capacity::metrics_read(&cluster, &[])),
+                &[],
+            )
+        }),
+        // **Drain safety and Waste are computed too**, as of their box — the four hand-written
+        // panes that stood here are gone and the sweeps below read the real strings. Seven states
+        // between them: the pane with all three row kinds, the one namespace scope that switches
+        // the whole report off, the four wasteful rows, the cut section with its overflow line,
+        // the scoped title, the cluster with nothing wasteful on it, and the login that could
+        // read none of the four lists.
+        (
+            "drain safety",
+            super::drain_safety(&drain::drain_corpus(), &[]),
+        ),
+        (
+            "drain safety, one namespace",
+            super::drain_safety(&drain::scoped_drain("payments"), &[]),
+        ),
+        (
+            "drain safety, every node ready",
+            super::drain_safety(&drain::nothing_to_drain(), &[]),
+        ),
+        // **The one entry built with findings in hand**, because one row on this pane is: a node
+        // whose kubelet stopped posting is N1's card restated as *would never finish draining*,
+        // and with an empty slice there is no card to restate.
+        (
+            "drain safety, a node that went quiet",
+            drain::a_node_that_went_quiet(),
+        ),
+        ("waste", super::waste(&waste::waste_corpus(), &[])),
+        (
+            "waste, a section cut short",
+            super::waste(&waste::overflowing(), &[]),
+        ),
+        (
+            "waste, one namespace",
+            super::waste(
+                &ClusterSnapshot {
+                    namespace_scope: Some("payments".to_string()),
+                    ..waste::waste_corpus()
+                },
+                &[],
+            ),
+        ),
+        (
+            "waste, nothing wasted",
+            super::waste(&waste::nothing_wasted(), &[]),
+        ),
+        (
+            "waste, nothing could be read",
+            super::waste(&waste::nothing_could_be_read(), &[]),
+        ),
+        // **Posture, Versions and Certificates are computed too**, as of their box — the
+        // hand-built certificates pane that stood here is gone, and its C2 row with it
+        // (NOTES § D129). Ten states between the three: the host-path list, its namespace scope
+        // and the cluster that mounts nothing; a cluster whose kubelets all match, one with a
+        // machine too far behind, one whose control-plane version could not be read and one
+        // whose node list could not be; and a kubeconfig running out beside an unread CSR list,
+        // an expired one beside machines waiting to join, and a pane with nothing to say.
+        ("posture", super::posture(&posture::posture_corpus(), &[])),
+        (
+            "posture, one namespace",
+            super::posture(
+                &ClusterSnapshot {
+                    namespace_scope: Some("kube-system".to_string()),
+                    ..posture::posture_corpus()
+                },
+                &[],
+            ),
+        ),
+        (
+            "posture, nothing mounted",
+            super::posture(
+                &ClusterSnapshot {
+                    pods: vec![captured_pod("healthy")],
+                    ..corpus()
+                },
+                &[],
+            ),
+        ),
+        (
+            "versions",
+            super::versions(&versions::version_corpus(), &[]),
+        ),
+        (
+            "versions, a machine behind",
+            super::versions(
+                &versions::kubelet_at(versions::version_corpus(), "k8rs-worker3", "v1.32.4"),
+                &[],
+            ),
+        ),
+        (
+            "versions, no control plane version",
+            super::versions(
+                &ClusterSnapshot {
+                    server_version: None,
+                    ..versions::version_corpus()
+                },
+                &[],
+            ),
+        ),
+        (
+            "versions, no nodes",
+            super::versions(
+                &ClusterSnapshot {
+                    nodes: Vec::new(),
+                    ..versions::version_corpus()
+                },
+                &[],
+            ),
+        ),
+        (
+            "certificates",
+            certificates::certificates_pane(&certificates::with_kubeconfig(
+                corpus(),
+                "expiring-client",
+            )),
+        ),
+        (
+            "certificates, expired and machines waiting",
+            certificates::certificates_pane(&certificates::with_requests(
+                certificates::with_kubeconfig(corpus(), "expired-client"),
+                vec![certificates::a_kubelet_waiting("csr-one")],
+            )),
+        ),
+        (
+            "certificates, nothing to say",
+            certificates::certificates_pane(&certificates::with_requests(
+                certificates::with_kubeconfig(corpus(), "healthy-client"),
+                Vec::new(),
+            )),
+        ),
+        ("restarts", shape::restarts()),
     ]
 }
 
 #[test]
 fn every_pane_the_screen_draws_is_expressible() {
-    // **What this covers, exactly**: the four panes `screens/analysis.md` sketches — Capacity
-    // (drawn twice, cluster-wide and namespace-scoped), Drain safety, Waste, Certificates — plus
-    // the states its § *What each report needs* table gives them and the restart row Phase 4
-    // adds later.
-    // **Two of Family C's six reports are not here and neither absence is a shape defect** —
-    // `Versions` is drawn at the foot of the Certificates pane rather than as a pane of its
-    // own, and `Posture` (todo.md) has no sketch at all. Both are `screens/`'s to answer.
+    // **What this covers, exactly**: all six Family C reports, computed, in every state
+    // `screens/analysis.md` gives them — the panes it sketches, the *could not run* rows its
+    // § *What each report needs* table names, and the empty pane rule 8 gives each one — plus the
+    // states the shape reaches that no mockup draws, which today is the login that could read
+    // none of Waste's four lists, plus the restart row Phase 4 adds later, the one thing here
+    // still built by hand.
+    //
+    // **Six reports and five panes is not a defect**: `Versions` is drawn at the foot of the
+    // Certificates pane rather than as a pane of its own, and which panes exist is `screens/`'s
+    // ruling and not this type's ([`Report`]).
     for (name, report) in every_report() {
         assert!(!report.title.is_empty(), "{name} has a pane heading");
         // Invariant 14 reaches every string here: a report never titles itself with its own
@@ -952,18 +670,101 @@ fn every_pane_the_screen_draws_is_expressible() {
             "{name}'s heading is a sentence, not its name"
         );
     }
-    // **Exactly one report here draws no rows**, and it is the one whose whole claim is that
-    // an empty `Vec` is a legal report. Naming it is what keeps this loop honest: a builder
-    // that quietly stopped returning rows would show up as a second name in this list rather
-    // than as a sweep that passed over nothing.
+    // **No report here draws no rows any more**, and that is a stronger claim than the one this
+    // assertion used to make. The empty `Vec` stays legal ([`Report::rows`]) and no pane asks for
+    // it (NOTES § D128): the hand-built `waste, nothing wasted` that used to be the one name in
+    // this list is now Waste's own producer, which says it has nothing to say in one
+    // `Row::Prose` — rule 8. A producer that quietly returned nothing at all now shows up here
+    // rather than passing a sweep over an empty list.
     assert_eq!(
         every_report()
             .iter()
             .filter(|(_, report)| report.rows.is_empty())
             .map(|(name, _)| *name)
             .collect::<Vec<_>>(),
-        vec!["waste, nothing wasted"]
+        Vec::<&str>::new()
     );
+}
+
+/// **One string per place [`strings_of`] reaches** — the canaries both sweeps below are proven
+/// against, `scripts/write-guard.py`'s own mechanism. Neither sweep asserts anything is *present*:
+/// they check that no swept string spells a glyph and that none breaks a line, and a
+/// [`strings_of`] that returned an empty `Vec` — or an [`every_report`] that quietly lost
+/// entries — passes both.
+///
+/// The first three are the three string fields of one row: Waste's orphan Service, which is on
+/// that pane in the corpus's own state.
+const CANARIES: [&str; 8] = [
+    // Row::Answer's text, detail and action.
+    "default/broken-noendpoints matches no pod",
+    "This Service points at nothing. Anything calling it gets a 503.",
+    "fix its selector, or delete it",
+    // Row::Prose — the heading the Versions report draws for the pane it shares.
+    "Versions",
+    // Row::NotComputed's two halves.
+    "Not checked. Reading what a node has needs permission to list nodes, and this login does not \
+     have it.",
+    "Ask for permission to list nodes across the whole cluster.",
+    // The report's own two. The badge is C1's countdown off the committed certificate and the pin
+    // `scripts/certs-test.sh` holds, asserted for itself in `certificates.rs` — so if this line
+    // and that one go red together, the certificate moved and this sweep is the echo.
+    "Things that cost you something for nothing",
+    "15d",
+];
+
+#[test]
+fn both_sweeps_are_reading_something() {
+    // **A derived list asserts it found something** (CLAUDE.md § Tests must not lie). Two ways the
+    // sweeps below degrade in silence, and this is the test for both: [`strings_of`] stopping at
+    // one of the places a string can sit, and [`every_report`] losing an entry.
+    let reports = every_report();
+    assert_eq!(
+        reports.len(),
+        25,
+        "a pane that left this list takes both sweeps below with it, and every claim they make \
+         about it goes quiet rather than red: {:?}",
+        reports.iter().map(|(name, _)| *name).collect::<Vec<_>>()
+    );
+    let swept: BTreeSet<&str> = reports
+        .iter()
+        .flat_map(|(_, report)| strings_of(report))
+        .collect();
+    for canary in CANARIES {
+        assert!(
+            swept.contains(canary),
+            "nothing sweeps {canary:?} any more, so whatever field it sits in is unchecked"
+        );
+    }
+}
+
+#[test]
+fn a_duration_badge_draws_no_glyph_and_a_count_draws_one() {
+    // **The one rule this file's own printer has to obey**, and it did not: it drew `15d▲` and
+    // `out●`, which `screens/widgets.md` § 2 forbids — a duration badge already states the fact
+    // in words, so the band only colours it, while on a count the glyph is the unit. This is a
+    // test artefact and not a product string, which is why it is asserted here and not swept by
+    // [`strings_of`] (`theme.rs` owns the glyph; nothing in `analysis.rs` spells one).
+    let badged = |value: &str| {
+        pane(&Report {
+            title: "t".to_string(),
+            badge: Some(Badge {
+                value: value.to_string(),
+                severity: Severity::Warn,
+            }),
+            rows: Vec::new(),
+        })
+        .lines()
+        .next()
+        .expect("the printer opens on the sidebar line")
+        .to_string()
+    };
+    assert_eq!(
+        badged("1"),
+        "[sidebar]  1\u{25b2}",
+        "a count carries its unit"
+    );
+    assert_eq!(badged("15d"), "[sidebar]  15d");
+    assert_eq!(badged("out"), "[sidebar]  out");
 }
 
 #[test]

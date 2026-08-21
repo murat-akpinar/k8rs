@@ -1,10 +1,28 @@
-> **Superseded corpus, and a later reader will grep for exactly the wrong line.**
-> Sections 1–12 measure the **third** capture trip. The review they fed changed the
-> tree: `broken-overhead` was pinned to `k8rs-worker`, `DisruptionBudgetSnapshot`
-> grew `generation` / `observed_generation` / `conditions`, and the trip was re-run
-> a **fourth** time. So `overhead: NOW=k8rs-worker2` in § 2 is true of what was
-> measured and **false of the tree now** — it is `k8rs-worker`. Section 13 measures
-> the fourth trip; where the two disagree, section 13 is the current one.
+> **Superseded corpus — assume every value in §§ 1–12 is stale until § 13 or the
+> tree says otherwise, and do not grep this file for a single line.** §§ 1–12
+> measure the **third** capture trip; § 13 measures the **fourth**, which is the
+> one the tree carries. The rule, and it is categorical rather than a list,
+> because a warning that enumerates goes stale the same way the values under it
+> did:
+>
+> - **Where § 13 covers the same ground, § 13 is the current measurement.** That
+>   is every per-node sum, every pod name, every node placement, every fixture
+>   face and every timestamp — §§ 1, 2, 3, 4 and 7 are all superseded this way.
+>   Two examples, so the shape is unmistakable: § 2's `overhead: NOW=k8rs-worker2`
+>   and § 4's `"node":"k8rs-worker2"` are both **false of the tree**, which pins
+>   `overhead.json` to `k8rs-worker` (§ 13.1), and § 1's `healthy-deploy` pod
+>   names are the pre-commit ones, not the committed `-6hlph` / `-lb6wt`
+>   (§ 13.4).
+> - **Where § 13 does *not* cover it, the tree is the current measurement and
+>   this file is not.** § 9's `DisruptionBudgetSnapshot` field list predates
+>   `generation`, `observed_generation`, `conditions` and `selector` becoming an
+>   `Option`; § 12's `git status` is a snapshot of a working tree that has since
+>   been committed.
+> - **§ 3's `kubectl drain` was run with `--ignore-daemonsets
+>   --delete-emptydir-data`**, so it proves what those two flags leave and not
+>   what a bare `kubectl drain` does.
+>   `reports/2026-08-21-family-c-analysis-report-family-review.md` § 1 runs it
+>   bare on the same cluster.
 
 # 2026-08-21 — the Family C corpus read as a cluster: drain, capacity, and what the break sequence deletes
 

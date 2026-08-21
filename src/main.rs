@@ -11,6 +11,13 @@
 //! driver whose whole job is to show what `analyze` returned may not drop one of them, and
 //! Phase 5's `--once` box takes the band off (NOTES § D121).
 //! It may not invent a third format: one `rules.rs`, one set of strings.
+//!
+//! **`--analysis` prints `analysis.rs`'s six reports under the cards**, which is what makes them
+//! runnable at all before `views.rs` exists: until this flag nothing outside `#[cfg(test)]` had
+//! ever rendered a `Report`, so invariant 9's strip was unexercised for every string in all six
+//! ([`pane`]). The five lists those reports join — Services, EndpointSlices, PVCs,
+//! PodDisruptionBudgets and CertificateSigningRequests — are read here from whatever files are
+//! named, so a pane's *not checked* state is still reachable by simply not naming one ([`take`]).
 
 // A module no `mod` line reaches is not in the crate at all, so `rules.rs` is declared the
 // moment it exists rather than when something calls it (NOTES § D34).
@@ -22,7 +29,10 @@ mod rules;
 mod tests;
 
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
-use k8s_openapi::api::core::v1::{Node, Pod};
+use k8s_openapi::api::certificates::v1::CertificateSigningRequest;
+use k8s_openapi::api::core::v1::{Node, PersistentVolumeClaim, Pod, Service};
+use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use k8s_openapi::jiff::Timestamp;
 use k8s_openapi::serde::de::DeserializeOwned;
@@ -83,21 +93,46 @@ fn stdout_failure(error: &std::io::Error) -> Option<String> {
 
 /// The three lines a run with no arguments gets. It says what this build cannot do, because
 /// the name on the tin promises a cluster and this one reads files.
-const USAGE: &str = "usage: k8rs <file.json>...\n\
+const USAGE: &str = "usage: k8rs [--analysis] <file.json>...\n\
     Each file holds Kubernetes objects as JSON: one object, or a list of them.\n\
     This build reads files only — it cannot reach a cluster yet.";
 
+/// **The one flag this driver has**, and it is scaffolding like the driver itself: `analysis.rs`'s
+/// six reports are whole-cluster answers rather than per-object cards, so they are a second
+/// report under the first rather than more findings in it. Phase 9 draws them in panes and this
+/// goes away with the rest of the temporary main (NOTES § D34).
+///
+/// **A flag and not the default**, because the default output is what `tests/binary.rs` pins as
+/// the report on stdout — and because a driver that printed six panes for every `k8rs pod.json`
+/// would bury the cards it exists to show.
+const ANALYSIS: &str = "--analysis";
+
 /// The report, or the sentence that goes to stderr instead. `Err` is the whole of exit 2.
-fn run(paths: &[String]) -> Result<String, String> {
+fn run(args: &[String]) -> Result<String, String> {
+    let wanted = args.iter().any(|arg| arg == ANALYSIS);
+    // Everything that is not the flag is a path — there is no second flag for one of them to be
+    // mistaken for, and a file really named `--analysis` is not a shape this scaffolding owes an
+    // escape hatch to.
+    let paths: Vec<String> = args
+        .iter()
+        .filter(|arg| *arg != ANALYSIS)
+        .cloned()
+        .collect();
     if paths.is_empty() {
         return Err(USAGE.to_string());
     }
     // The clock is read once, here, and handed to the rules as a field — never called from
     // inside one (invariant 5, NOTES § D18). Phase 5's `k8s.rs` reads it in the same place.
     let input = wall_clock()
-        .and_then(|now| load(paths, now))
+        .and_then(|now| load(&paths, now))
         .map_err(|problem| format!("k8rs: {problem}"))?;
-    Ok(render(&analyze(&input.snapshot), &input))
+    let findings = analyze(&input.snapshot);
+    let mut out = render(&findings, &input);
+    if wanted {
+        out.push('\n');
+        out.push_str(&reports(&input.snapshot, &findings));
+    }
+    Ok(out)
 }
 
 /// **The one clock call in the program**, read once and handed on as a value
@@ -187,17 +222,21 @@ fn load(paths: &[String], now: Time) -> Result<Input, String> {
             // Every namespace, as far as this input knows — the files are what they are.
             namespace_scope: None,
             // **`None` and not `Some(vec![])`, and the difference is the whole point of the
-            // `Option`** (NOTES § D129): this driver dispatches on `kind` and reads no
-            // Service, EndpointSlice, PVC, PDB or CSR, so *nobody looked* is what happened —
-            // and an empty `Vec` would tell a report that nothing is wasted and nothing is
-            // waiting to join, which is the reassuring wrong answer. No rule in `rules.rs`
-            // reads any of these; the Phase 5 fetch is what fills them.
+            // `Option`** (NOTES § D129): *nobody looked* is what has happened until a file
+            // holding one of these kinds is named, and an empty `Vec` would tell a report that
+            // nothing is wasted and nothing is waiting to join, which is the reassuring wrong
+            // answer. [`take`] turns each of them into a `Some` the moment it reads one; no
+            // rule in `rules.rs` reads any of these, and on a real cluster the Phase 5 fetch
+            // fills them when a pane opens.
             replica_sets: None,
             services: None,
             endpoint_slices: None,
             claims: None,
             disruption_budgets: None,
             certificate_requests: None,
+            // Same `None`, one field over and for the same reason: a fixture path has no
+            // metrics API to probe, so *k8rs did not ask* is what happened.
+            metrics: None,
         },
         skipped: BTreeMap::new(),
     };
@@ -228,6 +267,18 @@ fn load(paths: &[String], now: Time) -> Result<Input, String> {
 /// no `kind` field, and one whose `kind` is not text (`{"kind":42}`, a top-level array, a bare
 /// `null`). Saying *no kind field* over a document that has one is the same lie, one size down,
 /// as a report that misnames what it read.
+///
+/// **The five on-demand lists arrive here too, and `None` still means *nobody looked***
+/// (NOTES § D129). A cluster answers them on a fetch when a report's pane opens; this driver
+/// answers them from whatever files were named, so the field stays `None` until one such object
+/// is read and becomes `Some` — an empty `Vec` only where a capture held a `kind: List` with
+/// nothing in it. That is the same distinction the fetch draws, and it is what lets Waste say
+/// *nothing is going to waste* over the lists it read and *not checked* over the ones it did not.
+///
+/// **A ReplicaSet lands in two fields on purpose.** `workloads` is the permanent watch's, which
+/// the W-rules read; `replica_sets` is the list Waste's *parked at 0 replicas* row is counted
+/// from ([`crate::rules::ClusterSnapshot::replica_sets`]). One object read once fills both,
+/// because on a real cluster both would hold it.
 fn take(doc: Value, input: &mut Input) -> Result<(), String> {
     let snapshot = &mut input.snapshot;
     let kind = doc
@@ -244,12 +295,37 @@ fn take(doc: Value, input: &mut Input) -> Result<(), String> {
         "StatefulSet" => snapshot
             .workloads
             .push(decode::<StatefulSet>(doc, &kind)?.into()),
-        "ReplicaSet" => snapshot
-            .workloads
-            .push(decode::<ReplicaSet>(doc, &kind)?.into()),
+        "ReplicaSet" => {
+            let set: rules::WorkloadSnapshot = decode::<ReplicaSet>(doc, &kind)?.into();
+            snapshot
+                .replica_sets
+                .get_or_insert_with(Vec::new)
+                .push(set.clone());
+            snapshot.workloads.push(set);
+        }
         "DaemonSet" => snapshot
             .workloads
             .push(decode::<DaemonSet>(doc, &kind)?.into()),
+        "Service" => snapshot
+            .services
+            .get_or_insert_with(Vec::new)
+            .push(decode::<Service>(doc, &kind)?.into()),
+        "EndpointSlice" => snapshot
+            .endpoint_slices
+            .get_or_insert_with(Vec::new)
+            .push(decode::<EndpointSlice>(doc, &kind)?.into()),
+        "PersistentVolumeClaim" => snapshot
+            .claims
+            .get_or_insert_with(Vec::new)
+            .push(decode::<PersistentVolumeClaim>(doc, &kind)?.into()),
+        "PodDisruptionBudget" => snapshot
+            .disruption_budgets
+            .get_or_insert_with(Vec::new)
+            .push(decode::<PodDisruptionBudget>(doc, &kind)?.into()),
+        "CertificateSigningRequest" => snapshot
+            .certificate_requests
+            .get_or_insert_with(Vec::new)
+            .push(decode::<CertificateSigningRequest>(doc, &kind)?.into()),
         _ => *input.skipped.entry(kind).or_default() += 1,
     }
     Ok(())
@@ -401,3 +477,101 @@ fn plural(n: usize, unit: &str) -> String {
 }
 
 // --- THE REPORT END ---
+
+// --- THE ANALYSIS REPORTS START ---
+
+/// **The six reports, in the order the sidebar lists them** (`screens/analysis.md`) — printed
+/// under the cards when `--analysis` is passed.
+///
+/// **This is the first time anything outside `#[cfg(test)]` has rendered a `Report`**, and until
+/// it existed invariant 9 was unexercised for all six: `analysis_tests`' own `pane` is a reading
+/// aid that strips nothing, and Posture's row text is a `hostPath.path` **verbatim and whole**, so
+/// a crafted path arrived at the terminal as an escape sequence. The strip is [`pane`]'s, below.
+///
+/// **The label beside each pane is this file's, not the report's.** [`analysis::Report`] carries
+/// no sidebar name on purpose — which pane a report is drawn in is `screens/`'s ruling — so the
+/// driver spells its own six, and `Versions` is drawn beside `certificates` on the real screen
+/// rather than as a pane of its own.
+fn reports(snapshot: &ClusterSnapshot, findings: &[Finding]) -> String {
+    [
+        (
+            "capacity",
+            analysis::capacity as fn(&ClusterSnapshot, &[Finding]) -> analysis::Report,
+        ),
+        ("certificates", analysis::certificates),
+        ("drain safety", analysis::drain_safety),
+        ("posture", analysis::posture),
+        ("waste", analysis::waste),
+        ("versions", analysis::versions),
+    ]
+    .into_iter()
+    .map(|(name, produce)| pane(name, &produce(snapshot, findings)))
+    .collect::<Vec<String>>()
+    .join("\n")
+}
+
+/// **One report as this driver prints it** — the sidebar label and badge, the pane heading, and
+/// one block per row.
+///
+/// **Every string here came from `analysis.rs`, and every one is stripped as it enters the line
+/// it is printed on** — never over the finished block, which is the rule that ate [`USAGE`]'s own
+/// line breaks the first time it was written the other way round (NOTES § D122). The `Report`
+/// surface is treated as outside wholesale, exactly as the [`Finding`] surface is in [`card`]:
+/// these are k8rs's own sentences, but every one of them interpolates a name, a path or a message
+/// the API sent, and a per-field judgement call is how one field gets forgotten.
+///
+/// **The badge draws no glyph here, and that is not the sidebar's rule being broken.** A count
+/// badge carries its band as a glyph because `capacity  1` has lost what the number was of
+/// (`screens/widgets.md` § 2); this driver has no sidebar, and the label is on the same line, so
+/// there is nothing for a glyph to disambiguate. The row glyphs are [`symbol`]'s, shared with the
+/// cards above.
+fn pane(name: &str, report: &analysis::Report) -> String {
+    let mut lines = vec![
+        match &report.badge {
+            Some(badge) => format!("[{name}] {}", sanitize(&badge.value)),
+            None => format!("[{name}]"),
+        },
+        format!("  {}", sanitize(&report.title)),
+    ];
+    for row in &report.rows {
+        match row {
+            // **Every field named, and no `..`** — the rule `analysis_tests`' own `strings_of`
+            // states for the same shape: under a `..` a new string field on this variant compiles
+            // here and is silently never printed, and only a new *variant* is an error. The two
+            // that hold no text are named and dropped.
+            analysis::Row::Answer {
+                severity,
+                text,
+                detail,
+                action,
+                jump: _,
+            } => {
+                lines.push(format!(
+                    "  {} {}",
+                    severity.map_or(" ", symbol),
+                    sanitize(text)
+                ));
+                lines.extend(
+                    detail
+                        .iter()
+                        .map(|paragraph| format!("      {}", sanitize(paragraph))),
+                );
+                if !action.is_empty() {
+                    lines.push(format!("      → {}", sanitize(action)));
+                }
+            }
+            // Read and never selected, so it carries no glyph and nothing is indented under it.
+            analysis::Row::Prose(text) => lines.push(format!("  {}", sanitize(text))),
+            // Two sentences, always both: a report that names the check without naming the way
+            // out is the half a reader cannot act on ([`analysis::Row::NotComputed`]).
+            analysis::Row::NotComputed { reason, ask_for } => {
+                lines.push(format!("  {}", sanitize(reason)));
+                lines.push(format!("  {}", sanitize(ask_for)));
+            }
+        }
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+// --- THE ANALYSIS REPORTS END ---

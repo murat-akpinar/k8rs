@@ -4,7 +4,8 @@ use super::*;
 // product code in this file constructs one, and the top-level list is what `rules.rs`
 // reads off the API.
 use k8s_openapi::api::core::v1::{
-    ContainerStateRunning, ContainerStateWaiting, HostPathVolumeSource, Taint as ApiTaint,
+    ContainerStateRunning, ContainerStateWaiting, EmptyDirVolumeSource, EphemeralVolumeSource,
+    HostPathVolumeSource, PersistentVolumeClaimTemplate, Taint as ApiTaint,
     Toleration as ApiToleration, Volume, VolumeMount,
 };
 
@@ -329,6 +330,7 @@ fn nothing_fetched() -> ClusterSnapshot {
         claims: None,
         disruption_budgets: None,
         certificate_requests: None,
+        metrics: None,
     }
 }
 
@@ -404,6 +406,7 @@ fn fixture_snapshot() -> ClusterSnapshot {
                 .collect(),
         ),
         certificate_requests: None,
+        metrics: None,
     }
 }
 

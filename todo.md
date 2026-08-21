@@ -1750,7 +1750,7 @@ unchecked one from the top.
       cannot express are owed to the Waste and Capacity boxes, and four further
       findings to named boxes — all inside this phase, all before the freeze
       ([D127](NOTES.md#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20))
-- [ ] **Capacity** — per node: requests vs allocatable vs actual usage, plus
+- [x] **Capacity** — per node: requests vs allocatable vs actual usage, plus
       **the workloads with no limits defined** (the old rule 9, which lives
       here now — it is a risk, not an outage). Two snapshot fields are added
       **here**, not in Phase 3, which is what D42's one-phase window is for:
@@ -1759,6 +1759,13 @@ unchecked one from the top.
       clusters this project targets — and `spec.overhead`, the RuntimeClass
       charge the scheduler counts and a `spec`-only sum does not
       ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12))
+      Done: per-node promised-against-usable in both dimensions, the old rule 9 as
+      one counted row, and the five states `screens/analysis.md` § Capacity
+      draws. `spec.overhead` is summed inside `rules.rs`'s `charged` and not on
+      top of it, so N5 and the row cannot disagree about a node —
+      `k8rs-worker` 200m → 450m, under D124's five conditions.
+      `ClusterSnapshot::metrics` landed with it, six states, inside D42's
+      window ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
 *Moved out of Phase 3: each is a snapshot field before it is a rule, which is the one-phase window [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12) opened ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))*
 
 - [ ] **`spec.containers[].restartPolicyRules` is decodable now and still
@@ -1817,14 +1824,28 @@ unchecked one from the top.
       on by default. Answer it in NOTES either way; do not leave it as a silent
       omission, which is exactly what the pin was
 
-- [ ] **Drain safety** — for each node, what a drain would do and what would
+- [x] **Drain safety** — for each node, what a drain would do and what would
       block it. A PDB whose `minAvailable` equals the replica count means the
       drain never finishes; say so before, not 40 minutes in
-- [ ] **Waste** — **Services whose selector matches no pod first** (the 503
+      Done: five row kinds. Two operator-review rounds took away two green lights
+      — *ready to drain* said about a node a bare `kubectl drain` refuses
+      (DaemonSet pods, local storage), and about a node N1's own card called
+      dead. `--ignore-daemonsets` is stated once as the pane's opening line;
+      local storage is its own row, split by `medium` because a tmpfs has
+      nothing to copy off; a node that is not `Ready` is the pane's *cannot
+      answer this yet* row, never a verdict ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+- [x] **Waste** — **Services whose selector matches no pod first** (the 503
       nobody can explain; it stays here rather than in Alerts because
       promoting it would cost a permanent Services + EndpointSlices watch, and
       the watch budget is why k8rs is lighter than k9s), then unbound/unused
       PVCs, Evicted and Completed pod pileups, ReplicaSets parked at 0
+      Done: the Service matching no pod first, then unbound claims, the
+      finished-pod pileup and ReplicaSets at 0. Per-object sections cap at
+      five with a `Row::Prose` overflow; counted rows do not, which is the
+      same rule Posture and Capacity scroll under.
+      `DisruptionBudgetSnapshot::selector` became `Option<Selector>` here — an
+      empty selector protects a whole namespace and an absent one protects
+      nothing, and flattened they were one value ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
 - [ ] **`tui-designer` answers where the restart row lives, before it is
       written** —
       [D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)
@@ -1857,17 +1878,34 @@ unchecked one from the top.
       exists to prevent. That one is a convention with no gate behind it —
       `Terminated`'s `reason` and `exit_code` are `pub`, so a raw `exit 137` in a
       row is reachable and is wrong
-- [ ] **Posture** rows: the plain read-only hostPath mounts that no longer
+- [x] **Posture** rows: the plain read-only hostPath mounts that no longer
       appear in Alerts — CNI/CSI/node agents are supposed to have them, so
       they are a list to review, not an alarm to answer. Computed **here**,
       not in `rules.rs`: they read pod fields but produce a whole-cluster list,
       and `rules.rs` is frozen by now
       ([NOTES § D14](NOTES.md#d14--three-plan-corrections))
-- [ ] **Versions** — control plane vs kubelet vs client skew (this is where N4
+      Done: one row per host path, `Info`, no badge, the opening paragraph as a
+      `Row::Prose`. The partition against rule 8 is asserted both ways with a
+      known entry named on each side, and it is per **(pod, path)**: a pod
+      whose sibling mount rule 8 escalated contributes nothing to that path's
+      row, which is what kept a writable mount from being called read-only
+      ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+- [x] **Versions** — control plane vs kubelet vs client skew (this is where N4
       is shown), and which nodes fall outside the supported window
-- [ ] **Certificates** — the C-series as a dated table, soonest first. C1
+      Done: the `Versions` heading as the report's own first `Row::Prose`, the
+      control-plane line, and a row per node outside the window through N4 —
+      three minor versions, not two. *Could not compare* and *could not read*
+      are two sentences, because a different-major kubelet was read perfectly
+      well ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+- [x] **Certificates** — the C-series as a dated table, soonest first. C1
       (kubeconfig client cert) is shown here, and the sidebar badge — `30d` in
       the sketch — is its alerting mechanism
+      Done: C1 picked out of the findings slice by identity, the one row whose `⏎`
+      is a `Jump::Finding`. The badge is C1's own countdown and C1's band —
+      `15d`, `0d`, and `out` once it has expired, because every numeric
+      spelling of *expired* is wrong in the dangerous direction. C3's row is
+      one `Row::NotComputed` while the fetch is a Phase 5 box; C2 is not drawn
+      at all ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
 - [ ] Positive and negative fixture tests per report, same discipline as rules
 - [ ] `cargo mutants --timeout 90` clean over `analysis.rs` — same gate
       `rules.rs` gets in Phase 3. A report that quietly stops flagging looks
