@@ -1768,7 +1768,7 @@ unchecked one from the top.
       window ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
 *Moved out of Phase 3: each is a snapshot field before it is a rule, which is the one-phase window [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12) opened ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))*
 
-- [ ] **`spec.containers[].restartPolicyRules` is decodable now and still
+- [x] **`spec.containers[].restartPolicyRules` is decodable now and still
       reaches no rule, so rule 15's stand-in is a proxy where the real signal is
       available** — the field arrives at `v1_34` and the pin is `v1_36`
       ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
@@ -1798,7 +1798,15 @@ unchecked one from the top.
       feature, and costs a snapshot field, a prune line, a capture and a rule
       change. The severe ones go first; the ordering, not the value, is what
       changed
-- [ ] **`terminatingReplicas` is decodable now, and a pod on its way out is
+      Done: `ExitRule` and `ContainerSnapshot::restart_rules`, and rule 15
+      stands down only where a declared rule is **shown** to cover this exit —
+      an empty set, an operator or an action the build cannot read, or a
+      sibling that can no longer exit all leave the card standing. Two review
+      rounds took the first draft's opposite direction apart: a completed init
+      container's gang rule silenced every container in a pod that stays
+      `Running` for ever. The fixtures were already committed — the trip had
+      run ([D135](NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21))
+- [x] **`terminatingReplicas` is decodable now, and a pod on its way out is
       currently counted as a pod that is missing** — added to both
       `DeploymentStatus` and `ReplicaSetStatus` after 1.32
       ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).
@@ -1809,7 +1817,14 @@ unchecked one from the top.
       above: snapshot field, prune line, fixture, then the rule. Check first
       whether `explains_a_shortfall` is where it belongs rather than a rule of its
       own
-- [ ] **In-place resize makes *what a container asks for* and *what it has* two
+      Done: `WorkloadSnapshot::terminating`, read inside W2's readiness fact
+      and by no gate — `0 of 1 pod ready, 1 pod shutting down`. Not on W1,
+      where the clause is measured to push `exceeded quota: deny-all-pods` off
+      the card at +12 characters and no wording fits. Not in
+      `explains_a_shortfall`, which filters findings and has nothing to filter
+      here. The box's own premise was stale, and the positive is a [D40](NOTES.md#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+      one-field synthesis ([D135](NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21) · [D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21))
+- [x] **In-place resize makes *what a container asks for* and *what it has* two
       different numbers, and every resource rule reads only the first** —
       `podStatus.resources` and `podStatus.allocatedResources` arrive after 1.32
       ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
@@ -1823,6 +1838,14 @@ unchecked one from the top.
       feature that went beta in 1.33, and the honest answer may be no until it is
       on by default. Answer it in NOTES either way; do not leave it as a silent
       omission, which is exactly what the pin was
+      Answered — **no**, and the box's own premise was already stale: `effective`
+      resolves enacted-over-declared for all four resource fields, so nothing
+      reads the request where an enacted number exists. The third number
+      (`status.allocatedResources`) is decoded, tested and read by nobody, and
+      stays that way — its two fields are kept rather than deleted because
+      [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+      window shuts at this phase's close
+      ([D135](NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21))
 
 - [x] **Drain safety** — for each node, what a drain would do and what would
       block it. A PDB whose `minAvailable` equals the replica count means the

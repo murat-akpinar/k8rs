@@ -1710,6 +1710,54 @@ fn deployments_and_daemonsets_decode_their_own_desired_and_ready() {
         "a capture where every replica is ready cannot tell the two fields apart, and is not \
          the fixture for this assertion"
     );
+    assert_eq!(
+        sts.terminating, None,
+        "and a StatefulSet has no `terminatingReplicas` at all — KEP-3973 wrote it onto \
+         Deployments and ReplicaSets only, so this kind's `readyReplicas` still counts a pod on \
+         its way out and needs no correction ([`WorkloadSnapshot::terminating`])"
+    );
+
+    // **`terminatingReplicas` off the two kinds that have it, and it is `0` on every committed
+    // object** — the counter is non-zero only while a rollout is draining and no capture landed
+    // inside that window (NOTES § D135). The value is read out of the capture rather than
+    // written down, so a trip that *does* catch one reddens this line instead of quietly
+    // becoming the fixture for a case nobody chose; and `captured_i32` panics on an absent key,
+    // which is what makes this an assertion that the beta field was on at all rather than a
+    // comparison of `None` against `None`.
+    let deployments_raw = fixture("deployments");
+    for w in &deployments {
+        let captured = captured_i32(
+            captured_item(&deployments_raw, &w.id.name),
+            &["status", "terminatingReplicas"],
+        );
+        assert_eq!(
+            (w.terminating, captured),
+            (Some(0), 0),
+            "{}: the field is present in the capture and decodes off its own path — and the \
+             corpus has no draining workload, which is what [`ready_count`]'s clause has no \
+             committed object for and what its negative in `rules_tests/workload.rs` stands on",
+            w.id.name
+        );
+    }
+    let quota_rs: Vec<WorkloadSnapshot> = items::<ReplicaSet>("quota-replicasets")
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    let quota_rs = quota_rs
+        .first()
+        .expect("the quota namespace has one ReplicaSet");
+    assert_eq!(
+        (
+            quota_rs.terminating,
+            captured_i32(
+                &fixture("quota-replicasets")["items"][0],
+                &["status", "terminatingReplicas"]
+            )
+        ),
+        (Some(0), 0),
+        "and the ReplicaSet half of KEP-3973 decodes off the same path — a bare ReplicaSet is a \
+         workload W1 reads its band off, so the field cannot be a Deployment-only decode"
+    );
 }
 
 /// **[`CAPTURED_PODS`] against the directory, in both directions** — the coupling the list never
@@ -2335,6 +2383,128 @@ fn the_api_group_decides_which_kind_an_owner_reference_names() {
         ObjectKind::Other("Node.example.com".to_string()),
         "so it is kept as an ordinary owner instead of being discarded"
     );
+}
+
+/// **`spec.containers[].restartPolicyRules`, off the two captures that carry one** — the field
+/// [`stopped_for_good`] reads before it claims nothing is starting a container again
+/// ([`ContainerSnapshot::restart_rules`], NOTES § D99, § D135).
+///
+/// **Two captures and not one, because the two actions are different facts.** `neverrules`
+/// declares [`RESTART_SELF`], which stops at the container that declared it; `gang` declares
+/// [`RESTART_ALL_ACTION`], which is the only spelling that reaches a sibling — and the
+/// **validator** accepts both while `kubectl explain` and the published schema name only the
+/// first (NOTES § D97). A decode tested against one of them proves nothing about the other.
+///
+/// **Every value is read back out of the capture**, action, operator and codes alike: the rules
+/// are written in `scripts/broken.yaml` and belong to the cluster that answered, not to this
+/// file. What is asserted *here* is the shape rule 15's tests need the fixtures to keep — one
+/// rule, one operator, one code — so a manifest that grew a second rule reddens this line
+/// instead of quietly widening what the rule tests are standing on.
+///
+/// **The negative is in the same two objects**: `keeper` and `bystander` declare no rules at
+/// all, which is the state every other container in the corpus is in and the one that leaves
+/// [`ContainerSnapshot::restart_policy`] as the whole answer. Asserted over the **whole**
+/// corpus, both ways, so a decode that had stopped filling the field would print the same green
+/// line as one with nothing wrong (CLAUDE.md § A derived list asserts it found something).
+#[test]
+fn the_two_captures_that_declare_restart_rules_decode_them_and_the_rest_of_the_corpus_has_none() {
+    let mut carried: Vec<String> = Vec::new();
+    for name in CAPTURED_PODS {
+        let p = pod(name);
+        for c in &p.containers {
+            if !c.restart_rules.is_empty() {
+                carried.push(format!("{name}/{}", c.name));
+            }
+        }
+    }
+    carried.sort();
+    println!("containers declaring restartPolicyRules: {carried:?}");
+    assert_eq!(
+        carried,
+        ["gang/trigger", "neverrules/retry"],
+        "two captures declare rules and every other container in the corpus declares none — a \
+         third arriving is a shape rule 15's tests stopped being the only proof of, and a \
+         decode that had gone empty would otherwise pass with an empty sweep"
+    );
+
+    for (capture, container_name, action) in [
+        ("neverrules", "retry", RESTART_SELF),
+        ("gang", "trigger", RESTART_ALL_ACTION),
+    ] {
+        let raw = fixture(capture);
+        let declared = &raw["spec"]["containers"]
+            .as_array()
+            .expect("the capture declares its containers")
+            .iter()
+            .find(|c| c["name"] == container_name)
+            .unwrap_or_else(|| panic!("{capture} declares {container_name}"))["restartPolicyRules"];
+        let rules = declared
+            .as_array()
+            .unwrap_or_else(|| panic!("{capture}/{container_name} carries restartPolicyRules"));
+        assert_eq!(
+            rules.len(),
+            1,
+            "{capture}/{container_name}: one rule is the shape rule 15's tests are written \
+             around — {declared}"
+        );
+        assert_eq!(
+            captured_str(&rules[0], &["action"]),
+            action,
+            "{capture}/{container_name}: and it is this action, which is what makes the two \
+             captures two different facts rather than one repeated"
+        );
+
+        let decoded = pod(capture);
+        let c = container(&decoded, container_name);
+        // `values` is an array, and [`at`] walks object keys — so the codes come out of it by
+        // hand, with the count asserted rather than assumed: a rule naming two codes and a decode
+        // keeping one would otherwise compare equal on the first.
+        let codes: Vec<i32> = rules[0]["exitCodes"]["values"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{capture}/{container_name}: the rule names exit codes"))
+            .iter()
+            .map(|v| captured_i32(v, &[]))
+            .collect();
+        assert_eq!(
+            codes.len(),
+            1,
+            "{capture}/{container_name}: one code is the shape rule 15's tests are written \
+             around — {codes:?}"
+        );
+        println!("{capture}/{container_name}: {:?}", c.restart_rules);
+        assert_eq!(
+            c.restart_rules,
+            vec![ExitRule {
+                action: captured_str(&rules[0], &["action"]).to_string(),
+                operator: Some(captured_str(&rules[0], &["exitCodes", "operator"]).to_string()),
+                values: codes,
+            }],
+            "the whole rule, off its own three paths: the action, the operator inside \
+             `exitCodes`, and the codes inside that — three nested keys a decode can drop one \
+             of and stay green on the other two"
+        );
+        assert_eq!(
+            c.restart_rules[0].operator.as_deref(),
+            Some("In"),
+            "{capture}/{container_name}: an `In` rule is what the manifests declare, and the \
+             `NotIn` half is built rather than captured (NOTES § D40)"
+        );
+
+        // **The sibling in the same object declares nothing**, which is the negative that makes
+        // the positive above a discrimination rather than a decode that fills every container.
+        let sibling = match capture {
+            "neverrules" => "keeper",
+            _ => "bystander",
+        };
+        let other = container(&decoded, sibling);
+        assert!(
+            other.restart_rules.is_empty(),
+            "{capture}/{sibling}: `restartPolicyRules` is null in the capture, and an empty \
+             list is what that has to decode to — a rule borrowed from the container next to it \
+             would take this one's card away: {:?}",
+            other.restart_rules
+        );
+    }
 }
 
 // --- ONE FIELD CHANGED ON A REAL CAPTURE ---
@@ -3629,6 +3799,13 @@ fn a_container_status_that_omits_started_is_not_started() {
 /// `numberUnavailable` on a DaemonSet, and nothing at all on a ReplicaSet, which has no such
 /// field and must not borrow one from the four counters it does carry.
 ///
+/// **`terminating` is the one that is `0` on every committed object** — KEP-3973's counter is
+/// non-zero only while a rollout is draining, which is a window no capture landed inside
+/// (NOTES § D135) — so without a value set here it could be read off any of the five neighbours
+/// and stay green on all six workloads. It is a fifth distinct number below, and on the two
+/// kinds that have no such field it has to come back `None`
+/// ([`WorkloadSnapshot::terminating`]).
+///
 /// **Capture trip:** a Deployment whose new revision cannot start (a bad image on the
 /// second revision) captured mid-rollout gives the Deployment and its ReplicaSet at
 /// once; a DaemonSet with a broken image gives the third.
@@ -3645,18 +3822,20 @@ fn desired_and_ready_are_read_from_their_own_fields_and_not_a_neighbour() {
     status.available_replicas = Some(0); // ready, but not past minReadySeconds
     status.updated_replicas = Some(4);
     status.unavailable_replicas = Some(3);
+    status.terminating_replicas = Some(7);
 
     let w = WorkloadSnapshot::from(deployment);
     println!(
-        "deployment: desired={:?} ready={:?} updated={:?} unavailable={:?}",
-        w.desired, w.ready, w.updated, w.unavailable
+        "deployment: desired={:?} ready={:?} updated={:?} unavailable={:?} terminating={:?}",
+        w.desired, w.ready, w.updated, w.unavailable, w.terminating
     );
     assert_eq!(
-        (w.desired, w.ready, w.updated, w.unavailable),
-        (Some(5), Some(2), Some(4), Some(3)),
+        (w.desired, w.ready, w.updated, w.unavailable, w.terminating),
+        (Some(5), Some(2), Some(4), Some(3), Some(7)),
         "desired is what the spec asked for, ready is what is passing probes, updated is \
-         how many are on the new template, unavailable is how many are not answering — and \
-         no two of the six counters on this object are equal"
+         how many are on the new template, unavailable is how many are not answering, \
+         terminating is how many are on their way out — and no two of the seven counters on \
+         this object are equal"
     );
 
     let mut replicaset: ReplicaSet = items::<ReplicaSet>("healthy-replicasets")
@@ -3669,19 +3848,21 @@ fn desired_and_ready_are_read_from_their_own_fields_and_not_a_neighbour() {
     status.ready_replicas = Some(2);
     status.available_replicas = Some(0);
     status.fully_labeled_replicas = Some(4);
+    status.terminating_replicas = Some(7);
 
     let w = WorkloadSnapshot::from(replicaset);
     println!(
-        "replicaset: desired={:?} ready={:?} updated={:?} unavailable={:?}",
-        w.desired, w.ready, w.updated, w.unavailable
+        "replicaset: desired={:?} ready={:?} updated={:?} unavailable={:?} terminating={:?}",
+        w.desired, w.ready, w.updated, w.unavailable, w.terminating
     );
     assert_eq!(
-        (w.desired, w.ready, w.updated, w.unavailable),
-        (Some(5), Some(2), Some(6), None),
+        (w.desired, w.ready, w.updated, w.unavailable, w.terminating),
+        (Some(5), Some(2), Some(6), None, Some(7)),
         "a ReplicaSet's `status.replicas` is not optional and is not the desired count — it \
          is how many pods it has on its one template, which is what `updated` means here \
          (D82). `fullyLabeledReplicas` and `availableReplicas` are neither, and there is no \
-         unavailable counter on this kind at all"
+         unavailable counter on this kind at all — but there *is* a terminating one, which is \
+         the half of KEP-3973 a ReplicaSet does carry"
     );
 
     let mut daemonset: DaemonSet = items::<DaemonSet>("daemonsets")
@@ -3698,8 +3879,15 @@ fn desired_and_ready_are_read_from_their_own_fields_and_not_a_neighbour() {
 
     let w = WorkloadSnapshot::from(daemonset);
     println!(
-        "daemonset: desired={:?} ready={:?} updated={:?} unavailable={:?}",
-        w.desired, w.ready, w.updated, w.unavailable
+        "daemonset: desired={:?} ready={:?} updated={:?} unavailable={:?} terminating={:?}",
+        w.desired, w.ready, w.updated, w.unavailable, w.terminating
+    );
+    assert_eq!(
+        w.terminating, None,
+        "KEP-3973 gave `terminatingReplicas` to Deployments and ReplicaSets and to nothing \
+         else, so this kind answers `None` and none of the six counters set above may be \
+         borrowed for it — on a cluster with no such field `readyReplicas` still counts a pod \
+         on its way out, which is what makes the absence right rather than merely empty"
     );
     assert_eq!(
         (w.desired, w.ready, w.updated, w.unavailable),

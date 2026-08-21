@@ -245,8 +245,12 @@ code and never touch product files.
   snapshot types in `rules.rs`**, and it spans metadata, spec and status on all
   three kinds: `spec.volumes` (rule 8), `spec.terminationGracePeriodSeconds`
   (rule 12), `spec.unschedulable` and the taints under it (N2),
-  `spec.containers[].resources` (rule 2, N5) and `spec.replicas` (the workload
-  `desired`) all sit in the half an earlier "metadata + status only" would have
+  `spec.containers[].resources` (rule 2, N5), `spec.replicas` (the workload
+  `desired`) and `spec.containers[].restartPolicyRules` — on **every** container
+  of the pod and on the init list, since a rule one container over can restart
+  this one (rule 15,
+  [NOTES § D135](../NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21)) —
+  all sit in the half an earlier "metadata + status only" would have
   dropped
   ([NOTES § D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
   ReplicaSets are fetched on demand and cached, never watched. Every

@@ -4,9 +4,10 @@ use super::*;
 // product code in this file constructs one, and the top-level list is what `rules.rs`
 // reads off the API.
 use k8s_openapi::api::core::v1::{
-    ContainerStateRunning, ContainerStateWaiting, EmptyDirVolumeSource, EphemeralVolumeSource,
-    HostPathVolumeSource, PersistentVolumeClaimTemplate, Taint as ApiTaint,
-    Toleration as ApiToleration, Volume, VolumeMount,
+    ContainerRestartRule, ContainerRestartRuleOnExitCodes, ContainerStateRunning,
+    ContainerStateWaiting, EmptyDirVolumeSource, EphemeralVolumeSource, HostPathVolumeSource,
+    PersistentVolumeClaimTemplate, Taint as ApiTaint, Toleration as ApiToleration, Volume,
+    VolumeMount,
 };
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;

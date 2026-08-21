@@ -1144,6 +1144,106 @@ when nothing else has already explained the same silence.
   trap N3 has, one list away
   ([NOTES § D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
 
+### Pods shutting down: a comma inside W2's readiness fact, never on W1
+
+`status.terminatingReplicas`, decoded as
+[`WorkloadSnapshot::terminating`](../src/rules.rs), is read by
+[`shutting_down`](../src/rules.rs) alone, and `shutting_down` is called from
+[`rollout_gave_up`](../src/rules.rs) — W2 — and nowhere else
+([NOTES § D135](../NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21),
+[§ D136](../NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+**W1 — [`pods_were_never_created`](../src/rules.rs) — never carries it, in any
+shape**, and that is proven rather than assumed: the test plants drainers on
+*both* the Deployment W1's count is read from and the ReplicaSet the card is
+filed on, and asserts an **equality** against the same card unplanted — not
+merely an absence on the corpus, where `terminatingReplicas` happens to be
+`0` everywhere. Both pinned cards above are unaffected on the committed
+capture either way, W1 for a stronger reason than W2: W2's clause is absent
+because nothing is draining there; W1's is absent because W1 never draws it.
+
+- **What it says, and where it sits.** `shutting_down` returns a bare phrase —
+  `N pod(s) shutting down`, through `counted()`, so the unit word is present
+  (`1 pod shutting down`, `3 pods shutting down`) — and returns nothing where
+  `terminating` is `0` or absent. The caller writes the comma: W2's evidence
+  reads `0 of 1 pod ready, 1 pod shutting down · the reason Kubernetes gave:
+  …`. It is a **suffix inside the readiness fact**, not a fourth `·`-joined
+  fact — the distinction this section drew twice before today and drew
+  wrong both times.
+- **Only W2's first arm.** `rollout_gave_up` has three arms — `ready < desired`,
+  then `updated < desired`, then `unavailable > 0` — and the clause rides the
+  first one only. Arms two and three (`K of M pods on the new version`,
+  `N not answering`) carry no clause; see the two gaps below.
+- **Why W1 cannot have it, in any wording — this is the 176-character
+  measurement kept from round one, now load-bearing twice over.** Run
+  through this repo's own `wrapped_at` at 51 columns against
+  `screens/alerts.md`'s three-line evidence cut: W1's evidence with no clause
+  at all is **already** four lines and already cut, losing only the tail
+  (`used: pods=0, limited: pods=0`) while `exceeded quota: deny-all-pods` —
+  the sentence [`pods_were_never_created`](../src/rules.rs)'s own doc calls the whole
+  diagnosis — sits on line 3 and survives. Adding any wording moves that
+  sentence off the card instead, and the flip is a cliff, not a slope: at
+  `+11` characters `exceeded quota: deny-all-pods` is still kept; at `+12` it
+  is not, because the 30-column quoted token
+  `"broken-quota-59654c756-wzr9s"` re-lands one line later and strands line 2
+  at 21 of 51 columns. The shortest wording anyone has proposed on this
+  section is `+17` (bare `, 1 shutting down`); the shortest that keeps the
+  unit word invariant 14 asks for is `+21` (`, 1 pod shutting down`). **There
+  is no wording that fits under `+12`, so the answer this section pins is
+  which card, not which words.**
+- **The budget agrees with the merits, and both are pinned, not just one.**
+  On W1 the quote already explains why `ready` is low — the API server
+  refused to create the pods — so a drainer is not the missing explanation
+  there. On W2 the quote (`ProgressDeadlineExceeded`) explains nothing about
+  the count, so the drainer is exactly the explanation the reader is
+  missing. The budget and the merits point at the same card.
+- **Two gaps this section pins rather than papers over, one kept from
+  before and one corrected today:**
+  - **Arm 2 (kept):** `updatedReplicas` is a non-terminating counter and
+    carries no clause, so `K of M pods on the new version` understates while
+    a pod on the **new** template is draining.
+  - **Arm 3 (corrected — the round-two sentence here was wrong twice over).**
+    `unavailableReplicas` is `Σ(replicaset.spec.replicas) − availableReplicas`,
+    and the minuend is **not a pod count**: it is a *desired* number the
+    Deployment controller writes into each ReplicaSet's spec, and it knows
+    nothing about a pod terminating. Only the subtrahend is non-terminating.
+    The two move together only during a rollout, where the controller has
+    already decremented the old ReplicaSet's spec to match — on every other
+    drain (`kubectl delete pod`, an eviction, a preemption, a **node drain**)
+    the difference **rises one per leaving pod**. So arm 3 can print
+    `1 pod not answering` about a pod that *is* answering, mid-drain on an
+    old ReplicaSet while the new one reads fully ready. That is a real gap
+    and it predates this box — it is [backlog.md](../backlog.md)'s, and the
+    clause is deliberately not appended there: the same pod would then be
+    counted under two labels on one line. This screen pins what the reader
+    sees; it does not propose the fix.
+- **The shape, off the synthetic test that plants the field** — nothing on
+  the committed capture reaches either value, so both are printed flat, as
+  the binary prints them:
+
+  ```
+  0 of 1 pod ready, 1 pod shutting down · the reason Kubernetes gave:
+  ReplicaSet "broken-quota-59654c756" has timed out progressing.
+  ```
+
+  ```
+  0 of 1 pod ready, 3 pods shutting down · the reason Kubernetes gave:
+  ReplicaSet "broken-quota-59654c756" has timed out progressing.
+  ```
+
+  W1's card, planted the same way, is not drawn a third time here: it is
+  the byte-identical card already pinned above, proven so by the equality
+  test above rather than assumed.
+- **The tone finding from round one stands, and the wording it forced
+  stands with it.** *"On the way out"* was the only idiom this screen had
+  anywhere on a card, and *"already leaving"* is not needed once the clause
+  sits inside the fact it explains — position says *this is why the number
+  is low* without the reader placing a separate fact in context. What moved
+  since round two is narrower: the unit word is back (`1 pod shutting down`,
+  not the bare `1 shutting down`), because a bare number beside `of 1 pod`
+  reads as an arithmetic error before it reads as two populations, and W2 —
+  the only card that carries this clause — has the four spare characters
+  that fix it.
+
 ### W1 suppresses W2, and the screen shows one card
 
 **On the committed capture these two fire on the same owner sixty seconds

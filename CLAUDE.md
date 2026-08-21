@@ -477,6 +477,11 @@ exists if two writers are ever unavoidable, but reach for the plan fix first.
 **Review is not one of these slots** — nothing is built on top of a box until
 `k8s-admin` reports, and the dev idles meanwhile.
 
+**A re-dispatch to fix a finding is a write, not a review** — `screens/` went to
+its owner for a rewrite in the slot the table below reserves for two *reviewers*,
+and the reviewer's first read carried a section that no longer existed
+([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+
 **Sending a finished agent another message is a new dispatch**, and a resumed
 agent owns its files again the moment it wakes — so a follow-up while someone
 else holds that tree puts two writers on it, and the second one's restore from
@@ -586,6 +591,12 @@ The brief, six lines, no more: the box verbatim · the files you may write ·
 what "done" means for this turn · which `NOTES.md` section decides the
 behaviour · what is explicitly out of scope · **and what to read, by region**.
 
+**A box written a phase ago may describe a defect the code has already closed**,
+so the brief carries its premise re-checked at HEAD, or says plainly that it was
+not. Two Phase 4 boxes were stale; the one checked at brief time cost nothing and
+the one that was not cost a review round
+([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+
 **That last line is the one that costs hours when it is missing**
 ([D110](NOTES.md#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16)).
 An agent starts cold and, told only *fix rule 5*, pages the whole file. Name the
@@ -609,11 +620,17 @@ decision, and the PM writes it into `NOTES.md` before committing.
 - A box checked for work that was written but never *run*.
 - A test that has only ever been green — step 4's mutation run skipped because
   the diff looked small. It is `--in-diff` and it costs a minute.
-- **A number written from an estimate instead of a run.** Two drafts of the
-  mutation gate put a wrong figure in this file, each reasoned about the tool
-  rather than read off it
+- **A claim reasoned from a definition instead of measured against the object.**
+  Numbers are the loud half — two drafts of the mutation gate put a wrong figure
+  in this file, each reasoned about the tool rather than read off it
   ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
-  If a rule here rests on a number, run the thing first.
+  The quiet half is prose: a formula read correctly and concluded from wrongly, a
+  feature gate's name, a field's type, a column budget estimated in a review and
+  repeated as measured — four of them in one turn, each written by someone being
+  careful with the object one command away
+  ([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+  **The definition says what it is; only the object says what it does** — and
+  somebody else's finding stays an estimate until *you* have run it.
 - The security gate skipped because "this diff is only UI".
 - An agent editing outside its ownership row, quietly. PM reads the diff before
   committing, every time.

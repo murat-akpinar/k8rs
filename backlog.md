@@ -589,6 +589,51 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   and its red was proven on scratch copies rather than by a self-test, which every
   other guard in `scripts/` carries. `tester`'s, raised 2026-08-21
 
+- **`scripts/broken.yaml` cannot produce a non-zero `terminatingReplicas`.** Every
+  committed Deployment and ReplicaSet reports `0`, because a draining rollout is a
+  window a capture has to land inside. A long `terminationGracePeriodSeconds` plus
+  a `preStop` sleep on `broken-rollout`'s old revision would hold the window open
+  for minutes and retire the synthesis the rule ships with. `tester`'s manifest,
+  and it needs a trip, so it is nobody's until one is owed
+  ([D135](NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21)).
+  Raised 2026-08-21
+
+- **`settled` reads the policy and not the declared restart rules, so rule 6 and
+  rule 15 disagree about one container.** At `restarts != 0`, sitting in
+  `state.terminated exit 3` with its own `{Restart, In [3]}` rule: rule 15 stands
+  down, rule 6 calls that run the last one on record and hands over a plain
+  `kubectl logs` that the next kubelet action falsifies. Reproduced on the built
+  binary off `neverrules.json` rewound one restart (operator review,
+  `reports/2026-08-21-family-b-restart-rules-and-terminating-replicas.md` § 2).
+  The self arm needs no signature change; the sibling arm needs the pod, which is
+  [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  condition 3. A shared helper is a turn of its own — not a regression, and
+  [D125](NOTES.md#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20)
+  is where it was promised
+  ([D135](NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21)).
+  Raised 2026-08-21
+
+- **W2's third arm can say `1 pod not answering` about a pod that is answering.**
+  `unavailableReplicas` is `Σ(replicaset.spec.replicas) − availableReplicas`, and
+  the minuend is a *desired* number the Deployment controller writes into the
+  ReplicaSet spec — it does not know a pod is terminating. So on any drain that is
+  not a spec scale-down (`kubectl delete pod`, an eviction, a preemption, a node
+  drain) it rises one per leaving pod. Reachable: desired 2, new RS ready 2, an old
+  RS whose pod is drained off a node — `ready 2 ≥ 2`, `updated 2 ≥ 2`,
+  `Σspec 3 − available 2 = 1` → the card reads `1 pod not answering`. Predates
+  Family B, which only added a doc claim that it needs no correction; the claim is
+  fixed, the arm is not, and `terminatingReplicas` cannot correct it because it does
+  not say which template the pod was on. Operator review 2026-08-21 round 2, § 1
+  ([D135](NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21)).
+  Raised 2026-08-21
+
+- **`screens/alerts.md`'s two pinned W cards quote a prefix the binary does not
+  print.** They show `the controller's own words:`; `controller_said` prints `the
+  reason Kubernetes gave:`. Predates Family B — the file disclaims it in place
+  (*"rules.rs owns the final wording"*), and `screens-check.py` measures mockup
+  widths only, so nothing mechanical sees it. Either the pin or the disclaimer
+  should go. Found by `tui-designer` while re-pinning the same file, 2026-08-21
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
