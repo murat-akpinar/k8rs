@@ -328,14 +328,6 @@ fn the_badge_is_c1s_own_countdown_and_the_pane_never_disagrees_with_it() {
         "C1's own band on this pane, and deliberately not the worst row: the `●` CSR row beside \
          a `▲` badge is what `screens/analysis.md` draws"
     );
-    // **Value and band, never a glyph** — `theme.rs` draws those, and the screen's rule is that
-    // a duration draws none while a count does (`screens/analysis.md` § Certificates).
-    assert!(
-        !badge.value.contains(['\u{25cf}', '\u{25b2}', '\u{25cb}']),
-        "the glyph belongs to theme.rs: {}",
-        badge.value
-    );
-
     // **The row and the badge are the same subtraction, spelled twice** — the row in C1's own
     // sentence, the badge in the sidebar's three columns. This is the assertion that catches
     // them drifting: `expires_at` and `now` are the same on both sides, so only the *spelling*

@@ -2,7 +2,9 @@
 
 use super::*;
 
-use crate::rules::{ContainerRole, ContainerState, RESTARTS_WARN, age, analyze, doing_its_job};
+use crate::rules::{
+    ContainerRole, ContainerState, RESTARTS_WARN, age, analyze, container_fact, doing_its_job,
+};
 
 use k8s_openapi::api::core::v1::ContainerStatus;
 use k8s_openapi::jiff::SignedDuration;
@@ -319,9 +321,23 @@ fn a_sidecar_and_an_app_tied_on_their_count() -> PodSnapshot {
     pod
 }
 
-const SIDECAR_ROW: &str =
-    "default/broken-gang · sidecar container zz-proxy (it runs beside the app the whole time)";
-const APP_ROW: &str = "default/broken-gang · container aa-app";
+/// **The row this pane must draw for one container — composed from [`container_fact`], never
+/// copied out of it.**
+///
+/// `container_fact` was widened to `pub(crate)` *for this reader*, and the screen's rule is that
+/// the row's identity is that function's output verbatim, never a second wording of a role. A
+/// literal here cannot hold that rule: a producer that stopped calling the function and inlined
+/// the same sentence passes a literal pin, and passes the mutation gate too, because
+/// cargo-mutants cannot express *replace a call with an equal literal*. So the pin is the call.
+/// `src/rules_tests/pod.rs` pins the same function the same way.
+fn expected_row(pod: &PodSnapshot, container: &str) -> String {
+    let c = pod
+        .containers
+        .iter()
+        .find(|c| c.name == container)
+        .unwrap_or_else(|| panic!("the plant has no container {container}"));
+    format!("{} · {}", qualified(&pod.id), container_fact(c))
+}
 
 #[test]
 fn a_tie_on_the_count_breaks_on_the_younger_run_and_not_on_the_name() {
@@ -330,15 +346,19 @@ fn a_tie_on_the_count_breaks_on_the_younger_run_and_not_on_the_name() {
     // ties and falls through to the name — which is why `Cycling` keeps the moment beside its
     // spelling. Younger first puts the sidecar ahead of a container that sorts before it
     // alphabetically, so this order can only come from the run.
+    let pod = a_sidecar_and_an_app_tied_on_their_count();
     let report = super::restarts(
         &ClusterSnapshot {
-            pods: vec![a_sidecar_and_an_app_tied_on_their_count()],
+            pods: vec![pod.clone()],
             ..corpus()
         },
         &[],
     );
     println!("{}", pane(&report));
-    assert_eq!(selectable(&report), [SIDECAR_ROW, APP_ROW]);
+    assert_eq!(
+        selectable(&report),
+        [expected_row(&pod, "zz-proxy"), expected_row(&pod, "aa-app")]
+    );
     assert_eq!(
         detail_of(&report.rows[1])[1],
         detail_of(&report.rows[2])[1],
@@ -361,7 +381,7 @@ fn a_role_is_spelled_by_container_fact_and_an_equal_run_breaks_on_the_name() {
     }
     let report = super::restarts(
         &ClusterSnapshot {
-            pods: vec![pod],
+            pods: vec![pod.clone()],
             ..corpus()
         },
         &[],
@@ -369,9 +389,17 @@ fn a_role_is_spelled_by_container_fact_and_an_equal_run_breaks_on_the_name() {
     println!("{}", pane(&report));
     assert_eq!(
         selectable(&report),
-        // Alphabetical, against the source order — and the gloss is `container_fact`'s own words,
-        // verbatim, because a second wording of a role is the defect `ContainerRole`'s doc names.
-        [APP_ROW, SIDECAR_ROW]
+        // Alphabetical, against the source order — and each identity is `container_fact`'s own
+        // output, because a second wording of a role is the defect `ContainerRole`'s doc names.
+        [expected_row(&pod, "aa-app"), expected_row(&pod, "zz-proxy")]
+    );
+    // **A derived expectation asserts it derived something** (CLAUDE.md § Tests must not lie): a
+    // `container_fact` that stopped glossing a role would compose two rows this pane matched
+    // happily. The gloss is a trailing parenthetical; its words are `rules.rs`' to choose.
+    assert!(
+        expected_row(&pod, "zz-proxy").ends_with(')')
+            && !expected_row(&pod, "aa-app").ends_with(')'),
+        "a sidecar's identity carries a gloss and a regular container's does not"
     );
 }
 

@@ -1949,11 +1949,30 @@ unchecked one from the top.
       spelling of *expired* is wrong in the dangerous direction. C3's row is
       one `Row::NotComputed` while the fetch is a Phase 5 box; C2 is not drawn
       at all ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
-- [ ] Positive and negative fixture tests per report, same discipline as rules
-- [ ] `cargo mutants --timeout 90` clean over `analysis.rs` — same gate
+- [x] Positive and negative fixture tests per report, same discipline as rules
+      Audited per producer, not counted: all seven have a capture-driven positive
+      and an **asserted** negative, and every expected number was re-derived from
+      the fixtures rather than read off the code. What proves the negatives can
+      fail is a machine — the predicates that decide *do not draw* were swept
+      alone: 79 mutants, 67 caught, 0 missed. Three findings came back and two
+      were fixed here: the Restarts row pinned `container_fact`'s **words**
+      instead of calling it, so a producer that inlined the same sentence passed
+      every test and every mutant (proven, red C), and two `.contains` lines that
+      sat after an `assert_eq!` of the same string and could never be reached.
+      The third — a pod naming a node the snapshot does not have — is boxed in
+      Phase 5, where the watch makes the shape reachable
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
+- [x] `cargo mutants --timeout 90` clean over `analysis.rs` — same gate
       `rules.rs` gets in Phase 3. A report that quietly stops flagging looks
       identical to a report with nothing to flag
       ([NOTES § D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12))
+      Run whole and in four shards (D118), and **`just mutants` sweeps both pure
+      files**, so this run is also
+      [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+      fourth condition — the whole-file `rules.rs` gate the card-changing box
+      owed this close. **751 caught · 0 missed · 0 timeout · 93 unviable**, each
+      shard writing its own `mutants.out` and each naming a type rather than a
+      filesystem (D133)
 
 **Done when:** every report is correct against the cluster-wide fixture, and
 the temporary main can print any of them.
@@ -2203,6 +2222,40 @@ public release.
       only for what is on screen, and only when the capability probe found
       `metrics.k8s.io`. Without it the Capacity report's usage column has no
       source — and it says so rather than showing a blank
+      **And it is where the units get measured for the first time.** Capacity's
+      tests hand-build their metrics because the fixture cluster serves no
+      metrics API (`kubectl top nodes` → *Metrics API not available*), so *the
+      server writes nanocores and `Ki`* is upstream knowledge this repo has
+      never read off an object — the one input in `analysis.rs` that is neither
+      a capture nor a one-field plant on one. Deploy metrics-server into kind
+      on the trip this box needs anyway, and read the units
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
+- [ ] **The mutation gate reads one directory and names another, so a run that
+      tested nothing reports the previous run's logs** — `scripts/mutants.sh`
+      counts `$OUT/log` (the repo-root `mutants.out/`) while printing `$SCRATCH`
+      as the location it read. Measured 2026-08-22: a run with zero mutants left
+      `mutants.out/` untouched and the script printed *"29 unviable … 241 log(s)
+      read on …/k8rs-mutants"* from a run fourteen minutes earlier, with
+      `K8RS_MUTANTS_TMPDIR` pointed at an empty directory. **And `just
+      mutants-diff` does not refuse a diff that contains no product file** —
+      cargo-mutants does not mutate `#[cfg(test)]` code, so a test-only diff
+      prints `No mutants to filter` and exits 0, which is D133's own subject in a
+      second shape: the recipe refuses an *empty* diff and passes a diff with
+      nothing in it to mutate. Both are `tester`'s. Not a blocker at Phase 4's
+      close — that phase's own sweep wrote a fresh `mutants.out` per shard (212
+      logs each, 0 missed), so its evidence stands
+      ([D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21))
+- [ ] **A pod can name a node the snapshot does not have, and nothing has ruled
+      on what that means.** Two independently-timed watches produce it
+      (invariant 6): a pod delivered before the node LIST has landed, or a node
+      deleted between events. Today such a pod is silently invisible to every
+      per-node row on Capacity and Drain safety while still counting in
+      Capacity's limits row — which may be right, but no screen says so and no
+      test asserts it, so it is behaviour nobody chose. **It cannot happen while
+      the driver reads files**, which is why it is boxed here and not in Phase 4:
+      the shape arrives with the watch. Rule it, then feed it — one plant, two
+      assertions. Found by `tester`'s phase-close audit, 2026-08-22
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
 - [ ] Namespace scoping: `--namespace/-n`, and a 403 on the cluster-wide LIST
       falls back to the context's namespace (then `default`), with the header
       stating which scope is in effect and why. A namespace-scoped user must

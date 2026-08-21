@@ -1476,12 +1476,6 @@ fn a_budget_the_controller_could_not_compute_says_so_instead_of_inventing_the_nu
          protects are healthy, so it will not let any of them be moved. The numbers on it are \
          not a measurement of anything."
     );
-    assert!(
-        !detail_of(row)[0].contains(" 2 ") && !detail_of(row)[0].contains(" 1 "),
-        "and it names neither counter, or the sentence is invented out of numbers nobody \
-         computed: {}",
-        detail_of(row)[0]
-    );
     assert_eq!(
         action_of(row),
         "check what default/broken-pdb-floor points at — this happens when it names something \
