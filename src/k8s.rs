@@ -43,6 +43,22 @@
 //! window is indistinguishable from a hang. [`Store::still_listing`] is the state a screen draws
 //! it from; § WHAT A THROTTLE LOOKS LIKE is why there is nothing else to draw.
 //!
+//! **A first sync that never finishes is a state and not a spinner, and there is no deadline in
+//! it** (NOTES § D150, `PRIOR-ART § A7`). Each unfinished LIST reports two facts — how many
+//! objects it has decoded, and when the last one arrived — because *slow* and *hung* overlap by
+//! construction and any threshold that called the twentieth round trip of a 10 000-pod cluster a
+//! hang would call a working cluster broken. A LIST that is working moves both numbers; a LIST
+//! that is hung moves neither, and [`Listing`] is readable at any instant without one. **Nothing
+//! here cancels anything**: the tool does not quit because a cluster is slow.
+//!
+//! **The oldest API server this build is supported against is Kubernetes 1.29, and a cluster
+//! outside that window is told rather than turned away** (NOTES § D149). Nothing k8rs sends is
+//! refused by an older server and nothing it reads decodes wrongly on one — both measured, in
+//! § HOW OLD A CLUSTER MAY BE — so refusing to start would cost a reader with a broken v1.24
+//! cluster everything and buy them nothing. [`version_note`] is the one line they get instead,
+//! and it has a second half: a cluster *newer* than [`TYPES_BUILT_FOR`] drops its added fields at
+//! decode, which is the failure NOTES § D99 relocated onto the user's machine.
+//!
 //! **What is still missing is the `Client`**, and with it the five `Api<K>`s [`drive`] would be
 //! handed: that is the `connect()` box further down Phase 5. Nothing here has met an API
 //! server.
@@ -66,12 +82,13 @@ mod tests;
 use crate::rules::{
     ClusterSnapshot, Condition, ContainerSnapshot, ContainerState, ExitRule, HostPathMount,
     NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, Taint, Terminated, Toleration,
-    WorkloadSnapshot,
+    WorkloadSnapshot, minor_version,
 };
 use futures_util::stream::{BoxStream, Stream, StreamExt, TryStreamExt, select_all};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+use k8s_openapi::jiff::Timestamp;
 use kube::runtime::watcher::{self, Event};
 use std::collections::BTreeMap;
 
@@ -422,6 +439,14 @@ struct Watch<T> {
     /// publishing a **partial** list, and blanking the screen on every watch restart would be a
     /// worse answer to it than a few seconds of stale.
     complete: bool,
+    /// **When something last arrived on this watch's initial LIST** — `Init` counts, and so does
+    /// every `InitApply` (NOTES § D150). `None` means this watch has produced nothing at all,
+    /// which is the state a store is in before the loop's first poll.
+    ///
+    /// **It is not cleared at `InitDone`** and nothing reads it after one: [`Watch::progress`]
+    /// refuses to answer for a complete watch, so a stale stamp from the last bootstrap can
+    /// never be presented as a live one. A reconnect's `Init` overwrites it before it could be.
+    last_progress: Option<Time>,
 }
 
 // Written out rather than derived: `#[derive(Default)]` would demand `T: Default`, which no
@@ -432,6 +457,7 @@ impl<T> Default for Watch<T> {
             live: BTreeMap::new(),
             filling: None,
             complete: false,
+            last_progress: None,
         }
     }
 }
@@ -444,10 +470,18 @@ impl<T: Watched> Watch<T> {
     /// `Delete` goes through it too: the whole object is already in memory, one conversion means
     /// one place the identity is derived, and the key a delete looks up has to be built the same
     /// way the key it stored was.
-    fn take<K>(&mut self, event: Event<K>)
+    fn take<K>(&mut self, now: &Time, event: Event<K>)
     where
         T: From<K> + Bounded,
     {
+        // **Stamped on the two events an initial LIST is made of, and on no others**
+        // (NOTES § D150). `Apply` and `Delete` are ordinary watch traffic on a watch that has
+        // already listed; refreshing the stamp from them would let four healthy watches make a
+        // fifth one's hung LIST look alive, which is the shape D148's `failure` field already
+        // had to refuse once.
+        if matches!(event, Event::Init | Event::InitApply(_)) {
+            self.last_progress = Some(now.clone());
+        }
         match event {
             Event::Init => self.filling = Some(BTreeMap::new()),
             Event::InitApply(object) => {
@@ -476,6 +510,79 @@ impl<T: Watched> Watch<T> {
             }
         }
     }
+
+    /// **What this watch's unfinished initial LIST has to show for itself**, or `None` once it
+    /// has finished one (NOTES § D150).
+    ///
+    /// The count is `filling`'s own length rather than a counter kept beside it: kube buffers a
+    /// page and drains it one `InitApply` at a time (NOTES § D147), so the map *is* the tally,
+    /// and a second one could drift from it. It is objects **decoded and kept**, which is not
+    /// the same as objects the server has sent — a page in flight is invisible here, and no
+    /// number in this file can see it.
+    fn progress(&self) -> Option<(usize, Option<Time>)> {
+        (!self.complete).then(|| {
+            (
+                self.filling.as_ref().map_or(0, BTreeMap::len),
+                self.last_progress.clone(),
+            )
+        })
+    }
+}
+
+/// **One initial LIST that has not finished, and what it has to show for itself**
+/// (NOTES § D150). `PRIOR-ART § A7` is the failure this exists for: a first sync that never
+/// completes has to become a **state**, not a spinner, and k9s
+/// [#4044](https://github.com/derailed/k9s/issues/4044) is what a spinner costs — a wait with
+/// nothing to see it by while `kubectl get` on the same context returns instantly.
+///
+/// **There is no deadline here, and that is the decision rather than an omission.** *Slow* and
+/// *hung* overlap by construction: `REQUIREMENTS.md` budgets first paint under a second at
+/// ~1000 pods, and 10 000 pods is twenty sequential round trips at [`INITIAL_LIST_PAGE`], so
+/// any number that called the twentieth trip a hang would call a working cluster broken. So no
+/// number is picked. The two facts below are reported instead, and between them they separate
+/// the two cases without one: **a LIST that is working produces a count that moves, and a LIST
+/// that is hung produces one that does not.**
+///
+/// **A count alone would not have been enough, and D148 is why.** The watch sockets carry no
+/// TCP keepalive, so a connection that dies mid-list stalls with no error and no further
+/// events — and a screen that draws on events (invariant 7) never redraws to show the count
+/// standing still. [`since`](Listing::since) is what a redraw on a timer can read a duration
+/// off; without it the frozen number and a screen that simply is not repainting look identical.
+///
+/// **Nothing here cancels anything.** The clause this type answers says *becomes a state*, not
+/// *gives up*, and nothing in this design may quit because a cluster is slow.
+///
+/// **The ceiling, named rather than left to be discovered: this makes the state *readable*, and
+/// something still has to ask.** Invariant 7 blocks when idle, so a screen that draws only on
+/// events never redraws during exactly the silence this type describes — the seconds would
+/// advance and nothing would repaint them. A redraw on a timer while a bootstrap is outstanding
+/// is `ui.rs`'s to write, and until it exists these two facts are only as fresh as whatever else
+/// caused the last draw. **Putting the timer here instead would be worse**: it would make this
+/// file own a paint schedule it cannot see the screen of.
+///
+/// **It derives `Debug` where [`Store`] deliberately does not**, and the difference is not an
+/// oversight: a kind, a count and a timestamp are three things that never touched a credential,
+/// while `Store` is the type every API object flows into.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Listing {
+    /// Which watch is still listing.
+    pub kind: ObjectKind,
+    /// **Objects this LIST has decoded and kept so far.** Not what the server has sent: a page
+    /// in flight is invisible here, and kube emits nothing for it until the whole page has
+    /// landed and started draining (NOTES § D147). So `0` is the ordinary reading for the whole
+    /// of the first round trip, and it is also the reading `PRIOR-ART § A7`'s hang never leaves.
+    pub so_far: usize,
+    /// **When the last thing arrived on this LIST** — the `Init` that opens it counts, so a
+    /// watch that has begun always has one.
+    ///
+    /// **A `Time` and not a duration**, because this file does not read a clock to answer a
+    /// question (NOTES § D144): the caller holds `now` and turns this into *how long* with
+    /// [`crate::rules::age`], which is already the plain-language renderer for exactly that and
+    /// is not copied here.
+    ///
+    /// **`None` is *this watch has produced nothing at all*** — the state a store is in before
+    /// the loop's first poll, and the one it would stay in if a watch stream never yielded.
+    pub since: Option<Time>,
 }
 
 /// Everything the permanent watch holds, and the gate that decides whether any of it may be
@@ -515,24 +622,24 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn pod(&mut self, event: Event<Pod>) {
-        self.pods.take(event);
+    pub fn pod(&mut self, now: &Time, event: Event<Pod>) {
+        self.pods.take(now, event);
     }
 
-    pub fn node(&mut self, event: Event<Node>) {
-        self.nodes.take(event);
+    pub fn node(&mut self, now: &Time, event: Event<Node>) {
+        self.nodes.take(now, event);
     }
 
-    pub fn deployment(&mut self, event: Event<Deployment>) {
-        self.deployments.take(event);
+    pub fn deployment(&mut self, now: &Time, event: Event<Deployment>) {
+        self.deployments.take(now, event);
     }
 
-    pub fn stateful_set(&mut self, event: Event<StatefulSet>) {
-        self.stateful_sets.take(event);
+    pub fn stateful_set(&mut self, now: &Time, event: Event<StatefulSet>) {
+        self.stateful_sets.take(now, event);
     }
 
-    pub fn daemon_set(&mut self, event: Event<DaemonSet>) {
-        self.daemon_sets.take(event);
+    pub fn daemon_set(&mut self, now: &Time, event: Event<DaemonSet>) {
+        self.daemon_sets.take(now, event);
     }
 
     /// The last thing that went wrong on any watch, since the loop started.
@@ -540,34 +647,50 @@ impl Store {
         self.failure.as_ref()
     }
 
-    /// The kinds whose first LIST has not landed, in the order the watches are declared.
+    /// The initial LISTs that have not landed, in the order the watches are declared — each
+    /// with what it has to show for itself.
     ///
     /// **The only thing that says anything more about a bootstrap than that one is running**
-    /// (NOTES § D148). [`Store::snapshot`] answers `None` for every reason at once — D28 forbids
-    /// publishing a partial list — so on its own a screen can say *waiting* and stop there, which
-    /// is the shape `PRIOR-ART § A3` warns about: a wait with nothing to see it by. Pods is the
-    /// kind that grows with the cluster and the one [`INITIAL_LIST_PAGE`] is reasoned about, so
-    /// *still reading: pods* twenty seconds in names the long list rather than leaving a hang to
-    /// be guessed at. **How the other four behave at size is not measured here** and no claim
-    /// about it is made.
+    /// (NOTES § D148, § D150). [`Store::snapshot`] answers `None` for every reason at once — D28
+    /// forbids publishing a partial list — so on its own a screen can say *waiting* and stop
+    /// there, which is the shape `PRIOR-ART § A3` warns about: a wait with nothing to see it by.
     ///
-    /// **It cannot say why, and no field here could.** A LIST inside kube's silent retry window
-    /// (§ WHAT A THROTTLE LOOKS LIKE) and a LIST against an enormous cluster are the same answer
-    /// here; the wait happens below `watcher()` in a tower layer with no callback. Empty means
-    /// every LIST landed — the gate `listed` is this method, so the two cannot disagree.
+    /// **Empty means every LIST landed**, and [`Store::listed`] is derived from this same call
+    /// rather than from the five flags a second time, so the gate and the state a screen draws
+    /// the wait from cannot disagree. Empty is also **free**: a `Vec` that collects nothing
+    /// allocates nothing, which is what keeps the gate cheap on a path [`Store::snapshot`] takes
+    /// on every analysis pass.
     ///
-    /// **The words are the caller's.** This returns kinds, not sentences, because invariant 14's
-    /// plain language is the screen's decision and `views.rs` is not this file's.
-    pub fn still_listing(&self) -> Vec<ObjectKind> {
+    /// **It cannot say *why*, and no field here could.** A LIST inside kube's silent retry
+    /// window (§ WHAT A THROTTLE LOOKS LIKE), a LIST against an enormous cluster and a socket
+    /// that died with no keepalive (NOTES § D148) are one answer here; the wait happens below
+    /// `watcher()` in a tower layer with no callback. What separates them is the *shape over
+    /// time* of the two numbers, which is the caller's to watch and this call's to report.
+    ///
+    /// **Pods is the kind whose size is reasoned about** — [`INITIAL_LIST_PAGE`] is derived from
+    /// it — so *still reading: pods, 4 500 so far* names the long list rather than leaving a hang
+    /// to be guessed at. **How the other four behave at size is not measured** and no claim about
+    /// it is made here.
+    ///
+    /// **The words are the caller's.** This returns facts, not sentences: invariant 14's plain
+    /// language is the screen's decision and `views.rs` is not this file's.
+    pub fn still_listing(&self) -> Vec<Listing> {
         [
-            (ObjectKind::Pod, self.pods.complete),
-            (ObjectKind::Node, self.nodes.complete),
-            (ObjectKind::Deployment, self.deployments.complete),
-            (ObjectKind::StatefulSet, self.stateful_sets.complete),
-            (ObjectKind::DaemonSet, self.daemon_sets.complete),
+            (ObjectKind::Pod, self.pods.progress()),
+            (ObjectKind::Node, self.nodes.progress()),
+            (ObjectKind::Deployment, self.deployments.progress()),
+            (ObjectKind::StatefulSet, self.stateful_sets.progress()),
+            (ObjectKind::DaemonSet, self.daemon_sets.progress()),
         ]
         .into_iter()
-        .filter_map(|(kind, complete)| (!complete).then_some(kind))
+        .filter_map(|(kind, progress)| {
+            let (so_far, since) = progress?;
+            Some(Listing {
+                kind,
+                so_far,
+                since,
+            })
+        })
         .collect()
     }
 
@@ -792,6 +915,155 @@ const INITIAL_LIST_PAGE: u32 = 500;
 
 // --- WHAT A THROTTLE LOOKS LIKE END ---
 
+// --- HOW OLD A CLUSTER MAY BE START ---
+//
+// **The floor is Kubernetes 1.29, and it is not the three-minor support window** (NOTES § D149).
+// Upstream keeps branches for the last three minors, which is a fact about the Kubernetes project
+// and not about this tool. The number below came out of two questions asked against the objects.
+//
+// **Question one: what does an older server *omit*, and is omission safe?** NOTES § D99 says an
+// absent optional field decodes to `None` and invariant 5 already makes that *no finding*. Six
+// fields the snapshot types name arrived inside the window, each behind a gate whose graduation
+// is one file in `kubernetes/website` under
+// `content/en/docs/reference/command-line-tools-reference/feature-gates/<Gate>.md`, read on
+// 2026-08-22 rather than recalled:
+//
+// | field | gate | alpha | beta, default on |
+// |---|---|---|---|
+// | `spec.containers[].restartPolicyRules` | `ContainerRestartRules` | 1.34 | 1.35 |
+// | `status.terminatingReplicas` | `DeploymentReplicaSetTerminatingReplicas` | 1.33 | 1.35 |
+// | `spec.resources` (pod-level) | `PodLevelResources` | 1.32 | 1.34 |
+// | `status.containerStatuses[].allocatedResources` | `InPlacePodVerticalScaling` | 1.27 | 1.33 |
+// | `initContainers[].restartPolicy: Always` | `SidecarContainers` | 1.28 | 1.29 (locked 1.33) |
+// | the `PodReadyToStartContainers` condition | `PodReadyToStartContainersCondition` | 1.28 | 1.29 |
+//
+// Five of the six are self-explaining: a cluster that cannot run a native sidecar has no sidecar
+// to describe, so the absence *is* the answer, and every rule already reads it that way.
+// **The sixth is the floor.** Rule 13 — `rules.rs`'s `placed_but_never_started` — reads the
+// condition through `is_some_and(|c| c.status == "False")`, so an *absent* condition falls into
+// the `else` and the card **states a fact**: *"this pod has its storage and its network, so the
+// block is later"*. On a server that never set the condition nothing said that, and the comment
+// above that branch names the reader it misdirects — the one whose ConfigMap is missing, sent to
+// look at the CNI.
+//
+// **Where the condition starts existing is measured off the API types and not off the gate
+// table**, because the two disagree: the gate is listed as alpha at 1.28, but
+// `staging/src/k8s.io/api/core/v1/types.go` carries no `PodReadyToStartContainers` constant on
+// `release-1.28`, and no `PodHasNetwork` one on `release-1.25` … `release-1.27` either — the
+// old name was a kubelet-internal constant. It appears in the public `PodConditionType` block
+// for the first time on **`release-1.29`** (`types.go:3005`). So 1.29 is the oldest minor on
+// which every sentence k8rs prints is backed by something the server actually said, and that is
+// the whole derivation.
+//
+// **D99's two exceptions were checked against this surface and both are empty.** A *required*
+// field does not become `None`, it becomes `Default` — a value, not an absence — so the 64
+// non-`Option` fields in the closure these five watches decode were diffed against
+// `api/openapi-spec/swagger.json` on `kubernetes/kubernetes` branches `release-1.19`,
+// `release-1.24`, `release-1.32` and `release-1.36`: **none of the 64 is absent from any of
+// them.** Three whole *types* are (`ContainerRestartRule` and `ContainerRestartRuleOnExitCodes`
+// from all three older specs, `ResourceClaim` from 1.19 and 1.24), and each is reached only
+// through an `Option`, so an old server sends no such object for the trap to fire on. The one
+// row that looks like a hit is not one: six kinds list `metadata` as optional in their schema
+// while the generated type has it non-`Option` — and **`release-1.36` says exactly the same**, so
+// it is a constant of the spec rather than anything that moved.
+//
+// The other exception is a group/version move answering **404 rather than `None`**. It cannot
+// reach these five: `Pod` and `Node` are `core/v1` and the three workloads are `apps/v1`, and
+// both groups carry all five in `release-1.19`'s spec, the oldest checked here.
+//
+// **Question two: is anything we *send* refused?** That half omission does not cover, and it is
+// the one that hangs rather than degrades. Read off the vendored crate, not recalled: the initial
+// LIST sends `limit` (`kube-core-4.2.0/src/params.rs:102`) and then `continue` (`:105`) — gate
+// `APIListChunking`, beta and on by default at **1.9**, stable at 1.29 — and the watch sends
+// `watch=true` (`:378`), `timeoutSeconds=290` (`:381`) and `allowWatchBookmarks=true` (`:390`) —
+// gate `WatchBookmark`, stable at **1.17**, and in the API reference's own words a client
+// "shouldn't assume bookmarks are returned at any specific interval, nor can clients assume that
+// the API server will send any `BOOKMARK` event even when requested". Nothing else:
+// `ListSemantic::MostRecent` sets neither `resourceVersion` nor `resourceVersionMatch`
+// (`kube-runtime-4.2.0/src/watcher.rs:395`), and there are no selectors.
+//
+// **`sendInitialEvents` is the parameter that would set a real floor, and this design never sends
+// it.** `to_watch_params` sets it only under `InitialListStrategy::StreamingList`
+// (`watcher.rs:416-417`, and `params.rs:392-394` is where it would reach the wire), which
+// § THE INITIAL LIST keeps off. That closes the question D147
+// deferred to this box, and it closes it twice over, because the parameter has **two** bad
+// answers rather than one: a server that predates it *ignores* it and the promised `BOOKMARK`
+// never comes — k9s's [#4044](https://github.com/derailed/k9s/issues/4044), a spinner with no
+// error — and a server that knows it with the gate off **rejects the watch with 403**
+// (KEP-3157, `keps/sig-api-machinery/3157-watch-list/README.md`). The gate is not a straight
+// line either: `WatchList` was alpha 1.27-1.31, beta-**on** at 1.32, beta-**off** again at 1.33,
+// and beta-on from 1.34 (the website's own `WatchList.md`, which the KEP's graduation table
+// contradicts by claiming GA at 1.34 — the disagreement is why this cites the rendered one).
+// Switching `streaming_lists()` on for speed therefore buys a 403 on 1.33 and a hang below 1.27.
+//
+// **So k8rs runs on a cluster below the floor rather than refusing it**, because refusing is only
+// better than reporting when something is unsafe, and question two found nothing an old server
+// rejects. A tool that will not start tells a reader with a broken v1.24 cluster nothing at all
+// about their broken v1.24 cluster; a tool that starts and says what it cannot see tells them
+// both. What it must not do is stay silent, which is what this build does today.
+
+/// The oldest API server this build is supported against: **Kubernetes 1.29**, the oldest minor
+/// on which every sentence k8rs prints is backed by something the server said (NOTES § D149, and
+/// the region comment above for the derivation).
+const OLDEST_SERVER: u32 = 29;
+
+/// The Kubernetes minor these types were generated from — `k8s-openapi`'s `v1_36` feature in
+/// `Cargo.toml`, the **newest** the crate offers (NOTES § D99).
+///
+/// **A server above this drops its added fields at decode**, silently and exactly as the old pin
+/// dropped 1.36's. That is the failure D99 calls unaffordable and relocates onto the user's
+/// machine rather than eliminating, and [`version_note`] is where it stops being silent.
+const TYPES_BUILT_FOR: u32 = 36;
+
+/// **What to tell the user about this cluster's version, or `None` when there is nothing to say**
+/// (NOTES § D149). One line, in plain language, for someone who has never heard the phrase *minor
+/// version* (invariant 14).
+///
+/// **It takes a string and not a `Client`** so that the shapes a real server returns can be fed
+/// to it without one: `v1.31.2` from kind, `v1.29.4+k3s1` from k3s, `v1.28.3-gke.1286000` from
+/// GKE and `v1.30.0-rc.2` from a pre-release all parse through [`minor_version`], which is
+/// `rules.rs`'s and is not copied here — N4 and the Versions report already read the same string.
+///
+/// **A version it cannot parse says nothing**, which is N4's habit rather than a new one: a
+/// warning derived from a guess is worse than no warning, and `apiserver_version` is free text
+/// from the API like any other.
+///
+/// **Nothing the server sent is ever echoed back.** The message is built from the two integers
+/// [`minor_version`] parsed out, so a `gitVersion` carrying control characters cannot reach a
+/// terminal through this line (invariant 9). The bound is structural, not a filter.
+///
+/// **Neither answer refuses to run**, and the too-old one names the *shape* of what goes wrong
+/// rather than the one card it is about. That card is a defect in a frozen file, reported by this
+/// box and fixed by a later one; a user-facing string that enumerates today's bugs is the second
+/// copy that goes stale, and this one would go stale the day the defect is fixed.
+pub(crate) fn version_note(server_version: &str) -> Option<String> {
+    // Ordered rather than differenced. N4 refuses to compare across majors because a *distance*
+    // read over a major boundary is not a distance; an *order* is well defined, and a major
+    // nobody has seen is more outside this window than an old minor is, not less.
+    let version = minor_version(server_version)?;
+    if version < (1, OLDEST_SERVER) {
+        let (major, minor) = version;
+        return Some(format!(
+            "This cluster is Kubernetes {major}.{minor}, and k8rs has only been checked against \
+             1.{OLDEST_SERVER} and newer. It will still run — nothing it does here is unsafe — \
+             but a cluster this old does not publish everything the checks read, so some of them \
+             will stay quiet here, and a few can say more than this cluster actually told them."
+        ));
+    }
+    if version > (1, TYPES_BUILT_FOR) {
+        let (major, minor) = version;
+        return Some(format!(
+            "This cluster is Kubernetes {major}.{minor}, and this copy of k8rs was built to \
+             understand 1.{TYPES_BUILT_FOR}. It will still run, but anything Kubernetes added \
+             after 1.{TYPES_BUILT_FOR} is invisible to it — including, sometimes, the reason \
+             something is broken. A newer k8rs is the fix."
+        ));
+    }
+    None
+}
+
+// --- HOW OLD A CLUSTER MAY BE END ---
+
 // --- THE DRIVER START ---
 
 /// One watch event with its kind already decided: the only thing five streams of three
@@ -802,12 +1074,27 @@ type Update = Box<dyn FnOnce(&mut Store) + Send>;
 ///
 /// `apply` is the [`Store`] method for the kind the stream carries — `Store::pod` for a Pod
 /// watch — and this is the only line in the driver where a kind is named at all.
+///
+/// **The one clock read in this file, and it is here because this is the only place that knows
+/// when an event arrived** (NOTES § D150). [`Store`] never calls one: [`Store::snapshot`] is
+/// handed `now` because one analysis pass is one instant (NOTES § D18, § D144), and an event is
+/// the other shape — it happens at a moment nobody downstream can reconstruct, so the loop that
+/// receives it stamps it. That keeps the store a recorder, testable by feeding it instants, and
+/// leaves the clock in the half of the file that already does I/O.
+///
+/// **It is read per event and not per poll.** A page of 500 drains as 500 `InitApply`s and each
+/// gets its own stamp, so [`Listing::since`] means *the last object landed*, not *the batch
+/// started* — which is the difference between seeing a stall inside a page and seeing it only
+/// between pages.
 fn updates<K: Send + 'static>(
     watch: impl Stream<Item = watcher::Result<Event<K>>> + Send + 'static,
-    apply: fn(&mut Store, Event<K>),
+    apply: fn(&mut Store, &Time, Event<K>),
 ) -> BoxStream<'static, watcher::Result<Update>> {
     watch
-        .map_ok(move |event| Box::new(move |store: &mut Store| apply(store, event)) as Update)
+        .map_ok(move |event| {
+            let now = Time(Timestamp::now());
+            Box::new(move |store: &mut Store| apply(store, &now, event)) as Update
+        })
         .boxed()
 }
 

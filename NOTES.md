@@ -170,6 +170,8 @@ its line moving with it.
 - [D146](#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22) — the ingest guard: two bounds off a census, a visible marker, and the newline a real kubelet sent
 - [D147](#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22) — kube already paginates, so the box was a measurement; and one timeout field serves two very different calls
 - [D148](#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22) — nothing rate-limits us, something retries us for eight minutes in silence, and the watch sockets have no keepalive
+- [D149](#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22) — the floor is 1.29, because one rule's `else` turns a missing field into a claim
+- [D150](#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22) — a first sync that never finishes: two facts and no threshold
 
 ## Why it exists — where the gap is
 
@@ -12723,3 +12725,142 @@ field on `Store` separates them.
 `Config::default_retry == true` needs to build a `kube::Config`, which needs
 `http::Uri`, and `http` is neither a dependency nor re-exported — pinning it would
 cost a twelfth crate for a constant. Recorded here instead.
+
+### D149 — the floor is 1.29, because one rule's `else` turns a missing field into a claim (2026-08-22)
+
+Phase 5's fifth box asked for the oldest API server k8rs supports. The number is
+**Kubernetes 1.29**, and it does not come from the upstream three-minor support
+window — that is a fact about the Kubernetes project, quoted as corroboration and
+never as the derivation.
+
+**Nothing k8rs *sends* sets a floor.** Read off the vendored crates with verified
+line numbers: `limit`/`continue` are `APIListChunking`, beta-on since **1.9**;
+`allowWatchBookmarks` is stable at **1.17** and a server that does not implement
+it ignores the parameter; and with `ListSemantic::MostRecent` the watcher sends no
+`resourceVersion`, no `resourceVersionMatch` and no selectors at all. **Down to at
+least 1.19 — the oldest spec checked — nothing is refused.**
+
+**`sendInitialEvents` is the parameter that would set a real floor, and this
+design never sends it**, which closes [D147](#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)'s
+deferral — and it closes it twice, because the parameter has **two** bad answers.
+A server predating it *ignores* it and the promised `BOOKMARK` never arrives, so
+the informer waits forever (k9s #4044, `PRIOR-ART § A7`); a server that knows it
+with the gate off *rejects the watch with 403* (KEP-3157's own words). And the
+gate is **not monotonic** — `WatchList` was alpha 1.27–1.31, beta on at 1.32,
+beta **off** at 1.33, on again from 1.34 — so switching kube's streaming-list
+strategy on for speed buys a 403 on 1.33 and a hang below 1.27. The KEP says GA
+1.34 and the website says beta-on 1.34; **the disagreement is recorded rather than
+resolved.**
+
+**So the floor comes from one measured case, and it is a defect in a frozen file.**
+Rule 13's `placed_but_never_started` reads `ready_to_start_containers`, and its
+`else` branch prints *"this pod has its storage and its network, so the block is
+later"*. An **absent** condition takes that branch — so on a cluster that never
+published it, the card asserts something the cluster never said, and sends a
+reader whose CNI is broken to look at the image pull instead.
+
+**That is a third form of [D99](#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)'s
+exception, and it is the generalisable part of this entry.** D99 names two ways an
+old cluster does worse than answer nothing — a required field defaulting, and a
+group/version move returning 404. Both were measured empty here: none of the **64
+non-`Option` fields** in the decoded closure is absent from the 1.36, 1.32, 1.24 or
+1.19 specs, and the three absent *types* are reachable only through an `Option`.
+The third form is neither: **a rule whose `else` treats *absent* as *the negative
+case is false*, turning a missing field into a positive claim.**
+[Invariant 5](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
+*a missing field means no finding* does not cover it, because the missing field
+does not remove the finding — it changes the finding's **text**, and the text is a
+claim. Every `else` over an `Option` from the API is a candidate.
+
+**Where the condition begins was measured off the API types, not the gate table,
+because the two disagree.** `release-1.25` through `release-1.28` of
+`staging/src/k8s.io/api/core/v1/types.go` carry **no** `PodReadyToStartContainers`
+constant and no `PodHasNetwork` either — the former title in the gate file was a
+kubelet-internal name, never public API. It first appears at `release-1.29`,
+`types.go:3005`. The first draft of this reasoning said *"at 1.28 it exists under
+its old name"*, reasoned from the gate's `former_titles:`; the grep says otherwise.
+
+**Ruled: k8rs warns and does not refuse.** Refusing is only better than reporting
+when something is unsafe, and nothing is. A tool that will not start tells a reader
+with a broken v1.24 cluster nothing about their broken v1.24 cluster. Two
+sentences, one per end of the window, **neither naming a minor version and neither
+echoing the server's string** — the message is built from the two integers
+`minor_version` parsed, so invariant 9 holds structurally rather than by filtering.
+And the user-facing sentence names the *shape* (*"a few can say more than this
+cluster actually told them"*) rather than today's one instance, because a string
+enumerating current bugs goes stale the day one is fixed.
+
+**A test that only proved half of what its name claimed, caught by hand and not by
+the tool.** `every_shape_a_real_gitversion_takes_reaches_the_comparison` fed five
+version strings that were all `1.24`, so a mutant hard-coding `.24` into the
+message satisfied every row — the test proved *the major parsed*, not *this shape
+parsed to this minor*. `just mutants-diff` did **not** catch it, because
+`{major}.24` is not in cargo-mutants' catalogue; the author's own hand red run did.
+That is the argument for doing both, stated once here rather than re-learned.
+
+### D150 — a first sync that never finishes: two facts and no threshold (2026-08-22)
+
+The third clause of Phase 5's fifth box asked that *a first sync that does not
+complete becomes a state on screen instead of a wait* — `PRIOR-ART § A7`, and k9s
+#4044's spinner that never stops while `kubectl get` on the same context returns
+instantly.
+
+**There is no deadline and no threshold, and that is the answer rather than a
+dodge.** *Slow* and *hung* overlap by construction: `REQUIREMENTS.md` budgets first
+paint under a second **at ~1000 pods**, and 10 000 pods is twenty sequential round
+trips at [D147](#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)'s
+page size. Any number that called the twentieth trip a hang would call a working
+cluster broken, and there is no measured crossing point to put one at
+([D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
+[D147](#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)
+had already closed the other route: `Config::timeout` is one field for the LIST and
+the watch, so bounding one caps the other.
+
+**So the store reports two facts and lets their shape over time do the separating.**
+`Listing { kind, so_far, since }` — objects this LIST has decoded, and when the
+last one arrived. **A LIST that is working moves both. A LIST that is hung moves
+neither.** Nothing to tune, and nothing that can be wrong at a cluster size nobody
+has measured.
+
+**`Event::Init` is what makes it work, and it was read rather than assumed.** Under
+`ListWatch`, `watcher.rs:522-527` returns `Init` from `State::Empty` **with no
+`.await`** — before the request is made. So a watch that will never answer still
+stamps a start, and *nothing has arrived* becomes a fact with a duration instead of
+an absence. That is precisely the #4044 shape.
+
+**A count alone would have been wrong, and
+[D148](#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22)
+is why.** With no TCP keepalive on the watch sockets, a connection that dies
+mid-list stalls with no error and no further events: `so_far` freezes, a screen
+that draws on events never redraws, and *frozen number* and *screen not
+repainting* look identical. `since` is what a redraw can read a duration off. **The
+previous box's finding is load-bearing for this one's design** — without it the
+count would have shipped alone.
+
+**The store still never calls a clock.** One analysis pass is one instant, so
+`snapshot(now)` is handed one ([D18](#d18--the-clock-is-an-input-not-an-ambient-fact) ·
+[D144](#d144--the-snapshot-stores-shape-and-the-ten-choices-the-box-did-not-make-2026-08-22));
+an *event* is the other shape — it happens at a moment nobody downstream can
+reconstruct — so the driver stamps it as it arrives, **one clock read in the whole
+file**, in the half that already does I/O. And `still_listing()` takes no `now` at
+all: it returns *when*, and the caller turns it into *how long* with
+`rules::age`, which is already the plain-language renderer for exactly that.
+
+**Per-watch and not store-wide**, for the same reason `Store::failure` had to be:
+one stamp shared across five watches lets four healthy ones erase a fifth's
+silence. `Init` counts as progress — a watch that has begun and delivered nothing
+is a different state from one that has not begun. Ordinary `Apply` traffic does
+**not** stamp; it is traffic on a watch that already listed.
+
+**One ceiling, named rather than discovered.** `Listing` makes the state
+*readable*; something must still ask. [Invariant 7](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+blocks when idle, so a screen drawing only on events never redraws during exactly
+the silence this type describes. A redraw on a timer while a bootstrap is
+outstanding is `ui.rs`'s; putting it here would give this file a paint schedule it
+cannot see the screen of.
+
+**And what none of it proves.** Every stream in the tests is `stream::iter` over a
+`Vec`, which cannot stall. What is proven is that the store **records** enough to
+see a stall; that one is ever *seen* is a cluster measurement against a
+keepalive-less socket, and it is written into the test region as such rather than
+implied by a green run.

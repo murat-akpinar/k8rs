@@ -357,9 +357,45 @@ which also measures what the old pin had been dropping.
 
 `scripts/fixture-audit.sh` fails when the pin's minor falls below the version in
 `tests/fixtures/K8S_VERSION` — an inequality, so the crate may run ahead of the
-kind image. Nothing yet compares the pin with the *user's* cluster at runtime;
-that is an open box. kube-rs and k8s-openapi are upgraded together, never
-separately.
+kind image. kube-rs and k8s-openapi are upgraded together, never separately.
+
+### Which clusters k8rs supports
+
+**The oldest API server k8rs is supported against is Kubernetes 1.29, and the
+newest it fully understands is the one its `k8s-openapi` pin was built from — 1.36
+today.** Outside that window k8rs still runs: it says one line at connect and
+carries on. Refusing to start would tell somebody with a broken old cluster
+nothing at all about their broken old cluster, and nothing k8rs does on one is
+unsafe.
+
+**Nothing k8rs sends is refused by an older server.** The initial LIST asks for
+`limit` and follows `continue` (chunking, on by default since 1.9); the watch asks
+for `allowWatchBookmarks` (stable at 1.17, and a server that does not implement it
+ignores the parameter). k8rs deliberately does **not** use streaming lists —
+`sendInitialEvents` is ignored by servers older than 1.27, which leaves the client
+waiting forever for a bookmark that never comes
+([k9s #4044](https://github.com/derailed/k9s/issues/4044)), and is rejected with a
+403 by a server that knows it with the `WatchList` gate off (which 1.33 shipped as
+the default).
+
+**Below 1.29, some findings go quiet, and one can say more than the cluster told
+it.** A field the cluster does not have reads as absent, and every rule treats
+absent as *no finding*, so a cluster too old for container restart rules, in-place
+resize, pod-level resources, native sidecars or `status.terminatingReplicas` simply
+reports less — which is right, because it also *has* less. The exception is the
+`PodReadyToStartContainers` condition, which enters the Kubernetes API at 1.29: the
+card for a pod that was scheduled and never started reads its absence as *storage
+and network are fine*, and on an older cluster nothing said that. That is where the
+floor comes from, and it is the only place a supported-window statement was needed
+([NOTES § D149](../NOTES.md#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22)).
+
+**Above the pin, some findings never arrive.** A cluster newer than the types this
+binary was compiled against still answers every request, but fields Kubernetes
+added after that version are dropped when the response is decoded — silently,
+exactly like a field the cluster never set. Everybody running 1.37 the day 1.37
+ships is in that state, and no test in this repo can see it happen on somebody
+else's machine, which is why k8rs says it out loud at connect instead. Upgrading
+k8rs is the fix.
 
 ## Out of scope
 

@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::rules::ObjectKind;
+use k8s_openapi::jiff::SignedDuration;
 use k8s_openapi::serde::de::DeserializeOwned;
 use std::collections::BTreeSet;
 
@@ -62,21 +63,25 @@ fn now() -> Time {
 }
 
 /// One stream's complete initial LIST: `Init`, an `InitApply` per object, `InitDone`.
-fn list<K>(store: &mut Store, feed: fn(&mut Store, Event<K>), objects: Vec<K>) {
-    feed(store, Event::Init);
+///
+/// **Every event at the same instant**, which is what a test that is not about timing wants:
+/// the store stamps [`Listing::since`] from what it is handed (NOTES § D150), so a fixed clock
+/// keeps these stores comparable. The tests that *are* about timing hand out their own.
+fn list<K>(store: &mut Store, feed: fn(&mut Store, &Time, Event<K>), objects: Vec<K>) {
+    feed(store, &now(), Event::Init);
     for object in objects {
-        feed(store, Event::InitApply(object));
+        feed(store, &now(), Event::InitApply(object));
     }
-    feed(store, Event::InitDone);
+    feed(store, &now(), Event::InitDone);
 }
 
 /// One permanent watch, named so a test can leave it out, and the complete initial LIST it
-/// would deliver.
-type Listing = (&'static str, Box<dyn Fn(&mut Store)>);
+/// would deliver. **Not [`Listing`]**, which is the product type for an unfinished one.
+type NamedStream = (&'static str, Box<dyn Fn(&mut Store)>);
 
 /// **The five permanent watches** (invariant 6), each as the complete LIST it would deliver,
 /// named so a test can leave exactly one of them out.
-fn streams() -> Vec<Listing> {
+fn streams() -> Vec<NamedStream> {
     vec![
         (
             "pods",
@@ -173,16 +178,16 @@ fn a_list_in_flight_is_not_observable() {
          same thing"
     );
     let mut store = all_but("pods");
-    store.pod(Event::Init);
+    store.pod(&now(), Event::Init);
     for pod in pods.iter().take(2).cloned() {
-        store.pod(Event::InitApply(pod));
+        store.pod(&now(), Event::InitApply(pod));
     }
     assert!(
         store.snapshot(now()).is_none(),
         "two pods of {} were published as the whole cluster",
         pods.len()
     );
-    store.pod(Event::InitDone);
+    store.pod(&now(), Event::InitDone);
     let snapshot = store.snapshot(now()).expect("the last LIST landed");
     assert_eq!(
         snapshot.pods.len(),
@@ -204,8 +209,8 @@ fn a_relist_shows_the_last_complete_answer_and_never_a_partial_one() {
          this test the same number"
     );
     let mut store = bootstrapped();
-    store.pod(Event::Init);
-    store.pod(Event::InitApply(object::<Pod>("crashloop")));
+    store.pod(&now(), Event::Init);
+    store.pod(&now(), Event::InitApply(object::<Pod>("crashloop")));
     let during = store
         .snapshot(now())
         .expect("a relist must not close the gate the first LIST opened");
@@ -214,7 +219,7 @@ fn a_relist_shows_the_last_complete_answer_and_never_a_partial_one() {
         listed_pods,
         "a relist in flight was published as the cluster"
     );
-    store.pod(Event::InitDone);
+    store.pod(&now(), Event::InitDone);
     let after = store
         .snapshot(now())
         .expect("the relist landed and the store went quiet");
@@ -235,7 +240,7 @@ fn a_relist_shows_the_last_complete_answer_and_never_a_partial_one() {
 #[test]
 fn an_init_done_with_no_list_behind_it_publishes_nothing() {
     let mut store = all_but("pods");
-    store.pod(Event::InitDone);
+    store.pod(&now(), Event::InitDone);
     assert!(
         store.snapshot(now()).is_none(),
         "a stream that never listed anything opened the gate on an empty pod list"
@@ -250,14 +255,14 @@ fn an_init_done_with_no_list_behind_it_publishes_nothing() {
 fn a_recreated_name_replaces_rather_than_joins() {
     let mut store = bootstrapped();
     let mut pod = object::<Pod>("crashloop");
-    store.pod(Event::Apply(pod.clone()));
+    store.pod(&now(), Event::Apply(pod.clone()));
     let before = store
         .snapshot(now())
         .expect("every initial LIST landed")
         .pods
         .len();
     pod.metadata.uid = Some("11111111-2222-3333-4444-555555555555".to_string());
-    store.pod(Event::Apply(pod));
+    store.pod(&now(), Event::Apply(pod));
     let after = store.snapshot(now()).expect("every initial LIST landed");
     assert_eq!(
         after.pods.len(),
@@ -278,8 +283,8 @@ fn the_namespace_is_part_of_the_identity() {
     let here = object::<Pod>("crashloop");
     let mut elsewhere = here.clone();
     elsewhere.metadata.namespace = Some("payments".to_string());
-    store.pod(Event::Apply(here));
-    store.pod(Event::Apply(elsewhere));
+    store.pod(&now(), Event::Apply(here));
+    store.pod(&now(), Event::Apply(elsewhere));
     let snapshot = store.snapshot(now()).expect("every initial LIST landed");
     let mut namespaces: Vec<_> = snapshot
         .pods
@@ -311,7 +316,7 @@ fn a_delete_removes_only_the_object_it_names() {
         "{stranger_name} is in the listed set, so deleting it below is not the unknown-object \
          case this test is for"
     );
-    store.pod(Event::Delete(stranger));
+    store.pod(&now(), Event::Delete(stranger));
     assert_eq!(
         store
             .snapshot(now())
@@ -330,7 +335,7 @@ fn a_delete_removes_only_the_object_it_names() {
         .name
         .clone()
         .expect("a captured pod is named");
-    store.pod(Event::Delete(victim));
+    store.pod(&now(), Event::Delete(victim));
     let snapshot = store.snapshot(now()).expect("every initial LIST landed");
     assert_eq!(
         snapshot.pods.len(),
@@ -385,7 +390,7 @@ fn the_three_workload_kinds_arrive_in_one_list_without_colliding() {
     let shared = taken.name.clone().expect("a captured deployment is named");
     twin.metadata.name.clone_from(&taken.name);
     twin.metadata.namespace.clone_from(&taken.namespace);
-    store.daemon_set(Event::Apply(twin));
+    store.daemon_set(&now(), Event::Apply(twin));
     let sharing: Vec<_> = store
         .snapshot(now())
         .expect("every initial LIST landed")
@@ -480,7 +485,7 @@ fn the_pod_level_restart_policy_reaches_the_store() {
          would be read"
     );
     let mut store = bootstrapped();
-    store.pod(Event::Apply(pod));
+    store.pod(&now(), Event::Apply(pod));
     let stored = store.snapshot(now()).expect("every initial LIST landed");
     let containers = &pod_named(&stored, "broken-crashloop").containers;
     assert!(
@@ -524,9 +529,9 @@ fn managed_fields_change_nothing_the_store_keeps() {
     );
 
     let mut thin_store = bootstrapped();
-    thin_store.pod(Event::Apply(lean));
+    thin_store.pod(&now(), Event::Apply(lean));
     let mut fat_store = bootstrapped();
-    fat_store.pod(Event::Apply(fat));
+    fat_store.pod(&now(), Event::Apply(fat));
     assert_eq!(
         thin_store.snapshot(now()),
         fat_store.snapshot(now()),
@@ -619,7 +624,7 @@ fn pod_events() -> Vec<Event<Pod>> {
 
 fn one_watch<K: Send + 'static>(
     events: Vec<watcher::Result<Event<K>>>,
-    apply: fn(&mut Store, Event<K>),
+    apply: fn(&mut Store, &Time, Event<K>),
 ) -> BoxStream<'static, watcher::Result<Update>> {
     updates(stream::iter(events), apply)
 }
@@ -631,7 +636,7 @@ fn one_watch<K: Send + 'static>(
 async fn the_loop_lands_what_the_store_lands_when_it_is_fed_by_hand() {
     let mut by_hand = bootstrapped();
     for event in pod_events() {
-        by_hand.pod(event);
+        by_hand.pod(&now(), event);
     }
     let expected = by_hand.snapshot(now()).expect("every initial LIST landed");
     assert!(
@@ -882,14 +887,14 @@ fn a_paged_initial_list_keeps_the_gate_shut_until_the_last_page() {
     );
 
     let mut store = all_but("pods");
-    store.pod(Event::Init);
+    store.pod(&now(), Event::Init);
     assert!(
         store.snapshot(now()).is_none(),
         "the first page had not even arrived and the store published a cluster"
     );
     for (number, page) in pages.iter().enumerate() {
         for pod in page.iter().cloned() {
-            store.pod(Event::InitApply(pod));
+            store.pod(&now(), Event::InitApply(pod));
         }
         assert!(
             store.snapshot(now()).is_none(),
@@ -899,7 +904,7 @@ fn a_paged_initial_list_keeps_the_gate_shut_until_the_last_page() {
         );
     }
 
-    store.pod(Event::InitDone);
+    store.pod(&now(), Event::InitDone);
     let snapshot = store.snapshot(now()).expect("every page landed");
     assert_eq!(
         snapshot
@@ -918,7 +923,7 @@ fn a_paged_initial_list_keeps_the_gate_shut_until_the_last_page() {
     );
 
     let published = store.snapshot(now());
-    store.pod(Event::InitDone);
+    store.pod(&now(), Event::InitDone);
     assert_eq!(
         store.snapshot(now()),
         published,
@@ -1023,13 +1028,13 @@ fn kind_of_stream() -> Vec<(&'static str, ObjectKind)> {
 fn a_bootstrap_that_is_still_running_names_the_lists_it_is_waiting_for() {
     let every_kind: Vec<ObjectKind> = kind_of_stream().into_iter().map(|(_, kind)| kind).collect();
     assert_eq!(
-        Store::default().still_listing(),
+        outstanding_kinds(&Store::default()),
         every_kind,
         "a store that has heard nothing reported one of the five watches as already listed"
     );
     for (stream, kind) in kind_of_stream() {
         assert_eq!(
-            all_but(stream).still_listing(),
+            outstanding_kinds(&all_but(stream)),
             vec![kind],
             "four of the five LISTs landed and the store did not name the {stream} one as the \
              outstanding watch"
@@ -1037,7 +1042,7 @@ fn a_bootstrap_that_is_still_running_names_the_lists_it_is_waiting_for() {
     }
     let done = bootstrapped();
     assert_eq!(
-        done.still_listing(),
+        outstanding_kinds(&done),
         Vec::<ObjectKind>::new(),
         "every initial LIST landed and the store still says it is waiting for one"
     );
@@ -1049,12 +1054,12 @@ fn a_bootstrap_that_is_still_running_names_the_lists_it_is_waiting_for() {
     // The shape a real bootstrap spends its whole time in, and the one `all_but` never
     // produces: `Init` sent, objects arriving, no `InitDone` yet (NOTES § D29).
     let mut mid_list = all_but("pods");
-    mid_list.pod(Event::Init);
+    mid_list.pod(&now(), Event::Init);
     for pod in items::<Pod>("kube-system-pods") {
-        mid_list.pod(Event::InitApply(pod));
+        mid_list.pod(&now(), Event::InitApply(pod));
     }
     assert_eq!(
-        mid_list.still_listing(),
+        outstanding_kinds(&mid_list),
         vec![ObjectKind::Pod],
         "a LIST that had delivered objects but not finished was reported as landed"
     );
@@ -1063,12 +1068,32 @@ fn a_bootstrap_that_is_still_running_names_the_lists_it_is_waiting_for() {
     // again, because the last complete answer stays readable while the new LIST fills
     // (NOTES § D28). A screen that took this state from a reconnect would blank on every one.
     let mut relisting = bootstrapped();
-    relisting.pod(Event::Init);
+    relisting.pod(&now(), Event::Init);
     assert_eq!(
-        relisting.still_listing(),
+        outstanding_kinds(&relisting),
         Vec::<ObjectKind>::new(),
         "a reconnect put the pods watch back among the outstanding ones"
     );
+}
+
+/// The kinds of an unfinished bootstrap, for the assertions that are about *which* watch rather
+/// than about what it has to show for itself.
+fn outstanding_kinds(store: &Store) -> Vec<ObjectKind> {
+    store
+        .still_listing()
+        .into_iter()
+        .map(|listing| listing.kind)
+        .collect()
+}
+
+/// One [`Listing`] by kind, or a panic naming what was there instead.
+fn listing_for(store: &Store, kind: ObjectKind) -> Listing {
+    let outstanding = store.still_listing();
+    outstanding
+        .iter()
+        .find(|listing| listing.kind == kind)
+        .unwrap_or_else(|| panic!("no {kind:?} among {:?}", outstanding_kinds(store)))
+        .clone()
 }
 
 /// **A throttle that outlives kube's retries arrives as a code, not as prose** (NOTES § D148).
@@ -1122,7 +1147,7 @@ async fn a_throttled_api_server_reaches_the_store_as_a_code_and_not_as_prose() {
          a throttled server from a forbidden one"
     );
     assert_eq!(
-        store.still_listing(),
+        outstanding_kinds(&store),
         vec![ObjectKind::Pod],
         "the LIST that failed is not reported as outstanding, so a screen would show the \
          throttle and claim the pods had been read"
@@ -1130,6 +1155,227 @@ async fn a_throttled_api_server_reaches_the_store_as_a_code_and_not_as_prose() {
     assert!(
         store.snapshot(now()).is_none(),
         "a watch that never listed published a cluster anyway (NOTES § D28)"
+    );
+}
+
+// --- A FIRST SYNC THAT DOES NOT FINISH ---
+//
+// **`PRIOR-ART § A7` asks that a first sync which never completes become a state rather than a
+// wait, and these are the two facts that make it one** (NOTES § D150). No deadline is tested
+// because none exists: *slow* and *hung* overlap by construction — 10 000 pods is twenty
+// sequential round trips at `INITIAL_LIST_PAGE` — so what is proven here is that a caller can
+// tell them apart **without** a number. A LIST that is working produces a count that moves and
+// a stamp that advances; a hung one produces neither, and both are readable at any instant.
+//
+// **What is not proven here is the hang itself.** Every stream below is `stream::iter` over a
+// `Vec`, which cannot stall — a real stall is a socket with no keepalive (NOTES § D148) against
+// a server nothing in this repo has met. What these tests hold is that the store *records*
+// enough to see one; that a real one is seen is a cluster measurement.
+
+/// **A LIST that has begun and delivered nothing is a state, not a silence** — the exact shape
+/// k9s [#4044](https://github.com/derailed/k9s/issues/4044) leaves on screen forever.
+///
+/// `Init` arrives before kube makes the request at all (`watcher.rs:522-527` returns it from
+/// `State::Empty` with no `.await`), so a watch that will never answer still stamps a start —
+/// which is what makes *nothing has arrived* a fact with a duration rather than an absence.
+#[test]
+fn a_list_that_has_delivered_nothing_still_says_when_it_started() {
+    let begun = at("2026-08-22T09:00:00Z");
+    let mut store = all_but("pods");
+    store.pod(&begun, Event::Init);
+
+    let waiting = listing_for(&store, ObjectKind::Pod);
+    println!(
+        "hung LIST: {:?} · so far {} · since {:?} · {}",
+        waiting.kind,
+        waiting.so_far,
+        waiting.since,
+        crate::rules::age(
+            &now(),
+            waiting.since.as_ref().expect("the Init stamped a start")
+        )
+        .expect("a start in the past renders as an age")
+    );
+    assert_eq!(
+        waiting.so_far, 0,
+        "a LIST that has delivered no objects claimed to have some"
+    );
+    assert_eq!(
+        waiting.since,
+        Some(begun),
+        "the Init that opened the LIST left no stamp, so nothing downstream can say how long \
+         this cluster has been silent"
+    );
+
+    // And before the loop's first poll there is not even that: no watch has produced anything,
+    // which is a different state from *begun and quiet* and must not read as the same one.
+    let unstarted = listing_for(&Store::default(), ObjectKind::Pod);
+    assert_eq!(
+        (unstarted.so_far, unstarted.since),
+        (0, None),
+        "a store that has heard nothing invented a moment it heard something"
+    );
+}
+
+/// **A LIST that is working produces a count that moves and a stamp that advances**, and the
+/// stamp is the **last** object's rather than the `Init`'s — which is the difference between
+/// seeing a stall inside a page and only seeing one between pages (NOTES § D150).
+#[test]
+fn a_list_that_is_working_moves_both_numbers() {
+    let opened = at("2026-08-22T09:00:00Z");
+    let mut store = all_but("pods");
+    store.pod(&opened, Event::Init);
+
+    let pods = items::<Pod>("kube-system-pods");
+    assert!(
+        pods.len() > 2,
+        "the capture holds {} pods, too few for a count to be seen moving",
+        pods.len()
+    );
+    let mut seen = Vec::new();
+    for (i, pod) in pods.into_iter().enumerate() {
+        // Built by arithmetic rather than by formatting a second field, so a capture that ever
+        // grows past 59 pods moves the stamp on instead of asking `at` to parse `09:00:60Z`.
+        let arrived = Time(opened.0 + SignedDuration::from_secs(i as i64 + 1));
+        store.pod(&arrived, Event::InitApply(pod));
+        let listing = listing_for(&store, ObjectKind::Pod);
+        seen.push((listing.so_far, listing.since.clone()));
+        assert_eq!(
+            listing.since,
+            Some(arrived),
+            "the stamp is the Init's or an earlier object's, so a stall inside a page would be \
+             invisible until the page ended"
+        );
+    }
+    println!(
+        "working LIST: {} steps, count {} -> {}, stamp {:?} -> {:?}",
+        seen.len(),
+        seen[0].0,
+        seen[seen.len() - 1].0,
+        seen[0].1,
+        seen[seen.len() - 1].1
+    );
+    assert!(
+        seen.windows(2).all(|w| w[1].0 > w[0].0),
+        "the count did not rise on every object, so a working LIST is indistinguishable from a \
+         stalled one: {seen:?}"
+    );
+    assert!(
+        seen.windows(2).all(|w| w[1].1 > w[0].1),
+        "the stamp did not advance on every object: {seen:?}"
+    );
+}
+
+/// **A healthy watch cannot make a hung one look alive.** The stamp is per watch, and only the
+/// two events an initial LIST is made of set it — so four watches finishing and then carrying
+/// ordinary `Apply` traffic leave the fifth's silence exactly as long as it was.
+///
+/// This is the same failure `Store::failure` had to refuse in NOTES § D148, one field over: with
+/// one shared stamp, the busiest watch in the cluster would erase the evidence of the stuck one.
+#[test]
+fn ordinary_traffic_on_the_other_watches_does_not_refresh_a_stuck_one() {
+    let opened = at("2026-08-22T09:00:00Z");
+    let mut store = all_but("pods");
+    store.pod(&opened, Event::Init);
+
+    let much_later = at("2026-08-22T09:30:00Z");
+    for node in items::<Node>("nodes") {
+        store.node(&much_later, Event::Apply(node));
+    }
+    for deployment in items::<Deployment>("deployments") {
+        store.deployment(&much_later, Event::Apply(deployment));
+    }
+
+    let stuck = listing_for(&store, ObjectKind::Pod);
+    assert_eq!(
+        stuck.since,
+        Some(opened.clone()),
+        "traffic on another watch moved the stuck watch's stamp forward, which is how a hung \
+         bootstrap gets reported as a busy one"
+    );
+    assert_eq!(
+        stuck.so_far, 0,
+        "another watch's objects were counted against this LIST"
+    );
+
+    // And an `Apply` on the *stuck* watch's own kind would not count either — it is not part of
+    // an initial LIST. There is no such event before `InitDone` in kube's own sequence, so this
+    // asserts the rule rather than a shape the wire produces.
+    store.pod(&much_later, Event::Apply(object::<Pod>("crashloop")));
+    assert_eq!(
+        listing_for(&store, ObjectKind::Pod).since,
+        Some(opened),
+        "an Apply refreshed the initial LIST's stamp"
+    );
+}
+
+/// **A LIST that failed part-way and started again reports the new attempt, not the dead one**
+/// — the ordinary path when a `continue` token has been compacted (NOTES § D147), where kube
+/// reports `InitialListFailed` and emits a fresh `Init` on the next poll.
+///
+/// Without this, a screen would keep showing the abandoned attempt's count beside a stamp that
+/// never moves again, which reads as *stuck at 3* rather than *starting over*.
+#[test]
+fn a_relist_after_a_failure_starts_its_count_again() {
+    let first = at("2026-08-22T09:00:00Z");
+    let mut store = all_but("pods");
+    store.pod(&first, Event::Init);
+    for pod in items::<Pod>("kube-system-pods").into_iter().take(3) {
+        store.pod(&first, Event::InitApply(pod));
+    }
+    let abandoned = listing_for(&store, ObjectKind::Pod);
+    assert_eq!(
+        abandoned.so_far, 3,
+        "the first attempt did not buffer three"
+    );
+
+    let retry = at("2026-08-22T09:00:30Z");
+    store.pod(&retry, Event::Init);
+    let fresh = listing_for(&store, ObjectKind::Pod);
+    println!(
+        "relist: {} objects at {:?} -> {} objects at {:?}",
+        abandoned.so_far, abandoned.since, fresh.so_far, fresh.since
+    );
+    assert_eq!(
+        (fresh.so_far, fresh.since),
+        (0, Some(retry)),
+        "the retry inherited the abandoned attempt's count or its stamp"
+    );
+}
+
+/// **The loop is where the clock is read, and it reaches the store** (NOTES § D150). Every test
+/// above hands the store an instant by hand; this one proves the wiring — that `updates` stamps
+/// each event as it arrives, so a real watch's `Listing` is not permanently `None`.
+///
+/// It asserts a **range**, not a value: the instant is a real `Timestamp::now()`, so the only
+/// honest assertion is that it lies between two the test took itself.
+#[tokio::test]
+async fn the_loop_stamps_every_event_it_pumps() {
+    let before = Time(Timestamp::now());
+    let mut store = all_but("pods");
+    let mut opening = vec![Ok(Event::Init)];
+    opening.extend(
+        items::<Pod>("kube-system-pods")
+            .into_iter()
+            .map(|pod| Ok(Event::InitApply(pod))),
+    );
+    drive(vec![one_watch(opening, Store::pod)], &mut store).await;
+    let after = Time(Timestamp::now());
+
+    let listing = listing_for(&store, ObjectKind::Pod);
+    let stamped = listing.since.clone().expect("the loop stamped nothing");
+    println!(
+        "driven LIST: so far {} · stamped {:?} (between {:?} and {:?})",
+        listing.so_far, stamped, before, after
+    );
+    assert!(
+        listing.so_far > 0,
+        "the loop pumped no objects into the store"
+    );
+    assert!(
+        stamped >= before && stamped <= after,
+        "the loop's stamp is outside the window the test held open, so it did not come from the \
+         moment the event arrived: {stamped:?}"
     );
 }
 
@@ -1457,7 +1703,7 @@ fn a_delete_finds_the_object_whose_name_was_shortened() {
         .expect("every initial LIST landed")
         .pods
         .len();
-    store.pod(Event::Apply(pod.clone()));
+    store.pod(&now(), Event::Apply(pod.clone()));
     let during = store.snapshot(now()).expect("every initial LIST landed");
     assert_eq!(
         during.pods.len(),
@@ -1471,7 +1717,7 @@ fn a_delete_finds_the_object_whose_name_was_shortened() {
             .any(|pod| pod.id.name.ends_with(SHORTENED)),
         "the oversized name reached the store uncut"
     );
-    store.pod(Event::Delete(pod));
+    store.pod(&now(), Event::Delete(pod));
     assert_eq!(
         store
             .snapshot(now())
@@ -1975,5 +2221,187 @@ fn a_pod_of_megabyte_fields_costs_the_store_kilobytes() {
     assert!(
         kept < 64 * 1024,
         "the store kept {kept} bytes of a {sent}-byte object"
+    );
+}
+
+// --- HOW OLD A CLUSTER MAY BE ---
+//
+// **The floor is 1.29 and the derivation is in the product file, not here** (NOTES § D149). What
+// these tests hold is the half a cluster is not needed for: that every `gitVersion` shape a real
+// API server returns reaches the comparison, that both boundaries sit where the constants
+// say, that an unreadable version is silence rather than a guess, and that nothing the server
+// sent is ever echoed back.
+//
+// **What is *not* proven here is the thing that matters most and needs a v1.24 cluster**: that a
+// server below the floor accepts the LIST and the watch this file sends. Everything behind that
+// claim was read off `kube-core-4.2.0/src/params.rs`, the KEP and the API's own reference — the
+// wire itself has never been observed against an old server, and the fake-server harness box is
+// the one that could observe it without a cluster.
+
+/// **Every shape a real `gitVersion` takes reaches the comparison** — k3s's `+k3s1`, GKE's
+/// `-gke.NNNNN`, a release candidate's `-rc.N`, a plain kind one, and one with no leading `v` —
+/// the last of those is not a shape anybody has been observed returning, it is the one
+/// [`minor_version`]'s `trim_start_matches('v')` exists for, pinned so a later edit cannot drop
+/// it silently.
+///
+/// **Each is fed at a minor that is out of range on purpose**, because in range the answer is
+/// `None` and so is the answer for a string [`minor_version`] could not parse at all — a test
+/// built on the four real strings as they ship would pass just as well against a parser that
+/// understood none of them.
+///
+/// **And each carries a *different* minor.** Holding them all at 1.24 was this test's first
+/// draft, and its red run found it: a message with `1.24` written into it as a literal passed
+/// every row. The number has to move for the assertion to be about the parse rather than about
+/// the branch.
+#[test]
+fn every_shape_a_real_gitversion_takes_reaches_the_comparison() {
+    for (version, minor) in [
+        ("v1.24.4+k3s1", "1.24"),
+        ("v1.26.3-gke.1286000", "1.26"),
+        ("v1.20.0-rc.2", "1.20"),
+        ("v1.28.2", "1.28"),
+        ("1.19.16", "1.19"),
+    ] {
+        let note = version_note(version)
+            .unwrap_or_else(|| panic!("{version} is below the floor and drew no note at all"));
+        println!("{version:>22} -> {note}");
+        assert!(
+            note.contains(&format!("Kubernetes {minor},")),
+            "{version} parsed to something other than {minor}: {note}"
+        );
+    }
+    // The same four at the versions they are actually shipped as: two are inside the window and
+    // one is the floor itself, so the right answer for all three is silence.
+    for version in ["v1.29.4+k3s1", "v1.30.0-rc.2", "v1.31.2"] {
+        assert_eq!(
+            version_note(version),
+            None,
+            "{version} is inside the supported window and drew a note anyway"
+        );
+    }
+}
+
+/// **A cluster below the floor is told, and is not refused** (NOTES § D149). The boundary is
+/// asserted from both sides, because an off-by-one here either warns every supported cluster or
+/// never warns at all — and both read as *working*.
+///
+/// **A major nobody has seen sorts below 1.29 rather than being ignored**: the comparison is an
+/// order and not N4's distance, so `v0.9` is old rather than unknown.
+#[test]
+fn a_cluster_below_the_floor_is_told_and_still_runs() {
+    for version in ["v1.24.3", "v1.28.15", "v0.9.0"] {
+        let note = version_note(version).unwrap_or_else(|| panic!("{version} drew no note"));
+        println!("{version:>10} -> {note}");
+        assert!(
+            note.contains("only been checked against 1.29 and newer"),
+            "{version} is below the floor and got the wrong note: {note}"
+        );
+        assert!(
+            note.contains("still run"),
+            "the note for {version} does not say k8rs runs anyway: {note}"
+        );
+    }
+    assert_eq!(
+        version_note("v1.29.0"),
+        None,
+        "the floor itself was reported as below the floor"
+    );
+}
+
+/// **A cluster newer than these types is told too** — the second sentence NOTES § D99 says this
+/// box owes, because a server above the pin drops its added fields at decode and no fixture guard
+/// in this repo can see it happen on somebody else's machine.
+///
+/// Both sides of this boundary again, and a major above 1 sorts above rather than being ignored.
+#[test]
+fn a_cluster_newer_than_these_types_is_told_too() {
+    for version in ["v1.37.0", "v1.99.1", "v2.0.0"] {
+        let note = version_note(version).unwrap_or_else(|| panic!("{version} drew no note"));
+        println!("{version:>10} -> {note}");
+        assert!(
+            note.contains("built to understand 1.36"),
+            "{version} is above the pin and got the wrong note: {note}"
+        );
+        assert!(
+            note.contains("A newer k8rs is the fix"),
+            "the note for {version} does not say what to do about it: {note}"
+        );
+    }
+    assert_eq!(
+        version_note("v1.36.1"),
+        None,
+        "the version the fixtures were captured from was reported as too new"
+    );
+}
+
+/// **A version string nothing can parse says nothing** — N4's habit, and the reason it is a habit:
+/// a warning derived from a guess is worse than no warning. `apiserver_version` is free text from
+/// the API server like any other field, and a vendor is free to return something this parser has
+/// never seen.
+#[test]
+fn a_version_nobody_can_parse_says_nothing() {
+    for version in ["", "v", "v1", "1.", "vNext", "v1.x", "unknown", "v.29.0"] {
+        assert_eq!(
+            version_note(version),
+            None,
+            "{version:?} could not be parsed and a note was drawn from it anyway"
+        );
+    }
+}
+
+/// **Nothing the server sent is echoed back** (invariant 9). A crafted `gitVersion` is free text
+/// from the API and would otherwise reach a terminal through the one line printed at connect;
+/// the note is built from the two integers [`minor_version`] parsed out, so the bound is
+/// structural rather than a filter that could miss a byte.
+///
+/// The three framings NOTES § D31 names, because the escape need not be the whole string: it
+/// sits after the digits, in the middle, and doubled.
+#[test]
+fn the_note_never_repeats_what_the_server_sent() {
+    for version in [
+        "v1.24.3-\u{1b}[2J\u{7}rm -rf ~",
+        "v1.24.3\u{1b}]0;pwned\u{7}-gke.1",
+        "v1.24.\u{1b}[1m3\u{1b}[0m",
+    ] {
+        let note = version_note(version)
+            .unwrap_or_else(|| panic!("{version:?} is below the floor and drew no note"));
+        assert!(
+            note.contains("Kubernetes 1.24,"),
+            "{version:?} did not reach the comparison: {note}"
+        );
+        assert!(
+            !note.chars().any(char::is_control),
+            "a control character from the server reached the note: {note:?}"
+        );
+        assert!(
+            !note.contains("pwned") && !note.contains("rm -rf"),
+            "the server's own bytes were repeated back: {note:?}"
+        );
+    }
+}
+
+/// **`TYPES_BUILT_FOR` is a copy of the `k8s-openapi` feature in `Cargo.toml`, so it is compared
+/// with it rather than trusted.** A stale copy does not fail quietly: it tells everyone on the
+/// pin's own version that their cluster is newer than this build, which is the wrong half of
+/// NOTES § D99's table stated backwards.
+///
+/// The crate publishes the enabled feature as a `k8s_if_ge_1_NN!` macro that expands to its
+/// contents or to nothing, so the ladder below reads the pin rather than repeating it. **Its top
+/// rung is the crate's own maximum** — a pin raised past that needs a newer `k8s-openapi`, which
+/// is a dependency change under invariant 10 and gets read by a human either way.
+#[test]
+fn the_version_these_types_were_built_for_is_the_pin() {
+    // `max` rather than plain assignment: a rung that only writes is a dead store to clippy,
+    // and every rung below the enabled one is exactly that.
+    let mut pinned = 32u32;
+    k8s_openapi::k8s_if_ge_1_33! { pinned = pinned.max(33); }
+    k8s_openapi::k8s_if_ge_1_34! { pinned = pinned.max(34); }
+    k8s_openapi::k8s_if_ge_1_35! { pinned = pinned.max(35); }
+    k8s_openapi::k8s_if_ge_1_36! { pinned = pinned.max(36); }
+    println!("k8s-openapi feature in Cargo.toml: v1_{pinned}; TYPES_BUILT_FOR: {TYPES_BUILT_FOR}");
+    assert_eq!(
+        pinned, TYPES_BUILT_FOR,
+        "Cargo.toml pins k8s-openapi at v1_{pinned} and k8s.rs tells users it understands \
+         1.{TYPES_BUILT_FOR}"
     );
 }
