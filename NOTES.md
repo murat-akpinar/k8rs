@@ -168,6 +168,7 @@ its line moving with it.
 - [D144](#d144--the-snapshot-stores-shape-and-the-ten-choices-the-box-did-not-make-2026-08-22) — the snapshot store's shape, and the ten choices the box did not make
 - [D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22) — a failure that clears itself is a failure nobody sees, and the driver's six choices
 - [D146](#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22) — the ingest guard: two bounds off a census, a visible marker, and the newline a real kubelet sent
+- [D147](#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22) — kube already paginates, so the box was a measurement; and one timeout field serves two very different calls
 
 ## Why it exists — where the gap is
 
@@ -12566,3 +12567,82 @@ could fail, and the guard named them — which is the guard being *proven*, not 
 guard *finding* something. The author caught the PM's sentence and said so.
 Corrected because a decision that inflates its own evidence is worse than one with
 less of it, and this file is read as the record of what actually happened.
+
+### D147 — kube already paginates, so the box was a measurement; and one timeout field serves two very different calls (2026-08-22)
+
+Phase 5's third box said *read what kube-rs's `watcher` does by default rather
+than assuming*, and the reading is the deliverable: **there was no pagination to
+write.** Recorded here so nobody re-derives it, with the lines verified by the PM
+in `kube-runtime-4.2.0/src/watcher.rs` rather than taken from the report.
+
+- **`watcher::Config::default()` already sets `page_size: Some(500)`** (`:276`),
+  under kube's own comment *"same default page size limit as client-go"* citing
+  `tools/pager/pager.go#L31`. It reaches the wire as `limit` (`:404`, and
+  `kube-core/src/params.rs:102`).
+- **The watcher follows `continue` itself** — `to_list_params()` sets
+  `continue_token: None` with the comment *"The watcher handles pagination
+  internally"*, and `State::InitPage` buffers one page, drains it one
+  `InitApply` at a time, then re-lists with the server's token (`:562`).
+- **Paging is invisible to the bootstrap gate, which is the answer that mattered.**
+  One `Init` (`:523`), one `InitApply` per object across *every* page (`:548`),
+  and exactly one `InitDone`, emitted only when a page returns with no continue
+  token (`:555–559`). So the gate
+  [D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) demanded
+  is correct as built, under paging, without a line changing.
+- **A page that fails restarts the whole LIST** — `InitialListFailed` →
+  `State::Empty` → a fresh `Init` on the next poll (`:584`, `:523`). That is the
+  ordinary path when a `continue` token is compacted, and it makes `Event::Init`
+  clearing the buffer **load-bearing rather than defensive**. It was untested; it
+  is now.
+
+**`INITIAL_LIST_PAGE = 500`, and the binding constraint is memory rather than
+round trips.** kube buffers a whole page of decoded objects (`:574`) before
+emitting the first `InitApply`. Measured over the 55 pod objects in the committed
+captures: **median 3708 bytes of JSON, largest 5662** — so a 500-page is ~1.9 MB
+and a 5000-page ~19 MB, against a `< 50MB RSS` target the store must also fit
+inside. **That median is a lower bound**: the captures have `managedFields`
+stripped by the sanitizer, and a live object is larger by an amount only a cluster
+can say. At ~1000 pods — the size the budget is actually stated at — a bigger page
+saves one round trip and buys it by doubling the response the API server builds
+whole. **Neither 500 nor 1000 is a measured crossing point**, and
+[D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)
+is the entry that stops that from being quoted as one. The tie-break was risk: the
+memory budget is a stated requirement, the round-trip saving is speculation, and
+500 is the request shape every API server serves millions of times a day.
+
+**There is no `watch_config()` helper, and the reason is a small lesson.** The
+first draft had one, wrapping `Config::default().page_size(INITIAL_LIST_PAGE)`.
+Its red run — deleting the `.page_size(…)` — **stayed green**, because our number
+equals kube's, so the function is semantically identical to the silent inheritance
+it existed to prevent and no test could ever tell them apart. It was **deleted
+rather than made distinguishable by moving the number**, which would have been
+tuning a constant to satisfy a tool. The const and its derivation stay, and
+`connect()` writes `Config::default().page_size(INITIAL_LIST_PAGE)` where a reader
+can see the choice being made.
+
+**The finding with consequences for a later box: `Config::timeout` is one field
+and it feeds two calls.** `to_list_params()` (`:400`) and `to_watch_params()`
+(`:414`) both read `self.timeout`. A timeout short enough to bound the initial
+LIST would therefore also cap the **watch**, and re-LIST the whole cluster on that
+period — turning a bound into a poll, which is
+[invariant 6](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+inverted. **So the initial LIST cannot be given its own deadline through this
+config**, and the reconnect/backoff box inherits the problem rather than
+discovering it.
+
+**Two upstream defaults kept, both deliberate.** `ListSemantic::MostRecent` over
+`Any`: `Any` lists from the API server's watch cache, which is cheaper and can be
+stale, and a stale first paint is D28's lie with a different cause.
+`InitialListStrategy::ListWatch` over `StreamingList`: kube's own doc says the
+latter needs a server-side feature gate, and which servers have it belongs to the
+*oldest supported API server* box.
+
+**What source-reading cannot answer, stated because the box asked for a number.**
+It answers *whether* it pages, *how many* trips, and *what one page holds*. Only a
+real API server answers *how long one round trip takes* — which is the whole
+question of whether 500 or 1000 is faster and where the crossing point sits. That
+is a cluster measurement and it was not estimated. A harness could close part of
+it without a cluster: the real `watcher()` against a localhost fake API server
+would **observe** `limit=500` and the continue follow-up instead of reading them.
+It needs `tokio`'s `net` feature — a feature on a crate already present, not an
+eleventh crate — and it is boxed rather than done.

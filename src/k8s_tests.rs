@@ -828,6 +828,162 @@ async fn a_watch_that_only_fails_leaves_the_other_four_alone() {
     );
 }
 
+// --- THE INITIAL LIST ---
+//
+// **What a paged LIST changes, and what it does not — with the pages themselves synthesised.** kube
+// emits `Init` / `InitApply`* / `InitDone` across however many HTTP responses the LIST took
+// (`kube-runtime-4.2.0/src/watcher.rs:523`, `:548`, `:555-559`), and there is no cluster here to
+// deliver them — so what is proven below is that the store answers a *paged* sequence correctly,
+// never that kube produces that sequence. The source is read; the round trip is not.
+
+/// **The three upstream facts [`INITIAL_LIST_PAGE`] was reasoned against, pinned** (NOTES §
+/// D147). The number is only *decided* here — the `connect()` box is what hands it to kube — so
+/// what this turn can still guard is the ground it was chosen on: that kube pages at all, that
+/// `page_size` has any effect under the strategy kube picks, and that neither call is bounded by
+/// a timeout kube sets for us. `page_size` is an `Option` whose `None` is the one unbounded
+/// `LIST pods -A` that `PRIOR-ART § A2` is about, and a kube upgrade that moves any of the three
+/// has to come past this test rather than past nobody.
+#[test]
+fn kube_still_pages_the_initial_list_at_the_number_this_repo_chose() {
+    assert_eq!(
+        watcher::Config::default().page_size,
+        Some(INITIAL_LIST_PAGE),
+        "kube-runtime's default page size is no longer the {INITIAL_LIST_PAGE} that \
+         INITIAL_LIST_PAGE's reasoning was written against (watcher.rs:276) — read it again \
+         before following the new default"
+    );
+    assert_eq!(
+        watcher::Config::default().initial_list_strategy,
+        watcher::InitialListStrategy::ListWatch,
+        "page_size has no effect under StreamingList (watcher.rs:256), so the number above \
+         would be sent by nobody"
+    );
+    assert_eq!(
+        watcher::Config::default().timeout,
+        None,
+        "kube grew a default timeout, and it is one field for the list call and the watch \
+         (watcher.rs:400, :414) — a bounded LIST would now also re-LIST the cluster on that \
+         period"
+    );
+}
+
+/// **A LIST that arrives in pages is still one LIST** (NOTES § D147, D28). The gate is shut at
+/// every page boundary — not merely before the first one — it opens once, and it opens on the
+/// union of every page rather than on the last one.
+#[test]
+fn a_paged_initial_list_keeps_the_gate_shut_until_the_last_page() {
+    let pods = items::<Pod>("kube-system-pods");
+    let pages: Vec<&[Pod]> = pods.chunks(4).collect();
+    assert!(
+        pages.len() > 2 && pages.last().expect("chunks of a non-empty capture").len() < 4,
+        "{} pods in pages of 4 is {} pages: this test needs several, and a short last one",
+        pods.len(),
+        pages.len()
+    );
+
+    let mut store = all_but("pods");
+    store.pod(Event::Init);
+    assert!(
+        store.snapshot(now()).is_none(),
+        "the first page had not even arrived and the store published a cluster"
+    );
+    for (number, page) in pages.iter().enumerate() {
+        for pod in page.iter().cloned() {
+            store.pod(Event::InitApply(pod));
+        }
+        assert!(
+            store.snapshot(now()).is_none(),
+            "page {} of {} was published as the whole cluster",
+            number + 1,
+            pages.len()
+        );
+    }
+
+    store.pod(Event::InitDone);
+    let snapshot = store.snapshot(now()).expect("every page landed");
+    assert_eq!(
+        snapshot
+            .pods
+            .iter()
+            .map(|pod| pod.id.name.clone())
+            .collect::<BTreeSet<_>>(),
+        pods.iter()
+            .map(|pod| pod
+                .metadata
+                .name
+                .clone()
+                .expect("a captured pod has a name"))
+            .collect::<BTreeSet<_>>(),
+        "the pages before the last one were dropped instead of accumulated"
+    );
+
+    let published = store.snapshot(now());
+    store.pod(Event::InitDone);
+    assert_eq!(
+        store.snapshot(now()),
+        published,
+        "a second InitDone with no LIST behind it changed the answer"
+    );
+}
+
+/// **A page that fails abandons every page before it.** A `continue` token the API server has
+/// already compacted comes back `410 Gone`; kube reports `InitialListFailed` and resets its
+/// machine to `Empty`, whose next poll emits a fresh `Init` (`watcher.rs:584`, `:523`). So the
+/// store must answer with the second attempt alone — the half-list the first attempt delivered
+/// is not a cluster that ever existed, and pagination is what makes that the ordinary path
+/// rather than a rare one (NOTES § D147).
+#[tokio::test]
+async fn a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land() {
+    let abandoned = items::<Pod>("kube-system-pods");
+    let relisted = object::<Pod>("crashloop");
+    assert!(
+        !abandoned
+            .iter()
+            .any(|pod| pod.metadata.name == relisted.metadata.name),
+        "the relisted pod is one of the abandoned ones, so the assertion below would hold \
+         whether the abandoned pages survived or not"
+    );
+    let mut events: Vec<watcher::Result<Event<Pod>>> = vec![Ok(Event::Init)];
+    events.extend(
+        abandoned
+            .iter()
+            .cloned()
+            .map(|pod| Ok(Event::InitApply(pod))),
+    );
+    events.push(Err(watcher::Error::InitialListFailed(kube::Error::Api(
+        Box::new(kube::core::Status {
+            code: 410,
+            reason: "Expired".to_string(),
+            message: "The provided continue parameter is too old to display a consistent list \
+                      result"
+                .to_string(),
+            ..Default::default()
+        }),
+    ))));
+    events.extend(listing(vec![relisted]));
+
+    let mut store = all_but("pods");
+    drive(vec![one_watch(events, Store::pod)], &mut store).await;
+
+    let snapshot = store
+        .snapshot(now())
+        .expect("the second attempt listed and the gate opened");
+    let names: BTreeSet<&str> = snapshot
+        .pods
+        .iter()
+        .map(|pod| pod.id.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        BTreeSet::from(["broken-crashloop"]),
+        "the pages the failed attempt had already delivered were published as part of the cluster"
+    );
+    assert!(
+        store.failure().is_some(),
+        "the page that failed was swallowed: nothing on the store says the LIST restarted"
+    );
+}
+
 // --- THE INGEST GUARD ---
 //
 // **What is proven here is what the store *kept*, never what something printed.** The printer

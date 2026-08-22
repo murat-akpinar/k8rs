@@ -32,6 +32,11 @@
 //! removed (NOTES § D146). What the bound buys is the resident set again, and not latency: the
 //! 50 MB field still arrives and is still deserialized before it is cut.
 //!
+//! **The initial LIST arrives in pages of 500 and kube follows the `continue` tokens itself**
+//! (NOTES § D147). Pages are invisible to the gate above — one `Init`, one `InitApply` per
+//! object across every page, one `InitDone` — and the page size is a number this repo chose
+//! rather than one inherited silently, written down at [`INITIAL_LIST_PAGE`].
+//!
 //! **What is still missing is the `Client`**, and with it the five `Api<K>`s [`drive`] would be
 //! handed: that is the `connect()` box further down Phase 5. Nothing here has met an API
 //! server.
@@ -596,6 +601,76 @@ impl Store {
 }
 
 // --- THE STORE END ---
+
+// --- THE INITIAL LIST START ---
+//
+// **The initial LIST is already paged, and what is left to decide is the number** (NOTES § D147).
+//
+// **What kube 4.2.0 does by default, read off its source rather than recalled.**
+// `kube-runtime-4.2.0/src/watcher.rs:276` sets `page_size: Some(500)` in `Config::default()` —
+// "same default page size limit as client-go", `:404` carries it into the `ListParams` that
+// becomes the query string's `limit` (`kube-core-4.2.0/src/params.rs:102`), and
+// `State::InitPage` sends the server's own `continue` token back on the next request (`:562`,
+// `params.rs:105`) — one page per round trip, until a page comes back without one. So the
+// unpaginated `LIST pods -A` that `PRIOR-ART § A2` is about cannot happen through this client:
+// there is no pagination to write here, only a number to choose and a gate to prove against it.
+//
+// **Paging is invisible to [`Store`], and that is what the gate above depends on.** One `Init`
+// (`:523`), one `InitApply` per object across every page (`:548`), and one `InitDone` emitted
+// only once a page has drained and carried no `continue` token (`:555-559`) — so several HTTP
+// responses are one LIST, `filling` accumulates across all of them, and `live` is swapped once.
+//
+// **A page that fails abandons the pages before it**: `:584` reports `InitialListFailed` and
+// resets the machine to `Empty`, whose next poll emits a fresh `Init`. That is the ordinary path
+// for a `continue` token the API server has already compacted, not a rare one, and it is what
+// makes `Event::Init` clearing `filling` load-bearing rather than defensive.
+//
+// **What source-reading cannot answer is what a page costs.** That is a round trip against a
+// real API server, and this file has never met one. The arithmetic below is the half that can
+// be decided without a cluster; where the paint budget stops holding is the other half.
+
+/// Objects per page of an initial LIST: **500** — the number kube also defaults to, chosen here
+/// rather than inherited, and sent by the `connect()` box below this one (NOTES § D147).
+///
+/// **The binding constraint is memory, not round trips.** kube buffers a whole page of decoded
+/// objects before it emits the first `InitApply` (`watcher.rs:574`), so one page per watch sits
+/// on top of the store for as long as that page takes to drain. Measured over the 55 pod objects
+/// in the committed captures, the median is 3708 bytes of JSON and the largest 5662 — **with
+/// `managedFields` already stripped by the sanitizer**, so a live object is larger by an amount
+/// only a cluster can say. A 500-object page is therefore ~1.9 MB at the median and a 5000-object
+/// one ~19 MB, against the `< 50MB RSS at ~1000 pods` (`REQUIREMENTS.md`) that the store itself
+/// also has to fit inside.
+///
+/// **And at the size the budget is stated at, a larger page buys almost nothing.** ~1000 pods is
+/// two round trips at 500 and one at 1000, and the one it saves is bought by doubling the
+/// response the API server has to build whole — the k9s failure `PRIOR-ART § A2` describes. The
+/// twenty sequential round trips a 10 000-pod cluster costs at this size are real, and **neither
+/// number is a measured crossing point**: NOTES § D115 says in as many words that ~1000 and
+/// 10 000 are the sizes the budget and `PRIOR-ART § A2` were *written* at. Which page size is
+/// faster, and at what cluster size the paint budget stops holding, are one measurement against a
+/// real API server, and nothing in this file has met one.
+const INITIAL_LIST_PAGE: u32 = 500;
+
+// **Where the number is applied is the `connect()` box, not this one.** `page_size` reaches
+// kube as `watcher::Config::default().page_size(INITIAL_LIST_PAGE)`, and there is no
+// `watch_config()` here holding that one line early: measured, such a function is
+// *indistinguishable* from `Config::default()` — the two configs compare equal, so no test
+// could tell it from the silent inheritance it exists to prevent, and a function no test can
+// fail on is what the mutation gate is for (NOTES § D147). What can be proven without a
+// `Client` is that kube's default is still the number this reasoning was written against, and
+// `k8s_tests.rs` proves exactly that.
+//
+// Everything else on that config is kube's default on purpose. `ListSemantic::MostRecent` is
+// the quorum read; `Any` would serve the list from the API server's watch cache, which is
+// cheaper and can be stale, and a first paint that is stale is D28's lie with a different
+// cause. `InitialListStrategy::ListWatch` rather than `StreamingList`, which kube's own doc
+// (`watcher.rs:243`) says needs a server-side feature gate — which servers have it on is the
+// oldest-supported-API-server box, not this one. No selectors: invariant 6 watches every pod,
+// node and workload. And **`Config::timeout` is left unset deliberately**: it is one field for
+// both calls (`:400`, `:414`), so a timeout short enough to bound the initial LIST would also
+// cap the watch and re-LIST the whole cluster on that period.
+
+// --- THE INITIAL LIST END ---
 
 // --- THE DRIVER START ---
 

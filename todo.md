@@ -2130,7 +2130,7 @@ public release.
       453 + 7 tests, 27 mutants 0 missed, 15 shapes × 3 routes. **Collection
       lengths are deliberately not bounded** and have their own box — dropping
       list entries is a silent cut, which is what the marker exists to prevent
-- [ ] **How the initial LIST arrives is a decision, not a default** — the box
+- [x] **How the initial LIST arrives is a decision, not a default** — the box
       above forbids publishing a snapshot until every initial LIST has landed,
       which makes the shape of that LIST load-bearing. An unpaginated
       `LIST pods -A` on a 10 000-pod cluster is one response the API server has
@@ -2151,6 +2151,38 @@ public release.
       output — measure it, do not estimate it**, and neither number already
       written near it is that measurement
       ([NOTES § D25](NOTES.md#d25--what-this-review-did-not-decide))
+      Done, and it turned out to be a **measurement rather than code**: kube
+      already paginates. `watcher::Config::default()` sets `page_size: Some(500)`
+      under its own *"same default page size limit as client-go"*, and
+      `to_list_params()` says *"The watcher handles pagination internally"* — the
+      watcher follows `continue` itself. **Paging is invisible to the bootstrap
+      gate**, which was the answer that mattered: one `Init`, one `InitApply` per
+      object across every page, one `InitDone` only when a page returns with no
+      token — so the gate is correct as built, without a line changing. A page
+      that fails restarts the whole LIST, which makes `Event::Init` clearing the
+      buffer load-bearing rather than defensive, and that was untested until now.
+      `INITIAL_LIST_PAGE = 500` is kept with its derivation written down: the
+      binding constraint is **memory, not round trips**, because kube buffers a
+      whole page before emitting anything — median 3708 bytes per captured pod, so
+      ~1.9 MB a page. **Neither 500 nor 1000 is a measured crossing point** and
+      only a cluster can find one. A `watch_config()` helper was written and then
+      **deleted**: its red run stayed green, because a number equal to kube's own
+      cannot be distinguished from inheriting it
+      ([D147](NOTES.md#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)).
+      456 + 7 tests, 27 mutants 0 missed
+- [ ] **Nothing observes what k8rs actually puts on the wire — every claim about
+      it is read off kube's source.** D147 established the initial LIST pages at
+      500 and follows `continue` itself **by reading
+      `kube-runtime-4.2.0/src/watcher.rs`**, and the tests synthesise the
+      `Init → InitApply* → InitDone` sequence rather than receiving it. A
+      **localhost fake API server** answering canned paginated responses would let
+      the real `watcher()` run against it and turn four read claims into observed
+      ones: that `limit=500` is sent, that the `continue` token comes back, that a
+      compacted token restarts the LIST, and that a 403 arrives as
+      `InitialListFailed` rather than another variant. It needs `tokio`'s `net`
+      feature — **a feature on a crate already present, not a twelfth crate**, so
+      invariant 10 is not in question. Done when a test drives the real watcher
+      against it and each of the four is asserted from what crossed the socket
 - [ ] **Find out whether kube-rs rate-limits us, and if it does, put it on
       screen** — client-go ships a client-side QPS limiter, so for years a k9s
       user reporting "slow" was partly reporting a queue inside their own binary
@@ -2274,7 +2306,14 @@ public release.
       reconnector permanently · it called `BailOut` after five retries, so a VPN
       blip over lunch meant the tool was gone on return · each failed check held
       the 120-second call timeout, making recovery slower than the outage. The
-      **This box inherits two things from the driver loop and replaces one of
+      **`Config::timeout` is one field and it feeds two calls** — `to_list_params`
+      and `to_watch_params` both read it — so a timeout short enough to bound the
+      initial LIST also caps the **watch** and re-LISTs the whole cluster on that
+      period, turning a bound into a poll and inverting invariant 6. The initial
+      LIST cannot be given its own deadline through this config; this box inherits
+      that rather than discovering it
+      ([D147](NOTES.md#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)).
+      **This box inherits two more things from the driver loop and replaces one of
       them** ([D145](NOTES.md#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)).
       `Store::failure` is **monotone** — nothing clears it — because clearing it
       correctly needs per-watch identity and this box is where that lands: a
