@@ -134,6 +134,7 @@
 - *(ui)* The six panes, and the one place a missing metrics-server is said ([10b8580](https://github.com/murat-akpinar/k8rs/commit/10b8580aec0a094e0e2486d103372b545832cb29)) — Family C's screen spec, ahead of its code: D127 owed three things to screens/ before the report boxes could be briefed, and a brief cannot decide behaviour the screen contradicts.
 - *(rules)* The reports cannot see the helpers written for them ([25b6823](https://github.com/murat-akpinar/k8rs/commit/25b6823e910385e369c5ed5abae64a6bc61b12ae)) — Family C stopped on its first box, and correctly. Five of the six reports call functions that exist, are correct, and are private to rules.rs, which is analysis.rs's sibling and not its parent — thirteen E0603s, proven by the compiler and reverted. Two of them are in no Vec<Finding> at all: analyze's node loop never calls N4 or N5, which were written to be the Versions and Capacity reports' input and were reachable only from their own tests.
 - *(docs)* Record the node-name regex wider than its own comment ([cd78cfc](https://github.com/murat-akpinar/k8rs/commit/cd78cfc1e7ae8e0a72fd61f051344a4b67e3fde5))
+- *(docs)* Triage the boxes that were injected into an open phase 5, and count them again ([bd4aea1](https://github.com/murat-akpinar/k8rs/commit/bd4aea1c504d2099db75c04e867e880a5b25a255)) — Eight of the ten go to backlog.md, which is where a finding needing a ruling lives; two stay because a guard of theirs goes vacuous exactly when connect() lands, and both say so in their own bodies.
 
 ### 🧪 Testing
 
