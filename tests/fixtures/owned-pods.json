@@ -5,14 +5,14 @@
       "apiVersion": "v1",
       "kind": "Pod",
       "metadata": {
-        "creationTimestamp": "2026-08-16T09:44:00Z",
+        "creationTimestamp": "2026-08-20T22:42:55Z",
         "generation": 1,
         "labels": {
           "app": "broken-owned",
           "demo": "broken",
           "pod-template-hash": "7bdb7645c8"
         },
-        "name": "broken-owned-7bdb7645c8-tb9tn",
+        "name": "broken-owned-7bdb7645c8-bwdfd",
         "namespace": "default",
         "ownerReferences": [
           {
@@ -21,11 +21,11 @@
             "controller": true,
             "kind": "ReplicaSet",
             "name": "broken-owned-7bdb7645c8",
-            "uid": "1b632d5e-d2e9-4bf2-9629-9dfc5f57dff3"
+            "uid": "4e03512e-3d77-4908-9776-44889b4c3e27"
           }
         ],
-        "resourceVersion": "5656",
-        "uid": "aaa3b270-5535-43d6-8731-2a62f9ef174e"
+        "resourceVersion": "5712",
+        "uid": "01db0026-7b5e-42ec-bc87-fd82e4dfbbd9"
       },
       "spec": {
         "containers": [
@@ -46,7 +46,7 @@
             "volumeMounts": [
               {
                 "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                "name": "kube-api-access-6vp2m",
+                "name": "kube-api-access-pgq7p",
                 "readOnly": true
               }
             ]
@@ -54,7 +54,7 @@
         ],
         "dnsPolicy": "ClusterFirst",
         "enableServiceLinks": true,
-        "nodeName": "k8rs-worker2",
+        "nodeName": "k8rs-worker",
         "preemptionPolicy": "PreemptLowerPriority",
         "priority": 0,
         "restartPolicy": "Always",
@@ -79,7 +79,7 @@
         ],
         "volumes": [
           {
-            "name": "kube-api-access-6vp2m",
+            "name": "kube-api-access-pgq7p",
             "projected": {
               "defaultMode": 420,
               "sources": [
@@ -122,21 +122,21 @@
         "conditions": [
           {
             "lastProbeTime": null,
-            "lastTransitionTime": "2026-08-16T09:44:01Z",
+            "lastTransitionTime": "2026-08-20T22:42:55Z",
             "observedGeneration": 1,
             "status": "True",
             "type": "PodReadyToStartContainers"
           },
           {
             "lastProbeTime": null,
-            "lastTransitionTime": "2026-08-16T09:44:00Z",
+            "lastTransitionTime": "2026-08-20T22:42:55Z",
             "observedGeneration": 1,
             "status": "True",
             "type": "Initialized"
           },
           {
             "lastProbeTime": null,
-            "lastTransitionTime": "2026-08-16T10:10:48Z",
+            "lastTransitionTime": "2026-08-20T23:09:57Z",
             "message": "containers with unready status: [quitter]",
             "observedGeneration": 1,
             "reason": "ContainersNotReady",
@@ -145,7 +145,7 @@
           },
           {
             "lastProbeTime": null,
-            "lastTransitionTime": "2026-08-16T10:10:48Z",
+            "lastTransitionTime": "2026-08-20T23:09:57Z",
             "message": "containers with unready status: [quitter]",
             "observedGeneration": 1,
             "reason": "ContainersNotReady",
@@ -154,7 +154,7 @@
           },
           {
             "lastProbeTime": null,
-            "lastTransitionTime": "2026-08-16T09:44:00Z",
+            "lastTransitionTime": "2026-08-20T22:42:55Z",
             "observedGeneration": 1,
             "status": "True",
             "type": "PodScheduled"
@@ -162,17 +162,17 @@
         ],
         "containerStatuses": [
           {
-            "containerID": "containerd://018d9bbda39e40f3944b74b0a683cd0b37448bbe47d50d3c3c3ebe110ba93121",
+            "containerID": "containerd://a283e14b266f49612666cdf7a02a2b099478389a66a1a964e138c4d14cec736b",
             "image": "docker.io/library/busybox:latest",
             "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
             "lastState": {
               "terminated": {
-                "containerID": "containerd://ea3ebdd4ad21403bb54ab6fdeae6ff6c10ac73c1d79a23c2130b3e3e44a71f19",
+                "containerID": "containerd://a8e98e4f923eca94af5f37cdd9820941b09176210295734212900576cac2be8d",
                 "exitCode": 1,
-                "finishedAt": "2026-08-16T10:05:39Z",
+                "finishedAt": "2026-08-20T23:04:43Z",
                 "message": "starting\npanic: dial tcp db.payments.svc:5432: connect: connection refused\n",
                 "reason": "Error",
-                "startedAt": "2026-08-16T10:05:37Z"
+                "startedAt": "2026-08-20T23:04:41Z"
               }
             },
             "name": "quitter",
@@ -182,12 +182,12 @@
             "started": false,
             "state": {
               "terminated": {
-                "containerID": "containerd://018d9bbda39e40f3944b74b0a683cd0b37448bbe47d50d3c3c3ebe110ba93121",
+                "containerID": "containerd://a283e14b266f49612666cdf7a02a2b099478389a66a1a964e138c4d14cec736b",
                 "exitCode": 1,
-                "finishedAt": "2026-08-16T10:10:47Z",
+                "finishedAt": "2026-08-20T23:09:56Z",
                 "message": "starting\npanic: dial tcp db.payments.svc:5432: connect: connection refused\n",
                 "reason": "Error",
-                "startedAt": "2026-08-16T10:10:45Z"
+                "startedAt": "2026-08-20T23:09:54Z"
               }
             },
             "user": {
@@ -203,7 +203,7 @@
             "volumeMounts": [
               {
                 "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                "name": "kube-api-access-6vp2m",
+                "name": "kube-api-access-pgq7p",
                 "readOnly": true,
                 "recursiveReadOnly": "Disabled"
               }
@@ -226,7 +226,7 @@
         ],
         "qosClass": "BestEffort",
         "resources": {},
-        "startTime": "2026-08-16T09:44:00Z"
+        "startTime": "2026-08-20T22:42:55Z"
       }
     }
   ],

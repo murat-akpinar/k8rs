@@ -17,7 +17,9 @@ whole debugging loop without a typed command.
 │   capacity      1 ▲│  14:22:07  --- killed here ---                │
 │   certificates  30d│                                               │
 │   drain safety     │  This is the log from before the last crash,  │
-│   waste            │  which is usually the one you want.           │
+│   posture          │  which is usually the one you want.           │
+│   restarts         │                                               │
+│   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl logs web-7d9f4 -n payments -c app --previous             │

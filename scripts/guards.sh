@@ -84,3 +84,21 @@ bash scripts/certs-test.sh
 # can reach tests/fixtures/ without ever meeting the filter.
 bash scripts/fixture-audit.sh --self-test
 bash scripts/fixture-audit.sh
+# The mutation gate's own honesty: cargo-mutants files a failed build as
+# `unviable`, so anything that breaks the build without being a mutation result
+# reads as a pass — a full disk (NOTES § D133) and, since 2026-08-21, a lint
+# denied by the toolchain flags. Self-test only — the real run is the phase-close
+# sweep and is eleven minutes long.
+bash scripts/mutants.sh --self-test
+# The other half of D92's "a review cluster cannot produce a committed fixture":
+# sanitize.jq anchors the refusal, and this is the loud early one, on the path
+# that builds the cluster in the first place.
+bash scripts/cluster.sh --self-test
+# reports/ carries real cluster output into a committed file with no filter in
+# front of it (NOTES § D108). This is that filter, for prose rather than JSON.
+python3 scripts/reports-guard.py --self-test
+python3 scripts/reports-guard.py
+# `cargo fmt` reflows code and leaves comments alone, so the 100-column rule was
+# a convention until this ran. rustfmt's own options for it are nightly-only.
+python3 scripts/width-guard.py --self-test
+python3 scripts/width-guard.py

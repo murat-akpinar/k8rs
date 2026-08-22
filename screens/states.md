@@ -20,6 +20,8 @@ launch**.
 │   capacity      1 ▲│          ANALYSIS → capacity   (1 node is     │
 │   certificates  30d│          promising more than it has)          │
 │   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
@@ -50,6 +52,8 @@ now* — a lint report would never be empty.
 │   capacity         │                                               │
 │   certificates  30d│                                               │
 │   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
@@ -78,6 +82,8 @@ forbidden.
 │   capacity      1 ▲│                                               │
 │   certificates  30d│                                               │
 │   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
@@ -107,6 +113,8 @@ out mid-session ([NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kub
 │   capacity      1 ▲│    cluster again:                             │
 │   certificates  30d│                                               │
 │   drain safety     │      aws sso login                            │
+│   posture          │                                               │
+│   restarts         │                                               │
 │   waste            │                                               │
 │   versions         │    What you see below is from 2 min ago.      │
 ├────────────────────┴───────────────────────────────────────────────┤
@@ -148,8 +156,10 @@ on the cluster-wide list falls back instead of failing
 │   capacity         │  needs every pod in the cluster.              │
 │   certificates  30d│                                               │
 │   drain safety     │  ● payments/web  ·  3 of 5 pods    4 min ago  │
-│   waste            │    Containers exceeded their memory limit and │
-│   versions         │    were killed by the kernel (OOMKilled)      │
+│   posture          │    Containers exceeded their memory limit and │
+│   restarts         │    were killed by the kernel (OOMKilled)      │
+│   waste            │                                               │
+│   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤
 │ $ kubectl get pods -n payments --watch                             │
 ├────────────────────────────────────────────────────────────────────┤
@@ -228,6 +238,8 @@ making it while one check is switched off.
 │   capacity         │        node someone started emptying and      │
 │   certificates  30d│        did not finish needs every pod in      │
 │   drain safety     │        the cluster.                           │
+│   posture          │                                               │
+│   restarts         │                                               │
 │   waste            │                                               │
 │   versions         │                                               │
 ├────────────────────┴───────────────────────────────────────────────┤

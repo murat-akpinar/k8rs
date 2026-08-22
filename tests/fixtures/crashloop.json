@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-16T09:44:00Z",
+    "creationTimestamp": "2026-08-20T22:42:54Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-crashloop",
     "namespace": "default",
-    "resourceVersion": "5211",
-    "uid": "36305d3f-fe3f-4f0f-9dcc-d2fee1065c70"
+    "resourceVersion": "5808",
+    "uid": "eadf8a2f-4b9a-412a-8d50-ca98e8461183"
   },
   "spec": {
     "containers": [
@@ -31,7 +31,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-twhqz",
+            "name": "kube-api-access-kr8dz",
             "readOnly": true
           }
         ]
@@ -39,7 +39,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -64,7 +64,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-twhqz",
+        "name": "kube-api-access-kr8dz",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -107,21 +107,21 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:01Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-20T22:42:54Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T10:05:47Z",
+        "lastTransitionTime": "2026-08-20T23:09:38Z",
         "message": "containers with unready status: [quitter]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -130,7 +130,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T10:05:47Z",
+        "lastTransitionTime": "2026-08-20T23:09:38Z",
         "message": "containers with unready status: [quitter]",
         "observedGeneration": 1,
         "reason": "ContainersNotReady",
@@ -139,7 +139,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-20T22:42:54Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -147,27 +147,27 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://0b0a84bba81d1ed0ea8ecb298610a8568f9fffece3e2eb48565406d14db27262",
+        "containerID": "containerd://15fc24cab8a3448e4b2e32690e39f4eb3fa61978557a0e8fc9fca2db4f309b6a",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://0b0a84bba81d1ed0ea8ecb298610a8568f9fffece3e2eb48565406d14db27262",
+            "containerID": "containerd://15fc24cab8a3448e4b2e32690e39f4eb3fa61978557a0e8fc9fca2db4f309b6a",
             "exitCode": 1,
-            "finishedAt": "2026-08-16T10:05:47Z",
+            "finishedAt": "2026-08-20T23:09:38Z",
             "message": "starting\npanic: dial tcp db.payments.svc:5432: connect: connection refused\n",
             "reason": "Error",
-            "startedAt": "2026-08-16T10:05:45Z"
+            "startedAt": "2026-08-20T23:09:36Z"
           }
         },
         "name": "quitter",
         "ready": false,
         "resources": {},
-        "restartCount": 9,
+        "restartCount": 10,
         "started": false,
         "state": {
           "waiting": {
-            "message": "back-off 5m0s restarting failed container=quitter pod=broken-crashloop_default(36305d3f-fe3f-4f0f-9dcc-d2fee1065c70)",
+            "message": "back-off 5m0s restarting failed container=quitter pod=broken-crashloop_default(eadf8a2f-4b9a-412a-8d50-ca98e8461183)",
             "reason": "CrashLoopBackOff"
           }
         },
@@ -184,7 +184,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-twhqz",
+            "name": "kube-api-access-kr8dz",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -207,6 +207,6 @@
     ],
     "qosClass": "BestEffort",
     "resources": {},
-    "startTime": "2026-08-16T09:44:00Z"
+    "startTime": "2026-08-20T22:42:54Z"
   }
 }

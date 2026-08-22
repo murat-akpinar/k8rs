@@ -145,6 +145,22 @@ its line moving with it.
 - [D121](#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20) — the temporary driver, and the three places it does not draw what the console will
 - [D122](#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20) — the strip goes on the value entering the sentence, not on the finished sentence
 - [D123](#d123--the-mutation-gate-has-nothing-to-say-about-mains-body-so-a-test-drives-the-binary-2026-08-20) — the mutation gate has nothing to say about `main`'s body, so a test drives the binary
+- [D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20) — the freeze forbids reaching back into finished logic, and a card the capture proves wrong is not that
+- [D125](#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20) — the last run on record is a question about the container, not a field, and `state.terminated` may name a card only where the run is settled
+- [D126](#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20) — the guards Family A added, and the five judgement calls they could not avoid making
+- [D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20) — the `Report` shape, the test that decided its fields, and the two panes it cannot express
+- [D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20) — the six panes, the one rendering of a missing metrics-server, and the badge that does not fit
+- [D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20) — the reports cannot see the helpers written for them, and the freeze is about logic and not visibility
+- [D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20) — the unblock turn: what the export gap actually cost, and eleven things two agents settled that no box had
+- [D131](#d131--a-fixture-is-asked-two-different-questions-and-one-disjunction-was-answering-both-2026-08-21) — a fixture is asked two different questions, and one disjunction was answering both
+- [D132](#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21) — the trip that took four runs, and the sixteen things three agents settled under it
+- [D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21) — the mutation gate files a failed build as `unviable`, so a full disk reads as a pass
+- [D134](#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21) — Family C: the six reports, the frozen file they had to move, and the two green lights a review took away
+- [D135](#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21) — Family B: the trip that already ran, the resize box's stale premise, and the shape a capture cannot catch
+- [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21) — three claims that were reasoned instead of measured, and the one sentence that catches all three
+- [D137](#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22) — Family D: the restart row got a pane of its own, and a real cluster took four claims away
+- [D138](#d138--reports-keeps-everything-and-the-retention-rule-is-a-re-measure-trigger-2026-08-22) — reports/ keeps everything, and the retention rule is a re-measure trigger
+- [D139](#d139--phase-4s-close-the-budget-whose-first-sync-failed-and-where-the-other-seven-findings-went-2026-08-22) — Phase 4's close: the budget whose first sync failed, and where the other seven findings went
 
 ## Why it exists — where the gap is
 
@@ -6439,7 +6455,25 @@ survives measurement is that **the same record is in `lastState` in the same
 snapshot** — `state.terminated {exit 3}` and `lastState {exit 3, Error}` observed
 together, with rule 6 already firing off the second copy and rule 1's card
 following from the backoff. So refusing the current terminated state **loses
-nothing about any container that comes back**, not merely earliness. And the
+nothing about any container that comes back**, not merely earliness.
+
+**That last sentence is true of the container it was measured on and false in
+general, corrected 2026-08-20 by the operator review of
+[D125](#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20).**
+The container measured here exited `3` every run, so the two halves agreed **by
+construction** and the claim looked general. A container whose runs end
+*differently* holds two different runs in the two halves for the whole backoff —
+measured on a live `Always` pod exiting `10+n` on run `n`, **24 of 25 samples over
+75 seconds** carried `state.terminated {exit N}` beside `lastState {exit N-1}`,
+and rule 6's card named run N-1 while shipping a `--previous` that answered
+`unable to retrieve container logs` with `rc 0`. So what refusing the current
+state loses is **nothing where consecutive runs end the same way, and one run
+everywhere else** — which is smaller than *nothing* and larger than zero. The
+ruling is unchanged: a card drawn off a run another is about to follow is still a
+function of when the sampler looked, which is leg 3's real argument and does not
+depend on the two halves agreeing. What changes is that the residual is named
+rather than denied, and it is filed with the Phase 4 `restartPolicyRules` box in
+[`backlog.md`](backlog.md). And the
 obvious reply — *then debounce it* — is answered by
 [invariant 5](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision): a pure `analyze(&Snapshot)` has nowhere to hold *I
 saw an exit 3 four seconds ago*, so a card drawn from this field would be a
@@ -8909,6 +8943,1470 @@ page in the matrix is 16 KiB, so 256 KiB rather than the 64 KiB this machine
 has. A hole that opens only on somebody else's kernel is the kind that stays
 silent.
 
+### D124 — the freeze forbids reaching back into finished logic, and a card the capture proves wrong is not that (2026-08-20)
+
+Phase 3 closed with **`rules.rs` frozen** — except the snapshot types and their
+decode, which [D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)
+holds open until Phase 4 close. Phase 4's **first** box needs rule 6 changed. Both
+cannot stand, and the next session would have met the collision cold on box one.
+
+**The defect is real and it is on a committed capture**, reproduced at HEAD
+rather than argued:
+
+```
+$ ./target/release/k8rs tests/fixtures/neverrules.json
+1 pod · 0 nodes · 0 workloads
+
+▲ default/broken-neverrules · 3 days ago
+  The last run on record failed — exit 3
+  container retry · ran for under a second
+  → read the last run's log — it holds the last thing written before that run ended, from the program or from the shell that started it. The --previous flag below is what fetches it
+
+1 warning
+
+$ jq -r '.status.containerStatuses[] | "\(.name): state=\(.state|keys[0]) exit=\(.state.terminated.exitCode // "-") lastState=\(.lastState|keys[0]? // "none") lastExit=\(.lastState.terminated.exitCode // "-")"' tests/fixtures/neverrules.json
+keeper: state=running    exit=- lastState=none       lastExit=-
+retry:  state=terminated exit=1 lastState=terminated lastExit=3
+```
+
+`retry` is sitting in `state.terminated` at **exit 1**; the card names **exit 3**,
+which is the run before that one. And `--previous` resolves through
+`lastState.terminated.containerID`, so the command the card hands the reader
+fetches the log of the run the card should not have been about. That is
+[invariant 4](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+in the small — a record that lies — on the teaching device the whole tool is built
+around.
+
+**What the freeze is for.** Forward-only exists so that nothing built on a layer
+finds the layer moved: `analysis.rs`, `views.rs` and `ui.rs` all consume
+`Finding`, `ObjectId` and `analyze`'s signature, and reshaping those under them is
+the failure the rule names. It was never a rule that a wrong card becomes
+permanent because the phase that drew it has ended. Freezing this one would ship
+v1 with a card that names the wrong run — the freeze defeating its own purpose.
+
+**The precedent is this file's own, twice.**
+[D30](#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)
+broke the CI freeze "deliberately, minimally and in writing, which is what the
+forward-only rule asks for"; D42 made the `rules.rs` freeze per-concern rather
+than per-file. This is the third of the same shape and the narrowest.
+
+**The ruling, and the bounds are the entry.** A frozen `rules.rs` may be changed
+by a box in a later phase when **all five** hold:
+
+1. The defect is **proven on a committed capture**, output pasted. An argument
+   from consistency is not enough — that is
+   [the class two PM rulings already shipped a defect through](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13).
+2. The box was **written into the later phase before that phase opened**. Nothing
+   found mid-phase gets in; CLAUDE.md's *a box is never added to an open phase*
+   already says so and this does not widen it.
+3. It may change what a rule **reads, says or stands down on**. It may **not**
+   add a rule, or touch `Finding`, `ObjectId`, `analyze`'s signature, or a shared
+   helper's — those are the surface everything above is built on, and they are
+   what the freeze actually protects. `ClusterSnapshot` keeps D42's window and no
+   more.
+4. The **whole-file mutation gate for `rules.rs` re-runs at the close of the
+   phase that made the change**. Phase 3's 553 / 0 was taken before it; a gate
+   whose subject moved underneath it is not a gate.
+5. The box names this decision, so the unfreeze is never silent.
+
+**What this does not license.** Phase 4's other twenty boxes are `analysis.rs`,
+`scripts/` and snapshot fields, and none of them touches a rule. If a second
+`rules.rs` box appears in Phase 4 it arrives under condition 2 or not at all.
+
+### D125 — the last run on record is a question about the container, not a field, and `state.terminated` may name a card only where the run is settled (2026-08-20)
+
+Rule 6 titles its card **"The last run on record failed"** and reads
+`lastState.terminated` to fill it. That field is the last run **only while the
+container has moved on from it**. When the container is sitting in
+`state.terminated`, `lastState` is the run *before* the one it is stopped in, and
+the title is false out loud — proven at HEAD on a committed capture under
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+condition 1:
+
+```
+$ ./target/release/k8rs tests/fixtures/neverrules.json
+▲ default/broken-neverrules · 3 days ago
+  The last run on record failed — exit 3
+  → read the last run's log … The --previous flag below is what fetches it
+
+$ jq … tests/fixtures/neverrules.json
+retry: restarts=1 STATE(exit=1 reason=Error) LAST(exit=3 reason=Error)
+```
+
+`retry` is stopped at **exit 1** and the card names **exit 3**; `--previous`
+resolves through `lastState.terminated.containerID`, so the command reaches the
+run the card should not have been about while plain `kubectl logs` holds the
+container's actual last words.
+
+**The corpus says how far this reaches, and the sweep is the evidence rather than
+the argument.** Ten containers in the 50 committed fixtures sit in
+`state.terminated`, and they account for exactly ten — **the first draft of this
+paragraph said three where the sweep says two and left `neverback`'s pair out
+altogether, reaching nine and not noticing**, which is the third arithmetic
+this entry got from prose instead of from a run:
+
+| how many | which | why the card is right today |
+|---|---|---|
+| 2 | `failed/app`, `succeeded/migrate` | `phase` is terminal, so they leave through [`finished`]'s door before any container rule runs |
+| 3 | `init/migrate`, `notfound/app`, `oom/hog` | both halves carry *identical* runs, so the card reads correctly **by luck** |
+| 3 | `healthy/migrate`, `neverback/broke`, `neverback/done` | no `lastState` at all — there is no second run to disagree with |
+| 1 | `healthy-retry/wait-for-db` | suppressed by `doing_its_job`, an init container that finished |
+| 1 | **`neverrules/retry`** | **the two differ and a card is drawn** |
+
+So `neverrules` is the only committed object where the two halves differ and a
+card is drawn — which is why it took a capture trip to find,
+and why the general defect is bigger than the one fixture: `restartPolicy:
+OnFailure` with a container that failed once, then exited `0` and sits terminated
+beside a running sibling, is the shape every Job produces, and rule 6 calls that
+container's last run a failure.
+
+**The ruling.** *The last run on record* is computed **once**, from the
+container: `state.terminated` when the container is sitting in one, else
+`lastState.terminated`. Rules do not each pick a field.
+
+**And `state.terminated` may source a card only where the run is settled** —
+where nothing is going to start another. That bound is what keeps
+[D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15)
+intact rather than reversed, and it is worth being exact about which of D96's
+legs are load-bearing here:
+
+- **Leg 3 stands on its second argument, and this entry repeated its first one
+  after the review had falsified it.** The first — *a container that is coming
+  back has the same record in both halves, so refusing the current one loses
+  nothing* — holds only where consecutive runs end the same way; the operator
+  review measured 24 of 25 samples where they did not, and D96 leg 3 now carries
+  the correction. The argument that actually does the work is the second one and
+  it is untouched: a card drawn off a run another is about to follow is a
+  function of when the sampler looked, which invariant 5 leaves nowhere to
+  debounce.
+- **Leg 4 stands, and it is the one this bound exists for — but not for the
+  reason this entry first gave, and the correction is the entry's own evidence
+  rule turned on itself.** The first draft said the gang-restart trigger's
+  effective policy is `Always`, so it is *coming back*, so a policy-only
+  `settled` leaves it alone. **`gang.json` says otherwise**, and the PM wrote the
+  claim from D96's prose instead of opening the object — the same class as the
+  two rulings [D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)
+  catalogues, one entry after condition 1 was written to stop exactly it:
+
+  ```
+  $ jq '.spec.restartPolicy, (.spec.containers[]|{name,restartPolicy,restartPolicyRules})' tests/fixtures/gang.json
+  "Never"
+  {"name":"trigger","restartPolicy":"Never","restartPolicyRules":[{"action":"RestartAllContainers",…[3]}]}
+  ```
+
+  Pod `Never` **and** the container's own `Never`. A policy-only predicate calls
+  the parked trigger *settled*, and in the 10–30% of samples where its own
+  `exit 3` sits in `state.terminated` rule 6 draws — measured, the exact card D96
+  priced and refused. **So `settled` refuses the ending itself** — a container
+  sitting in an [`Ending::RestartRule`] run is one a firing has removed in order
+  to start again — **and carries a second clause besides**: a container whose
+  `lastState` holds such a record has been taken by the pod's own rules before, so
+  they can take it again. That trace is the only mark
+  `spec.containers[].restartPolicyRules` leaves in a *status*, it is already
+  decoded, it needs no snapshot field, and it can only move a container from
+  settled to coming-back — never the other way. A plain `Restart` rule leaves no
+  trace at all, which is why `neverrules/retry` is untouched by it and why the
+  Phase 4 box that reads the real field is still owed.
+
+  **The `lastState` clause does not hold the first firing, and crediting it with
+  that was an over-claim this entry made twice.** At `restartCount: 0` with no
+  `lastState` there is no trace yet, and `settled` answers *yes* — reproduced.
+  What keeps rules 1, 2, 5 and 6 quiet there is each rule's own guard: rule 6's
+  `restarts == 0` beside a run the container is sitting in, rule 5's count, rule
+  1's `waiting` trigger, rule 2's reason. Rule 15 **does** draw on that first
+  firing, which is D97's own gap and is boxed, not fixed here — **and that box
+  landed on 2026-08-21**: rule 15 reads the declared rules now and stands down on
+  that firing ([D135](#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21)).
+  `the_gang_restart_triggers_first_firing_is_held_by_the_rule_it_declared`
+  measures it, and asserts the silence rather than the card.
+  **The flicker is not reopened; it took the object rather than the argument to
+  keep it shut, and then took a second review to find what the object had not
+  been asked.**
+- **D96's headline — *nothing may put a sentence on the screen from this
+  field* — was already scoped by
+  [D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)**,
+  which built rule 15 on exactly the case D96 named as *what the ruling does not
+  cover*: a container that **cannot come back** is permanent rather than
+  transient. This entry continues that carve-out to rule 6; it does not widen it
+  past *settled*.
+
+**Settled is decidable from the object, and it is one predicate every rule that
+reads a terminated record calls.** `Always` restarts everything; `OnFailure`
+restarts a non-zero exit and lets a clean one lie; `Never` starts nothing.
+
+**But the policy is not the first question, and reading it as the first question
+was a defect the second operator review caught.** Two endings are the kubelet
+already bringing the container back, under **every** policy including `Never`: a
+status it lost ([`Ending::Unwatched`] — *a container the kubelet lost is
+restarted even under `Never`*, which rule 15's own doc had said all along) and a
+`RestartAllContainers` firing ([`Ending::RestartRule`], which removes the
+container in order to start it again). The first draft answered `Never` → settled
+for both, which put the shared predicate in direct contradiction with the rule
+one function over — **the exact class this entry was written to close, reproduced
+inside the thing that was meant to close it**, and measured: it turned a dated
+card with a working `--previous` into an undatable one pointing at `describe`.
+
+**So the predicate answers the ending first and the policy second, and it names
+every variant rather than comparing against one.** That is not a style choice:
+D95's whole mechanism is that adding an `Ending` stops the file compiling until
+every reader says what the new one means, and `== Ending::Finished` opted out of
+it. It is written **once**
+— two rules reading one container and disagreeing is the defect class this repo
+has paid most for, and it is precisely what rule 6 and rule 15 were doing about
+this field.
+
+**A settled failed run draws exactly one card, and it takes three owners to say
+that — not two, which is what the first draft of this paragraph claimed.** Rule
+15 draws where the run is settled **and** `restarts == 0` — D97's proxy for a
+field the snapshot cannot yet see. Rule 6 draws about the settled run where
+`restarts != 0`. **Rule 2 owns the labelled memory kill on both halves**, which
+rule 6 stands down on by name — and until every reader took the same record, that
+container drew *nothing at all*: rule 6 deferred, rule 15's count had spent, and
+rule 2 was reading the earlier run out of `lastState`. The operator review
+measured the silence and it is the sharpest argument in this entry for the *once*
+above. `a_settled_failed_run_draws_exactly_one_card` asserts it over all three
+rules, because the split is the only thing standing between a duplicate and a
+silence, and a split nobody wrote down is one the next edit closes over. **What
+draws neither is a settled run that did not fail** — `OnFailure` with a clean
+exit on top of a failure, the Job shape — and that row is named and counted
+rather than left to be discovered. D97's `restarts == 0` is **not** dropped and its residual gap
+is **not** widened: the Phase 4 box that teaches rule 15
+`spec.containers[].restartPolicyRules` is where that guard is retired, and the
+field can only ever *add* restarts, so it can only move a container from settled
+to coming-back — the upgrade lands in the shared predicate and both rules learn
+at once. **That last clause is reversed on 2026-08-21**: the box landed in rule
+15 alone, and the reversal — with the object that shows what it costs — is
+[D135](#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21).
+
+**The command follows the record, and the sentence stops naming a flag it may not
+have.** Where rule 6 is about the run the container is sitting in, the log is
+plain `kubectl logs`; where it is about `lastState`, it is `--previous`. The
+shared action sentence said *The --previous flag below is what fetches it*, which
+is false on the first of those, so it now points at **the command below** without
+naming the flag — and **the caller appends `, using --previous` where its own
+command carries the flag**, so the sentence is true of all three callers and the
+one token a reader in their first month cannot guess is not deleted from the only
+renderer that ships. The clause is eighteen characters because it was *measured*
+and not chosen: an explanatory fifty-seven-character version took the action from
+four wrapped lines to five and pushed 57 cards from ten lines to eleven, against
+`screens/alerts.md`'s budget. The pairing is structural — one helper decides the
+sentence and the command together — rather than a convention repeated in three
+arms.
+
+**It does not buy a referent, and the first draft of this paragraph claimed one.**
+It said the flag is *still on the card, one line down, which is where the reader
+copies it from* — written from the shape of a card rather than from `screens/`.
+No screen puts it there: `screens/alerts.md` § Finding card specifies **four**
+parts — who · what happened · the evidence · what to do — and `kubectl_cmd` is
+not one of them; the pane below the list is the **command log**. `screens/once.md`
+splits harder on purpose, findings on stdout and the commands on stderr, so
+`k8rs --once > findings.txt` puts *the command below* on the other stream. The
+word **below** was already dangling before this change and is dangling one word
+smaller after it; it is filed in [`backlog.md`](backlog.md) and is not this box's
+to close. **The trade this entry priced is real; the reinforcement it claimed as
+consolation was not there to lose.** `failed_run_action`'s signature does not move,
+which D124 condition 3 forbids.
+
+**Rule 5 was scoped out of this entry and the scoping was wrong, measured on a
+cluster within the hour.** The first draft said rule 5 *needs `restarts >= 3` and
+stands down on a `CrashLoopBackOff` wait, so no committed object reaches it in
+the settled shape* — true of the corpus, false of a cluster. With a `Restart`
+restart-rule the container does **not** sit in `CrashLoopBackOff`: 12 of 14
+samples over 2m11s were `state=terminated` while `restartCount` walked 0 → 5. And
+because rules 5 and 6 had until then read the *same* field, their runs, durations
+and stamps matched and [`one_card_per_action`] folded rule 6 away — **so changing
+one of the pair is what broke the fold**, and the operator review measured one
+container drawing two cards that print one sentence over two different commands
+and two different exit codes, the `--previous` one answering *unable to retrieve
+container logs* on stdout with `rc 0`.
+
+**So the *once* is not a tidiness and a partial *once* is worse than none**:
+rules 1, 2 and 5 route through [`last_run_on_record`] too. Rule 1 is a provable
+no-op — its trigger is a `waiting` state, so the container is never sitting in a
+run — and it is routed anyway and pinned by a test, because *provably identical
+today* is what the next reader has to re-derive. The two direct reads of
+`lastState` that survive are the helper's own and rule 13's existence check,
+which asks whether the container has **ever** run and never what the run was.
+
+**What this does not touch.** `settled` still reads a policy and not the rules
+beside it, and the operator review measured what that costs: a **sibling's**
+`RestartAllContainers` un-settles every container in the pod, and rule 15 drew
+*nothing is starting it again* about a container the kubelet restarted 48 seconds
+later. That is rule 15's pre-existing D97 gap, it needs a snapshot field and a
+capture, and it belongs to the Phase 4 `restartPolicyRules` box — which now owes
+one more thing than it did: **the field has to be read across siblings, not only
+on the container.** Recorded in [`backlog.md`](backlog.md), not folded in here. `Finding`, `ObjectId` and
+`analyze`'s signature are untouched (D124 condition 3), no rule is added, and
+`rules.rs`'s whole-file mutation gate re-runs at Phase 4 close (condition 4).
+
+### D126 — the guards Family A added, and the five judgement calls they could not avoid making (2026-08-20)
+
+Phase 4's Family A turned four promises into build steps and anchored a fifth
+([`check-docs.py`](scripts/check-docs.py) · new
+[`reports-guard.py`](scripts/reports-guard.py) · new
+[`width-guard.py`](scripts/width-guard.py) ·
+[`sanitize.jq`](scripts/sanitize.jq)). Each needed a call the box did not make,
+and a guard whose thresholds live only in its own source is one nobody can argue
+with later.
+
+**The node anchor is `k8rs-(control-plane|worker[0-9]*)` with an optional
+`.lan`, and it is used twice.** `sanitize.jq` refused node names that did not
+`startswith("k8rs-")`, which
+[D94](#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)
+proved `k8rs-review-control-plane` walks straight past — three agents reached for
+that name, and the only place the string is written in this repo is D94's own
+title. **The anchor is the fix because no wording can fix a string nobody wrote.**
+Measured before it landed: `node_names` over all 55 committed fixtures returns
+exactly `k8rs-control-plane`, `k8rs-worker`, `k8rs-worker2`, `k8rs-worker3`, and
+`fixture-audit.sh` prints a byte-identical line before and after. `k8rs-control-plane2`
+is **refused** — an HA cluster is one nobody can reproduce from the docs.
+
+**And the second use is the one that was actually open.** A CertificateSigningRequest
+is the one object carrying a node name *only* in `.spec.username`, so
+`system:node:k8rs-review-worker` was **accepted** by the committed filter with no
+`nodeName` anywhere in the file — proven by running it. Both rules now share one
+`kind_node_re`, which is [D52](#d52--the-guards-were-fed-the-shapes-their-authors-wrote-not-the-shapes-the-repo-produces-2026-08-12)'s
+lesson applied before it cost anything: `fixture-audit.sh`'s two hand-copies of
+the same rule were anchored in the same edit, because two files disagreeing about
+one name is how a guard prints a verdict the other contradicts.
+
+**`cluster.sh` refuses the `k8rs*` family except exactly `k8rs`, and only in
+`up`.** It is the loud guard, not the load-bearing one — a reviewer runs
+`kind create cluster` directly, because a review is one measurement and not a
+fixture trip, which is why the anchor had to be in the sanitizer. Refusing in
+`up` alone is deliberate: a cluster already built under a bad name must still be
+tearable-down, and a guard that traps a running cluster is one people delete.
+`K8RS_CLUSTER=review` keeps working ([D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)).
+
+**The 100-column guard has exactly one exemption: a markdown table row inside a
+comment.** A table row cannot be wrapped without ceasing to be a table row, which
+is what makes it an exemption rather than an allowance — and the guard **prints
+the exempt count** so the size of the widening is visible rather than assumed.
+`rustfmt`'s `wrap_comments` and `error_on_line_overflow` are nightly-only, so a
+`rustfmt.toml` would be silently ignored on the pinned stable toolchain: a gate
+that looks like one and is not. **Named ceiling**: it counts characters, not
+display columns.
+
+**`reports-guard.py` reads prose, and four of its calls are floors rather than
+rules.** It refuses **any non-`.md` file in `reports/` unread** — a
+`kubectl get -o yaml > reports/x.yaml` is precisely what it exists for and
+precisely what a `*.md` glob never opens. A **redaction is not a leak**:
+`<redacted>`, `<elided>`, `***` pass, because [`reports/README.md`](reports/README.md)
+tells people to name the field instead and refusing that trains them to leave the
+value in. The **base64 floor is 12 encoded characters**, set by the shortest thing
+worth catching — an IPv4 encodes to 15 — not by taste. And two ceilings are named
+out loud: a bare `prod-master-01` is indistinguishable from a pod name, so only
+machine-shaped hostnames are caught, and `K8RS_NODE_IMAGE=kindest/node:v1.36.1`
+is not read as an env value because the README permits pasting that command. The
+README paragraph stays; this is the floor under it, not a replacement for it.
+
+**The canary runs on every invocation, not only in the self-test** — it appends a
+bearer token to bytes it has just read from a real report and asserts the patterns
+fire, so *found nothing* and *read the wrong directory* cannot print the same
+line (CLAUDE.md § *A derived list asserts it found something*).
+
+**The decision-index guard is level-3-only, and finding out why is the useful
+part.** `### Design` and `### Dependencies` are level-3 headings beginning with
+`D`, and `#### D112 is right and narrow…` is a real subsection under D112 — so a
+naive `D\d+` at any depth invents a decision number and then demands an index line
+for the thing it invented. Both shapes are self-test cases. It checks **both
+directions**: a heading with no index line, and an index line whose `D##` has no
+heading.
+
+**One comment block moved rather than wrapped, and the precedent is worth a
+line.** `rules.rs`'s `container_snapshots` carried a comment whose single word is
+a 90-character test name — at indent 12 under `// ` that is 105 columns and no
+break exists inside a test name. The whole 15-line block moved up one nesting
+level, out of the closure to sit above `init.chain(main)` at indent 4, where it
+fits at 98. **Nothing was reworded**: the rule for this box was *rewrap, never
+summarise*, because several of these paragraphs are the only record of a
+measurement and a word lost is a claim lost. Byte-identity of every split string
+literal and every comment's word sequence was proved by a throwaway tokenizer
+(3,067 + 706 + 381 literals, ~106k comment words), itself seen red on a planted
+collapsed space and a dropped word — a rewrap is exactly the edit where *it still
+compiles* proves nothing.
+
+**D31 happened to the guard's author while writing the guard, which is the entry's
+last point.** `DATABASE_PASSWORD=hunter22xyz` was **not** refused —
+`\b(password|token|…)` never matches between `_` and `P` — so the credential class
+was green over the exact framing it exists for. It was caught by planting into a
+*real* report, not by the self-test, which had only ever been fed `token: s3cr3t`
+at line start. Three siblings fell out with it: a JSON key's closing quote sitting
+between name and colon, a base64 finding reporting line 0, and
+`client-key-data: <elided>` being refused because the pattern matched the key
+alone. **A guard is proven only for the framings it was fed** — and the self-test
+is the thing most likely to have fed it only the easy one.
+
+### D127 — the Report shape, the test that decided its fields, and the two panes it cannot express (2026-08-20)
+
+Phase 4's shared contract, written alone because six report boxes call it. The
+box named three things — *title · rows · the finding each row can jump to* — and
+the shape landed with five, so the question that mattered was not what to build
+but **what to refuse**.
+
+**The inclusion test: a field is in only if a screen draws it today.** The
+asymmetry is what makes it cheap. `analysis.rs` freezes at the *end* of Phase 4,
+and all six report boxes are inside it — so a field the reports turn out to need
+can still be added by the box that needs it, while a speculative field cannot be
+removed and is [D14](#d14--three-plan-corrections)'s violation in a file nobody
+may touch again. Omission is recoverable here; inclusion is not.
+
+Run over the candidates, it kept four and refused one:
+
+| Candidate | Drawn today? | |
+|---|---|---|
+| pane title, rows, per-row band, text, detail | `screens/analysis.md`, every pane | in |
+| a jump target with three cases | the `⏎` footer; the restart-row box demands the finding-less one | in |
+| the section that could not be computed | a third of `screens/analysis.md` | in |
+| the sidebar badge | `capacity  1 ▲`, `certificates  30d` | in |
+| a per-pane `$ kubectl …` line | drawn — **but it is not the report's** | **out** |
+
+The refusal is the one worth recording. The `$ kubectl get nodes -o json` strip
+under each pane is the **global command log**, which shows the calls k8rs
+actually made ([screens/context.md](screens/context.md) § *What the command log
+shows*), and `analysis.rs` is pure and makes none. A row that needs a teaching
+command reaches it through `Finding::kubectl_cmd`, which already exists. A
+finding-less row that wants one is a real question, and it belongs to whichever
+report box first has one — still before the freeze.
+
+The badge went in for the opposite reason: it is on four panes and in
+[screens/widgets.md](screens/widgets.md) § 1a, and deferring it would have put
+the same field in six boxes' diffs, which is the *two reports counting the same
+thing two different ways* defect Family C is grouped to prevent. One constraint
+came with it and it is in the type: **no glyph** — `▲` is `theme.rs`'s, so the
+badge carries a value and a band.
+
+**A second constraint was written into that doc and it was wrong.** The first
+draft made the badge a discriminator — `None` meaning *not checked* while a
+report that ran and found nothing carried `Some("0")` — and three of the box's
+own six panes falsify it: `drain safety`, `waste` and `posture` all badge
+`None` and all ran, `waste` with a `Critical` row. The screen agrees with the
+panes: across all five mockups exactly **two** sidebar entries badge,
+`capacity  1 ▲` and `certificates  30d`, and `drain safety` carries nothing in
+the very mockup that draws `node-2  ● BLOCKS`. So there is a third state the
+binary had no room for — *this report does not badge*.
+
+Ruled, and against one reviewer: `Some("0")` goes. `screens/widgets.md` § 1a
+settles it in its own words — the badge *"has room for a number, not for a
+reason, so the report itself carries the reason"*. **`None` means nothing is
+drawn beside the name**, for any of three reasons, and the single record of
+*did not run* is a [`Row::NotComputed`] in the body, which the screen needs
+anyway. A badge valued `0` carries nothing the body does not already say, and
+the sidebar has no room for the reason either way. It is **not** that
+`Some("0")` and `None` were one fact twice — *ran and found nothing* and *did
+not run* are opposite facts, and `capacity  0 ○` and a blank `capacity` are
+visibly different. The distinction is real; the body is where it is drawn, and
+a renderer must not read this as suppress-the-badge-on-zero.
+
+**Selection is a property of the row, and two drafts tried to derive it from a
+field.** The first defined `jump: None` as *a row that cannot be selected at
+all* while the tests used that same value on `No CPU/memory limit: 34
+workloads — ⏎ to list`, a row the screen offers `⏎` on. That contradiction was
+caught and the doc corrected to *no destination is recorded, over two different
+rows, and nothing may key selection on it* — which removed a wrong mechanism
+and supplied no right one, so a table header and a counted row were still
+identical in the type.
+
+**Ruled: `Row::Prose(String)`, and no fourth `Jump` case.** The two questions
+are not one. *Where does `⏎` go* is unspecified — `screens/` does not say what
+`⏎ to list` opens and [screens/resources.md](screens/resources.md) carries the
+same unanswered pattern (`⏎ to see`) — so `Jump::Set` would be a case no screen
+has specified, and the inclusion test refuses it. But *may the cursor land here*
+**is** specified: every pane draws `↑↓ move  ⏎ open`, six drawn rows are prose
+(the column header, the sentence under the table, the metrics-server
+parenthetical, `Still counted, from what you can see:`, `Worth knowing (not
+broken):`, the `Versions:` summary), and the consumer is `views.rs` in **Phase
+9, after this file freezes**. By the box's own test that is an *in*.
+[screens/widgets.md](screens/widgets.md) § 2 had already answered the identical
+question one pane to the left — the sidebar is a flat list whose group headers
+are unselectable rows that `↑↓` skips. So the variant says whether the cursor
+may land, `Answer::jump` says only where it goes, and `Answer::severity: None`
+narrows to *a selectable row that makes no judgement*.
+
+**`NotComputed` is unselectable too** — the author's extension, not the ruling's,
+and kept: a row saying *this check could not run* carries no destination, and
+`⏎` on it would have to invent one.
+
+**The producer signature could not build four of the six reports, and could not
+construct `Jump::Finding` at all.** The module doc stated
+`fn(&ClusterSnapshot) -> Report` as binding, and six cold-dispatched boxes would
+have read it that way. [`ClusterSnapshot`] carries no PodDisruptionBudgets
+(Drain safety), no Services, EndpointSlices, PVCs or ReplicaSets (Waste) and no
+CSR list (Certificates). Worse, the rule functions are **private** to `rules.rs`
+and `analysis` is its *sibling*, not its child — so the Certificates producer's
+only routes to the C1 card its drawn row jumps to were to run `analyze` a second
+time or to re-derive the expiry here, which is two implementations of one rule.
+The shape was offering a case no producer could fill. Fixed in the doc, not the
+shape: producers take the snapshot **and the findings `analyze` has already
+returned** — they are in hand, since `analyze` runs continuously for Alerts —
+and a paragraph names the un-watched inputs so the box that needs one knows it
+is expected to add it under [D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+window rather than meeting the gap cold.
+
+**A hand-written fixture contradicted the rule it was named after.** The tests'
+C1 `Finding` carried `uid: Some(…)` and a `timestamp` a year before the
+reference `now`; the real rule emits **`uid: None`** and **`timestamp: None`**,
+two states this file's own docs declare impossible — `rules.rs` says the
+kubeconfig certificate is the only `None` uid, and
+[D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)
+says the two bands of one rule may not draw a right edge on one card and a blank
+on the other. A Phase 9 detail view built on that row would have drawn *"365
+days ago"* on the one card that must have no age. The cause was a test helper
+that hardcoded `uid: Some(…)`, so **`uid: None` was a shape the file could not
+express**, and the one place it is mandatory got the wrong value in silence.
+This is CLAUDE.md § *fixtures come from real cluster captures, never
+hand-written* applied one layer up: the fixture is now copied field for field
+off the rule, and the helper can express both.
+
+**Two panes the shape still cannot express.**
+
+1. **A row standing for a set of objects has no jump case** — five of them:
+   Capacity's `34 workloads`, Waste's `47 pods` / `12 replicasets` / `9 pods`,
+   Certificates' `2 kubelets waiting to join`. **Owed by the Waste box, not
+   Capacity**, and that moved on review: Capacity has one such row, while Waste
+   has three plus *unbounded* per-object rows — every Service matching no pod,
+   every PVC bound to nothing — over inputs that are on-demand fetches and
+   deliberately not watches. So what is actually needed is a cap and an overflow
+   row, not merely a destination, and settled by Capacity in isolation it would
+   be re-answered by Waste. Capacity emits `jump: None` meanwhile, which is
+   exactly what that field now means and costs nothing before `views.rs` exists.
+2. **Three panes draw the band *inside* the line** — `node-2  9.1 cpu ▲`,
+   `node-2   ● BLOCKS`, `1.31 (1) ▲ too far behind` — and a `Row` carries one
+   band and one string, not cells. The sharper half: Capacity's `NODE / PROMISED
+   / USABLE / IN USE` table would force `analysis.rs` to pre-align four columns,
+   which is layout two layers too low. The tests hold those rows as
+   single-spaced semantic text and assert band, count and jump — never spacing.
+   **The operator review's answer is that it should not be a table at all**: the
+   sketch shows CPU only where memory is what kills a workload, the IN USE
+   column is empty on any cluster without metrics-server, and aligning cells
+   would make `views.rs` split a rendered string back into values — which is
+   [PRIOR-ART § F1](PRIOR-ART.md)'s single stated cause, arriving through the
+   back door. One row per node, the comparison in `text`. The Capacity box rules.
+
+Neither is a defect in this box; both are the shape meeting a screen it was
+written from, and both are cheaper to answer with the first real report in hand
+than in the abstract.
+
+**Four more findings were ruled out of this box and owed to a named one**, all
+inside Phase 4 and so all before the freeze: `Row` carries no moment, so a row
+printing a duration freezes it → the restart-row box; a Certificates badge
+reading `30d ▲` while the section it did not check is `Critical` → the
+Certificates box; three contradictory renderings of a missing metrics-server,
+Waste's scope label over a pane that mixes sums with facts, and Posture's
+missing pane → `screens/`, before those boxes are briefed.
+
+**What the author settled that the brief did not**, kept because a later box
+would otherwise re-decide it:
+
+- **`Row` is an enum, not a struct with an optional `not_computed`.** The variant
+  makes *reason* and *way out* both mandatory; the `Option` lets an author write
+  the reason and forget the way out, which is the half a reader cannot act on.
+- **`NotComputed` carries no cause enum.** Missing capability, missing permission
+  and missing scope share one sentence shape and the screen explicitly cannot
+  tell them apart, so a cause field would be drawn by nothing.
+- **`detail` and `action` are `String`, empty meaning *leave the line out*** —
+  `Finding::evidence`'s stated convention rather than an `Option<String>` beside
+  it, so a renderer needs one rule and not two. `action` is its own field because
+  `views.rs` draws the `→ `, and folding it into `detail` would spell a glyph
+  here.
+- **`Jump::Finding` is boxed.** Unboxed, `Row::Answer` measured 393 bytes against
+  `NotComputed`'s 48 and clippy refused it at `-D warnings` — numbers read off the
+  tool, not estimated ([D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
+- **The dead-code expectation is `#![cfg_attr(not(test), expect(…))]`, and
+  `rules.rs` needed no such gate.** The lint is per-target; this file's tests
+  construct and read *every* item, so under `cargo test` the expectation is
+  fulfilled by nothing and `-D warnings` rejects the attribute itself.
+  `rules.rs` never hit it because two of its items stay dead in the test target
+  too — the asymmetry [D38](#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)
+  records. Gating keeps D38's expiry on the binary and leaves `dead_code` live
+  under test, where a field no test reads is a field no test asserts. **D38's
+  pre-authorisation carries over unchanged: whichever box constructs the last
+  item deletes the line.**
+- **Derives are `Clone, Debug, PartialEq, Eq`** — `Finding`'s exact set. `Clone`
+  has no consumer today and is kept deliberately: `views.rs` arrives in Phase 9,
+  after this file freezes, and adding a derive to a frozen file is a process stop.
+
+**The mutation gate is silent over this box and that is honest, not passed.**
+`analysis.rs` holds types and no functions, so `--in-diff` reports no mutants —
+exactly [D35](#d35--just-mutants-is-a-check-that-cannot-fail-and-the-justfile-unfreezes-for-one-line-2026-08-12)'s
+position when `rules.rs` was in the same state. The author ran D35's own control
+rather than asserting it: `cargo mutants --list --file src/analysis.rs` and
+`--file src/does-not-exist.rs` print identical nothing, against 571 lines for
+`rules.rs`. What stands in for it is expressibility — every pane the screen draws
+is built and read back, with row counts, bands and jump targets asserted, and
+three planted defects proven red.
+
+**A trap every future box that creates a file will hit**, found live here: a new
+file is untracked, `git diff HEAD` cannot see it, and `cargo mutants --in-diff`
+therefore prints `No mutants to filter` over an **empty diff** — green for the
+wrong reason, indistinguishable from the honest zero above. `git add -N` before
+the gate is what makes the diff real.
+
+### D128 — the six panes, the one rendering of a missing metrics-server, and the badge that does not fit (2026-08-20)
+
+[D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)
+owed three things to `screens/` **before Family C could be briefed** — three
+contradictory renderings of a missing metrics-server, Waste's scope label, and
+Posture's missing pane — and owed the Capacity pane itself to the operator
+review, which had ruled it should not be a table at all. All four are settled
+here, in one designer turn ahead of the code, because a brief cannot decide
+behaviour the screen contradicts.
+
+**The three renderings, named and killed.** They were: `(needs metrics-server
+for the IN USE column)` drawn as a permanent parenthetical **in the sketch whose
+usage column was full of numbers**; a claim that the missing capability *is what
+the column reads*, which is 52 characters inside the 11 the old sketch gave that
+cell, once per node; and `analysis.rs`'s own [`Row::Prose`] doc citing the first
+as an example while [`Row::NotComputed`]'s doc, in the same file, refused the
+second — *"no `—` in an absent column, and no per-row unknown marker"*. **One
+rendering
+now:** the `using` lines are simply absent and **one** `Row::NotComputed` sits
+under the node rows, in the place their answer would have been. Five cluster
+states are drawn or named — answering · absent · installed but not answering · a
+403 on the metrics API · **the node section itself off, which draws no metrics
+row at all**, because one section may not offer two ways out to a reader who can
+only take one.
+
+**Capacity is not a table, and nothing on the page is.** One row per node, one
+string — `node-2  6.2 of 8 cpu · 30 of 16 GiB` — the band first and never
+mid-line, the `using` line as its `detail`. **Both dimensions on every row:** CPU
+overcommitment stops the next pod from starting, memory overcommitment gets a
+running one killed, and a report that names one teaches the wrong number to
+watch. It also kills the three mid-line bands D127 recorded as unexpressible
+(`9.1 cpu ▲`, `node-2   ● BLOCKS`, `1.31 (1) ▲ too far behind`): the shape was
+right and the drawings were wrong.
+
+**Waste's label, and the distinction that was itself wrong.** The title carries
+the namespace and is not a row, so it cannot scroll away from the number under
+it. But § *What each report needs* had explained Waste's safety as *per-object
+facts, not sums* — and **a count is a sum**. The real line is whether the number
+is measured against something the reader cannot see: `47 pods` is the length of a
+list they can see and is exactly true at any scope, while Capacity's promised
+total is weighed against a node's capacity and comes out silently low
+([PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)).
+
+**Posture has a pane** — one row per host path with a pod count, never one per
+pod, so a DaemonSet mounting `/var/lib/kubelet` on two hundred nodes is one line.
+It opens with a `Row::Prose`, because without it a list of things the cluster is
+supposed to have reads as an accusation.
+
+**A drawing flagged a healthy cluster, and no test can see a mockup.** `1.31 (1)
+▲ too far behind` under a 1.34 control plane is three minors, and
+[N4](#node-rules-n-series) is *more than three* since
+[D81](#d81--the-node-rules-and-the-four-things-a-real-cluster-said-about-them-2026-08-13)
+corrected it from two — so that sketch had been telling a cluster mid-upgrade it
+was unsupported ever since. Redrawn as `node-3 runs kubelet 1.30`, four behind,
+which is the case N4 exists for.
+
+**Ruled, on the PM's second pass: a badge draws its band as a glyph only where
+the value cannot carry it.** The turn's new prose claimed `certificates  30d ▲`
+beside five mockups drawing `certificates  30d`, [`todo.md`](todo.md)'s own
+sketch and `analysis.rs`'s badge doc; the string is also 21 columns in a
+20-column sidebar, which `capacity  1 ▲` escapes only because its label is four
+characters shorter. Deleting the sentence and leaving the band to colour was not
+available either — [§ Design](#design) says `● ▲ ○` never rely on colour alone.
+**So: a count draws its band as a glyph, a duration does not.** On a count the
+glyph is the *unit* — `1` counts nothing, `1 ▲` counts one warning, and a reader
+who copies `capacity  1` out of the terminal has lost what the number was *of*,
+which is § Design's copyability half binding for its own stated reason rather
+than by analogy. A duration is already a complete statement: `30d` survives a
+monochrome terminal, so `Badge::severity` colours it and adds nothing. A plain
+count with no band draws neither. The width agrees independently and is **not**
+the reason.
+
+**What the designer settled that no box had**, kept because a later box would
+otherwise re-decide it:
+
+- **Usage lives in `detail`, not in `text`.** D127's *"the comparison in `text`"*
+  is read as promised-versus-usable; folding a value that is absent on most
+  clusters into the always-present line is the empty-`IN USE`-column defect one
+  layer down.
+- **One band for both dimensions.** A node over on memory and a node over on CPU
+  are both `▲` — the *sentence* differs, because the consequence does, and the
+  kill itself is Alerts' rule 2 ([D2](#d2--the-dividing-line-broken-now-vs-risky-later)).
+- **Worst first, then name**, on Capacity and Drain safety. On a two-hundred-node
+  cluster the alternative puts the one answer the report exists to give below the
+  fold, with a badge saying *there is one in here* and no way to find it.
+- **A healthy row carries no band**; Waste's and Posture's inventory rows carry
+  `○`.
+- **An empty report is one `Row::Prose`, never `rows: []`**, so `views.rs`
+  carries no per-report empty text. `Report::rows`' documented *empty `Vec` says
+  the check ran and had nothing to say* is therefore unreachable on this screen —
+  not a contradiction, but nothing will produce it.
+- **Waste's and Posture's titles carry the namespace and Capacity's does not** —
+  its node rows are cluster-scoped, so it labels the scoped section in place.
+- **`— ⏎ to list` is off every counted row** until the Waste box answers what `⏎`
+  opens on a *set*; the rows stay selectable with `jump: None`, which is exactly
+  what that field means, and the suffix returns to every pane in one edit.
+- **The frames are drawn 15 body lines against a real 16**, so every drawing has
+  one spare line; the old file drew 13.
+- Drain safety's `● BLOCKS` moved into the band, and *"relax the disruption
+  budget"* became *"lower the minimum it must keep"* ([invariant 14](CLAUDE.md)).
+- **Loading maps to no variant, and should not** — there is no `Report` yet, and
+  it is `views.rs`'s state.
+
+**What this owes onward, and to whom:**
+
+1. **`analysis.rs`'s doc comments cite three drawings that no longer exist** —
+   `Row::Prose`'s `NODE  PROMISED  USABLE  IN USE` and its metrics parenthetical,
+   `Row::Answer::severity`'s old table row, and `Row::Answer::jump`'s claim that
+   the screen offers `⏎` on `34 workloads — ⏎ to list`. **The Capacity box fixes
+   them**, since `analysis.rs` does not freeze until this phase closes
+   ([D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+2. **The sixth sidebar entry makes five other screen files stale** — `alerts.md`,
+   `states.md`, `detail.md`, `README.md` and `once.md` all draw the five-entry
+   `ANALYSIS` list. One designer turn, and it waits for Family D in case
+   `restarts` becomes a seventh; otherwise six files are edited twice.
+3. **The badge glyph rule belongs beside `screens/widgets.md` § 2's badge list**,
+   the only place every badge on every screen is written down. Same turn as 2.
+
+2 and 3 are **one** entry in [backlog.md](backlog.md) because they are one turn,
+and that file is read at phase close, never mid-phase
+([D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)).
+1 is not in it: it has an owner and a box already.
+
+### D129 — the reports cannot see the helpers written for them, and the freeze is about logic and not visibility (2026-08-20)
+
+Family C was briefed as one turn and stopped on its first box. Five of the six
+reports call functions that exist, are correct, and are **private** to `rules.rs`
+— and `analysis.rs` is that file's *sibling*, not its child (invariant 11: eight
+flat files, no `mod.rs` pyramid). The dev did not work around it, which was
+right: working around it is a second implementation of exactly the code
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)
+says two reports must not disagree about.
+
+**Proven by the compiler, not argued** — a temporary call in `analysis.rs`, then
+reverted: `E0603` on `pods_on`, `a_drain_would_move`, `node_overcommitted`,
+`kubelet_too_far_behind`, `quantity_milli`, `minor_version`, `finished`,
+`mounted_path`, `is_runtime_socket`, `charged`, `cpu_text`, `bytes`, and the
+constants `SUPPORTED_SKEW` and `NODE_NAMESPACE`. `rules.rs` exports exactly four
+functions: `ObjectId::group_key`, `Finding::age`, `age` and `analyze`.
+
+**And two rules are in no `Vec<Finding>` at all.** `analyze`'s node loop calls
+`node_stopped_being_ready`, `cordoned_with_work_left_on_it` and
+`node_running_low` — nothing else (`rules.rs:1574`–1576, read at HEAD).
+`node_overcommitted` (N5) and `kubelet_too_far_behind` (N4) are defined at 5737
+and 5677 and called **only from `src/rules_tests/node.rs`**. That is not dead
+code and must not be deleted as such: [§ N-series](#node-rules-n-series) says N4
+is *"computed here but shown in the Versions report, not in Alerts"*, and N5's own
+doc says *"`Info`, and it does not reach Alerts: it is the Capacity report's
+input"*. **They were written for a consumer that could not reach them.** So the
+brief's escape hatch — [D127](#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)'s
+*the producers take the findings `analyze` already returned* — closes the gap for
+C1 and rule 8 and does not close it for N4 or N5.
+
+**Ruled: the freeze forbids reaching back into finished logic, and widening a
+name's visibility is not that.**
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+answers *may a later box change what a rule does*, under five conditions, and the
+first is a defect proven on a capture. **This is not that question.** Nothing here
+changes what a rule reads, says or stands down on; D124's condition 3 protects
+`Finding`, `ObjectId`, `analyze`'s signature and the shared helpers' signatures
+from being *reshaped*, and this reshapes none of them. It is an **export gap** —
+the plan built a layer above `rules.rs` and never gave it the door — and
+[CLAUDE.md § architecture workflow](CLAUDE.md#architecture-workflow) says exactly
+what to do with one: *if a later step needs a frozen file changed, the plan is
+wrong: stop, fix the order, record it in `NOTES.md`, continue.*
+
+**The bounds, and they are the ruling:**
+
+1. **`fn` → `pub(crate) fn`, and nothing else.** No body, no signature, no name,
+   no argument order, no return type, no `#[cfg]`, no doc claim about behaviour.
+   A diff line that is not a visibility keyword is outside this decision.
+2. **Only the items a Phase 4 report actually calls**, named in the turn's report
+   so the list is auditable. A helper widened *in case* a later report wants it
+   is not covered — the export surface is grown by demand, once, with a caller in
+   the same commit.
+3. **`just check` green is the proof it changed nothing** — every existing caller
+   compiles unchanged and all 285 tests pass, which is what distinguishes this
+   from a reshape.
+4. **The whole-file mutation gate on `rules.rs` re-runs at this phase's close**
+   anyway, because D125 already changed the file under D124's condition 4. This
+   decision adds no new obligation; it inherits that one.
+5. **Not a licence to move logic.** If a report needs a helper to behave
+   *differently*, that is D124's question and its five conditions, not this one's.
+
+**A third pane the shape cannot express, and it is ruled here because
+`analysis.rs` unfreezes at this phase's close.** `screens/analysis.md`'s flagged
+Capacity node draws **two** indented paragraphs — `using 3.4 cpu and 12 GiB`,
+then the explanation — and `Row::Answer::detail` is one `String` whose doc forbids
+a `\n` (*"a `\n` here is a wrap `views.rs` did not make"*). A healthy node draws
+one paragraph, a node with no metrics-server draws none. **`detail` becomes
+`Vec<String>`, one paragraph per element**, and the empty vector keeps the
+existing convention that *empty is drawn by leaving the line out*. The
+alternative — folding the measurement into the explanation, or into the row's
+`text` — is a screen change, and
+[D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)
+put usage in `detail` for a stated reason: a value absent on most clusters may not
+ride the always-present line. D127's own inclusion test decides it — *a field is
+in only if a screen draws it today* — and two paragraphs are drawn today.
+
+**Three inputs have no committed capture, so box 1871 cannot close on them yet.**
+Read, not assumed: `poddisruptionbudgets.json` and `persistentvolumeclaims.json`
+are both `"items": []`, `endpointslices` is not in the `justfile` capture loop at
+all, and all three Services in `services.json` match pods — so **Drain safety's
+whole reason for existing** (a PDB whose `minAvailable` equals the replica count)
+and **Waste's headline row** (the Service matching no pod, the 503 nobody can
+explain) each have no positive fixture, and hand-writing one is what
+[D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
+refuses. `scripts/broken.yaml` grows a PDB at its floor, a bound-but-unmounted
+PVC and a Service whose selector matches nothing; the capture loop grows
+`endpointslices`. **That is `tester`'s manifest and the PM's capture**
+([D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)),
+and it is the same trip Family B already owes — one trip, not two.
+
+**What the PM got wrong in the brief, recorded because it caused the stop.** It
+said *write the shared readers once, and name them*, which reads as *write them in
+`analysis.rs`* and was written without knowing `pods_on`, `a_drain_would_move`,
+`charged` and `quantity_milli` already existed. The brief named `rules.rs`'s
+region markers and its line numbers and still did not check what was **public**.
+The gap a brief cannot close by naming regions is the one the reader has to
+compile to find.
+
+**C2 is not this phase's, and the screen already knows.** `screens/analysis.md`
+draws `○ the API server certificate has 210 days`; C2 needs the TLS peer
+certificate, which kube-rs does not expose, and it is a Phase 5 box
+([`todo.md`](todo.md) § Phase 5, *Certificate rules that need the wire*). This is
+already recorded as a picture promising a row with no data path, so the
+Certificates producer leaves it out and the screen is not changed for it. C3's
+pending-CSR row is the same shape and the same phase — its `Option` field is
+`None` in Phase 4, which is exactly one `Row::NotComputed`.
+
+### D130 — the unblock turn: what the export gap actually cost, and eleven things two agents settled that no box had (2026-08-20)
+
+[D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20)'s
+ruling was carried out and its bounds held: **twelve** items widened, not the
+thirteen proposed — `charged` is reached through `promised`, `SUPPORTED_SKEW`
+through `kubelet_too_far_behind`, and `quantity_milli` has no decided Phase 4
+caller, so all three stayed private. Every changed line in `rules.rs` outside
+§ SNAPSHOT TYPES is a visibility keyword; three signatures became multi-line only
+because rustfmt reflowed them once `pub(crate) ` crossed 100 columns.
+
+**The proof went past what bound 3 asked for.** Green tests say the code still
+compiles; they do not say it still *answers the same*. HEAD was built from
+`git archive` into a scratch tree and both binaries run over all 55 committed
+fixtures: **148 lines, 29 cards, byte for byte identical**. That is the check a
+visibility change should always get, and it is cheap.
+
+**`rules.rs:11`'s `#![expect(dead_code, …)]` is what hid the export gap for a
+whole phase.** With it removed, `never used` prints for `group_key`,
+`SUPPORTED_SKEW`, `kubelet_too_far_behind`, `minor_version`, `node_overcommitted`,
+`promised` and `charged` — the entire N5 chain, written for a consumer that could
+not reach it. `pub(crate)` does not change that today. **The producer box deletes
+that line**: the moment Capacity and Versions call them the expectation goes
+unfulfilled and `-D warnings` rejects the attribute itself, which is
+[D38](#d38--the-grouping-key-was-a-derive-and-a-derive-cannot-be-told-what-to-ignore-2026-08-12)'s
+pre-authorised expiry firing exactly as designed.
+
+**The two fields box 1753 names landed as types and count toward nothing, and
+that is not the box closing.** `spec.overhead` and `status.allocatedResources`
+are decodable now, but `charged` and `promised` are frozen and read
+`cpu_request`; a Capacity report adding overhead *on top of* their answer makes
+the report and N5 disagree about one node, which is
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)'s
+named defect and the thing D129 exists to prevent. So the arithmetic is
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+question, whose first condition is a defect **proven on a committed capture** —
+and no captured pod has `spec.overhead`, because kind runs runc and nothing sets
+a RuntimeClass. **That evidence is capturable and the trip should produce it**: a
+RuntimeClass carrying `overhead.podFixed` and a pod naming it, since the
+RuntimeClass admission plugin writes `spec.overhead` whatever the handler is.
+Without that object the box's own stated reason — *a `spec`-only sum does not
+count what the scheduler counts* — can never be demonstrated, and a field nothing
+reads is not what the box asked for.
+
+**`spec.minAvailable` is deliberately not carried**, though
+[`todo.md`](todo.md) § Phase 5 names it. It is an `IntOrString` and
+`minAvailable: "50%"` is legal and common, so a row reading it prints *"wants at
+least 50% copies"* or nothing at all. The API server resolves it **and**
+`maxUnavailable` — which that box does not name — into `status.desiredHealthy`,
+so the status is the one source that is right for every PDB. The capture guard
+fixes both on one object (`minAvailable: 2` and `desiredHealthy: 2`), so the
+reading that is only sometimes correct stays visible.
+
+**Two planted reds did not fire on the first attempt, and that is the finding.**
+`status.allocatedResources` equals `status.resources.requests` on *every*
+committed capture — they diverge only inside the in-place-resize window — so a
+decode reading the neighbour was **green**. The same for the CSR:
+`csr-pending.json` is pending by construction (`make-csr.sh` refuses to write
+anything else), so `conditions: vec![]` and `issued: false` were indistinguishable
+from correct. Both were fixed under [D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12) —
+one field set on the committed capture, in the shape the field exists for. This
+is [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) one
+layer in: a fixture where two fields always agree cannot prove which one was read.
+
+**Four inputs no committed capture can prove, and a test that goes red when one
+lands.** `DisruptionBudgetSnapshot` and `ClaimSnapshot` decode only an empty
+list; `EndpointSliceSnapshot::from` has never run at all; and no captured pod
+carries `spec.overhead` or mounts a PVC. D40 does not reach them — it starts from
+a committed capture and there is no object to start from. The hole is held by one
+named test that **fails the moment the trip lands**, so it cannot be filled
+without its assertions being written.
+
+**The manifest side, and why each object is the one it is.**
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)
+rules out five of the six workloads for the PDB: a DaemonSet is skipped by a
+drain whatever the budget says, `broken-quota` has no pods, two more are blocked
+by being *unhealthy* rather than by their floor, and `broken-rollout` runs three
+pods against `replicas: 2` so *equal to the replica count* stops being readable
+off the object. `healthy-deploy` is the only one where all four numbers agree and
+the zero comes from the floor and nothing else. **The orphan PVC is a static
+`hostPath` PV with `storageClassName: ""` on both halves**, because kind's default
+class is `WaitForFirstConsumer`: a claim nothing mounts never gets a consumer, so
+the provisioner is never asked and it sits `Pending` — the wrong state under the
+right name.
+
+**The sanitizer already covered the new kind, and it was proven rather than
+assumed.** `.endpoints[].nodeName` is caught because `node_names` walks
+`.. | objects` at any depth rather than a fixed path — which is
+[D94](#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)'s
+design holding for a kind it had never seen. Deleting that one clause turned three
+cases red. **The proof is not committed**, and an uncommitted proof is not a gate.
+
+**A test that depended on a fixture staying empty.**
+`an_empty_list_reads_as_nothing_at_all` read `persistentvolumeclaims.json`
+*because* it was empty, and the manifest fills it — so the next capture would
+have broken a test nobody had touched. It now derives its empty list in memory
+from a real capture and asserts the source **had** items, so a source that
+quietly emptied makes the helper a no-op and the test a tautology. A test whose
+subject is emptiness owns its emptiness.
+
+**The smaller settlements, kept so a later box does not re-decide them.**
+`EndpointSliceSnapshot.endpoints` counts every endpoint, ready or not — a pod
+failing its readiness probe is Alerts' rule 7, and counting it as *nothing* here
+would put one pod on two screens saying two different things. `ClaimSnapshot`
+carries `status.capacity.storage` and not the spec request, because a volume
+expansion makes them disagree and the row bills the reader for the disk that
+exists. `CertificateRequestSnapshot` carries `conditions` rather than a
+`pending: bool` — approved-but-not-yet-issued is a real state a boolean flattens —
+and **`issued` is the bit, never the bytes**: no `spec.request`, no `spec.extra`,
+no `status.certificate` contents. `Selector` derives `Default` alone among the new
+types, because an absent `policy/v1` selector matches nothing and
+`Selector::default()` *is* that value. The new `use`s live inside § SNAPSHOT TYPES
+so that no line of the D129 diff falls outside the region it is bounded to.
+
+**And a measurement about the mutation gate itself.** Eleven mutants over ~470
+changed lines, 2 caught and 9 unviable — not vacuous, but not much either, and
+the reason matters: cargo-mutants replaces a function's **return value**, and a
+decode is a struct literal, so all it can offer is `Default::default()` for the
+whole impl. **It cannot swap one field for its neighbour**, which is this diff's
+entire defect class — the class that produced both non-firing reds above. The
+hand-planted reds are not redundant with the gate; here they are the only thing
+covering it.
+
+**The object that makes box 1753 closable, and the half of the mechanism the PM
+had wrong.** A `RuntimeClass` carrying `overhead.podFixed` and a pod naming it
+are now in `scripts/broken.yaml`, so the trip produces the `spec.overhead` D124's
+first condition needs. Two things were read rather than recalled. **The plugin is
+on**: `kube-system-pods.json` shows `--enable-admission-plugins=NodeRestriction`
+and no `--disable-admission-plugins`, and that flag *adds to* the default-on set.
+**And nothing in the mechanism is conditioned on the handler** — the API's own
+description says the value is written whenever a RuntimeClass "is configured and
+selected in the PodSpec". But it also says **`overhead` must not be set in a Pod
+create request — the admission controller rejects one that carries it**. So the
+manifest declares only `runtimeClassName`, which is what makes the captured value
+a genuine one: Kubernetes wrote it, not the manifest.
+
+**The two numbers, sized off the corpus rather than picked.** Every pod in
+`broken.yaml` + `healthy.yaml` that requests anything commits **200m cpu and
+544Mi** in total, across four nodes. The overhead is **250m / 120Mi** — the
+Kubernetes Pod Overhead documentation's own Kata example, so the figure has a
+source. A sum that ignores `spec.overhead` reads that pod as **100m / 64Mi**;
+one that counts it reads **350m / 184Mi**.
+
+> **Corrected 2026-08-21 — the denominator in this paragraph was incomplete, and
+> that is [PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)
+> committed inside the section that cites it.** *"125% of the whole cluster's
+> committed CPU"* and *"larger than every other request in the corpus combined"*
+> counted `broken.yaml` + `healthy.yaml` and called that the cluster.
+> `kube-system-pods.json` is part of the corpus and commits roughly **950m** on
+> the control plane alone, so the corpus commits about **1450m**, not 200m, and
+> the overhead is a **sixth** of it rather than a multiple. The claim the object
+> was built to make survives **per node**, which is the only scope a Capacity row
+> reports in anyway — measured in
+> [D132](#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21). The pod's own request is deliberately the *smaller* of the two,
+because reversed the overhead would be a rounding error on its own row. Against
+*allocatable* nothing pod-sized moves at all — a kind node reports the host's 12
+cpu — so the difference this object proves is against the committed total, which
+is what *the cluster is lying to itself* actually measures.
+
+**Six `verify` predicates, and the guard refused all six on sight.**
+`scripts/verify-test.sh` failed each one with *"has no case it must refuse — a
+predicate that only ever matched proves nothing"*, which is
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) enforced
+by a script; thirteen objects and nineteen checks followed. **The negatives are
+each other** — the budget at its floor against the budget with slack, the orphan
+claim against the claim a pod mounts — plus three *composed* shapes that are the
+real failure modes: the pod with the class named and **no overhead on it** (the
+plugin off), a claim left **Pending** on the default class (the
+`WaitForFirstConsumer` trap as an object), and a budget also at
+`disruptionsAllowed: 0` **because its workload is broken** rather than because of
+its floor. Both deliberate loosenings were caught by exactly the case written for
+them. 45 → 51 predicates.
+
+**Two smaller things, both found by the author's own second pass.**
+`cluster.sh`'s `diagnose()` printed a PDB's *name* and nothing else — an operator
+inside a one-hour trip budget, told which object failed and not which number was
+wrong, which is the failure that function exists to prevent; it now prints the
+five numbers, proven not to change the output for any of the 138 objects that
+existed before. And `[pvc_used]` rested on a jq edge: `null != ""` is `true`, so a
+claim with `storageClassName` **absent** — what a cluster with no default class
+writes — read as dynamically provisioned. Its neighbour's phase clause was hiding
+it, and a predicate that is right for a reason its neighbour supplies is one the
+neighbour can stop supplying.
+
+### D131 — a fixture is asked two different questions, and one disjunction was answering both (2026-08-21)
+
+**The capture trip of 2026-08-20 came back with two fixtures on a face their own
+tests cannot read.** `crashloop.json`'s `quitter` and `exit0.json`'s `batch` both
+landed in `state.terminated` with no `state.waiting`, and rule 1's card is drawn
+from `state.waiting.reason == "CrashLoopBackOff"`. Forty-seven tests went red;
+`crashloop_pod_decodes_what_rules_1_5_and_6_read` said it in one line — *"a
+crashlooping container must decode as waiting"*.
+
+**Nothing was wrong with the cluster, and nothing was wrong with `verify`.** The
+container really was crashlooping. It is in `state.terminated` for a large part
+of every cycle — `scripts/cluster.sh` already carried the measurement, sampled 70
+times on this cluster: `state.terminated` 39, `waiting: CrashLoopBackOff` 29,
+`running` 2. A `verify` predicate demanding the waiting face would fail a pod that
+is behaving correctly, which is the too-tight half `scripts/verify-test.sh` exists
+to catch.
+
+**What was wrong is that the guard on the committed bytes was spelled like the
+predicate on the live pod.** Both read
+`(.state.waiting.reason == "CrashLoopBackOff" or .state.terminated.exitCode == 1)`,
+and the disjunction is correct for exactly one of them. They are two different
+questions:
+
+- **`cluster.sh verify` asks about a live object**: *did this pod reach the state
+  its rule is about?* A cycling container answers yes on either face, so the
+  predicate must accept both or it fails a correct cluster.
+- **The `guard` in `just fixtures` asks about committed bytes**: *can the corpus
+  carry the tests written against it?* Those tests read one face. A guard that
+  accepts the other passes a capture that reddens the suite.
+
+So the rule, and it is the general one: **the byte guard names the face its tests
+read; the live predicate names the state the rule is about.** Unifying them
+breaks whichever end it is moved to. The comment recording the split sits above
+both.
+
+**The face is now fetched rather than hoped for.** `fetch_until` in the `fixtures`
+recipe re-fetches a stem until its byte guard passes, bounded at 300s and failing
+loudly by name when the bound is hit — a silent give-up would be the original bug
+with a longer fuse. Six stems went into it. **The 300s is one full backoff cap
+plus a sample, not a measurement**: nobody has timed how long a single face
+persists on `broken-crashloop` itself, and the 39/29/2 split above is a different
+pod. A failure on the bound is therefore a reason to watch a cycle and raise it,
+never to loosen the face back into a disjunction.
+
+**Four of the six were found by sweeping, and only two had failed.** `sigterm` was
+the same hole, latent: it carries `CrashLoopBackOff` with 13 restarts at HEAD,
+`the_three_ways_into_a_restart_loop_do_not_get_the_same_card` asserts the waiting
+face for it as much as for the other two, and its guard named no face at all — it
+survived on luck. `probe0` is the mirror image: its tests need rule 5's card and
+`src/rules_tests/pod.rs` states the shape positively — *13 restarts,
+`lastState.terminated` `0`/`Completed`, **`state.running`**, `ready: false`* — so
+a trip that catches it in backoff fires rule 1 and breaks it. `restarts.json`'s
+guard read `restartCount == 3` and nothing else, while two tests date rule 5's
+card from `state.running.startedAt`; caught between runs the stamp does not exist.
+**That count guard deliberately stayed outside the retry**: a restart count only
+goes up, so re-fetching cannot mend a four — retrying it would delay a loud
+failure by five minutes and then print the wrong sentence.
+
+**`init.json` is the case that proves the rule is about faces and not about
+`waiting`.** Its guard keeps the disjunction, because its tests genuinely read
+whichever face the capture holds, and the corpus history is the evidence rather
+than the claim: `migrate` is `waiting` in the 2026-08-12, -08-12, -08-13 and
+-08-14 revisions and `terminated` in -08-16 and -08-20. A tightening there would
+have been a new defect wearing the fix's clothes.
+
+**Two tests that were green and asking nothing.** The face flip exposed both.
+`every_rule_that_reads_the_present_is_proved_to_be_one` demanded D125's
+counterexample of `init.json`, whose predicate accepts either face — it now reads
+`failed.json`, where the pod's phase is `Failed` and no container can hold any
+other state, so the shape is stable by construction rather than by luck. And
+`every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_captured_finding`
+incremented the two counters that prove both arms of its `||` are exercised
+**outside** the branch that makes the assertion, so exempt objects fed them: on
+this corpus `mid_loop` was 1 and that one was `neverrules/retry`, which the `||`
+is never asked about. The counters moved inside the branch, `mid_loop` is honestly
+0, and the arm is now held by a named, face-independent list —
+`crashloop/quitter`, `init/migrate`, `notfound/app`, `oom/hog`, `sigterm/app`.
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) one layer
+in: a guard is proven only for the shapes it was fed, and a corpus that has only
+ever shown it one face has fed it one shape.
+
+**And a third one, found by the trip that was supposed to close it.** The Drain
+safety join had no pod: neither committed budget selected anything the repository
+had captured, so the positive half of the join ran on a
+[D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+one-field plant and the emptiness of the real join was left as a tripwire —
+*"a trip that captures one of those pods reddens this test"*. A third trip
+captured two of them. **The test stayed green.** `every_captured_pod()` chained
+`CAPTURED_PODS` with `kube-system-pods` by name and nothing else, so a new
+`List` of pods was invisible to it; and the corpus sweep that couples
+`tests/fixtures` to the arrays that read it filtered `kind == "Pod"`, so a `List`
+of pods was coupled to **nothing at all**. Two helpers, one hole, and the guard
+written for exactly this event did not fire on it.
+
+The fix is the coupling and not the call site: `CAPTURED_POD_LISTS` names the
+three `kubectl get pods` captures, `every_captured_pod` chains the array rather
+than the names (52 → 55 pods), and the sweep now checks singles and lists in both
+directions, so the fourth `List` cannot arrive the same way. **The cascade was
+measured before it was feared** — growing the helper moved exactly one test,
+because every node join derives its expectation from the pod list it is handed
+rather than from a transcribed total — the habit
+[D65](#d65--the-repin-n2-gains-a-clock-and-what-two-agents-decided-that-no-brief-did-2026-08-13)
+bought when a bigger cluster reddened a row of pasted-in literals, and this is the
+first trip that spent it. The one that moved is the join
+itself, and it now runs on the two captured pods against the committed budget,
+namespaced, cross-checked against the controller's own `status.currentHealthy`,
+on two distinct nodes — which is not what makes the budget blocking but is what
+makes *two* nodes blocked, and a trip that co-located the replicas would have
+narrowed Drain safety's only positive case in silence.
+
+**What is still owed and is asserted rather than described**: `healthy-pdb-room`
+selects `app=broken-rollout`, whose pods are still not captured — D130 rules that
+workload blocked by being unhealthy rather than by its floor, so it is a different
+row — and the test fails the day a trip takes them.
+
+### D132 — the trip that took four runs, and the sixteen things three agents settled under it (2026-08-21)
+
+**The capture trip [D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)
+prepared ran three times.** Trip 1 committed two fixtures on a face their tests
+cannot read, which is [D131](#d131--a-fixture-is-asked-two-different-questions-and-one-disjunction-was-answering-both-2026-08-21).
+Trip 2 was clean and landed, and then the landing found that **no captured pod
+carried either committed PodDisruptionBudget's label** — Drain safety's join had a
+budget on one side and nothing on the other. Trip 3 added `healthy-deploy`'s pods
+and closed it. The corpus is **59 files from one cluster**, kind v1.36.1,
+2026-08-20 21:0x–21:31 UTC; the pin moved `2026-08-17` → `2026-08-21T00:00:00Z`;
+`CAPTURED_PODS` went 36 → 38 and `every_captured_pod()` 52 → 55.
+
+**Re-running the whole trip was cheaper than landing twice**, and that is the
+scheduling rule worth keeping: the expensive part of a capture is not the cluster,
+it is re-deriving every age and every per-node sum against a moved pin. Doing that
+once over the final corpus cost one dev turn; doing it after each trip would have
+cost three.
+
+**Thirteen things settled that no box had decided.**
+
+**The pin is spelled in four places and a fifth count hides from the guard.**
+`scripts/certs-test.sh` extracts the literal out of `fn now()` and refuses to
+disagree with it ([D57](#d57--the-pinned-now-is-part-of-the-fixture-contract-and-it-makes-recent-unrepresentable-2026-08-12)),
+but it reads `tests/fixtures/certs/` — and `certificate.rs`'s control row builds a
+certificate **from bytes in the test**, so its day-count is outside anything the
+guard can see. It moved 15 → 11 with this repin and only a human noticed. Named in
+the file as the fourth, so the next repinner is told rather than trusted.
+
+**A count that rises every trip is derived, never transcribed.** `probe0.json`
+arrived at 13 restarts, then 14, then 13 again. The title fragment is now read off
+the capture and the assertion keeps the property that actually selects the arm —
+`restarts >= RESTARTS_CRITICAL` — instead of a number a trip can move. Same
+convention as `the_quiet_node`.
+
+**D125's counterexample moved from `init.json` to `failed.json`.** It needs a
+container sitting in `state.terminated`, and `init`'s capture predicate accepts
+either face by design ([D114](#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16)),
+so the test was pinned to a face the corpus does not promise. A pod whose phase is
+`Failed` cannot hold a container in any other state, so the shape is now stable by
+construction. **The cost is stated rather than hidden**: `analyze` charges nothing
+to a finished pod, so the counterexample now lives at the rule level — which is the
+level D125's claim is made at, and weaker than a live pod would be.
+
+**The budget-to-pod matcher lives in the test file, bounded and dated.** Eight
+lines, `matchLabels` only, confined to the assertions that need it, with the real
+one owed to `analysis.rs` in a later box. A second implementation of a matcher is
+what [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)
+warns about, so this one is written to be deleted.
+
+**The join is namespaced, and that clause could not be reddened by anything
+committed** — every captured budget and every pod it selects are in `default`. So
+it is proven by a [D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+plant: a `kube-system` pod wearing `app=healthy-deploy`. A clause nothing can fail
+is not a clause.
+
+**The join is cross-checked against the controller's own arithmetic** —
+`protected.len() == status.currentHealthy` — which ties two files from the same
+trip together, **with its precondition stated**: the controller counts *healthy*
+pods and the join counts *matching* ones, so the equality holds only while every
+matched pod is Ready, and that is asserted beside it rather than assumed.
+
+**Two nodes, not one, and the reason is not what it looks like.** The two protected
+pods sit on two different workers. That is not what makes the budget blocking — the
+floor is — but it is what makes *two* nodes blocked, and a trip that co-located the
+replicas would narrow Drain safety's only positive case with nothing going red.
+
+**`fixture_snapshot()` deliberately did not grow with `every_captured_pod()`.** It
+feeds the whole-capture run, which enumerates cards per pod; adding fourteen
+`kube-system` objects is a different box. Its doc now says `CAPTURED_PODS` and says
+why, instead of claiming "every pod".
+
+**`healthy-deploy-pods.json` is guarded at exactly two, not at one or more.** The
+budget's own capture fixes `expectedPods: 2` / `currentHealthy: 2`, so a list of
+one or three is a fixture that contradicts the object it exists to be joined
+against. The count also closes an empty-list hole in the same clause: jq's `all`
+over `[]` is `true`, so without it the guard passes on `{"items":[]}`.
+
+**`cluster.sh verify` gained no predicate for those pods, and the refusal is
+recorded.** `[pdb_floor]` already asserts `expectedPods == 2 and currentHealthy == 2`
+over the same objects through the same selector, and Ready implies Running and
+scheduled — so a pod-list predicate beside it could not fail while `[pdb_floor]`
+passes. A fourth guard that cannot fail, added rather than inherited, on the day
+this repo deleted three.
+
+**The mutation gate has nothing to say about a test-only diff, and that was
+measured twice rather than assumed.** `cargo mutants --in-diff` reports *No mutants
+to filter* — it does not mutate `#[cfg(test)]`. Run instead over the `rules.rs`
+decodes the new tests cover: 5 mutants, 1 caught, 4 unviable, none missed, which is
+[D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)'s
+own measurement repeating — the tool replaces a return value and a decode is a
+struct literal, so it cannot swap one field for its neighbour, which is this
+diff's entire defect class. **Twenty-one hand-planted reds are not redundant with
+the gate here; they are the gate.**
+
+**And a doc that had become false rather than merely old.**
+`docs/architecture.md` justified the one-field licence with *"the cluster the
+fixtures came from had no cordoned node, no partially-ready workload and no pod
+with an owner"*. All three are in the corpus now — `nodes.json`'s `k8rs-worker`,
+`statefulsets.json`'s `broken-sts` at 1 ready of 2, `owned-pods.json` — each
+brought back by the trip that retired its plant. The licence is unchanged; the
+sentence defending it was reporting a cluster that stopped existing.
+
+**Round two — the operator review, two blockers, and a reviewer corrected by its
+own evidence.** The family review read the landed tree and returned twelve
+findings; six went to [`backlog.md`](backlog.md), one is the Capacity box's own
+question, and the rest landed here.
+
+**Blocker 1 — the object built to make a per-node sum legible landed on the one
+node whose pod set is fiction.** `break-nodes` taints a worker `NoExecute` *after*
+the pod captures, correctly, and `nodes.json` is captured after that — so the
+committed snapshot holds pods Running on a node that in the same snapshot evicts
+them. Measured: fifteen committed pod rows name `k8rs-worker2`, and only
+`kindnet` and `kube-proxy` carry a toleration that survives it. **The contradiction
+predates this trip and is not what was fixed.** What was fixed is that placement is
+a **lottery**: `broken-config` moved `k8rs-worker` → `k8rs-worker2` between two
+trips with no manifest change, and `broken-overhead` — the object
+[D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)
+created so that a `spec`-only sum can be shown wrong — drew the fiction node.
+`nodeName: k8rs-worker` pins it, and the reasoning is better than the one the
+ruling gave: `break_nodes` picks the cordon node dynamically — the first worker in
+sorted order running a movable `demo` pod — so pinning a movable pod to
+`k8rs-worker` makes **the whole node assignment deterministic** rather than merely
+stable. **And a consequence nobody had asked about**: kind names nodes after the
+cluster, so a hardcoded `k8rs-worker` leaves the pod `Pending` forever on
+`k8s-admin`'s own `K8RS_CLUSTER=review` cluster and blocks the reviewer at minute
+two. One anchored `sed` on the apply path rewrites the prefix, byte-identical on
+the fixture cluster.
+
+**Blocker 2 — `DisruptionBudgetSnapshot` dropped the two fields that say whether
+its own numbers are trustworthy**, on the one pane that draws a green light before
+a destructive operation. `observedGeneration < generation` makes the eviction
+handler refuse **every** eviction with `TooManyRequests` whatever
+`disruptionsAllowed` says — *"this node is ready to drain"*, and then it hangs —
+and `reason: SyncFailed` means `disruptionsAllowed: 0` was never computed rather
+than genuinely zero. Both are in the committed bytes and both were being thrown
+away: [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)'s
+class verbatim, closed inside [D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+window. **Both shapes are carried, and the reason neither alone was enough is the
+decision**: the `DisruptionAllowed` condition carries its own `observedGeneration`
+but nothing to compare it against, and two generation fields carry no reason. So
+two `Option<i64>` — never a pre-computed `stale: bool`, because the comparison is
+the report's and a boolean hides which generation it saw — beside the conditions
+carried **whole**, since picking one condition out of the list and reading its
+reason is a verdict, and the verdict is the report's. `metav1::Condition` declares
+`reason`/`message` as required strings and both committed budgets carry `""`, so
+an empty required string decodes to `None` rather than drawing a blank line under
+every budget in the corpus. The upstream claim was read rather than repeated:
+`eviction.go` returns the **same** `TooManyRequests` text for a stale budget as for
+a genuinely full one, so the failure does not explain itself — which is why the
+field has to be carried rather than inferred.
+
+**A reviewer corrected by the code, which is the review working in both
+directions.** The `back-off` clause in `crashloop`'s byte guard was called out as
+guarding a field rule 1 never reads — true of the rule, and `crash_looping` does
+drop the sentence. But `crashloop_pod_decodes_what_rules_1_5_and_6_read` asserts
+it, so by this repo's own rule — *the byte guard names what its tests read*
+([D131](#d131--a-fixture-is-asked-two-different-questions-and-one-disjunction-was-answering-both-2026-08-21))
+— the clause stays. **The concern underneath it was real and was fixed**: the face
+alternates and is worth retrying, the kubelet's sentence does not and never will,
+so retrying it only spends the budget and then fails naming the wrong thing. It
+left the retry and became a plain guard that fails at once.
+
+**And `fetch_until` learned two things the first version did not know.** Its six
+calls were six independent 300s timers — thirty minutes worst case inside a trip
+that must finish within an hour of `break`, and that contains `broken-restarts`,
+whose `sleep 3600` fuse expires on a wall clock. One shared deadline now covers
+all six, proven shared rather than written that way. And on the failure path it
+had been leaving the bad fixture on disk while its own message said committing that
+file was the defect; it fetches to a temp and publishes only on success. **The
+second pass caught the fix's own defect**: `mktemp` creates at 0600 and `mv`
+carries the mode, so six fixtures would have sat at 0600 beside every other capture
+at 0644 — and git tracks only the executable bit, so that drift would have been
+invisible forever. The publish is a redirect, which matches the mode by
+construction.
+
+**The corrected arithmetic, measured twice by two agents.** Over the committed
+corpus: `k8rs-control-plane` 950m, `k8rs-worker` 100m, `k8rs-worker2` 250m,
+`k8rs-worker3` 170m — **1470m** total, of which `kube-system` alone is 1250m,
+against the 220m that `broken.yaml` + `healthy.yaml` request between them. The
+overhead is 250m. So the claim the object supports, restated with its denominator
+named: the pod asks 100m and is charged 350m, a spec-only sum undercounts **that
+pod** by 71%; 250m on one pod is more than every request in both manifests put
+together; and on the node it is now pinned to, the sum reads 200m ignoring the
+field and 450m counting it. What does **not** survive is *125% of the whole
+cluster's committed CPU* — see the correction on D130.
+
+**Round three — the roster that was a coin flip, and a green test whose premise
+was eight days wrong.** The fourth trip caught `init/migrate` and `oom/hog` on the
+terminated face instead of the backoff face, and
+`every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_captured_finding`
+asserted an **exact roster** of those containers. Its own message already admitted
+*"which crash loops appear here at all is the coin flip"* — which is the problem,
+not a caveat: a roster that must be hand-edited every trip is one whose repair
+under time pressure is to paste in whatever the run printed, and that is the single
+thing [D26](#d26--a-green-build-that-proves-nothing-2026-08-12) forbids.
+
+**The shape it took: the sweep splits where the coin lands, and only the side the
+coin cannot reach stays a roster.** A container that stopped *for good* — a
+finished init container, anything under `Never`, a retry rule that ran out — sits
+there because of the manifest, so its whole line survives any recapture and is
+rostered exactly. A crash loop caught between runs sits there because of the second
+the shutter opened, so it is **printed and never rostered**: that population held 3
+objects after 2026-08-16, 0 after the first trip of 2026-08-20 and 2 after the
+fourth, from an unchanged cluster and unchanged manifests. Nothing escapes being
+named — every container the sweep reaches is in one of two asserted lists, the
+settled roster or `restarted_after_a_bad_run()`'s, and the split is computed **by
+asking that same function** rather than by re-reading the fields, so the two cannot
+disagree about one container. The roster now carries its own instruction: *a change
+here is a finding to read and never a line to paste.*
+
+**And the repin falsified prose nobody had been reading.** Seven comments in the
+test files stated ages — *"three hours"*, *"12 hours ago"* — about objects now
+seventy minutes from the pin. A wrong number in a comment is the same class as a
+wrong number in an assertion
+([D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)),
+so they moved with it. One was worse than stale:
+`every_unusable_image_reason_is_rule_threes_card_and_arrives_at_once` pinned its
+moment to a transcribed literal that no trip had ever repinned, and against this
+corpus it sat **eight days before** the capture it claimed to be seven seconds
+after. It is derived from the capture's own `PodScheduled` now — and the honest
+half is recorded with it: **no verdict ever moved**, because `UNUSABLE_IMAGE` is
+rule 13's exclusion at any age, so the perturbation stays green at +11 minutes too.
+The lie was the sentence, not the assertion, and it is said that way rather than
+dressed up as a caught bug.
+
+**Round four — the review's own second round, and the ruling that stopped the
+loop.** It confirmed the second blocker closed completely and the first closed for
+the object it was applied to, then found the same shape one report over: **Drain
+safety's join is entirely inside the eviction zone.** Both pods `broken-pdb-floor`
+protects sit on the two workers `break-nodes` empties, so the corpus says
+`currentHealthy: 2` where the cluster it came from now says 0, and the assertion
+*"draining either one is blocked by this budget"* is true of the budget and of
+neither node. Underneath it is the general fact, which is the part worth keeping:
+**a cordon evicts nothing and the other two breakages do, so exactly one worker
+keeps its pods — and ten fixtures out of thirty-eight are on it.**
+
+**Ruled a box rather than a fifth trip**, and the reasoning is the ruling. The
+corpus is not *wrong* about what it photographed: at capture both pods were Running
+and Ready with `disruptionsAllowed: 0`, and the snapshot is a photograph, not a
+promise about the cluster afterwards. No producer reads these fields yet — Phase 4
+has written none — so nothing ships a false number today. And the fix that was
+available was one more workload's tolerations, which leaves the *rule* unenforced
+across the other thirteen and buys a fifth trip for a fraction of the problem. Four
+trips in one night is already the shape
+[CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+warns about — *an unbounded go back to the start means the last nit found is the one
+that decides whether the phase ever ends* — and each review round here found the
+**next instance of one structural fact**, not a new defect. The fact is written down
+now, with its measurement, and the box it becomes is a fixture-design box with a
+done-when rather than another capture.
+
+**Two things the round found that were tonight's own contradictions were fixed in
+the same turn**, because they are not instances of anything: a test message still
+claiming rule 1 renders the kubelet's sentence, after the same night's work
+established in `justfile` that it does not; and `$CLUSTER` interpolated unescaped
+into a `sed` replacement on the path that exists precisely because that variable is
+user-supplied.
+
+### D133 — the mutation gate files a failed build as `unviable`, so a full disk reads as a pass (2026-08-21)
+
+**`cargo mutants` reported `1 caught, 3 unviable` and one of those three had not
+been tested at all.** Its log said `No space left on device (os error 28)` — not a
+type error. cargo-mutants classifies **any** build failure as *unviable*, which is
+correct for a mutant that cannot compile and catastrophically wrong for one that
+never got the chance. Re-run with `TMPDIR` on a volume with room, the same mutant
+came back **caught**.
+
+The machine: `/tmp` is a **12 GiB tmpfs at 94%**, holding eight
+`cargo-mutants-k8rs-*.tmp` directories (~4 GB) left behind by runs that did not
+clean up, beside 7 GB of agent scratchpads. `/home` had 916 GB free the whole time.
+The gate builds a full copy of the tree per mutant, so it is the single hungriest
+thing this repo runs and it was pointed at the smallest filesystem on the box.
+
+**This is the exact shape [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)
+is about, one level up.** D26 says a green build can prove nothing;
+[D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)
+answered it by handing the proof to a tool *with no incentive to lie* — and the
+tool's honesty turns out to be conditional on a resource nobody was watching. A
+surviving mutant is a test that cannot fail; an **unviable** mutant is a claim that
+there was nothing to test, and the two are one word apart in the output.
+
+Three things follow, and the first is the only one that is a fix:
+
+- **`just mutants` pins `TMPDIR` off tmpfs.** The gate names its own scratch
+  volume rather than inheriting whatever the box happens to hand it.
+- **`unviable` is read, not skipped.** A run whose unviable count moves is a run
+  whose reason has to be looked at — the honest ones here are
+  `the trait bound rules::Condition: Default is not satisfied`, which names a type;
+  a line naming a filesystem is not a mutation result.
+- **And the phase-close sweep is where this would have cost most.** It runs whole,
+  in four shards
+  ([D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)),
+  over hundreds of mutants — the run with the most to say and the one most likely
+  to fill a disk saying it. A shard that goes green because it ran out of room
+  prints no `MISSED` line, which is exactly what a passing shard prints.
+
+**Found by an agent reading its own tool's log rather than its summary line**, on a
+turn whose gate had already reported green once.
+
+**The fix is two checks, because neither subsumes the other.** Refusing to start
+without headroom catches the common case in one second instead of after eleven
+minutes of sharded sweep, but cannot see a disk filled *during* a run by something
+else. Reading the run's logs afterwards is the only check that can tell *nothing to
+test* from *could not test*, and the only one that survives a mid-run fill. **The
+count cannot do it**: the last phase close was `498 caught, 55 unviable, 0 MISSED`,
+and those 55 were legitimate — so any count-based rule is either useless or
+permanently red. The scan runs **before the exit code decides anything**, because
+cargo-mutants also exits non-zero for a `MISSED` mutant and a `set -e` that stopped
+at the run would skip the check on exactly the runs worth checking.
+
+**Sized off a measurement, not a guess**: 499–510 MB per scratch tree, read with
+`du` off the eight abandoned directories themselves, and the floor set at 2 GiB —
+four times the largest — so `--jobs` above 1 does not need the number to know about
+it. The first guarded run then made the case better than any argument: ten of ten
+mutants unviable, with cargo-mutants itself printing *"perhaps there is a problem
+with building in a scratch directory"* — a summary indistinguishable from the disk
+failure. The logs named `the trait bound ObjectKind: Default is not satisfied`.
+All ten honest, and **a count-based guard would have failed that run**.
+
+**Two things this cannot reach, said rather than implied.** The scan reads
+`mutants.out` by name, so a run given `--output` writes where nothing looks; and no
+disk was actually filled to prove it end to end — what is proven is the scan
+against captured tool output in five framings and the whole path against a planted
+log. **And the sweep already recorded in `todo.md` cannot be re-checked**: Phase
+3's close logged `553 mutants, 498 caught, 55 unviable, 0 MISSED`, it ran before
+any of this, and `mutants.out` has been overwritten since. Those 55 were never read
+against ENOSPC and the logs are gone. The honest statement is not that they were
+fine — it is that the next sweep will be checked and that one cannot be.
+
+**The guard's own self-test had the defect it exists to catch.** Written first, it
+read the *live* filesystem — so it asserted something about the box rather than the
+code, and **would have gone red on a full disk, in the one file whose entire
+subject is that a full disk must not be mistaken for a result.** It runs against two
+captured `df -Pk` lines now. Five of its six planted breaks could not fail either:
+the ENOSPC fixture carried both spellings on one line, the way the tool really
+prints it, so deleting half the pattern stayed green.
+
 ## Decisions made
 
 ### Product
@@ -9178,6 +10676,7 @@ Cluster-wide, computed on demand, each one a join no per-object rule can do:
 | Report | Answers |
 |---|---|
 | **Capacity** | Per node: requests vs allocatable vs actual usage. Where is the cluster lying to itself |
+| **Posture** | The read-only host mounts rule 8 leaves behind — a list to review, not an alarm to answer. One row per host path, never one per pod ([D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)) |
 | **Certificates** | The C-series above, as a dated table sorted by soonest expiry |
 | **Drain safety** | For every node: what a drain would do, and what would block it. A PDB with `minAvailable` equal to the replica count means the drain **never finishes** — admins normally discover this 40 minutes in |
 | **Waste** | PVCs bound to nothing, Evicted/Completed pod pileups, Services whose selector matches no pod (the 503 nobody can explain), replica sets kept at 0 forever |
@@ -9866,3 +11365,717 @@ Fallback if the name is ever lost: **k8ray** ("the X-ray of k8s").
 - [rusternetes](https://github.com/calfonso/rusternetes) — ⚠️ not a TUI, a web console (see the design section)
 - [goldpinger](https://github.com/bloomberg/goldpinger) — source of the v4 mesh idea
 - [Keda HTTP scaling](https://github.com/SevginGalibov/Keda-HTTP-Add-On-Scaling)
+
+### D134 — Family C: the six reports, the frozen file they had to move, and the two green lights a review took away (2026-08-21)
+
+Phase 4's Family C — Capacity, Drain safety, Waste, Posture, Versions,
+Certificates — written as one turn. This entry is the decisions; the boxes keep
+their titles and link here.
+
+**`spec.overhead` goes into `charged`, not on top of it.**
+[D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20)
+had already refused the alternative in writing — a report adding the overhead on
+top of `promised`'s answer makes N5 and the Capacity row disagree about one node,
+which is
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)'s
+named defect. So it is summed once, in the reader both consumers already call,
+under
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+five conditions. Proven with the tool's own numbers rather than the corpus
+report's: `k8rs-worker` 200m spec-only against 450m with overhead, and the row
+moves with it. It matches upstream `resourcehelper.PodRequests` — a pod-level
+request replaces the container aggregate per resource, then the overhead is added
+once, after both branches.
+
+**Condition 3 protects the surface consumers are built on, and a helper's first
+consumer is not that.** `charged` gained a fourth accessor and `promised` a
+fifth, which condition 3 forbids on its face. But `promised` was **private** at
+Phase 3 close and became `pub(crate)` a day earlier under
+[D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20)
+with no caller above `rules.rs`; Capacity is its first. A parameter appended in
+the same commit that gives a helper its first consumer breaks nothing above it,
+so the protection is vacuous for that one name. **This narrows condition 3, it
+does not widen D124.** The rejected alternative was a per-pod clone with the
+request fields swapped for the overhead ones, which is the clever thing nobody
+can read at 3am.
+
+**The export surface reached sixteen, each by demand with a caller in the same
+commit** (D129 bound 2, visibility keyword only): `qualified` — the second copy of
+a four-line formatter is what CLAUDE.md § *Write function-based* refuses;
+`expires_at` — the badge is a *different* spelling of the same subtraction
+(`30d` against `30 days`), so `in_days` was never reusable and the real second
+implementation would have been re-parsing the PEM; `quantity_milli` — `using 3.4
+cpu` sits directly under `6.2 of 8 cpu`, and printing the usage raw would put two
+spellings of one number on adjacent lines; `listed` — naming several blocking
+budgets is the *up to two, then and N more* convention N1's own evidence line
+already uses. **`rules.rs:11`'s `#![expect(dead_code, …)]` stays**, and D130's
+claim that the producer box deletes it is corrected here: measured by removing
+it, `ObjectId::group_key` and the `Metrics` variants are still unfulfilled, so it
+expires at Phase 9 and not now.
+
+**Three snapshot fields inside D42's window, and the window is why they are now.**
+`ClusterSnapshot::metrics` (six states, five of which no cluster here can produce
+— Phase 5's polling box would otherwise have needed a second unfreeze);
+`DisruptionBudgetSnapshot::selector` becoming `Option<Selector>`; and
+`PodSnapshot::local_storage`. `PodSnapshot::claims` also grew the claim a generic
+ephemeral volume stands up. Refused under the same window: `PodSnapshot::reason`,
+because
+[D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)
+names it as an example from Phase 2 and the screen, written later and more
+specifically, draws **one** row over Evicted and Completed together — `finished()`
+already is that predicate, and a field with no row behind it is what D42 itself
+calls a guess.
+
+**`selector: {}` and `selector: null` stopped being one value.** Read out of
+`k8s-openapi`'s own generated docs rather than taken on a PM's word: *"A null
+selector will match no pods, while an empty ({}) selector will select all pods
+within the namespace."* Flattened to `Selector::default()` they were the same
+value, so a budget protecting an entire namespace read as protecting nothing —
+*"node-1 is ready to drain"* over a drain that will hang, the one direction D46
+refuses.
+
+**Two green lights the operator review took away, and both were the same shape.**
+A row that says *ready to drain* is a verdict; `a_drain_would_move` answers a
+different question — *which pods does a drain relocate*. Bare `kubectl drain`
+refuses on three classes, measured live: DaemonSet-managed pods, pods with local
+storage, and pods with no controller. Only the third was drawn. And it refuses
+**after cordoning**, which is N2's own subject. So: the `--ignore-daemonsets`
+assumption is stated once as the pane's opening line, local storage became its own
+row, and *ready to drain* now means something a named command actually does.
+
+The second was a node at `Ready: Unknown` drawn *ready to drain* while **N1's
+Alerts card about the same object said it had stopped responding** — one object,
+two screens, opposite advice. The fix needed no new export: `analyze` already
+returns N1's finding and D127 already hands the producers that slice.
+
+**Then the same review took the fix's own first draft away.** `Ready: False` was
+ruled *not* the stopped-responding case, on the argument that a kubelet still
+talking can carry out an eviction. It answers the wrong question: a drain waits on
+the kubelet to **confirm the container is gone**, and `KubeletNotReady: container
+runtime is down` is a kubelet that is posting status and cannot stop anything —
+it hangs exactly as `Unknown` does, while `NetworkPluginNotReady` does not.
+`conditions[Ready].status` cannot separate them, so **neither** verdict is
+defensible and the row is the pane's *k8rs cannot answer this yet* kind.
+`Ready: False` is also the **ordinary** shape of a broken node — dead containerd,
+full disk, CNI never up — so the first draft fixed the rarer half.
+
+**A row may not be built on a premise that is false for a common pod.**
+`emptyDir: {medium: Memory}` is a tmpfs: `kubectl drain` still refuses it, and
+there is nothing to copy off. Istio's injector adds one to every meshed pod, so
+one field would have put a Critical row with an impossible action on every node of
+every meshed cluster. The field splits by medium — the refusal and the data loss
+are two facts and the prune line has to carry both, because D42's window shuts at
+this phase's close and `medium` dropped now could never be recovered.
+
+**Picking a finding by identity needs more identity than a kind and a name.**
+D127's mechanism works for C1 because `ObjectKind::Other("kubeconfig")` is unique.
+For a node it is not: N1's two branches, N2 and N3 all file under the node's own
+name and a `Finding` carries no rule id. The pick is kind + name + `Critical`,
+resting on **N1 being the only Critical node rule** — verified from source (N2 and
+N3 are `Warn`, N4 and N5 `Info`) and pinned by a test. The pin is weaker than the
+claim: it asserts over one cluster's output, and a future Critical node rule keyed
+on a shape that cluster lacks lands green. Boxed.
+
+**The mutation gate had been reporting false passes, and it is the gate that
+proves every box here.** `justfile`'s `export RUSTFLAGS := "-D warnings"` reached
+`cargo mutants`; a mutant's replaced body leaves its parameters unused; `-D
+warnings` made that a **build failure**; and cargo-mutants files any build failure
+as `unviable`. Same tree, same 141 mutants: **64 caught / 77 unviable** through
+`just`, **123 caught / 18 unviable / 0 missed** with the flag cleared — 63 never
+tested. It hid a real survivor (`>` → `>=` in `drain_row`, which would have drawn
+*"0 pods here were started by hand"* under every blocked node), and Capacity's own
+*0 missed* had been measured through the same lens. This is
+[D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
+one class wider — D133 caught the disk, and *a failed build reads as a pass*
+walked back in through the toolchain flags. `scripts/mutants.sh` now passes
+cargo-mutants' own `--cap-lints=true` (in the script, so a direct `bash` call is
+fixed too, and it beats an inherited flag rather than avoiding one) and refuses a
+**lint-denied** unviable the way it already refused a disk-failed one. D133's
+sentence — *an honest unviable names a type, a dishonest one names a filesystem,
+and the count cannot tell them apart* — was one class short.
+
+**The strip stays at the printer, and the brief that said otherwise was wrong.**
+`sanitize` lives in `main.rs`, the **top** of the pyramid; `analysis.rs` calling
+up into it inverts the build order. It runs field by field where a value enters a
+line, never over the assembled block, which is
+[D122](#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20)'s
+substance; the location was the only thing in question and it was not available.
+Phase 5's ingest strip is still the permanent answer.
+
+**Smaller settlements, kept so a later box does not re-decide them.** An empty
+`nodes` list is *no permission to list nodes* — the type cannot say *nobody
+looked* and the screen's own premise is that a cluster always has nodes. A row
+that is already an **aggregate** scrolls (Capacity's nodes, Posture's paths); a
+row that is **one per object** caps at five with a `Row::Prose` overflow (Waste's
+Services and disks) — the rule the two panes were accused of contradicting, and
+Waste's own counted rows obey it too. Waste folds its three per-section
+`NotComputed`s into one when every section is unread, which is rule 7's stated
+reason applied at the pane. The `Versions` heading is the report's own first
+`Row::Prose`, because `Row::Prose`'s doc had already ruled it and `views.rs`
+would otherwise hard-code a per-report string. The expired certificate badge reads
+`out`: `0d` reads as *expires today*, `-12d` teaches a minus sign, and a blank
+sidebar is worst exactly when things got worse. `uncapped_workloads` counts
+distinct owners, not pods — 42 pods were nine controllers on the test cluster —
+and its answer changes at Phase 5 when `owner` resolves past the ReplicaSet, which
+is not a regression.
+
+**Two frozen doc claims a committed capture disproves, corrected.**
+`PodSnapshot::cpu_limit` said a pod declaring its limits at pod level decodes with
+all-`None` containers; `podlimit.json` shows the kubelet writes the pod-level
+limit down onto the container status. `PodSnapshot::containers` said the same of
+an unreported pod; `pending.json` decodes with an **empty** list, which answers
+*yes, all of them* to any sweep. A doc sentence is not logic, so this is inside
+D42's window and not a reshape — but it is the same defect class D124 unfroze a
+file for.
+
+### D135 — Family B: the trip that already ran, the resize box's stale premise, and the shape a capture cannot catch (2026-08-21)
+
+Phase 4's Family B is written as *three boxes riding one capture trip*. **That trip
+has run** — [D132](#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21), 59 files, kind v1.36.1 — and the corpus was read before
+briefing anything, over `tests/fixtures/`:
+
+```
+neverrules.json  broken-neverrules  Never  retry:[{Restart, exitCodes In [3]}]  keeper:null
+                                           retry restarts:1 terminated · keeper restarts:0 running
+gang.json        broken-gang        Never  trigger:[{RestartAllContainers, In [3]}]  bystander:null
+resize.json      broken-resize      spec memory 24277416Ki vs allocatedResources 64Mi, PodResizePending
+deployments.json broken-owned broken-rollout healthy-deploy broken-quota coredns local-path-provisioner
+                 terminatingReplicas: 0 0 0 0 0 0
+rollout-replicasets.json  broken-rollout-5967d47d5b:0  broken-rollout-764f96ccf7:0
+```
+
+So two of the three boxes have their objects and **no fourth trip is owed**. One
+does not, and one turns out to have been answered underneath the box.
+
+**`terminatingReplicas` takes [D40](#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)'s one-field synthesis, not another trip.** A
+non-zero value exists only while a rollout is draining old pods; catching one
+means the capture landing inside a termination window, which is a race the trip
+cannot schedule — D132 already took four runs and none of them held one. This is
+exactly D40's case: the capture cannot produce the shape, so the test sets one
+field off a committed object and **names what it is waiting for**. What would
+make it capturable — a long `terminationGracePeriodSeconds` and a `preStop`
+sleep on `broken-rollout`'s old revision, so the window is minutes wide — is a
+`scripts/broken.yaml` change with no phase, and it goes to
+[backlog.md](backlog.md) rather than becoming a box in an open phase.
+
+**The in-place resize box's premise stopped being true before the box was read,
+and its invariant-13 question answers *no*.** The box says every resource rule
+reads what the container *asked for*. At HEAD they do not: `effective`
+(`rules.rs:592`) resolves enacted-over-declared per key, and all four resource
+fields go through it (`rules.rs:1835`–1838), which is
+[D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)'s
+work and already shipped. What is left is the *third* number,
+`status.allocatedResources` — what the kubelet reserved — decoded into
+`ContainerSnapshot::allocated_cpu` / `allocated_memory` (`rules.rs:816`–817) and
+asserted by the decode tests (`rules_tests/snapshot.rs:3796`–3856), with **no
+reader anywhere**: `grep` over `rules.rs` and `analysis.rs` finds the decode and
+the doc references and nothing else. D129's doc left it *"for the Capacity report
+to read"*, and Family C landed summing `cpu_request` / `memory_request` through
+`promised` (`analysis.rs:434`–445) instead. **Ruled: no rule and no report reads
+it.** What the scheduler charges a node is the enacted request, which Capacity
+already sums; the reservation printed beside it is two spellings of one number on
+one screen, which [D134](#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21) refused for `quantity_milli`. A pending resize is also not
+what someone meets in a normal week (invariant 13) — it takes a deliberate
+`kubectl patch --subresource resize`.
+
+**The two fields stay, and that is the lazy half of the ruling, not an
+oversight.** Deleting them is the change [D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s window cannot undo after this
+phase closes; keeping them costs two optional strings on a prune line Phase 5
+has not written yet. The ceiling is named here so the next reader does not
+re-open it: decoded, tested, unread, and a consumer needs no decode change.
+
+**So Family B is two boxes and a ruling, and the two stay one turn.** The
+per-box rule for shared helpers
+([CLAUDE.md § the cycle](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it))
+does not bite: `settled`'s own doc already places `restartPolicyRules` on rule
+15's side of the line — *"as that rule's own guard and never as a condition of
+this predicate"* — so the box changes `stopped_for_good` and not the predicate
+five rules share, and `explains_a_shortfall` has exactly one caller
+(`rules.rs:2287`).
+
+**[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20) condition 1, read for a defect no capture can print.** Rule 15 fires
+only at `restarts == 0`, and `neverrules.json` caught `retry` at 1 — the false
+positive is one exit wide, so no committed capture holds the wrong *card*.
+Condition 1 is satisfied by a capture that **falsifies the rule's premise**:
+`neverrules.json` holds a container under `Never` whose own declared rules
+restart it on exit 3, and `Never` is the whole of rule 15's fourth condition
+(`settled`). Demanding the printed card instead would leave a rule knowingly
+wrong until a race is captured, which is the opposite of what D124 exists for.
+Conditions 2–5 are unchanged, and condition 4's whole-file mutation re-run at
+this phase's close already covers the change.
+
+**What the turn settled after the operator review, and the one reversal it owed.**
+The review is `reports/2026-08-21-family-b-restart-rules-and-terminating-replicas.md`.
+
+**The sibling arm withheld a CRITICAL card off a rule that can never fire, and
+that is a regression this box created.** `restart_rules_bring_it_back`'s two arms
+read disjoint halves of one declaration: the container's own rules were matched on
+the exit code and never on the action, a sibling's on the action and never on the
+codes — and nothing asked whether the sibling could still exit. Measured on the
+built binary: a container already sitting in `state.terminated exit 0` under
+`Never`, given one `RestartAllContainers` rule, silences rule 15 for the **whole
+pod** (`○ nothing is broken` where the committed capture prints `1 critical`), and
+so does `exitCodes: {operator: In, values: []}`, which the API server accepts and
+which can match nothing. **The direction is inverted, and that is the ruling:** a
+declared rule suppresses rule 15's card only where it can be **shown** to cover
+this exit — an empty set, an operator this build does not know, an action it does
+not know, a missing field, a sibling that cannot exit again all leave the card
+standing. The author's `unreadable ⇒ covered` was the careful-sounding half of the
+trade and the wrong one: silence is the mistake this rule exists to end, and the
+false positive the new direction risks is self-correcting inside one backoff
+window, where a withheld card is permanent. `container_snapshots` chains the init list into
+`pod.containers`, so a **completed init container** carrying a gang rule silences
+every container in the pod permanently. Fixed in the box: both arms read the
+action *and* the codes, `In []` matches nothing and `NotIn []` matches everything,
+and a sibling counts only while it can still exit.
+
+**[D125](#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20) said this upgrade lands in the shared predicate; it landed in rule 15
+alone. That is the reversal, and here is what it costs.** `settled` still reads
+the policy only, so on a container at `restarts != 0` sitting in
+`state.terminated exit 3` whose own rule names 3, rule 15 stands down — it is
+coming back — while rule 6, one function over, calls that same run *the last run
+on record* and hands over a plain `kubectl logs` that stops being right the moment
+the kubelet acts. Two rules reading one container and disagreeing, which is the
+class D125 exists to close. **It is not fixed here**, for the reason the split
+exists: `settled` is read by rules 1, 2, 5, 6 and 15, and a shared helper is a
+turn of its own ([CLAUDE.md § the cycle](CLAUDE.md#the-cycle--one-family-of-todomd-boxes-is-one-turn-of-it)) — the sibling half additionally needs the pod,
+which is D124 condition 3's signature change. It is **not a regression**: `settled`
+read the policy alone at HEAD too. It goes to [backlog.md](backlog.md) with the
+object named, for the phase-close triage, and D125's sentence carries the pointer.
+
+**The clause moves into the readiness count, and that is the PM deciding a split
+between two reviewers.** `tui-designer` measured that appending it last leaves both
+pinned cards byte-identical and that losing it before the controller's own words is
+the right trade; `k8s-admin` measured that on W1 the evidence is 176 characters
+against a three-line cut at ~152, so the clause is **never drawn** on the one card
+whose `0 of 1 pod ready` it exists to qualify. Both are right, and the second is
+decisive: a fact that is structurally invisible on the card that needs it is not a
+fact. It is folded into the readiness fact instead — `0 of 1 pod ready, 1 shutting
+down` — which is never cut and puts the correction against the number it corrects.
+
+**The price of that fold was stated from an estimate and it is wrong, and the
+measurement is here because two of this file's rules exist for exactly this**
+(a number is read off a run, and a claim that survives into a doc comment is the
+one that goes stale). `k8s-admin` priced it at *"ten characters of a quota message
+which still names the quota"*; `tui-designer` could not reproduce that, and the PM
+re-ran the wrap-and-cut against `screens/alerts.md`'s own 51-column three-line
+budget, with and without hyphen breaking, both agreeing:
+
+```
+HEAD    0 of 1 pod ready · … exceeded quota: deny-all-pods, requested: pods=1,
+fold    0 of 1 pod ready, 1 shutting down · … "broken-quota-…" is forbidden:
+```
+
+The clause costs **`exceeded quota: deny-all-pods`** — the words that name what
+refused the pods — which is the same loss the author measured for second position
+in round 1 and rejected. In budget terms the fold *is* second position; only the
+estimate made it look cheaper. **So the ruling is withdrawn, and the answer is
+*which card*, not *which words*.** Swept a character at a time, by two people
+independently, the edge is **between +11 and +12**: the 30-column token
+`"broken-quota-59654c756-wzr9s"` re-lands one line later and strands line 2 at 21
+of 51 columns. The shortest wording anyone proposed is +17 and the shortest that
+survives invariant 14 is +21, so **no wording fits W1** — while W2's 109-character
+quote is whole even at +22.
+
+**The clause is `rollout_gave_up`'s alone, and the merits agree with the budget
+rather than merely permitting it.** On W1 the quote already says why `ready` is
+low — the API server refused to create the pods — so a leaving pod is not the
+explanation there. On W2 the quote (`ProgressDeadlineExceeded`) says nothing about
+the count and the drainers do. `pods_were_never_created` is byte-identical to what
+it printed before this box existed, proven with drainers **planted** rather than
+on the corpus where the field is `0`; `ready_count` is HEAD's body; the clause is a
+comma suffix inside the readiness fact — `0 of 1 pod ready, 1 pod shutting down` —
+carried by W2's readiness arm only, since arm 2 counts a template and arm 3 counts
+a shortfall. It takes the unit word through `counted`, because a bare `3` beside
+`of 1 pod` has the denominator as its nearest referent and reads as an arithmetic
+error before it reads as two populations.
+
+**Three rulings on one clause in one turn, and each reversal was a measurement
+the round before had not made.** Appended last (author, measured) → folded into
+the count (PM, on an estimate) → W2 only (PM, measured, twice). The cost of that
+is one round each; the cost of not re-measuring would have been shipping a card
+that hides the only string on it a reader can act on. **Worded
+`N shutting down`**: `on the way out` is the only idiom on any card (invariant 14,
+and this screen is read by people whose first language is not English), and
+`already leaving` — the designer's own alternative, where `already` marked a state
+the card *found* rather than an event — no longer needs the word, because sitting
+inside the readiness count is what says that now.
+
+**The `terminatingReplicas` box's premise was stale in the same way the resize
+box's was, and the box is checked knowing it.** It names the false-positive class
+that gets a tool muted — a normal deploy drawing a card — and at HEAD no normal
+deploy draws one: W1 needs `ReplicaFailure`/`FailedCreate`, W2 needs
+`Progressing`/`ProgressDeadlineExceeded`. What shipped is a qualifier on a card
+that was already drawing for another reason. The field is still right to read: the
+miscount is real, and the doc was wrong about where — a pre-gate ReplicaSet
+already excludes a deleting pod through `FilterActivePods`, so those clusters
+miscount **and** have no counter to correct it with. The field is alpha at 1.33
+and 1.34 and beta-on at 1.35, not 1.33. Corrected in all three places that
+repeated the claim.
+
+**One decode helper did move, and D135's batching argument does not cover it.**
+`workload()` went from five positional counters to a private `Counters` struct
+across its four `From` impls — forced by clippy's argument cap with no `#[allow]`
+anywhere in `src/`, inside [D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s window, and the named fields are what makes a
+`readyReplicas`/`availableReplicas` swap visible at the call site. The argument
+above is about the predicate five *rules* share; a decode helper reshaped in the
+same commit that gives it its new field, with every call site in the same file, is
+not that.
+
+### D136 — three claims that were reasoned instead of measured, and the one sentence that catches all three (2026-08-21)
+
+Family B's turn produced no wrong output. It produced **four wrong claims in prose**,
+each one written by someone who had the object available and read a definition
+instead. They cost three review rounds between them, and the rule that would have
+caught every one of them is one sentence long.
+
+**What each of them was.**
+
+- **`unavailableReplicas` "does not move"** — the formula
+  `Σ(replicaset.spec.replicas) − availableReplicas` was read correctly and the
+  conclusion drawn from the *names*: both sides non-terminating, so the difference
+  is stable. The minuend is not a pod count at all; it is a **desired** number the
+  controller writes into the ReplicaSet spec, so on any drain that is not a spec
+  scale-down the difference rises one per leaving pod. The card that prints it says
+  `1 pod not answering` about a pod that is answering
+  ([backlog.md](backlog.md)).
+- **"ten characters of a quota message that still names the quota"** — the price of
+  folding the drain clause into the readiness count, estimated by a reviewer, taken
+  as measured by the PM, written into `NOTES.md` and into a doc comment. Re-run
+  against the pinned 51-column three-line budget it costs `exceeded quota:
+  deny-all-pods` outright — the same loss the author had already **measured** for the
+  rejected alternative one round earlier.
+- **"a pre-gate cluster has nothing to correct"** — reasoned from the feature gate's
+  name. `FilterActivePods` predates the gate by four releases, so those clusters
+  miscount *and* have no counter to say so.
+- **`0..=255` is "the POSIX range the field can hold"** — reasoned from what an
+  exit code *is*. The API server validates a cardinality (255 elements) and no
+  range, and accepts `-1`, `256`, `300`; `-1` is the code this file's own
+  `Ending::CodeUnknown` exists for.
+
+**The class is not carelessness and it is not the number rule already in
+[CLAUDE.md](CLAUDE.md).** That one says *a number written from an estimate instead
+of a run*. Three of these four are not numbers, and all four were written by people
+being careful — each is a correct reading of a *definition*: a formula, a feature
+gate's name, a field's type, a reviewer's parenthesis. What they share is that the
+object was one command away and nobody ran it.
+
+**Ruled, and it is the sentence that generalises the number rule:**
+
+> **A claim about what a field, a formula or a budget *does* is measured against the
+> object, or it is not written.** The definition tells you what it is; only the
+> object tells you what it does. This binds a doc comment, a `NOTES.md` entry, a box
+> and a review finding equally — and a reviewer's estimate stays an estimate until
+> whoever repeats it has run it themselves.
+
+The repeat is the half that bites hardest: three of the four survived a round
+*because* a careful reader passed them on. A finding is evidence when the person
+citing it has the output; otherwise it is a claim wearing a citation.
+
+**Two smaller things the same turn settled.**
+
+**A box's premise goes stale under its own phase, and the brief is where that is
+caught.** Two Phase 4 boxes described a defect the landed code had already closed —
+the resize box (`effective` had resolved enacted-over-declared since
+[D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12))
+and the `terminatingReplicas` box (neither W rule fires on a normal deploy at all).
+The first was caught at brief time and cost nothing; the second was not, and cost a
+review round. **So the brief carries the box's premise re-checked at HEAD, or says
+plainly that it was not checked** — one grep, and it is the cheapest gate in this
+file.
+
+**A re-pin is a write, not a review.** `screens/` was dispatched to `tui-designer`
+for a rewrite in the same slot a reviewer was reading it, on the strength of
+[CLAUDE.md](CLAUDE.md#the-one-hard-rule-of-concurrency)'s *two reviewers on the same
+diff are safe*. The designer was not reviewing; it was writing, and the reviewer's
+first read carried a section that no longer existed. Nothing was lost this time
+because the rewrite was the correct one. The existing rule already covers it —
+**one writer per file tree** — and what failed is that a *re-dispatch to fix a
+finding* was filed under the row that lets reviewers overlap.
+
+### D137 — Family D: the restart row got a pane of its own, and a real cluster took four claims away (2026-08-22)
+
+[D101](#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)
+ruled that a container which is fine right now and keeps dying belongs in a
+report row rather than an alert card, and left the screen two constraints it
+did not settle. Family D settled them and then spent four rounds losing claims
+that were true of the fixture corpus and false of a cluster.
+
+**The row is a seventh pane, not a row bent into Waste.** Waste's title —
+*Things that cost you something for nothing* — is wrong for a container that
+costs nothing and is running, and widening any of the other five titles to also
+cover *has this container been dying* recreates the invariant-14 defect one
+heading over. The bill was paid in the same turn: the `ANALYSIS` sidebar block is
+drawn in six files, and every one of them gained the entry — together with
+`posture`, which had been deferred since [D128](#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)
+precisely until this box answered.
+
+**Two of the box's premises had gone stale and the brief carried them
+re-checked**, which is [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+working: *Worth knowing (not broken)* had already left Waste with the hostPath
+rows, and *Waste is the one pane the sidebar never badges* was never true —
+`drain safety`, `posture` and `waste` all badge nothing. **`restarts` does not
+badge either, and the cluster is what proved that right**: three node reboots on
+a one-node kind cluster took the qualifying set from 6 to 17 containers with
+nothing broken, and a count badge would have read `17`.
+
+**Three private items in a frozen `rules.rs` became `pub(crate)`, by ruling, and
+no logic moved with them** — `RESTARTS_WARN`, `doing_its_job` and
+`container_fact`. Each alternative was a second copy: a second `3`, a second
+readiness reading, a second wording of a role. D101 forbids widening a private
+item *quietly*; this is the loud path, and the precedent is `NODE_NAMESPACE` and
+`listed()`.
+
+**The filter is three clauses answering three questions, and the third is not
+redundant.** `matches!(state, Running { .. }) && doing_its_job(c) && restarts >=
+RESTARTS_WARN`. `doing_its_job` answers *healthy* and is never re-derived here;
+`Running` answers *in a run right now*, which is what the row's second number
+measures. Without it `healthy-retry`'s `wait-for-db` — an init container that
+failed three times and then exited `0` — qualifies for ever and can never be
+drawn, so a cluster whose only such container is that one draws an opening
+paragraph with nothing under it, permanently.
+
+**What the corpus could not show, and a kind cluster did.** Four findings, each
+with an object behind it:
+
+1. **The opening paragraph denied what Alerts was saying in the same
+   snapshot.** Rule 5 stands down on a serving container only once its current
+   run is older than `NOT_READY_GRACE`, and this pane qualifies it the moment it
+   is serving — **the two overlap by construction for ten minutes after every
+   restart**. `default/cycler` carried *"restarted 8 times — it is serving now,
+   but something keeps killing it"* while the pane printed *"Nothing below is
+   broken"* about it. The corpus shows none of that because its five runs are
+   all past the grace: a property of five pinned timestamps, not of a cluster.
+   **The sentence was the defect, not the set** — the paragraph now says what
+   the pane is and points at the second number as the signal, and `_findings`
+   stays unread.
+2. **The cap was Waste's number borrowed without Waste's reason.** Five is a
+   *per-section* budget for a pane whose four sections share sixteen lines; this
+   pane has one section and nothing to starve. Measured, the five slots went to
+   five containers that had stopped restarting for good while the one on a live
+   ten-minute cycle became an unselectable `and 1 more`. **This pane scrolls**,
+   like Capacity and Posture.
+3. **The sort discarded the second number.** Count stays primary — it is D101's
+   own *worst* — but a tie now breaks on the **younger current run**, which the
+   producer had already computed one line above the comparator. It compares the
+   moment and not `age`'s string: two runs three seconds apart both spell
+   `22 hours ago`, and a comparator reading the rung ties.
+4. **The reason a not-ready container is excluded was false, and had been
+   written into the frozen file.** Four sites said *it already carries rule 7's
+   card*. `running_but_not_ready` opens `if c.role != ContainerRole::Regular {
+   return None; }`, so a native sidecar failing the identical probe gets no rule
+   7 card at all — the Istio/Linkerd shape the role split exists for; two pods in
+   that state produced one rule 7 card and it was not the sidecar's. **The
+   guarantee is rule 5's non-serving branch**, which ages out only where
+   `doing_its_job` is true and therefore never for that container, whatever its
+   role. The behaviour was right; the reason was reasoned from a definition.
+
+**The empty sentence was rewritten three times and each rewrite closed a false
+claim.** *Every container* swept in the crash-loopers it never looks at; *every
+container running* swept in the `Running && !ready` ones the filter drops; and
+unscoped, it asserted something about the whole cluster while the title above it
+named one namespace — `kube-system/etcd` at forty restarts is what makes that
+false. It now reads *every container serving right now in `<namespace>`*, with
+the number derived from `RESTARTS_WARN` and drawn as a digit, which is every
+other count on that page.
+
+**Three smaller rulings, recorded so they are not re-opened.**
+`src/analysis_tests/shape.rs` is deleted: it held only the hand-built placeholder
+pane, whose title and `severity: None` the landed spec contradicts, and the real
+producer makes its claims. **The tests' `qualifying()` and `drawable()` keep
+restating the filter rather than calling the producer** — [D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+is about two *product* readers of one container; a restatement written from the
+screen is the second opinion, and a test that calls the function it tests
+asserts a tautology. And **a count is not always evidence about the container the
+row names**: `broken-gang`'s `bystander` never failed — the pod's
+`RestartAllContainers` rule restarted it for a sibling's exit — and the row may
+not say so, because that would mean naming the ending. D101's own cost list did
+not carry it; the producer's doc does now.
+
+**One correction inside an earlier entry.** D127 listed `drain safety`, `waste`
+and `restarts` as the three panes that falsified the badge discriminator. There
+was no `restarts` pane on 2026-08-20; D128, written later the same day, names the
+real trio. The word is now `posture`.
+
+**The lesson this family adds to D136's.** Every one of the four findings above
+was invisible to 420 passing tests over 59 committed fixtures, and each fell out
+of one kind cluster in one afternoon. A corpus is a set of pinned moments; a
+claim about *what happens over time* — a card that ages out, a count that never
+comes back down, a pane that fills up after a reboot — cannot be checked against
+one. **When a claim's subject is time, the fixture cannot be the witness.**
+
+### D138 — reports/ keeps everything, and the retention rule is a re-measure trigger (2026-08-22)
+
+Phase 4's last box asked for a bound on `reports/` "before there is anything to
+bound", and named three candidates: a report whose decision landed is **deleted**,
+**kept**, or **reduced to the `D##` that cites it**. The box's premise was that
+"this repo's disease is append" and that `reports/` grows forever in the tree
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+ruled must get smaller. The box was written on 2026-08-16 (`1b2cf66`), when
+`reports/` held **no reports at all** — only its README. So *before there is
+anything to bound* was literal, and the premise about growth was a forecast, not
+a measurement.
+
+**Measured at Phase 4 close** (`du -sb`, 2026-08-22, twelve reports):
+
+| | bytes |
+|---|---|
+| `backlog.md` | 47,667 |
+| `reports/` | **160,742** |
+| `todo.md` | 217,654 |
+| `screens/` | 324,194 |
+| `NOTES.md` | 796,873 |
+
+`reports/` is one fifth of `NOTES.md`, and larger than only one of the other
+four. More to the point it is not one of the files D103 was
+about: that decision's subject was, in its own words, "the two files every agent
+must read — `NOTES.md` and `todo.md`". `reports/` is read when somebody wants a
+measurement, like `backlog.md` and `screens/` — none of the three is paged
+through on the way to something else. A per-turn cost and a disk cost are
+different diseases, and the cure for one is not owed to the other.
+
+**Ruled: kept.** No count, no age, no size bound on the directory, and nothing is
+deleted for having landed.
+
+**Reducing a report to its `D##` is the option the measurement actually
+forbids.** There are **37** by-name citations of a report from outside the
+directory — `backlog.md` 17, `screens/analysis.md` 10, `NOTES.md` 9, `todo.md` 1
+— and **13** of them carry a section number *into the report body*
+(`… § 13.1`, `… §§ 1–2`). What `screens/analysis.md` reaches into is
+`corpus-drain-and-capacity.md` § 13.1, *Node states, and where the pinned pod
+landed* — a table of what four nodes were doing on one afternoon, which no
+decision entry contains and none should: a decision says what was settled, the
+report says what was seen. Collapsing the report into the decision
+deletes the object the decision is checkable against, which is the failure
+[CLAUDE.md § Where a leak would actually happen](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand) names by hand —
+*the definition says what it is; only the object says what it does*.
+
+**What bounds the directory is already paid for, and neither half is new:**
+
+- **Per file** — the "no object dumps" rule in
+  [`reports/README.md`](reports/README.md), now enforced by
+  `scripts/reports-guard.py`
+  ([D126](#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20)).
+  A report is the command, its exit status, and the field values the finding
+  turns on. That is what keeps a file at 200 lines instead of 20 000, and it
+  refuses by content class rather than by length — a line ceiling would fire on a
+  legitimate thirteen-section measurement and stay quiet on a short leak.
+- **Per link** — `scripts/check-docs.py` walks every `*.md` in the repo and fails
+  on a link whose destination file does not exist (`missing file ->`). Deleting a
+  report is therefore *available and guarded*: you may delete one, you may not
+  delete one something still cites.
+
+**The re-decide trigger, because "no rule" needs one.** This ruling rests on one
+number and it is one command to re-take: when `reports/` is no longer a fraction
+of `NOTES.md` — say, when `du -sb reports/ NOTES.md` stops putting it in second
+place — the measurement that justified keeping everything has stopped holding and
+the bound is decided again. Not a gate, not a ritual step: a named condition, so
+the next PM re-measures instead of re-reasoning.
+
+**What the measurement found on the way.** Two reports are cited by no filename
+anywhere — `2026-08-16-capture-trip-review-measurements.md` and
+`2026-08-22-family-d-restarts-pane.md`. Neither is orphaned: the first carries
+its decision in its own title (D114), and the second is cited by the form several
+closed boxes use, `([reports/](reports/README.md), 2026-08-22)`. So a
+"delete what nothing cites" rule would have opened with two false positives on
+its first run, and a citation-by-date is a citation. It is not adopted.
+And `reports/README.md` still said the sanitization guard "does not run here",
+"on a path with no guard yet" and "owed", in three separate paragraphs, after
+`scripts/reports-guard.py` had been running in `just check` since 2026-08-20 —
+fixed in this same change. The guard that closed the gap did not update the page
+that describes it, which is the stale-second-copy failure this repo names in
+CLAUDE.md and had here in its own documentation of the fix.
+
+### D139 — Phase 4's close: the budget whose first sync failed, and where the other seven findings went (2026-08-22)
+
+The phase-close cross-family review read all seven reports together with the
+helpers they share ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)).
+One blocker, two should-fix, five nits. This entry is the blocker's ruling and
+the disposition of the other seven, so no finding is left resting only in a
+report.
+
+**The blocker: the permanent case arrived wearing the transient one's shape.**
+`drain_row` asked `has_not_caught_up` before `blocks_a_drain`, so a budget whose
+`status.observedGeneration` was behind its `generation` could never reach the
+`SyncFailed` branch. Upstream's `failSafe` sets `DisruptionsAllowed = 0` and the
+`SyncFailed` condition and **does not** advance `status.observedGeneration`, while
+`eviction.go` refuses every eviction while the status is behind. So a budget whose
+*first* sync failed sits at `generation: 1 / observedGeneration: 0` forever, every
+eviction of its pods is refused — and k8rs drew the pane's **quietest** row, no
+band, sorted with the ready nodes: *"needs a moment before it can be checked …
+wait a few seconds and look again"*.
+
+That is the exact failure
+[D132](#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21)
+§ *Blocker 2* carried both fields to prevent — *"this node is ready to drain, and
+then it hangs"* — reintroduced one layer up, in the order the two questions were
+asked. **A field carried for a reason is not the same as a reason honoured**, and
+nothing between the two was watching.
+
+**The fix is one guard and one shared reader.** `could_not_be_counted` is now the
+only place the `DisruptionAllowed` condition's reason is read, called from both
+`drain_row` and `blocks_a_drain`; the loop reads
+`Some(waiting) if !could_not_be_counted(budget)`.
+
+**Ruled: this is not a reversal of [D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20).**
+D130's rule is that the generation question is asked at the call site and never
+inside `blocks_a_drain`, and it still is — `blocks_a_drain` asks nothing about
+generations. What changed is that its answer no longer wins unconditionally. The
+invariant underneath D130 — *the counters are never read while the spec is ahead*
+— holds **by construction, and the PM checked the code rather than the report**:
+the only budget that now reaches `blocks_a_drain` while behind is one
+`could_not_be_counted` is true of, and that is branch 1, which returns before
+`disruptions_allowed` is touched.
+
+**An upstream reading that sharpens D132.** D132 hoped the `DisruptionAllowed`
+condition's own `observedGeneration` might separate the two cases and recorded
+that it "carries nothing to compare it against". Read at `release-1.34`, the
+reason is stronger than that: **both** writers copy the status value into it —
+`failSafe` with `ObservedGeneration: newPdb.Status.ObservedGeneration`, and the
+success path's `UpdateDisruptionAllowedCondition` the same. It can never differ
+from `status.observedGeneration`, so the field D46 drops would not have helped,
+and the `reason` is the only thing that separates them. Every successful sync
+overwrites `SyncFailed`, so it means *the last thing the controller did to this
+budget was fail*.
+
+**One case is not separable and draws the blocking row.** A generation bumped
+*after* a failed sync (`generation: 2 / observedGeneration: 1 / SyncFailed`) is
+indistinguishable from a budget mid-resync of a spec somebody has just fixed. It
+draws *would never finish draining*, because evictions are refused right now and
+the controller's last word was that it could not count this — both halves of the
+sentence stay true. Stated here rather than left as a silent judgement.
+
+**Where the other seven went.** Two should-fix and five nits, none of them boxed
+into the phase that was closing:
+
+- **`34 workloads` under a header saying `16 workloads`** — reproduced by the PM,
+  and it is starker with no user workload at all: `0 workloads` in the header and
+  `6 workloads have no memory or CPU limit` below it. Folded into Phase 5's
+  **owner-name-resolution** box, because resolving a ReplicaSet to its Deployment
+  changes that number anyway and fixing the noun twice is worse than once.
+- **`endpoints_behind` is quadratic in Services** (~1.4 s at 10 000) — its own
+  Phase 5 box. The finding is the growth rate; `REQUIREMENTS.md` states the paint
+  budget at ~1000 pods, which is not where this was measured
+  ([D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
+- **Posture sorts the one row worth reviewing last** — a pod in `default`
+  mounting `/etc/kubernetes/pki` read-only draws no card and folds into a
+  `kube-system` row. Its own Phase 5 box. **Not a reversal of
+  [D2](#d2--the-dividing-line-broken-now-vs-risky-later)**: D2's stated reason is
+  that a plain read-only hostPath "is how CNI, CSI and every node agent are
+  supposed to work" — a claim about **who** mounts it — and the code keys only on
+  **what** is mounted. Adding an escalation case is the move
+  [D79](#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
+  already made once.
+- **Three of the seven have never drawn their principal shape through the
+  binary** — the driver hard-codes `server_version`, `context`,
+  `client_certificate` and `metrics` to `None`. Its own Phase 5 box, which is
+  where those four stop being `None`.
+- **The `.` hostPath doc claim, the two meanings of `Info`, and the unglossed
+  `--ignore-daemonsets`** — [`backlog.md`](backlog.md). The last two are
+  presentation, and the phase that draws the bands is the one that can judge them.
+
+**`analysis.rs` freezes with this close, so every box above is a
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+question when it lands** — said here so the next PM meets it as a known cost and
+not a surprise. The cheapest of them is the quadratic join, whose output must not
+change at all.

@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-16T09:44:00Z",
+    "creationTimestamp": "2026-08-20T22:42:55Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-failed",
     "namespace": "default",
-    "resourceVersion": "2300",
-    "uid": "e19b0a42-38dc-4b0f-8b4e-30881b958b61"
+    "resourceVersion": "2313",
+    "uid": "f123fefb-09f6-417c-b758-45cb465266eb"
   },
   "spec": {
     "activeDeadlineSeconds": 120,
@@ -30,7 +30,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-vjgnm",
+            "name": "kube-api-access-nppgt",
             "readOnly": true
           }
         ]
@@ -38,7 +38,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker3",
+    "nodeName": "k8rs-worker",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "OnFailure",
@@ -63,7 +63,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-vjgnm",
+        "name": "kube-api-access-nppgt",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -106,21 +106,21 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:46:01Z",
+        "lastTransitionTime": "2026-08-20T22:44:55Z",
         "observedGeneration": 1,
         "status": "False",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:45:44Z",
+        "lastTransitionTime": "2026-08-20T22:44:45Z",
         "observedGeneration": 1,
         "reason": "PodFailed",
         "status": "False",
@@ -128,7 +128,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:45:44Z",
+        "lastTransitionTime": "2026-08-20T22:44:45Z",
         "observedGeneration": 1,
         "reason": "PodFailed",
         "status": "False",
@@ -136,7 +136,7 @@
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -144,16 +144,16 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://3980c8a3c6bcc72bdf6de8993f367926d8d9260c23357a1a41d3cf1a3bd465df",
+        "containerID": "containerd://9070ce478cbd3adf1a9df93ebec669db4db095816b11ce742d008c489f69e161",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {
           "terminated": {
-            "containerID": "containerd://3980c8a3c6bcc72bdf6de8993f367926d8d9260c23357a1a41d3cf1a3bd465df",
+            "containerID": "containerd://9070ce478cbd3adf1a9df93ebec669db4db095816b11ce742d008c489f69e161",
             "exitCode": 1,
-            "finishedAt": "2026-08-16T09:45:44Z",
+            "finishedAt": "2026-08-20T22:44:45Z",
             "reason": "Error",
-            "startedAt": "2026-08-16T09:45:44Z"
+            "startedAt": "2026-08-20T22:44:45Z"
           }
         },
         "name": "app",
@@ -183,7 +183,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-vjgnm",
+            "name": "kube-api-access-nppgt",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -208,6 +208,6 @@
     "qosClass": "BestEffort",
     "reason": "DeadlineExceeded",
     "resources": {},
-    "startTime": "2026-08-16T09:44:00Z"
+    "startTime": "2026-08-20T22:42:55Z"
   }
 }

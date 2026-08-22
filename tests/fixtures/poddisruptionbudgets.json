@@ -1,6 +1,87 @@
 {
   "apiVersion": "v1",
-  "items": [],
+  "items": [
+    {
+      "apiVersion": "policy/v1",
+      "kind": "PodDisruptionBudget",
+      "metadata": {
+        "creationTimestamp": "2026-08-20T22:42:55Z",
+        "generation": 1,
+        "labels": {
+          "demo": "broken"
+        },
+        "name": "broken-pdb-floor",
+        "namespace": "default",
+        "resourceVersion": "1346",
+        "uid": "3b1d5981-ebf1-439a-96c9-d67265ef5106"
+      },
+      "spec": {
+        "minAvailable": 2,
+        "selector": {
+          "matchLabels": {
+            "app": "healthy-deploy"
+          }
+        }
+      },
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-08-20T22:42:55Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "InsufficientPods",
+            "status": "False",
+            "type": "DisruptionAllowed"
+          }
+        ],
+        "currentHealthy": 2,
+        "desiredHealthy": 2,
+        "disruptionsAllowed": 0,
+        "expectedPods": 2,
+        "observedGeneration": 1
+      }
+    },
+    {
+      "apiVersion": "policy/v1",
+      "kind": "PodDisruptionBudget",
+      "metadata": {
+        "creationTimestamp": "2026-08-20T22:42:55Z",
+        "generation": 1,
+        "labels": {
+          "demo": "healthy"
+        },
+        "name": "healthy-pdb-room",
+        "namespace": "default",
+        "resourceVersion": "1156",
+        "uid": "e4031909-7670-4c85-948f-2dfbc7b11f60"
+      },
+      "spec": {
+        "minAvailable": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "broken-rollout"
+          }
+        }
+      },
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-08-20T22:43:04Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "SufficientPods",
+            "status": "True",
+            "type": "DisruptionAllowed"
+          }
+        ],
+        "currentHealthy": 2,
+        "desiredHealthy": 1,
+        "disruptionsAllowed": 1,
+        "expectedPods": 3,
+        "observedGeneration": 1
+      }
+    }
+  ],
   "kind": "List",
   "metadata": {
     "resourceVersion": ""

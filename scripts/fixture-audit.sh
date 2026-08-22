@@ -342,6 +342,17 @@ for file in "${all_files[@]}"; do
   fi
 done
 
+# The names the fixture cluster's kind config produces, and the same set
+# scripts/sanitize.jq anchors `refuse_foreign_nodes` to. Two files, one rule —
+# and this is the second copy, which is exactly the shape D52 names: the audit
+# and the sanitizer were blind in the same places twice. It stays because the
+# blocks below name the node they found and the filter backstop further down can
+# only say the filter objects; it stays *anchored* so the two never print
+# contradictory verdicts on one name.
+kind_node() { # $1 = a node name
+  [[ $1 =~ ^k8rs-(control-plane|worker[0-9]*)(\.[a-z0-9-]+)*$ ]]
+}
+
 # Node identity is in every pod fixture, not only nodes.json — ten of them carry
 # `spec.nodeName`, and none of them used to be checked. Same rule as the
 # sanitizer's: a foreign name is refused, never rewritten.
@@ -349,7 +360,7 @@ for file in "${files[@]}"; do
   rel=${file#"$fixtures"/}
   while read -r n; do
     [ -z "$n" ] && continue
-    case "$n" in k8rs-*) ;; *) note "[$rel] names node '$n', which is not from the kind test cluster" ;; esac
+    kind_node "$n" || note "[$rel] names node '$n', which is not from the kind test cluster"
   done < <(jq -r '[.. | objects | .nodeName? // empty] | .[]' "$file" 2>/dev/null)
 done
 
@@ -391,10 +402,7 @@ if [ -f "$fixtures/nodes.json" ]; then
   names=$(jq -r '[.items[]?.metadata.name // empty] | join(" ")' "$fixtures/nodes.json")
   [ -n "$names" ] || note "[nodes.json] has no node names — the N-series rules join on these"
   for n in $names; do
-    case "$n" in
-      k8rs-*) ;;
-      *) note "[nodes.json] node '$n' is not from the kind test cluster" ;;
-    esac
+    kind_node "$n" || note "[nodes.json] node '$n' is not from the kind test cluster"
   done
 fi
 

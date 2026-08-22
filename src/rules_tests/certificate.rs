@@ -5,8 +5,8 @@ use super::*;
 // --- C1, THE ONE CARD ABOUT THE READER'S OWN MACHINE ---
 //
 // Three committed certificates, whose `notBefore` and `notAfter` are pinned and asserted
-// by `scripts/certs-test.sh` against the same instant [`now`] spells — 19 days left, 360
-// days left, 8 days past. That script also refuses to let this file and itself disagree
+// by `scripts/certs-test.sh` against the same instant [`now`] spells — 15 days left, 356
+// days left, 12 days past. That script also refuses to let this file and itself disagree
 // about that instant, so a pin moved in one and not the other is a red guard.
 //
 // **What is guarded is the assertions, and a day-count written into prose is not one**
@@ -19,11 +19,12 @@ use super::*;
 // made it wrong and one of them two, which is the drift this convention exists to stop.
 //
 // **The three numbers move with the pin and the certificates do not** (NOTES § D97) —
-// once on 2026-08-16 and again on 2026-08-17, when the capture trip that added the four
-// pod fixtures pushed the pin a day. Their `notBefore` and `notAfter` are absolute, so a
-// repin changes what the counts are *at* the pin and nothing about the committed bytes —
-// and both fixtures stay on the side of [`CERT_EXPIRY_WARN`] they were made for (19 days
-// is inside the 30-day window, 360 days is outside it), which is the property that would
+// on 2026-08-16, on 2026-08-17, and again on 2026-08-20, when the capture trip that added
+// the four Family C fixtures pushed the pin four days. Their `notBefore` and `notAfter`
+// are absolute, so a repin changes what the counts are *at* the pin and nothing about the
+// committed bytes —
+// and both fixtures stay on the side of [`CERT_EXPIRY_WARN`] they were made for (15 days
+// is inside the 30-day window, 356 days is outside it), which is the property that would
 // have forced a regeneration if it had failed.
 //
 // **A repin is therefore an edit in two ownership rows.** The three numbers above and the
@@ -158,8 +159,8 @@ fn the_kubeconfig_certificate_inside_the_window_says_how_long_the_reader_has() {
          card in Alerts that no screen spec has (NOTES § D87)"
     );
     assert!(
-        card.title.contains("19 days"),
-        "the certificate has 19 days left at the pinned `now` and the card says so — \
+        card.title.contains("15 days"),
+        "the certificate has 15 days left at the pinned `now` and the card says so — \
          `scripts/certs-test.sh` asserts that number against the committed bytes: {}",
         card.title
     );
@@ -237,7 +238,7 @@ fn an_expired_kubeconfig_certificate_is_a_failure_and_not_a_warning() {
          are read in two places, not because one shouts louder (NOTES § D87)"
     );
     assert!(
-        card.title.contains("expired 8 days ago"),
+        card.title.contains("expired 12 days ago"),
         "past the deadline the sentence changes tense and the number is how long ago: {}",
         card.title
     );
@@ -334,10 +335,15 @@ fn thirty_days_is_the_threshold_and_the_deadline_itself_is_not_yet_past() {
 /// is also what a certificate this file built wrong produces, so the same builder, the
 /// same tag and the same field length are fed a date inside C1's window first: if that
 /// card does not draw, the `9999` row proves nothing about `9999`.
+///
+/// **The control's count is taken at the pin and `scripts/certs-test.sh` does not reach it**
+/// — the guard reads `tests/fixtures/certs/`, and this certificate is built from bytes here.
+/// It is the fourth pin-derived count in the file and the only one outside the three the
+/// header names, so a repin moves it too: `2026-09-01` less [`now`], in whole days.
 #[test]
 fn a_certificate_that_never_expires_draws_no_card_rather_than_panicking() {
     for (not_after, expected) in [
-        (b"20260901000000Z", Some("15 days")),
+        (b"20260901000000Z", Some("11 days")),
         (b"99991231235959Z", None),
     ] {
         let der = certificate_expiring_at(&tlv(0x18, not_after));

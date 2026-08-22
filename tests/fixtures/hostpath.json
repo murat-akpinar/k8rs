@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-16T09:44:00Z",
+    "creationTimestamp": "2026-08-20T22:42:54Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-hostpath",
     "namespace": "default",
-    "resourceVersion": "1378",
-    "uid": "d5a9fe8f-05e6-4832-a193-842d6b76103c"
+    "resourceVersion": "1434",
+    "uid": "6a167eb2-f0da-49fa-826c-c10f5ce85136"
   },
   "spec": {
     "containers": [
@@ -33,7 +33,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-6swgs",
+            "name": "kube-api-access-wlth9",
             "readOnly": true
           }
         ]
@@ -57,7 +57,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-6swgs",
+            "name": "kube-api-access-wlth9",
             "readOnly": true
           }
         ]
@@ -65,7 +65,7 @@
     ],
     "dnsPolicy": "ClusterFirst",
     "enableServiceLinks": true,
-    "nodeName": "k8rs-worker",
+    "nodeName": "k8rs-worker3",
     "preemptionPolicy": "PreemptLowerPriority",
     "priority": 0,
     "restartPolicy": "Always",
@@ -97,7 +97,7 @@
         "name": "root"
       },
       {
-        "name": "kube-api-access-6swgs",
+        "name": "kube-api-access-wlth9",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -140,35 +140,35 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:01Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-20T22:42:54Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:21Z",
+        "lastTransitionTime": "2026-08-20T22:43:16Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:21Z",
+        "lastTransitionTime": "2026-08-20T22:43:16Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-20T22:42:54Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -176,7 +176,7 @@
     ],
     "containerStatuses": [
       {
-        "containerID": "containerd://811cf0018a8759e38b59477356e8cf669c7e022499569cfdc08afb51ec0e512b",
+        "containerID": "containerd://d3268d09019567794dbbe0c471981fbaf2777065511564581f0b838671aa67fa",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {},
@@ -187,7 +187,7 @@
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-16T09:44:10Z"
+            "startedAt": "2026-08-20T22:43:03Z"
           }
         },
         "user": {
@@ -207,14 +207,14 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-6swgs",
+            "name": "kube-api-access-wlth9",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
         ]
       },
       {
-        "containerID": "containerd://79463e18807f0e15891e02626b5e699439149db6af55f0cdee82945da33d7e81",
+        "containerID": "containerd://41b14d50a781f74d53492b5e9d10577376f7c2bb2ba0a7da7f43afb0fa2a666c",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {},
@@ -225,7 +225,7 @@
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-16T09:44:21Z"
+            "startedAt": "2026-08-20T22:43:16Z"
           }
         },
         "user": {
@@ -247,7 +247,7 @@
           },
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-6swgs",
+            "name": "kube-api-access-wlth9",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -270,6 +270,6 @@
     ],
     "qosClass": "BestEffort",
     "resources": {},
-    "startTime": "2026-08-16T09:44:00Z"
+    "startTime": "2026-08-20T22:42:54Z"
   }
 }

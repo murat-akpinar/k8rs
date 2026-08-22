@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-16T09:44:01Z",
+    "creationTimestamp": "2026-08-20T22:42:55Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-unjudged",
     "namespace": "default",
-    "resourceVersion": "837",
-    "uid": "076e256b-fe24-400c-84f5-19091bd220a1"
+    "resourceVersion": "799",
+    "uid": "51b60cc5-0faa-4ad3-80e9-27004bc45f09"
   },
   "spec": {
     "containers": [
@@ -28,7 +28,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-fdz4v",
+            "name": "kube-api-access-kqrv6",
             "readOnly": true
           }
         ]
@@ -60,7 +60,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-fdz4v",
+        "name": "kube-api-access-kqrv6",
         "projected": {
           "defaultMode": 420,
           "sources": [

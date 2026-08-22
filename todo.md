@@ -1606,137 +1606,162 @@ Goal: the cluster-wide answers no per-object rule can give. Pure functions
 over a `ClusterSnapshot`, so this phase is as testable as Phase 3 and needs no
 cluster either.
 
-- [ ] **Rule 6 and rule 15 disagree about which run is "the last", and the
-      capture trip put the disagreement on a card.** Rule 15's condition table
-      calls `lastState` *the run before this one*; rule 6 titles that same field
-      **"The last run on record failed"**. When a container is sitting in
-      `state.terminated`, `lastState` is the *second to last* run — and
-      `neverrules.json` is the first committed capture where the two differ, so
-      the card is wrong out loud: it draws *"The last run on record failed —
-      exit 3"* about `retry`, which is stopped for good at **exit 1**. Worse for
-      the reader than a wrong number: `--previous` resolves through
-      `lastState.terminated.containerID`, so the command the card hands them
-      returns *"cannot reach the license server, retrying"* while the container's
-      actual last words, *"giving up"*, are what plain `kubectl logs` would
-      return. The generic case is `restartPolicy: OnFailure` — a container that
-      failed once, then exited 0 and sits terminated beside a running sibling,
-      about which rule 6 says the last run failed. `oom`, `notfound` and `init`
-      are all in that face now and only read correctly because both their runs
-      are identical, which is luck and not a design. Found by the operator review
-      of the capture trip
-      ([D114](NOTES.md#d114--the-capture-trip-that-put-four-objects-on-disk-and-the-init-arm-that-is-not-reachable-at-all-2026-08-16));
-      boxed here rather than folded in because it needs a decision that box did
-      not make — whether rule 6 reads `state.terminated` when the container is
-      currently terminated, and what that does to rule 15's table and to
-      `one_card_per_action`. Done-when: the card names the run it is actually
-      about on `neverrules.json`, the command beside it reaches that run's log,
-      and a test holds both
-- [ ] **`scripts/check-docs.py` fails on a `### D##` heading with no line in
-      NOTES § Decision index** — `tester`'s box, and it closes the one hole
+**The 21 boxes below are four families, three singles and two closing gates**
+([D109](NOTES.md#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)).
+They are **not reordered** — the brief names them, the file keeps them where the
+text that cites them expects to find them, and the next box is still the first
+unchecked one from the top.
+
+- **Alone, and first — the run a card is about.** Rule 6 versus rule 15. It
+  changes `rules.rs`, which froze at Phase 3 close, and
+  [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  is the one decision that lets it — under five conditions, one of which is that
+  this phase's close re-runs the whole-file mutation gate. Never batched.
+- **Family A — what the build refuses.** The `### D##` index guard · the
+  `reports/` sanitization guard · the 100-column guard · `certs-test.sh`'s stale
+  `(C1 warns)` · the `sanitize.jq` node-name anchor. All `tester`'s, all
+  `scripts/` and `just check`, none of them touching `src/` — so this one runs
+  **alongside** whichever `analysis.rs` box is open, not in a slot of its own.
+- **Family B — the fields the pin made readable.** `restartPolicyRules` ·
+  `terminatingReplicas` · in-place resize. Three
+  [D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)
+  follow-ups with one shape each — snapshot field, prune line, fixture, then the
+  rule — all inside [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+  window, and all riding **one** capture trip.
+- **Alone — the `Report` shape.** Every report box calls it, and a shared
+  contract's blast radius is not a family.
+- **Family C — the reports.** Capacity · Drain safety · Waste · Posture ·
+  Versions · Certificates. Read together or not at all: two reports counting the
+  same thing two different ways is invisible from inside either.
+- **Family D — the restart row.** `tui-designer` answers where it lives, and
+  then it is written — the designer box is step 2 of the second one's cycle, not
+  a turn of its own.
+- **Not in a family:** the `reports/` retention box, which is the PM's and says
+  *at a phase close, not mid-phase*, so it closes **with** this phase; and the
+  last two boxes, which are its gates.
+
+- [x] **Rule 6 and rule 15 disagree about which run is "the last", and the
+      capture trip put the disagreement on a card.** `lastState` is the last run
+      only while the container has moved on from it; sitting in
+      `state.terminated` it is the *second to last*, so rule 6 drew *"The last
+      run on record failed — exit 3"* about `neverrules.json`'s `retry`, which is
+      stopped at **exit 1**, and handed a `--previous` that fetches that same
+      wrong run. Ruled in
+      [D125](NOTES.md#d125--the-last-run-on-record-is-a-question-about-the-container-not-a-field-and-stateterminated-may-name-a-card-only-where-the-run-is-settled-2026-08-20)
+      under
+      [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+      five conditions, which is what let a frozen `rules.rs` change at all — and
+      condition 4 is why this phase's close re-runs the whole-file mutation gate.
+      Done: *the last run on record* is one shared reader
+      (`last_run_on_record`), bounded by one shared predicate (`settled`) that
+      names every `Ending`; **every** rule that reads a terminated record routes
+      through it — rules 1, 2, 5, 6 and 15, because changing one of a pair that
+      had agreed by accident is what broke `one_card_per_action`'s fold and drew
+      two contradictory cards on one container. `neverrules.json` names exit 1
+      and ships plain `kubectl logs`; the action sentence keeps `--previous` on
+      the callers whose command carries it. 267 + 7 tests, 37 mutants 0 missed,
+      three operator-review rounds on kind v1.36.1
+      ([reports/](reports/README.md), 2026-08-20 ×2)
+- [x] **`scripts/check-docs.py` fails on a `### D##` heading with no line in
+      NOTES § Decision index** — closes the one hole
       [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
-      left open. The index makes the file navigable without reading it, and
-      today a *renamed* heading is caught by the anchor check while a heading
-      **added** with no line at all is caught by nobody — which is the failure
-      that degrades in silence, and the reason CLAUDE.md's rule needs a guard
-      and not a promise. Landed in a later phase than the one that found it,
-      per CLAUDE.md § What to do next. Done-when: a self-test plants a decision
-      with no index line and the guard goes red on it
-- [ ] **The fixture sanitization gate does not run over `reports/`, and that is
+      left open: a *renamed* heading was caught by the anchor check, a heading
+      **added with no line at all** by nobody, which is the failure that
+      degrades in silence. Done, **both directions** — a heading with no index
+      line and an index line with no heading — and level-3 only, because
+      `### Design` and a `#### D112 …` subsection both make a naive `D\d+`
+      invent a decision number. It caught a bad anchor in the PM's own D126 on
+      its first real run ([D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20))
+- [x] **The fixture sanitization gate does not run over `reports/`, and that is
       where raw cluster output now lands** — `reports/` takes an agent's
       measurements into a *committed* file
       ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)),
-      which is the path `scripts/sanitize.jq` exists to guard for fixtures. Today
-      the rule is a paragraph in [`reports/README.md`](reports/README.md) enforced
-      by the PM reading the diff — a promise, and
-      [D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12) is what
-      promises are worth here. The guard is not the fixture sanitizer reused:
-      that one rewrites JSON, this one reads prose and must refuse a token, a
-      PEM block, a kubeconfig, an env value, an annotation payload, a node IP or
-      a hostname wherever it appears in a markdown file. **Feed it every framing**
-      (D31): the value whole, as a substring of a longer line, inside a fenced
-      block, and base64-re-encoded. `tester`'s files, and it runs from
-      `just check` with a `--self-test` like its neighbours. Done-when: each
-      refused class is planted once, seen red, and the clean tree green before
-      and after — and one **canary** proves the guard is reading the directory at
-      all, so *found nothing* cannot print the same line as *nothing to find*
-- [ ] **`reports/` has no retention rule and this repo's disease is append** —
+      the path `scripts/sanitize.jq` exists to guard for fixtures, and the rule
+      was a paragraph in [`reports/README.md`](reports/README.md) enforced by the
+      PM reading the diff. Done:
+      [`scripts/reports-guard.py`](scripts/reports-guard.py) reads **prose** and
+      refuses a token, a PEM block, a kubeconfig, an env value, an annotation
+      payload, a node IP or a hostname — **21 planted values across 7 classes,
+      each proven red whole, as a substring, inside a fence and
+      base64-encoded** (D31), with a **canary** on every invocation so *found
+      nothing* cannot print the same line as *nothing to find*. It refuses any
+      non-`.md` file in `reports/` unread; its floors and two named ceilings are
+      in [D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20)
+- [x] **`reports/` has no retention rule and this repo's disease is append** —
       the directory grows one file per measurement forever, in the tree
       [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
       ruled must get smaller. Decide the bound before there is anything to bound:
       whether a report whose decision landed is deleted, kept, or reduced to the
       `D##` that cites it. PM's, at a phase close, not mid-phase
+      Ruled **kept**, and the box's own premise is what the measurement took
+      away: `reports/` is 157K against `NOTES.md`'s 778K and is not one of the two
+      files D103 was about — the two every agent *must* read — so a per-turn cost
+      was being charged to a disk cost. **Reduce-to-`D##` is the option the
+      numbers forbid** — 13 of the 37 by-name citations point at a *section* of a
+      report. What bounds it was already paid for: `reports-guard.py` per file,
+      and `check-docs.py`'s `missing file` per link, which makes deleting an
+      uncited report available and a cited one red. A "delete what nothing
+      cites" rule was drafted and **dropped after it opened with two false
+      positives** — a citation by date is a citation
+      ([D138](NOTES.md#d138--reports-keeps-everything-and-the-retention-rule-is-a-re-measure-trigger-2026-08-22))
 
 *Moved out of Phase 3: `tester`'s files, no rule touched ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))*
 
-- [ ] **`just check` cannot see a comment's width, so the 100-column rule is a
+- [x] **`just check` cannot see a comment's width, so the 100-column rule is a
       convention and not a gate** — `cargo fmt` reflows code and leaves comments
-      alone, and two lines over 100 columns shipped into `rules.rs` on
-      2026-08-15 and were caught by a reviewer counting characters rather than by
-      the build. **Config is not the fix**: `rustfmt`'s `wrap_comments` and
-      `error_on_line_overflow` are both nightly-only options, so a `rustfmt.toml`
-      would be silently ignored on the pinned stable toolchain — which is worse
-      than no gate, because it looks like one. A `scripts/` guard is, and it is
-      `tester`'s: fail on any line in `src/*.rs` past 100 columns, run from
-      `just check` with a `--self-test` like its neighbours. **It needs a decision
-      it cannot make for itself**: the file already carries a deliberate markdown
-      table whose rows are long on purpose, so either the table is rewrapped or
-      the guard learns one narrow, named exemption — an unnamed allowance is how a
-      guard becomes decoration
-- [ ] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display text
-      in the green line, not an assertion, so nothing fails and that is exactly
-      why it will survive. One word, `tester`'s file, and it goes with whichever
-      of that agent's boxes runs next
-- [ ] **`cluster.sh` accepts the one cluster name that defeats the fixture
-      guard** — `scripts/sanitize.jq` refuses node names that do not
-      `startswith("k8rs-")`, and
-      [D92](NOTES.md#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)
-      leans on that to make *a review cluster cannot produce a committed fixture*
-      mechanical rather than promised. **`k8rs-review` sails straight through
-      it**, and that is exactly what the first agent to raise a review cluster
-      typed, against three committed files that said `review`
-      ([NOTES § D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
-      **The second reviewer reached for the same wrong name and reported it as a
-      repo defect** (2026-08-15) — every committed file still said `review`, and
-      the string had reached it through **D94's own title**, which contains
-      `k8rs-review` because the entry is about that mistake. The brief that told
-      it to read D94 before naming the cluster is what handed it the name. Nothing
-      to fix in the record; it is the sharpest possible argument that the refusal
-      has to be mechanical, since the file warning about the name is itself a way
-      of spreading it. **Third instance, and this one is the sharpest**: the
-      reviewer of the D97 box quoted its own agent definition back as saying
-      **`K8RS_CLUSTER=k8rs-review`, always** — `.claude/agents/k8s-admin.md:54`
-      says `review`, in those words, and every other committed file agrees. It
-      used `review` and filed the difference as a defect in the instructions.
-      **Three agents, three misreadings, zero wrong strings in the repo**: the
-      only place `k8rs-review` is written is D94's own title, and it keeps
-      arriving in working memory from there. No wording change can fix a string
-      nobody wrote; the anchor is the fix **Third instance the same day, and this one actually ran**:
-      the review of the D96 ruling brought its cluster up as `k8rs-review`,
-      against a brief that said `review`, so `k8rs-review-control-plane` existed
-      on a machine and `sanitize.jq` would have waved its node name through.
-      Nothing leaked — a review takes no captures — but the refusal has now been
-      defeated in practice by the second agent to reach for it, which is the
-      argument for anchoring rather than repeating. **One wording fix belongs with
-      the anchor**: `CLAUDE.md` says the sanitizer refuses *a name*, and it
-      refuses a **node-name prefix** — `review` is refused only because kind names
-      the node `review-control-plane`.
-      **The primary fix is in `sanitize.jq`, not in `cluster.sh`** — the reviewer
-      never ran `cluster.sh`, it ran `kind create cluster` directly, because a
-      review is one measurement and not a fixture trip, and the next one will skip
-      that script for the same reason. So: **anchor `refuse_foreign_nodes` to the
-      four node names the fixture cluster actually produces** — control plane and
-      numbered workers, keeping the `.lan` suffix the identity rule already
-      allows — instead of accepting the whole `k8rs-*` family. That refuses
-      `k8rs-review-control-plane` on the only path that matters, whoever made the
-      cluster and however. **Then** give `cluster.sh` its refusal too, as the
-      early and loud one; it must not be the only one. Done-when: both refusals
-      proven by running them, both directions, and the proof is a `just check`
-      step rather than a paragraph. Watch the blast radius — the anchor must still
-      accept every node name in the 50 committed fixtures, so run
-      `fixture-audit.sh` before and after and show it unchanged. `tester`'s files
-
-- [ ] `Report` shape: title · rows · the finding each row can jump to
-- [ ] **Capacity** — per node: requests vs allocatable vs actual usage, plus
+      alone, and two over-long lines shipped into `rules.rs` on 2026-08-15,
+      caught by a reviewer counting characters. **Config is not the fix**:
+      `wrap_comments` and `error_on_line_overflow` are nightly-only, so a
+      `rustfmt.toml` would be silently ignored on the pinned stable toolchain —
+      worse than no gate, because it looks like one. Done:
+      [`scripts/width-guard.py`](scripts/width-guard.py) in `just check` with a
+      `--self-test`, and **one narrow exemption named by PM ruling** — a
+      markdown table row inside a comment, which cannot be wrapped and stay a
+      table row; the guard prints the exempt count so the widening's size is
+      visible. It found **53** lines the convention had let through, all
+      rewrapped with every claim intact ([D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20))
+- [x] **`certs-test.sh` says `(C1 warns)` and C1 no longer does** — display
+      text in the green line, not an assertion, so nothing failed and that is
+      exactly why it survived. Now reads `(C1 reports)`; C1 is `Severity::Info`
+      and the window constant is still `CERT_EXPIRY_WARN`, so only the severity
+      claim was false
+- [x] **`cluster.sh` accepts the one cluster name that defeats the fixture
+      guard** — `scripts/sanitize.jq` refused node names that did not
+      `startswith("k8rs-")`, and `k8rs-review-control-plane` sailed straight
+      through it; three agents reached for that name and the only place the
+      string is written in this repo is
+      [D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)'s
+      own title, which is why the anchor and not the wording is the fix. Done:
+      `refuse_foreign_nodes` is anchored to `k8rs-(control-plane|worker[N])`
+      with the `.lan` suffix, **and the same anchor now backs the CSR
+      `system:node:` rule** — a CertificateSigningRequest carries a node name
+      only in `.spec.username`, and `system:node:k8rs-review-worker` was proven
+      **accepted** by the committed filter. `cluster.sh` refuses the family name
+      in `up` as the loud second guard, both refusals run from `just check`, and
+      `fixture-audit.sh` prints a byte-identical line before and after over all
+      55 fixtures ([D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20))
+- [x] **`Report` shape: title · rows · the finding each row can jump to** — the
+      contract all six report boxes fill, written alone because a shared
+      contract's blast radius is not a family. Done: a plain-language pane
+      title, an optional sidebar badge, and a body of
+      `Row::Answer | Prose | NotComputed` where **the variant says whether the
+      cursor may land on the row** — a field cannot, and a table header and a
+      `⏎ to list` row were otherwise identical in the type, which would have
+      left Phase 9 parking the cursor where `⏎` does nothing. `Jump::Finding |
+      Object` says where it goes, the second case carrying the rows no rule
+      fired on. Producers take the snapshot **and** the findings `analyze`
+      already returned, because the rule functions are private to a sibling
+      module and a snapshot-only signature could build neither `Jump::Finding`
+      nor four of the six reports. The fields were decided by one test — *a
+      field is in only if a screen draws it today* — which kept the badge,
+      refused the per-pane kubectl strip, and refused a `Jump::Set` no screen
+      specifies. 278 + 7 tests, every new assertion proven red before it was
+      trusted; the mutation gate is **vacuous, not passed**, over a file of
+      types, and D35's control was re-run to say so. Two panes the shape still
+      cannot express are owed to the Waste and Capacity boxes, and four further
+      findings to named boxes — all inside this phase, all before the freeze
+      ([D127](NOTES.md#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20))
+- [x] **Capacity** — per node: requests vs allocatable vs actual usage, plus
       **the workloads with no limits defined** (the old rule 9, which lives
       here now — it is a risk, not an outage). Two snapshot fields are added
       **here**, not in Phase 3, which is what D42's one-phase window is for:
@@ -1745,9 +1770,16 @@ cluster either.
       clusters this project targets — and `spec.overhead`, the RuntimeClass
       charge the scheduler counts and a `spec`-only sum does not
       ([NOTES § D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12))
+      Done: per-node promised-against-usable in both dimensions, the old rule 9 as
+      one counted row, and the five states `screens/analysis.md` § Capacity
+      draws. `spec.overhead` is summed inside `rules.rs`'s `charged` and not on
+      top of it, so N5 and the row cannot disagree about a node —
+      `k8rs-worker` 200m → 450m, under D124's five conditions.
+      `ClusterSnapshot::metrics` landed with it, six states, inside D42's
+      window ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
 *Moved out of Phase 3: each is a snapshot field before it is a rule, which is the one-phase window [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12) opened ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))*
 
-- [ ] **`spec.containers[].restartPolicyRules` is decodable now and still
+- [x] **`spec.containers[].restartPolicyRules` is decodable now and still
       reaches no rule, so rule 15's stand-in is a proxy where the real signal is
       available** — the field arrives at `v1_34` and the pin is `v1_36`
       ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
@@ -1777,7 +1809,15 @@ cluster either.
       feature, and costs a snapshot field, a prune line, a capture and a rule
       change. The severe ones go first; the ordering, not the value, is what
       changed
-- [ ] **`terminatingReplicas` is decodable now, and a pod on its way out is
+      Done: `ExitRule` and `ContainerSnapshot::restart_rules`, and rule 15
+      stands down only where a declared rule is **shown** to cover this exit —
+      an empty set, an operator or an action the build cannot read, or a
+      sibling that can no longer exit all leave the card standing. Two review
+      rounds took the first draft's opposite direction apart: a completed init
+      container's gang rule silenced every container in a pod that stays
+      `Running` for ever. The fixtures were already committed — the trip had
+      run ([D135](NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21))
+- [x] **`terminatingReplicas` is decodable now, and a pod on its way out is
       currently counted as a pod that is missing** — added to both
       `DeploymentStatus` and `ReplicaSetStatus` after 1.32
       ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)).
@@ -1788,7 +1828,14 @@ cluster either.
       above: snapshot field, prune line, fixture, then the rule. Check first
       whether `explains_a_shortfall` is where it belongs rather than a rule of its
       own
-- [ ] **In-place resize makes *what a container asks for* and *what it has* two
+      Done: `WorkloadSnapshot::terminating`, read inside W2's readiness fact
+      and by no gate — `0 of 1 pod ready, 1 pod shutting down`. Not on W1,
+      where the clause is measured to push `exceeded quota: deny-all-pods` off
+      the card at +12 characters and no wording fits. Not in
+      `explains_a_shortfall`, which filters findings and has nothing to filter
+      here. The box's own premise was stale, and the positive is a [D40](NOTES.md#d40--the-capture-could-not-produce-the-shape-so-the-test-sets-one-field-2026-08-12)
+      one-field synthesis ([D135](NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21) · [D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21))
+- [x] **In-place resize makes *what a container asks for* and *what it has* two
       different numbers, and every resource rule reads only the first** —
       `podStatus.resources` and `podStatus.allocatedResources` arrive after 1.32
       ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
@@ -1802,16 +1849,38 @@ cluster either.
       feature that went beta in 1.33, and the honest answer may be no until it is
       on by default. Answer it in NOTES either way; do not leave it as a silent
       omission, which is exactly what the pin was
+      Answered — **no**, and the box's own premise was already stale: `effective`
+      resolves enacted-over-declared for all four resource fields, so nothing
+      reads the request where an enacted number exists. The third number
+      (`status.allocatedResources`) is decoded, tested and read by nobody, and
+      stays that way — its two fields are kept rather than deleted because
+      [D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+      window shuts at this phase's close
+      ([D135](NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21))
 
-- [ ] **Drain safety** — for each node, what a drain would do and what would
+- [x] **Drain safety** — for each node, what a drain would do and what would
       block it. A PDB whose `minAvailable` equals the replica count means the
       drain never finishes; say so before, not 40 minutes in
-- [ ] **Waste** — **Services whose selector matches no pod first** (the 503
+      Done: five row kinds. Two operator-review rounds took away two green lights
+      — *ready to drain* said about a node a bare `kubectl drain` refuses
+      (DaemonSet pods, local storage), and about a node N1's own card called
+      dead. `--ignore-daemonsets` is stated once as the pane's opening line;
+      local storage is its own row, split by `medium` because a tmpfs has
+      nothing to copy off; a node that is not `Ready` is the pane's *cannot
+      answer this yet* row, never a verdict ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+- [x] **Waste** — **Services whose selector matches no pod first** (the 503
       nobody can explain; it stays here rather than in Alerts because
       promoting it would cost a permanent Services + EndpointSlices watch, and
       the watch budget is why k8rs is lighter than k9s), then unbound/unused
       PVCs, Evicted and Completed pod pileups, ReplicaSets parked at 0
-- [ ] **`tui-designer` answers where the restart row lives, before it is
+      Done: the Service matching no pod first, then unbound claims, the
+      finished-pod pileup and ReplicaSets at 0. Per-object sections cap at
+      five with a `Row::Prose` overflow; counted rows do not, which is the
+      same rule Posture and Capacity scroll under.
+      `DisruptionBudgetSnapshot::selector` became `Option<Selector>` here — an
+      empty selector protects a whole namespace and an absent one protects
+      nothing, and flattened they were one value ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+- [x] **`tui-designer` answers where the restart row lives, before it is
       written** —
       [D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)
       hands the screen two constraints and settles neither. Waste is the only pane
@@ -1822,7 +1891,15 @@ cluster either.
       Alerts silence lands where nothing sends the reader. Re-title, re-home or
       badge it — in `screens/analysis.md`, with the wording of the two columns,
       which says **since this pod started** because a rollout resets the count
-- [ ] **Restarts, as a counted row and never an alert card** — the hole D101
+      Answered: **a seventh pane of its own**, `Containers that keep restarting`,
+      and **no badge** — a count badge would have read `17` on a one-node cluster
+      where three reboots broke nothing. The `ANALYSIS` sidebar block is drawn in
+      six files and every one gained the entry, together with `posture`, deferred
+      since [D128](NOTES.md#d128--the-six-panes-the-one-rendering-of-a-missing-metrics-server-and-the-badge-that-does-not-fit-2026-08-20)
+      until this box answered. Two of the box's own premises were stale and the
+      brief carried them re-checked
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
+- [x] **Restarts, as a counted row and never an alert card** — the hole D101
       left visible: a container that is fine right now and keeps dying on a long
       cycle draws nothing from rules 1, 2, 5 or 6 between its restarts. **One row
       per container, both numbers that container's own**: `restarts`, and how long
@@ -1843,22 +1920,95 @@ cluster either.
       exists to prevent. That one is a convention with no gate behind it —
       `Terminated`'s `reason` and `exit_code` are `pub`, so a raw `exit 137` in a
       row is reachable and is wrong
-- [ ] **Posture** rows: the plain read-only hostPath mounts that no longer
+      Done: one row per container, the count and the current run's age in two
+      `detail` paragraphs, `Jump::Object` to the pod, `Info` throughout. The filter
+      is three clauses answering three questions —
+      `Running && doing_its_job(c) && restarts >= RESTARTS_WARN` — and three private
+      items in a frozen `rules.rs` became `pub(crate)` by ruling rather than being
+      copied. **A kind cluster took four claims a 420-test corpus could not see**:
+      the opening paragraph denied a card Alerts was drawing in the same snapshot,
+      the cap was Waste's number without Waste's reason, the sort discarded the
+      second number at a tie, and the not-ready exclusion cited a rule that never
+      fires for a sidecar
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22) ·
+      [reports/](reports/README.md), 2026-08-22)
+- [x] **Posture** rows: the plain read-only hostPath mounts that no longer
       appear in Alerts — CNI/CSI/node agents are supposed to have them, so
       they are a list to review, not an alarm to answer. Computed **here**,
       not in `rules.rs`: they read pod fields but produce a whole-cluster list,
       and `rules.rs` is frozen by now
       ([NOTES § D14](NOTES.md#d14--three-plan-corrections))
-- [ ] **Versions** — control plane vs kubelet vs client skew (this is where N4
+      Done: one row per host path, `Info`, no badge, the opening paragraph as a
+      `Row::Prose`. The partition against rule 8 is asserted both ways with a
+      known entry named on each side, and it is per **(pod, path)**: a pod
+      whose sibling mount rule 8 escalated contributes nothing to that path's
+      row, which is what kept a writable mount from being called read-only
+      ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+- [x] **Versions** — control plane vs kubelet vs client skew (this is where N4
       is shown), and which nodes fall outside the supported window
-- [ ] **Certificates** — the C-series as a dated table, soonest first. C1
+      Done: the `Versions` heading as the report's own first `Row::Prose`, the
+      control-plane line, and a row per node outside the window through N4 —
+      three minor versions, not two. *Could not compare* and *could not read*
+      are two sentences, because a different-major kubelet was read perfectly
+      well ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+- [x] **Certificates** — the C-series as a dated table, soonest first. C1
       (kubeconfig client cert) is shown here, and the sidebar badge — `30d` in
       the sketch — is its alerting mechanism
-- [ ] Positive and negative fixture tests per report, same discipline as rules
-- [ ] `cargo mutants --timeout 90` clean over `analysis.rs` — same gate
+      Done: C1 picked out of the findings slice by identity, the one row whose `⏎`
+      is a `Jump::Finding`. The badge is C1's own countdown and C1's band —
+      `15d`, `0d`, and `out` once it has expired, because every numeric
+      spelling of *expired* is wrong in the dangerous direction. C3's row is
+      one `Row::NotComputed` while the fetch is a Phase 5 box; C2 is not drawn
+      at all ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+- [x] Positive and negative fixture tests per report, same discipline as rules
+      Audited per producer, not counted: all seven have a capture-driven positive
+      and an **asserted** negative, and every expected number was re-derived from
+      the fixtures rather than read off the code. What proves the negatives can
+      fail is a machine — the predicates that decide *do not draw* were swept
+      alone: 79 mutants, 67 caught, 0 missed. Three findings came back and two
+      were fixed here: the Restarts row pinned `container_fact`'s **words**
+      instead of calling it, so a producer that inlined the same sentence passed
+      every test and every mutant (proven, red C), and two `.contains` lines that
+      sat after an `assert_eq!` of the same string and could never be reached.
+      The third — a pod naming a node the snapshot does not have — is boxed in
+      Phase 5, where the watch makes the shape reachable
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
+- [x] `cargo mutants --timeout 90` clean over `analysis.rs` — same gate
       `rules.rs` gets in Phase 3. A report that quietly stops flagging looks
       identical to a report with nothing to flag
       ([NOTES § D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12))
+      Run whole and in four shards (D118), and **`just mutants` sweeps both pure
+      files**, so this run is also
+      [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+      fourth condition — the whole-file `rules.rs` gate the card-changing box
+      owed this close. **751 caught · 0 missed · 0 timeout · 93 unviable**, each
+      shard writing its own `mutants.out` and each naming a type rather than a
+      filesystem (D133).
+      **Re-run whole at the close, over the tree the blocker fix landed on**, in
+      eight shards rather than four because 213 mutants no longer fit one
+      ten-minute foreground call
+      ([D118](NOTES.md#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)):
+      **849 mutants · 756 caught · 0 missed · 0 timeout · 93 unviable**, the five
+      new ones being the fix's own. Every unviable log names `error[E0277]`, a
+      trait bound, and `no space left`/`os error 28` was grepped for after each
+      shard and found in none — an honest unviable names a type, a dishonest one
+      names a filesystem
+
+**🔒 Security gate:** this phase had none of its own until it closed, which is
+why the list below says what *was run* rather than what is owed. A report is a
+second printer for API text, so invariant 9 is the whole of it: every field of
+every `Row` variant is stripped as it enters the line it is printed on, named
+individually with no `..`, so a new string field cannot be added and silently go
+unstripped. `analysis.rs` reads **no** env value, no Secret and no annotation —
+grepped, the class is empty. It cannot panic on a cluster's data: no `unwrap`,
+no `expect`, no `panic!`, no indexing, one division and it is by the constant
+`24`, and all three unsigned subtractions are guarded — one by an explicit
+`len() > 1`, two by construction, since `take(n)` and `filter_map` over the same
+source cannot yield more than it. **Length bounding is deliberately not here** —
+it is Phase 5's ingest gate, which this close amended to name
+`spec.volumes[].hostPath.path`, the field Posture prints as a row's own subject.
+No dependency changed in this phase: `Cargo.toml`, `Cargo.lock` and `deny.toml`
+are untouched end to end.
 
 **Done when:** every report is correct against the cluster-wide fixture, and
 the temporary main can print any of them.
@@ -1916,6 +2066,27 @@ public release.
       claim load-bearing; this is D69's shape a second time, caught before the
       code instead of after
       ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14))
+- [ ] **Bound every free-text field at ingest, not the one field that was
+      measured.** The security gate has said *sizes are bounded* since Phase 1
+      and nothing below this phase implements it, so today `k8rs` reads, holds
+      and prints whatever the API sends: handed one object whose `kind` is 10 MB
+      of `K`, the temporary driver printed a first line of **10 000 061 bytes**
+      at **51 MiB peak RSS**, exit 0 — `sanitize` strips and deliberately never
+      truncates
+      ([D122](NOTES.md#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20),
+      measured by `tester` 2026-08-20). **The box is not *bound the header***, or
+      this phase closes the header and leaves the 50MB annotation and the endless
+      log line beside it. It goes **on the way into the decode**, beside the
+      control-character strip and for the same reason: one place, so no
+      downstream consumer has to remember. **The field list is not "names and
+      messages"** — this phase's gate names the three that a generic sentence
+      lets an implementer miss: `state.waiting.message` (rules 3, 4),
+      `metadata.finalizers` (rule 12), and `spec.volumes[].hostPath.path`, which
+      Posture prints as a row's own *subject*. Done: a bound chosen and written
+      down rather than inherited, a truncation the reader can see is a
+      truncation, and a test per field that feeds the oversized shape and asserts
+      what got stored — not what got printed, which is the half that already had
+      a guard
 - [ ] **How the initial LIST arrives is a decision, not a default** — the box
       above forbids publishing a snapshot until every initial LIST has landed,
       which makes the shape of that LIST load-bearing. An unpaginated
@@ -1988,7 +2159,37 @@ public release.
       `web-7d4f5c6b8`. Fetch the ReplicaSet on demand, cache by UID, never
       watch it — and never strip the hash with a string heuristic, which is
       the kind of guess that lies. The same cached object supplies W1's
-      `ReplicaFailure` message
+      `ReplicaFailure` message.
+      **And the same resolution settles a noun this repo now overloads.** Over
+      one snapshot of the committed corpus the driver printed
+      `55 pods · 4 nodes · 16 workloads` and, 150 lines below it, Capacity's
+      `34 workloads have no memory or CPU limit`. Both are right for their own
+      definition: the header counts `snapshot.workloads`, which is every
+      Deployment, StatefulSet, ReplicaSet and DaemonSet read (measured on the
+      corpus: 7 + 1 + 5 + 3 = 16), while Capacity counts distinct pod *owners*
+      with a limitless container — and on this corpus the great majority of those
+      are pods started by hand, each of which is its own owner. So the two nouns
+      count different sets and `34 of 16` is not defensible to a reader
+      ([PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)); the
+      header itself is deliberate and stays
+      ([D121](NOTES.md#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20)).
+      Resolving a ReplicaSet up to its Deployment is what makes the two countable
+      together — so when it lands, **re-derive Capacity's count and say in one
+      place what `workload` means**, starting with whether a hand-started pod is
+      one. **The operator review sharpened it to a case with no user workload at
+      all**: over `nodes.json` + `kube-system-pods.json` the driver printed
+      `14 pods · 4 nodes · 0 workloads` and, below it,
+      `6 workloads have no memory or CPU limit` — `etcd`, `kube-apiserver`,
+      `kube-controller-manager`, `kube-scheduler`, `kube-proxy` and `coredns`,
+      one key each, because `rules.rs` discards a `Node` ownerReference and a
+      static pod becomes its own owner. `0` and `6` on one screen. It also
+      contradicts the test that pins the noun
+      (`src/analysis_tests/capacity.rs:890`: *"`workload` means a controller
+      everywhere else in this product"*), and it makes Capacity's rule-8
+      *nothing to do* sentence unreachable on any kubeadm-shaped cluster, since
+      that sentence needs `uncapped == 0`
+      ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+      § 2). Found by Phase 4's close, the only pass that saw both numbers at once
 - [ ] `kube::discovery`: enumerate every kind the cluster serves, CRDs
       included. This is what the sidebar is built from — never a hard-coded list
 - [ ] Server-side `Table` fetch for browser kinds — the columns come from the
@@ -2043,6 +2244,61 @@ public release.
       come from. **It updates `docs/architecture.md § Error handling`**, which
       today covers the three startup errors and not the general rule
       ([PRIOR-ART § C1](PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error))
+- [ ] **`endpoints_behind` is a nested scan and the cost is quadratic in
+      Services** — `analysis.rs` walks every EndpointSlice for every Service, and
+      `MOST_ROWS_PER_SECTION` caps the rows drawn, not the objects visited.
+      Timed on synthetic 200-node/5000-pod snapshots at Phase 4's close: 0
+      Services ~25 ms · 2 500 → 35 ms · 5 000 → ~230 ms · 10 000 → **1 355 ms**,
+      i.e. 4× the input for ~39× the cost. `REQUIREMENTS.md` budgets first paint
+      at **under 1s, and states it at ~1000 pods** — so the 10 000-Service figure
+      is past where the budget speaks, which is the conflation
+      [D115](NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)
+      exists to stop. The finding is the **growth rate**, not a breached budget. **The rest of the joins are not this
+      shape** and are not to be "optimised" with it: all seven reports cost
+      ~25 ms at 200 nodes/5000 pods even though `pods_on` is a full pod scan run
+      twice per node, and 2 000 budgets cost 116 ms — one nested loop is the
+      whole finding
+      ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+      § 3). Done: the join is done once into a map, the same rows come out of
+      the committed corpus byte for byte, and the 10 000-Service timing is
+      re-taken and written down. `analysis.rs` is frozen by then, so this is a
+      [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+      question — and the cheapest one it can be asked, since the output must not
+      change at all
+- [ ] **Posture opens with *"Nothing here is broken"* and sorts the one row an
+      operator would act on last.** The pane sorts by pod count descending, and
+      `left_by_rule_8` sends **any** read-only host mount here from **any**
+      namespace — so a pod in `default` mounting `/etc/kubernetes/pki` read-only
+      draws no Alerts card at all and folds into a row reading *"3 pods in
+      default and kube-system"*, indistinguishable from the two kube-apiserver
+      mounts beside it. `ca.key` is in that directory. Measured with a synthetic
+      pod against the committed `nodes.json` + `kube-system-pods.json`
+      ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+      § 4). **This is not a reversal of [D2](NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)**:
+      D2's stated reason is that a plain read-only hostPath *"is how CNI, CSI and
+      every node agent are supposed to work"* — a claim about **who** mounts it —
+      and the code keys only on **what** is mounted. Adding a case to rule 8's
+      escalation list is the move
+      [D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
+      already made once. Decide all three, in this order: whether the PKI
+      directory escalates (that is `rules.rs`, frozen — a D124 question), what
+      the sort key should be when one row is not a node agent, and whether the
+      opening sentence may keep saying *nothing here is broken* while the pane
+      can hold a row that is
+- [ ] **Three of the seven reports have never drawn their principal shape
+      through the binary.** The temporary driver hard-codes `server_version`,
+      `context`, `client_certificate` and `metrics` to `None`, so the run every
+      Phase 4 box was closed against exercised 1 of Versions' 6 shapes, neither
+      C1's row nor the sidebar badge — the pane's only `Jump::Finding` and the
+      product's only duration badge — and none of Capacity's `using …`
+      paragraphs. `cargo test` covers all of them; the *binary* has printed none
+      ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+      § 6). This phase is where those four stop being `None`, so it is where they
+      get run for real: done when each of the three has been printed by the
+      binary against a live cluster and the output pasted into the box. **A
+      report proven only by its tests is the thing
+      [CLAUDE.md § Running it](CLAUDE.md#running-it--and-just-check) forbids
+      reporting as done**
 - [ ] **Measure resident memory against 10 000 pods** (kind + a generator)
       **plus the three workload watches**, and write the number down. Pruning `managedFields` is agreed; whether the
       pruned store actually fits is unmeasured, and an unmeasured number is not
@@ -2108,6 +2364,40 @@ public release.
       only for what is on screen, and only when the capability probe found
       `metrics.k8s.io`. Without it the Capacity report's usage column has no
       source — and it says so rather than showing a blank
+      **And it is where the units get measured for the first time.** Capacity's
+      tests hand-build their metrics because the fixture cluster serves no
+      metrics API (`kubectl top nodes` → *Metrics API not available*), so *the
+      server writes nanocores and `Ki`* is upstream knowledge this repo has
+      never read off an object — the one input in `analysis.rs` that is neither
+      a capture nor a one-field plant on one. Deploy metrics-server into kind
+      on the trip this box needs anyway, and read the units
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
+- [ ] **The mutation gate reads one directory and names another, so a run that
+      tested nothing reports the previous run's logs** — `scripts/mutants.sh`
+      counts `$OUT/log` (the repo-root `mutants.out/`) while printing `$SCRATCH`
+      as the location it read. Measured 2026-08-22: a run with zero mutants left
+      `mutants.out/` untouched and the script printed *"29 unviable … 241 log(s)
+      read on …/k8rs-mutants"* from a run fourteen minutes earlier, with
+      `K8RS_MUTANTS_TMPDIR` pointed at an empty directory. **And `just
+      mutants-diff` does not refuse a diff that contains no product file** —
+      cargo-mutants does not mutate `#[cfg(test)]` code, so a test-only diff
+      prints `No mutants to filter` and exits 0, which is D133's own subject in a
+      second shape: the recipe refuses an *empty* diff and passes a diff with
+      nothing in it to mutate. Both are `tester`'s. Not a blocker at Phase 4's
+      close — that phase's own sweep wrote a fresh `mutants.out` per shard (212
+      logs each, 0 missed), so its evidence stands
+      ([D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21))
+- [ ] **A pod can name a node the snapshot does not have, and nothing has ruled
+      on what that means.** Two independently-timed watches produce it
+      (invariant 6): a pod delivered before the node LIST has landed, or a node
+      deleted between events. Today such a pod is silently invisible to every
+      per-node row on Capacity and Drain safety while still counting in
+      Capacity's limits row — which may be right, but no screen says so and no
+      test asserts it, so it is behaviour nobody chose. **It cannot happen while
+      the driver reads files**, which is why it is boxed here and not in Phase 4:
+      the shape arrives with the watch. Rule it, then feed it — one plant, two
+      assertions. Found by `tester`'s phase-close audit, 2026-08-22
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
 - [ ] Namespace scoping: `--namespace/-n`, and a 403 on the cluster-wide LIST
       falls back to the context's namespace (then `default`), with the header
       stating which scope is in effect and why. A namespace-scoped user must
@@ -2142,8 +2432,11 @@ anything that could hold it. Control characters are stripped at ingest, so no
 downstream code has to remember — **and the field list is not "names and
 messages"**: `metadata.finalizers` reaches `evidence` verbatim through rule 12
 and is settable by anyone with `patch` on pods, which is the shape a generic
-sentence lets an implementer miss. Field sizes are bounded: a 50MB annotation
-must not be stored whole, **and neither must a container's waiting message** —
+sentence lets an implementer miss. **Phase 4 added a third of that shape**:
+`spec.volumes[].hostPath.path` reaches the screen as the *subject* of a Posture
+row, not buried in a message, and anyone who can create a pod chooses it. Field
+sizes are bounded: a 50MB annotation must not be stored whole, **and neither
+must a container's waiting message** —
 rules 3 and 4 put the kubelet's whole `state.waiting.message` on the card, and
 nothing below this phase bounds it
 ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).

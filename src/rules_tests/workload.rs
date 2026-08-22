@@ -1276,6 +1276,234 @@ fn a_replicaset_is_short_of_pods_only_when_it_actually_is() {
     );
 }
 
+/// **A rollout that gave up says how many pods are still shutting down; a refusal does not** —
+/// the whole of what `status.terminatingReplicas` buys the rule set
+/// ([`WorkloadSnapshot::terminating`], [`shutting_down`], NOTES § D135, § D136).
+///
+/// **Why W2 needs it.** `readyReplicas` counts **non-terminating** pods, so a pod that is still
+/// up, still passing its probes and still taking requests through its grace period leaves the
+/// count the instant it is asked to stop. `0 of 1 pod ready` beside a pod the reader can see in
+/// `kubectl get pods` is the reading that makes a screen stop being believed (invariant 4), and
+/// on W2 the quoted `ProgressDeadlineExceeded` explains nothing about the number.
+///
+/// **Why W1 must not have it, and this test moved twice before it got there.** Round 1 appended
+/// it as a `·`-joined fact last; round 2 folded it into the readiness count on both cards, on a
+/// reviewer's estimate that the fold cost *"ten characters of a quota message that still names
+/// the quota"*. Re-run through the same greedy wrap the card tests use, at 51 columns against
+/// the three-line evidence cut, that estimate is wrong: W1's evidence is already four lines and
+/// already cut, and the clause moves `exceeded quota: deny-all-pods` — what
+/// [`pods_were_never_created`]'s own doc calls the whole diagnosis — from line 3 to line 4. The
+/// flip is a cliff at `+12` characters and every wording plain language allows is `+17` or more.
+/// **On the merits it lands the same way**: on W1 the quote already explains why the count is
+/// low, so pods draining are not the missing explanation there (NOTES § D136).
+///
+/// **So the W1 row is an equality against the unplanted card**, not a `!contains`. A card that
+/// changed in any other way while nobody was looking fails it too, and it is the row that stops
+/// someone folding the clause back in.
+///
+/// **The value is planted and says what it is waiting for** (NOTES § D40): the counter is
+/// non-zero only while a rollout is draining, which is a window a capture has to land *inside* —
+/// D132 took four runs and none of them held one, and what would make it capturable is a long
+/// `terminationGracePeriodSeconds` on `broken-rollout`'s old revision. Everything else on both
+/// cards is the committed capture's.
+#[test]
+fn a_rollout_that_gave_up_counts_the_pods_still_shutting_down_and_a_refusal_does_not() {
+    // W2, on the Deployment that gave up: `readyReplicas` is absent, so the count reads zero
+    // while pods are on their way out.
+    // **Both counts and both silences.** `Some(0)` is what every committed workload reports and
+    // `None` is a cluster without the field, and neither may put a clause on the card — `0 pods
+    // shutting down` is a sentence about nothing, printed on every W2 card in the corpus.
+    for (terminating, clause) in [
+        (Some(1), Some("1 pod shutting down")),
+        (Some(3), Some("3 pods shutting down")),
+        (Some(0), None),
+        (None, None),
+    ] {
+        let draining = deployment_but("broken-quota", |d| {
+            d.status
+                .as_mut()
+                .expect("a captured Deployment has a status")
+                .terminating_replicas = terminating;
+        });
+        let all = analyze(&with_workloads(Vec::new(), vec![draining]));
+        show(&all);
+        let card = only(&all, "broken-quota", "gave up");
+        let head = match clause {
+            Some(clause) => format!("0 of 1 pod ready, {clause} \u{b7} "),
+            None => "0 of 1 pod ready \u{b7} ".to_string(),
+        };
+        assert!(
+            card.evidence.starts_with(&head),
+            "terminating={terminating:?}: the clause rides the readiness fact with a comma and \
+             carries the unit word — a bare number beside `of 1 pod` reads as an arithmetic error \
+             before it reads as two populations, and W2 is the card with room for the four \
+             characters that fix it — while nothing leaving is nothing said: {}",
+            card.evidence
+        );
+        assert!(
+            card.evidence.ends_with("has timed out progressing."),
+            "terminating={terminating:?}: and the controller's whole 109-character quote is still \
+             behind it — at 51 columns this card is three lines with the clause on and nothing is \
+             cut at all: {}",
+            card.evidence
+        );
+    }
+
+    // **W1, and the assertion is an equality**: the same refused ReplicaSet, once off the
+    // committed corpus and once with `terminatingReplicas` planted on **both** the Deployment the
+    // count is read from ([`the_workload_that_serves`]) and the ReplicaSet the card is filed on,
+    // so no future reading of either object can put a clause on this card without failing here.
+    let w1 = |terminating: Option<i32>| {
+        let above = deployment_but("broken-quota", |d| {
+            d.status
+                .as_mut()
+                .expect("a captured Deployment has a status")
+                .terminating_replicas = terminating;
+        });
+        let refused: WorkloadSnapshot = replicaset_but("quota-replicasets", |r| {
+            r.status
+                .as_mut()
+                .expect("a captured ReplicaSet has a status")
+                .terminating_replicas = terminating;
+        })
+        .into();
+        analyze(&with_workloads(Vec::new(), vec![refused, above]))
+    };
+    let plain = w1(None);
+    let draining = w1(Some(3));
+    show(&plain);
+    show(&draining);
+    let (plain, draining) = (
+        only(&plain, "broken-quota-59654c756", "refused to create"),
+        only(&draining, "broken-quota-59654c756", "refused to create"),
+    );
+    assert_eq!(
+        draining.evidence, plain.evidence,
+        "three pods leaving change nothing on this card: the clause is measured to push \
+         `exceeded quota: deny-all-pods` past the three-line cut, and the refusal it names is \
+         already the explanation for the count beside it (NOTES § D136)"
+    );
+    assert!(
+        draining.evidence.contains("exceeded quota: deny-all-pods"),
+        "and that sentence is what has to survive, word for word: {}",
+        draining.evidence
+    );
+    assert!(
+        !draining.evidence.contains("shutting down"),
+        "said the other way round as well, because an equality against a card that had itself \
+         grown a clause would pass: {}",
+        draining.evidence
+    );
+
+    // **The corpus negative**: every committed workload reports `terminatingReplicas: 0`, so
+    // nothing may be added to any ordinary card — a clause drawn at zero is one on every card.
+    let untouched = analyze(&with_workloads(
+        Vec::new(),
+        captured_deployments()
+            .into_iter()
+            .chain(captured_replicasets("quota-replicasets"))
+            .collect(),
+    ));
+    show(&untouched);
+    for f in &untouched {
+        assert!(
+            !f.evidence.contains("shutting down"),
+            "nothing is leaving any committed workload, so no card may say anything is: {}",
+            f.evidence
+        );
+    }
+    assert!(
+        !untouched.is_empty(),
+        "and the sweep found cards to check, or the loop above vetted nothing (CLAUDE.md \
+         \u{a7} A derived list asserts it found something)"
+    );
+}
+
+/// **Pods on their way out do not soften the band and do not close the shortfall, and the ceiling
+/// is asserted rather than described** (NOTES § D135).
+///
+/// **A pod on its way out is a pod the workload is *losing*.** Crediting it against
+/// [`nothing_is_serving`] would turn the outage that is thirty seconds away into an amber card,
+/// on a workload these rules have already found broken; crediting it against [`short_of_pods`]
+/// would silence the card outright. Both are the opposite mistake to the one this field closes,
+/// and the more dangerous one at 3am — so what the field changes is a clause inside the readiness
+/// count and nothing that decides whether there is a card at all.
+///
+/// **[`short_of_pods`] has a second reason of its own**: the status does not say which template a
+/// pod on its way out was on, so crediting it against `updated < desired` would count an *old*
+/// pod as one of the new ones — the arm that reports a rollout whose pods were never created.
+///
+/// **The count planted is larger than every counter on the object, and each of
+/// [`short_of_pods`]' three arms is then isolated** — the two that are not the arm under test are
+/// written whole. An offset on all three flips the first plant; an offset on *one* of them is
+/// invisible there, because the other two are firing on the captured object as well.
+#[test]
+fn pods_on_their_way_out_do_not_soften_the_band_or_close_the_shortfall() {
+    let draining = deployment_but("broken-quota", |d| {
+        d.status
+            .as_mut()
+            .expect("a captured Deployment has a status")
+            .terminating_replicas = Some(99);
+    });
+    println!(
+        "desired={:?} ready={:?} updated={:?} unavailable={:?} terminating={:?}",
+        draining.desired,
+        draining.ready,
+        draining.updated,
+        draining.unavailable,
+        draining.terminating
+    );
+    assert!(
+        nothing_is_serving(&draining),
+        "ninety-nine pods on their way out and none of them counted ready — they are serving \
+         out a grace period with nothing behind them, which is the outage this band is for"
+    );
+    assert!(
+        short_of_pods(&draining),
+        "and the workload is still short of every pod it was told to run: what is leaving is \
+         not what it has"
+    );
+    let all = analyze(&with_workloads(Vec::new(), vec![draining]));
+    show(&all);
+    assert_eq!(
+        only(&all, "broken-quota", "gave up").severity,
+        Severity::Critical,
+        "so the card is the same card it was, with one more clause on it"
+    );
+
+    // **One arm at a time**, with the other two written whole — `broken-quota` wants one pod, so
+    // `Some(1)` is a counter that reads whole and `Some(0)` is one that does not. Each row is a
+    // shape a single-arm offset would silence and the plant above would not.
+    for (arm, ready, updated, unavailable) in [
+        ("ready < desired", None, Some(1), Some(0)),
+        ("updated < desired", Some(1), Some(0), Some(0)),
+        ("unavailable > 0", Some(1), Some(1), Some(1)),
+    ] {
+        let only_this_arm = deployment_but("broken-quota", |d| {
+            let status = d
+                .status
+                .as_mut()
+                .expect("a captured Deployment has a status");
+            status.ready_replicas = ready;
+            status.updated_replicas = updated;
+            status.unavailable_replicas = unavailable;
+            status.terminating_replicas = Some(99);
+        });
+        println!(
+            "{arm}: ready={:?} updated={:?} unavailable={:?} terminating={:?}",
+            only_this_arm.ready,
+            only_this_arm.updated,
+            only_this_arm.unavailable,
+            only_this_arm.terminating
+        );
+        assert!(
+            short_of_pods(&only_this_arm),
+            "{arm} is the only arm short on this object, and ninety-nine pods leaving do not \
+             close it: what is on its way out is not what the workload has"
+        );
+    }
+}
+
 /// **W2's action names no command, because there is no command it can promise.**
 ///
 /// `kubectl rollout undo` errors on a **single-revision** Deployment — *"no rollout history

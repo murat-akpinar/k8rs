@@ -1,0 +1,229 @@
+{
+  "apiVersion": "v1",
+  "items": [
+    {
+      "addressType": "IPv4",
+      "apiVersion": "discovery.k8s.io/v1",
+      "endpoints": null,
+      "kind": "EndpointSlice",
+      "metadata": {
+        "creationTimestamp": "2026-08-20T22:42:55Z",
+        "generation": 1,
+        "labels": {
+          "demo": "broken",
+          "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+          "kubernetes.io/service-name": "broken-noendpoints"
+        },
+        "name": "broken-noendpoints-nqtf4",
+        "namespace": "default",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Service",
+            "name": "broken-noendpoints",
+            "uid": "3d3c0936-d452-4035-9ae4-d2114bdc5513"
+          }
+        ],
+        "resourceVersion": "841",
+        "uid": "c76e51ab-4d1a-4078-9ad4-01a652e25c37"
+      },
+      "ports": null
+    },
+    {
+      "addressType": "IPv4",
+      "apiVersion": "discovery.k8s.io/v1",
+      "endpoints": [
+        {
+          "addresses": [
+            "REDACTED-IP"
+          ],
+          "conditions": {
+            "ready": true,
+            "serving": true,
+            "terminating": false
+          },
+          "hostname": "broken-sts-0",
+          "nodeName": "k8rs-worker",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "broken-sts-0",
+            "namespace": "default",
+            "uid": "8841821d-b969-4e69-90f4-1bc3f08bbf0f"
+          }
+        },
+        {
+          "addresses": [
+            "REDACTED-IP"
+          ],
+          "conditions": {
+            "ready": false,
+            "serving": false,
+            "terminating": false
+          },
+          "hostname": "broken-sts-1",
+          "nodeName": "k8rs-worker2",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "broken-sts-1",
+            "namespace": "default",
+            "uid": "0f3e93ff-c4fb-4a33-8040-16a327eff45b"
+          }
+        }
+      ],
+      "kind": "EndpointSlice",
+      "metadata": {
+        "creationTimestamp": "2026-08-20T22:42:55Z",
+        "generation": 6,
+        "labels": {
+          "demo": "broken",
+          "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+          "kubernetes.io/service-name": "broken-sts",
+          "service.kubernetes.io/headless": ""
+        },
+        "name": "broken-sts-jt74f",
+        "namespace": "default",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Service",
+            "name": "broken-sts",
+            "uid": "5488233e-15b1-4cad-8c98-5b332fd5c77c"
+          }
+        ],
+        "resourceVersion": "1582",
+        "uid": "a2a94396-3b75-409f-9e3c-f5e7f2907407"
+      },
+      "ports": [
+        {
+          "name": "http",
+          "port": 80,
+          "protocol": "TCP"
+        }
+      ]
+    },
+    {
+      "addressType": "IPv4",
+      "apiVersion": "discovery.k8s.io/v1",
+      "endpoints": [
+        {
+          "addresses": [
+            "REDACTED-IP"
+          ],
+          "conditions": {
+            "ready": true
+          }
+        }
+      ],
+      "kind": "EndpointSlice",
+      "metadata": {
+        "creationTimestamp": "2026-08-20T22:42:26Z",
+        "generation": 1,
+        "labels": {
+          "kubernetes.io/service-name": "kubernetes"
+        },
+        "name": "kubernetes",
+        "namespace": "default",
+        "resourceVersion": "211",
+        "uid": "ff814442-7d56-4e80-a9b7-8380a94ea31b"
+      },
+      "ports": [
+        {
+          "name": "https",
+          "port": 6443,
+          "protocol": "TCP"
+        }
+      ]
+    },
+    {
+      "addressType": "IPv4",
+      "apiVersion": "discovery.k8s.io/v1",
+      "endpoints": [
+        {
+          "addresses": [
+            "REDACTED-IP"
+          ],
+          "conditions": {
+            "ready": true,
+            "serving": true,
+            "terminating": false
+          },
+          "nodeName": "k8rs-control-plane",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "coredns-589f44dc88-lbkj6",
+            "namespace": "kube-system",
+            "uid": "f17ae92f-28e1-4432-86f1-98adeb117e82"
+          }
+        },
+        {
+          "addresses": [
+            "REDACTED-IP"
+          ],
+          "conditions": {
+            "ready": true,
+            "serving": true,
+            "terminating": false
+          },
+          "nodeName": "k8rs-control-plane",
+          "targetRef": {
+            "kind": "Pod",
+            "name": "coredns-589f44dc88-hdrv5",
+            "namespace": "kube-system",
+            "uid": "3b8815bc-e888-4e9f-b9e1-c84ec2258f31"
+          }
+        }
+      ],
+      "kind": "EndpointSlice",
+      "metadata": {
+        "creationTimestamp": "2026-08-20T22:42:35Z",
+        "generation": 5,
+        "labels": {
+          "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+          "k8s-app": "kube-dns",
+          "kubernetes.io/cluster-service": "true",
+          "kubernetes.io/name": "CoreDNS",
+          "kubernetes.io/service-name": "kube-dns"
+        },
+        "name": "kube-dns-874k5",
+        "namespace": "kube-system",
+        "ownerReferences": [
+          {
+            "apiVersion": "v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Service",
+            "name": "kube-dns",
+            "uid": "28914187-1335-4dfb-8777-c07adffe3103"
+          }
+        ],
+        "resourceVersion": "606",
+        "uid": "02b3964f-6feb-40d5-9352-607f2b018886"
+      },
+      "ports": [
+        {
+          "name": "dns",
+          "port": 53,
+          "protocol": "UDP"
+        },
+        {
+          "name": "dns-tcp",
+          "port": 53,
+          "protocol": "TCP"
+        },
+        {
+          "name": "metrics",
+          "port": 9153,
+          "protocol": "TCP"
+        }
+      ]
+    }
+  ],
+  "kind": "List",
+  "metadata": {
+    "resourceVersion": ""
+  }
+}

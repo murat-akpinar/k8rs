@@ -190,6 +190,36 @@ more column from the name beside it.
 | Empty · loading · disconnected | centered `Paragraph` | — | same frame, different content pane — never a different screen |
 | Banner above a list (disconnected · namespace scope) | two to eight `Line`s above the normal list | — | one slot, two occupants: the list stays visible and the banner says what is wrong with it — stale data, or a check that could not run ([states.md](states.md)). Disconnected **while** scoped drops the scope explanation (the header still says `ns: payments`) and keeps the *"one node check is off"* line, which is the half a reader cannot infer from anywhere else |
 
+**The badge-glyph rule, stated once for every sidebar count on every
+screen**: `3 ● 7 ▲` · `1 ▲` · `30d` · `12` are not one convention, they are
+two, and which one a badge follows depends on what kind of value it carries,
+never on how it looks.
+
+- **A badge that is a count draws its band as a glyph.** `● ▲ ○` never rely
+  on colour alone — colour blindness, and copyability
+  ([NOTES § Design](../NOTES.md#design)) — and on a count the glyph is not
+  emphasis, it is the *unit*: `1` counts nothing, `1 ▲` counts one warning,
+  and a reader who copies `capacity  1` out of the terminal has lost what
+  the number was of. `capacity  1 ▲` is this shape.
+- **A badge that is a duration draws no glyph.** The value already states
+  the fact the reader acts on, in words that survive being copied into a
+  monochrome terminal — `30d`, or `out` when the deadline has passed — so
+  `Badge::severity` colours the text and adds nothing else to it.
+  `certificates  30d` is this shape, and so is `certificates  out`: the
+  expired case drops the digits entirely rather than signing them, because a
+  badge carries no sentence to give a number direction — `0d` would read as
+  *expires today*, and `-12d` would teach a minus sign to a reader this
+  product is written for ([invariant 14](../CLAUDE.md); the case is drawn in
+  full at [analysis.md § Certificates and Versions](analysis.md#certificates-and-versions)).
+- **A plain count with no band draws neither** — the `12` above, a fact with
+  nothing to judge.
+
+This is the single point of change for every badge on every screen; a new
+report's badge is one of these three shapes and never a fourth. It moved
+here from `analysis.md`, which drew it once for `certificates  30d` and
+named this file as where it belonged — see that section for the one worked
+example.
+
 Nothing here is a custom widget. If a screen seems to need one, the screen is
 wrong before the widget set is.
 

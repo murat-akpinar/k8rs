@@ -67,7 +67,44 @@ kind_config() {
   for _ in $(seq "$WORKERS"); do echo "  - role: worker"; done
 }
 
+# The early, loud half of the refusal scripts/sanitize.jq anchors. kind names a
+# node `<cluster>-<role>`, and the sanitizer accepts exactly the names *this*
+# cluster produces — so a cluster called `k8rs-review` builds
+# `k8rs-review-control-plane`, whose capture is refused hours later, at the end
+# of a trip, by a filter the person has no reason to be thinking about.
+#
+# Refused: a name wearing the fixture cluster's own as a prefix. `review` — the
+# name D92 gives an ephemeral measurement cluster — is not one and must keep
+# working, which is the whole reason this is a prefix check and not an allowlist
+# of one.
+#
+# It is not the primary refusal and must not be read as one: a reviewer raising a
+# cluster with `kind create cluster` never runs this file. The sanitizer is what
+# makes D92 mechanical; this is what makes it early (todo.md, Phase 4).
+#
+# `up` only, so a cluster somebody already built under a refused name can still
+# be torn down with `down` — a guard that traps a running cluster on the host is
+# one people work around by deleting the guard.
+refuse_family_name() { # $1 = cluster name
+  case "$1" in
+    k8rs) return 0 ;;
+    k8rs*)
+      echo "cluster.sh: refusing to build a cluster named '$1'." >&2
+      echo "  kind would name its nodes '$1-control-plane' and '$1-worker…', which" >&2
+      echo "  wear the fixture cluster's name without being it — scripts/sanitize.jq" >&2
+      echo "  refuses exactly those, so any capture from here dies at the end of the" >&2
+      echo "  trip instead of now (NOTES § D92, § D94)." >&2
+      echo "  The fixture cluster is 'k8rs'. An ephemeral review cluster is" >&2
+      echo "  K8RS_CLUSTER=review — no prefix." >&2
+      return 1 ;;
+  esac
+}
+
 up() {
+  # Before `need`, so the name is refused on a machine that has not installed
+  # kind yet: the wrong answer to "which cluster am I building" does not become
+  # more or less wrong when a binary is missing.
+  refuse_family_name "$CLUSTER"
   need kind; need kubectl
   kind_config | kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --config -
   kubectl --context "kind-$CLUSTER" wait --for=condition=Ready node --all --timeout=120s
@@ -234,7 +271,23 @@ break_it() {
   # destroys the evidence this reads.
   scan_second_revisions "${SECOND_REVISION[@]}"
 
-  "${kc[@]}" apply -f "$BROKEN"
+  # **The one field in broken.yaml that names a node, made relative to this
+  # cluster.** `broken-overhead` carries `nodeName: k8rs-worker` (its manifest says
+  # why), and kind names nodes after the cluster — so on the ephemeral review
+  # cluster, `K8RS_CLUSTER=review`, that node does not exist and the pod sits
+  # Pending forever while `[overhead]` waits for `Running`. A trip on the fixture
+  # cluster substitutes `k8rs` for `k8rs` and nothing changes, so the file stays
+  # exactly what `kubectl apply -f scripts/broken.yaml` does by hand; only a
+  # differently-named cluster sees a difference, which is the only place there is
+  # one. Anchored to the `nodeName:` key so it cannot touch an object *name* that
+  # happens to start `k8rs-`, and `$CLUSTER` is safe in the replacement because
+  # `refuse_unusable_name` has already refused every character that is not.
+  #
+  # **The node name is spelled in three places** and they agree by construction
+  # only on the fixture cluster: `scripts/broken.yaml`'s `nodeName: k8rs-worker`,
+  # the `k8rs-` prefix in this expression, and the `.spec.nodeName == "k8rs-worker"`
+  # clause in `justfile` § fixtures. Change one and the other two do not follow.
+  sed "s/^\( *nodeName: \)k8rs-/\1$CLUSTER-/" "$BROKEN" | "${kc[@]}" apply -f -
   # The healthy side goes up with the broken one: a rule needs both fixtures,
   # and capturing them from the same cluster at the same time is what makes
   # the negative test comparable to the positive one.
@@ -312,7 +365,21 @@ unbreak() {
   # Every kind that owns a pod, not only Pod: deleting the pod of an owned
   # fixture deletes nothing, because the controller above it puts one straight
   # back. The Service is the StatefulSet's required headless one.
-  local kinds=pod,deployment,statefulset,daemonset,service
+  #
+  # **And the cluster-wide reports' inputs, which this list did not cover** — a
+  # PDB, two claims, the static PV under one of them and a RuntimeClass all
+  # survived `unbreak` and were residue its own promise did not mention
+  # (NOTES § D129, § D130). Two of them are cluster-scoped (`persistentvolume`,
+  # `runtimeclass`); kubectl resolves each type's scope for itself, so they ride
+  # in the same label-selected delete as the rest.
+  #
+  # Order is not a concern here because `--wait=false` is: the claim's
+  # `pvc-protection` finalizer holds until the pod that mounts it is gone, and
+  # the volume's `pv-protection` until the claim is, and none of that blocks a
+  # delete that does not wait. The static PV is `Retain`, so deleting its claim
+  # would leave it `Released` rather than gone — which is exactly why it is named
+  # here rather than left to a reclaim policy that never runs.
+  local kinds=pod,deployment,statefulset,daemonset,service,poddisruptionbudget,persistentvolumeclaim,persistentvolume,runtimeclass
   "${kc[@]}" delete "$kinds" -l demo=broken --wait=false --ignore-not-found
   "${kc[@]}" delete "$kinds" -l demo=healthy --wait=false --ignore-not-found
   # The W1 fixture lives in its own namespace (a pods: "0" quota would
@@ -428,7 +495,8 @@ POD_STATES=(oom crashloop image config pending hostpath readiness restarts
             healthy_init healthy_sidecar healthy_hostpath healthy_podlevel
             exit0 sigterm socket succeeded failed startup notfound wedged
             unjudged oomserving neverback healthy_retry healthy_unreadysidecar
-            probe0 neverrules gang)
+            probe0 neverrules gang
+            overhead healthy_disk pdb_floor pdb_room pvc_orphan pvc_used)
 # The two fixtures that cost more than every other one put together, split out
 # so that a failure in the fast set is reported in the usual few minutes instead
 # of behind a half-hour wait. See `verify` for the arithmetic — there is no
@@ -451,6 +519,17 @@ declare -A want=(
   # The `or` is the same fix, and for the same measured reason, as [owned]
   # below: a crash loop is not one state, and this predicate used to name only
   # the half of it that was on screen when it was written.
+  #
+  # **The looseness is deliberate and it does not travel.** This predicate asks
+  # about a *live* pod, where either face is the pod cycling correctly — the
+  # 70-sample measurement is under [owned]. `just fixtures` § `fetch_until` asks a
+  # different question of the same container: whether the bytes it is about to
+  # commit can carry the tests written against them, and there `crashloop.json`
+  # and `exit0.json` must land in `waiting: CrashLoopBackOff` because that is the
+  # face rule 1's card is drawn from. That guard is tight, this one stays loose,
+  # and unifying them breaks whichever end it is moved to — tightening here fails
+  # a correct pod and burns the 420s timeout, which is the too-tight half
+  # verify-test.sh exists to catch.
   #
   # The message clause is D51's: `terminationMessagePolicy:
   # FallbackToLogsOnError` is what makes the kubelet copy the container's last
@@ -713,6 +792,39 @@ declare -A want=(
   # capture from either and leave the fixture unable to say which ending it is
   # for: this one is `Ending::CodeUnknown`.
   [reboot]='.status.phase=="Running" and (.status.containerStatuses[0] | .ready==true and .state.running!=null and .restartCount>=3 and .lastState.terminated.exitCode==255 and .lastState.terminated.reason=="Unknown")'
+  # --- THE CLUSTER-WIDE REPORTS' INPUTS (D129, D130) ---
+  # Six states that are not pod rules: the analysis reports join over kinds no
+  # pod carries, and three of those joins had no object at all. They are here
+  # rather than only behind the justfile's `guard` lines because a claim that
+  # never bound is caught at minute two by this table and after the 26-minute
+  # restart pass by that one — and the trip has an hour from `break`.
+  #
+  # **`spec.overhead` is asserted with the value the apiserver writes, not the
+  # one the manifest asks for**, because the manifest may not ask: the
+  # RuntimeClass admission controller autopopulates the field and rejects a
+  # create request that already carries it. So a match here is proof the plugin
+  # ran, and `runtimeClassName` beside it is what says which class it read.
+  [overhead]='.status.phase=="Running" and ([.status.containerStatuses[].ready]|all) and .spec.runtimeClassName=="broken-overhead" and .spec.overhead.cpu=="250m" and .spec.overhead.memory=="120Mi"'
+  [healthy_disk]='.status.phase=="Running" and ([.status.containerStatuses[].ready]|all) and ([.spec.volumes[]?|select(.persistentVolumeClaim.claimName=="healthy-disk")]|length)==1'
+  # Exact numbers rather than a relation, for [sts]'s reason: the manifest fixes
+  # them, and `disruptionsAllowed==0` alone is also true of a budget blocked
+  # because its workload is unhealthy — which is a different row. Two healthy of
+  # two expected against a minAvailable of 2 is the floor itself.
+  [pdb_floor]='.spec.minAvailable==2 and .status.expectedPods==2 and .status.currentHealthy==2 and .status.desiredHealthy==2 and .status.disruptionsAllowed==0'
+  [pdb_room]='.status.disruptionsAllowed>=1 and .status.currentHealthy>.status.desiredHealthy'
+  # `Bound`, never `Pending` — a claim that reserved nothing is a different row,
+  # and `WaitForFirstConsumer` is exactly what would leave this one Pending
+  # forever if the static PV under it ever stopped being static. The capacity
+  # clause is the second half: a bound claim reports the **PV's** size, so 128Mi
+  # against a 64Mi request is what separates a decode of `status.capacity` from
+  # one of `spec.resources.requests`.
+  [pvc_orphan]='.status.phase=="Bound" and .status.capacity.storage=="128Mi" and .spec.resources.requests.storage=="64Mi"'
+  # `// ""` and not a bare `!= ""`: in jq `null != ""` is **true**, so a claim
+  # whose storageClassName is absent entirely — which is what a cluster with no
+  # default class writes — would have read as dynamically provisioned. The
+  # phase clause hides that today; a predicate that is right for a reason its
+  # neighbour supplies is one the neighbour can stop supplying.
+  [pvc_used]='.status.phase=="Bound" and (.spec.storageClassName // "")!=""'
 )
 
 declare -A why=(
@@ -761,6 +873,12 @@ declare -A why=(
   [neverrules]="D97 — restarted under restartPolicy Never by a rule on its own exit code: rule 15's false positive"
   [gang]="D100 — a settled gang restart: 137/RestartingAllContainers with no stamps, beside a live startedAt"
   [reboot]="D90 — a restart count raised by a node reboot: rule 5's producer, on a container that never crashed"
+  [overhead]="D46/D130 — spec.overhead, written by the RuntimeClass admission controller: the charge the scheduler counts and a spec-only sum does not"
+  [healthy_disk]="D129 — a pod that mounts a claim: the half of Waste's orphan-disk row that lives on a pod"
+  [pdb_floor]="D46/D129 — a PDB at its floor, so a drain of its node never finishes (Drain safety's whole reason for existing)"
+  [pdb_room]="D129 — a PDB with slack, which is what lets the one above fail"
+  [pvc_orphan]="D129 — a claim that is Bound and mounted by nothing (Waste); Bound matters, a Pending one is a different row"
+  [pvc_used]="D129 — a Bound claim a pod does mount, so the join has both sides"
 )
 # --- PREDICATES END ---
 
@@ -780,6 +898,12 @@ fetch() {
     sts)     "${kc[@]}" get statefulset broken-sts -o json ;;
     rollout) "${kc[@]}" get deployment broken-rollout -o json ;;
     ds)      "${kc[@]}" get daemonset broken-ds -o json ;;
+    # The cluster-wide report inputs. `healthy_disk` needs no case of its own —
+    # it is a pod and the `healthy_*` line below already fetches it.
+    pdb_floor)  "${kc[@]}" get poddisruptionbudget broken-pdb-floor -o json ;;
+    pdb_room)   "${kc[@]}" get poddisruptionbudget healthy-pdb-room -o json ;;
+    pvc_orphan) "${kc[@]}" get persistentvolumeclaim broken-unused-disk -o json ;;
+    pvc_used)   "${kc[@]}" get persistentvolumeclaim healthy-disk -o json ;;
     healthy_init) "${kc[@]}" get pod healthy -o json ;;
     healthy_*)    "${kc[@]}" get pod "healthy-${1#healthy_}" -o json ;;
     cordoned|tainted|notready) "${kc[@]}" get nodes -o json ;;
@@ -816,6 +940,23 @@ diagnose() {
            replicas:   ({ want: .spec.replicas } + (.status // {} | {replicas, readyReplicas, updatedReplicas, unavailableReplicas, desiredNumberScheduled, numberReady})
                         | with_entries(select(.value != null))),
            conditions: [ (.status.conditions // [])[] | {type,status,reason} ],
+           # The cluster-wide report inputs (D129, D130). Without these a FAIL on
+           # one of the six printed the name and nothing else, which is the
+           # failure this whole function exists to prevent: an operator with an
+           # hour of trip budget left and no idea which number was wrong. Same
+           # shape as `replicas` above and dropped the same way, so every
+           # existing FAIL line is byte-identical.
+           overhead:   .spec.overhead,
+           runtimeClass: .spec.runtimeClassName,
+           mounts:     [ (.spec.volumes // [])[] | .persistentVolumeClaim.claimName // empty ],
+           budget:     (.status // {} | {expectedPods, currentHealthy, desiredHealthy, disruptionsAllowed}
+                        | with_entries(select(.value != null))),
+           # `class` is kept when it is the empty string and not only when it is
+           # set: an empty storageClassName is what says no provisioner was
+           # involved, which is the difference between the two claims.
+           claim:      ({ asked: .spec.resources.requests.storage, class: .spec.storageClassName,
+                          got: .status.capacity.storage }
+                        | with_entries(select(.value != null))),
            items:      [ (.items // [])[] | { name: .metadata.name,
                            owner:      [ (.metadata.ownerReferences // [])[] | {kind,controller} ],
                            state:      (.status.containerStatuses // [])[0].state,
@@ -1085,7 +1226,79 @@ status() {
   free -m 2>/dev/null | awk '/^Mem:/{printf "host memory: %s MiB used of %s, %s available\n", $3, $2, $7}'
 }
 
+# **The second refusal, and it is not the one above.** That one is *policy* — a
+# name whose node names `sanitize.jq` refuses — and it is `up`-only on purpose, so
+# a cluster already built under it can still be torn down. This one is
+# *arithmetic*, and it applies to every subcommand because it can trap nothing: a
+# name outside the class below cannot become a kind cluster at all. kind builds a
+# container called `<name>-control-plane`, and the docker daemon refuses it in
+# these words, measured against the daemon on 2026-08-21 rather than read off a
+# doc:
+#
+#   Invalid container name (a/b-control-plane), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed
+#
+# It exists because `break_it` substitutes `$CLUSTER` into a **sed replacement**
+# (the `nodeName:` rewrite), where `&` is the whole match and `/` ends the
+# expression — and `K8RS_CLUSTER` is user-supplied, which is the entire reason
+# that rewrite exists. Escaping at the one site would also work; refusing here is
+# the same length, and the two sets are identical — docker's class holds no `/`,
+# no `&` and no backslash — so this is not a guard invented for a case that cannot
+# arise. It is docker's own rule, said early enough to be a sentence instead of a
+# Pending pod at minute two.
+#
+# `LC_ALL=C` because a bracket range is collation-ordered and not byte-ordered: a
+# locale where `[A-Za-z]` means something else would refuse a name docker accepts,
+# which is the one direction this must not fail in. A here-string and not a pipe,
+# because `grep -q` closes early and `set -o pipefail` would read the writer's
+# EPIPE as a failed match.
+refuse_unusable_name() { # $1 = cluster name
+  LC_ALL=C grep -qE '^[A-Za-z0-9][A-Za-z0-9_.-]*$' <<<"$1" && return 0
+  echo "cluster.sh: '$1' cannot name a kind cluster." >&2
+  echo "  kind would build a container called '$1-control-plane', and the docker daemon" >&2
+  echo "  allows only [a-zA-Z0-9][a-zA-Z0-9_.-] in a container name — so no cluster can" >&2
+  echo "  exist under this name and there is nothing here to operate on." >&2
+  echo "  It is also the name this file substitutes into a sed replacement (the nodeName" >&2
+  echo "  rewrite in \`break\`), where '&' and '/' would rewrite the manifest into garbage." >&2
+  echo "  The fixture cluster is 'k8rs'; an ephemeral review cluster is 'review'." >&2
+  return 1
+}
+
+# A guard nobody has seen fail is not a guard (todo.md, Phase 1). It needs no
+# cluster, no kind and no network — the thing under test is a name.
+self_test() {
+  local n rc sfail=0
+  for n in k8rs review k8s-review my-cluster reviewk8rs; do
+    rc=0; refuse_family_name "$n" 2>/dev/null || rc=$?
+    [ "$rc" -eq 0 ] || { echo "FAIL  self-test: '$n' is a name cluster.sh must build"; sfail=1; }
+  done
+  # `k8rs-review` is the name three agents in a row typed; the rest are the same
+  # mistake spelled differently, and every one of them produces node names
+  # sanitize.jq refuses.
+  for n in k8rs-review k8rs-review-2 k8rs2 k8rs-test k8rs-; do
+    rc=0; refuse_family_name "$n" 2>/dev/null || rc=$?
+    [ "$rc" -eq 1 ] || { echo "FAIL  self-test: '$n' wears the fixture cluster's name and was accepted"; sfail=1; }
+  done
+  # The names docker's own message says it will and will not accept — including
+  # the three that break a sed replacement, which is why this refusal exists.
+  for n in k8rs review my-cluster A_b.c-1 x; do
+    rc=0; refuse_unusable_name "$n" 2>/dev/null || rc=$?
+    [ "$rc" -eq 0 ] || { echo "FAIL  self-test: '$n' is a name docker accepts as a container and this refused it"; sfail=1; }
+  done
+  for n in 'a/b' 'a&b' 'a b' '-lead' '.lead' '' 'a$b' 'a\\b' "a'b"; do
+    rc=0; refuse_unusable_name "$n" 2>/dev/null || rc=$?
+    [ "$rc" -eq 1 ] || { echo "FAIL  self-test: '$n' cannot name a container and was accepted — and it reaches a sed replacement"; sfail=1; }
+  done
+  [ $sfail -eq 0 ] && echo "cluster.sh: self-test passed — 'k8rs' and any name without that prefix build; 'k8rs-review' and the rest of the family are refused before kind runs; and a name outside docker's container-name class, which is every name that would break the nodeName rewrite, is refused on every subcommand"
+  return $sfail
+}
+
+# Before the dispatch, so it covers every subcommand rather than `up` alone, and
+# before anything has run. See the function for why this one is universal and
+# `refuse_family_name` is not.
+refuse_unusable_name "$CLUSTER" || exit 1
+
 case "${1:-}" in
+  --self-test) self_test ;;
   up)          up ;;
   down)        down ;;
   break)       break_it ;;

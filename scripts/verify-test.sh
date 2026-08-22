@@ -99,7 +99,8 @@ for canary in oom crashloop image config pending hostpath readiness restarts \
               exit0 sigterm socket succeeded failed restarts10 restarts10serving \
               startup notfound wedged unjudged oomserving neverback healthy_retry \
               healthy_unreadysidecar \
-              probe0 neverrules gang reboot; do
+              probe0 neverrules gang reboot \
+              overhead healthy_disk pdb_floor pdb_room pvc_orphan pvc_used; do
   [ -n "${want[$canary]:-}" ] || {
     echo "verify-test: cluster.sh has no predicate '$canary' — the extraction broke, not the predicate"
     exit 1
@@ -3403,6 +3404,166 @@ check gang      miss  gang_lost "the same statuses on a node whose kubelet stopp
 # and given a positive case and nothing that must refuse it — which is the
 # state a predicate spends its life in when nobody is watching, and it is
 # indistinguishable from a working one until a fixture drifts.
+# --- THE CLUSTER-WIDE REPORTS' INPUTS (D129, D130) START ---
+# Six predicates whose kinds no capture holds — that absence is the whole reason
+# the objects below the pods exist at all. So these are **composed**, and the
+# header's rule applies unchanged: each one names the object the capture owes,
+# and § THE RE-CUT DEBT is the standing instruction to re-cut it once
+# `just fixtures` has run. The two pod shapes are cut from `healthy_spec`, which
+# is a capture; the PDB and PVC shapes are assembled from the API types
+# (k8s-openapi v1_36 `PodDisruptionBudgetStatus`, `PersistentVolumeClaimStatus`)
+# because there is no PDB or PVC anywhere in tests/fixtures/ to cut from — both
+# files are `"items": []` until the trip runs.
+#
+# **The negatives here are each other**, which is the strongest form available:
+# the floor budget's neighbour is the budget with slack, and the orphan claim's
+# neighbour is the claim a pod mounts. Neither is a shape invented to fail.
+
+# `broken-overhead` once the RuntimeClass admission controller has run. The two
+# fields are what it writes and what the manifest names; the manifest itself may
+# carry no `spec.overhead` at all, so an object *without* it is not a broken
+# capture, it is the plugin never having run — which is the miss below.
+# Owed by: overhead.json.
+obj[overhead_pod]=$(jq '.metadata.name = "broken-overhead"
+   | .spec.runtimeClassName = "broken-overhead"
+   | .spec.overhead = {cpu: "250m", memory: "120Mi"}' <<<"${obj[healthy_spec]}")
+
+# The same pod with the class named and the field absent: a cluster where the
+# admission plugin is off or the RuntimeClass does not exist. It is the one
+# failure this predicate is for, and it is indistinguishable from success to a
+# check that only asked whether the pod is running.
+obj[overhead_unpopulated]=$(jq 'del(.spec.overhead)' <<<"${obj[overhead_pod]}")
+
+# `healthy-disk`: an ordinary pod whose only distinguishing feature is that it
+# mounts a claim. Owed by: healthy-disk.json.
+obj[disk_pod]=$(jq '.metadata.name = "healthy-disk"
+   | .spec.volumes = [{name: "data", persistentVolumeClaim: {claimName: "healthy-disk"}}]' \
+  <<<"${obj[healthy_spec]}")
+
+# The same pod with an emptyDir instead — a volume that reserves no disk and
+# names no claim. Half the pods in scripts/broken.yaml carry one, so a predicate
+# that matched this would call every one of them the other side of Waste's join.
+obj[disk_emptydir]=$(jq '.spec.volumes = [{name: "data", emptyDir: {}}]' <<<"${obj[disk_pod]}")
+
+# `broken-pdb-floor`. `expectedPods` is the number of pods the selector matched,
+# `desiredHealthy` is the integer `minAvailable` read straight off the spec, and
+# `disruptionsAllowed` is `max(0, currentHealthy - desiredHealthy)` — so a
+# healthy two-replica workload under a `minAvailable: 2` sits at zero forever.
+# Owed by: poddisruptionbudgets.json.
+obj[pdb_at_floor]=$(cat <<'JSON'
+{
+  "apiVersion": "policy/v1",
+  "kind": "PodDisruptionBudget",
+  "metadata": { "name": "broken-pdb-floor", "namespace": "default" },
+  "spec": { "minAvailable": 2, "selector": { "matchLabels": { "app": "healthy-deploy" } } },
+  "status": {
+    "observedGeneration": 1,
+    "expectedPods": 2,
+    "currentHealthy": 2,
+    "desiredHealthy": 2,
+    "disruptionsAllowed": 0
+  }
+}
+JSON
+)
+
+# `healthy-pdb-room`: the same kind with slack in it. Owed by the same file.
+obj[pdb_with_room]=$(cat <<'JSON'
+{
+  "apiVersion": "policy/v1",
+  "kind": "PodDisruptionBudget",
+  "metadata": { "name": "healthy-pdb-room", "namespace": "default" },
+  "spec": { "minAvailable": 1, "selector": { "matchLabels": { "app": "broken-rollout" } } },
+  "status": {
+    "observedGeneration": 1,
+    "expectedPods": 3,
+    "currentHealthy": 2,
+    "desiredHealthy": 1,
+    "disruptionsAllowed": 1
+  }
+}
+JSON
+)
+
+# **A budget at zero for the other reason**, and it is the case that separates
+# Drain safety's row from a workload alarm: `minAvailable: 1` over a workload
+# with nothing healthy is also `disruptionsAllowed: 0`, and a drain of its node
+# is also blocked — but the cause is the application, not the budget, and rule
+# 1 has already drawn that card. [pdb_floor] must refuse it.
+obj[pdb_zero_unhealthy]=$(jq '.metadata.name = "pdb-over-a-broken-workload"
+   | .spec.minAvailable = 1
+   | .status = {observedGeneration: 1, expectedPods: 1, currentHealthy: 0,
+                desiredHealthy: 1, disruptionsAllowed: 0}' <<<"${obj[pdb_at_floor]}")
+
+# `broken-unused-disk`, bound to the static PV declared beside it. The capacity
+# is the **PV's** and the request is the claim's, which is why they differ.
+# Owed by: persistentvolumeclaims.json.
+obj[pvc_bound_orphan]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "PersistentVolumeClaim",
+  "metadata": { "name": "broken-unused-disk", "namespace": "default" },
+  "spec": {
+    "accessModes": ["ReadWriteOnce"],
+    "storageClassName": "",
+    "volumeName": "broken-unused-disk",
+    "resources": { "requests": { "storage": "64Mi" } }
+  },
+  "status": {
+    "phase": "Bound",
+    "accessModes": ["ReadWriteOnce"],
+    "capacity": { "storage": "128Mi" }
+  }
+}
+JSON
+)
+
+# `healthy-disk`: dynamically provisioned on the default class, so its capacity
+# is what it asked for. Owed by the same file.
+obj[pvc_bound_used]=$(jq '.metadata.name = "healthy-disk"
+   | .spec.storageClassName = "standard" | .spec.volumeName = "pvc-9a1"
+   | .status.capacity.storage = "64Mi"' <<<"${obj[pvc_bound_orphan]}")
+
+# **The `WaitForFirstConsumer` trap, as an object.** A claim on the default class
+# that nothing mounts never gets a consumer, so the provisioner is never asked
+# and it sits here forever: no `capacity`, no `volumeName`, phase `Pending`. It
+# is the state the static PV exists to avoid, and both claim predicates must
+# refuse it — a report billing a reader for a disk that was never provisioned is
+# the row's own false positive.
+obj[pvc_pending]=$(jq '.spec.storageClassName = "standard" | del(.spec.volumeName)
+   | .status = {phase: "Pending"}' <<<"${obj[pvc_bound_orphan]}")
+
+# The absent-field shape, which is not the empty-string one: jq answers `true`
+# to `null != ""`, so this is the object that separates the predicate from a
+# spelling of it that is right only because the phase clause is carrying it.
+obj[pvc_classless]=$(jq 'del(.spec.storageClassName)' <<<"${obj[pvc_bound_used]}")
+
+check overhead     match overhead_pod "broken-overhead once the admission controller has written spec.overhead from the RuntimeClass it names"
+check overhead     miss  overhead_unpopulated "the same pod with the class named and no overhead on it — the plugin off, or the RuntimeClass absent"
+check overhead     miss  healthy_spec "an ordinary healthy pod, which names no RuntimeClass at all"
+
+check healthy_disk match disk_pod "healthy-disk, running and ready, mounting the claim by name"
+check healthy_disk miss  disk_emptydir "the same pod with an emptyDir instead — a volume that reserves no disk and names no claim"
+check healthy_disk miss  healthy_spec "a pod with no volumes at all"
+
+check pdb_floor    match pdb_at_floor "broken-pdb-floor: two healthy of two expected under a minAvailable of 2, so nothing may be evicted"
+check pdb_floor    miss  pdb_with_room "the budget with slack — one spare pod, and the drain finishes"
+check pdb_floor    miss  pdb_zero_unhealthy "a budget also at disruptionsAllowed 0, but because its workload is broken rather than because of the floor"
+
+check pdb_room     match pdb_with_room "healthy-pdb-room: more healthy than it demands, which is the drain that finishes"
+check pdb_room     miss  pdb_at_floor "the budget at its floor — the row this one is the negative of"
+check pdb_room     miss  pdb_zero_unhealthy "a budget with nothing healthy under it: allowed 0, and currentHealthy below desiredHealthy rather than above"
+
+check pvc_orphan   match pvc_bound_orphan "broken-unused-disk: Bound to the static PV, reporting the PV's 128Mi against its own 64Mi request"
+check pvc_orphan   miss  pvc_pending "the same claim on the default class, never bound — the WaitForFirstConsumer trap"
+check pvc_orphan   miss  pvc_bound_used "the dynamically provisioned claim, whose capacity is what it asked for"
+
+check pvc_used     match pvc_bound_used "healthy-disk: Bound on the default class, the claim a pod actually mounts"
+check pvc_used     miss  pvc_pending "the same claim before anything bound it"
+check pvc_used     miss  pvc_bound_orphan "the statically bound orphan, whose empty storageClassName is what says no provisioner was involved"
+check pvc_used     miss  pvc_classless "a bound claim with no storageClassName field at all — what a cluster with no default class writes, and the shape a bare != \"\" reads as provisioned"
+# --- THE CLUSTER-WIDE REPORTS' INPUTS END ---
+
 for key in "${!want[@]}"; do
   case " ${covered[$key]:-} " in
     *" match "*) ;;

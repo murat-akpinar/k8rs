@@ -1167,6 +1167,356 @@ spec:
       emptyDir: {}
 ---
 # ============================================================================
+# THE CLUSTER-WIDE REPORTS' POSITIVES — todo.md Phase 4, NOTES § D129.
+#
+# Everything above this line is a *pod* rule's fixture. The six analysis reports
+# are joins over kinds no pod carries, and three of those joins had no object to
+# be proven on at all: `poddisruptionbudgets.json` and
+# `persistentvolumeclaims.json` were both `"items": []`, and every Service in
+# `services.json` matched pods. So **Drain safety's whole reason for existing**
+# and **Waste's headline row** each had no positive fixture, and hand-writing one
+# into the capture is what NOTES § D53 refuses. The manifest grows instead.
+#
+# **Each positive arrives with the negative that makes it falsifiable, in the
+# same capture**, because these fixtures are `-A` Lists: one file holds every
+# PDB, one every PVC, one every Service. A List with a single item in it cannot
+# tell a report that reads `disruptionsAllowed` apart from one that names every
+# PDB it finds — both print one row (CLAUDE.md § Tests must not lie). Only the
+# Service had its negative already; the other two are declared below.
+#
+# **The negatives are here rather than in `scripts/healthy.yaml`**, which is
+# where the positive/negative file split otherwise puts them, for one reason:
+# they belong to the turn that owns this file. Each carries `demo: healthy`, so
+# moving them is a cut and not an edit.
+#
+# Nothing here needs a step in `cluster.sh break` either, which is the section
+# header above's rule and not an exception to it: every object below settles
+# from one `apply`, and a re-apply of an already-bound claim sends the same
+# values it already has.
+# ============================================================================
+
+# **Drain safety's positive: a PDB at its floor.** `minAvailable` equal to the
+# replica count of the workload it protects pins `disruptionsAllowed` at 0 for
+# as long as that workload is healthy, so the eviction of *any* of its pods is
+# refused and `kubectl drain` on the node holding one retries until the operator
+# gives up — the forty-minute discovery NOTES § Analysis reports names.
+#
+# **It protects `healthy-deploy`, which is in the other manifest, and that is the
+# argument rather than an accident.** NOTES § D46 is explicit that a PDB over
+# pods a drain would never evict proves nothing, and that rules out most of the
+# corpus — read off what each workload here actually runs:
+#
+#   - `broken-ds` is a DaemonSet, and `kubectl/pkg/drain/filters.go` skips
+#     DaemonSet pods *regardless of flags*: the drain finishes and the budget is
+#     never consulted — a budget over it would be a fixture for nothing.
+#   - `broken-quota` has **no pods at all** — its namespace quota is `pods: "0"`
+#     — so there is nothing for an eviction to be refused about.
+#   - `broken-owned` runs one replica and it crashloops; `broken-sts` runs two
+#     and exactly one is ready (it is parked there on purpose, D40). Evictions
+#     against those are blocked too, but by the workload being **unhealthy** —
+#     `currentHealthy` below `desiredHealthy` — which is a different sentence
+#     than the one this report exists to say.
+#   - `broken-rollout` keeps two ready pods and a third that never becomes one,
+#     so `expectedPods` is 3 while `spec.replicas` is 2 and "equal to the replica
+#     count" stops being readable off the object. It is the negative below.
+#
+# `healthy-deploy` is the only workload in the corpus with two *ready* pods a
+# drain would actually move, so it is the only one where `currentHealthy ==
+# desiredHealthy == expectedPods == spec.replicas == 2` and the zero comes from
+# the floor itself and nothing else. The finding is a healthy application whose
+# budget makes its nodes undrainable, which is the shape an operator meets.
+#
+# An integer and never a percentage: a percentage sends the disruption
+# controller looking for the controller above the pods through the `scale`
+# subresource, while an integer `minAvailable` is read straight off the object —
+# one less moving part between the manifest and the three numbers the snapshot
+# carries.
+#
+# **It changes nothing already captured.** A PDB is consulted by the eviction API
+# and by nothing else, and no step of the trip evicts: `break-nodes` cordons
+# (which moves nothing), taints `NoExecute` (the taint manager deletes pods
+# directly and consults no budget) and stops a kubelet.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: broken-pdb-floor, labels: { demo: broken } }
+spec:
+  minAvailable: 2
+  selector: { matchLabels: { app: healthy-deploy } }
+---
+# The same field with room left in it, which is what lets the positive above
+# fail: `minAvailable: 1` over the three pods `broken-rollout` holds (two ready,
+# one surge that never becomes ready) leaves `disruptionsAllowed: 1`, so a drain
+# of the node holding a ready one finishes.
+#
+# **A second budget over a second workload, never a second selector over the same
+# pods.** Two PDBs matching one pod is a misconfiguration the eviction API
+# refuses outright — *This pod has more than one PodDisruptionBudget* — so these
+# two select disjoint sets: `healthy-deploy` above, `broken-rollout` here.
+#
+# `broken-sts` would have been the wrong subject for this half. Two replicas of
+# which one is ready means `minAvailable: 1` leaves `currentHealthy ==
+# desiredHealthy` and this budget would be blocked as well. The negative has to
+# be a budget with slack in it, not one that happens to be satisfied.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: healthy-pdb-room, labels: { demo: healthy } }
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: broken-rollout } }
+---
+# **Waste's *"a disk was reserved and no pod ever mounted it"*, and the trap in
+# producing one on kind.** The row is about a **Bound** claim — `ClaimSnapshot`
+# carries `phase` precisely so a `Pending` claim, which has reserved nothing
+# yet, stays off the report — and kind's default `standard` StorageClass is
+# `volumeBindingMode: WaitForFirstConsumer` (kind's documented default, not
+# measured here). A claim nothing mounts never gets a consumer, so the
+# provisioner is never asked and it sits `Pending` forever: a claim on the
+# default class would produce the wrong state under the right name.
+#
+# So the volume is **static**. A PV is declared here and both halves carry
+# `storageClassName: ""`, which is what turns dynamic provisioning off — the
+# `DefaultStorageClass` admission plugin fills the field in only when it is
+# *absent*, never when it is the empty string. Binding is then the PV
+# controller's own match (same class, access modes covered, capacity large
+# enough) and needs no scheduler, no provisioner and no consumer: Bound within
+# seconds of `apply`, and Bound for the rest of the trip. **Which is also why
+# the binding mode above is a reason and not a dependency** — a static bind is
+# what it is whatever the default class turns out to be set to.
+#
+# **The two sizes disagree on purpose.** A statically bound claim reports the
+# **PV's** capacity in `status.capacity`, not what it asked for, and
+# `ClaimSnapshot` reads `status.capacity.storage` because that is what was
+# actually provisioned — the number the reader is billed for. With both at 64Mi
+# a decode that read `spec.resources.requests.storage` instead would be
+# indistinguishable from the right one; at 128Mi against 64Mi it is not.
+#
+# The `hostPath` directory is never created on any node, because nothing ever
+# mounts this volume — which is the fixture.
+#
+# `Retain` because the alternative cannot work: a reclaim policy fires when the
+# claim is deleted, and `Delete` on a `hostPath` volume asks the
+# controller-manager to remove a directory that exists only inside a node
+# container. Nothing ever asks it to here — `unbreak` deletes
+# `pod,deployment,statefulset,daemonset,service` and no claim, and the
+# documented re-run is `cluster.sh reset`, which is a new cluster.
+apiVersion: v1
+kind: PersistentVolume
+metadata: { name: broken-unused-disk, labels: { demo: broken } }
+spec:
+  capacity: { storage: 128Mi }
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath: { path: /var/local/k8rs-unused-disk }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: broken-unused-disk, labels: { demo: broken } }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: ""
+  resources: { requests: { storage: 64Mi } }
+---
+# The negative side, and it is two objects because *"mounted by nothing"* is a
+# **join**: in a corpus where no pod mounts any claim, a report that does the
+# join and one that names every Bound claim print the same row. This is the
+# other side of it.
+#
+# On the default class deliberately: `WaitForFirstConsumer` is the trap for the
+# orphan above and the ordinary path for this one — the claim binds when its pod
+# is scheduled, which is what happens on every real cluster, and it is the shape
+# the report has to stay silent about.
+#
+# `healthy-*` because nothing may fire on it: limits set, no host mount, no
+# restarts, one container that stays up. **The pod needs a committed capture of
+# its own** or the snapshot a report test builds holds the claim and not the
+# mount — the justfile captures it into `healthy-disk.json` beside the other
+# healthy pods.
+#
+# `sleep 86400` and not `3600`, for the reason every long-lived pod in this file
+# has it: an hour-long sleep ends inside a slow trip and the container restarts.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: healthy-disk, labels: { demo: healthy } }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 64Mi } }
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: healthy-disk, labels: { demo: healthy } }
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "86400"]
+      volumeMounts:
+        - { name: data, mountPath: /data }
+      resources:
+        requests: { cpu: "10m", memory: "16Mi" }
+        limits: { cpu: "100m", memory: "64Mi" }
+  volumes:
+    - name: data
+      persistentVolumeClaim: { claimName: healthy-disk }
+---
+# **Waste's headline row: the 503 nobody can explain.** A Service whose selector
+# matches no pod — a label typo, a Deployment renamed, a namespace moved —
+# answers every request with a connection to nothing, and `kubectl get svc`
+# prints it looking exactly like one that works.
+#
+# The three Services already in the capture are its negative, and they are three
+# different ones rather than three copies: `broken-sts` and `kube-dns` carry
+# selectors that **do** match pods, and `kubernetes` in `default` carries **no
+# selector at all** — endpoints managed by hand, which `ServiceSnapshot` says in
+# so many words is not a thing to report. All four land in one `-A` capture.
+#
+# The selector names a label nothing in either manifest carries, and it is the
+# Service's own name for the reason a real one usually is: a pod added later
+# cannot quietly satisfy it without also being named for it.
+#
+# **It is captured with its EndpointSlices or it proves half of itself.** *Matches
+# no pod* is a claim about what is behind the Service, and the endpoint
+# controller writes that down — a placeholder slice carrying no endpoints, which
+# is what `EndpointSliceSnapshot.endpoints` counts. Capturing Services without
+# them is what left this gap; the justfile's cluster-wide loop grows the kind.
+apiVersion: v1
+kind: Service
+metadata: { name: broken-noendpoints, labels: { demo: broken } }
+spec:
+  selector: { app: broken-noendpoints }
+  ports: [{ name: http, port: 80, targetPort: 8080 }]
+---
+# **Box 1753's second field, and the one thing no kind cluster produces by
+# accident: `spec.overhead`.** D46 sent it to Phase 4 as *the RuntimeClass charge
+# the scheduler counts and a `spec`-only sum does not* — and no captured pod has
+# it, because kind runs runc and nothing here ever named a RuntimeClass. So the
+# field ships counting toward nothing and the box cannot close on its own stated
+# reason (NOTES § D124, whose first condition is a defect proven on a committed
+# capture).
+#
+# **The manifest does not set `spec.overhead`, and may not.** The API's own words
+# on the field (k8s-openapi v1_36, `PodSpec.overhead`): *"This field will be
+# autopopulated at admission time by the RuntimeClass admission controller. If
+# the RuntimeClass admission controller is enabled, overhead must not be set in
+# Pod create requests. The RuntimeClass admission controller will reject Pod
+# create requests which have the overhead already set. If RuntimeClass is
+# configured and selected in the PodSpec, Overhead will be set to the value
+# defined in the corresponding RuntimeClass."* So the pod names a class and the
+# apiserver writes the number — which is also why this is a real capture and not
+# a hand-written field: the value on disk was put there by Kubernetes.
+#
+# **Nothing in that sentence is conditioned on the handler**, and the plugin is
+# on: `kube-system-pods.json` carries kubeadm's only admission flag,
+# `--enable-admission-plugins=NodeRestriction`, and no `--disable-admission-plugins`
+# beside it — that flag *adds to* the default-on set, so `RuntimeClass` is
+# running and nothing turns it off.
+#
+# `handler: runc` because the pod has to actually start: the kubelet resolves the
+# handler against the CRI's configured runtimes and refuses a sandbox for one
+# that is not there. `runc` is containerd's own default runtime name — the
+# capture says `containerd://2.3.1` — and it is the example the API description
+# itself gives. If it were ever wrong the pod would not run and `cluster.sh
+# verify` says so at minute two, which is the direction to fail in.
+#
+# No `scheduling` block: *"If scheduling is nil, this RuntimeClass is assumed to
+# be supported by all nodes"*, which is what this needs — a node constraint would
+# make the pod's placement a second variable in a fixture about one number.
+#
+# **The size is the Kubernetes Pod Overhead documentation's own Kata example
+# (250m / 120Mi), and it did not have to be inflated to be visible.**
+#
+# The claim that was here until 2026-08-21 said the overhead was *125% of the
+# whole cluster's committed cpu*, off a denominator of 200m. That denominator was
+# these two manifests and nothing else, and it left out the cluster's own control
+# plane and node agents — which is a number with an incomplete denominator, the
+# defect PRIOR-ART § F2 is about, committed in a comment in the repository whose
+# founding argument it is. Measured over the committed corpus on 2026-08-21
+# (every live pod in `tests/fixtures/`, de-duplicated, container requests summed):
+# **1470m across four nodes**, of which **1250m is kube-system** — the apiserver's
+# 250m, the controller manager's 200m, etcd and the scheduler at 100m each, two
+# CoreDNS at 100m, and kindnet's 100m on every one of the four nodes. This
+# manifest and `healthy.yaml` together commit **220m** of that.
+#
+# What survives, and it is the claim the fixture actually needs:
+#
+#   - **Fixed by this manifest, and it cannot move**: the pod asks for 100m and is
+#     charged 350m, so a sum that ignores `spec.overhead` undercounts it by 71%.
+#   - **Corpus-wide and placement-independent**: 250m of overhead on one pod is
+#     more than the 220m *every* pod in these two manifests requests put together.
+#   - **Per node, which is the sum a Capacity row prints**: on `k8rs-worker`, the
+#     node the `nodeName` below pins this pod to, the 2026-08-21 capture holds 12
+#     pods committing **100m** between them (kindnet's; the other eleven request
+#     nothing). So the node reads 200m with the field ignored and 450m with it
+#     counted — the same node, more than doubled by one field.
+#
+# The last of the three is a snapshot of one trip and says so; the first two hold
+# whatever the scheduler does. A number invented to be big would prove the same
+# thing and be a number nobody could source.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata: { name: broken-overhead, labels: { demo: broken } }
+handler: runc
+overhead:
+  podFixed: { cpu: "250m", memory: "120Mi" }
+---
+# The pod that names it. Its own requests are deliberately *smaller* than the
+# overhead: with the two the other way round the overhead would be a rounding
+# error on the pod's own row, and the whole question is whether the charge the
+# scheduler counts survives into the report.
+#
+# It is otherwise an ordinary healthy pod — running, ready, limits set, no host
+# mount — because nothing may fire on it. The only unusual thing about it is a
+# field the apiserver writes.
+#
+# **`nodeName`, because placement is a lottery and this object cannot afford one**
+# (the 2026-08-21 operator review). The 2026-08-20 trip put this pod on
+# `k8rs-worker2` — the node `break-nodes` taints `dedicated=gpu:NoExecute` — so
+# the committed snapshot had the one object built to make a per-node sum provably
+# wrong sitting on the one node whose pod set the same snapshot says is evicted.
+# That placement was luck, not design: `broken-config` moved from `k8rs-worker` to
+# `k8rs-worker2` between the two trips without a line of either manifest changing.
+#
+# `k8rs-worker` and not another node, checked against `scripts/cluster.sh`
+# § break_nodes rather than assumed:
+#
+#   - `nodeName` skips the scheduler, so no taint or cordon is consulted at
+#     creation — and creation is at `break` time, before `break-nodes` runs at all.
+#   - What `break-nodes` later does to this node is `kubectl cordon`, which is
+#     `unschedulable: true` plus a **NoSchedule** taint. NoSchedule is a scheduler
+#     predicate and evicts nothing already bound; only worker2's NoExecute does.
+#   - `break_nodes` picks the cordon node as *the first worker in sorted order
+#     running a movable `demo` pod*, and `workers()` sorts, so `k8rs-worker` is
+#     first. Pinning a movable `demo` pod here makes that pick deterministic
+#     instead of merely stable — worker2 gets the taint and worker3 the stopped
+#     kubelet, which is the assignment `nodes.json` already holds.
+#   - And it puts the Capacity object on the node N2's drain row is about, so one
+#     committed node carries both reports instead of neither carrying this one.
+#
+# `k8rs-worker3` is out: its kubelet is stopped and every pod on it goes Unknown.
+# `k8rs-control-plane` is out: it carries the 950m of kube-system this fixture's
+# arithmetic is trying to be legible against.
+#
+# **The name is rewritten for any cluster that is not `k8rs`.** kind names nodes
+# after the cluster, so on `k8rs-admin`'s ephemeral review cluster
+# (`K8RS_CLUSTER=review`) this node does not exist and the pod would sit Pending
+# while `verify`'s `[overhead]` waited forever for `Running`. `cluster.sh` § break
+# substitutes the prefix on the way to `kubectl apply` — a no-op on the fixture
+# cluster, so this file is still exactly what `kubectl apply -f` does by hand.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-overhead, labels: { demo: broken } }
+spec:
+  nodeName: k8rs-worker
+  runtimeClassName: broken-overhead
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "86400"]
+      resources:
+        requests: { cpu: "100m", memory: "64Mi" }
+        limits: { cpu: "200m", memory: "128Mi" }
+---
+# ============================================================================
 # THE ONE OBJECT A MANIFEST DECLARES AND ONLY THE MACHINE CAN FINISH — NOTES
 # § D90, and the exception to the section header above.
 #

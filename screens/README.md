@@ -9,7 +9,7 @@ plan and belongs in the same edit as the decision behind it
 |---|---|
 | [alerts.md](alerts.md) | **Alerts** — the default view, findings grouped by owner |
 | [resources.md](resources.md) | **Resources** — the browser over every kind, server-side columns |
-| [analysis.md](analysis.md) | **Analysis** — capacity · drain safety · waste · certificates · versions |
+| [analysis.md](analysis.md) | **Analysis** — capacity · drain safety · waste · posture · restarts · certificates · versions |
 | [detail.md](detail.md) | Object detail — logs · describe · yaml · events |
 | [dialogs.md](dialogs.md) | Confirmations, the typed-name delete, and a refused write |
 | [help.md](help.md) | The `?` key map |

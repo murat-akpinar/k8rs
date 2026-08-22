@@ -2,15 +2,15 @@
   "apiVersion": "v1",
   "kind": "Pod",
   "metadata": {
-    "creationTimestamp": "2026-08-16T09:44:00Z",
+    "creationTimestamp": "2026-08-20T22:42:55Z",
     "generation": 1,
     "labels": {
       "demo": "broken"
     },
     "name": "broken-podlimit",
     "namespace": "default",
-    "resourceVersion": "2154",
-    "uid": "456c6bbd-b142-4e80-af85-ab075598b6cc"
+    "resourceVersion": "2113",
+    "uid": "c1038169-11ae-4439-ba30-e020739e7fc5"
   },
   "spec": {
     "containers": [
@@ -35,7 +35,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-vxvrd",
+            "name": "kube-api-access-97kpl",
             "readOnly": true
           }
         ]
@@ -77,7 +77,7 @@
     ],
     "volumes": [
       {
-        "name": "kube-api-access-vxvrd",
+        "name": "kube-api-access-97kpl",
         "projected": {
           "defaultMode": 420,
           "sources": [
@@ -124,35 +124,35 @@
     "conditions": [
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:03Z",
+        "lastTransitionTime": "2026-08-20T22:42:56Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodReadyToStartContainers"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Initialized"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:15Z",
+        "lastTransitionTime": "2026-08-20T22:43:06Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "Ready"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:15Z",
+        "lastTransitionTime": "2026-08-20T22:43:06Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "ContainersReady"
       },
       {
         "lastProbeTime": null,
-        "lastTransitionTime": "2026-08-16T09:44:00Z",
+        "lastTransitionTime": "2026-08-20T22:42:55Z",
         "observedGeneration": 1,
         "status": "True",
         "type": "PodScheduled"
@@ -163,7 +163,7 @@
         "allocatedResources": {
           "cpu": "10m"
         },
-        "containerID": "containerd://c4078687e19ee240c6eadf94e0f7870b479c825eef8fc37e2a012ffbc433ed3e",
+        "containerID": "containerd://2d25ffd1597003f8f97a22078924a8473cf99cd01df6785aed8d0ef2f64b6b0f",
         "image": "docker.io/library/busybox:latest",
         "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
         "lastState": {},
@@ -182,7 +182,7 @@
         "started": true,
         "state": {
           "running": {
-            "startedAt": "2026-08-16T09:44:15Z"
+            "startedAt": "2026-08-20T22:43:06Z"
           }
         },
         "user": {
@@ -198,7 +198,7 @@
         "volumeMounts": [
           {
             "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "name": "kube-api-access-vxvrd",
+            "name": "kube-api-access-97kpl",
             "readOnly": true,
             "recursiveReadOnly": "Disabled"
           }
@@ -230,6 +230,6 @@
         "memory": "128Mi"
       }
     },
-    "startTime": "2026-08-16T09:44:00Z"
+    "startTime": "2026-08-20T22:42:55Z"
   }
 }

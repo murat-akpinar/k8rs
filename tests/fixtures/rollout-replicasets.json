@@ -5,7 +5,7 @@
       "apiVersion": "apps/v1",
       "kind": "ReplicaSet",
       "metadata": {
-        "creationTimestamp": "2026-08-16T09:44:09Z",
+        "creationTimestamp": "2026-08-20T22:43:04Z",
         "generation": 1,
         "labels": {
           "app": "broken-rollout",
@@ -21,11 +21,11 @@
             "controller": true,
             "kind": "Deployment",
             "name": "broken-rollout",
-            "uid": "b61ea231-e9bc-4aac-b808-5571c1380c8a"
+            "uid": "7e0aa4b1-ba7d-4489-8729-7a134c89fec4"
           }
         ],
-        "resourceVersion": "1093",
-        "uid": "914523b9-7c5e-4965-b481-79af10502ade"
+        "resourceVersion": "1159",
+        "uid": "68fa955f-40ad-4eee-af63-6a81dac43308"
       },
       "spec": {
         "replicas": 1,
@@ -77,7 +77,7 @@
       "apiVersion": "apps/v1",
       "kind": "ReplicaSet",
       "metadata": {
-        "creationTimestamp": "2026-08-16T09:44:00Z",
+        "creationTimestamp": "2026-08-20T22:42:55Z",
         "generation": 1,
         "labels": {
           "app": "broken-rollout",
@@ -93,11 +93,11 @@
             "controller": true,
             "kind": "Deployment",
             "name": "broken-rollout",
-            "uid": "b61ea231-e9bc-4aac-b808-5571c1380c8a"
+            "uid": "7e0aa4b1-ba7d-4489-8729-7a134c89fec4"
           }
         ],
-        "resourceVersion": "1075",
-        "uid": "8e0bbd64-00f2-4137-9896-eb583949ed4d"
+        "resourceVersion": "1143",
+        "uid": "e1725e47-9e3c-4517-9d32-769c1b7e7382"
       },
       "spec": {
         "replicas": 2,

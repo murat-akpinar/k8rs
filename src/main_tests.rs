@@ -10,7 +10,7 @@
 use super::*;
 
 // `main.rs` itself never names a kind, only matches on the strings the API sends.
-use crate::rules::ObjectKind;
+use crate::rules::{ContainerState, ObjectKind};
 
 fn fixture(name: &str) -> String {
     format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
@@ -54,6 +54,54 @@ fn items_in(name: &str) -> usize {
     );
     items
 }
+
+/// **A committed `kind: List` capture with its items taken out**, written where [`load`] can
+/// read it back — and the emptiness belongs to this test rather than to a file.
+///
+/// `poddisruptionbudgets.json` and `persistentvolumeclaims.json` were the only two empty Lists
+/// in the corpus, and the test below read one of them *because* it was empty.
+/// `scripts/broken.yaml` fills both on the next capture trip, at which point that test would
+/// have had no input at all and both its assertions would have failed — found by running the
+/// binary, not by reading the test (NOTES § D129's second blocker, `tester`'s finding).
+///
+/// **A test whose subject is emptiness owns its emptiness.** The source is still a committed
+/// capture, so this is not hand-written JSON (CLAUDE.md § fixtures come from real cluster
+/// captures): what is removed is the array, and [`items_in`] asserts there was one to remove —
+/// otherwise a source that quietly became empty would make this helper a no-op and the test a
+/// tautology.
+fn emptied_list(name: &str) -> String {
+    assert!(items_in(name) > 0, "{name} had nothing to empty");
+    let text = std::fs::read_to_string(fixture(name)).expect("the fixture reads");
+    let mut doc: Value = serde_json::from_str(&text).expect("the fixture is JSON");
+    doc["items"] = Value::Array(Vec::new());
+    // The process id separates two `cargo test` runs and the thread id separates two callers
+    // inside one — `cargo test` runs tests as threads, so the pid alone would let a second
+    // test emptying this same source delete the file this one is about to read. The caller
+    // removes it the moment `load` has read it, so nothing survives the test either way.
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-empty-{name}-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::write(&path, doc.to_string()).expect("a temp file this test owns");
+    path.to_string_lossy().into_owned()
+}
+
+/// The seven labels [`reports`] prints, in the order the sidebar lists them — named here so a
+/// producer that stopped being printed is a red test rather than a pane nobody misses.
+///
+/// **`[restarts]` was missing until its box landed**, which made the claim above untrue of it:
+/// the list only fails on a pane that *leaves*, so one that never joined is a producer this file
+/// would not have missed either.
+const PANES: [&str; 7] = [
+    "[capacity]",
+    "[certificates]",
+    "[drain safety]",
+    "[posture]",
+    "[restarts]",
+    "[waste]",
+    "[versions]",
+];
 
 fn finding(severity: Severity, object: ObjectId) -> Finding {
     Finding {
@@ -137,6 +185,167 @@ fn no_control_character_from_a_finding_reaches_the_report() {
         report.contains("▲ node[2J-3\n"),
         "the cluster-scoped identity is drawn by the other arm of `name`, and it did not \
          come out clean: {report:?}"
+    );
+}
+
+/// **The same invariant over the seven analysis reports, which nothing outside `#[cfg(test)]` had
+/// ever rendered.** `analysis_tests`' own `pane` strips nothing, so until this box every string in
+/// every report was unexercised — and **Posture's row text is a `hostPath.path` verbatim and
+/// whole**, not a value inside a sentence, so a crafted path arrived at the terminal as an escape
+/// sequence (`reports/2026-08-21-family-c-analysis-report-family-review.md` § 8).
+///
+/// **Four framings, because a guard is proven only for the framing it was written for**
+/// (NOTES § D31): the whole of a row's `text` (the host path), a value inside a sentence (the
+/// namespace in Posture's `in {namespace}`), a value inside a *row's* sentence built by a
+/// different producer (the node name on Capacity's row), and **three values joined into one row's
+/// `text` by a fourth** (the pod's namespace, its name and its container's, on a Restarts row).
+///
+/// **`restarts.json` is in the input for that last one, and its absence was the gap**
+/// (NOTES § D29). The pane draws nothing on a cluster of `healthy-hostpath` and nodes, so none of
+/// its three untrusted interpolations ever reached this sweep, and a guard that is never fed the
+/// shape is not a guard for it.
+#[test]
+fn no_control_character_from_a_report_reaches_the_terminal() {
+    // `restarts.json` second, so the plants below still land on `healthy-hostpath`'s pod at 0.
+    let mut input = read(&["healthy-hostpath.json", "restarts.json", "nodes.json"]);
+    let pod = &mut input.snapshot.pods[0];
+    assert_eq!(pod.host_path_mounts.len(), 1, "the capture mounts one path");
+    // `ESC`, `CR`, `BEL`, `DEL` and a C1 control — the whole `Cc` category, in the middle of a
+    // value rather than as the whole of one.
+    pod.host_path_mounts[0].path = "/var\x1b[2J/lo\u{9b}g".to_string();
+    pod.id.namespace = Some("pay\rments".to_string());
+    input.snapshot.nodes[0].id.name = "node\x07-\x7f1".to_string();
+    // The pod has to be on the node whose name is crafted, or Capacity's row never names it.
+    pod.node = Some(input.snapshot.nodes[0].id.name.clone());
+
+    // **The Restarts row, whose text is three untrusted values joined by that producer's own
+    // `separator`.** All three are crafted, because the row builds them in one `format!` and a
+    // per-field judgement call is how one of the three gets forgotten.
+    let restarting = &mut input.snapshot.pods[1];
+    assert_eq!(
+        restarting.containers.len(),
+        1,
+        "the capture carries the one restarting container"
+    );
+    restarting.id.namespace = Some("sh\x1bop".to_string());
+    restarting.id.name = "che\u{9b}ckout".to_string();
+    restarting.containers[0].name = "ap\x07p".to_string();
+    // The capture was taken after this file's pin, so its own `startedAt` sits four days in the
+    // future and `rules::age` declines it — which is the pane's *no age yet* state, not its row.
+    // This test is about the strip and not about the ladder, so the start moves onto the pin.
+    restarting.containers[0].state = ContainerState::Running {
+        started_at: Some(four_minutes_ago()),
+    };
+
+    let printed = reports(&input.snapshot, &analyze(&input.snapshot));
+    println!("{printed}");
+
+    let survivors: Vec<char> = printed
+        .chars()
+        .filter(|c| c.is_control() && *c != '\n')
+        .collect();
+    assert!(
+        survivors.is_empty(),
+        "control characters reached the terminal: {survivors:?}\n{printed:?}"
+    );
+    // **And only those were removed** — a `sanitize` that returned nothing at all satisfies the
+    // assertion above (CLAUDE.md § A derived list asserts it found something).
+    assert!(
+        printed.contains("/var[2J/log"),
+        "the path is a row's whole text, and it came back short: {printed:?}"
+    );
+    assert!(
+        printed.contains("in payments."),
+        "the namespace enters a sentence and came back short: {printed:?}"
+    );
+    assert!(
+        printed.contains("node-1   "),
+        "the node name enters another producer's sentence and came back short: {printed:?}"
+    );
+    assert!(
+        printed.contains("shop/checkout \u{b7} container app"),
+        "three values joined into one Restarts row, and one came back short: {printed:?}"
+    );
+}
+
+/// **An empty action draws no line at all**, the same convention [`card`] follows for an empty
+/// evidence — never a `→ ` with nothing after it, which is a hole in the middle of a pane
+/// ([`analysis::Row::Answer::action`]). Both halves in one report, because *drawn for everything*
+/// and *drawn for nothing* are the two ways this goes wrong and one assertion cannot see both.
+#[test]
+fn a_row_with_nothing_to_do_draws_no_arrow_and_one_with_something_does() {
+    let printed = pane(
+        "test",
+        &analysis::Report {
+            title: "What each node promised, and what it has".to_string(),
+            badge: None,
+            rows: vec![
+                analysis::Row::Answer {
+                    severity: Some(Severity::Warn),
+                    text: "node-2   over".to_string(),
+                    detail: vec!["one of them is killed.".to_string()],
+                    action: "move some pods to another node".to_string(),
+                    jump: None,
+                },
+                analysis::Row::Answer {
+                    severity: None,
+                    text: "node-1   fine".to_string(),
+                    detail: Vec::new(),
+                    action: String::new(),
+                    jump: None,
+                },
+            ],
+        },
+    );
+
+    assert_eq!(
+        printed.lines().collect::<Vec<&str>>(),
+        [
+            "[test]",
+            "  What each node promised, and what it has",
+            "  ▲ node-2   over",
+            "      one of them is killed.",
+            "      → move some pods to another node",
+            "    node-1   fine",
+        ],
+        "the flagged row carries its glyph and its way out; the row with nothing to do carries \
+         neither, and nothing is drawn where nothing was said"
+    );
+}
+
+/// **The flag, and that it is not read as a path.** Seven panes under the cards when it is passed,
+/// none when it is not — and the cards themselves are the same either way, because the driver
+/// prints one report under the other rather than folding the reports into the findings.
+#[test]
+fn the_analysis_flag_adds_every_pane_and_is_not_a_file() {
+    let paths = [fixture("nodes.json"), fixture("kube-system-pods.json")];
+    let plain = run(&paths).expect("the captures load");
+    let with_reports = run(&[paths[0].clone(), ANALYSIS.to_string(), paths[1].clone()])
+        .expect("the flag is not a path — a run that tried to open it would be an Err naming it");
+
+    for pane in PANES {
+        assert!(!plain.contains(pane), "{pane} is drawn without asking");
+        assert!(
+            with_reports.contains(pane),
+            "{pane} is missing: {with_reports}"
+        );
+    }
+    assert!(
+        with_reports.starts_with(&plain),
+        "the cards are unchanged and the panes are under them"
+    );
+    // The order is the sidebar's, and it is asserted rather than assumed.
+    let mut at = 0;
+    for pane in PANES {
+        let found = with_reports[at..].find(pane).expect("checked above");
+        at += found;
+    }
+
+    // **The flag on its own is the usage**, not a run over no files at all.
+    assert_eq!(
+        run(&[ANALYSIS.to_string()]),
+        Err(USAGE.to_string()),
+        "a flag is not an input"
     );
 }
 
@@ -354,37 +563,136 @@ fn a_bare_document_lands_in_the_field_its_kind_belongs_to() {
     );
 }
 
+/// **A committed capture rewritten to a kind nothing dispatches on**, in a temp file this test
+/// owns — [`emptied_list`]'s mechanism, for the same reason and with the same care: what is
+/// asserted below is [`take`]'s fallback arm, which never decodes the body under the `kind`, so
+/// the object itself is not what makes the input honest. The source is a capture and the one
+/// field moved is named here.
+///
+/// **The corpus holds no unread kind any anymore, which is what this box changed**: the driver
+/// now reads all eleven kinds in it — Pod, Node, the four workload kinds, and the five on-demand
+/// lists the reports join. Without this the test would have had no input at all and would have
+/// gone green over an assertion about nothing (the defect [`emptied_list`] records).
+fn under_a_kind_nothing_reads(name: &str, kind: &str) -> String {
+    let text = std::fs::read_to_string(fixture(name)).expect("the fixture reads");
+    let mut doc: Value = serde_json::from_str(&text).expect("the fixture is JSON");
+    let was = doc["kind"].as_str().expect("the capture names its kind");
+    assert_ne!(
+        was, kind,
+        "{name} is already a {kind}, so nothing was moved"
+    );
+    doc["kind"] = Value::String(kind.to_string());
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-unread-{kind}-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::write(&path, doc.to_string()).expect("a temp file this test owns");
+    path.to_string_lossy().into_owned()
+}
+
 /// **A kind no rule reads is counted and named, never dropped in silence** — the header is
-/// where a reader decides whether the report covered what they handed it. Both shapes: a list
-/// of them, and a bare one.
+/// where a reader decides whether the report covered what they handed it.
 #[test]
 fn a_kind_no_rule_reads_is_counted_and_named() {
-    let input = read(&["services.json", "csr-pending.json"]);
+    let one = under_a_kind_nothing_reads("healthy.json", "ConfigMap");
+    let two = under_a_kind_nothing_reads("healthy.json", "Secret");
+    let input = load(&[one.clone(), two.clone()], now()).expect("both documents read");
+    let _ = std::fs::remove_file(&one);
+    let _ = std::fs::remove_file(&two);
 
-    assert_eq!(
-        input.skipped.get("Service").copied(),
-        Some(items_in("services.json"))
-    );
-    assert_eq!(
-        input.skipped.get("CertificateSigningRequest").copied(),
-        Some(1)
-    );
+    assert_eq!(input.skipped.get("ConfigMap").copied(), Some(1));
+    assert_eq!(input.skipped.get("Secret").copied(), Some(1));
     assert!(input.snapshot.pods.is_empty() && input.snapshot.nodes.is_empty());
     assert_eq!(
         header(&input),
-        format!(
-            "0 pods · 0 nodes · 0 workloads · {} objects no rule reads \
-             (CertificateSigningRequest, Service)",
-            items_in("services.json") + 1
-        )
+        "0 pods · 0 nodes · 0 workloads · 2 objects no rule reads (ConfigMap, Secret)",
+        "named, sorted, and counted — the header is where a reader decides whether the report \
+         covered what they handed it"
+    );
+}
+
+/// **The five lists a report joins are `None` until one of their objects is read, and `Some` the
+/// moment one is** — the distinction the reports key on (NOTES § D129): *nobody looked* against
+/// *looked and found nothing*, which is the difference between Waste saying **not checked** and
+/// Waste saying **nothing is going to waste**.
+#[test]
+fn the_on_demand_lists_are_nobody_looked_until_one_of_their_objects_is_read() {
+    let nothing = nothing_read().snapshot;
+    assert!(
+        nothing.services.is_none()
+            && nothing.endpoint_slices.is_none()
+            && nothing.claims.is_none()
+            && nothing.disruption_budgets.is_none()
+            && nothing.certificate_requests.is_none()
+            && nothing.replica_sets.is_none(),
+        "a run that was handed no such file looked at none of them"
+    );
+
+    let read_one = read(&["services.json"]).snapshot;
+    assert_eq!(
+        read_one.services.as_ref().map(Vec::len),
+        Some(items_in("services.json")),
+        "and the list it was handed is the list it has"
+    );
+    assert!(
+        read_one.endpoint_slices.is_none() && read_one.claims.is_none(),
+        "one list arriving says nothing about the four beside it"
+    );
+
+    // **A ReplicaSet lands in both fields**: `workloads` for the W-rules, `replica_sets` for the
+    // Waste row that counts the ones parked at zero.
+    let sets = read(&["healthy-replicasets.json"]).snapshot;
+    assert_eq!(
+        sets.replica_sets.as_ref().map(Vec::len),
+        Some(items_in("healthy-replicasets.json"))
+    );
+    assert_eq!(sets.workloads.len(), items_in("healthy-replicasets.json"));
+
+    // And every other kind the reports join, so none of the five is wired to the wrong field.
+    let joined = read(&[
+        "endpointslices.json",
+        "persistentvolumeclaims.json",
+        "poddisruptionbudgets.json",
+        "csr-pending.json",
+    ])
+    .snapshot;
+    assert_eq!(
+        (
+            joined.endpoint_slices.as_ref().map(Vec::len),
+            joined.claims.as_ref().map(Vec::len),
+            joined.disruption_budgets.as_ref().map(Vec::len),
+            joined.certificate_requests.as_ref().map(Vec::len),
+        ),
+        (
+            Some(items_in("endpointslices.json")),
+            Some(items_in("persistentvolumeclaims.json")),
+            Some(items_in("poddisruptionbudgets.json")),
+            Some(1),
+        ),
+        "the last is a bare document rather than a `kind: List`, which is the other shape `take` \
+         is handed"
+    );
+    assert!(
+        joined.services.is_none(),
+        "and nothing filled a list nobody handed it"
     );
 }
 
 /// An empty list is not an error and not a skipped kind: nothing was in it.
+///
+/// **The input is [`emptied_list`]'s and not a fixture that happens to be empty** — see there
+/// for why, and for what running the binary found.
 #[test]
 fn an_empty_list_reads_as_nothing_at_all() {
-    let input = read(&["persistentvolumeclaims.json"]);
+    let path = emptied_list("services.json");
+    let input = load(std::slice::from_ref(&path), now()).expect("an empty list is not an error");
+    std::fs::remove_file(&path).expect("the temp file this test wrote");
 
+    // Every Service the source holds would have been counted as a kind no rule reads — the
+    // test one above asserts exactly that, off the same file — so `skipped` being empty here
+    // is the array's absence and nothing else. How many there are belongs to the cluster and
+    // is deliberately not written down (`items_in`).
     assert!(input.skipped.is_empty(), "{:?}", input.skipped);
     assert_eq!(
         render(&[], &input),

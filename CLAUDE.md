@@ -438,9 +438,16 @@ and the sanitization gate. An **ephemeral measurement** — bring a cluster up,
 check one claim, tear it down — is `k8s-admin`'s, and nobody else's: a dev with a
 cluster tunes the code until the cluster agrees. It runs under
 **`K8RS_CLUSTER=review`** — the default name is the PM's fixture cluster and
-teardown would delete it, and `review` is additionally a name `scripts/sanitize.jq`
-**refuses**, so a review cluster cannot produce a committed fixture even by
-mistake. **The cluster is ephemeral; the write-up is not** — the measurement
+teardown would delete it. **The sanitizer never sees a cluster name; it reads
+node names**, and since 2026-08-20 `scripts/sanitize.jq` accepts only the four
+the fixture cluster actually produces — `k8rs-control-plane` and
+`k8rs-worker[N]`, `.lan` suffix allowed — instead of the whole `k8rs-*` family
+that `k8rs-review-control-plane` walked straight through three times
+([D94](NOTES.md#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)).
+So **no cluster but `k8rs` can produce a committed fixture**, which is stronger
+than the old claim about one name, and it holds however the cluster was made —
+`cluster.sh` refuses the family name too, but it is the loud guard and not the
+load-bearing one, because a reviewer runs `kind create cluster` directly. **The cluster is ephemeral; the write-up is not** — the measurement
 lands in [`reports/`](reports/README.md) under that file's sanitization rule,
 which is what keeps *an object from the cluster* on the PM's side of this split
 while *what was observed about it* stays on `k8s-admin`'s
@@ -469,6 +476,11 @@ Anything else runs one at a time; worktree isolation (`isolation: "worktree"`)
 exists if two writers are ever unavoidable, but reach for the plan fix first.
 **Review is not one of these slots** — nothing is built on top of a box until
 `k8s-admin` reports, and the dev idles meanwhile.
+
+**A re-dispatch to fix a finding is a write, not a review** — `screens/` went to
+its owner for a rewrite in the slot the table below reserves for two *reviewers*,
+and the reviewer's first read carried a section that no longer existed
+([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
 
 **Sending a finished agent another message is a new dispatch**, and a resumed
 agent owns its files again the moment it wakes — so a follow-up while someone
@@ -501,7 +513,7 @@ gives sixteen boxes of work one changelog line and no way back to box eleven.
 | 1 | Read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking |
 | 2 | Screen spec, **only if a screen changes** | `tui-designer` | the mockup covers every state, not just the happy one |
 | 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
-| 4 | Prove the tests can fail | the author, before reporting | `cargo mutants --in-diff` over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
+| 4 | Prove the tests can fail | the author, before reporting | `just mutants-diff` over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
 | 5 | Attack it, then the full run | `tester` | the assertions attacked and the unfed shapes fed · `just check` green **and** the code exercised for real |
 | 6 | Operator review | `k8s-admin` | blocking for `rules.rs` `analysis.rs` `ops.rs` `k8s.rs`, any dialog, any kubectl line; skippable only for formatting. **Batched by rule family, not by rule** — see below |
 | 7 | Land it | PM | see below |
@@ -549,11 +561,21 @@ still proves its own change red then green and pastes both** — that is step 3'
 not a separate turn. What checks the *claim* is a mutation run, because a
 surviving mutant is a test that cannot fail, stated by a tool with no incentive
 ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
-**Per turn it is scoped to the diff** —
-`cargo mutants --timeout 90 --in-diff <(git diff HEAD)` — because the whole file
-was 519 mutants at ~2s each the last time it was run whole (2026-08-16; the file
-has grown since). `just mutants` whole is the *phase-close* gate, and
-`--iterate` skips what an earlier run already caught.
+**Per turn it is scoped to the diff** — **`just mutants-diff`**, never a raw
+`cargo mutants` line — because the whole file was 519 mutants at ~2s each the last
+time it was run whole (2026-08-16; the file has grown since). `just mutants` whole
+is the *phase-close* gate, and `--iterate` skips what an earlier run already
+caught. **Both go through `scripts/mutants.sh`, and that is not a convenience.**
+cargo-mutants files *any* build failure as `unviable`, so a mutant that never got
+built because the scratch volume was full reads exactly like one that cannot
+compile — and this box's `/tmp` is a 12 GiB tmpfs that has been at 94% while
+`$HOME` had 916 GB free
+([D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)).
+The script names its own scratch volume, refuses to start without headroom, and
+**reads the run's logs afterwards** — an honest `unviable` names a type, a
+dishonest one names a filesystem, and the *count* cannot tell them apart (the last
+phase close had 55 legitimate unviables). A shard that dies for space prints no
+`MISSED` line, which is exactly what a passing shard prints.
 
 **So `tester` no longer re-runs the author's mutations by hand** — measured, it
 found zero defects for fourteen minutes and 120k tokens
@@ -568,6 +590,12 @@ feed the shapes the author did not, read what the screen actually prints, and
 The brief, six lines, no more: the box verbatim · the files you may write ·
 what "done" means for this turn · which `NOTES.md` section decides the
 behaviour · what is explicitly out of scope · **and what to read, by region**.
+
+**A box written a phase ago may describe a defect the code has already closed**,
+so the brief carries its premise re-checked at HEAD, or says plainly that it was
+not. Two Phase 4 boxes were stale; the one checked at brief time cost nothing and
+the one that was not cost a review round
+([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
 
 **That last line is the one that costs hours when it is missing**
 ([D110](NOTES.md#d110--the-brief-names-the-regions-because-a-cold-dispatch-reads-fifteen-thousand-lines-2026-08-16)).
@@ -592,11 +620,17 @@ decision, and the PM writes it into `NOTES.md` before committing.
 - A box checked for work that was written but never *run*.
 - A test that has only ever been green — step 4's mutation run skipped because
   the diff looked small. It is `--in-diff` and it costs a minute.
-- **A number written from an estimate instead of a run.** Two drafts of the
-  mutation gate put a wrong figure in this file, each reasoned about the tool
-  rather than read off it
+- **A claim reasoned from a definition instead of measured against the object.**
+  Numbers are the loud half — two drafts of the mutation gate put a wrong figure
+  in this file, each reasoned about the tool rather than read off it
   ([D104](NOTES.md#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)).
-  If a rule here rests on a number, run the thing first.
+  The quiet half is prose: a formula read correctly and concluded from wrongly, a
+  feature gate's name, a field's type, a column budget estimated in a review and
+  repeated as measured — four of them in one turn, each written by someone being
+  careful with the object one command away
+  ([D136](NOTES.md#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+  **The definition says what it is; only the object says what it does** — and
+  somebody else's finding stays an estimate until *you* have run it.
 - The security gate skipped because "this diff is only UI".
 - An agent editing outside its ownership row, quietly. PM reads the diff before
   committing, every time.

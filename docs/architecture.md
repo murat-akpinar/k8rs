@@ -19,7 +19,7 @@ Three views, one content pane at a time:
 |---|---|---|
 | **Alerts** *(default)* | per-object findings from `rules.rs`, severity-sorted | live |
 | **Resources** | browser over every kind the cluster serves; the operations live here | list + watch while open |
-| **Analysis** | cluster-wide reports from `analysis.rs` — capacity, certificates, drain safety, waste, versions | on demand |
+| **Analysis** | cluster-wide reports from `analysis.rs` — capacity, certificates, drain safety, posture, restarts, waste, versions | on demand |
 
 One question decides which view a finding belongs to: **is it broken right
 now, or is it risky, wasteful or expiring?** The first goes to Alerts, the
@@ -245,8 +245,12 @@ code and never touch product files.
   snapshot types in `rules.rs`**, and it spans metadata, spec and status on all
   three kinds: `spec.volumes` (rule 8), `spec.terminationGracePeriodSeconds`
   (rule 12), `spec.unschedulable` and the taints under it (N2),
-  `spec.containers[].resources` (rule 2, N5) and `spec.replicas` (the workload
-  `desired`) all sit in the half an earlier "metadata + status only" would have
+  `spec.containers[].resources` (rule 2, N5), `spec.replicas` (the workload
+  `desired`) and `spec.containers[].restartPolicyRules` — on **every** container
+  of the pod and on the init list, since a rule one container over can restart
+  this one (rule 15,
+  [NOTES § D135](../NOTES.md#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21)) —
+  all sit in the half an earlier "metadata + status only" would have
   dropped
   ([NOTES § D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
   ReplicaSets are fetched on demand and cached, never watched. Every
@@ -319,10 +323,14 @@ it the first paint reports what it is waiting for
   never had it. Pruning is verified against live watch data in the client
   layer, where the field actually arrives
   ([NOTES § D30](../NOTES.md#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)).
-- **A decode test may set one field on a real capture** — the cluster the
-  fixtures came from had no cordoned node, no partially-ready workload and no
-  pod with an owner, and a branch whose input the capture cannot contain is a
-  branch no test can reach. It starts from a committed capture, changes one
+- **A decode test may set one field on a real capture** — a branch whose input
+  the capture cannot contain is a branch no test can reach, and the corpus has
+  always lacked *something*. The three shapes that licence was written for are
+  no longer among them: a cordoned node, a partially-ready workload and a pod
+  with an owner have each since been captured (`nodes.json`'s `k8rs-worker`,
+  `statefulsets.json`'s `broken-sts` at 1 ready of 2, `owned-pods.json`), and
+  each plant was retired by the trip that brought its object back. That is the
+  licence working, not an exception to it. It starts from a committed capture, changes one
   field to a value the API demonstrably produces, says why the capture lacks
   it, and names the object the next capture trip should bring back to replace
   it. A **rule's** positive fixture is still a real capture — this never
