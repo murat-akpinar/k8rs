@@ -59,6 +59,16 @@
 //! and it has a second half: a cluster *newer* than [`TYPES_BUILT_FOR`] drops its added fields at
 //! decode, which is the failure NOTES § D99 relocated onto the user's machine.
 //!
+//! **The browser's sidebar is every kind the cluster says it serves, and none of them is named
+//! here** (invariant 12). [`browsable`] takes the answer rather than fetching it and decides the
+//! three things a screen cannot: a kind that cannot be listed is not offered, a CRD's own words
+//! go through the same strip and bound as a watched object, and the order is ours because the two
+//! calls that produce the list — `Discovery::groups()` and `ApiGroup::resources_by_stability()` —
+//! both end in a hash map. § EVERY KIND THE CLUSTER SERVES
+//! is what each discovery entry point costs in round trips, and the four ways it fails —
+//! including the one where a server too old for the aggregated call answers `Ok` with an empty
+//! cluster in it.
+//!
 //! **What is still missing is the `Client`**, and with it the five `Api<K>`s [`drive`] would be
 //! handed: that is the `connect()` box further down Phase 5. Nothing here has met an API
 //! server.
@@ -90,6 +100,7 @@ use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use k8s_openapi::jiff::Timestamp;
 use kube::core::response::reason;
+use kube::discovery::{ApiCapabilities, ApiResource, Scope, verbs};
 use kube::runtime::watcher::{self, Event};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -377,11 +388,33 @@ impl Bounded for WorkloadSnapshot {
     }
 }
 
+/// **What the sidebar keeps of one kind the cluster serves** (§ EVERY KIND THE CLUSTER SERVES).
+///
+/// **Not a snapshot type, and here anyway.** Every other impl above belongs to something a watch
+/// decoded; this one belongs to a discovery answer, and its strings are the *only* ones in this
+/// file that a person outside the cluster's control plane can choose — a CRD's `spec.names` is
+/// whatever the manifest said. That is invariant 9's own class of input, so it goes through the
+/// same door rather than a second one beside it.
+impl Bounded for Browsable {
+    fn bound(&mut self) {
+        text(&mut self.group, IDENTIFIER);
+        text(&mut self.version, IDENTIFIER);
+        text(&mut self.kind, IDENTIFIER);
+        text(&mut self.plural, IDENTIFIER);
+        for verb in &mut self.verbs {
+            text(verb, IDENTIFIER);
+        }
+    }
+}
+
 /// **The whole of what happens to an API object on its way into the store**: decode, which is
 /// the prune, then strip and bound.
 ///
-/// One function so there is one answer, and [`Watch::take`] is the only caller — a second entry
-/// point into the store is a second place to forget the guard.
+/// One function so there is one answer — a second entry point into the store is a second place
+/// to forget the guard. Three callers: [`Watch::take`] for a watched object,
+/// [`Store::owner_fetched`] for a ReplicaSet fetched by uid, and [`browsable`] for a kind
+/// discovery named. **The doc said *the only caller* until 2026-08-22** and the second one had
+/// landed a box earlier; the count is not the point, the single door is.
 fn ingest<K, T: From<K> + Bounded>(object: K) -> T {
     let mut object = T::from(object);
     object.bound();
@@ -1432,3 +1465,264 @@ async fn drive(watches: Vec<BoxStream<'static, watcher::Result<Update>>>, store:
 }
 
 // --- THE DRIVER END ---
+
+// --- EVERY KIND THE CLUSTER SERVES START ---
+//
+// **The browser's sidebar is whatever the API server says it serves, and this is where that
+// answer stops being kube's and becomes something a screen may believe** (todo.md § Phase 5,
+// invariant 12). A kind written down anywhere above this line is the design failure that
+// invariant names; what is written down here is one filter, one strip and one order.
+//
+// **The fetch itself is the `connect()` box**, for the reason § THE INITIAL LIST gives about
+// `page_size`: with no `Client` in this build, a function whose whole body is
+// `Discovery::new(client).run_aggregated().await` is a line no test can fail on, and the
+// mutation gate exists to catch exactly that. Everything the answer *means* is decided here.
+//
+// **What each entry point costs, counted off the calls and not off the doc comment above them**
+// (NOTES § D147 read the initial LIST the same way). `G` is the groups a server serves and
+// `V(g)` the versions each one serves; every path below is
+// `kube-client-4.2.0/src/discovery/`:
+//
+// | call | round trips | what they are |
+// |---|---|---|
+// | `Discovery::new(c).run()` | `2 + ΣV(g)` | `/apis`, then **one per group *version*** (`apigroup.rs:96-99`), then `/api` and one per core version (`apigroup.rs:115-118`) |
+// | `Discovery::new(c).run_aggregated()` | **2** | `/apis` and `/api`, at any cluster size (`mod.rs:171-200`) |
+// | `discovery::group(c, g)` | `1 + V(g)` | `/apis` — or `/api` for the core group — then that one group's versions (`oneshot.rs:41-51`) |
+// | `discovery::pinned_group(c, gv)` | 1 | `/apis/<g>/<v>` alone (`apigroup.rs:187-201`) |
+// | `discovery::pinned_kind(c, gvk)` | 1 | the same call with one kind picked out (`apigroup.rs:164-184`) |
+// | `Discovery::resolve_gvk(gvk)` | 0 | a lookup over what `run*` already cached (`mod.rs:234`) |
+//
+// **`run()`'s own doc says `N+2` where `N` is the number of groups (`mod.rs:87`), and the loop
+// is per version.** A group serving `v1` and `v1beta1` costs two, and a cluster with CRDs on it
+// is the ordinary case rather than the exotic one. **The calls are also sequential** —
+// `for g in api_groups.groups { … .await? }` (`mod.rs:118-124`) — so they are `ΣV(g)` waits one
+// after another on the path that draws the first screen. **How long one round trip takes is not
+// measured here and cannot be**: this file has never met an API server, and `G` itself is a
+// number only a cluster can say.
+//
+// **So the sidebar is built from `run_aggregated()`, and a fallback under it is not
+// optional.** Two calls rather than thirty-odd sequential ones is the first-paint argument, and
+// the partial-failure shape in § What breaks is the larger one.
+//
+// **Its floor is 1.27 and not the 1.26 kube's doc claims** (`mod.rs:137`, `:166`). Read off
+// `AggregatedDiscoveryEndpoint.md` in `kubernetes/website` on 2026-08-22, the same source
+// § HOW OLD A CLUSTER MAY BE used: **alpha at 1.26 and default `false`**, beta and on from
+// **1.27**, GA 1.30, gate since removed. So on a 1.26 server, and on any older one, the
+// aggregated call is answered by a server that does not know the type — which is the first
+// failure below, not an error.
+//
+// ## What breaks, and which half of it is proven here
+//
+// **1. A server that does not serve aggregated discovery answers `Ok` with nothing in it.**
+// The Accept header carries a `,application/json` fallback (`kube-core-4.2.0/src/discovery/
+// v2.rs:12`), so such a server replies with the ordinary `APIGroupList`; `Client::request`
+// deserialises whatever came back straight into `APIGroupDiscoveryList`
+// (`kube-client-4.2.0/src/client/mod.rs:281-291`, plain `serde_json::from_str`), whose fields
+// are all `#[serde(default)]` and which denies no unknown field — so `groups` is ignored,
+// `items` defaults to empty, and `run_aggregated` returns `Ok` with **zero groups**. kube's own
+// doc says the opposite in as many words: *"If the server does not support Aggregated Discovery,
+// this will return an error"* (`mod.rs:168-170`). It does not, and an empty sidebar is exactly
+// what a cluster that serves nothing would look like. **Proven, not read**: `k8s_tests.rs` feeds
+// a real `APIGroupList`'s own serialisation to the aggregated type and reads back nothing. What
+// is *not* proven is that an old server answers that header with that body — that is HTTP
+// content negotiation against a real API server, and nobody here has one.
+//
+// **2. `run()` cannot express a partial failure at all.** One group's fetch failing ends the
+// whole run: the `?` is inside the loop (`apigroup.rs:97`, `mod.rs:121`). So a group that `/apis`
+// names and that cannot then answer for itself takes the entire sidebar with it, and the reader
+// loses every kind because one is unreachable. **The mechanism is read off the loop; the shape
+// that produces it is not measured here** — an aggregated API server whose backing pod is down,
+// `metrics.k8s.io` being the one every cluster has, is the case to point a measurement at.
+//
+// A fallback that wants partial results cannot use `Discovery` for it; it is
+// `client.list_api_groups()` plus one
+// `list_api_group_resources` per group version with the errors kept per group, which is code
+// that belongs to `connect()` and is named here so that box does not rediscover it.
+//
+// **3. The aggregated call has the partial-failure answer and kube throws it away.** The wire
+// type carries `freshness` per group version — *"Stale indicates the discovery document could
+// not be retrieved and the returned discovery document may be significantly out of date"*
+// (`kube-core-4.2.0/src/discovery/v2.rs:61-68`) — and `GroupVersionData::from_v2` builds
+// `{ version, resources }` from it and keeps no trace (`discovery/parse.rs:94-108`), while
+// `ApiGroup` has no field for one either (`apigroup.rs:74-81`). So through `kube::discovery` a
+// stale group and a current one are the same value, and a screen cannot say *this group's list
+// may be out of date* however much it wants to. Reaching it means calling
+// `client.list_api_groups_aggregated()` directly and reading `items[].versions[].freshness`
+// before handing the rest on — one call, the same call, not an extra one.
+//
+// **4. A 403 on discovery is not a 403 on a kind.** Both arrive as `kube::Error::Api(Status)`,
+// and they mean different things: refused on `/apis` is *no sidebar at all*, refused on one
+// kind's list is *this one row cannot open*. **[`why`] is not the function for the first one** —
+// its four arms are about a ReplicaSet fetched by name, and `/apis` is not a thing that is
+// deleted mid-rollout — so discovery gets no reason enum of its own either: it is one call with
+// one outcome, and the caller keeps the `kube::Error` it was handed. What does carry over
+// unchanged is that **nothing retries**, which is [`Store::unresolved_owners`]'s rule and holds
+// here for its reason (NOTES § D151): a standing refusal re-asked once a pass is the retry loop
+// the security gate forbids by name.
+//
+// ## What an entry carries, and the one thing it does not
+//
+// **The verbs are the resource's, never the reader's.** `list` in `operations` means this
+// resource can be listed by *somebody*; it says nothing about whether this kubeconfig may. The
+// only call that answers that is a `SelfSubjectAccessReview`, which is performed with `create`
+// and therefore lives in `ops.rs` and nowhere else (invariant 1, NOTES § D23). So [`browsable`]
+// drops what cannot be listed **at all** and keeps what can; a kind the reader is refused stays
+// in the sidebar and answers `403` when it is opened, and telling them that is the browser's job,
+// not this filter's.
+//
+// **Subresources are gone before this is called and no filter here re-does it.** The legacy path
+// skips any resource whose name contains `/` (`parse.rs:79`) and the aggregated one nests them
+// under their parent (`parse.rs:128-132`), so `pods/log` cannot reach this function through
+// either. A guard against a shape the pipeline cannot produce is one nobody can prove
+// (NOTES § D29).
+//
+// **`namespaced` is `Scope::Namespaced`, and an omitted scope reads as cluster-wide.** The
+// aggregated parse is `match res.scope.as_deref() { Some("Namespaced") => Namespaced, _ =>
+// Cluster }` (`parse.rs:115-118`), so a server that sent no scope, or one k8rs cannot spell,
+// silently becomes `Cluster` — which is `screens/resources.md`'s rule for whether the `ns:`
+// label is drawn at all. It degrades toward showing every namespace rather than the wrong one.
+//
+// **Three fields the API sends are unreachable through `kube::discovery`**: `shortNames`,
+// `singularResource` and `categories` are on the wire (`v2.rs:88-104`) and neither parse keeps
+// them (`parse.rs:21-27`, `:120-126`). `categories` is the nearest thing the API has to the
+// sidebar's *workloads / network / storage / config / cluster* sections, and it would not have
+// been enough anyway — it carries `all` and little else. **Those five sections are k8rs's own
+// categorisation and cannot come from discovery**; that is the Phase 9 sidebar box's to settle,
+// and it is named here because "not a hard-coded list" is true of the *kinds* and cannot be made
+// true of the sections by this call.
+//
+// ## Two things the caller must do, because kube will not
+//
+// **The order is ours.** `Discovery::groups()` is `HashMap::values()` (`mod.rs:206-208`) and
+// `ApiGroup::resources_by_stability()` ends in `HashMap::into_values()` (`apigroup.rs:320-326`),
+// so both hand back iteration order — a sidebar built straight off either would be in a
+// different order on every launch. [`browsable`] sorts, and `groups_alphabetical()`
+// (`mod.rs:213-218`) is the group-level equivalent kube provides.
+//
+// **The per-group accessor is `resources_by_stability()` and not `recommended_resources()`.**
+// The latter is `versioned_resources(preferred_version_or_latest())` (`apigroup.rs:284-287`), and
+// **preference is a group concept** — kube's own doc calls this the common pitfall
+// (`apigroup.rs:60-64`). A group whose preferred version is `v1` because one CRD reached `v1`
+// silently omits every sibling CRD still served only at `v1alpha1`, which is a kind the cluster
+// serves vanishing out of the list this box exists to build. `resources_by_stability()` keys by
+// kind across all versions of the group and picks the most stable each (`apigroup.rs:310-327`),
+// which is one entry per kind and no kind lost.
+//
+// **A plural can still appear twice and both rows are real.** `events` is served by `core/v1`
+// and by `events.k8s.io/v1`; they are different resources and [`browsable`] keeps both, adjacent,
+// because the sort is by plural first. Which one a sidebar draws — or how it tells them apart —
+// is `views.rs`'s, and it needs the group to do it, which is why the group travels.
+//
+// ## Discovery is a photograph, and there is no loop here
+//
+// A CRD installed while k8rs is open is absent from an answer taken at connect, and so is one
+// deleted. **Re-running costs the same two calls** as the first run, which is cheap enough that
+// the question is only *when*, never *whether we can afford it*. **The trigger is not built in
+// this box and no timer is added by it**: invariant 6 is about watches and this is not one, and
+// a periodic re-discovery is the poll that invariant exists to refuse. The two triggers that
+// cost nothing when nothing changed are a key the reader presses on the browser, and a `404`
+// from a Table fetch on a kind this list still names — the answer the API server gives for a
+// kind that has gone. Both belong to the boxes that own those calls.
+
+/// **One kind the browser may offer, as the cluster described it.**
+///
+/// Every field is the API server's own word for something: nothing here is a name k8rs chose,
+/// which is invariant 12 stated as a struct. The four strings and the flag reconstruct kube's
+/// [`ApiResource`] exactly, through
+/// [`ApiResource::from_gvk_with_plural`](kube::discovery::ApiResource::from_gvk_with_plural) —
+/// the constructor that is *told* the plural rather than the one that guesses it — so a caller
+/// that needs one for `Api::all_with` loses nothing by this type not carrying it.
+///
+/// **Every string has been through the ingest guard** ([`Bounded`], § THE INGEST GUARD): a CRD's
+/// plural is whatever its manifest said, and a manifest is written by somebody who does not have
+/// to be friendly (invariant 9). **The ceiling: the guard bounds each string and not the number
+/// of them**, so ten thousand CRDs are ten thousand entries — the open collection-bound box in
+/// todo.md § Phase 5 is that class and this is one more member of it.
+///
+/// **The subresources discovery also reports are dropped, and the one thing that would want them
+/// is named rather than left to be found.** `ApiCapabilities::subresources` carries `scale`,
+/// `status` and `log` per kind; nothing in `todo.md` or `screens/` decides a key's availability
+/// from them today — the `scale` box is written against `Api::patch_scale` on the workload kinds
+/// — so carrying them would be a field with no reader. A box that later needs one re-runs
+/// discovery for it, which § EVERY KIND THE CLUSTER SERVES prices at two round trips.
+///
+/// **It derives `Debug` where [`Store`] deliberately does not**, for [`Listing`]'s reason: a
+/// group, a version and a plural never touched a credential.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Browsable {
+    /// The API group, empty for the core one — `""`, `apps`, `example.com`.
+    pub group: String,
+    /// The version this kind is offered at: the most stable one the group serves it at, if the
+    /// caller used `resources_by_stability()` as the region above says it must.
+    pub version: String,
+    /// The PascalCase kind — `Deployment`. What a `Table` response comes back as.
+    pub kind: String,
+    /// The plural, lowercase — `deployments`. **What the sidebar draws and what the URL path
+    /// carries**, which is why it is not derived from [`Browsable::kind`]: kube's own
+    /// pluraliser calls itself a guess that "for CRDs with complex pluralisations it can fail"
+    /// (`kube-core-4.2.0/src/discovery/mod.rs:50-56`), and the server sent the real one.
+    pub plural: String,
+    /// Whether objects of this kind live in a namespace — `screens/resources.md` draws the `ns:`
+    /// label from this and from nothing else.
+    pub namespaced: bool,
+    /// **What the resource supports, which is not what the reader is allowed to do** (the region
+    /// above). Kept whole rather than reduced to the one verb this file filters on, because it
+    /// is the only thing here that a second round trip would be needed to get back.
+    pub verbs: Vec<String>,
+}
+
+impl From<(ApiResource, ApiCapabilities)> for Browsable {
+    fn from((resource, capabilities): (ApiResource, ApiCapabilities)) -> Self {
+        Self {
+            group: resource.group,
+            version: resource.version,
+            kind: resource.kind,
+            plural: resource.plural,
+            namespaced: capabilities.scope == Scope::Namespaced,
+            verbs: capabilities.operations,
+        }
+    }
+}
+
+/// **Every kind the cluster serves that a browser can actually open**, in one order.
+///
+/// The caller does the fetching and hands the answer over — the region above says which calls,
+/// what they cost and which accessor loses a kind. This takes the flattened
+/// `(ApiResource, ApiCapabilities)` pairs of every group and answers what may be offered.
+///
+/// **Three things happen and nothing else does.** A resource that cannot be *listed* is dropped,
+/// because the browser has one verb and a row that answers `405` is worse than an absent one.
+/// What survives goes through [`ingest`] — the same strip and bound as a watched object, for the
+/// reason [`Bounded for Browsable`](Browsable) gives. Then it is sorted, because the two calls
+/// that produce the list end in a hash map and a sidebar that reshuffles itself between launches
+/// is unusable.
+///
+/// **Sorted by plural, then group, then version** — by the word the sidebar draws first, so the
+/// two `events` land next to each other rather than at opposite ends, and by the group second so
+/// that pair has a fixed order too. **After the bound and not before**: two plurals cut to the
+/// same 512 bytes would otherwise be ordered by text nobody can see.
+///
+/// **Nothing is de-duplicated.** One kind per group per call is what
+/// `resources_by_stability()` yields, and the same plural under two groups is two resources, not
+/// one repeated.
+///
+/// **An empty answer comes back empty, and it is not a cluster with no kinds in it.** The one
+/// failure that reaches this function *as an answer* rather than as an `Err` is a server too old
+/// for the aggregated call, which returns `Ok` with zero groups (failure 1 above); a refusal and
+/// a dead API server never get here at all. Nothing here can tell those apart — the caller that
+/// made the call is the only place that knows which happened.
+pub fn browsable(
+    served: impl IntoIterator<Item = (ApiResource, ApiCapabilities)>,
+) -> Vec<Browsable> {
+    let mut kinds: Vec<Browsable> = served
+        .into_iter()
+        .filter(|(_, capabilities)| capabilities.supports_operation(verbs::LIST))
+        .map(ingest)
+        .collect();
+    kinds.sort_by(|one, two| {
+        (&one.plural, &one.group, &one.version).cmp(&(&two.plural, &two.group, &two.version))
+    });
+    kinds
+}
+
+// --- EVERY KIND THE CLUSTER SERVES END ---

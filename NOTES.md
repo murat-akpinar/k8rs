@@ -173,6 +173,8 @@ its line moving with it.
 - [D149](#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22) — the floor is 1.29, because one rule's `else` turns a missing field into a claim
 - [D150](#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22) — a first sync that never finishes: two facts and no threshold
 - [D151](#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22) — owner resolution, and the noun collision that turned out to be the header's fault
+- [D152](#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22) — discovery: what each call costs, and the four ways it fails quietly
+- [D153](#d153--the-pm-injected-nine-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22) — the PM injected nine boxes into a running Phase 5, which is the rule the PM was enforcing
 
 ## Why it exists — where the gap is
 
@@ -12980,3 +12982,129 @@ design choices named; not folded into a running box.
 hop looks in `snapshot.workloads`, which on a live cluster held no ReplicaSets at
 all — so W2's suppression list was silently unresolvable before this box, and is
 not now.
+
+### D152 — discovery: what each call costs, and the four ways it fails quietly (2026-08-22)
+
+Phase 5's discovery box, and like D147 and D148 the reading is most of the
+deliverable. All line references below are `kube-client-4.2.0`.
+
+**Round trips, counted off the calls rather than off the doc.**
+`Discovery::new(c).run()` is `2 + ΣV(g)` — `/apis`, then **one request per group
+*version***, then `/api` and one per core version — and the calls are
+**sequential**, on the first-paint path. **kube's own doc says `N+2` where N is
+groups**; the loop is per version, so a group serving `v1` and `v1beta1` costs two.
+`run_aggregated()` is **2 requests at any cluster size**; `group()` is `1 + V(g)`;
+`pinned_group`/`pinned_kind` are 1; `resolve_gvk` is a cache lookup.
+
+**Aggregated discovery's floor is 1.27, not the 1.26 kube's doc claims** — alpha at
+1.26 with the gate **default false**, beta-on 1.27, GA 1.30. It sits above
+[D149](#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22)'s
+1.29 floor, so on every supported cluster the two-request call is available.
+
+**Four failure shapes, and three of them are quiet.**
+
+1. **A server too old for the aggregated call answers `Ok` with nothing in it.**
+   The Accept header carries a `,application/json` fallback, the client is a plain
+   `serde_json::from_str`, and `APIGroupDiscoveryList`'s fields are all
+   `#[serde(default)]` with no `deny_unknown_fields` — so a legacy `APIGroupList`
+   decodes to **zero groups and no error**, and the sidebar is empty rather than
+   broken. **kube's doc says the opposite in as many words** (*"this will return an
+   error"*). Proven by test, not read: a real `APIGroupList` in, `items: []` out.
+2. **`run()` cannot express a partial failure at all** — the `?` is inside the
+   loop, so one group that `/apis` names and that cannot answer for itself takes
+   the whole sidebar down. An aggregated API server whose backing pod is down is
+   exactly that shape.
+3. **The aggregated call *has* the partial-failure answer and kube discards it.**
+   `freshness: "Stale"` is on the wire per group version; nothing in kube's parse
+   keeps it and `ApiGroup` has no field for one. Reaching it means calling
+   `list_api_groups_aggregated()` directly — the same request, not an extra one.
+4. **A 403 on `/apis` is not a 403 on a kind**, and D151's `Why` is not the enum
+   for it: those four arms are about one ReplicaSet fetched by name. Discovery is
+   one call with one outcome and the caller keeps the `kube::Error`. What does
+   carry over from D151 is **nothing retries**.
+
+**`verbs` is what the resource supports, not what this kubeconfig may do**, and the
+brief that commissioned this box said otherwise. The only call that answers the
+reader's permission is a `SelfSubjectAccessReview`, which is performed with
+`create` and therefore lives in `ops.rs`
+([D23](#d23--permissions-are-discovered-by-failing-and-that-is-backwards)). So the
+filter is *a resource nobody can list*, never *a resource you cannot list*.
+
+**Three fields the API sends never survive kube's parse: `shortNames`,
+`singularResource` and `categories`** — on the wire, dropped in `parse.rs`. That
+last one is the finding with a consequence: **`categories` is the closest thing on
+the wire to the sidebar's five sections**, so *workloads / network / storage /
+config / cluster* **cannot come from discovery**.
+[Invariant 12](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
+*never a hard-coded list* is true of the kinds and cannot be made true of the
+sections by this call. **Phase 9's sidebar box needs that ruling before it is
+briefed**, and it is written down here so it is not discovered there.
+
+**`Browsable` carries four strings, a bool and the verbs**, goes through `ingest`
+so it is stripped and bounded like everything else, and is filtered on `list`
+alone. Every test input is an **invented CRD** — if the function could tell a
+built-in from a custom resource the tests could not see it, which is invariant 12
+as an assertion rather than a claim.
+
+**The recommendation to `connect()`, recorded where that box will read it:**
+`run_aggregated()` with a hand-rolled legacy fallback, **not** `Discovery::run()`;
+and `resources_by_stability()` per group, **not** `recommended_resources()`, which
+silently omits a CRD served only at a non-preferred version — kube calls that its
+own *"common pitfall"*.
+
+**And the capability probe two boxes down gets its answer free:**
+`has_group("metrics.k8s.io")` is a cache lookup on the same result, zero extra
+round trips.
+
+### D153 — the PM injected nine boxes into a running Phase 5, which is the rule the PM was enforcing (2026-08-22)
+
+**`CLAUDE.md` says a box is never added to an open phase.** Work found mid-phase is
+recorded where it belongs and boxed in a *later* one, so the phase that is running
+can converge —
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+exists because twelve boxes were injected into a running Phase 3 on 2026-08-14 and
+the phase stopped closing.
+
+**Over 2026-08-22 the PM injected nine into a running Phase 5**, one or two at a
+time, each one a genuine finding from the box that had just landed:
+
+| | box |
+|---|---|
+| 2173 | nothing observes what k8rs puts on the wire (a fake API server) |
+| 2275 | the ingest guard bounds every field and no collection |
+| 2393 | the token-hygiene scan reads `struct` and not `enum` |
+| 2412 | `no second outbound path` catches only a literal hostname |
+| 2429 | `tests/binary.rs` pins two of nine printed shapes |
+| 2443 | nothing committed exercises the unread-kind branch |
+| 2458 | W1 draws no card on a live cluster |
+| 2476 | `TYPES_BUILT_FOR` is a third copy of the pin |
+| 2495 | rule 13's `else` states a fact the cluster never gave |
+
+Every one is real and several are security findings. **That is exactly what makes
+the rule hard to keep** — each was justified on its own, in the turn that found it,
+and the argument *this one is different because it must land before `connect()`*
+was made twice and was true both times.
+
+**It was caught by an agent and not by the PM**, on the discovery brief: the PM
+called discovery *"Phase 5's seventh box"*, and `dev-core` read the file and
+answered that it is the **third unchecked** one — 2173 and 2275 sit above it, and
+the PM put both there. **The same brief was the third in a row where the PM
+summarised a box instead of quoting it**, and an agent caught all three.
+
+**The rule that broke was not the one that was written down.** *A box is never
+added to an open phase* was known and quoted at agents repeatedly in the same
+session. What was missing is that **the PM never re-read the phase to see the
+shape of what it had become** — nine boxes accumulate one at a time, and no single
+addition looks like the failure. The cheap check is the one `dev-core` ran without
+being asked: **list the phase's unchecked boxes in file order and see whether the
+one you are about to brief is the first.** Forty seconds, and it is the same shape
+as every other gate in this repo — a machine or a list, never a memory.
+
+**Ruled, for the session that picks this up:** the nine stay where they are for now
+rather than being moved in the same turn that discovered the problem — a hurried
+triage is how the wrong thing gets deleted. **Phase 5 does not close until they are
+triaged**, and the triage is: anything that is a *finding needing a ruling* goes to
+[`backlog.md`](backlog.md), which is its designated home; anything genuinely
+blocking a Phase 5 box stays and says so in its own body. The note at Phase 5's
+head in `todo.md` carries this instruction so it is met before the next box, not
+after.

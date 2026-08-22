@@ -2033,11 +2033,14 @@ fn field_of(line: &'static str) -> Option<(&'static str, &'static str)> {
     (!name.contains(' ')).then_some((name, kind))
 }
 
-/// Every type `rules.rs` declares, with its fields.
-fn declared_types() -> BTreeMap<&'static str, Vec<(&'static str, &'static str)>> {
+/// Every type one source file declares, with its fields. `rules.rs` for the snapshot types
+/// below, `k8s.rs` for [`Browsable`] — one parser rather than two that could disagree.
+fn declared_types(
+    source: &'static str,
+) -> BTreeMap<&'static str, Vec<(&'static str, &'static str)>> {
     let mut types = BTreeMap::new();
     let mut open: Option<(&'static str, Vec<(&'static str, &'static str)>)> = None;
-    for line in RULES_SOURCE.lines() {
+    for line in source.lines() {
         if let Some(name) = type_header(line) {
             open = Some((name, Vec::new()));
             continue;
@@ -2093,7 +2096,7 @@ const BOUNDED_INSIDE_ANOTHER_IMPL: [&str; 1] = ["ObjectKind"];
 /// missed (todo.md, Phase 5 § Security gate).
 #[test]
 fn every_string_a_watched_snapshot_type_carries_is_named_by_the_ingest_guard() {
-    let types = declared_types();
+    let types = declared_types(RULES_SOURCE);
     assert!(
         types.len() > 20,
         "only {} types were parsed out of rules.rs, so this guard is reading nothing",
@@ -2930,4 +2933,361 @@ fn the_finding_a_pod_draws_files_under_the_deployment_once_the_owner_resolves() 
              it — two group keys is D3's two-cards bug"
         );
     }
+}
+
+// --- EVERY KIND THE CLUSTER SERVES ---
+//
+// **Not one input below is a kind any cluster actually serves, and that is the assertion.**
+// `k8s.rs` § EVERY KIND THE CLUSTER SERVES has no list of kinds in it to fail against, so these
+// feed invented CRDs — `widgets`, `sprockets` — and every claim about built-ins made in that
+// region is a claim about `kube::discovery`, proven by reading its source and cited there rather
+// than restated here. If [`browsable`] could tell a built-in from a CRD, these tests would be
+// unable to see it; invariant 12 is that it cannot.
+//
+// **What is synthesised is the discovery *answer*, not the objects in it.** There is no cluster
+// in this turn, so the `(ApiResource, ApiCapabilities)` pairs a `Discovery` run would hand over
+// are built here — from kube's own constructor, so the derived `api_version` is whatever kube
+// would have derived. That is the half a live API server replaces: these prove what k8rs does
+// with an answer, never that a server gives that answer.
+
+/// One resource as discovery would describe it. `verbs` is the resource's own list — never the
+/// reader's permissions, which is the distinction `k8s.rs` § EVERY KIND THE CLUSTER SERVES is
+/// about.
+fn served(
+    group: &str,
+    version: &str,
+    kind: &str,
+    plural: &str,
+    scope: Scope,
+    verbs: &[&str],
+) -> (ApiResource, ApiCapabilities) {
+    let gvk = kube::core::gvk::GroupVersionKind::gvk(group, version, kind);
+    (
+        ApiResource::from_gvk_with_plural(&gvk, plural),
+        ApiCapabilities {
+            scope,
+            subresources: vec![],
+            operations: verbs.iter().map(|verb| (*verb).to_string()).collect(),
+        },
+    )
+}
+
+/// A listable, namespaced CRD — the ordinary entry, for a test that is about something else.
+fn listable(group: &str, kind: &str, plural: &str) -> (ApiResource, ApiCapabilities) {
+    served(
+        group,
+        "v1",
+        kind,
+        plural,
+        Scope::Namespaced,
+        &["get", "list", "watch"],
+    )
+}
+
+/// **A kind the browser cannot open is not offered, and the scope decides the namespace label.**
+///
+/// The filter is one verb: `list` is the whole of what the Resources view does, so a resource
+/// that supports `create` and nothing else — the shape every access-review endpoint has — would
+/// be a row that answers `405` to the only key that opens it. The two flags are asserted
+/// together because they come off the same [`ApiCapabilities`] and one is easy to read as the
+/// other.
+#[test]
+fn a_kind_that_cannot_be_listed_is_never_offered_and_the_scope_decides_the_namespace_label() {
+    let answer = browsable(vec![
+        listable("example.com", "Widget", "widgets"),
+        served(
+            "example.com",
+            "v1",
+            "Sprocket",
+            "sprockets",
+            Scope::Cluster,
+            &["get", "list"],
+        ),
+        // The access-review shape: performed, never listed.
+        served(
+            "example.com",
+            "v1",
+            "Review",
+            "reviews",
+            Scope::Cluster,
+            &["create"],
+        ),
+        // Readable one at a time and not enumerable — the same refusal for a different reason.
+        served(
+            "example.com",
+            "v1",
+            "Ledger",
+            "ledgers",
+            Scope::Namespaced,
+            &["get", "watch"],
+        ),
+    ]);
+    for kind in &answer {
+        println!(
+            "offered: {}/{} {} ({})",
+            kind.group,
+            kind.version,
+            kind.plural,
+            if kind.namespaced {
+                "namespaced"
+            } else {
+                "cluster-wide"
+            }
+        );
+    }
+    assert_eq!(
+        answer
+            .iter()
+            .map(|kind| (kind.plural.as_str(), kind.namespaced))
+            .collect::<Vec<_>>(),
+        vec![("sprockets", false), ("widgets", true)],
+        "the sidebar offers exactly the kinds that can be listed, each with the scope discovery \
+         gave it"
+    );
+    assert!(
+        browsable(vec![]).is_empty(),
+        "nothing served has to come back as nothing offered — the shape a server too old for \
+         the aggregated call produces, which returns Ok with no groups in it rather than an error"
+    );
+}
+
+/// **The order is k8rs's, because kube hands back `HashMap` iteration order.**
+///
+/// `Discovery::groups()` and `ApiGroup::resources_by_stability()` both end in a hash map
+/// (`kube-client-4.2.0/src/discovery/mod.rs:206-208`, `apigroup.rs:320-326`), so a sidebar built
+/// straight off either is in a different order on every launch. Sorting by the plural first is
+/// what puts a plural two groups both serve next to itself instead of at opposite ends of the
+/// list — `events` is the real instance, and these are two invented ones for the same reason the
+/// section head gives.
+#[test]
+fn the_order_is_ours_and_one_plural_two_groups_serve_lands_together() {
+    let answer = browsable(vec![
+        listable("z.example.com", "Widget", "widgets"),
+        listable("example.com", "Sprocket", "sprockets"),
+        served(
+            "a.example.com",
+            "v2",
+            "Widget",
+            "widgets",
+            Scope::Namespaced,
+            &["list"],
+        ),
+        served(
+            "a.example.com",
+            "v1",
+            "Widget",
+            "widgets",
+            Scope::Namespaced,
+            &["list"],
+        ),
+    ]);
+    let order: Vec<String> = answer
+        .iter()
+        .map(|kind| format!("{}/{}/{}", kind.plural, kind.group, kind.version))
+        .collect();
+    for row in &order {
+        println!("sidebar: {row}");
+    }
+    assert_eq!(
+        order,
+        vec![
+            "sprockets/example.com/v1",
+            "widgets/a.example.com/v1",
+            "widgets/a.example.com/v2",
+            "widgets/z.example.com/v1",
+        ],
+        "plural, then group, then version — and nothing was dropped for sharing a plural, \
+         because two groups serving one plural is two resources"
+    );
+}
+
+/// **A CRD names itself, so its name is untrusted text like any other** (invariant 9).
+///
+/// `spec.names.plural` is whatever the manifest said, and the sidebar prints it — so an `ESC`
+/// in it reaches a terminal unless something strips it. One case per string [`Browsable`]
+/// carries, because a guard is proven only for the fields it was fed (NOTES § D29), and the
+/// group and version are in the list too: they are as much the CRD author's as the plural is.
+#[test]
+fn a_crd_that_names_itself_with_control_characters_cannot_rewrite_a_terminal() {
+    let evil = "wid\u{1b}[2Jgets";
+    for (field, answer) in [
+        (
+            "group",
+            browsable(vec![listable(evil, "Widget", "widgets")]),
+        ),
+        (
+            "kind",
+            browsable(vec![listable("example.com", evil, "widgets")]),
+        ),
+        (
+            "plural",
+            browsable(vec![listable("example.com", "Widget", evil)]),
+        ),
+        (
+            "version",
+            browsable(vec![served(
+                "example.com",
+                evil,
+                "Widget",
+                "widgets",
+                Scope::Namespaced,
+                &["list"],
+            )]),
+        ),
+        (
+            "verbs",
+            browsable(vec![served(
+                "example.com",
+                "v1",
+                "Widget",
+                "widgets",
+                Scope::Namespaced,
+                &["list", evil],
+            )]),
+        ),
+    ] {
+        let kind = answer.first().unwrap_or_else(|| {
+            panic!("the {field} case dropped the only entry, so it proves nothing")
+        });
+        println!("{field}: {kind:?}");
+        let strings: Vec<&str> = [
+            kind.group.as_str(),
+            kind.version.as_str(),
+            kind.kind.as_str(),
+            kind.plural.as_str(),
+        ]
+        .into_iter()
+        .chain(kind.verbs.iter().map(String::as_str))
+        .collect();
+        assert!(
+            strings.iter().all(|text| !text.contains('\u{1b}')),
+            "an escape sequence a CRD put in its own {field} reached a screen: {strings:?}"
+        );
+        // The control character and nothing else: `text` removes what cannot be printed and
+        // leaves what can, so the rest of the escape sequence is still there as plain text.
+        let stripped = evil.replace('\u{1b}', "");
+        assert!(
+            strings.iter().any(|text| *text == stripped),
+            "the {field} case did not come back as {stripped:?} — the strip took more, or less, \
+             than the control character: {strings:?}"
+        );
+    }
+}
+
+/// **And a name longer than the bound is cut where every other field is cut**, with the same
+/// visible marker (NOTES § D146). A CRD's plural has a length limit; a *verb* an aggregated API
+/// server reports has none that k8rs can see.
+#[test]
+fn a_discovery_field_over_the_bound_is_shortened_and_says_so() {
+    let long = "w".repeat(IDENTIFIER * 2);
+    let answer = browsable(vec![served(
+        "example.com",
+        "v1",
+        "Widget",
+        &long,
+        Scope::Namespaced,
+        &["list", &long],
+    )]);
+    let kind = answer.first().expect("one listable kind was served");
+    println!(
+        "plural: {} bytes, verb: {} bytes",
+        kind.plural.len(),
+        kind.verbs[1].len()
+    );
+    for (field, value) in [("plural", &kind.plural), ("verb", &kind.verbs[1])] {
+        assert!(
+            value.ends_with(SHORTENED),
+            "a {field} of {} bytes was kept whole, or cut without saying so",
+            long.len()
+        );
+        assert!(
+            value.len() <= IDENTIFIER + SHORTENED.len(),
+            "a {field} of {} bytes came back as {} — the bound did not hold",
+            long.len(),
+            value.len()
+        );
+    }
+}
+
+/// **Every `String` [`Browsable`] carries is named by its `Bounded` impl**, derived from
+/// `k8s.rs` rather than typed out here — the same guard the snapshot types get above, over the
+/// one type in this file that holds text the cluster's own users wrote. A field added to it and
+/// forgotten in the ingest guard fails this test.
+#[test]
+fn every_string_the_sidebar_keeps_is_named_by_the_ingest_guard() {
+    let types = declared_types(K8S_SOURCE);
+    let fields = types
+        .get("Browsable")
+        .expect("k8s.rs no longer declares Browsable, or declares it differently");
+    let carries_text: Vec<&str> = fields
+        .iter()
+        .filter(|(_, kind)| words(kind).any(|word| word == "String"))
+        .map(|(field, _)| *field)
+        .collect();
+    assert!(
+        carries_text.len() >= 4,
+        "only {carries_text:?} were parsed out of Browsable, so this guard is reading nothing"
+    );
+    let body = bounded_impl("Browsable")
+        .expect("Browsable carries text and the ingest guard region has no impl Bounded for it");
+    for field in carries_text {
+        println!("bounded: Browsable.{field}");
+        assert!(
+            words(body).any(|word| word == field),
+            "Browsable.{field} is a String the sidebar keeps and the ingest guard never names it"
+        );
+    }
+}
+
+/// **A server that does not serve aggregated discovery answers `Ok` with an empty cluster in
+/// it** — the first failure `k8s.rs` § EVERY KIND THE CLUSTER SERVES lists, and the one kube's
+/// own doc denies: *"If the server does not support Aggregated Discovery, this will return an
+/// error"* (`kube-client-4.2.0/src/discovery/mod.rs:168-170`).
+///
+/// The gate is beta and on from 1.27 and alpha-off at 1.26 (`AggregatedDiscoveryEndpoint.md`,
+/// `kubernetes/website`, read 2026-08-22), and § HOW OLD A CLUSTER MAY BE lets k8rs run below
+/// its own 1.29 floor — so this is a server k8rs meets rather than a hypothetical one.
+///
+/// **What is proven here is the decode and not the negotiation.** The legacy body is built from
+/// `k8s-openapi`'s own `APIGroupList` and serialised by its own impl, so no JSON is hand-written;
+/// that a 1.26 API server answers kube's Accept header with that body is HTTP content
+/// negotiation against a real server, and nothing in this repo has one.
+#[test]
+fn a_server_too_old_for_aggregated_discovery_decodes_to_no_groups_and_no_error() {
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::{
+        APIGroup, APIGroupList, GroupVersionForDiscovery,
+    };
+    use kube::core::discovery::v2::APIGroupDiscoveryList;
+
+    let legacy = APIGroupList {
+        groups: vec![APIGroup {
+            name: "example.com".to_string(),
+            versions: vec![GroupVersionForDiscovery {
+                group_version: "example.com/v1".to_string(),
+                version: "v1".to_string(),
+            }],
+            preferred_version: Some(GroupVersionForDiscovery {
+                group_version: "example.com/v1".to_string(),
+                version: "v1".to_string(),
+            }),
+            server_address_by_client_cidrs: None,
+        }],
+    };
+    let body = serde_json::to_string(&legacy).expect("k8s-openapi serialises its own type");
+    println!("what the old server sends: {body}");
+
+    // `Client::request` is exactly this line over the response text
+    // (`kube-client-4.2.0/src/client/mod.rs:281-291`).
+    let aggregated: APIGroupDiscoveryList =
+        serde_json::from_str(&body).expect("the aggregated type rejected a legacy discovery body");
+    println!("what run_aggregated() would build from it: {aggregated:?}");
+    assert!(
+        aggregated.items.is_empty(),
+        "a legacy discovery body no longer decodes to an empty aggregated one, so the silent \
+         empty sidebar this test pins has changed shape"
+    );
+    assert!(
+        !legacy.groups.is_empty(),
+        "the body fed in named no groups, so an empty answer would have proven nothing"
+    );
 }

@@ -2021,6 +2021,23 @@ the temporary main can print any of them.
 Goal: the same findings and reports, from a living cluster — and the first
 public release.
 
+> **⚠ Read before picking the next box.** Over 2026-08-22 the PM injected **nine**
+> boxes into this phase while it was running — 2173, 2275, 2393, 2412, 2429, 2443,
+> 2458, 2476 and 2495 — which is the rule `CLAUDE.md` states and D103 exists to
+> enforce. Every one is a real finding from the box that had just landed, and
+> several are security findings; that is what made each addition easy to justify
+> and the pattern invisible until an agent counted
+> ([D153](NOTES.md#d153--the-pm-injected-nine-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22)).
+> **Triage them before briefing anything else**: a finding that needs a ruling goes
+> to [`backlog.md`](backlog.md), which is its designated home; one that genuinely
+> blocks a Phase 5 box stays and says so in its own body. **This phase does not
+> close until that is done.**
+>
+> And the cheap check that would have caught it, which costs forty seconds: **list
+> this phase's unchecked boxes in file order and confirm the one you are about to
+> brief is the first.** The PM briefed discovery as "the seventh box"; it was the
+> third unchecked one.
+
 - [x] `k8s.rs`: kube-rs `watcher` over Pods, Nodes and
       Deployments/StatefulSets/DaemonSets + prune (drop `managedFields`) →
       snapshot store. **The prune line is "the fields the snapshot types in
@@ -2341,8 +2358,25 @@ public release.
       ([D151](NOTES.md#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)).
       480 + 7 tests, 22 mutants 0 missed. **W1 turned out to be unreachable through
       this route** and has its own box
-- [ ] `kube::discovery`: enumerate every kind the cluster serves, CRDs
+- [x] `kube::discovery`: enumerate every kind the cluster serves, CRDs
       included. This is what the sidebar is built from — never a hard-coded list
+      Done, and mostly a recorded finding: `Browsable` (four strings, a bool, the
+      verbs), built from `(ApiResource, ApiCapabilities)` so it is testable with no
+      `Client`, filtered on `list` alone, through `ingest` like everything else.
+      **Round trips counted off the calls**: `Discovery::run()` is `2 + ΣV(g)`
+      sequentially — kube's own doc says `N+2` **per group** and the loop is per
+      *version* — while `run_aggregated()` is 2 at any cluster size, and its 1.27
+      floor sits above D149's 1.29. **Three of its four failure shapes are quiet**,
+      the worst being that a server too old for the aggregated call answers `Ok`
+      with **zero groups and no error** — an empty sidebar, not a broken one, and
+      kube's doc claims the opposite. Proven by test. **`verbs` is the resource's,
+      not the reader's** — the brief said otherwise and was wrong; only a
+      `SelfSubjectAccessReview` answers permission and that lives in `ops.rs`.
+      **And `categories` never survives kube's parse**, so Phase 9's five sidebar
+      sections cannot come from discovery — a ruling that box needs before it is
+      briefed ([D152](NOTES.md#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22)).
+      486 + 7 tests, 5 mutants 0 missed. **This was not the first unchecked box and
+      the PM did not notice** — see the note at this phase's head
 - [ ] Server-side `Table` fetch for browser kinds — the columns come from the
       API server, not from us. Hand-built through `Client::request` (kube-rs
       has no `Table` type), Accept header
