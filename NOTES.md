@@ -178,6 +178,7 @@ its line moving with it.
 - [D154](#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22) — the browser's rows: a 37× that was one event, a floor measured from the answer, and a guard that stopped at `Cc`
 - [D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22) — a whole-project review found two boxes checked over work their own text does not describe
 - [D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22) — rule 13's silence is ruled on the node, and the three-of-four routes to its own shape that delete themselves
+- [D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22) — what a re-close runs, and the two numbers that only a close re-takes
 
 ## Why it exists — where the gap is
 
@@ -13369,11 +13370,17 @@ nothing else.
 **2 — The silence is ruled on the node, which is D155's own predicate put into
 code.** D155 wrote that the code's hand-off to the N-series "holds only when the
 node is in the snapshot with `Ready` not `True`". That is the gate:
-`placed_but_never_started` takes `&snapshot.nodes` — the shape
-[`no_node_accepted_it`] already has, so it is not a new one — and on the
-empty-status branch it **stands down when the pod's node is in the snapshot
-carrying a `Ready` condition that is not `True`**, because N1 draws exactly that
-card and names the node and its owners. Everywhere else it fires. The box's
+`placed_but_never_started` takes `&ClusterSnapshot` — **the only pod rule in the
+file that does**, and the reason is this ruling: nothing else here has to know
+what another card is about to say. On the empty-status branch it **stands down
+where N1 actually covers the pod**, which is two conditions and not one: the
+pod's node is in the snapshot carrying a `Ready` that is not `True`, **and** there
+is no namespace scope. Both halves are load-bearing — under `--namespace`,
+`node_stopped_being_ready` drops its workload line rather than count from a
+fraction of the pods, and on a quiet node it has no kubelet sentence to carry
+either, so its card's evidence is *empty* and standing down there would be
+silence rather than a hand-off. That second half came out of the family review;
+the first was the ruling. Everywhere else it fires. The box's
 "that pod draws rule 13's card" is under-specified about which pod, and this is
 the reading D155's own sentence forces; the PM ruled it rather than leaving two
 agents to guess.
@@ -13461,3 +13468,50 @@ fossil argument. **This was cosmetic until ruling 2 cited it**: a card nobody
 leans on may be loosely worded, and a card another rule stands down in favour of
 may not. `screens/alerts.md` § N1 moves with it — the specification is that file,
 and `src/rules_tests/node.rs` cites it as the requirement.
+
+### D157 — what a re-close runs, and the two numbers that only a close re-takes (2026-08-22)
+
+Phase 3 closed on 2026-08-20 with the full ritual. On 2026-08-22 a whole-project
+review re-opened it, because one `[x]` box's own done-when was not met
+([D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)).
+That box landed the same day
+([D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22))
+and the phase was closed again. **[CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+has no rule for the second time**, so here it is.
+
+**A re-close runs the whole ritual, not a diff of it.** The temptation is to scope
+it to what changed since the first close, and that is exactly wrong: the thing
+that re-opened the phase was a box checked over work *narrower than its own text*,
+which is invisible to anything scoped by a diff — the code never changed, the
+box's meaning did. So step 4's review is pointed at the phase's boxes again, and
+its first job is to hunt that shape rather than to re-read the rules. It did, over
+seven boxes with a checkable specific in them, and found **no other box checked
+over code narrower than its text** — which is the answer the close needed and
+could not have been given by re-reading the diff.
+
+**Two numbers are re-taken rather than carried, and both are cheap to get wrong.**
+
+- **The whole-file mutation sweep.** The first close recorded 553 mutants / 498
+  caught / 55 unviable / 0 MISSED. The re-close measured **854 / 761 / 93 / 0**,
+  over the same four shards — the file gained **301 mutants** in two days. The
+  per-turn `--in-diff` gate does not close that: measured during the review, the
+  two functions this box rewrote hold **19** mutants while the turn's `--in-diff`
+  run tested **10**, so nine live in lines the diff never touched. A box whose
+  done-when is *clean over `rules.rs`* is therefore a claim with a shelf life, and
+  a close is where it is re-taken.
+- **Anything the phase's boxes state as a count.** `screens/alerts.md` and
+  `todo.md` both carried *four actions over the five-line cap*, one of them
+  `failed_action(Init)` at eight lines — a function that no longer exists in
+  `src/`. Re-measured: **75 distinct actions, none over.** Both copies are gone
+  now rather than updated, which is this file's own rule about a fact that moves
+  on a schedule.
+
+**What the re-close cost and what it found:** eight findings, **none blocking**, so
+the phase closed on all eight — two were docs sync and were fixed inside the close
+(`docs/architecture.md` still gave a dead defect as the live reason for the 1.29
+floor; `screens/alerts.md` still specified the cap breach above), one was a test
+that had stopped discriminating and is fixed because *a test that cannot fail is
+not a test*, three were stale copies in `NOTES.md`, `todo.md` and `backlog.md`, and
+two went to [`backlog.md`](backlog.md). The triage rule held: a non-blocker is
+boxed later and the phase still closes
+([reports/2026-08-22-phase-3-reclose-family-review.md](reports/2026-08-22-phase-3-reclose-family-review.md)).

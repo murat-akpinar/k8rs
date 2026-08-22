@@ -1130,12 +1130,14 @@ that cites them expects to find them.
       under them** — `the_clean_exit_actions_fit_the_card_they_are_drawn_on`,
       which measures those three strings and no others
       ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
-      **Exactly five actions in the file still exceed the cap**, with the same
-      wrap at 49 columns: `stopped_action`'s two arms at 6 lines each,
-      `failed_action(Init)` at **8** — a 14-row card, which is the one that
-      breaks the ten-line cap outright — rule 5's `None` arm at 6, and rule 6's
-      action at 6. That is the whole list; the count fell from nine because two
-      rule 1 strings were folded away, not because anything was shortened.
+      **Five actions exceeded the cap when this box was written and none does
+      now** — `stopped_action`'s two arms, `failed_action(Init)` at 8 (a 14-row
+      card, the one that broke the ten-line cap outright), rule 5's `None` arm
+      and rule 6's action. `failed_action` no longer exists in `src/` at all
+      ([NOTES § D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)).
+      The count is not restated here or in `screens/`: it is `cargo test --
+      --nocapture` with every distinct `→ ` line wrapped at 49, run fresh, and
+      this line went stale for weeks precisely because it was a copy.
       **The doors are not what costs the space**: three readings fit in five
       lines once the preamble and the restatements come out, which is what the
       rewrite above proved on the hardest of them. **One correction to carry into
@@ -1530,7 +1532,13 @@ that cites them expects to find them.
       being spelled by hand
       ([D119](NOTES.md#d119--the-last-surviving-mutant-was-equivalent-and-the-fix-is-to-stop-spelling-the-tie-by-hand-2026-08-20)).
       The count falls 558 → 553 for that reason and the trade is recorded there
-      ([NOTES § D41](NOTES.md#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12))
+      ([NOTES § D41](NOTES.md#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12)).
+      **Re-run at the 2026-08-22 re-close, over the same four shards: 854
+      mutants, 761 caught, 93 unviable, 0 MISSED, 0 timeouts** — the file has
+      grown by 301 mutants since, and the per-turn `--in-diff` gate does not
+      cover the unchanged lines of a rewritten function, which is why this box's
+      numbers are re-taken at a close and not carried
+      ([NOTES § D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22))
 - [x] Temporary `main.rs` shell (~10 lines): load a fixture path from args,
       print findings. It cannot reach a cluster yet — `k8s.rs` is Phase 5, and
       that is where the v0.0.1 release therefore sits. **It strips control

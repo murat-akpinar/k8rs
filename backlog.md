@@ -335,7 +335,7 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   fixtures, no cluster: `k8rs tests/fixtures/nodes.json tests/fixtures/healthy.json`
   draws N1 on `k8rs-worker3` with **no pod line at all**; add
   `tests/fixtures/kube-system-pods.json` and the same card reads
-  `kube-system/kindnet and kube-system/kube-proxy were running here (2 pods)`.
+  `kube-system/kindnet and kube-system/kube-proxy were placed here (2 pods)`.
   N1's own doc comment refuses exactly this — *"one pod was running here" about a
   node carrying forty reads as complete* — and N2's count and N5's sum are gated
   on the same field. Visible in this phase's own close review, where the operator
@@ -1103,3 +1103,56 @@ that are not defects in the box that produced them. Read at the next phase close
   the stub beside it and a line in `guards.sh`, and the stub's own dishonesty is
   what its `--self-test` has to catch first. What holds today is the capture trip
   itself, which is a real cluster and runs once a phase
+
+### From the Phase 3 re-close review (2026-08-22)
+
+*Two findings from [`reports/2026-08-22-phase-3-reclose-family-review.md`](reports/2026-08-22-phase-3-reclose-family-review.md)
+that are not defects and not docs sync. The first has a deadline that is a phase,
+not a phase close.*
+
+- **Rule 13's new evidence is four lines against a three-line cap, and the line
+  the cut would take is the diagnosis.** Measured at 49, 51 and 53 columns:
+  *"on node X · the machine has written nothing at all about this pod: not one of
+  its containers has a status, not even a failed attempt, **so nothing there has
+  picked it up**"* — and it is that last clause, the one that turns an absence
+  into a finding, that falls off a three-line cut. **No cut exists yet**:
+  `main.rs` prints evidence whole, so nothing is wrong today and this is a
+  **Phase 8 deadline**, when the pane that cuts arrives.
+  [`screens/alerts.md`](screens/alerts.md) § the evidence cap justifies cutting
+  because an evidence line carries an unbounded API quote — and this one quotes
+  nothing, which is the question to answer before the cut is written: either the
+  cap is about quoted text and this line is outside it, or the evidence is
+  reworded so the diagnosis survives three lines.
+  **`tui-designer` has already answered the design half and the answer is
+  narrow**: `screens/alerts.md` § the evidence cap argues the cut by *contrast* —
+  every author-written part (title, action) is never cut, because an author can
+  measure and shorten their own sentence, and the evidence alone is cut because
+  it carries a controller's sentence quoted verbatim that no author bounds
+  ([D37](NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)). Rule 13's
+  new evidence quotes nothing and is bounded, so **a straight `…` cut is the
+  wrong tool** — it would reclassify an author-written sentence as unmeasurable.
+  What is left to decide is which of the two: author-shorten it to three lines
+  like every other bounded field, or give the cap a second, wider budget for the
+  author-written case
+
+- **`scripts/mutants.sh`'s three log scans read `mutants.out` unconditionally, so
+  a run that never got the lock reports another run's numbers.** Reproduced by
+  accident during the re-close review: an invocation that tested **zero** mutants
+  printed *"180 log(s) read"* and *"18 unviable"*, all of them `analysis.rs`, from
+  a sweep another process was running in the same tree. cargo-mutants only rotates
+  its output directory once it holds the lock. **The exit status is unaffected**
+  (`exit $rc`), so nothing has ever passed on this — what it corrupts is the
+  human-readable line the script exists to make trustworthy, which is the whole
+  point of [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21).
+  **Seen a second way an hour later, which is what makes it a box rather than a
+  curiosity**: `just mutants-diff` over a diff that contains **only** a
+  `#[cfg(test)]` module printed `INFO No mutants to filter` and then thirteen
+  `src/rules.rs` unviables from a shard of the whole-file sweep that had ended
+  twenty minutes earlier. Exit 0 both times. The recipe already refuses an
+  *empty* diff for exactly this reason — nothing to test reads like nothing got
+  past — and does not refuse a diff with **no mutants in it**, which is the same
+  sentence. If boxed: the scans run only when this invocation owned the lock and
+  actually tested something, the stale output directory is cleared or
+  timestamped, and the `--self-test` gains both cases — a run that never held the
+  lock, and a run that held it and tested zero — each of which must print
+  *nothing read*, never a count

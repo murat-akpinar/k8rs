@@ -382,16 +382,25 @@ waiting forever for a bookmark that never comes
 403 by a server that knows it with the `WatchList` gate off (which 1.33 shipped as
 the default).
 
-**Below 1.29, some findings go quiet, and one can say more than the cluster told
-it.** A field the cluster does not have reads as absent, and every rule treats
+**Below 1.29, some findings go quiet — and one used to say more than the cluster
+told it, which is where the floor came from.** A field the cluster does not have
+reads as absent, and every rule treats
 absent as *no finding*, so a cluster too old for container restart rules, in-place
 resize, pod-level resources, native sidecars or `status.terminatingReplicas` simply
-reports less — which is right, because it also *has* less. The exception is the
-`PodReadyToStartContainers` condition, which enters the Kubernetes API at 1.29: the
-card for a pod that was scheduled and never started reads its absence as *storage
-and network are fine*, and on an older cluster nothing said that. That is where the
-floor comes from, and it is the only place a supported-window statement was needed
+reports less — which is right, because it also *has* less.
+
+The floor was set by the one place that did worse than report less. The
+`PodReadyToStartContainers` condition enters the Kubernetes API at 1.29, and the
+card for a pod that was scheduled and never started used to read its absence as
+*storage and network are fine* — a sentence no older cluster ever said
 ([NOTES § D149](../NOTES.md#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22)).
+**That branch was fixed on 2026-08-22 and the floor did not move with it**
+([NOTES § D156](../NOTES.md#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)):
+the card now has a third arm and claims nothing when the condition is absent. The
+floor stays 1.29 for a weaker reason — **nobody has read every other `else` over
+an optional API field against the same question**, and until someone has, 1.29 is
+the oldest cluster this tool is willing to claim it is honest on. One rule was
+fixed; the class was not.
 
 **Above the pin, some findings never arrive.** A cluster newer than the types this
 binary was compiled against still answers every request, but fields Kubernetes

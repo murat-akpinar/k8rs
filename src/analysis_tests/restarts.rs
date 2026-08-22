@@ -38,6 +38,14 @@ use k8s_openapi::jiff::SignedDuration;
 // where `state.running.startedAt` is still `None` (NOTES § D100) together with a start past
 // [`age`]'s skew allowance, a container list that is not already in alphabetical order, and two
 // containers tied on their count with runs of different ages.
+//
+// **Two tests move the snapshot's clock, and neither moves the pin.** `now()` sits two days past
+// every run this pane draws, where [`age`]'s ladder has one rung for everything past 48 hours
+// and all five drawn rows print the identical sentence — so a row reading its neighbour's clock
+// passes an assertion on that string
+// (`reports/2026-08-22-phase-3-reclose-family-review.md` § 3). The two tests that assert *whose*
+// run an age belongs to read the same cluster through [`just_after_the_newest_run`] and assert
+// through [`age_no_other_row_can_print`], which refuses an age two rows share.
 
 /// **Every capture that carries a restarting container, on one cluster.** The five that are drawn,
 /// the two that are `Running` and not ready, the five that are not `Running`, the one under the
@@ -70,32 +78,97 @@ pub(super) fn restarts_corpus() -> ClusterSnapshot {
 /// screen's rule and not against the producer's own answer.
 fn qualifying(cluster: &ClusterSnapshot) -> BTreeSet<(String, &str)> {
     pairs(cluster)
-        .filter(|(_, c)| {
-            matches!(c.state, ContainerState::Running { .. })
-                && doing_its_job(c)
-                && c.restarts >= RESTARTS_WARN
-        })
+        .filter(|(_, c)| qualifies(c))
         .map(|(pod, c)| (qualified(&pod.id), c.name.as_str()))
+        .collect()
+}
+
+/// The screen's three clauses, in **one** place: three readers in this file ask different
+/// questions of the same filter and may not drift apart from each other, while all three stay
+/// independent of the producer's own answer.
+fn qualifies(c: &ContainerSnapshot) -> bool {
+    matches!(c.state, ContainerState::Running { .. })
+        && doing_its_job(c)
+        && c.restarts >= RESTARTS_WARN
+}
+
+/// When a container's **current run** began, or `None` where it is not in one — the field this
+/// pane's second number is measured from, and never `last_terminated` (NOTES § D100).
+fn run_start(c: &ContainerSnapshot) -> Option<&Time> {
+    match &c.state {
+        ContainerState::Running { started_at } => started_at.as_ref(),
+        _ => None,
+    }
+}
+
+/// **The age each drawable row must print, derived from that row's own captured
+/// `state.running.startedAt`** — the expectation, keyed by the row that has to carry it.
+///
+/// A literal cannot hold that claim on its own: [`age`]'s ladder puts everything past 48 hours on
+/// one rung, so at this file's pin all five drawn rows print the identical sentence and an
+/// assertion on the string passes for a row reading its neighbour's clock
+/// (`reports/2026-08-22-phase-3-reclose-family-review.md` § 3). The two tests that assert *whose*
+/// run an age belongs to therefore ask through [`age_no_other_row_can_print`].
+fn run_ages(cluster: &ClusterSnapshot) -> BTreeMap<(String, &str), String> {
+    pairs(cluster)
+        .filter(|(_, c)| qualifies(c))
+        .filter_map(|(pod, c)| {
+            Some((
+                (qualified(&pod.id), c.name.as_str()),
+                age(&cluster.now, run_start(c)?)?,
+            ))
+        })
         .collect()
 }
 
 /// The subset of those that can also be **drawn** — a current run with an age this screen can
 /// print. The two sets are not the same one, and the pane behaves differently on the difference.
 fn drawable(cluster: &ClusterSnapshot) -> BTreeSet<(String, &str)> {
-    pairs(cluster)
-        .filter(|(_, c)| {
-            matches!(c.state, ContainerState::Running { .. })
-                && doing_its_job(c)
-                && c.restarts >= RESTARTS_WARN
-        })
-        .filter(|(_, c)| match &c.state {
-            ContainerState::Running {
-                started_at: Some(started),
-            } => age(&cluster.now, started).is_some(),
-            _ => false,
-        })
-        .map(|(pod, c)| (qualified(&pod.id), c.name.as_str()))
-        .collect()
+    run_ages(cluster).into_keys().collect()
+}
+
+/// **One row's age, and the proof that no other row on this pane prints it.**
+///
+/// It panics where the container draws no row, and **fails where two rows share the age**: an age
+/// is only worth asserting at a clock that can tell the rows apart, and this is where that is
+/// checked rather than assumed. Its two callers get that clock from [`just_after_the_newest_run`];
+/// one that did not would fail here rather than pass quietly.
+fn age_no_other_row_can_print(cluster: &ClusterSnapshot, pod: &str, container: &str) -> String {
+    let ages = run_ages(cluster);
+    let mine = ages
+        .get(&(pod.to_string(), container))
+        .unwrap_or_else(|| panic!("{pod} · container {container} draws no row on this pane"))
+        .clone();
+    assert_eq!(
+        ages.values().filter(|age| **age == mine).count(),
+        1,
+        "`{mine}` is on more than one row, so asserting it says nothing about whose clock it came \
+         from: {ages:?}"
+    );
+    mine
+}
+
+/// **The same cluster, read thirty seconds after its newest run began** — a clock the pane's rows
+/// can be told apart at, derived from the captures rather than typed, so a re-capture moves it
+/// instead of stranding a literal.
+///
+/// **It does not move the pin, and the pin is why it exists.** `now()` sits two days past every
+/// run this pane draws, on the one rung of [`age`]'s ladder that holds everything past 48
+/// hours, and `broken-gang`'s two runs are **three seconds** apart — invisible on every rung above
+/// seconds at any clock. Thirty seconds is also a moment this pane is really read at: the
+/// producer's own doc measures its overlap with rule 5's card as the first ten minutes after a
+/// restart, which is when the reader arrives here from that card.
+fn just_after_the_newest_run(cluster: ClusterSnapshot) -> ClusterSnapshot {
+    let newest = pairs(&cluster)
+        .filter(|(_, c)| qualifies(c))
+        .filter_map(|(_, c)| run_start(c))
+        .max()
+        .expect("this cluster draws a row, so some run on it has a start")
+        .clone();
+    ClusterSnapshot {
+        now: Time(newest.0 + SignedDuration::from_secs(30)),
+        ..cluster
+    }
 }
 
 fn pairs(cluster: &ClusterSnapshot) -> impl Iterator<Item = (&PodSnapshot, &ContainerSnapshot)> {
@@ -284,7 +357,8 @@ fn the_worst_leads_and_the_row_is_the_container_fact_with_both_numbers_under_it(
     // (restarts), `22:43:27` (gang bystander) and `22:43:24` (gang trigger), which is the order
     // below and is **not** `namespace/pod` order: `broken-gang` sorts first alphabetically and
     // comes third and fourth here.
-    let report = super::restarts(&restarts_corpus(), &[]);
+    let cluster = just_after_the_newest_run(restarts_corpus());
+    let report = super::restarts(&cluster, &[]);
     println!("{}", pane(&report));
     assert_eq!(
         selectable(&report),
@@ -296,11 +370,24 @@ fn the_worst_leads_and_the_row_is_the_container_fact_with_both_numbers_under_it(
             "default/broken-gang · container trigger",
         ]
     );
+    // **The second number is the lead's own run and not the pane's**: the age is derived from
+    // `restarts10serving/flaky`'s captured `state.running.startedAt`, at a clock where no other
+    // row can print it, so a producer that dated every row off one container fails here instead
+    // of agreeing with a string all five rows share.
+    //
+    // **The ceiling, stated:** this pins the *lead's* clock, not all five. `broken-gang`'s two
+    // runs are three seconds apart and half an hour behind the newest, so on a pane that draws
+    // both there is no clock that separates them —
+    // `both_numbers_are_the_container_s_own_and_the_row_jumps_to_its_pod` is where that pair is
+    // pinned, on a cluster of its own.
     assert_eq!(
         detail_of(&report.rows[1]),
         [
             "Restarted 10 times since this pod started.".to_string(),
-            "This run started 2 days ago.".to_string(),
+            format!(
+                "This run started {}.",
+                age_no_other_row_can_print(&cluster, "default/broken-restarts10serving", "flaky")
+            ),
         ],
         "both numbers, one paragraph each, and never divided"
     );
@@ -342,7 +429,8 @@ fn expected_row(pod: &PodSnapshot, container: &str) -> String {
 #[test]
 fn a_tie_on_the_count_breaks_on_the_younger_run_and_not_on_the_name() {
     // **The second number was computed one line above the comparator and thrown away.** These two
-    // are three seconds apart and both spell `1 hour ago`, so a comparator reading the *rung*
+    // are three seconds apart, and **no rung of [`age`]'s ladder above seconds can separate
+    // them** — at this file's pin both spell `2 days ago` — so a comparator reading the *rung*
     // ties and falls through to the name — which is why `Cycling` keeps the moment beside its
     // spelling. Younger first puts the sidecar ahead of a container that sorts before it
     // alphabetically, so this order can only come from the run.
@@ -439,10 +527,10 @@ fn both_numbers_are_the_container_s_own_and_the_row_jumps_to_its_pod() {
     // merged and never summed. Each row carries that container's own count and its own run, and
     // both jump to the one pod the reader sees them both from.
     let pod = captured_pod("gang");
-    let cluster = ClusterSnapshot {
+    let cluster = just_after_the_newest_run(ClusterSnapshot {
         pods: vec![pod.clone()],
         ..corpus()
-    };
+    });
     let report = super::restarts(&cluster, &[]);
     println!("{}", pane(&report));
 
@@ -455,17 +543,29 @@ fn both_numbers_are_the_container_s_own_and_the_row_jumps_to_its_pod() {
         "two containers, two rows, neither merged into the other"
     );
     // The two runs began three seconds apart, which is one restart of one pod and two separate
-    // clocks all the same: each row measures its own.
-    for row in report
+    // clocks all the same: each row measures its own. **Three seconds is invisible on every rung
+    // of [`age`]'s ladder above seconds**, so the clock is inside that rung and each row's age is
+    // one [`age_no_other_row_can_print`] has confirmed the other row does not print — without
+    // which a producer that dated both rows off one container passes this loop.
+    for (row, container) in report
         .rows
         .iter()
         .filter(|r| matches!(r, Row::Answer { .. }))
+        .zip(["bystander", "trigger"])
     {
+        assert_eq!(
+            text_of(row),
+            expected_row(&pod, container),
+            "the rows are in the order the ages below are asserted in"
+        );
         assert_eq!(
             detail_of(row),
             [
                 "Restarted 3 times since this pod started.".to_string(),
-                "This run started 2 days ago.".to_string(),
+                format!(
+                    "This run started {}.",
+                    age_no_other_row_can_print(&cluster, "default/broken-gang", container)
+                ),
             ],
             "the count first, then the run's own age off `state.running.startedAt`"
         );
