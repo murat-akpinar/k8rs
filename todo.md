@@ -2046,6 +2046,28 @@ it is Phase 5's ingest gate, which this close amended to name
 No dependency changed in this phase: `Cargo.toml`, `Cargo.lock` and `deny.toml`
 are untouched end to end.
 
+- [ ] **Re-close this phase.** [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+      re-opened the Waste box **after** this phase had closed, and it landed on
+      2026-08-23 ([D158](NOTES.md#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23)).
+      Everything above it therefore reads as closed while the close it describes
+      is one box out of date — which is what makes this a box rather than a
+      sentence: `/basla` picks the first *unchecked* box, and prose here would be
+      stepped over on the way to Phase 5. **Not new work**; it is the ritual this
+      phase already owes.
+      [D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)
+      says what a re-close runs: **the whole of
+      [CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase),
+      not a diff of it** — the thing that re-opened the phase was a box checked
+      over work narrower than its own text, which nothing scoped by a diff can
+      see. Two numbers are **re-taken, never carried**: the whole-file mutation
+      sweep (the figures recorded above are the previous close's, and both
+      `rules.rs` and `analysis.rs` changed on 2026-08-23), and every count this
+      phase's boxes state. Step 4's family review is pointed at the boxes again
+      and hunts *checked over work narrower than its text* before it re-reads any
+      rule. Ends with the PR to `main`, merged
+      Done when: the ritual's eleven steps have each been run and said so, the
+      sweep is 0 missed over the tree as it now stands, and `main` carries it
+
 **Done when:** every report is correct against the cluster-wide fixture, and
 the temporary main can print any of them.
 **Frozen after:** `analysis.rs`.
