@@ -850,6 +850,61 @@ fn the_placed_pod_no_kubelet_ever_reported_on_decodes_with_no_containers_at_all(
     );
 }
 
+/// **`status.reason`, the field that tells two terminal pods apart** — decoded for
+/// [`crate::analysis::waste`] and read by no rule (NOTES § D155, [`PodSnapshot::reason`]).
+///
+/// **Two captures and not one.** `evicted.json` is the positive: a node took its ephemeral
+/// storage back and the API server wrote the word. `failed.json` is the negative that matters —
+/// also `Failed`, also [`finished`], and its reason is `DeadlineExceeded`, so a decode that
+/// filled this field from the phase, or a report keying on `Failed` alone, calls a Job that ran
+/// out of time a pod a node removed. `succeeded.json` is the third state, `None`: a pod that
+/// ended on its own carries no reason at all.
+///
+/// **Asserted over the whole corpus as well as on the three**, both ways: a decode that had
+/// stopped filling the field prints the same green line as one with nothing wrong
+/// (CLAUDE.md § A derived list asserts it found something). The census is also what says the
+/// literal `"Evicted"` is the only spelling the corpus holds — [`crate::analysis::waste`]
+/// compares with `==` and every other reason stays in its other row.
+#[test]
+fn the_evicted_pod_says_why_it_is_over_and_the_pod_that_ran_out_of_time_says_something_else() {
+    let evicted = pod("evicted");
+    assert_eq!(evicted.phase.as_deref(), Some("Failed"));
+    assert_eq!(
+        evicted.reason.as_deref(),
+        Some("Evicted"),
+        "the API server's own word for it, kept as the word and not translated here — \
+         `analysis.rs` compares it, `views.rs` never prints it (invariant 14)"
+    );
+    assert_eq!(
+        evicted.reason.as_deref(),
+        Some(captured_str(&fixture("evicted"), &["status", "reason"])),
+        "and it is read off the capture rather than transcribed beside it"
+    );
+
+    // The negative, and it is the one the report would get wrong: same phase, same `finished`,
+    // different reason.
+    let deadline = pod("failed");
+    assert_eq!(deadline.phase.as_deref(), Some("Failed"));
+    assert_eq!(deadline.reason.as_deref(), Some("DeadlineExceeded"));
+    // And the third state: over, with nothing to say about why.
+    assert_eq!(pod("succeeded").reason.as_deref(), None);
+
+    // **Every reason the corpus holds, named** — so a second capture growing one reddens this
+    // line instead of quietly widening what `analysis.rs` is standing on.
+    let reasons: Vec<String> = CAPTURED_PODS
+        .iter()
+        .map(|n| pod(n))
+        .filter_map(|p| p.reason.map(|r| format!("{}: {r}", p.id.name)))
+        .collect();
+    println!("pods carrying a status reason: {reasons:?}");
+    assert_eq!(
+        reasons,
+        ["broken-evicted: Evicted", "broken-failed: DeadlineExceeded"],
+        "two captures carry this field and every other pod in the corpus leaves it empty — a \
+         sweep that read nothing prints the same green line as one with nothing wrong"
+    );
+}
+
 /// Rule 5's whole point: this pod is Running and Ready and something is still wrong.
 #[test]
 fn a_pod_that_looks_healthy_still_carries_its_restart_count() {

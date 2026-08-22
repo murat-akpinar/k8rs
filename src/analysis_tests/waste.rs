@@ -7,16 +7,21 @@ use super::*;
 // **The producer, against the committed corpus** — the two hand-built panes that stood here until
 // this box landed are gone. The corpus holds one of each row this report draws: a Service with a
 // selector and nothing behind it, a Service with no selector at all, a `Bound` claim nobody
-// mounts beside one a pod does, and two pods that finished and stayed. **The ReplicaSet parked at
+// mounts beside one a pod does, and three pods that are over — the two that finished on their
+// own and the one a node removed. **The ReplicaSet parked at
 // zero is the one row no capture holds** — the trip's cluster has never had one — so it is a
 // plant (NOTES § D40), and what a trip would have to do to replace it is on the test.
 
-/// **The corpus with the four lists Waste fetches**, plus the two finished pods and the one pod
-/// that mounts a claim. `captured_pods` holds nothing finished and nothing mounting a disk, so
-/// without these three the report's second and third rows have neither a positive nor a negative.
+/// **The corpus with the four lists Waste fetches**, plus the three pods that are over and the
+/// one pod that mounts a claim. `captured_pods` holds nothing terminal and nothing mounting a
+/// disk, so without these four the report's middle rows have neither a positive nor a negative.
+///
+/// **`evicted` and `failed` are the split's two directions on one phase** — both `Failed`, both
+/// [`finished`], and only the first carries `status.reason: Evicted` — so the pane this corpus
+/// draws is the negative for each row as much as the positive for the other (NOTES § D155).
 pub(super) fn waste_corpus() -> ClusterSnapshot {
     let mut pods = captured_pods();
-    pods.extend(["succeeded", "failed", "healthy-disk"].map(captured_pod));
+    pods.extend(["succeeded", "failed", "evicted", "healthy-disk"].map(captured_pod));
     ClusterSnapshot {
         services: Some(captured_services()),
         endpoint_slices: Some(captured_slices()),
@@ -36,14 +41,16 @@ fn the_service_matching_no_pod_leads_and_every_row_is_an_answer() {
         vec![
             "default/broken-noendpoints matches no pod",
             "default/broken-unused-disk is 128Mi nobody is using",
+            "1 pod was removed by a node and remains",
             "2 pods finished and were never removed",
         ],
-        "the 503 nobody can explain first, then the disk, then the pileup \
-         (`screens/analysis.md` § Waste)"
+        "the 503 nobody can explain first, then the disk, then the two pileups — the removed row \
+         ahead of the completed one because it names a cause and carries the action, not because \
+         it is louder (`screens/analysis.md` § *The pileup splits in two, one per cause*)"
     );
     assert_eq!(
         report.rows.len(),
-        3,
+        4,
         "and there is no `Prose` on this pane at all — every line is a row"
     );
     assert_eq!(
@@ -51,9 +58,13 @@ fn the_service_matching_no_pod_leads_and_every_row_is_an_answer() {
         vec![
             Some(Severity::Critical),
             Some(Severity::Warn),
+            Some(Severity::Info),
             Some(Severity::Info)
         ],
-        "the 503, the disk nobody mounts, and the pileup that is often deliberate"
+        "the 503, the disk nobody mounts, and then two `Info` pileups: what a removed pod costs \
+         today is an etcd entry and a longer pod list, exactly the completed row's own cost, and \
+         a `Warn` that clears only by deleting its own evidence is what stops an alert screen \
+         being believed (`screens/analysis.md` § *The pileup splits in two, one per cause*)"
     );
     assert_eq!(
         report.title, "Things that cost you something for nothing",
@@ -77,6 +88,7 @@ fn the_service_matching_no_pod_leads_and_every_row_is_an_answer() {
     assert!(matches!(jump_of(&report.rows[1]), Some(Jump::Object(id))
             if id.kind == ObjectKind::Other("PersistentVolumeClaim".to_string())));
     assert_eq!(jump_of(&report.rows[2]), None);
+    assert_eq!(jump_of(&report.rows[3]), None);
 
     assert_eq!(
         detail_of(&report.rows[0]),
@@ -90,9 +102,10 @@ fn the_service_matching_no_pod_leads_and_every_row_is_an_answer() {
             .iter()
             .filter(|row| !action_of(row).is_empty())
             .count(),
-        1,
-        "only the Service has a way out — deleting a disk deletes what is on it, and this report \
-         does not know whether that matters"
+        2,
+        "the Service and the pods a node removed. The disk has no way out — deleting a claim \
+         deletes what is on it, and this report does not know whether that matters — and neither \
+         has a pod that ran to completion on its own"
     );
 }
 
@@ -342,6 +355,7 @@ fn services_present_with_the_slices_missing_is_not_every_service_matching_nothin
         selectable(&report),
         vec![
             "default/broken-unused-disk is 128Mi nobody is using",
+            "1 pod was removed by a node and remains",
             "2 pods finished and were never removed",
         ]
     );
@@ -652,58 +666,329 @@ fn a_disk_a_generic_ephemeral_volume_stands_up_is_not_a_disk_nobody_is_using() {
     );
 }
 
+/// **The number a counted row opens with**, summed over every row of this pane that carries the
+/// marker — `0` when no such row is drawn, because *no row* is how this section says none.
+///
+/// **Summed rather than found**, so a section that drew its row twice reads as double and fails
+/// the partition below instead of matching on the first one and passing.
+///
+/// **It cannot say a row is absent, and no test here may ask it to.** `0` is the answer for *no
+/// row* and for a row reading `0 pods finished and were never removed` alike, so a section that
+/// lost its `> 0` guard goes on satisfying `counted(..) == 0` — measured, and it is why the
+/// negative below asserts over [`selectable`] instead.
+fn counted(report: &Report, marker: &str) -> usize {
+    selectable(report)
+        .iter()
+        .filter(|text| text.contains(marker))
+        .map(|text| {
+            text.split(' ')
+                .next()
+                .and_then(|number| number.parse::<usize>().ok())
+                .unwrap_or_else(|| panic!("a counted row opens with its number: {text}"))
+        })
+        .sum()
+}
+
+/// **The one `Answer` on this pane whose text carries `marker`.** [`row_for`] matches on the
+/// first *word*, and since the split this pane can draw `1 pod was removed by a node and remains`
+/// above `1 replicaset is parked at 0 replicas` — so a counted row is found by what it says and
+/// never by the number it opens with.
+fn row_saying<'a>(report: &'a Report, marker: &str) -> &'a Row {
+    let mut found = report
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Answer { text, .. } if text.contains(marker)));
+    let row = found.next().unwrap_or_else(|| {
+        panic!(
+            "no row on this pane says {marker:?}: {:?}",
+            selectable(report)
+        )
+    });
+    assert!(
+        found.next().is_none(),
+        "two rows on this pane say {marker:?}, so this lookup is answering about the wrong one"
+    );
+    row
+}
+
+/// What each of the two rows says it counts — the marker [`counted`] and [`row_saying`] read
+/// them back by.
+const REMOVED_BY_A_NODE: &str = "removed by a node";
+const FINISHED_ON_ITS_OWN: &str = "finished and";
+
+/// **Rule 8's sentence for this pane, whole.** Its tail is the half the split changed — it used
+/// to end *"and nothing finished is lying around"*, which was one row's claim standing for two —
+/// so a test that stopped at `starts_with` on the opening clause read back none of the change
+/// (NOTES § D155).
+const NOTHING_WASTED: &str = "Nothing here is going to waste. Every Service reaches a pod, every \
+                              disk that was reserved is mounted, and no pod — finished or removed \
+                              by a node — is left lying around.";
+
 #[test]
-fn the_finished_pod_row_is_one_row_over_evicted_and_completed() {
-    // One row, because [`finished`] is already the predicate over `Succeeded | Failed` and the
-    // reader does one thing about both. `broken-succeeded` and `broken-failed` are the two.
+fn the_pileup_splits_in_two_and_the_pods_a_node_removed_come_first() {
+    // The corpus is one of each: `broken-evicted` is the pod a node killed to get its ephemeral
+    // storage back, `broken-succeeded` and `broken-failed` are the two that ended on their own
+    // — and `broken-failed` is `Failed` with `status.reason: DeadlineExceeded`, which is the
+    // negative that matters (NOTES § D155, `screens/analysis.md` § *The pileup splits in two*).
     let report = super::waste(&waste_corpus(), &[]);
-    let row = row_for(&report, "2");
-    assert_eq!(text_of(row), "2 pods finished and were never removed");
-    // **`Info`, and the sentence says the normal case out loud.** A CronJob keeps three finished
-    // Jobs by default and keeps them forever
+    println!("{}", pane(&report));
+
+    let removed = row_saying(&report, REMOVED_BY_A_NODE);
+    assert_eq!(text_of(removed), "1 pod was removed by a node and remains");
+    // **`Info`, the same band as the row below it.** The killing already happened; what is left
+    // behind costs an etcd entry and a longer pod list, which is the completed row's own cost —
+    // and an evicted pod is collected only past 12 500 finished pods on the node (NOTES § D71),
+    // so a `Warn` would stay lit for good, clearable only by deleting this pane's own evidence
+    // (`screens/analysis.md` § *The pileup splits in two, one per cause*).
+    assert_eq!(severity_of(removed), Some(Severity::Info));
+    // **Both causes, and the API's word once in brackets.** `status.reason: Evicted` has two
+    // producers in the kubelet and the capture behind this row is the second — a pod over its own
+    // declared storage limit, on a node whose three pressure conditions were all `False` — so
+    // *the node ran out of room* alone would be false of the only object this row is measured
+    // against (`reports/2026-08-23-waste-evicted-row-operator-review.md` §§ 2–4). The word is in
+    // parentheses after the translation, the shape every term this project translates uses, and
+    // this is the only place on the screen it appears at all: `kubectl get pods` prints `Error`
+    // for this object, not `Evicted` (§ 6).
+    assert_eq!(
+        detail_of(removed),
+        ["Either the node was short, or the pod went over its own disk limit (Evicted)."]
+    );
+    // **The action is the whole reason this row left the other one, and it points at the object.**
+    // These pods did not finish; something killed them. Nothing this row can see says which
+    // resource or which node ran out, and N3 is silent for the commoner cause — it needs a
+    // pressure condition `True` right now, which the pod-limit mechanism never sets — so the
+    // reader is sent to the pod's own `status.message`, which names the exact resource and
+    // moment.
+    assert_eq!(
+        action_of(removed),
+        "look at one of the pods — its own message names what ran out",
+        "and it never names a node, a resource, or another screen"
+    );
+    assert_eq!(jump_of(removed), None, "it stands for a set (NOTES § D128)");
+
+    let completed = row_saying(&report, FINISHED_ON_ITS_OWN);
+    assert_eq!(text_of(completed), "2 pods finished and were never removed");
+    // **`Info`, unmoved.** A CronJob keeps three finished Jobs by default and keeps them forever
     // (`reports/2026-08-21-family-c-analysis-report-family-review.md` § 11), so `Warn` over a
     // fact that is often deliberate teaches the wrong lesson the first time a reader chases it
     // and finds nothing to fix (`screens/analysis.md` § Waste).
-    assert_eq!(severity_of(row), Some(Severity::Info));
+    assert_eq!(severity_of(completed), Some(Severity::Info));
     assert_eq!(
-        detail_of(row),
+        detail_of(completed),
         [
             "Kubernetes keeps a few finished Jobs by default, so some of this is normal. They use \
           no CPU or memory — they only make every pod list longer."
         ]
     );
-    assert_eq!(jump_of(row), None, "it stands for a set (NOTES § D128)");
-
-    // **No threshold**: the box says *pileup* and every number that could stand for one would be
-    // invented here, so one pod left behind is one row saying so.
-    let one = ClusterSnapshot {
-        pods: vec![captured_pod("succeeded")],
-        ..waste_corpus()
-    };
-    let report = super::waste(&one, &[]);
-    println!("{}", pane(&report));
     assert_eq!(
-        text_of(row_for(&report, "1")),
-        "1 pod finished and was never removed",
-        "and the singular is a different sentence, not a plural with an `s` taken off"
+        action_of(completed),
+        "",
+        "a pod that ran to completion on its own is not worth chasing, and this row still \
+         offers nothing to do"
+    );
+    assert_eq!(jump_of(completed), None);
+
+    // **First of the two, and not because it is louder** — both are `Info`. It leads because it
+    // is the more specific statement, naming a cause where the row below names the absence of
+    // one, and because it is the row that carries an action.
+    let order: Vec<usize> = selectable(&report)
+        .iter()
+        .enumerate()
+        .filter(|(_, text)| text.contains(REMOVED_BY_A_NODE) || text.contains(FINISHED_ON_ITS_OWN))
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(
+        order.len(),
+        2,
+        "both rows are on this pane: {:?}",
+        selectable(&report)
+    );
+    assert!(
+        order[0] < order[1] && selectable(&report)[order[0]].contains(REMOVED_BY_A_NODE),
+        "the pods a node killed sort ahead of the ones that finished: {:?}",
+        selectable(&report)
+    );
+}
+
+#[test]
+fn only_the_pods_a_node_removed_leave_the_completed_row() {
+    // **The literal `Evicted` and nothing else** (NOTES § D155), fed two kinds of input.
+    //
+    // `DeadlineExceeded` is the committed negative — `failed.json` carries it — and
+    // `NodeAffinity`, `Terminated`, `NodeShutdown` and `OutOfcpu` are the other reasons
+    // `screens/analysis.md` § *The pileup splits in two* names as staying in the completed row;
+    // this report has no capture of any of them, which is exactly why they belong here as a
+    // plant. **Every one of the four is a string the kubelet actually writes** — `Terminated` for
+    // a running pod caught by graceful node shutdown and `NodeShutdown` for one rejected during
+    // it (`nodeshutdown_manager.go:84,88`), `OutOfcpu` for an admission rejection
+    // (`lifecycle/predicate.go`) — because a plant that is not a real value proves the predicate
+    // against a shape no cluster can hand it. `OutOfcpu` also probes a `starts_with`-shaped
+    // mistake from the other direction: it is the only one whose case differs mid-word.
+    // **`evicted` and `EvictedByVPA` are near-misses
+    // this file made up**, and neither is claimed to be a value any API writes: they are the two
+    // shapes a match that lowercased or `starts_with`-ed its way to an answer would get wrong,
+    // and a predicate proven only against words that look nothing like the target is proven
+    // against the easy half (NOTES § D29).
+    let planted = |reason: Option<&str>| {
+        let word = reason.map(str::to_string);
+        captured_pod_but("evicted", move |pod| {
+            pod.status
+                .as_mut()
+                .expect("the capture carries a status")
+                .reason = word;
+        })
+    };
+    for reason in [
+        None,
+        Some("DeadlineExceeded"),
+        Some("NodeAffinity"),
+        Some("Terminated"),
+        Some("NodeShutdown"),
+        Some("OutOfcpu"),
+        Some("evicted"),
+        Some("EvictedByVPA"),
+    ] {
+        let pod = planted(reason);
+        assert!(finished(&pod), "the plant is still a pod that is over");
+        let report = super::waste(
+            &ClusterSnapshot {
+                pods: vec![pod],
+                ..waste_corpus()
+            },
+            &[],
+        );
+        assert_eq!(
+            counted(&report, REMOVED_BY_A_NODE),
+            0,
+            "{reason:?} is not the word, so this pod stays in the completed row: {:?}",
+            selectable(&report)
+        );
+        assert_eq!(
+            counted(&report, FINISHED_ON_ITS_OWN),
+            1,
+            "{reason:?}: and it is counted there rather than dropped: {:?}",
+            selectable(&report)
+        );
+    }
+
+    // The positive, one field apart, so the eight above are refused by the word and not by
+    // something else about the plant (NOTES § D29).
+    let report = super::waste(
+        &ClusterSnapshot {
+            pods: vec![planted(Some("Evicted"))],
+            ..waste_corpus()
+        },
+        &[],
+    );
+    println!("{}", pane(&report));
+    assert_eq!(counted(&report, REMOVED_BY_A_NODE), 1);
+    assert_eq!(
+        counted(&report, FINISHED_ON_ITS_OWN),
+        0,
+        "and it left the completed row rather than being counted twice"
+    );
+}
+
+#[test]
+fn the_two_rows_partition_the_pods_that_are_over() {
+    // **The invariant a third branch would break in silence** (NOTES § D155): the two rows always
+    // sum to the count the one row used to draw, no pod lands on both, and none falls through and
+    // lands on neither. One equality catches all three — a pod counted twice makes the sum too
+    // big, a pod dropped makes it too small.
+    //
+    // [`finished`] is the outer gate and is untouched by the split, so it is what the sum is
+    // measured against rather than a number typed here.
+    let over = ["succeeded", "failed", "evicted"].map(captured_pod);
+    let running = ["healthy", "healthy-disk"].map(captured_pod);
+    let pods: Vec<PodSnapshot> = over.iter().chain(running.iter()).cloned().collect();
+    let expected = pods.iter().filter(|pod| finished(pod)).count();
+    assert_eq!(expected, 3, "three of the five captures are over");
+
+    let report = super::waste(
+        &ClusterSnapshot {
+            pods,
+            ..waste_corpus()
+        },
+        &[],
+    );
+    println!("{}", pane(&report));
+    let removed = counted(&report, REMOVED_BY_A_NODE);
+    let completed = counted(&report, FINISHED_ON_ITS_OWN);
+    assert_eq!(
+        removed + completed,
+        expected,
+        "the two rows sum to what [`finished`] answers, or a pod is on both rows or on neither: \
+         {removed} + {completed} against {expected}"
+    );
+    // And neither side is zero, or the equality above holds over an empty partition.
+    assert_eq!((removed, completed), (1, 2));
+}
+
+#[test]
+fn each_pileup_row_has_its_own_singular_and_a_cluster_with_neither_draws_nothing() {
+    // **No threshold on either row**: the box says *pileup* and every number that could stand for
+    // one would be invented here, so one pod left behind is one row saying so.
+    let one_of_each = super::waste(
+        &ClusterSnapshot {
+            pods: vec![captured_pod("succeeded"), captured_pod("evicted")],
+            ..waste_corpus()
+        },
+        &[],
+    );
+    println!("{}", pane(&one_of_each));
+    assert_eq!(
+        text_of(row_saying(&one_of_each, REMOVED_BY_A_NODE)),
+        "1 pod was removed by a node and remains",
+        "the singular is a different sentence, not a plural with an `s` taken off"
     );
     assert_eq!(
-        detail_of(row_for(&report, "1")),
+        text_of(row_saying(&one_of_each, FINISHED_ON_ITS_OWN)),
+        "1 pod finished and was never removed",
+        "and so is the other row's"
+    );
+    // **The action does not change with the count** (`screens/analysis.md` § *The pileup splits
+    // in two*), and neither does either explanation's subject — except the completed row's, whose
+    // sentence is about the pods rather than to the reader.
+    let removed = row_saying(&one_of_each, REMOVED_BY_A_NODE);
+    assert_eq!(
+        action_of(removed),
+        "look at one of the pods — its own message names what ran out"
+    );
+    assert_eq!(
+        detail_of(removed),
+        ["Either the node was short, or the pod went over its own disk limit (Evicted)."],
+        "one sentence for one pod and for four — nothing in it is counted"
+    );
+    let completed = row_saying(&one_of_each, FINISHED_ON_ITS_OWN);
+    assert_eq!(
+        detail_of(completed),
         [
             "Kubernetes keeps a few finished Jobs by default, so some of this is normal. It \
           uses no CPU or memory — it only makes every pod list longer."
         ]
     );
 
-    // The negative: a cluster whose pods are all still running draws no such row.
-    let running = ClusterSnapshot {
-        pods: vec![captured_pod("healthy")],
-        ..waste_corpus()
-    };
+    // **The negative for both rows, asserted as an absence and never as a count.** A cluster
+    // whose pods are all still running draws neither row — and `0` is what [`counted`] answers
+    // for *no row* and for a row reading `0 pods finished and were never removed` alike, so a
+    // section that lost its `> 0` guard would go on passing a count of zero. What separates them
+    // is whether the pane says the words at all.
+    let running = super::waste(
+        &ClusterSnapshot {
+            pods: vec![captured_pod("healthy")],
+            ..waste_corpus()
+        },
+        &[],
+    );
+    println!("{}", pane(&running));
+    let pileups: Vec<&str> = selectable(&running)
+        .into_iter()
+        .filter(|text| text.contains(REMOVED_BY_A_NODE) || text.contains(FINISHED_ON_ITS_OWN))
+        .collect();
     assert!(
-        !selectable(&super::waste(&running, &[]))
-            .iter()
-            .any(|text| text.contains("finished"))
+        pileups.is_empty(),
+        "neither pileup draws a row at all, rather than a row saying zero: {pileups:?} in {:?}",
+        selectable(&running)
     );
 }
 
@@ -736,7 +1021,7 @@ fn replicasets_parked_at_zero_are_counted_and_a_live_one_is_not() {
     };
     let report = super::waste(&cluster, &[]);
     println!("{}", pane(&report));
-    let row = row_for(&report, "1");
+    let row = row_saying(&report, "parked");
     assert_eq!(text_of(row), "1 replicaset is parked at 0 replicas");
     assert_eq!(
         severity_of(row),
@@ -829,7 +1114,7 @@ fn a_section_longer_than_the_pane_is_cut_and_says_what_it_cut() {
     );
     assert_eq!(
         selectable(&report).len(),
-        7,
+        8,
         "the overflow line is a `Row::Prose` and the cursor may not land on it — it opens \
          nothing, and not even a *set* a later `Jump` case could be built for (NOTES § D127)"
     );
@@ -992,6 +1277,7 @@ fn a_scoped_pane_is_a_shorter_list_and_never_a_wrong_number() {
         vec![
             "default/broken-noendpoints matches no pod",
             "default/broken-unused-disk is 128Mi nobody is using",
+            "1 pod was removed by a node and remains",
             "2 pods finished and were never removed",
         ],
         "what the whole cluster has to say, for the narrow pane to be a subset of"
@@ -1004,10 +1290,9 @@ fn a_scoped_pane_is_a_shorter_list_and_never_a_wrong_number() {
         selectable(&scoped)
     );
     assert!(
-        matches!(&scoped.rows[..], [Row::Prose(text)]
-            if text.starts_with("Nothing here is going to waste")),
-        "rule 8's sentence, and not a `NotComputed`: every list was read, they were just short \
-         ({:?})",
+        matches!(&scoped.rows[..], [Row::Prose(text)] if text == NOTHING_WASTED),
+        "rule 8's sentence whole, and not a `NotComputed`: every list was read, they were just \
+         short ({:?})",
         scoped.rows
     );
     assert!(not_computed(&scoped).is_empty());
@@ -1072,9 +1357,10 @@ fn nothing_wasted_says_so_in_this_reports_own_words() {
 
     assert_eq!(report.rows.len(), 1);
     assert!(
-        matches!(&report.rows[0], Row::Prose(text)
-            if text.starts_with("Nothing here is going to waste")),
-        "{:?}",
+        matches!(&report.rows[0], Row::Prose(text) if text == NOTHING_WASTED),
+        "the whole sentence, tail included: its `no pod — finished or removed by a node` is the \
+         clause the split changed, and both rows have to be covered by it or the pane promises \
+         over one of them only: {:?}",
         report.rows[0]
     );
     assert!(

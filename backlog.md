@@ -1038,6 +1038,46 @@ stop being cheap.***
   `## Decisions` section, then ~10 lines in the guard requiring a `### D##` to be
   its immediate child.
 
+- **Waste counts every `Failed` pod that is not `Evicted` as a finished Job, and
+  two of those reasons arrive in hundreds.** `OutOfcpu` / `OutOfmemory` /
+  `OutOfpods` / `OutOfephemeral-storage` (`pkg/kubelet/lifecycle/predicate.go`)
+  are the kubelet refusing a pod the scheduler already bound — *a node that
+  literally ran out of room*, being told *"Kubernetes keeps a few finished Jobs by
+  default, so some of this is normal"*. `Terminated`
+  (`nodeshutdown_manager.go:88`) is every managed node-pool upgrade and every spot
+  reclaim; a 30-node rolling upgrade leaves hundreds. Both read as CronJob
+  leftovers today. A third pileup row was refused as *not this box*
+  ([D158](NOTES.md#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23));
+  the alternative is narrowing the completed row's sentence to what it can prove —
+  the Job sentence over `Succeeded`, a neutral one over `Failed`
+  ([reports/2026-08-23-waste-evicted-row-operator-review.md](reports/2026-08-23-waste-evicted-row-operator-review.md) § 5).
+
+- **Waste's removed-pods row could name the node when there is exactly one.**
+  `PodSnapshot::node` is already carried and `listed()` is already `pub(crate)`,
+  so `1 pod was removed by k8rs-worker and remains` costs nothing new and answers
+  half of what its action reaches for. Refused for the general case, measured
+  rather than assumed: real node names are `ip-10-0-1-23.ec2.internal` and two of
+  them through `listed()` blow the pane's 53-column content budget (D158,
+  same report § 9).
+
+- **Waste's disk row counts a finished pod as a mounter, and one of those pods is
+  now visibly dead on the same pane.** Deliberate and documented — a `Succeeded`
+  CronJob pod is evidence something mounts the claim every run — but an evicted
+  pod under `restartPolicy: Never` with no owner will never mount anything again,
+  and since D158 the pane prints `N pods were removed by a node` two rows under
+  the claim that their disk is in use. The argument for the row (never push a
+  reader at deleting a volume) still holds; what is new is that one screen now
+  asserts both (same report § 8).
+
+- **The eviction the corpus does not hold is the node-pressure one.** Every claim
+  about that half of `status.reason: Evicted` rests on upstream source and on the
+  *absence* of a `DisruptionTarget` condition from `evicted.json`, not on an
+  object. The capture that would settle it: a pod evicted while a node's
+  `MemoryPressure` is `True`, carrying `The node was low on resource: memory.` and
+  a `DisruptionTarget: True / TerminationByKubelet` condition. With it the row
+  could say *which* mechanism instead of naming both — which is the only reason
+  `status.message` would be worth decoding (D158, same report § 1).
+
 
 ## Ruled out
 

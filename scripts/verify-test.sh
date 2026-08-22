@@ -100,7 +100,8 @@ for canary in oom crashloop image config pending hostpath readiness restarts \
               startup notfound wedged unjudged oomserving neverback healthy_retry \
               healthy_unreadysidecar \
               probe0 neverrules gang reboot \
-              overhead healthy_disk pdb_floor pdb_room pvc_orphan pvc_used; do
+              overhead healthy_disk pdb_floor pdb_room pvc_orphan pvc_used \
+              evicted; do
   [ -n "${want[$canary]:-}" ] || {
     echo "verify-test: cluster.sh has no predicate '$canary' — the extraction broke, not the predicate"
     exit 1
@@ -3563,6 +3564,150 @@ check pvc_used     miss  pvc_pending "the same claim before anything bound it"
 check pvc_used     miss  pvc_bound_orphan "the statically bound orphan, whose empty storageClassName is what says no provisioner was involved"
 check pvc_used     miss  pvc_classless "a bound claim with no storageClassName field at all — what a cluster with no default class writes, and the shape a bare != \"\" reads as provisioned"
 # --- THE CLUSTER-WIDE REPORTS' INPUTS END ---
+
+# --- THE SECOND WAY INTO PHASE FAILED (D155) START ---
+# `broken-evicted`, and unlike the six above it this one is a **capture**, not a
+# composition: `kubectl get pod broken-evicted -o json` off the kind cluster
+# (kindest/node:v1.36.1) on 2026-08-22, through scripts/sanitize.jq, with only
+# noise no predicate reads dropped — containerID, imageID, the projected token
+# volume and its mount, the image reference and the runtime user block. Every
+# field either predicate touches is exactly what the apiserver served. The
+# manifest that produces it is scripts/broken.yaml § broken-evicted; the
+# committed file it is owed by is evicted.json.
+#
+# What it is for: `finished()` is `Succeeded | Failed`, and a kubelet eviction is
+# `Failed` — so the Waste report counts a pod a node threw away as a finished
+# Job (D155). `status.reason` is the field that separates them, and until this
+# object the only one in the corpus carrying it was `broken-failed`, which spells
+# it `DeadlineExceeded`.
+#
+# Note what the container says, because it is the trap: `137`/`Error`, which is
+# what `kubectl get pods` prints in the STATUS column for this pod. The eviction
+# is recorded on the **pod**, not on the container, and a predicate reading the
+# container would assert the one field here that says nothing about it.
+obj[evicted_pod]=$(cat <<'JSON'
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "broken-evicted",
+    "namespace": "default",
+    "uid": "b7beed7f-6154-4c56-a1f7-477c4213ba67",
+    "creationTimestamp": "2026-08-22T21:33:48Z",
+    "labels": {
+      "demo": "broken"
+    }
+  },
+  "spec": {
+    "nodeName": "k8rs-worker",
+    "restartPolicy": "Never",
+    "containers": [
+      {
+        "name": "app",
+        "image": "busybox",
+        "command": [
+          "/bin/sh",
+          "-c",
+          "dd if=/dev/zero of=/scratch/fill bs=1M count=64 && sleep 86400"
+        ],
+        "resources": {
+          "limits": {
+            "cpu": "50m",
+            "ephemeral-storage": "8Mi",
+            "memory": "32Mi"
+          },
+          "requests": {
+            "cpu": "10m",
+            "ephemeral-storage": "8Mi",
+            "memory": "16Mi"
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/scratch",
+            "name": "scratch"
+          }
+        ]
+      }
+    ],
+    "volumes": [
+      {
+        "emptyDir": {},
+        "name": "scratch"
+      }
+    ]
+  },
+  "status": {
+    "phase": "Failed",
+    "reason": "Evicted",
+    "message": "Pod ephemeral local storage usage exceeds the total limit of containers 8Mi. ",
+    "startTime": "2026-08-22T21:33:48Z",
+    "conditions": [
+      {
+        "type": "PodReadyToStartContainers",
+        "status": "False",
+        "lastTransitionTime": "2026-08-22T21:34:35Z"
+      },
+      {
+        "type": "Initialized",
+        "status": "True",
+        "lastTransitionTime": "2026-08-22T21:33:48Z"
+      },
+      {
+        "type": "Ready",
+        "status": "False",
+        "reason": "PodFailed",
+        "lastTransitionTime": "2026-08-22T21:34:35Z"
+      },
+      {
+        "type": "ContainersReady",
+        "status": "False",
+        "reason": "PodFailed",
+        "lastTransitionTime": "2026-08-22T21:34:35Z"
+      },
+      {
+        "type": "PodScheduled",
+        "status": "True",
+        "lastTransitionTime": "2026-08-22T21:33:48Z"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "app",
+        "ready": false,
+        "started": false,
+        "restartCount": 0,
+        "lastState": {},
+        "state": {
+          "terminated": {
+            "exitCode": 137,
+            "reason": "Error",
+            "startedAt": "2026-08-22T21:33:52Z",
+            "finishedAt": "2026-08-22T21:34:35Z"
+          }
+        }
+      }
+    ]
+  }
+}
+JSON
+)
+
+# The same object with the phase alone put back — **not a shape any kubelet
+# writes**, because the eviction manager sets `phase`, `reason` and `message` in
+# one status update. It is here for the reason `succeeded_running` is: without it
+# the phase clause has no case that refuses it, and a clause nothing can refuse
+# is one that can be deleted with this file staying green. Stated plainly rather
+# than dressed as a cluster state, since no capture will ever hold it.
+obj[evicted_running]=$(jq '.status.phase = "Running"' <<<"${obj[evicted_pod]}")
+# --- THE SECOND WAY INTO PHASE FAILED (D155) END ---
+
+# D155's re-open, and its negative is the pod that reaches the same phase by the
+# other route the corpus already holds.
+check evicted   match evicted_pod "broken-evicted: the kubelet threw it off the node — Failed, and status.reason Evicted"
+check evicted   miss  failed_pod "broken-failed: Failed too, past its activeDeadlineSeconds, and reason DeadlineExceeded — the phase both pods share, and the field that tells them apart"
+check evicted   miss  succeeded_pod "a pod that finished on its own: the phase differs and status.reason is absent entirely, which is what every other capture in the corpus looks like"
+check evicted   miss  evicted_running "the identical reason and message on a pod that is still Running — the clause that says this fixture is a pod the cluster is done with"
 
 for key in "${!want[@]}"; do
   case " ${covered[$key]:-} " in

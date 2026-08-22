@@ -179,6 +179,7 @@ its line moving with it.
 - [D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22) — a whole-project review found two boxes checked over work their own text does not describe
 - [D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22) — rule 13's silence is ruled on the node, and the three-of-four routes to its own shape that delete themselves
 - [D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22) — what a re-close runs, and the two numbers that only a close re-takes
+- [D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23) — the Waste box's second half, and the jargon translation that was wrong in this file first
 
 ## Why it exists — where the gap is
 
@@ -264,8 +265,15 @@ several things that were otherwise open:
 3. **Zero configuration on first run.** No flags, no config file, no setup
    step. It reads your kubeconfig's current context and works.
 4. **Plain language over jargon, everywhere** — not only in findings. Column
-   headers, confirmation dialogs, error messages. `Evicted` is "removed by the
-   node because it ran out of room".
+   headers, confirmation dialogs, error messages. `Evicted` is "its node stopped
+   it and took the room back" — **and the translation names no cause**, because
+   the kubelet writes that one word for two of them: a node under pressure, and a
+   pod over a limit it declared for itself. The first draft of this line said
+   "because it ran out of room", and a report row built faithfully on it told
+   operators their node was short when a single container overran its own disk
+   limit ([D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23)).
+   **A translation that is shorter than the term is where the meaning gets lost**;
+   the plain sentence names what happened, and the cause only where it is known.
 5. **Confirmations explain the consequence, not the API call.** "This starts 2
    more copies of your app" above the `kubectl` line, not instead of it.
 6. **Per-object detail tabs**, the lazydocker pattern: logs · describe · yaml ·
@@ -13515,3 +13523,76 @@ not a test*, three were stale copies in `NOTES.md`, `todo.md` and `backlog.md`, 
 two went to [`backlog.md`](backlog.md). The triage rule held: a non-blocker is
 boxed later and the phase still closes
 ([reports/2026-08-22-phase-3-reclose-family-review.md](reports/2026-08-22-phase-3-reclose-family-review.md)).
+
+### D158 — the Waste box's second half, and the jargon translation that was wrong in this file first (2026-08-23)
+
+[D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+re-opened Phase 4's **Waste** box: `finished()` is `Succeeded | Failed`, a
+kubelet eviction is `Failed`, so a pod a node threw away was counted with
+completed Job pods and explained with the Job sentence. It is closed —
+`PodSnapshot::reason` (the only field D42's window was re-opened for), one
+ingest-guard line, and one `if`/`else` inside the gate that already existed, so
+the two rows **partition** what `finished()` lets through and always sum to the
+count the one row drew. `tests/fixtures/evicted.json` is a real capture, taken
+targeted rather than by a full re-trip ([D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)'s
+precedent), and its stamp landed before the pin, so nothing repinned.
+
+**The row's first sentence was false, and the file it was copied from is this
+one.** *"A node does this when it runs out of room"* describes one of the two
+producers of `status.reason: Evicted`. Both go through `evictPod`
+(`pkg/kubelet/eviction/eviction_manager.go:633`), but `localStorageEviction`
+(`:514-630`) compares a pod against a limit **it declared for itself**, consults
+no node threshold, and runs *before* the pressure path. The committed capture is
+that one: an `8Mi` ephemeral-storage limit, no `DisruptionTarget` condition, and
+`nodes.json` from the same trip has its node at all three pressures `False` with
+~953 GiB free. So the row told an operator their node was short when one
+container overran its own limit. **§ Positioning item 4 said the same wrong
+thing** — *"`Evicted` is 'removed by the node because it ran out of room'"* — and
+is corrected here rather than only in the row, because the next reader would
+otherwise re-derive the sentence from it.
+
+**Three rulings the review reversed, and two of them were the PM's own.**
+
+1. **The band is `Info`, not `Warn`.** The PM's ground was *this pane's `Info`
+   rows carry no action* — a correlation, not a constraint: `main.rs`'s
+   `Row::Answer` arm prints the action without reading `severity`, which the PM
+   read only when the reviewer named it. The reasons that survive are the pane's:
+   Waste's charter is cost, an evicted pod's cost is the completed row's cost,
+   and a pod is collected only above 12 500 ([D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
+   — so a `Warn` here stays lit for good after one bad half-hour, clearable only
+   by deleting this pane's own evidence.
+2. **The action may not name another screen.** `→ check Alerts for what a node is
+   low on` pointed at N3, which needs a pressure condition `True` *now* and can
+   never fire for the pod-limit cause at all. The old detail said *"often the only
+   sign left once the node recovers"* — two lines that cannot both be obeyed.
+3. **The API's word is printed, in brackets, after the translation.** Invariant 14
+   says plain language, not *hide the term*; `rules.rs` has said
+   `… (CrashLoopBackOff)` and `… (OOMKilled)` since Phase 3. It matters most here:
+   `printPod` overwrites `status.reason` with the container's terminated reason,
+   so `kubectl get pods` prints `Error` for this object and the parenthetical is
+   the only thread from the row to anything typable.
+
+**`Shutdown` is not a value any kubelet writes** — `NodeShutdownNotAdmittedReason`
+is `"NodeShutdown"` and `nodeShutdownReason` is `"Terminated"`. The PM invented
+it in a brief, `tui-designer` put it in the screen, `dev-core` planted it in a
+test as a real value beside two the same file carefully labels as invented. One
+string, three files, no gate: a shape fed to a check that does not exist is
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) from the
+other end.
+
+**Four correct findings were refused and went to [`backlog.md`](backlog.md)**, not
+because they are wrong but because a third pileup row, a per-object section and a
+node name in the text are not the box that is open, and a box is never added to a
+running phase.
+
+**An agent ran `git checkout` over a dirty file and destroyed two turns of
+uncommitted work.** It recovered them from another agent's scratchpad copy, which
+is luck, not a process, and it reported it unprompted. The recovery was verified
+by the PM independently of the agent's own account — the file carries no probe
+appendix and its diffstat matches the figure a third agent's report had recorded
+before the loss. **Nothing new is added: `scratchpad-per-agent`
+([D60](#d60--claudemd-was-compressed-and-four-stories-moved-here-2026-08-12)) is
+what made the copy exist, and the standing rule against a destructive git command
+on a dirty tree already covered it.** What this run adds is the evidence that the
+rule is worth its cost, and that the safety net under it is another agent's
+housekeeping.

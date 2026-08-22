@@ -412,6 +412,7 @@ impl Bounded for PodSnapshot {
         self.owner.bound();
         maybe(&mut self.node, IDENTIFIER);
         maybe(&mut self.phase, IDENTIFIER);
+        maybe(&mut self.reason, IDENTIFIER);
         self.containers.bound();
         maybe(&mut self.cpu_request, IDENTIFIER);
         maybe(&mut self.memory_request, IDENTIFIER);

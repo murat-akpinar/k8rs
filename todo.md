@@ -1891,7 +1891,7 @@ unchecked one from the top.
       local storage is its own row, split by `medium` because a tmpfs has
       nothing to copy off; a node that is not `Ready` is the pane's *cannot
       answer this yet* row, never a verdict ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
-- [ ] **Waste** — **Services whose selector matches no pod first** (the 503
+- [x] **Waste** — **Services whose selector matches no pod first** (the 503
       nobody can explain; it stays here rather than in Alerts because
       promoting it would cost a permanent Services + EndpointSlices watch, and
       the watch budget is why k8rs is lighter than k9s), then unbound/unused
@@ -1903,19 +1903,19 @@ unchecked one from the top.
       `DisruptionBudgetSnapshot::selector` became `Option<Selector>` here — an
       empty selector protects a whole namespace and an absent one protects
       nothing, and flattened they were one value ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
-      **Re-opened 2026-08-22: only one of the two pileups landed, and the Done
-      note above records the narrowing.** `finished()` is `Succeeded | Failed`
-      and a node-pressure eviction is `Failed`, so evicted pods are counted with
-      completed Job pods and explained with the Job sentence. Measured on four
-      of them: Alerts prints `nothing is broken`, Waste prints *"4 pods finished
-      and were never removed — Kubernetes keeps a few finished Jobs by default,
-      so some of this is normal"* at `Info` with no action line. They did not
-      finish, they were killed for node memory or disk; they are often the only
-      evidence left after the node recovers; and `Evicted` is NOTES' own example
-      of jargon that must be translated. **Done when** the two pileups are two
-      rows with two sentences, the evicted one carries an action, and a fixture
-      holds the evicted shape
-      ([D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22))
+      Re-opened 2026-08-22 ([D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)):
+      only one of the two pileups had landed. Done: `PodSnapshot::reason` — the
+      one field D42's window was re-opened for — and an `if`/`else` inside the
+      gate that already existed, so the two rows *partition* what `finished()`
+      lets through. `tests/fixtures/evicted.json` is a targeted capture off kind
+      v1.36.1. The operator review took the row's first sentence away as false
+      about its own fixture, the action away as pointing at a screen that is
+      silent by construction, and the `Warn` band away with it; § Positioning's
+      own translation of `Evicted` was the source of the false sentence and moved
+      too. Four correct findings were refused as *not this box* and are in
+      [`backlog.md`](backlog.md)
+      ([D158](NOTES.md#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23) ·
+      [reports/](reports/README.md), 2026-08-23)
 - [x] **`tui-designer` answers where the restart row lives, before it is
       written** —
       [D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)

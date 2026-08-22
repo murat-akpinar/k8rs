@@ -276,22 +276,25 @@ break_it() {
   # destroys the evidence this reads.
   scan_second_revisions "${SECOND_REVISION[@]}"
 
-  # **The one field in broken.yaml that names a node, made relative to this
-  # cluster.** `broken-overhead` carries `nodeName: k8rs-worker` (its manifest says
-  # why), and kind names nodes after the cluster — so on the ephemeral review
-  # cluster, `K8RS_CLUSTER=review`, that node does not exist and the pod sits
-  # Pending forever while `[overhead]` waits for `Running`. A trip on the fixture
-  # cluster substitutes `k8rs` for `k8rs` and nothing changes, so the file stays
-  # exactly what `kubectl apply -f scripts/broken.yaml` does by hand; only a
-  # differently-named cluster sees a difference, which is the only place there is
-  # one. Anchored to the `nodeName:` key so it cannot touch an object *name* that
-  # happens to start `k8rs-`, and `$CLUSTER` is safe in the replacement because
-  # `refuse_unusable_name` has already refused every character that is not.
+  # **The two fields in broken.yaml that name a node, made relative to this
+  # cluster.** `broken-overhead` and `broken-evicted` both carry
+  # `nodeName: k8rs-worker` (their manifests say why), and kind names nodes after
+  # the cluster — so on the ephemeral review cluster, `K8RS_CLUSTER=review`, that
+  # node does not exist and both pods sit Pending forever while `[overhead]` waits
+  # for `Running` and `[evicted]` for a kubelet that has never seen the pod. A
+  # trip on the fixture cluster substitutes `k8rs` for `k8rs` and nothing changes,
+  # so the file stays exactly what `kubectl apply -f scripts/broken.yaml` does by
+  # hand; only a differently-named cluster sees a difference, which is the only
+  # place there is one. Anchored to the `nodeName:` key so it cannot touch an
+  # object *name* that happens to start `k8rs-`, and `$CLUSTER` is safe in the
+  # replacement because `refuse_unusable_name` has already refused every
+  # character that is not.
   #
-  # **The node name is spelled in three places** and they agree by construction
-  # only on the fixture cluster: `scripts/broken.yaml`'s `nodeName: k8rs-worker`,
-  # the `k8rs-` prefix in this expression, and the `.spec.nodeName == "k8rs-worker"`
-  # clause in `justfile` § fixtures. Change one and the other two do not follow.
+  # **The node name is spelled in four places** and they agree by construction
+  # only on the fixture cluster: `scripts/broken.yaml`'s two
+  # `nodeName: k8rs-worker` lines, the `k8rs-` prefix in this expression, and the
+  # `.spec.nodeName == "k8rs-worker"` clause in `justfile` § fixtures. Change one
+  # and the others do not follow.
   sed "s/^\( *nodeName: \)k8rs-/\1$CLUSTER-/" "$BROKEN" | "${kc[@]}" apply -f -
   # The healthy side goes up with the broken one: a rule needs both fixtures,
   # and capturing them from the same cluster at the same time is what makes
@@ -512,7 +515,7 @@ workers() {
 POD_STATES=(oom crashloop image config pending hostpath readiness restarts
             nolimits stuck init quota w2 owned resize podlimit sts rollout ds
             healthy_init healthy_sidecar healthy_hostpath healthy_podlevel
-            exit0 sigterm socket succeeded failed startup notfound wedged
+            exit0 sigterm socket succeeded failed evicted startup notfound wedged
             unjudged oomserving neverback healthy_retry healthy_unreadysidecar
             probe0 neverrules gang
             overhead healthy_disk pdb_floor pdb_room pvc_orphan pvc_used)
@@ -694,6 +697,15 @@ declare -A want=(
   # below rule 5's own threshold and the skip would be proven for rule 6 alone.
   [succeeded]='.status.phase=="Succeeded" and (.status.containerStatuses[0] | .restartCount>=3 and .state.terminated.exitCode==0 and .lastState.terminated.exitCode==1)'
   [failed]='.status.phase=="Failed" and (.status.containerStatuses[0] | .restartCount>=3 and .lastState.terminated.exitCode==1)'
+  # The other way into `Failed`, and the field that tells them apart:
+  # `broken-failed` above is `Failed` too, carrying `status.reason`
+  # `DeadlineExceeded`, so a predicate that stopped at the phase would pass this
+  # fixture on that pod — seen, by deleting the reason clause and watching
+  # verify-test go red on it. Nothing here reads a container: the kubelet leaves
+  # an ordinary `137`/`Error` termination behind, which is what `kubectl get pods`
+  # prints in the STATUS column, and asserting it would pin the one field on this
+  # object that says nothing about an eviction.
+  [evicted]='.status.phase=="Failed" and .status.reason=="Evicted"'
   # Rule 5's CRITICAL band, and the `&& !serving` half beside it: the same
   # history on the same image, told apart by whether the container is serving at
   # the end of it. `.state.running` as well as the count, because a container in
@@ -878,6 +890,7 @@ declare -A why=(
   [socket]="rule 8 — the runtime socket itself, read-only, under its /var/run name (D78)"
   [succeeded]="D71 — a pod that finished, carrying the restarts analyze() must skip"
   [failed]="D71 — the Failed half of that skip, which Evicted pods arrive in"
+  [evicted]="D155 — a pod the kubelet threw off its node: Failed carrying status.reason Evicted, which Waste counts as a finished Job"
   [restarts10]="rule 5 — past ten restarts and not serving: the CRITICAL band"
   [restarts10serving]="rule 5 — past ten restarts and serving: WARN, because red must mean broken"
   [startup]="rule 7 — a startup probe still failing, so readiness has not been asked (D71)"
@@ -935,6 +948,11 @@ fetch() {
 diagnose() {
   jq -c '{ name:       .metadata.name,
            phase:      .status.phase,
+           # The field that separates one way into phase Failed from another (D155).
+           # Dropped when absent by the filter at the foot of this function, so
+           # every FAIL line for a pod that carries no status.reason — today
+           # every fixture but broken-failed and broken-evicted — is unchanged.
+           reason:     .status.reason,
            state:      (.status.containerStatuses // [])[0].state,
            last:       (.status.containerStatuses // [])[0].lastState,
            restarts:   (.status.containerStatuses // [])[0].restartCount,
