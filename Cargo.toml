@@ -29,6 +29,31 @@ exclude = ["screens/", "scripts/", "tmp/", "docs/", "NOTES.md", "REQUIREMENTS.md
 k8s-openapi = { version = "0.28.0", features = ["v1_36"] }
 x509-parser = "0.18.1"
 
+# The client and the watch machinery Phase 5 is built on. **4.2.0 is the version
+# that pairs with the pin above**, read off the crates.io index rather than
+# guessed: kube 4.x requires `k8s-openapi ^0.28.0` and 3.1.0 requires `^0.27.0`,
+# and the two are upgraded together, never separately (`docs/tech-stack.md`).
+#
+# **`rustls-tls`, and the features are named rather than inherited**
+# ([NOTES § D140](NOTES.md)). `default-features = false` keeps `oauth`, `oidc`,
+# `socks5`, `ws` and a second TLS backend out of a binary whose whole trust model
+# is one kubeconfig and one API server — the fewer doors compiled in, the fewer
+# there are to audit. `client` brings discovery with it; there is no separate
+# feature for it.
+kube = { version = "4.2.0", default-features = false, features = [
+    "client",
+    "runtime",
+    "rustls-tls",
+] }
+
+# Required by kube-rs, and later the single `select!` loop. Two features now —
+# a runtime and `#[tokio::main]`; `signal` and `time` arrive with the box that
+# needs them rather than being reserved here.
+tokio = { version = "1.53.1", default-features = false, features = [
+    "rt-multi-thread",
+    "macros",
+] }
+
 [dev-dependencies]
 # Only the fixture tests parse JSON in Phase 3 — the decode they exercise is
 # `serde` into `k8s_openapi::api::core::v1::Pod`. It moves up to a real

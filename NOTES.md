@@ -161,6 +161,8 @@ its line moving with it.
 - [D137](#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22) — Family D: the restart row got a pane of its own, and a real cluster took four claims away
 - [D138](#d138--reports-keeps-everything-and-the-retention-rule-is-a-re-measure-trigger-2026-08-22) — reports/ keeps everything, and the retention rule is a re-measure trigger
 - [D139](#d139--phase-4s-close-the-budget-whose-first-sync-failed-and-where-the-other-seven-findings-went-2026-08-22) — Phase 4's close: the budget whose first sync failed, and where the other seven findings went
+- [D140](#d140--phase-5s-two-dependencies-the-version-that-pairs-with-the-pin-and-rustls-because-the-release-targets-decide-it-2026-08-22) — Phase 5's two dependencies: the version that pairs with the pin, and rustls because the release targets decide it
+- [D141](#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22) — the write guard has never run, and the fix is to give the matching to the tool that resolves paths
 
 ## Why it exists — where the gap is
 
@@ -12079,3 +12081,139 @@ into the phase that was closing:
 question when it lands** — said here so the next PM meets it as a known cost and
 not a surprise. The cheapest of them is the quadratic join, whose output must not
 change at all.
+
+### D140 — Phase 5's two dependencies: the version that pairs with the pin, and rustls because the release targets decide it (2026-08-22)
+
+Phase 5's first box needs `kube` and `tokio`. Both are inside
+[invariant 10](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
+ten, so nothing here reverses that — *approved is not the same as present*, and
+this is the entry that makes them present.
+
+**`kube = "4.2.0"`, read off the crates.io index rather than guessed.** kube 4.x
+declares `k8s-openapi ^0.28.0` and kube 3.1.0 declares `^0.27.0`; the pin in
+`Cargo.toml` is `0.28.0`, so 4.x is the only line that resolves against it. The
+two are upgraded together and never separately
+([D99](#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)),
+and this is the first time that rule has had a second crate to bind.
+
+**`rustls-tls`, and the release targets are what decide it — not a preference.**
+`.github/workflows` builds four targets besides the host:
+`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `x86_64-apple-darwin`,
+`aarch64-apple-darwin`. `openssl-tls` wants a system OpenSSL and a C toolchain per
+target, which is the well-known way a static musl build stops being static and a
+cross-compile stops working at all; rustls is Rust and cross-compiles with the
+rest. **The cost is real and is named here so nobody rediscovers it as a bug:**
+rustls parses certificates more strictly than OpenSSL, so a kubeconfig carrying a
+CA that OpenSSL accepts and rustls rejects will fail to connect where `kubectl`
+succeeds. If that is ever reported, this entry is the thing to reopen — and the
+error must say so, under
+[§ Errors that lie](PRIOR-ART.md#c-errors-that-lie), rather than printing a
+generic TLS failure.
+
+**The features are named, not inherited.** `default-features = false` on both.
+kube gets `client`, `runtime` and `rustls-tls` and nothing else — `oauth`,
+`oidc`, `socks5`, `ws`, `kubelet-debug` and a second TLS backend stay out of a
+binary whose entire trust model is one kubeconfig and one API server
+([invariant 3](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)),
+and the fewer doors are compiled in the fewer there are to audit. **Discovery
+needs no feature of its own** — it arrives with `client`. tokio gets
+`rt-multi-thread` and `macros`; `signal` and `time` arrive with the box that
+needs them rather than being reserved now.
+
+**A note for whoever reads `--all-features` in CI and worries.** `cargo clippy
+--all-features` enables the features declared in *our* manifest, and this crate
+declares none — it cannot reach into `kube` and switch its TLS backend on. Checked
+rather than assumed, because if the crate ever grows a `[features]` section that
+stops being true.
+
+**The gate caught the thing the ruling had not considered, which is the gate
+working.** With the two crates added, `cargo deny check` failed — `licenses`,
+exactly one rejection: **`CDLA-Permissive-2.0`** on `webpki-root-certs v1.0.9`,
+reached through `rustls-platform-verifier` ← `kube-client`. Ruled **admitted**:
+the licence covers *data* rather than code — the Mozilla CA root bundle — and 2.0
+dropped the attribution-on-output obligation 1.0 carried. It is also not avoidable
+by feature selection: kube 4.2.0 exposes no feature that removes the platform
+verifier, and the one adjacent feature, `webpki-roots`, would pull more of the
+same.
+
+**A third reason was given for that ruling and it was false — reasoned, not
+measured, in the same turn that closed a phase for exactly this class.** The
+ruling said k8rs *links it into a shipped binary, so this is a real distribution
+question*. It does not. `rustls-platform-verifier 0.7.0` declares it under
+`[target.'cfg(target_arch = "wasm32")'.dependencies]`, so
+`cargo tree -i webpki-root-certs -e normal` prints **"nothing to print"** on the
+host and only `--target all` finds it. `tester` measured that and said so; the PM
+re-ran both commands before writing this. It is in the **graph** cargo-deny reads,
+because cargo-deny does not filter by target, and in **zero** k8rs binaries.
+
+That correction does not reverse the ruling — it narrows it. A licence that never
+reaches a shipped artifact is a weaker reason to relax policy globally and a
+better reason to name one crate, which is what `deny.toml` now does:
+`{ name = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] }`, an exception
+rather than an `allow` entry, **with no version pin** — measured four ways by
+`tester`, and a pinned version turns a routine bump into a red build while an
+unpinned one degrades to a warning if kube ever drops the crate. Filtering
+`[graph] targets` instead would have made the failure vanish by dropping the graph
+from 192 crates to 162, and those 30 would stop being checked for advisories and
+sources too; rejected on that measurement rather than on principle.
+
+**`openssl-probe` is in the lockfile and no OpenSSL is linked.** It locates the
+system trust store on disk. Written down because a reader who greps
+`Cargo.lock` for `openssl` will find it and should not have to re-derive that.
+
+### D141 — the write guard has never run, and the fix is to give the matching to the tool that resolves paths (2026-08-22)
+
+Adding `kube` in [D140](#d140--phase-5s-two-dependencies-the-version-that-pairs-with-the-pin-and-rustls-because-the-release-targets-decide-it-2026-08-22)
+turned `scripts/write-guard.py` red for the first time — **five findings, all
+false, and zero true**:
+
+    FAIL src/analysis.rs:2210  .entry()    — BTreeMap::entry
+    FAIL src/analysis.rs:2221  .entry()    — BTreeMap::entry
+    FAIL src/main.rs:329       .entry()    — HashMap::entry
+    FAIL src/rules.rs:6390     .replace()  — str::replace, twice on one line
+
+**And the reason it had never fired before is worse than the false positives.**
+The guard begins by deriving its ban list from the kube version in `Cargo.lock`,
+and when kube is not a dependency it prints *"nothing to contain"* and exits 0.
+kube was not a dependency until today. So invariant 1's *mechanical*
+enforcement — the thing `CLAUDE.md` calls the containment guarantee — **has been
+passing vacuously for the entire project**, and `clippy.toml`'s
+`disallowed-methods` has been `[]` the whole time beside it. Nothing was
+containing anything. It never mattered, because `grep -rn "kube::" src/` still
+returns nothing, but that is luck rather than a guard.
+
+**Why the false positives are structural and not a bug to patch.** The derived
+ban list is *every `&self` method of `Api<K>` minus the allowlist* — 48 methods
+found, 29 banned, deliberately conservative so a method kube adds next release is
+banned by default. Three of those 29 are ordinary Rust method names — **`entry`,
+`replace`, `namespace`** — and two more, `namespace` and `resource_url`, do not
+mutate at all and are banned only because they miss the `get*`/`list*`/`watch*`
+allowlist. The guard matches a bare `.name(` in any `.rs` file with no knowledge
+of the receiver's type, so `HashMap::entry` and `str::replace` are indistinguishable
+from kube writes. **No amount of tuning fixes that**: the information the check
+needs — what the receiver is — is not in the text it reads.
+
+**Ruled: the matching moves to clippy, and the guard keeps the half only it can
+do.** `clippy.toml` already says this is the plan — *"clippy resolves paths… entries
+arrive with the client (Phase 5)"* — and this is Phase 5.
+
+- **`clippy.toml` gets the 29 as fully-qualified paths.** Clippy resolves
+  `kube::Api::replace` and never confuses it with `str::replace`, which is the
+  whole problem gone rather than narrowed. With `-D warnings` this is the
+  containment, and `ops.rs` carries the single visible
+  `#![allow(clippy::disallowed_methods)]` that announces the exception, exactly
+  as [invariant 1](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+  describes.
+- **`write-guard.py` stops grepping `src/` and checks for drift instead**: derive
+  the ban list from the kube in `Cargo.lock`, and fail unless `clippy.toml` names
+  exactly that set. That is the job the grep could never do and the reason the
+  script exists in its own words — *"kube-rs grows new ones every release, which
+  is exactly the thing nobody will remember to update"*. Its `CANARIES` stay, and
+  they matter more now: an under-extracting parser would produce a short list,
+  `clippy.toml` would match it, and both would be green over a hole.
+
+**This is a deletion, and that is the point.** The weaker, false-positive-prone
+half goes; nothing is lost, because a kube method added between releases makes the
+derived set differ from `clippy.toml` and goes red in the same commit that bumps
+kube. A gate that is red for nothing is one people learn to wave through — which
+`scripts/guards.sh` already says in its own comments, about itself.

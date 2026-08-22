@@ -24,7 +24,7 @@ Full dependency list (ten crates approved; nine ship in v0.1, `similar`
 arrives with `edit` in v0.4):
 
 ```toml
-kube            # client + runtime (watcher/reflector) + discovery features
+kube            # client + runtime (watcher/reflector); discovery comes with `client`
 k8s-openapi     # API types — one k8s version feature pinned
 ratatui
 crossterm
@@ -38,6 +38,27 @@ similar         # edit diff
 
 The last three were added by the 2026-08-11 scope reversal. Everything else
 predates it.
+
+**What is actually in `Cargo.toml` today** — approved is not the same as present,
+and four of the ten have not arrived yet:
+
+| Crate | Pin | Landed | Features |
+|---|---|---|---|
+| `k8s-openapi` | `0.28.0` | Phase 3 | `v1_36` |
+| `x509-parser` | `0.18.1` | Phase 3 | — |
+| `kube` | `4.2.0` | Phase 5 | `client`, `runtime`, `rustls-tls`, no defaults |
+| `tokio` | `1.53.1` | Phase 5 | `rt-multi-thread`, `macros`, no defaults |
+| `serde_json` | `1` | Phase 3, as a **dev**-dependency | — |
+
+`kube` 4.x is the line that resolves against the `k8s-openapi` pin — 3.1.0 wants
+`^0.27.0` — and the two are upgraded together, never separately.
+**`rustls-tls` is chosen by the release targets**, not by preference: `openssl-tls`
+wants a system OpenSSL and a C toolchain for each of the four cross-compiled
+targets. The cost is that rustls parses certificates more strictly than OpenSSL,
+so a CA that `kubectl` accepts can be one k8rs rejects
+([NOTES § D140](../NOTES.md#d140--phase-5s-two-dependencies-the-version-that-pairs-with-the-pin-and-rustls-because-the-release-targets-decide-it-2026-08-22)).
+`openssl-probe` appears in `Cargo.lock` and links no OpenSSL — it locates the
+system trust store on disk.
 
 ## Deliberately absent
 
