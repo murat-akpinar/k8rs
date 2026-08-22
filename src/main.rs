@@ -161,13 +161,20 @@ fn wall_clock() -> Result<Time, String> {
     })
 }
 
-/// **Strip the control characters out of a string that came from outside this file** — the
-/// guard invariant 9 owes every printer, and this is the first one (`screens/widgets.md` § 7).
+/// **Strip the characters that have no printed form out of a string that came from outside
+/// this file** — the guard invariant 9 owes every printer, and this is the first one
+/// (`screens/widgets.md` § 7).
 ///
 /// `println!` has no ratatui between it and the terminal, so an escape sequence in a pod name
-/// arrives as an escape sequence and rewrites the user's screen. `char::is_control` is
-/// Unicode's `Cc` category, which is exactly that class: the C0 range, `DEL`, and the C1 range
-/// a UTF-8 stream can carry as `\u{80}`–`\u{9f}`.
+/// arrives as an escape sequence and rewrites the user's screen.
+///
+/// **What counts as such a character is [`k8s::unprintable`]'s answer and is not restated
+/// here** (NOTES § D154, CLAUDE.md § Single point of change). This file carried its own
+/// narrower spelling until 2026-08-22, and the day the ingest guard widened and this one did
+/// not, `k8rs some-pod.json` printed a row that reads *prodcd* for a pod named
+/// `prod\u{202e}dc` — the hole is this path's alone, because it builds its snapshot off
+/// `rules.rs`'s `From` impls and never meets [`k8s::Store`]. **A second spelling is what the
+/// fix refuses**: the two files are modules of one crate, so this one calls the predicate.
 ///
 /// **Removed, not replaced.** "Stripped" is the word in both invariant 9 and § 7, and a
 /// substituted space is a character the API did not send — a second lie in the record
@@ -178,13 +185,13 @@ fn wall_clock() -> Result<Time, String> {
 /// message, never on the finished message.** Every fragment that came from outside passes
 /// through it at the `format!` that interpolates it — a [`Finding`]'s fields, a path off argv,
 /// an error string from `serde_json`, the standard library or `jiff`. Every literal in this
-/// file is ours and stays whole, which is what the other half buys: `'\n'.is_control()` is
-/// `true`, so a strip over the assembled message ate [`USAGE`]'s own line breaks and printed
-/// three sentences as one. A `\n` *from the cluster* still dies here, and must — it would
-/// forge a second card. Phase 5's ingest strip supersedes this by applying the same rule one
-/// layer earlier, cleaning the text as it arrives.
+/// file is ours and stays whole, which is what the other half buys: a line break is
+/// unprintable by the predicate above, so a strip over the assembled message ate [`USAGE`]'s
+/// own line breaks and printed three sentences as one. A `\n` *from the cluster* still dies
+/// here, and must — it would forge a second card. Phase 5's ingest strip supersedes this by
+/// applying the same rule one layer earlier, cleaning the text as it arrives.
 fn sanitize(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).collect()
+    text.chars().filter(|c| !k8s::unprintable(*c)).collect()
 }
 
 // --- WHAT WAS READ START ---

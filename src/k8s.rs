@@ -69,6 +69,18 @@
 //! including the one where a server too old for the aggregated call answers `Ok` with an empty
 //! cluster in it.
 //!
+//! **The browser's rows are the API server's own printed table, and the fallback under it is one
+//! column** (invariant 12, § THE BROWSER'S ROWS). [`Fetch`] is where a list is asked for and
+//! [`Table`] is what comes back — cells that are not all strings, an identity per row that the
+//! `includeObject` default is kept for, and the plain object list read for what it is whether it
+//! arrives as a `200` the Accept header negotiated or after a `406` from an aggregated API server.
+//!
+//! **A browser view is the one watch that is not permanent** (§ KEEPING A BROWSER VIEW FRESH).
+//! A metadata watch says *that* something changed and [`Browsing`] decides when that is worth a
+//! re-fetch. [`REFRESH_FLOOR`] is the floor between an answer and the next question, the pending
+//! flag clears when a fetch is issued rather than when it returns, and one fetch is on the wire at
+//! a time — the two halves of `PRIOR-ART § A5` (NOTES § D154).
+//!
 //! **What is still missing is the `Client`**, and with it the five `Api<K>`s [`drive`] would be
 //! handed: that is the `connect()` box further down Phase 5. Nothing here has met an API
 //! server.
@@ -98,8 +110,15 @@ use futures_util::stream::{BoxStream, Stream, StreamExt, TryStreamExt, select_al
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
-use k8s_openapi::jiff::Timestamp;
+use k8s_openapi::jiff::{SignedDuration, Timestamp};
+// `serde` and `serde_json` are reached through `k8s-openapi`'s own re-exports rather than named a
+// second time in `Cargo.toml` — the same door `jiff` already comes through above, and invariant
+// 10's narrowest possible answer: a crate already in the build, not even needing to be named.
+use k8s_openapi::serde::Deserialize;
+use k8s_openapi::serde_json::Value;
+use kube::Resource;
 use kube::core::response::reason;
+use kube::core::{DynamicObject, gvk::GroupVersionKind};
 use kube::discovery::{ApiCapabilities, ApiResource, Scope, verbs};
 use kube::runtime::watcher::{self, Event};
 use std::collections::{BTreeMap, BTreeSet};
@@ -109,8 +128,20 @@ use std::collections::{BTreeMap, BTreeSet};
 // **Every string a snapshot type carries is cleaned and bounded here, and nowhere else.**
 // Invariant 9 owes a strip to every printer and the security gate owes a bound to every field;
 // both are paid once, on the way into the decode, so no downstream consumer has to remember.
-// `main.rs`'s `sanitize` is the same rule one layer up and is superseded by this (NOTES § D122);
-// it stays until `dev-ui` removes it at Phase 12.
+// `main.rs`'s `sanitize` was the same rule one layer up and is superseded by this
+// (NOTES § D122); it stays until `dev-ui` removes it at Phase 12.
+//
+// **It stopped being the same rule for a day, and the second copy is gone rather than
+// widened.** This guard grew the zero-width and bidi characters `char::is_control` does not
+// answer for ([`unprintable`], NOTES § D154); `sanitize` did not, and the temporary driver's
+// fixture path never meets this file — `main.rs` builds its snapshot straight off `rules.rs`'s
+// `From` impls — so `k8rs some-pod.json` printed a U+202E straight to the terminal for as long
+// as the two spellings coexisted. **`sanitize` now calls [`unprintable`]**, which is why it is
+// `pub(crate)`: one predicate, one place, and the next widening reaches both paths without
+// anyone remembering (CLAUDE.md § Single point of change). What `sanitize` still owns is the
+// *disposal* — it removes and never substitutes, where [`text`] turns a removed whitespace
+// break into one space — because a driver that strips at the `format!` cannot tell a value
+// from the sentence around it.
 //
 // **The one string this file keeps that does not come through here is [`Store::failure`]**,
 // which is kube's `watcher::Error` and not a `String` this file owns. Its own doc carries the
@@ -151,13 +182,50 @@ const FREE_TEXT: usize = 4096;
 /// neither.
 const SHORTENED: &str = "… (shortened by k8rs)";
 
+/// **A character with no printed form of its own** — what this guard removes, and it is wider
+/// than `char::is_control` (invariant 9, NOTES § D154).
+///
+/// `is_control` is Unicode `Cc` and nothing else, so U+202E RIGHT-TO-LEFT OVERRIDE, U+200B ZERO
+/// WIDTH SPACE, U+00AD SOFT HYPHEN and U+FEFF walked straight through it — **compiled and run,
+/// not reasoned from the name**: `is_control` was evaluated on each of them and
+/// `"prod\u{202e}reversed"` came back out of [`text`] unchanged. A bidi override reverses every
+/// character after it, so `prod\u{202e}dc` is a row that reads *prodcd* and matches neither
+/// spelling in a search; a zero-width character hides a difference between two names outright.
+/// That is Trojan Source in a row, and § THE BROWSER'S ROWS is what makes it reachable from
+/// every cell of every kind the cluster serves — a CRD's `additionalPrinterColumns`, an Events
+/// `MESSAGE` — instead of from the named `String` fields the snapshot types carry.
+///
+/// **Ranges rather than the codepoints somebody has been seen using**: `200b..=200f` is the
+/// zero-width and bidi-mark block, `202a..=202e` the embeddings and overrides, `2060..=206f` the
+/// word joiner, the invisible operators, the bidi *isolates* — the modern spelling of the
+/// override — and the deprecated format characters; the two singletons are the soft hyphen and
+/// the byte-order mark. **Not one of them is `char::is_whitespace`**, so none becomes a space in
+/// [`text`] — they separated nothing.
+///
+/// **Two of them do carry meaning somewhere, and that cost is paid deliberately.** U+200C and
+/// U+200D sit inside the first range: the joiner builds a multi-person emoji out of several, and
+/// both change how Persian and Indic text is shaped. A *message* containing one renders
+/// differently after this. They are removed anyway, because they are also how two names are made
+/// to look like one, and a Kubernetes name is a DNS label with neither of them in it.
+///
+/// **What is deliberately left in is anything that prints.** U+2028 and U+2029 are drawn as a
+/// glyph by a terminal rather than obeyed, and U+00A0 is a space that is visible as one;
+/// removing either would change text the cluster meant to send.
+pub(crate) fn unprintable(character: char) -> bool {
+    character.is_control()
+        || matches!(character,
+            '\u{ad}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}' | '\u{feff}')
+}
+
 /// One untrusted string, made safe to hold and safe to print.
 ///
-/// **A control character that is whitespace becomes one space; every other one is removed**
-/// (NOTES § D146). `char::is_whitespace` is what decides which — `HT`, `LF`, `VT`, `FF`, `CR`
-/// and `NEL`, and nothing else in the control range — so the split is the standard library's
-/// and not a list kept here. A boundary deleted glues two words into one; `ESC`, `NUL`, `DEL`
-/// and the rest of the C1 range have no readable equivalent and are what invariant 9 exists for.
+/// **An [`unprintable`] character that is whitespace becomes one space; every other one is
+/// removed** (NOTES § D146, § D154). `char::is_whitespace` is what decides which — `HT`, `LF`,
+/// `VT`, `FF`, `CR` and `NEL`, and nothing else this guard removes — so the split is the
+/// standard library's and not a list kept here. A boundary deleted glues two words into one;
+/// `ESC`, `NUL`, `DEL`, the rest of the C1 range and every zero-width and bidi character have
+/// no readable equivalent and are what invariant 9 exists for.
 ///
 /// **The space is added only between two characters that were kept, and only where there is not
 /// one already**, which settles the three end cases in one condition: a run of breaks however it
@@ -180,7 +248,7 @@ fn text(value: &mut String, cap: usize) {
     let mut kept = String::new();
     let mut break_pending = false;
     for character in value.chars() {
-        if !character.is_control() {
+        if !unprintable(character) {
             if break_pending && !kept.is_empty() && !kept.ends_with(' ') {
                 kept.push(' ');
             }
@@ -407,14 +475,58 @@ impl Bounded for Browsable {
     }
 }
 
+/// **What the browser keeps of one column the server printed** (§ THE BROWSER'S ROWS).
+///
+/// Here for [`Bounded for Browsable`](Browsable)'s reason and one more: the name of a CRD's
+/// `additionalPrinterColumns` entry is written by whoever wrote the manifest, so a column header is
+/// the same untrusted class as a plural (invariant 9).
+impl Bounded for Column {
+    fn bound(&mut self) {
+        text(&mut self.name, IDENTIFIER);
+    }
+}
+
+/// **A printed cell is [`FREE_TEXT`] and every one of them is, because nothing kind-agnostic says
+/// which are words and which are sentences.**
+///
+/// D146 splits the two classes by what the value is drawn as, and a `Table` cell can be either: an
+/// Events table's `MESSAGE` is a sentence, a Pod's `Ready` is `1/1`. The wire carries no signal
+/// that separates them — `columnDefinitions[].type` is `string`/`integer`/`date`, and `format` is
+/// `name` or empty — and a list of which columns are sentences would be a per-kind list, which is
+/// the thing invariant 12 refuses. So the class that keeps a sentence whole is the one used, and
+/// the narrower bound stays on the identity beside it, which is an identifier in every row.
+impl Bounded for Row {
+    fn bound(&mut self) {
+        for cell in &mut self.cells {
+            text(cell, FREE_TEXT);
+        }
+        maybe(&mut self.namespace, IDENTIFIER);
+        maybe(&mut self.name, IDENTIFIER);
+        maybe(&mut self.uid, IDENTIFIER);
+    }
+}
+
+impl Bounded for Table {
+    fn bound(&mut self) {
+        self.columns.bound();
+        self.rows.bound();
+    }
+}
+
 /// **The whole of what happens to an API object on its way into the store**: decode, which is
 /// the prune, then strip and bound.
 ///
 /// One function so there is one answer — a second entry point into the store is a second place
-/// to forget the guard. Three callers: [`Watch::take`] for a watched object,
-/// [`Store::owner_fetched`] for a ReplicaSet fetched by uid, and [`browsable`] for a kind
-/// discovery named. **The doc said *the only caller* until 2026-08-22** and the second one had
-/// landed a box earlier; the count is not the point, the single door is.
+/// to forget the guard. [`Watch::take`] for a watched object, [`Store::owner_fetched`] for a
+/// ReplicaSet fetched by uid, [`browsable`] for a kind discovery named, and the browser's
+/// [`Table`] for either shape a list comes back in. **The doc said *the only caller* until
+/// 2026-08-22** and the second one had landed a box earlier; the count is not the point, and it
+/// is not kept here any more — the single door is.
+///
+/// **The `From` is what makes the door unavoidable for the browser's rows.** [`Table`] does not
+/// implement `Deserialize`, so `Client::request::<Table>` cannot compile: the only way to hold one
+/// is `ingest::<TableResponse, _>`, whichever of the two shapes the body turned out to be, and it
+/// ends here.
 fn ingest<K, T: From<K> + Bounded>(object: K) -> T {
     let mut object = T::from(object);
     object.bound();
@@ -1570,11 +1682,16 @@ async fn drive(watches: Vec<BoxStream<'static, watcher::Result<Update>>>, store:
 // in the sidebar and answers `403` when it is opened, and telling them that is the browser's job,
 // not this filter's.
 //
-// **Subresources are gone before this is called and no filter here re-does it.** The legacy path
-// skips any resource whose name contains `/` (`parse.rs:79`) and the aggregated one nests them
-// under their parent (`parse.rs:128-132`), so `pods/log` cannot reach this function through
-// either. A guard against a shape the pipeline cannot produce is one nobody can prove
-// (NOTES § D29).
+// **Subresources are gone before this is called, as long as the server is well behaved.** The
+// legacy path skips any resource whose name contains `/` (`parse.rs:79`) and the aggregated one
+// nests a *declared* subresource under its parent (`parse.rs:128-132`), so `pods/log` does not
+// reach this function from either on an ordinary cluster. **What the aggregated path does not do
+// is check the top-level name at all** — `parse_v2_resource` is `plural: res.resource
+// .unwrap_or_default()` (`parse.rs:115-132`) with no filter on it — and `run_aggregated()` is the
+// call this file makes, so a `/` in a plural is a shape the pipeline *can* produce after all.
+// **That is [`path_safe`]'s subject, in § THE BROWSER'S ROWS, and it is not this filter**: this one
+// is about what a resource is, that one about what a URL may be built from, and only the second
+// has ever met a byte that leaves the machine.
 //
 // **`namespaced` is `Scope::Namespaced`, and an omitted scope reads as cluster-wide.** The
 // aggregated parse is `match res.scope.as_deref() { Some("Namespaced") => Namespaced, _ =>
@@ -1697,6 +1814,13 @@ impl From<(ApiResource, ApiCapabilities)> for Browsable {
 /// that produce the list end in a hash map and a sidebar that reshuffles itself between launches
 /// is unusable.
 ///
+/// **A kind whose own words cannot build a URL is still offered here, and cannot be opened.** The
+/// region above is why one can exist at all; [`path_safe`] is where it is refused, one layer
+/// later, at the only place a discovery word becomes a request. Refusing it *here* would be the
+/// stronger answer and is deliberately not taken this turn: it would also drop a kind the ingest
+/// guard had just shortened or stripped, which reverses two things this box proved, and what a
+/// screen should say about a row that cannot open is not a question this file settles alone.
+///
 /// **Sorted by plural, then group, then version** — by the word the sidebar draws first, so the
 /// two `events` land next to each other rather than at opposite ends, and by the group second so
 /// that pair has a fixed order too. **After the bound and not before**: two plurals cut to the
@@ -1726,3 +1850,742 @@ pub fn browsable(
 }
 
 // --- EVERY KIND THE CLUSTER SERVES END ---
+
+// --- THE BROWSER'S ROWS START ---
+//
+// **The columns come off the wire and are not written down here** (invariant 12,
+// `screens/resources.md`). The API server prints a list the way `kubectl get` would — one
+// `columnDefinitions` array, one `cells` array per row — and everything in this region either
+// carries that answer or refuses to look inside it. A `match` on a kind anywhere below is the
+// design failure invariant 12 names.
+//
+// **Measured off a live kind cluster (v1.36.1) on 2026-08-22 through `kubectl proxy`, with the
+// Accept header below.** The two shapes are `tests/fixtures/table-pods.json` and
+// `tests/fixtures/table-deployments.json`:
+//
+// | what | measured |
+// |---|---|
+// | top level | `{apiVersion: meta.k8s.io/v1, kind: Table, columnDefinitions, rows, metadata}` |
+// | columns — pods / nodes / deployments | 9 / 10 / 8, of which 5 / 5 / 5 at `priority: 0` |
+// | `priority > 0` | exactly what `kubectl -o wide` adds |
+// | cell types across the deployments table | `["number", "string"]` |
+// | `?includeObject=None` against the default | 7 339 vs 142 584 bytes, 14 kube-system pods |
+//
+// **A cell is not a string.** A Deployment's `Up-to-date` and `Available` arrive as JSON numbers,
+// so `cells: Vec<String>` would have failed to deserialise on every Deployment table a real
+// cluster serves. [`cell`] is the one place a cell becomes text.
+//
+// ## `includeObject`, and why the 19× is paid
+//
+// The default is `Metadata` — every row carries a whole `PartialObjectMetadata`, `managedFields`
+// and all — and `?includeObject=None` sends `"object": null` instead, for a nineteenth of the
+// bytes. **The default is kept**, because `screens/resources.md` spends the row's object twice and
+// neither spend has a second source: a finding is matched onto a row *by name, namespace and uid*
+// (the `●` marker, which is that screen's first rule), and every operation in `screens/dialogs.md`
+// needs an explicitly selected object to name (invariant 2). The cells cannot supply them — the
+// committed pods table has nine columns and none of them is a namespace, and **a cross-namespace
+// list does not add one**. Measured 2026-08-22: `/api/v1/pods` — 53 rows drawn from three
+// namespaces — comes back with the same nine columns as `/api/v1/namespaces/kube-system/pods`.
+// `kubectl get pods -A` prints a `NAMESPACE` column because **kubectl prepends it client-side**;
+// the server never sends one.
+//
+// **What that costs a screen is named here so the box that draws one inherits it rather than
+// rediscovering it.** `Fetch::table(kind, None)` on a namespaced kind lists every namespace, so a
+// screen drawing the `priority: 0` cells and nothing else shows six identical `kube-root-ca.crt`
+// rows with a cursor sitting on one of them (`/api/v1/configmaps` on the same cluster, 14 rows,
+// six of that name). **The identity is recoverable and that is exactly why the default is kept** —
+// [`Row::namespace`] is right there under it — and it is **not** recoverable under
+// `?includeObject=None`, which is how `tests/fixtures/table-deployments.json` was captured and why
+// every one of its six rows, living in four namespaces, carries `namespace: None`.
+//
+// **Nothing of `managedFields` is *retained*, and that is not the same as nothing being paid.**
+// The first draft of this paragraph said none of the 19× is paid in memory, and both halves of
+// that were wrong.
+//
+// **Retained: nothing.** `managedFields` is not named by [`MetadataResponse`], so serde skips it —
+// `serde_json-1.0.106/src/de.rs:1093` `ignore_value` keeps a depth stack of one byte per brace and
+// `ignore_str` copies no characters at all. The prune is the decode, as it is for a watched object
+// (see the module doc).
+//
+// **Paid transiently in memory, twice over.** `kube-client-4.2.0/src/client/mod.rs:298-299`
+// collects the body to `Bytes` and then builds a `String` from `body_bytes.to_vec()` — a second
+// whole copy alive at the same time — before `serde_json::from_str` at `:287` ever sees it. At the
+// default `includeObject` that is two copies of the large body, not of the small one.
+//
+// **Paid in CPU, and here is the number.** Measured on the real `serde_json::from_str` path, best
+// of 50 runs each: 12 204 bytes parses in **185.4 µs** and 676 056 bytes in **6.452 ms** — 55× the
+// bytes for 34.8× the time, near enough linear. At this box's own 19× that is **roughly 12× the
+// parse cost of every refresh**, at up to once a second per open view. **[`REFRESH_FLOOR`] bounds
+// how often a request is made and not what one costs**, so it caps this at 1 Hz and does not
+// reduce it.
+//
+// **`includeObject` is not sent, and the default is written down here instead of asked for.**
+// Sending `?includeObject=Metadata` would put k8rs on a query kubectl does not use for the same
+// answer, and [`Fetch::plain`] would then have to strip it again — `includeObject` is a `Table`
+// option and means nothing to the object list a `406` falls back to. What would reverse this is one
+// measurement of a re-fetch at cluster size, which no machine in this repo can take.
+//
+// ## The 406, and the half of it that is not proven
+//
+// **The Accept header carries `,application/json` so an ordinary server negotiates the plain list
+// by itself**; the case the fallback exists for is an aggregated API server that refuses the whole
+// header (`screens/resources.md`). **The kind cluster this region was measured on runs no
+// aggregated API server**, so [`not_acceptable`] is proven against a `Status` this repo built and
+// never against one a server sent. What a real 406 body contains is the half that stays unproven.
+//
+// **The predicate reads `Status::code`, and there is one shape it cannot see.** kube parses the
+// error body into a `Status`, and stamps the HTTP code onto a synthetic one only when that parse
+// fails (`kube-client-4.2.0/src/client/mod.rs:551-558`). Every field of `Status` is
+// `#[serde(default)]`, so a `406` whose body is JSON that is *not* a `Status` parses as one with
+// `code: 0` and the fallback does not fire. **Driven through kube's own branch with eight bodies**,
+// the set that is missed is `{}`, an object with other keys such as `{"error": …}`, the RFC 7807
+// problem-details shape, and — the one nobody would have guessed — **`[]`**, because serde builds
+// an all-default struct out of a sequence just as happily. A plain-text or HTML body *does* fire,
+// because that parse fails and kube stamps the real HTTP code. Closing the rest needs a server to
+// ask.
+//
+// **The fallback can draw one column.** A plain object list carries no columns at all, and the only
+// thing in one that is not per-kind is `metadata` — so [`Table::from_objects`] synthesises a `Name`
+// column and nothing else: no Ready, no Status, no Age. Age is not an oversight, it is a clock, and
+// this file does not read one (invariant 5, NOTES § D18); it would have to become a column of
+// RFC 3339 text, which is not what the reader was looking at a moment before.
+//
+// **And the `406` is not the only way that list arrives.** The Accept header's own
+// `,application/json` half means an ordinary server that cannot print a `Table` answers **200**
+// with it, which [`not_acceptable`] never sees — so the branch that reads it is in the decode,
+// on `kind`, and [`TableResponse`] is where that is written down.
+//
+// **How many rows and how many cells is deliberately not answered here.** [`text`] bounds each
+// value and nothing bounds the number of them — the same ceiling [`Browsable`] carries, and the
+// open collection-bound box in todo.md § Phase 5 is where a reader is told that a list was cut.
+//
+// **A Table can be paged and the server says how much is left, and neither fact reaches this
+// file.** `?limit=5` answers `metadata.remainingItemCount: 48` and a `metadata.continue` token;
+// the same call unpaged answers 53 rows and a `metadata` of nothing but `resourceVersion`
+// (measured 2026-08-22). **[`TableResponse`] names no `metadata` field at all**, so the fetch is
+// unpaged and nothing here can say *there are 4 947 more rows* or ask for the next page — a
+// 5 000-row namespace is 5 000 rows decoded, held and drawn, which is also what
+// [`REFRESH_FLOOR`]'s numbers are about. It is deliberately not added by this box: a field with
+// no reader is one nobody can prove, the box that would read it has no phase yet, and **this file
+// freezes after Phase 6** (todo.md § Phase 5, NOTES § D116) — so that box raises it before then,
+// as [`Column`]'s dropped `type` must.
+//
+// **One thing in this region is a sink and not a display, and it is the only refusal in it.** A
+// group, a version and a plural become a *URL path*, and § EVERY KIND THE CLUSTER SERVES is where
+// they came from — an answer an aggregated API server writes. [`path_safe`] is that door.
+
+/// **One word that is about to become part of a URL path** — a group, a version, a plural, or the
+/// namespace a view is scoped to.
+///
+/// **The trust boundary is real** (§ EVERY KIND THE CLUSTER SERVES): `run_aggregated()` copies
+/// `resources[].resource` straight into the plural with no check on it
+/// (`kube-client-4.2.0/src/discovery/parse.rs:115-132`), so on a cluster with an aggregated
+/// APIService registered, the string [`Fetch::table`] would interpolate into a path is chosen by
+/// whoever runs that API server. A plural of `pods/../secrets` is a row labelled *widgets* that
+/// lists Secrets with the reader's own credentials, and one containing `?` or `#` puts query
+/// parameters on a call the command log prints without them, which is invariant 4's record lying.
+/// It cannot reach a different *host* — the base URL is the kubeconfig's — and that is the whole
+/// of what keeps it from being worse. **The same rule that covers a name building a filesystem
+/// path covers a name building a URL** (the security gate); this is that sink.
+///
+/// **What is allowed is what every Kubernetes name already is**: ASCII alphanumerics, `-` and `.`,
+/// beginning with an alphanumeric. An API group is a DNS subdomain and **may begin with a digit**,
+/// so a leading letter is not required — requiring one would refuse a real CRD group. The empty
+/// word is refused here and the empty *group* is allowed by [`Fetch::table`], because the core
+/// group is spelled `""` and contributes no path segment.
+///
+/// **The namespace goes through it too**, and for a reason that is about time rather than about
+/// trust: today it is `--namespace`, and the picker further down Phase 5 fills it from the
+/// cluster's own list. A predicate that is applied to every word cannot be the one that was
+/// forgotten when the source changed.
+///
+/// **A denylist of `/`, `..`, `?` and `#` was the other way to write this, and it is the wrong
+/// one** — for invariant 1's reason one layer down. Percent-encoding, `;` parameters and whatever
+/// the next URL parser disagrees about are all things a list of four characters does not know
+/// about.
+///
+/// **Where this does *not* run is [`browsable`], and that is a question rather than a decision.**
+/// Moving it there would drop such a kind from the sidebar entirely, which is the stronger answer
+/// and also reverses two things the discovery box proved — a CRD that names itself with control
+/// characters is *offered with its name stripped*, and a runaway plural is *offered shortened*,
+/// and neither survives this predicate afterwards. What a screen should show for a row that cannot
+/// be opened is not this file's to settle alone.
+fn path_safe(word: &str) -> bool {
+    word.starts_with(|character: char| character.is_ascii_alphanumeric())
+        && word.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '.'
+        })
+}
+
+/// **What the browser asks for**: the `Table` the API server would print for `kubectl get`, with
+/// the plain object list as the negotiated second choice (`screens/resources.md`).
+///
+/// The two halves are not interchangeable: without `,application/json` a server with no `Table`
+/// support answers `406` instead of the list, and without the `Table` half every screen would be
+/// a hand-written column list, which is what invariant 12 refuses.
+const TABLE_ACCEPT: &str = "application/json;as=Table;g=meta.k8s.io;v=v1,application/json";
+
+/// What [`Fetch::plain`] asks for after a `406`: the ordinary object list, no `Table` at all.
+const PLAIN_ACCEPT: &str = "application/json";
+
+/// The one HTTP status that means *ask again without the `Table` header* (the region above).
+const NOT_ACCEPTABLE: u16 = 406;
+
+/// What the server calls the printed answer, and the whole of how [`TableResponse`] tells the two
+/// shapes apart.
+const TABLE_KIND: &str = "Table";
+
+/// The column a plain object list is drawn as, spelled the way the API server spells its own
+/// (`columnDefinitions[0].name` is `Name` in both committed tables). Casing on screen is
+/// `views.rs`'s.
+const NAME_COLUMN: &str = "Name";
+
+/// **One browser fetch: where it goes, and what it will accept there.**
+///
+/// **Not an `http::Request`, and that is a choice with two halves.** The caller builds one from
+/// this with `kube::core::Request::new(&fetch.path).list(&ListParams::default())` — `list` is on
+/// invariant 1's allowlist and supplies the `GET` — and inserts [`Fetch::accept`]; that line is
+/// `connect()`'s for § EVERY KIND THE CLUSTER SERVES's reason. The half that is *not* about
+/// ownership: `http::Request` is not `Clone`, so a fallback derived from the request that was
+/// refused could not be, and [`Fetch::plain`] is exactly that derivation. **The path a `406`
+/// retries is structurally the path that was refused**, never one rebuilt beside it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fetch {
+    /// The URL path, built by kube from what discovery said —
+    /// `/api/v1/namespaces/kube-system/pods`, `/apis/apps/v1/deployments`. No query string: the
+    /// region above is why `includeObject` is absent.
+    pub path: String,
+    /// The `Accept` header, and the whole of what separates the two fetches.
+    pub accept: &'static str,
+}
+
+impl Fetch {
+    /// The `Table` fetch for one kind the cluster said it serves.
+    ///
+    /// **The path is kube's own**, through [`ApiResource::from_gvk_with_plural`] — the constructor
+    /// that is *told* the plural rather than the one that guesses it ([`Browsable::plural`]) — so
+    /// this cannot disagree with the URL an `Api<K>` would have built for the same kind.
+    ///
+    /// **A namespace is dropped for a kind that has none.** `namespaced` is discovery's own flag
+    /// (invariant 12), and `/api/v1/namespaces/payments/nodes` is a path no server answers; the
+    /// screen has the same condition for whether it draws the `ns:` label at all.
+    ///
+    /// **`None` is a word that cannot be a path segment** ([`path_safe`]) — the only refusal here,
+    /// and the reason this is not infallible. **The namespace is judged by the same predicate**,
+    /// and only after the line above has dropped it for a cluster-scoped kind, so a stray one
+    /// cannot refuse a fetch that would never have carried it. An earlier draft exempted the
+    /// namespace and reasoned from its source — *the caller typed it* — which holds only while
+    /// that source is `--namespace`: the namespace picker further down Phase 5 is fed from the
+    /// cluster's own list, and `x?watch=true` puts a query parameter on a call the command log
+    /// prints without one.
+    pub fn table(kind: &Browsable, namespace: Option<&str>) -> Option<Self> {
+        let namespace = kind.namespaced.then_some(namespace).flatten();
+        if !(kind.group.is_empty() || path_safe(&kind.group))
+            || !path_safe(&kind.version)
+            || !path_safe(&kind.plural)
+            || namespace.is_some_and(|namespace| !path_safe(namespace))
+        {
+            return None;
+        }
+        let gvk = GroupVersionKind::gvk(&kind.group, &kind.version, &kind.kind);
+        let resource = ApiResource::from_gvk_with_plural(&gvk, &kind.plural);
+        Some(Self {
+            path: DynamicObject::url_path(&resource, namespace),
+            accept: TABLE_ACCEPT,
+        })
+    }
+
+    /// The same list again, asked for as an ordinary object list — what a `406` falls back to.
+    pub fn plain(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            accept: PLAIN_ACCEPT,
+        }
+    }
+}
+
+/// **The server refused the `Table` header itself** — the one failure that is answered by asking
+/// again rather than by telling the reader (the region above).
+///
+/// Everything else is the reader's news: a `403` on one kind is *this row cannot open*, a `404` is
+/// a kind discovery still names and the cluster no longer serves. Neither is retried, which is
+/// [`Store::unresolved_owners`]'s rule and holds here for its reason (NOTES § D151).
+///
+/// **Whoever reads that `404` keys on `Status::code` and never on `Status::reason`**, and the
+/// deleted-CRD case is precisely the one that proves it. A group nobody serves answers with the
+/// literal body `404 page not found` — not a `Status` at all — so kube builds
+/// `Status::failure(text, "Failed to parse error data").with_code(404)`
+/// (`kube-client-4.2.0/src/client/mod.rs:551-558`) and `.reason` is that phrase rather than
+/// `NotFound`. A resource missing from a group the server *does* serve answers a real `Status`
+/// with `reason: NotFound`. **The code is the same in both and the reason is not**, which is why
+/// this predicate reads one field.
+pub fn not_acceptable(failure: &kube::Error) -> bool {
+    matches!(failure, kube::Error::Api(status) if status.code == NOT_ACCEPTABLE)
+}
+
+/// **One list as the API server itself would print it**, columns and all.
+///
+/// Nothing in this type names a kind, and nothing that builds one reads what kind it came from
+/// (invariant 12). It derives `Debug` for [`Listing`]'s reason: **nothing k8rs puts in here is a
+/// credential**, and neither a column header nor a printed cell is a field this file read off a
+/// secret.
+///
+/// **That is a claim about our types and not about the cluster's choices, and the difference is
+/// worth writing down.** It is true of the built-in printers — a `Table` for Pods or Deployments
+/// prints what `kubectl get` prints. A CRD's columns are `additionalPrinterColumns`, a JSONPath
+/// its author chose into a spec its author wrote, so a cell of one contains whatever that author
+/// pointed it at. Nothing here can tell the two apart; what holds either way is that the value
+/// went through [`text`] and is bounded, and that this type is `Debug` and not `Display` — it
+/// reaches a log only where something writes one.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Table {
+    /// The server's `columnDefinitions`, in the order it sent them.
+    pub columns: Vec<Column>,
+    /// One row per object, each with at least one cell per column.
+    pub rows: Vec<Row>,
+}
+
+/// One column the server said this kind is printed with.
+///
+/// **Three fields the wire carries are dropped: `type`, `format` and `description`.** Nothing
+/// draws them today and a field with no reader is one nobody can prove ([`Browsable`] drops
+/// discovery's `shortNames` for the same rule); `description` is also most of the response's
+/// column bytes — 350 of them on `Name` alone. **`type` is the one a later box might want**, for
+/// right-aligning a number, and `screens/resources.md` draws every column left-aligned today: it is
+/// one word in [`ColumnResponse`] when a screen needs it, and **this file freezes after Phase 6**
+/// (todo.md § Phase 5, NOTES § D116), so the box that wants it raises it before then.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Column {
+    /// The header the server chose — `Name`, `Ready`, `Up-to-date`. Cased for the screen by
+    /// `views.rs`.
+    pub name: String,
+    /// **`0` is what plain `kubectl get` prints and anything above it is what `-o wide` adds.**
+    /// `screens/resources.md` draws the `priority: 0` set and no more — without that filter every
+    /// screen is the wide view. The filter is the screen's, because which columns fit is.
+    pub priority: i32,
+}
+
+/// One object, as a row of printed cells and the identity underneath it.
+///
+/// **The identity is `None` on every row when the server was asked with `?includeObject=None`**,
+/// which k8rs does not ask (the region above) but `tests/fixtures/table-deployments.json` is, so
+/// the decode survives both shapes rather than assuming one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Row {
+    /// **At least one cell per column**, in the columns' order. A server that sent fewer is padded
+    /// with empty cells so a renderer cannot index past the end; a server that sent *more* keeps
+    /// them, because cutting a collection is the open box named above and not this one's to decide.
+    pub cells: Vec<String>,
+    /// The namespace of the object this row is, when the server sent one.
+    pub namespace: Option<String>,
+    /// Its name — what a kubectl line and every dialog names.
+    ///
+    /// **Nothing judges it beyond [`text`]'s strip and its 512-byte bound, and the promise above
+    /// is where that stops being enough.** A name is a DNS label on any cluster that made it, but
+    /// this is the API server's word and not a rule this file enforces: a row named
+    /// `web -n kube-system` builds the command-log line
+    /// `kubectl delete pod web -n kube-system -n payments`, which is invariant 4's record lying
+    /// about what ran. **There is no command log and no `ops.rs` yet, so this is not the box that
+    /// fixes it** — it is named here because this doc comment is what promises those two uses.
+    pub name: Option<String>,
+    /// Its uid: what a finding is matched onto a row by, and what keeps a cursor on the same object
+    /// when a re-fetch reorders the rows. **Not the name**, for [`Store`]'s reason — a name deleted
+    /// and recreated is a different object.
+    pub uid: Option<String>,
+}
+
+/// **The answer to a browser fetch, in either shape it can come back in** — and `kind` is what
+/// says which.
+///
+/// **One type rather than two, because the choice is not the caller's to make.** The Accept header
+/// asks for a `Table` and offers `,application/json` under it, so a server that cannot print one
+/// answers **200** with the ordinary object list — no `406`, nothing for [`not_acceptable`] to
+/// see. A type that named only `columnDefinitions` and `rows` decoded that body to *zero columns
+/// and zero rows, with no error*: six Deployments in, an empty screen out. The `406` fallback
+/// ([`Fetch::plain`]) sends the same body, so both paths land on the same branch.
+///
+/// **The branch reads `kind`, which is the server's own word for what it sent** — `Table`, or the
+/// `List` / `PodList` / `DeploymentList` of anything else. **Its ceiling, named rather than left
+/// to be found: a `Table` body carrying no `kind` at all reads as an empty list**, because the
+/// `else` has to be one of the two. Every capture in this repo carries one and the API server sets
+/// it on every response k8rs asks for, so a body without one is malformed rather than a third
+/// shape this file chooses between.
+///
+/// Only what [`Table`] keeps is named, so the rest — every row's `managedFields` above all — is
+/// walked past by serde. **Every field defaults and no unknown field is refused**, which is what
+/// makes one decode cover both `includeObject` shapes and a server that adds a field later
+/// (NOTES § D152 reads kube's own discovery type the same way).
+#[derive(Deserialize)]
+#[serde(crate = "k8s_openapi::serde", rename_all = "camelCase")]
+pub struct TableResponse {
+    /// `Table`, or the list kind of whatever the server printed instead.
+    #[serde(default)]
+    kind: String,
+    /// **A watch event sends this once per stream and `[]` on every event after the first**
+    /// (§ KEEPING A BROWSER VIEW FRESH, measured). Nothing breaks today — no watch event reaches
+    /// this type — and the `resize` in the `From` impl below is a no-op against zero columns, so
+    /// **a later box feeding events through it would draw the second event with no headers at
+    /// all**. Whoever writes that box carries the first event's columns forward itself.
+    #[serde(default)]
+    column_definitions: Vec<ColumnResponse>,
+    #[serde(default)]
+    rows: Vec<RowResponse>,
+    /// A plain object list's own objects — empty on a `Table`, and the only thing read when the
+    /// server sent one of those instead.
+    #[serde(default)]
+    items: Vec<ObjectResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "k8s_openapi::serde")]
+struct ColumnResponse {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    priority: i32,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "k8s_openapi::serde")]
+struct RowResponse {
+    /// **`Value` and not `String`**: a Deployment's table sends numbers (the region above).
+    #[serde(default)]
+    cells: Vec<Value>,
+    /// `null` under `?includeObject=None`, absent on a server that sends neither.
+    #[serde(default)]
+    object: Option<ObjectResponse>,
+}
+
+/// A row's object under `includeObject=Metadata`, and an item of a plain object list — the same
+/// two braces either way, so it is one type.
+#[derive(Deserialize)]
+#[serde(crate = "k8s_openapi::serde")]
+struct ObjectResponse {
+    #[serde(default)]
+    metadata: MetadataResponse,
+}
+
+/// **The three fields of a row's object k8rs keeps**, and the whole reason `managedFields` costs
+/// nothing to hold: it is not named here, so serde never builds it.
+#[derive(Default, Deserialize)]
+#[serde(crate = "k8s_openapi::serde")]
+struct MetadataResponse {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    namespace: Option<String>,
+    #[serde(default)]
+    uid: Option<String>,
+}
+
+/// One cell as text.
+///
+/// **A string is kept as itself and everything else is its JSON**, which is `1` for a number and
+/// `true` for a boolean rather than the quoted forms `Value::to_string` would give a string.
+/// `null` is an empty cell — a server that sent nothing for a column has not sent the word "null".
+/// An array or an object has no printed form the API defines, so it keeps its JSON and the guard
+/// bounds it like anything else.
+fn cell(value: Value) -> String {
+    match value {
+        Value::String(text) => text,
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+impl From<TableResponse> for Table {
+    fn from(response: TableResponse) -> Self {
+        if response.kind != TABLE_KIND {
+            return Self::from_objects(response.items);
+        }
+        let columns: Vec<Column> = response
+            .column_definitions
+            .into_iter()
+            .map(|column| Column {
+                name: column.name,
+                priority: column.priority,
+            })
+            .collect();
+        let rows = response
+            .rows
+            .into_iter()
+            .map(|row| {
+                let mut cells: Vec<String> = row.cells.into_iter().map(cell).collect();
+                // Padded and never cut: a renderer that walks the columns cannot index past the
+                // end, and nothing the server sent is thrown away ([`Row::cells`]). `max` rather
+                // than a `<` guard around the same `resize`, because the two spellings differ
+                // only when the lengths are equal — where `resize` does nothing either way — and
+                // a branch no input can tell apart is a branch no test can fail on.
+                cells.resize(cells.len().max(columns.len()), String::new());
+                let metadata = row.object.map(|object| object.metadata).unwrap_or_default();
+                Row {
+                    cells,
+                    namespace: metadata.namespace,
+                    name: metadata.name,
+                    uid: metadata.uid,
+                }
+            })
+            .collect();
+        Self { columns, rows }
+    }
+}
+
+impl Table {
+    /// **A plain object list, drawn as the one column a list of anything can honestly be drawn
+    /// as** (the region above): `metadata` is the only thing in an object that is not per-kind,
+    /// and an Age column would need a clock this file does not read.
+    fn from_objects(items: Vec<ObjectResponse>) -> Self {
+        Self {
+            columns: vec![Column {
+                name: NAME_COLUMN.to_string(),
+                priority: 0,
+            }],
+            rows: items
+                .into_iter()
+                .map(|item| Row {
+                    cells: vec![item.metadata.name.clone().unwrap_or_default()],
+                    namespace: item.metadata.namespace,
+                    name: item.metadata.name,
+                    uid: item.metadata.uid,
+                })
+                .collect(),
+        }
+    }
+}
+
+// --- THE BROWSER'S ROWS END ---
+
+// --- KEEPING A BROWSER VIEW FRESH START ---
+//
+// **A `Table` can be watched, and is still not watched here** (`screens/resources.md`,
+// NOTES § D154): `?watch=true` under the Accept header above answers `200` and streams `Table`
+// objects. A browser view watches metadata instead — the smallest thing that says *something
+// changed* — and re-fetches the Table.
+//
+// **The reason is kube's, and it is not the wire cost.** The first draft of this region argued a
+// 37× overhead: *every event re-sends the entire column schema, 3 086 bytes of
+// `columnDefinitions` to carry an 82-byte row*. **That was the first event of a fresh stream,
+// generalised.** Measured on the same image it was written against (kind v1.36.1, 2026-08-22,
+// 18 events off a pods Table watch): `columnDefinitions` is sent **once per stream** and is `[]`
+// on every event after the first — event 1 carried 9 columns in 5 764 bytes, events 2–18 carried
+// none, mean 3 062 bytes. A deployments watch: one event with 8 columns, ten with none.
+//
+// **So the shape below is the more expensive one on the wire, and it is chosen knowing that.**
+// A Table watch event is ~3 062 bytes and *already carries the row's identity* — `rows[0].object`
+// is the same `PartialObjectMetadata` a metadata watch sends. A metadata event is ~2 624 bytes,
+// 14% smaller, **and then owes a whole Table re-fetch at 6 852 bytes per row**. One change in a
+// 500-row namespace: ~3 KB the other way, 2.6 KB + 3.4 MB this way.
+//
+// **What that buys is `watcher`, and `watcher` is the part that is hard to get right.**
+// `kube::runtime::watcher` takes `K: Resource + Clone + DeserializeOwned + Debug + Send`
+// (`kube-runtime-4.2.0/src/watcher.rs:787`) and **kube has no `Table` type at all** — the string
+// `as=Table` appears nowhere in `kube-core` or `kube-client` — because a Table is a *rendering*
+// of a list and not a resource the API server serves. Streaming one means
+// `Client::request_stream` / `request_events` (`kube-client-4.2.0/src/client/mod.rs:307,340`),
+// which frame lines and decode them and do nothing else: **this file would own the
+// `resourceVersion` bookkeeping, the `410 Gone` relist, and the `Event::Init` that relist has to
+// emit** — three things `watcher` already does, and the middle one cannot be proven here without
+// a server that expires a resourceVersion on demand. (**Backoff is not one of them**: there is
+// none inside either entry point — `watcher.rs:26` and `:806` both tell the caller to apply its
+// own — so it is owed the same either way and is no part of this trade.)
+// **What would reverse it**: a `Table` stream with those guarantees, or a re-fetch measured at a
+// size where 3.4 MB per change is the thing that hurts — the numbers on [`REFRESH_FLOOR`] are
+// where that argument would start.
+//
+// **The watch is `connect()`'s and only the policy is here**, for § EVERY KIND THE CLUSTER
+// SERVES's reason. The line, over the same [`ApiResource`] [`Fetch::table`] builds its path from:
+//
+// ```ignore
+// let api: Api<PartialObjectMeta<DynamicObject>> = Api::all_with(client, &resource);
+// watcher::watcher(api, watcher::Config::default())
+// ```
+//
+// **Not `metadata_watcher`**, which this region named until the review compiled it:
+// `watcher.rs:850` carries `#[deprecated(since = "3.1.0")]` and `just check` runs clippy with
+// `-D warnings`, so the one line this region tells `connect()` to write would have failed the
+// gate. `PartialObjectMeta<K>` takes `K::DynamicType` as its own — `metadata.rs:149-151` in
+// `kube-core-4.2.0` — which for `DynamicObject` is an `ApiResource`, so `all_with` and
+// `namespaced_with` work unchanged and [`Browsable::namespaced`] still picks between them. It is
+// a line no test can fail on; *when* the re-fetch happens is not, and that is [`Browsing`].
+//
+// **A kind that can be listed and cannot be watched exists, and nothing here knows it.** Of the
+// 42 resources this cluster advertises `list` on, exactly one does not advertise `watch`:
+// `componentstatuses`, which answers `get,list` and is a built-in rather than a CRD.
+// [`browsable`] filters on `list` alone, so it is offered, and a caller that opens a watch on it
+// gets `405 MethodNotAllowed` — *watch is not supported on resources of kind
+// "componentstatuses"* — with no state here to stop it retrying.
+// [`Browsable::verbs`] is already carried, so the caller's check is
+// `verbs.iter().any(|verb| verb == "watch")`; **no state for it is built here**, because what a
+// screen offers instead — a manual refresh key — is a ruling nobody has made, and a field with no
+// reader is one nobody can prove.
+//
+// **The permanent set does not grow here.** Invariant 6 watches five streams — Pods, Nodes and the
+// three workload kinds, which are the Alerts view's inputs — and [`Store`] holds exactly those
+// five and no sixth. [`Browsing`] is a plain value the caller owns and drops, holding no stream of
+// its own: closing a view drops the one it opened, and forty permanent streams is the failure this
+// shape exists to avoid (`screens/resources.md`). `k8s_tests.rs` derives that five off this file
+// rather than trusting the sentence.
+//
+// **`PRIOR-ART § A5` is the defect this region is one step away from** — k9s merged *skip the
+// reconcile when nothing changed* and reverted it a month later, because a coalescer that drops the
+// last event of a burst shows stale data forever and passes every test that does not assert the
+// state *after* the storm. **It has two halves and the first draft closed one.** The pending flag
+// is cleared when a fetch is *issued*, never when it returns, so a change arriving mid-flight
+// re-arms rather than being answered by a response that predates it — that is the first. The
+// second is that nothing stopped a *second* fetch going out beside the first: three seconds of
+// body, a change per floor, and HTTP/2 promising no ordering, so the older answer can land last
+// and leave the view on pre-change rows with nothing pending to re-arm. [`Browsing::done`] is the
+// second half — one fetch at a time, and the floor measured from the answer (NOTES § D154).
+
+/// **The shortest gap between one Table answer and the next Table question: one second.**
+///
+/// **A floor between fetches, not a delay before one.** A view that has been quiet re-fetches the
+/// instant something changes, and a rollout that emits hundreds of metadata events costs one list
+/// per second instead of hundreds. A plain debounce — wait for quiet, then fetch — would have the
+/// opposite failure: while a deploy is rolling there *is* no quiet, so it would not fire at all.
+///
+/// **It is the lower bound and not the period.** The gap is measured from the moment a fetch came
+/// back ([`Browsing::done`]), and only one is ever on the wire, so the real cycle is *this plus
+/// however long the last fetch took*: a 30 ms answer refreshes at 1 Hz, a 3 s answer every 4 s.
+/// **The cluster tunes it, and there is no second constant** — which is what makes one fixed
+/// number defensible at every size, because the size is what moves the other half.
+///
+/// **What one refresh costs, measured** (kind v1.36.1, 2026-08-22): **6 852 bytes per row** on the
+/// wire at the default `includeObject` (§ THE BROWSER'S ROWS is why the default is kept), and a
+/// parse that is near-linear — 12 204 bytes in **185.4 µs**, 676 056 bytes in **6.452 ms**. So a
+/// refresh is ~343 KB at 50 rows, ~3.4 MB at 500, ~34 MB at 5 000. **At a fixed 1 Hz that last one
+/// is 34 MB/s out of a single open view**, which is the class of cost `PRIOR-ART § A` collects
+/// the complaints about k9s's poll loop for.
+///
+/// **What the paragraph above fixes is the pile-up, and it is honest about what it does not
+/// fix.** One fetch at a time means a slow answer cannot queue three more behind it, so the
+/// worst case is one refresh in flight rather than a growing pile — that is the unbounded half.
+/// Whether a 34 MB list comes back in well under a second is the cluster's answer and not this
+/// constant's, and where it does, 1 Hz still costs 34 MB/s. **The half that bounds *that* is
+/// paging**, which § THE BROWSER'S ROWS names as absent and the open collection-bound box in
+/// todo.md § Phase 5 is what closes.
+///
+/// **Invariant 7's ~100 ms is not this number**: that one coalesces *paints*, and a paint costs
+/// nothing on the wire.
+const REFRESH_FLOOR: SignedDuration = SignedDuration::from_secs(1);
+
+/// **One open browser view, and the whole of when its list is re-read.**
+///
+/// **It holds no stream and no client**, which is what makes *a closed view drops its stream* the
+/// caller's one line rather than this type's: the metadata watch's stream lives beside this value
+/// and is dropped with it (the region above). Nothing here can outlive a view or keep one open.
+///
+/// **It derives `Debug`** for [`Listing`]'s reason — a kind, a path and a timestamp never touched
+/// a credential.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Browsing {
+    /// The kind being browsed, exactly as discovery described it.
+    kind: Browsable,
+    /// **The one request this view ever makes, built once at open.** The kind and the namespace do
+    /// not change while a view is open — switching either opens a new one, because the fetch this
+    /// one is halfway through is for the old scope — so there is nothing to rebuild per refresh,
+    /// and [`path_safe`] is judged once rather than on every poll.
+    fetch: Fetch,
+    /// **Something arrived on the metadata watch that this view's rows do not yet show.** Set by
+    /// [`Browsing::changed`] and cleared the moment a fetch is *issued* — never when one returns
+    /// (`PRIOR-ART § A5`, the region above).
+    stale: bool,
+    /// **A fetch this view handed out has not been answered yet.** The other half of
+    /// `PRIOR-ART § A5`, and what makes at most one Table of this view exist at a time.
+    outstanding: bool,
+    /// When the last fetch *came back*, or `None` for a view that has never completed one — which
+    /// is what makes the first fetch owed immediately. **Not when one was issued**: the floor is a
+    /// gap between an answer and the next question (the region above).
+    returned: Option<Time>,
+}
+
+impl Browsing {
+    /// A view just opened: its first Table is owed at once.
+    ///
+    /// **`None` is a kind that cannot be browsed at all** — [`Fetch::table`]'s one refusal, taken
+    /// here so that a view which exists is a view that can fetch, and [`Browsing::issue`] can
+    /// answer `None` for exactly one reason.
+    pub fn open(kind: Browsable, namespace: Option<&str>) -> Option<Self> {
+        Some(Self {
+            fetch: Fetch::table(&kind, namespace)?,
+            kind,
+            stale: false,
+            outstanding: false,
+            returned: None,
+        })
+    }
+
+    /// The kind this view is showing — what a title and a kubectl line are built from.
+    pub fn kind(&self) -> &Browsable {
+        &self.kind
+    }
+
+    /// **Something changed on the metadata watch.** No clock: the floor is measured from the last
+    /// fetch that came back, not from the change, so the moment the change arrived is not a fact
+    /// this needs.
+    pub fn changed(&mut self) {
+        self.stale = true;
+    }
+
+    /// **The fetch [`Browsing::issue`] handed out is off the wire** — and this is where the floor
+    /// starts (NOTES § D154, the region above).
+    ///
+    /// **Owed for every fetch that was issued, whatever became of it.** A refusal, a `404` and a
+    /// dead socket are answers too: this says *the request is finished*, not *it worked*. A caller
+    /// that drops one without saying so freezes its own view, which is the ceiling this shape has
+    /// and the reason it is stated here rather than found later.
+    ///
+    /// **A failure does not re-arm anything.** [`Browsing::stale`] was cleared at issue, so a view
+    /// whose fetch failed shows what it had until the next change — the rule
+    /// [`Store::unresolved_owners`] holds to, for its reason (NOTES § D151): retrying a `403` at
+    /// the floor is a loop the security gate refuses. A caller that *wants* the retry says
+    /// [`Browsing::changed`], which is the same word the watch uses and costs one fetch per floor.
+    pub fn done(&mut self, now: &Time) {
+        self.outstanding = false;
+        self.returned = Some(now.clone());
+    }
+
+    /// **When [`Browsing::issue`] will next hand out a fetch** — `now` for one already owed, a
+    /// future moment while [`REFRESH_FLOOR`] holds one back, and `None` when there is nothing to
+    /// wake up for: nothing has changed, **or a fetch is already on the wire** and the answer to
+    /// it is the event that moves this on.
+    ///
+    /// The loop that drives a view sleeps on this: with a screen that draws on events (invariant 7)
+    /// and nothing else, a fetch held back by the floor would otherwise wait for the next unrelated
+    /// event to release it. It is the same shape [`Listing`] names — the state is readable here and
+    /// something above still has to ask.
+    pub fn due_at(&self, now: &Time) -> Option<Time> {
+        if self.outstanding {
+            return None;
+        }
+        match &self.returned {
+            None => Some(now.clone()),
+            Some(_) if !self.stale => None,
+            // `checked_add` and not `+`, for NOTES § D54's reason. The only input that can
+            // overflow it is a clock reading within a second of the end of time, and the fallback
+            // is *due now* rather than *never again*, so the degenerate case still redraws.
+            Some(last) => Some(Time(last.0.checked_add(REFRESH_FLOOR).unwrap_or(now.0))),
+        }
+    }
+
+    /// **The fetch this view owes, if it owes one — and asking issues it.** `None` means *nothing
+    /// to fetch yet* — nothing changed, the floor has not passed, or the last fetch has not been
+    /// answered — and never *this view cannot fetch*: a kind that could never be fetched was
+    /// refused at [`Browsing::open`].
+    ///
+    /// `&mut` and a verb rather than a question, because the two halves cannot be allowed to come
+    /// apart: a caller that read *due* and then fetched without saying so would re-fetch on every
+    /// poll for a whole floor, and one that never says [`Browsing::done`] gets no second fetch at
+    /// all.
+    pub fn issue(&mut self, now: &Time) -> Option<Fetch> {
+        let due = self.due_at(now)?;
+        if now.0 < due.0 {
+            return None;
+        }
+        self.stale = false;
+        self.outstanding = true;
+        Some(self.fetch.clone())
+    }
+}
+
+// --- KEEPING A BROWSER VIEW FRESH END ---

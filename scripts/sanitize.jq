@@ -51,7 +51,38 @@ def node_names:
       # so `{kind: Node, name: prod-master-01}` names a machine exactly as well
       # as `.nodeName` does. A full Node object also has `.kind == "Node"` and
       # no top-level `.name`, which is what `// empty` is for.
-      (select(.kind? == "Node") | .name? // empty) ]
+      (select(.kind? == "Node") | .name? // empty),
+      # The sixth place, and the first that is not a field at all: a server-side
+      # `Table` (`src/k8s.rs` § THE BROWSER'S ROWS) carries the node name as a
+      # **bare string in `cells`**, under whichever column `columnDefinitions`
+      # called `Node` — or `Nominated Node`, the same value one step earlier.
+      #
+      # **Read by column and never by scanning the cells**, because a pods
+      # Table's `Name` column holds `kube-apiserver-k8rs-control-plane`: a pod
+      # name that contains a node name, is not itself in the allowed set, and is
+      # in the capture this repo committed. A whole-cells filter refuses that
+      # legitimate capture, which is the other way a guard fails.
+      #
+      # `<none>` is what the printer writes for a pod nothing has scheduled. It
+      # carries characters a DNS subdomain cannot, so no node is ever called
+      # that, and a Table full of them is an ordinary capture.
+      #
+      # Ceiling, and it needs a ruling rather than a wider regex: a Table of
+      # **Nodes** puts the node name in the `Name` column and in
+      # `rows[].object.metadata.name`, and neither is reachable from here — a
+      # Table names no kind, and `Name` is a pod name on the capture beside it.
+      # `just fixtures` captures Tables of pods and of Deployments only.
+      (select((.columnDefinitions? | type) == "array" and (.rows? | type) == "array")
+       | . as $table
+       | [ $table.columnDefinitions | to_entries[]
+           | select(((.value.name? // "") | ascii_downcase)
+                    | . == "node" or . == "nominated node")
+           | .key ] as $columns
+       | $table.rows[]?
+       | .cells? as $cells
+       | $columns[]
+       | $cells[.]?
+       | select(. != "<none>" and . != "")) ]
   | map(select(type == "string"));
 
 # **The node names the fixture cluster actually produces, and no wider.** kind

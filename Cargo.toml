@@ -68,7 +68,10 @@ futures-util = { version = "0.3.34", default-features = false, features = [
 # Only the fixture tests parse JSON in Phase 3 — the decode they exercise is
 # `serde` into `k8s_openapi::api::core::v1::Pod`. It moves up to a real
 # dependency in Phase 5, where `k8s.rs` builds the browser's Table request by
-# hand and decodes the answer with it.
+# hand and decodes the answer with it. **It did not**: `k8s-openapi` re-exports
+# both `serde` and `serde_json` (`lib.rs:242-243`), which is the door `jiff`
+# already comes through in that file, so the Table decode named no new
+# dependency at all (2026-08-22).
 serde_json = "1"
 
 [profile.release]

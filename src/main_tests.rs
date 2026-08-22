@@ -136,12 +136,35 @@ fn node_id(name: &str) -> ObjectId {
 
 // --- THE STRIP, WHICH IS WHY THIS BOX EXISTS ---
 
+/// **What a printed string kept that has no printed form of its own** — the sweep all three
+/// strip tests run.
+///
+/// It asks [`crate::k8s::unprintable`], which is what [`crate::sanitize`] asks, because the
+/// defect this region exists for was a *second spelling* of that predicate: these tests filtered
+/// on the narrower `Cc` category by hand while the ingest guard had already widened, so every
+/// one of them was green over a U+202E they were written to catch (NOTES § D154). A test that
+/// spells the class out itself is how the next widening comes back green for the same reason.
+///
+/// **The caller strips the report's own line breaks before calling this**, rather than an
+/// exclusion hidden in here: a `\n` in a *value* forges a second card and must be caught, and
+/// `the_usage_text_keeps_its_three_lines` is what holds the other half.
+fn survivors(printed: &str) -> Vec<char> {
+    printed
+        .chars()
+        .filter(|c| crate::k8s::unprintable(*c))
+        .collect()
+}
+
 /// **The positive half of invariant 9.** A crafted name, message or action reaches the
 /// terminal through `println!` with no ratatui in between, so every string read off a
 /// `Finding` passes `sanitize` first (`screens/once.md` § The rule that matters most here).
 ///
-/// All five shapes at once: `ESC`, `CR`, `BEL`, a C1 control (`CSI`) and `DEL` — the whole of
-/// Unicode's `Cc` category, which is what `char::is_control` answers.
+/// All five `Cc` shapes at once — `ESC`, `CR`, `BEL`, a C1 control (`CSI`) and `DEL` — **and
+/// one from each of the five things [`crate::k8s::unprintable`] adds beyond `Cc`**: the soft
+/// hyphen, the zero-width block (U+200B), the bidi marks (U+200E), the overrides (U+202E) and
+/// the word joiner (U+2060), plus U+FEFF. Every field carries one, because a per-field
+/// judgement call is how one of six gets forgotten, and because a bidi override is what makes
+/// `prod\u{202e}dc-web` read as *prodcd-web* in a list nobody can then search (NOTES § D154).
 ///
 /// **And both identity shapes**, because an identity is drawn by one of two arms and a guard
 /// is proven only for the shapes it was fed (NOTES § D29): a namespaced object, whose
@@ -149,23 +172,24 @@ fn node_id(name: &str) -> ObjectId {
 /// own. A node is as nameable by an attacker as a pod — `kubectl label` is not needed, a
 /// kubelet registers under the name it is given.
 #[test]
-fn no_control_character_from_a_finding_reaches_the_report() {
-    let mut f = finding(Severity::Critical, pod_id("pay\rments", "web\u{9b}0"));
-    f.title = "Escape \x1b[2J and bell \x07 here".to_string();
-    f.evidence = "exit \x7f 137".to_string();
-    f.action = "restart \u{85} it".to_string();
+fn nothing_unprintable_from_a_finding_reaches_the_report() {
+    let mut f = finding(
+        Severity::Critical,
+        pod_id("pay\r\u{200b}ments", "web\u{9b}\u{202e}0"),
+    );
+    f.title = "Escape \x1b[2J and bell \x07 h\u{ad}ere".to_string();
+    f.evidence = "exit \x7f 1\u{feff}37".to_string();
+    f.action = "restart \u{85} i\u{2060}t".to_string();
     f.timestamp = Some(four_minutes_ago());
-    let cluster_scoped = finding(Severity::Warn, node_id("node\x1b[2J\u{9b}-3"));
+    let cluster_scoped = finding(Severity::Warn, node_id("node\x1b[2J\u{9b}\u{200e}-3"));
 
     let report = render(&[f, cluster_scoped], &nothing_read());
 
-    let survivors: Vec<char> = report
-        .chars()
-        .filter(|c| c.is_control() && *c != '\n')
-        .collect();
+    // The driver's own line breaks are structure, not values ([`survivors`]).
+    let survivors = survivors(&report.replace('\n', ""));
     assert!(
         survivors.is_empty(),
-        "control characters reached the report: {survivors:?}\n{report:?}"
+        "characters with no printed form reached the report: {survivors:?}\n{report:?}"
     );
     // And the strip removed only those: a `sanitize` that returned nothing at all would
     // satisfy the assertion above (CLAUDE.md § A derived list asserts it found something).
@@ -205,16 +229,17 @@ fn no_control_character_from_a_finding_reaches_the_report() {
 /// its three untrusted interpolations ever reached this sweep, and a guard that is never fed the
 /// shape is not a guard for it.
 #[test]
-fn no_control_character_from_a_report_reaches_the_terminal() {
+fn nothing_unprintable_from_a_report_reaches_the_terminal() {
     // `restarts.json` second, so the plants below still land on `healthy-hostpath`'s pod at 0.
     let mut input = read(&["healthy-hostpath.json", "restarts.json", "nodes.json"]);
     let pod = &mut input.snapshot.pods[0];
     assert_eq!(pod.host_path_mounts.len(), 1, "the capture mounts one path");
-    // `ESC`, `CR`, `BEL`, `DEL` and a C1 control — the whole `Cc` category, in the middle of a
-    // value rather than as the whole of one.
-    pod.host_path_mounts[0].path = "/var\x1b[2J/lo\u{9b}g".to_string();
-    pod.id.namespace = Some("pay\rments".to_string());
-    input.snapshot.nodes[0].id.name = "node\x07-\x7f1".to_string();
+    // `ESC`, `CR`, `BEL`, `DEL` and a C1 control — the whole `Cc` category — **and one of the
+    // invisible characters `Cc` does not hold, per value**, in the middle of a value rather
+    // than as the whole of one ([`survivors`], NOTES § D154).
+    pod.host_path_mounts[0].path = "/var\x1b[2J/lo\u{9b}\u{202e}g".to_string();
+    pod.id.namespace = Some("pay\r\u{200b}ments".to_string());
+    input.snapshot.nodes[0].id.name = "node\x07-\x7f\u{feff}1".to_string();
     // The pod has to be on the node whose name is crafted, or Capacity's row never names it.
     pod.node = Some(input.snapshot.nodes[0].id.name.clone());
 
@@ -227,9 +252,9 @@ fn no_control_character_from_a_report_reaches_the_terminal() {
         1,
         "the capture carries the one restarting container"
     );
-    restarting.id.namespace = Some("sh\x1bop".to_string());
-    restarting.id.name = "che\u{9b}ckout".to_string();
-    restarting.containers[0].name = "ap\x07p".to_string();
+    restarting.id.namespace = Some("sh\x1b\u{ad}op".to_string());
+    restarting.id.name = "che\u{9b}\u{2060}ckout".to_string();
+    restarting.containers[0].name = "ap\x07\u{200e}p".to_string();
     // The capture was taken after this file's pin, so its own `startedAt` sits four days in the
     // future and `rules::age` declines it — which is the pane's *no age yet* state, not its row.
     // This test is about the strip and not about the ladder, so the start moves onto the pin.
@@ -240,13 +265,10 @@ fn no_control_character_from_a_report_reaches_the_terminal() {
     let printed = reports(&input.snapshot, &analyze(&input.snapshot));
     println!("{printed}");
 
-    let survivors: Vec<char> = printed
-        .chars()
-        .filter(|c| c.is_control() && *c != '\n')
-        .collect();
+    let survivors = survivors(&printed.replace('\n', ""));
     assert!(
         survivors.is_empty(),
-        "control characters reached the terminal: {survivors:?}\n{printed:?}"
+        "characters with no printed form reached the terminal: {survivors:?}\n{printed:?}"
     );
     // **And only those were removed** — a `sanitize` that returned nothing at all satisfies the
     // assertion above (CLAUDE.md § A derived list asserts it found something).
@@ -349,9 +371,10 @@ fn the_analysis_flag_adds_every_pane_and_is_not_a_file() {
     );
 }
 
-/// **The negative half.** `char::is_control` is the `Cc` category and nothing wider: a Turkish
-/// `ğ`, a CJK name and an en dash are ordinary text and come out byte-identical. Nothing here
-/// is truncated either — we never cut a string ourselves (`screens/widgets.md` § 7).
+/// **The negative half.** [`crate::k8s::unprintable`] answers for characters with no printed
+/// form and nothing wider: a Turkish `ğ`, a CJK name and an en dash are ordinary text and come
+/// out byte-identical. Nothing here is truncated either — we never cut a string ourselves
+/// (`screens/widgets.md` § 7).
 #[test]
 fn ordinary_and_multibyte_text_passes_through_whole() {
     let mut f = finding(Severity::Critical, pod_id("üretim", "日本語-0"));
@@ -393,16 +416,28 @@ fn an_empty_evidence_draws_no_line_at_all() {
     );
 }
 
-/// An evidence made **only** of control characters is the same case one step later: what
+/// An evidence made **only** of unprintable characters is the same case one step later: what
 /// decides is what would be printed, not what the API sent.
+///
+/// **The third framing D31 asks for — the whole of a value rather than a substring of one** —
+/// and the zero-width character is in it because that is the framing where the old predicate
+/// did not merely leak a character, it drew a card line made of nothing. Asserted as the whole
+/// report rather than as *no blank line*, because a line holding one U+200B is not blank and
+/// the weaker form was green over it.
 #[test]
 fn an_evidence_that_sanitizes_to_nothing_draws_no_line_either() {
     let mut f = finding(Severity::Warn, pod_id("shop", "api-7"));
-    f.evidence = "\x07\x1b\r".to_string();
+    f.evidence = "\x07\x1b\r\u{200b}\u{feff}".to_string();
 
-    assert!(
-        !render(&[f], &nothing_read()).contains("\n  \n"),
-        "a card was drawn with a blank line where its evidence would have been"
+    assert_eq!(
+        render(&[f], &nothing_read()),
+        "0 pods · 0 nodes\n\
+         \n\
+         ▲ shop/api-7\n  \
+           Something happened\n  \
+           → do this about it\n\
+         \n\
+         1 warning"
     );
 }
 
@@ -723,18 +758,21 @@ fn a_path_that_does_not_exist_is_an_error_and_names_itself() {
 /// still does. A `sanitize` that returned nothing would pass the first assertion and leave the
 /// user an error that names no file (CLAUDE.md § A derived list asserts it found something).
 #[test]
-fn a_crafted_path_comes_back_out_of_the_error_with_no_control_characters() {
-    // `ESC`, `CR` and a C1 control, the shapes the strip test already feeds a `Finding`.
-    let crafted = fixture("no-such\x1b[2J\r\u{9b}fixture.json");
+fn a_crafted_path_comes_back_out_of_the_error_with_nothing_unprintable_left() {
+    // `ESC`, `CR`, a C1 control and a bidi override — the shapes the strip test already feeds
+    // a `Finding`. A directory really can be named with one, and a glob really will expand it.
+    let crafted = fixture("no-such\x1b[2J\r\u{9b}\u{202e}fixture.json");
 
     let Err(problem) = load(std::slice::from_ref(&crafted), now()) else {
         panic!("a file that is not there is not a snapshot")
     };
 
-    let survivors: Vec<char> = problem.chars().filter(|c| c.is_control()).collect();
+    // No `\n` is stripped first: this error is one line, and a break in the path would forge
+    // a second ([`survivors`]).
+    let survivors = survivors(&problem);
     assert!(
         survivors.is_empty(),
-        "control characters reached the error: {survivors:?}\n{problem:?}"
+        "characters with no printed form reached the error: {survivors:?}\n{problem:?}"
     );
     assert!(
         problem.contains("no-such[2Jfixture.json"),
@@ -860,11 +898,12 @@ fn no_arguments_is_the_usage_text_and_not_a_report() {
     assert!(problem.contains("cannot reach a cluster"), "{problem}");
 }
 
-/// **…and it is still three lines when it gets there.** `'\n'.is_control()` is `true`, so a
-/// strip run over the *assembled* message instead of over the values that entered it eats
-/// k8rs's own line breaks and prints the three sentences as one run-on line — with the two
-/// spaces missing where the breaks were. That is what the first thing a new user ever sees
-/// looked like until the strip moved to the interpolations ([`sanitize`]).
+/// **…and it is still three lines when it gets there.** A line break is unprintable by
+/// [`crate::sanitize`]'s predicate, so a strip run over the *assembled* message instead of
+/// over the values that entered it eats k8rs's own line breaks and prints the three sentences
+/// as one run-on line — with the two spaces missing where the breaks were. That is what the
+/// first thing a new user ever sees looked like until the strip moved to the interpolations
+/// ([`sanitize`]).
 #[test]
 fn the_usage_text_keeps_its_three_lines() {
     let Err(problem) = run(&[]) else {

@@ -2349,16 +2349,32 @@ public release.
       briefed ([D152](NOTES.md#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22)).
       486 + 7 tests, 5 mutants 0 missed. **This was not the first unchecked box and
       the PM did not notice** — see the note at this phase's head
-- [ ] Server-side `Table` fetch for browser kinds — the columns come from the
+- [x] Server-side `Table` fetch for browser kinds — the columns come from the
       API server, not from us. Hand-built through `Client::request` (kube-rs
       has no `Table` type), Accept header
       `application/json;as=Table;g=meta.k8s.io;v=v1,application/json`, and the
       `406`-from-an-aggregated-API case handled by falling back to the plain
-      object list
-- [ ] Watch lifecycle: browser views watch `watch_metadata` (tiny) to learn
-      *that* something changed and re-fetch the Table, debounced — Table
-      cannot be watched. Only the Pod and Node watches stay permanent; a
-      closed view drops its stream
+      object list. **The `406` is not the only door that list arrives
+      through** — the Accept header's own `,application/json` half means an
+      ordinary server answers `200` with it, which `not_acceptable` never sees,
+      so the branch that reads it is in the decode, on `kind`. Two captured
+      fixtures, `table-pods.json` and `table-deployments.json`, and the second
+      is why cells are `Value` and not `String`
+      ([D154](NOTES.md#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22))
+- [x] Watch lifecycle: browser views watch a metadata stream to learn *that*
+      something changed and re-fetch the Table, with a floor between fetches.
+      **A Table *can* be watched and the 37× that said not to was one event
+      read as if it were every event** — the design stands on what kube gives
+      the metadata path for free, and the numbers are in
+      [D154](NOTES.md#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22).
+      **The floor is measured from the answer, not from the question**: nothing
+      bounded fetches in flight, and out-of-order arrival put `PRIOR-ART § A5`
+      back inside the type whose doc said it was prevented. **The permanent
+      watches are invariant 6's five** —
+      Pods, Nodes and Deployments/StatefulSets/DaemonSets — and this box said
+      *Pod and Node* until 2026-08-22, contradicting the invariant, `screens/
+      resources.md` and the code that had already shipped. A browser view's own
+      stream is not one of them: a closed view drops it
 - [ ] Capability probe from the same discovery call: `metrics.k8s.io`,
       `policy`, `cert-manager.io`, `monitoring.coreos.com`, Istio/Linkerd/
       Cilium. Absent capability = the feature says why it is off, never hides
@@ -2623,7 +2639,18 @@ public release.
       verified by running v0.0.1 against kind under exactly that role and
       nothing more. It ships with the first release because it is what a
       stranger needs in order to run the thing at all; the admin role follows
-      in Phase 7 with the writes it exists for
+      in Phase 7 with the writes it exists for. **Measured 2026-08-22 and it
+      does not cover the browser today**: `k8rs-readonly` names 15 resources
+      and discovery offers 42 on a bare kind cluster, every CRD on a real one,
+      so most rows 403 — and the role has no `nonResourceURLs: ["/api",
+      "/apis"]` rule at all, which usually works only because `system:discovery`
+      is bound to `system:authenticated` by default. The browser's verbs are
+      `list` + `watch` per resource plus non-resource `get` on `/api` and
+      `/apis`. The server already names the verb, resource, group and namespace
+      in `status.message`; rendering it satisfies the gate's *names the missing
+      verb* literally, and swallowing it into *could not load resources* is
+      [PRIOR-ART § C](PRIOR-ART.md#c-errors-that-lie) by name
+      ([reports/2026-08-22-browser-rows-table-watch-and-refresh.md](reports/2026-08-22-browser-rows-table-watch-and-refresh.md))
 - [ ] **Say in the docs where `--once` output ends up.** Findings carry
       controller messages verbatim, and a validating webhook can echo the
       object it rejected — env values included — into one. On the terminal

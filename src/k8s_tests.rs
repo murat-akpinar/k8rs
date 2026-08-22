@@ -1555,6 +1555,60 @@ fn control_characters_die_at_ingest_wherever_they_sit() {
     }
 }
 
+/// **The invisible characters `char::is_control` does not answer for**, one per class the
+/// operator review measured on 2026-08-22 and both ends of every range the guard names: bidi
+/// marks and overrides, a bidi isolate, a zero-width space, a word joiner, a soft hyphen and a
+/// byte-order mark.
+const INVISIBLE: [(&str, char); 8] = [
+    ("U+200B ZERO WIDTH SPACE", '\u{200b}'),
+    ("U+200F RIGHT-TO-LEFT MARK", '\u{200f}'),
+    ("U+202A LEFT-TO-RIGHT EMBEDDING", '\u{202a}'),
+    ("U+202E RIGHT-TO-LEFT OVERRIDE", '\u{202e}'),
+    ("U+2060 WORD JOINER", '\u{2060}'),
+    ("U+206F NOMINAL DIGIT SHAPES", '\u{206f}'),
+    ("U+00AD SOFT HYPHEN", '\u{00ad}'),
+    ("U+FEFF ZERO WIDTH NO-BREAK SPACE", '\u{feff}'),
+];
+
+/// **A character that prints as nothing dies at ingest too, and `char::is_control` is not what
+/// says so** (invariant 9, NOTES § D154). `is_control` is Unicode `Cc` and nothing else, so
+/// every codepoint above walked through the guard until this test was written: `prod\u{202e}dc`
+/// is a row that reads *prodcd* on the screen and matches neither in a search, which is Trojan
+/// Source in a cell.
+///
+/// **Each class is fed on its own and at four framings** (NOTES § D29, § D31): the whole value,
+/// inside one, and at either end — and down all three routes, one of which
+/// (`metadata.finalizers[0]`) is an element of an array rather than a field of its own.
+///
+/// **None of them becomes a space.** They are not `char::is_whitespace`, so nothing here is a
+/// word boundary that a deletion would glue shut — `prod` and `dc` were never two words.
+#[test]
+fn an_invisible_character_dies_at_ingest_like_a_control_one() {
+    for (label, invisible) in INVISIBLE {
+        for (shape, poison, survives) in [
+            ("the whole value", invisible.to_string(), ""),
+            ("inside a value", format!("prod{invisible}dc"), "proddc"),
+            ("at the front", format!("{invisible}leading"), "leading"),
+            ("at the back", format!("trailing{invisible}"), "trailing"),
+        ] {
+            for name in ROUTES {
+                let stored = kept(name, &poisoned(name, &poison));
+                if name == "message" {
+                    println!("{shape:>16}  {poison:?} -> {stored:?}   ({label})");
+                }
+                assert_eq!(
+                    stored, survives,
+                    "{label} as {shape} survived the {name} route: {stored:?}"
+                );
+                assert!(
+                    !stored.chars().any(unprintable),
+                    "{label} as {shape} reached a screen through the {name} route"
+                );
+            }
+        }
+    }
+}
+
 /// **A value at the bound is kept whole; one byte over is cut, and the cut is marked.** The two
 /// classes are asserted against each other in the same run: a 513-byte *message* is untouched
 /// and a 513-byte *finalizer* is not, which is what says the fields were sorted into classes
@@ -1839,15 +1893,23 @@ fn every_captured_object() -> Vec<(String, String, serde_json::Value)> {
     objects
 }
 
-/// One captured object of a watched kind, through the real ingest path, as the store's own
-/// `Debug` of what it kept. `None` for a kind no watch decodes.
+/// One captured object, through the real ingest path, as the `Debug` of what was kept. `None` for
+/// a kind nothing in `k8s.rs` decodes.
 ///
 /// Each of the three workload kinds goes down its own stream, because each is a different API
 /// type — the one thing the driver's `Store::deployment` / `stateful_set` / `daemon_set` split
-/// exists for.
+/// exists for. **A `Table` is not a watched object and is swept here anyway**: its cells and column
+/// headers are API free text through the same one door, so the two sweeps below cover the browser's
+/// rows for free rather than through a second copy of themselves.
 fn ingested_dump(kind: &str, document: serde_json::Value) -> Option<String> {
     let mut store;
     let workloads = match kind {
+        "Table" => {
+            let response: TableResponse =
+                serde_json::from_value(document).expect("a captured Table decodes");
+            let decoded: Table = ingest(response);
+            return Some(format!("{decoded:?}"));
+        }
         "Pod" => {
             let pod = serde_json::from_value(document).expect("a captured Pod decodes");
             return Some(format!("{:?}", ingested_pod(pod)));
@@ -3290,4 +3352,979 @@ fn a_server_too_old_for_aggregated_discovery_decodes_to_no_groups_and_no_error()
         !legacy.groups.is_empty(),
         "the body fed in named no groups, so an empty answer would have proven nothing"
     );
+}
+
+// --- THE BROWSER'S ROWS ---
+//
+// **Two committed captures and no hand-written JSON** (NOTES § D53): `table-pods.json` is the
+// default `includeObject`, nine columns, an object under every row; `table-deployments.json` is
+// `?includeObject=None`, eight columns, `"object": null`, and **number cells** — the shape a
+// `Vec<String>` would have refused. Both came off the kind cluster on 2026-08-22 through
+// `kubectl proxy` with the Accept header the product code sends.
+//
+// **What is built in Rust here is the response, never the objects**: the ragged row and the
+// crafted cell are shapes no healthy server produces, so no capture has them and none is edited
+// to (`k8s.rs` § THE BROWSER'S ROWS). And the `406` is a `Status` this file constructs — the kind
+// cluster runs no aggregated API server, so **the fallback is proven against a synthesised refusal
+// and never against one a server sent**.
+
+/// One committed `Table` capture, through the real ingest path.
+fn table(name: &str) -> Table {
+    let response: TableResponse = serde_json::from_value(capture(name))
+        .unwrap_or_else(|e| panic!("{name}.json is not a Table: {e}"));
+    ingest(response)
+}
+
+/// The column headers of a decoded table, in the server's order.
+fn headers(table: &Table) -> Vec<&str> {
+    table.columns.iter().map(|c| c.name.as_str()).collect()
+}
+
+/// **What a screen would have to work with**, printed so a reader of the test output can see it:
+/// the `priority: 0` columns `screens/resources.md` draws, and nothing else. The widths are this
+/// function's own — `views.rs` owns the real ones — so this is evidence, not a layout.
+///
+/// **And it measures width with `str::len`, which is bytes**, so a CJK or emoji cell would
+/// misalign every column to its right in the output below. That is fine for evidence a person
+/// reads once and it is **not** a thing `views.rs` may inherit: a real column budget is display
+/// width, not bytes and not `chars().count()` either.
+fn drawn(table: &Table) -> String {
+    let narrow: Vec<usize> = (0..table.columns.len())
+        .filter(|&index| table.columns[index].priority == 0)
+        .collect();
+    let width = |index: usize| {
+        table
+            .rows
+            .iter()
+            .map(|row| row.cells[index].len())
+            .chain(std::iter::once(table.columns[index].name.len()))
+            .max()
+            .unwrap_or(0)
+    };
+    let line = |cells: &dyn Fn(usize) -> String| {
+        narrow
+            .iter()
+            .map(|&index| format!("{:<pad$}", cells(index), pad = width(index)))
+            .collect::<Vec<_>>()
+            .join("  ")
+    };
+    let mut out = line(&|index| table.columns[index].name.to_uppercase());
+    for row in &table.rows {
+        out.push('\n');
+        out.push_str(&line(&|index| row.cells[index].clone()));
+    }
+    out
+}
+
+/// One kind, as discovery would have described it and [`browsable`] would have kept it.
+fn browsed(group: &str, version: &str, kind: &str, plural: &str, scope: Scope) -> Browsable {
+    browsable(vec![served(group, version, kind, plural, scope, &["list"])])
+        .pop()
+        .expect("a listable kind survives browsable()")
+}
+
+/// A `Table` response built here, for a shape no healthy server sends.
+fn response(columns: &[&str], rows: Vec<Vec<Value>>) -> TableResponse {
+    TableResponse {
+        kind: TABLE_KIND.to_string(),
+        items: vec![],
+        column_definitions: columns
+            .iter()
+            .map(|name| ColumnResponse {
+                name: (*name).to_string(),
+                priority: 0,
+            })
+            .collect(),
+        rows: rows
+            .into_iter()
+            .map(|cells| RowResponse {
+                cells,
+                object: None,
+            })
+            .collect(),
+    }
+}
+
+/// A refusal with one HTTP code on it, as `Client::request` would hand it over
+/// (`kube-client-4.2.0/src/client/mod.rs:551-558`).
+fn refused(code: u16) -> kube::Error {
+    kube::Error::Api(
+        kube::core::response::Status {
+            code,
+            ..Default::default()
+        }
+        .boxed(),
+    )
+}
+
+/// **The columns are the server's, and two kinds do not share one list.**
+///
+/// **What this proves is that the columns are per-kind, which is weaker than invariant 12 and the
+/// first draft of this comment claimed the stronger thing.** A hand-written map from kind to
+/// columns would produce two different header lists just as well, so `assert_ne!` cannot see the
+/// difference between reading them off the wire and looking them up. What *would* is a `Table` of
+/// a kind no built-in printer knows — a CRD, whose columns can only have come from the server —
+/// and **no CRD `Table` is captured in this repo**, so that half is unproven here. The mechanical
+/// half of invariant 12 is covered elsewhere: `k8s.rs` § THE BROWSER'S ROWS contains no kind at
+/// all, and the tests around [`Fetch::table`] feed invented CRDs to everything that does.
+///
+/// **The `priority` split is the second half**: `screens/resources.md` draws the `priority: 0` set,
+/// and without it every screen is `kubectl -o wide`. Nine columns of which five are narrow is the
+/// measurement, not a guess.
+#[test]
+fn the_columns_come_from_the_server_and_two_kinds_never_share_one_list() {
+    let pods = table("table-pods");
+    let deployments = table("table-deployments");
+    println!("pods: {:?}", headers(&pods));
+    println!("deployments: {:?}", headers(&deployments));
+    println!("\nwhat a screen gets, pods:\n{}", drawn(&pods));
+    println!(
+        "\nwhat a screen gets, deployments:\n{}",
+        drawn(&deployments)
+    );
+
+    assert_eq!(
+        headers(&pods),
+        [
+            "Name",
+            "Ready",
+            "Status",
+            "Restarts",
+            "Age",
+            "IP",
+            "Node",
+            "Nominated Node",
+            "Readiness Gates"
+        ],
+        "the pods table's columns are not the ones the API server sent"
+    );
+    assert_eq!(
+        headers(&deployments),
+        [
+            "Name",
+            "Ready",
+            "Up-to-date",
+            "Available",
+            "Age",
+            "Containers",
+            "Images",
+            "Selector"
+        ],
+        "the deployments table's columns are not the ones the API server sent"
+    );
+    assert_ne!(
+        headers(&pods),
+        headers(&deployments),
+        "two kinds came back with identical columns, which is what a hard-coded list looks like"
+    );
+
+    for (kind, decoded, wide) in [("pods", &pods, 4), ("deployments", &deployments, 3)] {
+        let narrow = decoded
+            .columns
+            .iter()
+            .filter(|column| column.priority == 0)
+            .count();
+        println!(
+            "{kind}: {} columns, {narrow} at priority 0",
+            decoded.columns.len()
+        );
+        assert_eq!(
+            narrow, 5,
+            "{kind} no longer has five narrow columns, so the wide/narrow split has moved"
+        );
+        assert_eq!(
+            decoded.columns.len() - narrow,
+            wide,
+            "{kind} lost the columns `kubectl -o wide` adds, so priority is not being kept"
+        );
+    }
+}
+
+/// **A cell is not a string, and this is the defect the deployments capture exists to prevent.**
+///
+/// `[.rows[].cells[]] | map(type) | unique` over that table is `["number", "string"]`, so
+/// `cells: Vec<String>` would have failed to deserialise every Deployment table a real cluster
+/// serves. The fixture is asserted to still carry a number first — otherwise a capture that lost
+/// them would leave this test green and testing nothing.
+#[test]
+fn a_number_cell_decodes_and_comes_out_as_the_text_a_column_prints() {
+    let raw = capture("table-deployments");
+    let shapes: BTreeSet<&str> = raw["rows"]
+        .as_array()
+        .expect("the capture has rows")
+        .iter()
+        .flat_map(|row| row["cells"].as_array().expect("a row has cells"))
+        .map(|cell| match cell {
+            serde_json::Value::Number(_) => "number",
+            serde_json::Value::String(_) => "string",
+            _ => "other",
+        })
+        .collect();
+    println!("cell types in table-deployments.json: {shapes:?}");
+    assert!(
+        shapes.contains("number"),
+        "table-deployments.json no longer carries a number cell, so this test proves nothing"
+    );
+
+    let decoded = table("table-deployments");
+    assert_eq!(
+        decoded.rows[0].cells,
+        [
+            "broken-owned",
+            "0/1",
+            "1",
+            "0",
+            "34h",
+            "quitter",
+            "busybox",
+            "app=broken-owned"
+        ],
+        "a number cell did not come out as the bare text a column prints"
+    );
+
+    // The negative: a table whose cells are all strings is carried through untouched.
+    let pods = capture("table-pods");
+    let sent: Vec<String> = pods["rows"][0]["cells"]
+        .as_array()
+        .expect("the first pod row has cells")
+        .iter()
+        .map(|cell| {
+            cell.as_str()
+                .expect("every pod cell is a string")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        table("table-pods").rows[0].cells,
+        sent,
+        "a table of plain string cells was not carried through as it was sent"
+    );
+}
+
+/// **A row carries the identity the default `includeObject` sends, and carries none when the
+/// server was asked for none** — the two shapes `k8s.rs` § THE BROWSER'S ROWS decides between,
+/// both decoded by one type.
+///
+/// The identity is what `screens/resources.md` matches a finding onto a row by and what every
+/// dialog names, so the `None` half is the cost of the alternative rather than a mode k8rs uses.
+#[test]
+fn a_row_carries_its_identity_under_the_default_and_none_under_include_object_none() {
+    let pods = table("table-pods");
+    assert!(!pods.rows.is_empty(), "the pods capture has no rows");
+    for row in &pods.rows {
+        println!("{:?}/{:?} uid {:?}", row.namespace, row.name, row.uid);
+        assert_eq!(
+            row.namespace.as_deref(),
+            Some("kube-system"),
+            "a row of a kube-system table lost its namespace"
+        );
+        assert_eq!(
+            row.name.as_deref(),
+            Some(row.cells[0].as_str()),
+            "the row's object and its Name cell disagree about what it is"
+        );
+        assert!(
+            row.uid.as_ref().is_some_and(|uid| uid.len() == 36),
+            "a row came through without the uid a finding is matched onto it by"
+        );
+    }
+
+    let raw = capture("table-deployments");
+    assert!(
+        raw["rows"][0]["object"].is_null(),
+        "table-deployments.json is no longer the ?includeObject=None capture, so the second \
+         shape is not being decoded here"
+    );
+    let deployments = table("table-deployments");
+    assert!(
+        !deployments.rows.is_empty(),
+        "the deployments capture has no rows"
+    );
+    for row in &deployments.rows {
+        assert_eq!(
+            (&row.namespace, &row.name, &row.uid),
+            (&None, &None, &None),
+            "a row with no object under it invented an identity"
+        );
+    }
+}
+
+/// **A cell is free text from the API and goes through the one guard** (invariant 9,
+/// NOTES § D146), **at the class that keeps a sentence whole**.
+///
+/// The three assertions are the three things that could be wrong: a control character survives, a
+/// runaway cell is kept whole, or the class is [`IDENTIFIER`] and an Events table's `MESSAGE`
+/// column loses its second half. The last is why 513 bytes is asserted *untouched*.
+#[test]
+fn a_crafted_cell_is_stripped_and_bounded_and_a_sentence_length_one_is_not_cut() {
+    let sentence = "S".repeat(IDENTIFIER + 1);
+    let runaway = "R".repeat(FREE_TEXT + 1);
+    let decoded: Table = ingest(response(
+        &["Name", "Message"],
+        vec![
+            vec![
+                Value::String("\u{1b}[2Jweb\u{7}\u{202e}".to_string()),
+                Value::String(sentence.clone()),
+            ],
+            vec![Value::String("api".to_string()), Value::String(runaway)],
+        ],
+    ));
+
+    println!("name cell: {:?}", decoded.rows[0].cells[0]);
+    // `\u{1b}`, `\u{7}` and `\u{202e}` are gone and `[2J` is not: D146 removes what has no
+    // printed form and never touches a character that prints as itself. What the crafted cell
+    // loses is its power to move the reader's cursor and to reverse the text after it, not its
+    // text. **A cell is where this class is worth the most** — every kind the cluster serves
+    // reaches a screen through this one path, a CRD's own `additionalPrinterColumns` included.
+    assert_eq!(
+        decoded.rows[0].cells[0], "[2Jweb",
+        "a crafted cell reached the screen with a control character still in it"
+    );
+    assert!(
+        !decoded.rows[0].cells[0].chars().any(unprintable),
+        "a character with no printed form survived into a cell a terminal will print"
+    );
+    assert_eq!(
+        decoded.rows[0].cells[1],
+        sentence,
+        "a {}-byte cell was cut, so a message column is being bounded as an identifier",
+        sentence.len()
+    );
+    assert!(
+        decoded.rows[1].cells[1].ends_with(SHORTENED),
+        "a cell past {FREE_TEXT} bytes was kept whole, or cut without saying so"
+    );
+    assert!(
+        decoded.rows[1].cells[1].len() <= FREE_TEXT + SHORTENED.len(),
+        "the cell bound did not hold"
+    );
+}
+
+/// **A row shorter than the column list is padded, and a longer one keeps every cell it was
+/// sent.** The first is a renderer that would index past the end; the second is the collection
+/// bound this box is explicitly not deciding — nothing here cuts a list.
+#[test]
+fn a_short_row_is_padded_to_the_columns_and_a_long_one_is_never_cut() {
+    let decoded: Table = ingest(response(
+        &["Name", "Ready", "Age"],
+        vec![
+            vec![Value::String("web".to_string())],
+            vec![
+                Value::String("api".to_string()),
+                Value::String("1/1".to_string()),
+                Value::String("3d".to_string()),
+                Value::String("extra".to_string()),
+            ],
+        ],
+    ));
+    println!(
+        "short: {:?}\nlong:  {:?}",
+        decoded.rows[0].cells, decoded.rows[1].cells
+    );
+    assert_eq!(
+        decoded.rows[0].cells,
+        ["web", "", ""],
+        "a row with one cell and three columns was not padded, so a renderer walking the columns \
+         would index past the end"
+    );
+    assert_eq!(
+        decoded.rows[1].cells,
+        ["api", "1/1", "3d", "extra"],
+        "a cell the server sent was thrown away, which is a collection bound this box does not \
+         decide"
+    );
+}
+
+/// **The request is the path kube would have built and the Accept header the box names, byte for
+/// byte** — and the `406` fallback is the *same* path, never one rebuilt beside it.
+///
+/// The namespace is dropped for a cluster-scoped kind because `/api/v1/namespaces/x/nodes` is a
+/// path no server answers, and `namespaced` is discovery's own flag rather than a list of kinds
+/// (invariant 12). The CRD row is what says none of this knows a built-in from anything else.
+#[test]
+fn the_table_fetch_is_one_path_one_header_and_the_fallback_reuses_the_path() {
+    let cases = [
+        (
+            browsed("", "v1", "Pod", "pods", Scope::Namespaced),
+            Some("kube-system"),
+            "/api/v1/namespaces/kube-system/pods",
+        ),
+        (
+            browsed("", "v1", "Pod", "pods", Scope::Namespaced),
+            None,
+            "/api/v1/pods",
+        ),
+        (
+            browsed("apps", "v1", "Deployment", "deployments", Scope::Namespaced),
+            Some("payments"),
+            "/apis/apps/v1/namespaces/payments/deployments",
+        ),
+        (
+            browsed("", "v1", "Node", "nodes", Scope::Cluster),
+            Some("payments"),
+            "/api/v1/nodes",
+        ),
+        (
+            browsed(
+                "example.com",
+                "v1alpha1",
+                "Widget",
+                "widgets",
+                Scope::Namespaced,
+            ),
+            Some("payments"),
+            "/apis/example.com/v1alpha1/namespaces/payments/widgets",
+        ),
+    ];
+    for (kind, namespace, path) in &cases {
+        let fetch = Fetch::table(kind, *namespace).expect("an ordinary kind builds a path");
+        println!("{} ns={namespace:?} -> {}", kind.plural, fetch.path);
+        assert_eq!(&fetch.path, path, "the path for {} is wrong", kind.plural);
+        assert_eq!(
+            fetch.accept, "application/json;as=Table;g=meta.k8s.io;v=v1,application/json",
+            "the Accept header is not the one todo.md § Phase 5 names"
+        );
+        assert!(
+            !fetch.path.contains("includeObject"),
+            "includeObject is on the wire; k8s.rs § THE BROWSER'S ROWS keeps the server default \
+             instead, and the doc comment is the record of it"
+        );
+
+        let fallback = fetch.plain();
+        assert_eq!(
+            fallback.path, fetch.path,
+            "the 406 fallback went somewhere else than the request that was refused"
+        );
+        assert_eq!(
+            fallback.accept, "application/json",
+            "the fallback still asks for a Table"
+        );
+    }
+}
+
+/// **A kind whose own words cannot build a URL is never fetched** ([`path_safe`]).
+///
+/// **The threat is not hypothetical and it is not a CRD**: `run_aggregated()` copies
+/// `resources[].resource` into the plural unchecked (`parse.rs:115-132`), so whoever runs an
+/// aggregated API server on the cluster chooses this string. A row labelled *widgets* that GETs
+/// `/api/v1/namespaces/kube-system/secrets` with the reader's own credentials is the shape.
+///
+/// **The last two cases are the ones nobody would have thought to feed**: a plural the ingest
+/// guard itself *shortened* ends in `… (shortened by k8rs)`, which is our text and not the
+/// cluster's and is still not a path; and the guard leaves `[2J` behind when it removes the escape
+/// that made it dangerous, which is D146 working exactly as written and still not a path either.
+#[test]
+fn a_kind_whose_own_words_cannot_build_a_url_is_never_fetched() {
+    let long = "w".repeat(IDENTIFIER + 1);
+    let refused: [(&str, &str, &str); 8] = [
+        ("example.com", "v1", "pods/../secrets"),
+        ("example.com", "v1", "widgets?labelSelector=x"),
+        ("example.com", "v1", "widgets#anchor"),
+        ("example.com", "v1", ".."),
+        ("example.com", "v1", ""),
+        ("example.com", "v1", "wid gets"),
+        ("../../apis/apps", "v1", "widgets"),
+        ("example.com", "v1/../../v2", "widgets"),
+    ];
+    for (group, version, plural) in refused {
+        let kind = browsed(group, version, plural, plural, Scope::Namespaced);
+        println!("refused: {group:?} {version:?} {plural:?}");
+        assert_eq!(
+            Fetch::table(&kind, Some("kube-system")),
+            None,
+            "{group}/{version} {plural} built a URL path — a request the reader never asked \
+             for, going out with the reader's own credentials"
+        );
+        assert!(
+            Browsing::open(kind, Some("kube-system")).is_none(),
+            "a view opened on a kind no request can be built for"
+        );
+    }
+
+    // The ingest guard's own two outputs, fed to the sink that has to survive them.
+    for plural in ["\u{1b}[2Jwidgets".to_string(), long.clone()] {
+        let kind = browsed("example.com", "v1", "Widget", &plural, Scope::Namespaced);
+        println!("after the guard: {:?}", kind.plural);
+        assert_ne!(
+            kind.plural, plural,
+            "the ingest guard left this plural alone, so this case is not about what it produces"
+        );
+        assert_eq!(
+            Fetch::table(&kind, None),
+            None,
+            "a plural the guard rewrote was still used to build a URL"
+        );
+    }
+
+    // The negative: every ordinary shape a real cluster serves is kept.
+    let kept: [(&str, &str, &str); 6] = [
+        ("", "v1", "pods"),
+        ("apps", "v1", "deployments"),
+        ("policy", "v1", "poddisruptionbudgets"),
+        ("storage.k8s.io", "v1", "csistoragecapacities"),
+        ("cert-manager.io", "v1alpha2", "certificaterequests"),
+        ("1password.com", "v1", "onepassworditems"),
+    ];
+    for (group, version, plural) in kept {
+        let kind = browsed(group, version, "Widget", plural, Scope::Namespaced);
+        let fetch = Fetch::table(&kind, Some("payments"));
+        println!("kept: {group:?} {version:?} {plural:?} -> {fetch:?}");
+        assert!(
+            fetch.is_some(),
+            "{group}/{version} {plural} is a shape a real cluster serves and it was refused"
+        );
+    }
+}
+
+/// **The namespace is judged by the same predicate, one argument along.**
+///
+/// The first draft exempted it and reasoned from the source — *the caller typed it* — which is
+/// true only while the source is `--namespace`. The namespace **picker** is a later box in this
+/// same phase and it is fed from the cluster's own namespace list, so the exemption had a shelf
+/// life. `x?watch=true` is the exact failure [`path_safe`]'s doc names for a plural: a query
+/// parameter on a call the command log prints without it, which is invariant 4's record lying.
+///
+/// **A cluster-scoped kind drops the namespace before it is judged**, so a stray one cannot
+/// refuse a fetch that would never have carried it.
+#[test]
+fn a_namespace_that_cannot_be_a_path_segment_is_refused_too() {
+    let pods = browsed("", "v1", "Pod", "pods", Scope::Namespaced);
+    let nodes = browsed("", "v1", "Node", "nodes", Scope::Cluster);
+
+    for namespace in ["../../../api/v1/secrets", "x?watch=true", "a#b", "", "a b"] {
+        println!(
+            "namespaced {namespace:?} -> {:?}",
+            Fetch::table(&pods, Some(namespace)).map(|fetch| fetch.path)
+        );
+        assert_eq!(
+            Fetch::table(&pods, Some(namespace)),
+            None,
+            "a namespace of {namespace:?} built a URL path — the reader's credentials on a \
+             request the reader did not make"
+        );
+        assert!(
+            Browsing::open(pods.clone(), Some(namespace)).is_none(),
+            "a view opened on a namespace no request can be built for"
+        );
+        // The cluster-scoped kind never carries it, so it is never judged.
+        assert_eq!(
+            Fetch::table(&nodes, Some(namespace))
+                .expect("a cluster-scoped kind drops the namespace before judging it")
+                .path,
+            "/api/v1/nodes"
+        );
+    }
+
+    for namespace in ["kube-system", "payments", "default", "team-1.example"] {
+        let fetch = Fetch::table(&pods, Some(namespace)).expect("an ordinary namespace is a path");
+        println!("kept: {namespace:?} -> {}", fetch.path);
+        assert_eq!(fetch.path, format!("/api/v1/namespaces/{namespace}/pods"));
+    }
+}
+
+/// **Only a `406` asks again; every other refusal is the reader's news.**
+///
+/// **Synthesised, and it says so**: the kind cluster this box was measured on runs no aggregated
+/// API server, so no capture of a real `406` exists and this drives the branch with a `Status`
+/// built here. What it cannot prove is what a real aggregated server puts in that body —
+/// `k8s.rs` § THE BROWSER'S ROWS names the one shape the predicate would miss.
+#[test]
+fn only_a_406_asks_again_for_the_plain_object_list() {
+    assert!(
+        not_acceptable(&refused(406)),
+        "a 406 did not fall back, so a browser breaks on somebody's aggregated API"
+    );
+    for code in [0, 200, 401, 403, 404, 409, 410, 429, 500, 503] {
+        println!("{code} -> {}", not_acceptable(&refused(code)));
+        assert!(
+            !not_acceptable(&refused(code)),
+            "a {code} asked again without the Table header, which answers the reader's 403 with a \
+             second request instead of telling them"
+        );
+    }
+    assert!(
+        !not_acceptable(&kube::Error::TlsRequired),
+        "a failure that never reached the API server was read as a refusal of the Table header"
+    );
+}
+
+/// **A `200` that is not a `Table` is read as the object list it is**, and a one-column table is
+/// what a plain list can honestly be drawn as (invariant 12: `metadata` is the only thing in one
+/// that is not per-kind, and a column of ages would need a clock this file does not read —
+/// invariant 5, NOTES § D18).
+///
+/// **This is the Accept header's own second half, not the `406` path.** `,application/json` means
+/// a server that cannot print a `Table` answers **200** with the ordinary list, so
+/// [`not_acceptable`] never sees it and the fallback never fires — the decode is the only place
+/// that can notice. A body whose `kind` is not `Table` used to decode to
+/// `Table { columns: [], rows: [] }` with no error at all: six Deployments in, an empty screen
+/// out, silently.
+///
+/// Driven by a committed `kind: List` capture, which is the exact shape both that server and the
+/// `406` fallback send.
+#[test]
+fn a_two_hundred_that_is_not_a_table_is_read_as_the_object_list_it_is() {
+    let raw = capture("deployments");
+    let sent = raw["items"]
+        .as_array()
+        .expect("the capture is a list")
+        .len();
+    assert_eq!(
+        raw["kind"], "List",
+        "deployments.json is no longer a plain object list, so this test is about another shape"
+    );
+    let response: TableResponse =
+        serde_json::from_value(raw).expect("a captured object list decodes through the one type");
+    let decoded: Table = ingest(response);
+
+    println!(
+        "{sent} items -> {:?} / {} rows",
+        headers(&decoded),
+        decoded.rows.len()
+    );
+    assert_eq!(
+        headers(&decoded),
+        ["Name"],
+        "the fallback drew a column the API server never printed"
+    );
+    assert_eq!(
+        decoded.rows.len(),
+        sent,
+        "the fallback lost objects the list carried — an empty screen for a namespace that has \
+         six Deployments in it"
+    );
+    assert!(
+        sent > 1,
+        "the capture has one item, so a row count proves nothing"
+    );
+    for row in &decoded.rows {
+        assert_eq!(
+            row.cells.len(),
+            1,
+            "a fallback row has cells the one column cannot draw"
+        );
+        assert_eq!(
+            row.name.as_deref(),
+            Some(row.cells[0].as_str()),
+            "the fallback's cell and its identity disagree"
+        );
+        assert!(
+            row.namespace.is_some() && row.uid.is_some(),
+            "a fallback row lost the identity every dialog needs: {row:?}"
+        );
+    }
+
+    // The other direction: a real `Table` is still read as one by the same decode, so the branch
+    // cannot be *always the list* any more than it could be *always the table*.
+    let table = table("table-pods");
+    assert_eq!(
+        table.columns.len(),
+        9,
+        "a Table body was read as an object list"
+    );
+    assert_eq!(table.rows.len(), 14);
+}
+
+/// **Every `String` the browser's rows keep is named by the ingest guard**, derived off `k8s.rs`
+/// rather than typed out here — the same guard [`Browsable`] and the snapshot types get. A field
+/// added to [`Row`] or [`Column`] and forgotten in the guard fails this.
+#[test]
+fn every_string_the_browsers_rows_keep_is_named_by_the_ingest_guard() {
+    let types = declared_types(K8S_SOURCE);
+    for (name, least) in [("Row", 4), ("Column", 1)] {
+        let fields = types.get(name).unwrap_or_else(|| {
+            panic!("k8s.rs no longer declares {name}, or declares it differently")
+        });
+        let carries_text: Vec<&str> = fields
+            .iter()
+            .filter(|(_, kind)| words(kind).any(|word| word == "String"))
+            .map(|(field, _)| *field)
+            .collect();
+        assert!(
+            carries_text.len() >= least,
+            "only {carries_text:?} were parsed out of {name}, so this guard is reading nothing"
+        );
+        let body = bounded_impl(name).unwrap_or_else(|| {
+            panic!("{name} carries text and the ingest guard region has no impl Bounded for it")
+        });
+        for field in carries_text {
+            println!("bounded: {name}.{field}");
+            assert!(
+                words(body).any(|word| word == field),
+                "{name}.{field} is a String a row keeps and the ingest guard never names it"
+            );
+        }
+    }
+}
+
+// --- KEEPING A BROWSER VIEW FRESH ---
+//
+// **`PRIOR-ART § A5` is what these are written against**: k9s merged *skip the reconcile when
+// nothing changed* and reverted it a month later, because a coalescer that drops the last event of
+// a burst shows stale data forever and passes every test that stops before the storm ends. So the
+// three that matter here all end *after* the last change: one asserts the fetch that serves it
+// happens, one asserts a change arriving mid-flight is not answered by a response that predates
+// it, and one asserts no second fetch is on the wire beside the first — the half the review found
+// open, where an answer arriving out of order leaves the view on pre-change rows with nothing
+// pending to re-arm (NOTES § D154).
+//
+// **Every fetch is answered with `done()`, and that is not ceremony.** The floor is measured from
+// the moment an answer came back, so a test that issues and never completes is testing a frozen
+// view — which is itself asserted, once, rather than left to be the accidental shape of the rest.
+//
+// **No clock is read.** Every moment below is handed in, as it is everywhere else in this file
+// (invariant 5, NOTES § D18).
+
+/// A moment this many milliseconds after another.
+fn after(base: &Time, millis: i64) -> Time {
+    Time(
+        base.0
+            .checked_add(SignedDuration::from_millis(millis))
+            .expect("a test moment fits in a timestamp"),
+    )
+}
+
+/// A view on one kind, freshly opened.
+fn opened() -> Browsing {
+    Browsing::open(
+        browsed("apps", "v1", "Deployment", "deployments", Scope::Namespaced),
+        Some("payments"),
+    )
+    .expect("an ordinary kind can be browsed")
+}
+
+/// **A view fetches the moment it opens, and then not again until something changes** — the
+/// no-polling half of invariant 6 at the one place a browser could quietly reintroduce one.
+#[test]
+fn a_view_fetches_when_it_opens_and_then_only_when_something_changes() {
+    let open = now();
+    let mut view = opened();
+
+    // What a pane title and the `ns:` label are drawn off (`screens/resources.md`): the view
+    // remembers the kind discovery described, not a name k8rs made up for it.
+    assert_eq!(view.kind().plural, "deployments");
+    assert_eq!(view.kind().group, "apps");
+    assert!(
+        view.kind().namespaced,
+        "the view lost the flag the ns: label is drawn from"
+    );
+
+    let first = view
+        .issue(&open)
+        .expect("a view that has never fetched owes one at once");
+    println!("opened -> {first:?}");
+    assert_eq!(
+        first.path, "/apis/apps/v1/namespaces/payments/deployments",
+        "the view fetched something other than the kind and namespace it was opened on"
+    );
+    assert_eq!(first.accept, TABLE_ACCEPT);
+    view.done(&open);
+
+    for millis in [0, 500, 1_000, 60_000] {
+        assert!(
+            view.issue(&after(&open, millis)).is_none(),
+            "a view nothing changed on re-fetched {millis}ms later, which is the poll invariant 6 \
+             refuses"
+        );
+    }
+    assert_eq!(
+        view.due_at(&after(&open, 60_000)),
+        None,
+        "a view with nothing pending told the loop to wake up anyway"
+    );
+}
+
+/// **A storm costs one fetch per floor, and the last change of it is never dropped**
+/// (`PRIOR-ART § A5`). The assertion that matters is the one *after* the storm: a coalescer that
+/// swallowed the final event would leave the view showing what it showed before the deploy, and
+/// every test that stopped at the last `changed()` would still be green.
+#[test]
+fn a_storm_costs_one_fetch_per_floor_and_the_last_change_is_still_served() {
+    let open = now();
+    let mut view = opened();
+    view.issue(&open).expect("the opening fetch");
+    view.done(&open);
+
+    // The rollout: events every 50ms for half a second.
+    for step in 1..=10 {
+        view.changed();
+        let moment = after(&open, step * 50);
+        assert!(
+            view.issue(&moment).is_none(),
+            "a fetch went out {}ms after the last one, under the {REFRESH_FLOOR:?} floor",
+            step * 50
+        );
+    }
+    assert_eq!(
+        view.due_at(&after(&open, 500)),
+        Some(after(&open, 1_000)),
+        "the loop was not told when to come back for the fetch the floor is holding"
+    );
+
+    let served = view
+        .issue(&after(&open, 1_000))
+        .expect("the storm's last change is served once the floor has passed");
+    println!("storm of 10 changes -> one fetch at +1000ms: {served:?}");
+    view.done(&after(&open, 1_000));
+    assert!(
+        view.issue(&after(&open, 5_000)).is_none(),
+        "the view kept fetching after the storm ended with nothing left to show"
+    );
+}
+
+/// **A change that arrives while a fetch is in flight is not answered by that fetch.**
+///
+/// The response left the server before the change happened, so it cannot contain it. This is why
+/// the pending flag is cleared when a request is *issued* and not when it returns — the one line
+/// `PRIOR-ART § A5` says k9s got wrong in the other direction.
+#[test]
+fn a_change_that_lands_mid_flight_is_not_swallowed_by_the_request_it_overtook() {
+    let open = now();
+    let mut view = opened();
+    view.issue(&open).expect("the opening fetch");
+
+    // The request is still on the wire when the cluster changes again.
+    view.changed();
+    view.done(&after(&open, 100));
+
+    assert!(
+        view.issue(&after(&open, 100)).is_none(),
+        "the floor did not hold a fetch that came back 100ms after the last one went out"
+    );
+    assert!(
+        view.issue(&after(&open, 1_100)).is_some(),
+        "a change that arrived while a fetch was in flight was cleared by that fetch's own \
+         issue, so the view shows a cluster state that is one change out of date forever"
+    );
+}
+
+/// **A view that has been quiet re-fetches at once** — the floor is a gap between fetches, not a
+/// delay before one, so a reader who deletes a pod does not wait a second to watch the row go.
+#[test]
+fn a_quiet_view_refetches_the_moment_something_finally_changes() {
+    let open = now();
+    let mut view = opened();
+    view.issue(&open).expect("the opening fetch");
+    view.done(&open);
+
+    let quiet = after(&open, 600_000);
+    view.changed();
+    assert_eq!(
+        view.due_at(&quiet),
+        Some(after(&open, 1_000)),
+        "the deadline moved with the change rather than staying on the last fetch, which is a \
+         debounce and not a floor"
+    );
+    assert!(
+        view.issue(&quiet).is_some(),
+        "a view idle for ten minutes still waited for the floor after one change"
+    );
+}
+
+/// **Two fetches are never on the wire at once, and the cluster sets the pace** — the half of
+/// `PRIOR-ART § A5` that clearing the flag at *issue* does not close.
+///
+/// Clearing at issue keeps a change from being answered by a response that predates it. It does
+/// nothing about the second fetch going out while the first is still on the wire: at
+/// 6852 bytes/row a 5000-row namespace is a 34 MB body, it takes however long the cluster takes,
+/// and a rolling deploy issues one per floor. **HTTP/2 gives no ordering guarantee**, so the
+/// answer to the older request can land last and leave the view showing rows from before the
+/// change that asked for it — with nothing pending to re-arm, until some unrelated change minutes
+/// later. Holding one at a time is what makes that arrival order impossible rather than unlikely.
+///
+/// **It is also where [`REFRESH_FLOOR`] stops being the whole answer**: the gap is measured from
+/// the moment an answer came back, so a fetch that takes three seconds is followed a second
+/// later and not two seconds *ago*. No second constant, and the cluster tunes it.
+#[test]
+fn two_fetches_are_never_on_the_wire_at_once_and_a_slow_cluster_sets_the_pace() {
+    let open = now();
+    let mut view = opened();
+    view.issue(&open).expect("the opening fetch");
+
+    // The cluster keeps changing while that first fetch is still on the wire. The last moment is
+    // ten minutes in, which is the ceiling stated rather than left to be found: a caller that
+    // never says `done()` has frozen its own view, and no floor and no change will unfreeze it.
+    for millis in [1_000, 2_000, 3_000, 600_000] {
+        view.changed();
+        assert!(
+            view.issue(&after(&open, millis)).is_none(),
+            "a second fetch went out {millis}ms in with the first still on the wire: two bodies \
+             of one list are held at once, and the older answer can arrive last"
+        );
+        assert_eq!(
+            view.due_at(&after(&open, millis)),
+            None,
+            "the loop was told to wake up at {millis}ms for a fetch that cannot be issued until \
+             the one in flight comes back"
+        );
+    }
+
+    // It lands after three seconds. The change that arrived while it was out is still owed.
+    view.done(&after(&open, 3_000));
+    assert_eq!(
+        view.due_at(&after(&open, 3_000)),
+        Some(after(&open, 4_000)),
+        "the floor was measured from the moment the fetch was issued, so a fetch slower than the \
+         floor is followed by one that was due before it even came back"
+    );
+    assert!(
+        view.issue(&after(&open, 3_999)).is_none(),
+        "the floor did not hold, so a three-second fetch would be re-issued the moment it landed"
+    );
+    let next = view
+        .issue(&after(&open, 4_000))
+        .expect("the change that arrived mid-flight is served once the answer is in");
+    println!("3s fetch, changes at +1s/+2s/+3s -> one fetch at +4000ms: {next:?}");
+
+    // And the pace is the cluster's: the same view against a 30ms answer is back at the floor.
+    view.done(&after(&open, 4_030));
+    view.changed();
+    assert_eq!(
+        view.due_at(&after(&open, 4_030)),
+        Some(after(&open, 5_030)),
+        "a fast answer did not put the view back on the floor, so the pace is not the cluster's"
+    );
+}
+
+/// **Only the Alerts view's inputs are watched permanently** (invariant 6,
+/// `screens/resources.md`), derived off `k8s.rs` rather than asserted in prose. A sixth `Watch<>`
+/// on [`Store`] — a browser kind promoted to a permanent stream, which is the forty-streams
+/// failure this architecture exists to avoid — fails here.
+#[test]
+fn only_the_alerts_views_inputs_are_watched_permanently() {
+    let types = declared_types(K8S_SOURCE);
+    let permanent: Vec<&str> = types
+        .get("Store")
+        .expect("k8s.rs no longer declares Store, or declares it differently")
+        .iter()
+        .filter(|(_, kind)| kind.starts_with("Watch<"))
+        .map(|(field, _)| *field)
+        .collect();
+    println!("permanent watches: {permanent:?}");
+    assert_eq!(
+        permanent,
+        [
+            "pods",
+            "nodes",
+            "deployments",
+            "stateful_sets",
+            "daemon_sets"
+        ],
+        "the permanent watch set is no longer invariant 6's five"
+    );
+
+    let browsing = types
+        .get("Browsing")
+        .expect("k8s.rs no longer declares Browsing, or declares it differently");
+    assert!(
+        !browsing.is_empty(),
+        "no fields were parsed out of Browsing, so this half of the guard reads nothing"
+    );
+    for (field, kind) in browsing {
+        assert!(
+            !kind.contains("Watch<"),
+            "Browsing.{field} holds a watch ({kind}); a browser view's stream is the caller's and \
+             dies when the view is dropped"
+        );
+    }
 }

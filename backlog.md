@@ -813,6 +813,105 @@ in their own bodies why.*
   against the same question, with the ones that are safe named so nobody
   re-audits them
 
+### From the browser's-rows family and its operator review (2026-08-22)
+
+*Everything the family found that is not a defect in the family. Ranked roughly
+by what it costs to leave — the first two are reachable from a keypress once
+`connect()` lands, and the third has a deadline that is not a phase close.*
+
+- **A kind that can be listed and cannot be watched exists on every cluster, and
+  nothing here has a state for it.** Measured: of the 42 resources a bare kind
+  cluster advertises `list` on, `componentstatuses` has no `watch`, and the
+  server answers `watch is not supported on resources of kind
+  "componentstatuses"` — **permanently, not transiently**. `browsable()` filters
+  on `list` alone, so the sidebar offers it; a caller then opens a metadata watch
+  and gets a 405 forever, and kube's `watcher` carries no backoff, so that is a
+  hot loop against the API server reachable by pressing Enter on a sidebar row —
+  the security gate's *never retries in a loop* by name. **Not the
+  reconnect/backoff box**: that one is about a watch that should work and
+  blipped; this one can never work. `Browsable` already carries `verbs`, so the
+  data-side check costs nothing; the screen half — a view with no change signal
+  fetches once and offers a manual refresh key — is the ruling. Named in
+  `k8s.rs`'s doc, not built ([reports/2026-08-22-browser-rows-table-watch-and-refresh.md](reports/2026-08-22-browser-rows-table-watch-and-refresh.md)).
+
+- **`Row::name` is what a kubectl line and every dialog will name, and nothing
+  judges it beyond the strip and a 512-byte bound.** `path_safe` guards the URL
+  and argues from exactly the right threat — an aggregated API server chooses
+  `resources[].resource` — and it chooses `metadata.name` by the same amount. A
+  name of `web -n kube-system` renders a command log line reading `kubectl
+  delete pod web -n kube-system -n payments`: k8rs does not execute it, but
+  [invariant 4](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+  says *neither record may lie*, and that one does. The same string later builds
+  the `e` edit temp file path, where `../` is the gate's named case. No command
+  log and no `ops.rs` exists yet, so it was named in the doc rather than fixed.
+
+- **The Table is fetched unpaged, and the field that would say *truncated* is
+  dropped at the decode — and `k8s.rs` freezes after Phase 6.** `ListParams::
+  default().limit` is `None`, so the browser asks for everything in one body: 34 MB
+  at 5 000 rows, which is `PRIOR-ART § A2`'s complaint one door along from the
+  initial-LIST box that owns it. A Table pages perfectly well — measured,
+  `?limit=5` returns 5 rows with `metadata.continue` and `remainingItemCount:
+  48` — but `TableResponse` names no `metadata`, so the *showing 500 of 5 048*
+  line has nothing to read. **This is the one entry here with a deadline that is
+  not a phase close**: after Phase 6 the file is frozen and adding the field is a
+  plan correction rather than an edit.
+
+- **Should the browser watch the Table after all?** [D154](NOTES.md#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22)'s boxed question. The
+  measured comparison does not favour what shipped: a Table watch event is ~3 062
+  bytes and already carries the row identity, a metadata event is ~2 624 bytes
+  **plus** a whole re-fetch at 6 852 bytes per row. What shipped is defended by
+  what kube gives the metadata path for free — `resourceVersion` bookkeeping, the
+  410 relist, the init event — and a Table watch is a hand-rolled
+  `Client::request_stream` owing all three. Real work either way; nobody has
+  ruled which is less.
+
+- **`path_safe` sits at the sink and the stronger placement was refused for a
+  reason worth revisiting.** Putting it in `browsable()` would keep a hostile row
+  out of the sidebar entirely, but it reversed two behaviours the discovery box
+  proved — a CRD naming itself with control characters is *offered with its name
+  stripped*, and a runaway plural is *offered shortened* — and neither survives
+  the predicate afterwards. The PM ruled the sink is enough (the row degrades to
+  *cannot fetch* rather than exploiting anything). The question is whether
+  *offered but unopenable* is the right screen.
+
+- **A Table with no `priority: 0` column renders nothing.** Fed `columns=[A(1),
+  B(1)]`, the drawn output is `"\n"`; same for zero `columnDefinitions` with rows
+  present. Built-in printers and the CRD table convertor always emit `Name` at 0,
+  but an aggregated API server writes its own Table. The screen needs a rule for
+  *the server gave me no narrow columns*.
+
+- **`kubectl get pods` with no `-n` is not what k8rs will have done.**
+  `Fetch::table(kind, None)` is `/api/v1/pods`, every namespace; the honest
+  command log line is `kubectl get pods -A`, because plain `kubectl get pods`
+  uses the kubeconfig's current namespace. A trap for the command-log box, and
+  invariant 4 again.
+
+- **The fixture that would turn one test's claim into invariant 12 proper.**
+  `assert_ne!` over two captures proves the columns are *per-kind*, which a
+  hand-written map would also give; what proves there is no map is a `Table` of a
+  kind no built-in printer knows. One namespaced CRD with
+  `additionalPrinterColumns`, captured with the same Accept header, on the next
+  capture trip — it is also the only shape that exercises a column header written
+  by somebody outside the control plane.
+
+- **`unprintable` has two disposals and they differ.** `text` turns a removed
+  *whitespace* character into a space and bounds the result; `main.rs`'s
+  `sanitize` removes it. So on the fixture path a `\n` inside a cluster-sent
+  message glues two words together where the ingest path leaves one space. The
+  real fix is that `load` should go through `Store` rather than straight through
+  `rules.rs`'s `From` impls — a plan question, named in [D154](NOTES.md#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22)'s third section.
+  **And there is a third spelling, in a test**: `k8s_tests.rs:1547` and `:2438`
+  assert `!chars().any(char::is_control)` — true, weaker than the guard beside
+  them, and exactly the shape that let the narrow word come back. Not a hole
+  (their siblings feed the wider set); a widening nobody would notice.
+
+- **`bounded_impl` reads an impl body as raw text**, so a field named only in a
+  *comment* inside the body would satisfy `every_string_the_browsers_rows_keep_is
+  _named_by_the_ingest_guard`. `Row`'s and `Column`'s impls carry no comments
+  today, so it holds; `ObjectId`'s does. Pre-existing, found while attacking this
+  family.
+
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

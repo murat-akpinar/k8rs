@@ -175,6 +175,7 @@ its line moving with it.
 - [D151](#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22) — owner resolution, and the noun collision that turned out to be the header's fault
 - [D152](#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22) — discovery: what each call costs, and the four ways it fails quietly
 - [D153](#d153--the-pm-injected-ten-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22) — the PM injected ten boxes into a running Phase 5, which is the rule the PM was enforcing
+- [D154](#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22) — the browser's rows: a 37× that was one event, a floor measured from the answer, and a guard that stopped at `Cc`
 
 ## Why it exists — where the gap is
 
@@ -11185,10 +11186,10 @@ it reachable from another machine.
    `?watch=true` with the Table `Accept` header returns 200 and streams
    `{"type":"ADDED","object":{"kind":"Table",…}}`. The mechanism
    [resources.md](screens/resources.md) chose — watch metadata, re-fetch the
-   Table debounced — is still right, but for a different reason: **every event
-   re-sends the entire column schema, 3086 bytes of `columnDefinitions` to
-   deliver an 82-byte row.** A 37× overhead is the argument; impossibility was
-   never true.
+   Table debounced — is still right, but **neither for impossibility nor for
+   the 37× this entry used to claim**, which was one event read as if it were
+   every event
+   ([D154](#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22)).
 2. **The `,application/json` fallback is unproven, not wrong.** The claim is
    that aggregated API servers may answer `406` to a Table-only `Accept`. This
    cluster has **zero** aggregated APIServices, so nothing exercised it. Keep
@@ -11196,9 +11197,11 @@ it reachable from another machine.
    metrics-server or another aggregated API is installed.
 3. **"The exact columns `kubectl get` would show" needs a filter.** The server
    returns *both* sets in one response: `priority: 0` is plain `kubectl get`,
-   `priority: 1` is `-o wide` only. Pods come back with nine columns, five of
-   them priority 1. Without filtering on `priority == 0` the browser shows the
-   wide view on every screen.
+   `priority: 1` is `-o wide` only. Pods come back with nine columns, **five of
+   them priority 0** and four priority 1 — this entry said the opposite until
+   2026-08-22, and `tests/fixtures/table-pods.json` is now the object that
+   settles it. Without filtering on `priority == 0` the browser shows the wide
+   view on every screen.
 
 ### Not written down anywhere yet
 
@@ -13130,3 +13133,122 @@ list against the commit before the phase opened, and found `{:?}` on a
 process failure gets measured the same way as a claim about the code
 ([D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)):
 the file says what happened, the reader's count says what was noticed.
+
+### D154 — the browser's rows: a 37× that was one event, a floor measured from the answer, and a guard that stopped at `Cc` (2026-08-22)
+
+**One entry for one family** — the `Table` fetch and the browser view's refresh —
+because its three rulings are cited from the same regions and a reader who
+follows any one of them needs the other two. Sections, in the order the review
+found them.
+
+## The 37×
+
+**A Table *can* be watched**, and [§ Contradicts a document](#contradicts-a-document)
+recorded that correctly. What it then wrote down to justify watching metadata
+instead was **every event re-sends the entire column schema, 3086 bytes of
+`columnDefinitions` to deliver an 82-byte row — a 37× overhead**. That sentence
+was restated in four files: this one, `screens/resources.md`, `todo.md`'s watch
+box, and the doc comment of the region that implements it.
+
+**It is false, and the operator review measured it on the same cluster image the
+claim was written against** (`kindest/node:v1.36.1`,
+[reports/2026-08-22-browser-rows-table-watch-and-refresh.md](reports/2026-08-22-browser-rows-table-watch-and-refresh.md)).
+`columnDefinitions` is sent **once per stream, on the first event, and never
+again**: 18 events off a pods Table watch gave one `cols: 9` at 5 764 bytes and
+seventeen `cols: 0` averaging 3 062; deployments gave one `cols: 8` and ten
+`cols: 0`. Whoever measured it took the first event of a fresh watch and
+generalised — the loud half of
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21),
+except that this one *was* measured and then over-read.
+
+**What the real comparison says, and it does not flatter the choice.** A Table
+watch event is ~3 062 bytes and already carries the row's identity
+(`.object.rows[0].object.kind` is `PartialObjectMetadata`); a metadata watch
+event is ~2 624 bytes — 14% smaller — **plus a whole Table re-fetch at 6 852
+bytes per row**. On a 500-row namespace the shape that shipped costs 2.6 KB plus
+3.4 MB per change; the shape it rejected costs ~3 KB and no re-fetch.
+
+**The design stays, and the reason it stays is the one nobody had written
+down.** `kube::runtime::watcher` needs `K: Resource + DeserializeOwned` and
+`Table` is neither, so watching a Table is a hand-rolled
+`Client::request_stream` carrying its own `resourceVersion` bookkeeping, its own
+410-relist and its own `Event::Init` — three things the metadata path gets from
+kube for free. That is a real argument. Backoff is **not** part of it: `watcher`
+does not carry one either, so it is owed on both paths.
+
+**Two rules come out of this, and the second is the one that cost four files.**
+A number read off one sample is a number about that sample — a watch's first
+event is a different object from its steady state, and *per event* was never
+measured. And **the second copy is the one that goes stale**
+([CLAUDE.md § Every file here also has to get smaller](CLAUDE.md#every-file-here-also-has-to-get-smaller)):
+this claim was cited nowhere and restated everywhere, so correcting it touched
+four files instead of one, and the doc comment that implements it is the copy
+that would have shipped the falsehood to a reader of the code.
+
+**Boxed, not fixed here:** whether the browser should watch the Table after all
+is a design question with real work behind it, and it goes to
+[`backlog.md`](backlog.md) rather than into an open phase.
+
+
+## The floor is measured from the answer, not from the question
+
+`Browsing` bounded how often a fetch is *issued* and knew nothing about one in
+flight. Its own doc claimed
+[PRIOR-ART § A5](PRIOR-ART.md#a-scale--the-largest-single-complaint-class) was
+closed because the pending flag clears on issue rather than on return — which
+closes one half. The other half: at 6 852 bytes per row a 5 000-pod namespace is
+a 34 MB body held twice at once by `Client::request_text`, so one fetch takes
+seconds, and a rolling deploy issues three. **HTTP/2 gives no ordering
+guarantee**, so B arrives, then A; A's body predates the change B was issued
+for; `stale` was cleared when B was issued; nothing re-arms. The view sits on
+pre-change rows until some unrelated change, which on a settled cluster is
+minutes — A5's failure mode, arrived at from the opposite side, inside the type
+whose doc said it was prevented.
+
+**The fix is one state, not one more constant.** `Browsing` carries
+`outstanding` and `returned`, `issue`/`due_at` answer `None` while a fetch is on
+the wire, and the effective floor is *at least `REFRESH_FLOOR` after the last
+one landed*. A three-second fetch refreshes every four seconds instead of piling
+up three; a thirty-millisecond one refreshes at one second. **The cluster tunes
+it**, which is the only way a single number survives being run somewhere bigger
+than the machine it was picked on. What it does **not** bound is the cost of one
+refresh — 34 MB is 34 MB — and that belongs to the paging question, which has no
+phase yet.
+
+`REFRESH_FLOOR` stays 1 s and stays honestly labelled unmeasured; the numbers
+that would settle it are in the report.
+
+## The guard stopped at `Cc`, and a second spelling is what made it reachable
+
+`char::is_control` is Unicode `Cc` and nothing else, so U+202E RIGHT-TO-LEFT
+OVERRIDE, U+200B, U+00AD, U+FEFF and the bidi isolates all walked through
+`text()` — compiled and run, `"prod\u{202e}reversed"` in and the same string
+out. That is Trojan Source in a row, and it is precisely what
+[invariant 9](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+exists for. The predicate is now `unprintable`, which is `is_control` plus the
+zero-width and bidi ranges; U+2028/U+2029 and U+00A0 are deliberately **kept**,
+because a terminal draws something for them and removing them would change text
+the cluster meant. U+200C/U+200D are removed knowingly: they are load-bearing in
+emoji sequences and in Persian and Indic shaping, and they are also how two names
+are made to look like one — and a Kubernetes name is a DNS label.
+
+**The part worth more than the widening: there were two spellings of the rule,
+and widening one did nothing.** `main.rs`'s fixture path never touches `k8s.rs` —
+`load()` goes straight through `rules.rs`'s `From` impls — and it carried its own
+`fn sanitize` filtering on `is_control`. So the real binary printed the U+202E
+byte-identically before and after the guard was widened, demonstrated over a
+planted copy of a fixture. `main.rs` now calls `k8s::unprintable`, `pub(crate)`
+and no wider, and `grep -rn is_control src/` finds **one** executable hit: inside
+`unprintable` itself.
+
+**`unprintable` is the predicate; `text` and `sanitize` are two disposals of
+it**, and that is layering rather than duplication — but the disposals genuinely
+differ: `text` turns a removed *whitespace* character into a space and bounds the
+result, `sanitize` removes it. So on the fixture path a `\n` inside a
+cluster-sent message glues two words together where the ingest path would leave
+one space. Named here rather than fixed, because unifying them is a behaviour
+change with a phase behind it.
+
+**And this is the rule, again:** the second copy is the one that goes stale, and
+it is never the one that gets fixed. Here it was not even stale — it was simply
+never widened, and nothing pointed from one to the other.
