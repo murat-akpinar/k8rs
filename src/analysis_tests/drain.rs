@@ -2050,3 +2050,173 @@ fn the_three_causes_have_three_ways_out_and_the_widest_one_is_drawn() {
         "no two of these say the same thing, or one of the three causes has no way out of its own"
     );
 }
+
+#[test]
+fn a_budget_whose_first_sync_failed_blocks_the_drain_instead_of_asking_for_a_moment() {
+    // **The two fields fed at once, which is the shape that shipped the defect**
+    // (`reports/2026-08-22-phase-4-close-cross-family-review.md` § 1): every other test here
+    // plants the generation gap *or* `SyncFailed`, and the two rows they prove are opposite ends
+    // of this pane's band order.
+    //
+    // Upstream, `release-1.34`: `failSafe` sets `Status.DisruptionsAllowed = 0` and the
+    // `SyncFailed` condition and **does not** advance `Status.ObservedGeneration` — only
+    // `updatePdbStatus` does, with `ObservedGeneration: pdb.Generation`. So a budget whose *first*
+    // sync failed sits at `generation: 1` / `observedGeneration: 0` forever, and
+    // `eviction.go`'s `checkAndDecrement` refuses every eviction of its pods on that comparison
+    // alone. Asked in the old order it drew the pane's quietest row: *"wait a few seconds and look
+    // again"*, no band, sorted among the ready nodes — and which of the two questions wins when
+    // both are true is NOTES § D139.
+    //
+    // **The plant is failSafe's own output, field for field** — `disruptions_allowed` stays at the
+    // capture's 0 because that is what `failSafe` writes, and `observed_generation` is cleared
+    // because that is the field it refuses to advance. Cleared and not set to zero: upstream
+    // declares it `int64` with `omitempty`, so a status that has never been written carries no
+    // key at all and decodes to `None` here. **An explicit zero is legal on the wire too** and is
+    // fed at the end of this test, because *absent* and *`Some(0)`* are two shapes of one fact and
+    // only one of them is what a capture would hold (NOTES § D29).
+    //
+    // **What a trip would have to do to replace it**: create a PDB selecting the pods of a CRD the
+    // disruption controller cannot resolve `scale` on, and photograph it before anything fixes it.
+    // `scripts/broken.yaml` has no such workload.
+    let never_synced = |reason: &str| {
+        let reason = reason.to_string();
+        captured_budget_but("broken-pdb-floor", move |b| {
+            let status = b.status.get_or_insert_with(Default::default);
+            status.observed_generation = None;
+            status
+                .conditions
+                .as_mut()
+                .into_iter()
+                .flatten()
+                .find(|c| c.type_ == "DisruptionAllowed")
+                .expect("the captured budget carries the condition the plant moves")
+                .reason = reason;
+        })
+    };
+
+    let stuck = never_synced("SyncFailed");
+    assert_eq!(
+        (
+            stuck.generation,
+            stuck.observed_generation,
+            stuck.disruptions_allowed
+        ),
+        (Some(1), None, Some(0)),
+        "the plant is upstream's `failSafe` shape and the assertion says so out loud: a spec at \
+         version 1 the controller never counted, and the zero it wrote instead of a count"
+    );
+    let report = super::drain_safety(&with_budgets(only_the_deployments_pods(), vec![stuck]), &[]);
+    println!("{}", pane(&report));
+    let row = row_for(&report, "k8rs-worker3");
+
+    assert_eq!(
+        text_of(row),
+        "k8rs-worker3 would never finish draining",
+        "the eviction API refuses every eviction of this budget's pods until a human fixes it — \
+         *needs a moment before it can be checked* is a description of a wait that never ends"
+    );
+    assert_eq!(
+        severity_of(row),
+        Some(Severity::Critical),
+        "with a band, which the stale row deliberately has none of"
+    );
+    assert_eq!(
+        detail_of(row)[0],
+        "Kubernetes could not work out how many copies of the pods default/broken-pdb-floor \
+         protects are healthy, so it will not let any of them be moved. The numbers on it are \
+         not a measurement of anything.",
+        "the sentence is `blocks_a_drain`'s `SyncFailed` one and not a second copy: the counters \
+         are not a measurement whether the controller failed on version 1 or on version 9"
+    );
+    assert_eq!(
+        action_of(row),
+        "check what default/broken-pdb-floor points at — this happens when it names something \
+         Kubernetes cannot count copies of"
+    );
+    assert_eq!(
+        detail_of(row).len(),
+        1,
+        "and the stale sentence is not appended under it — the budget is named once, by the row \
+         that says what is wrong with it: {:?}",
+        detail_of(row)
+    );
+    assert_eq!(
+        never_finish(&report),
+        vec!["k8rs-worker2", "k8rs-worker3"],
+        "both nodes carrying its pods block, and neither is a node the corpus blocks anyway"
+    );
+    assert_eq!(
+        drained_nodes(&report),
+        vec![
+            "k8rs-worker2",
+            "k8rs-worker3",
+            "k8rs-control-plane",
+            "k8rs-worker"
+        ],
+        "sorted with the other blockers and above the ready nodes — `k8rs-control-plane` sorts \
+         first by name, so this is an assertion about the band"
+    );
+
+    // **The negative, one field apart.** The same budget, the same generation gap, the reason the
+    // capture came with: a controller that is merely a second behind keeps the calm row. And it
+    // is a real negative rather than a restatement — this budget is at its floor
+    // (`currentHealthy: 2`, `desiredHealthy: 2`, `disruptionsAllowed: 0`), so a report that
+    // stopped asking the generation question at all would draw *would never finish draining* here
+    // too, off counters that are not a measurement of anything.
+    let behind = never_synced("InsufficientPods");
+    let calm = super::drain_safety(
+        &with_budgets(only_the_deployments_pods(), vec![behind]),
+        &[],
+    );
+    println!("{}", pane(&calm));
+    let row = row_for(&calm, "k8rs-worker3");
+
+    assert_eq!(
+        text_of(row),
+        "k8rs-worker3 needs a moment before it can be checked",
+        "nothing has said it cannot be counted — only that it has not been counted yet"
+    );
+    assert_eq!(severity_of(row), None, "and no band, as before");
+    assert_eq!(
+        detail_of(row)[0],
+        "default/broken-pdb-floor was just changed and Kubernetes has not finished counting its \
+         healthy pods — the change is version 1, the count has not been worked out at all."
+    );
+
+    // **And the other spelling of *never counted*, both ways round.** `omitempty` is why the
+    // plants above carry no key, but a written zero decodes to `Some(0)` and is behind by the same
+    // comparison the API server makes — so the row it draws may not depend on which spelling
+    // arrived.
+    let spelled_zero = |snapshot: DisruptionBudgetSnapshot| DisruptionBudgetSnapshot {
+        observed_generation: Some(0),
+        ..snapshot
+    };
+    assert_eq!(
+        text_of(row_for(
+            &super::drain_safety(
+                &with_budgets(
+                    only_the_deployments_pods(),
+                    vec![spelled_zero(never_synced("SyncFailed"))]
+                ),
+                &[]
+            ),
+            "k8rs-worker3"
+        )),
+        "k8rs-worker3 would never finish draining",
+        "a written zero is the same never-counted budget as an absent key"
+    );
+    assert_eq!(
+        text_of(row_for(
+            &super::drain_safety(
+                &with_budgets(
+                    only_the_deployments_pods(),
+                    vec![spelled_zero(never_synced("InsufficientPods"))]
+                ),
+                &[]
+            ),
+            "k8rs-worker3"
+        )),
+        "k8rs-worker3 needs a moment before it can be checked",
+        "and it is still the reason that decides, not the spelling of the number"
+    );
+}

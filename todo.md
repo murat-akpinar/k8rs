@@ -1687,12 +1687,23 @@ unchecked one from the top.
       nothing* cannot print the same line as *nothing to find*. It refuses any
       non-`.md` file in `reports/` unread; its floors and two named ceilings are
       in [D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20)
-- [ ] **`reports/` has no retention rule and this repo's disease is append** —
+- [x] **`reports/` has no retention rule and this repo's disease is append** —
       the directory grows one file per measurement forever, in the tree
       [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
       ruled must get smaller. Decide the bound before there is anything to bound:
       whether a report whose decision landed is deleted, kept, or reduced to the
       `D##` that cites it. PM's, at a phase close, not mid-phase
+      Ruled **kept**, and the box's own premise is what the measurement took
+      away: `reports/` is 157K against `NOTES.md`'s 778K and is not one of the two
+      files D103 was about — the two every agent *must* read — so a per-turn cost
+      was being charged to a disk cost. **Reduce-to-`D##` is the option the
+      numbers forbid** — 13 of the 37 by-name citations point at a *section* of a
+      report. What bounds it was already paid for: `reports-guard.py` per file,
+      and `check-docs.py`'s `missing file` per link, which makes deleting an
+      uncited report available and a cited one red. A "delete what nothing
+      cites" rule was drafted and **dropped after it opened with two false
+      positives** — a citation by date is a citation
+      ([D138](NOTES.md#d138--reports-keeps-everything-and-the-retention-rule-is-a-re-measure-trigger-2026-08-22))
 
 *Moved out of Phase 3: `tester`'s files, no rule touched ([D106](NOTES.md#d106--phase-3s-twenty-three-open-boxes-are-two-families-six-foreign-boxes-and-one-already-done-2026-08-16))*
 
@@ -1972,7 +1983,32 @@ unchecked one from the top.
       fourth condition — the whole-file `rules.rs` gate the card-changing box
       owed this close. **751 caught · 0 missed · 0 timeout · 93 unviable**, each
       shard writing its own `mutants.out` and each naming a type rather than a
-      filesystem (D133)
+      filesystem (D133).
+      **Re-run whole at the close, over the tree the blocker fix landed on**, in
+      eight shards rather than four because 213 mutants no longer fit one
+      ten-minute foreground call
+      ([D118](NOTES.md#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)):
+      **849 mutants · 756 caught · 0 missed · 0 timeout · 93 unviable**, the five
+      new ones being the fix's own. Every unviable log names `error[E0277]`, a
+      trait bound, and `no space left`/`os error 28` was grepped for after each
+      shard and found in none — an honest unviable names a type, a dishonest one
+      names a filesystem
+
+**🔒 Security gate:** this phase had none of its own until it closed, which is
+why the list below says what *was run* rather than what is owed. A report is a
+second printer for API text, so invariant 9 is the whole of it: every field of
+every `Row` variant is stripped as it enters the line it is printed on, named
+individually with no `..`, so a new string field cannot be added and silently go
+unstripped. `analysis.rs` reads **no** env value, no Secret and no annotation —
+grepped, the class is empty. It cannot panic on a cluster's data: no `unwrap`,
+no `expect`, no `panic!`, no indexing, one division and it is by the constant
+`24`, and all three unsigned subtractions are guarded — one by an explicit
+`len() > 1`, two by construction, since `take(n)` and `filter_map` over the same
+source cannot yield more than it. **Length bounding is deliberately not here** —
+it is Phase 5's ingest gate, which this close amended to name
+`spec.volumes[].hostPath.path`, the field Posture prints as a row's own subject.
+No dependency changed in this phase: `Cargo.toml`, `Cargo.lock` and `deny.toml`
+are untouched end to end.
 
 **Done when:** every report is correct against the cluster-wide fixture, and
 the temporary main can print any of them.
@@ -2030,6 +2066,27 @@ public release.
       claim load-bearing; this is D69's shape a second time, caught before the
       code instead of after
       ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14))
+- [ ] **Bound every free-text field at ingest, not the one field that was
+      measured.** The security gate has said *sizes are bounded* since Phase 1
+      and nothing below this phase implements it, so today `k8rs` reads, holds
+      and prints whatever the API sends: handed one object whose `kind` is 10 MB
+      of `K`, the temporary driver printed a first line of **10 000 061 bytes**
+      at **51 MiB peak RSS**, exit 0 — `sanitize` strips and deliberately never
+      truncates
+      ([D122](NOTES.md#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20),
+      measured by `tester` 2026-08-20). **The box is not *bound the header***, or
+      this phase closes the header and leaves the 50MB annotation and the endless
+      log line beside it. It goes **on the way into the decode**, beside the
+      control-character strip and for the same reason: one place, so no
+      downstream consumer has to remember. **The field list is not "names and
+      messages"** — this phase's gate names the three that a generic sentence
+      lets an implementer miss: `state.waiting.message` (rules 3, 4),
+      `metadata.finalizers` (rule 12), and `spec.volumes[].hostPath.path`, which
+      Posture prints as a row's own *subject*. Done: a bound chosen and written
+      down rather than inherited, a truncation the reader can see is a
+      truncation, and a test per field that feeds the oversized shape and asserts
+      what got stored — not what got printed, which is the half that already had
+      a guard
 - [ ] **How the initial LIST arrives is a decision, not a default** — the box
       above forbids publishing a snapshot until every initial LIST has landed,
       which makes the shape of that LIST load-bearing. An unpaginated
@@ -2102,7 +2159,37 @@ public release.
       `web-7d4f5c6b8`. Fetch the ReplicaSet on demand, cache by UID, never
       watch it — and never strip the hash with a string heuristic, which is
       the kind of guess that lies. The same cached object supplies W1's
-      `ReplicaFailure` message
+      `ReplicaFailure` message.
+      **And the same resolution settles a noun this repo now overloads.** Over
+      one snapshot of the committed corpus the driver printed
+      `55 pods · 4 nodes · 16 workloads` and, 150 lines below it, Capacity's
+      `34 workloads have no memory or CPU limit`. Both are right for their own
+      definition: the header counts `snapshot.workloads`, which is every
+      Deployment, StatefulSet, ReplicaSet and DaemonSet read (measured on the
+      corpus: 7 + 1 + 5 + 3 = 16), while Capacity counts distinct pod *owners*
+      with a limitless container — and on this corpus the great majority of those
+      are pods started by hand, each of which is its own owner. So the two nouns
+      count different sets and `34 of 16` is not defensible to a reader
+      ([PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended)); the
+      header itself is deliberate and stays
+      ([D121](NOTES.md#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20)).
+      Resolving a ReplicaSet up to its Deployment is what makes the two countable
+      together — so when it lands, **re-derive Capacity's count and say in one
+      place what `workload` means**, starting with whether a hand-started pod is
+      one. **The operator review sharpened it to a case with no user workload at
+      all**: over `nodes.json` + `kube-system-pods.json` the driver printed
+      `14 pods · 4 nodes · 0 workloads` and, below it,
+      `6 workloads have no memory or CPU limit` — `etcd`, `kube-apiserver`,
+      `kube-controller-manager`, `kube-scheduler`, `kube-proxy` and `coredns`,
+      one key each, because `rules.rs` discards a `Node` ownerReference and a
+      static pod becomes its own owner. `0` and `6` on one screen. It also
+      contradicts the test that pins the noun
+      (`src/analysis_tests/capacity.rs:890`: *"`workload` means a controller
+      everywhere else in this product"*), and it makes Capacity's rule-8
+      *nothing to do* sentence unreachable on any kubeadm-shaped cluster, since
+      that sentence needs `uncapped == 0`
+      ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+      § 2). Found by Phase 4's close, the only pass that saw both numbers at once
 - [ ] `kube::discovery`: enumerate every kind the cluster serves, CRDs
       included. This is what the sidebar is built from — never a hard-coded list
 - [ ] Server-side `Table` fetch for browser kinds — the columns come from the
@@ -2157,6 +2244,61 @@ public release.
       come from. **It updates `docs/architecture.md § Error handling`**, which
       today covers the three startup errors and not the general rule
       ([PRIOR-ART § C1](PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error))
+- [ ] **`endpoints_behind` is a nested scan and the cost is quadratic in
+      Services** — `analysis.rs` walks every EndpointSlice for every Service, and
+      `MOST_ROWS_PER_SECTION` caps the rows drawn, not the objects visited.
+      Timed on synthetic 200-node/5000-pod snapshots at Phase 4's close: 0
+      Services ~25 ms · 2 500 → 35 ms · 5 000 → ~230 ms · 10 000 → **1 355 ms**,
+      i.e. 4× the input for ~39× the cost. `REQUIREMENTS.md` budgets first paint
+      at **under 1s, and states it at ~1000 pods** — so the 10 000-Service figure
+      is past where the budget speaks, which is the conflation
+      [D115](NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)
+      exists to stop. The finding is the **growth rate**, not a breached budget. **The rest of the joins are not this
+      shape** and are not to be "optimised" with it: all seven reports cost
+      ~25 ms at 200 nodes/5000 pods even though `pods_on` is a full pod scan run
+      twice per node, and 2 000 budgets cost 116 ms — one nested loop is the
+      whole finding
+      ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+      § 3). Done: the join is done once into a map, the same rows come out of
+      the committed corpus byte for byte, and the 10 000-Service timing is
+      re-taken and written down. `analysis.rs` is frozen by then, so this is a
+      [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+      question — and the cheapest one it can be asked, since the output must not
+      change at all
+- [ ] **Posture opens with *"Nothing here is broken"* and sorts the one row an
+      operator would act on last.** The pane sorts by pod count descending, and
+      `left_by_rule_8` sends **any** read-only host mount here from **any**
+      namespace — so a pod in `default` mounting `/etc/kubernetes/pki` read-only
+      draws no Alerts card at all and folds into a row reading *"3 pods in
+      default and kube-system"*, indistinguishable from the two kube-apiserver
+      mounts beside it. `ca.key` is in that directory. Measured with a synthetic
+      pod against the committed `nodes.json` + `kube-system-pods.json`
+      ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+      § 4). **This is not a reversal of [D2](NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)**:
+      D2's stated reason is that a plain read-only hostPath *"is how CNI, CSI and
+      every node agent are supposed to work"* — a claim about **who** mounts it —
+      and the code keys only on **what** is mounted. Adding a case to rule 8's
+      escalation list is the move
+      [D79](NOTES.md#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
+      already made once. Decide all three, in this order: whether the PKI
+      directory escalates (that is `rules.rs`, frozen — a D124 question), what
+      the sort key should be when one row is not a node agent, and whether the
+      opening sentence may keep saying *nothing here is broken* while the pane
+      can hold a row that is
+- [ ] **Three of the seven reports have never drawn their principal shape
+      through the binary.** The temporary driver hard-codes `server_version`,
+      `context`, `client_certificate` and `metrics` to `None`, so the run every
+      Phase 4 box was closed against exercised 1 of Versions' 6 shapes, neither
+      C1's row nor the sidebar badge — the pane's only `Jump::Finding` and the
+      product's only duration badge — and none of Capacity's `using …`
+      paragraphs. `cargo test` covers all of them; the *binary* has printed none
+      ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+      § 6). This phase is where those four stop being `None`, so it is where they
+      get run for real: done when each of the three has been printed by the
+      binary against a live cluster and the output pasted into the box. **A
+      report proven only by its tests is the thing
+      [CLAUDE.md § Running it](CLAUDE.md#running-it--and-just-check) forbids
+      reporting as done**
 - [ ] **Measure resident memory against 10 000 pods** (kind + a generator)
       **plus the three workload watches**, and write the number down. Pruning `managedFields` is agreed; whether the
       pruned store actually fits is unmeasured, and an unmeasured number is not
@@ -2290,8 +2432,11 @@ anything that could hold it. Control characters are stripped at ingest, so no
 downstream code has to remember — **and the field list is not "names and
 messages"**: `metadata.finalizers` reaches `evidence` verbatim through rule 12
 and is settable by anyone with `patch` on pods, which is the shape a generic
-sentence lets an implementer miss. Field sizes are bounded: a 50MB annotation
-must not be stored whole, **and neither must a container's waiting message** —
+sentence lets an implementer miss. **Phase 4 added a third of that shape**:
+`spec.volumes[].hostPath.path` reaches the screen as the *subject* of a Posture
+row, not buried in a message, and anyone who can create a pod chooses it. Field
+sizes are bounded: a 50MB annotation must not be stored whole, **and neither
+must a container's waiting message** —
 rules 3 and 4 put the kubelet's whole `state.waiting.message` on the card, and
 nothing below this phase bounds it
 ([NOTES § D71](NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).

@@ -1003,9 +1003,15 @@ loudest band. `metadata.generation` ahead of `status.observedGeneration` is
 the controller not having reached the budget yet, normally for well under a
 second; it is upstream's own `TooManyRequests` refusal with no diagnosis
 attached, and it resolves by itself far more often than it needs an
-operator. That is not the same class of problem as *"this will never
-finish"*, and dressing a self-healing state in the pane's most urgent band
-teaches a reader to distrust the band the next time it is genuinely urgent.
+operator. **One shape of that gap never closes**: a budget whose very first
+sync failed sits at `generation: 1` / `observedGeneration: 0` forever,
+because `failSafe` sets `SyncFailed` without ever advancing the counter —
+that budget carries the reason this row cannot see, so it never reaches
+here at all; it draws *would never finish draining* below instead
+([NOTES § D139](../NOTES.md#d139--phase-4s-close-the-budget-whose-first-sync-failed-and-where-the-other-seven-findings-went-2026-08-22)).
+That is not the same class of problem as *"this will never finish"*, and
+dressing a self-healing state in the pane's most urgent band teaches a
+reader to distrust the band the next time it is genuinely urgent.
 **Rebanded to no band at all** — a fact k8rs cannot yet answer, the same
 family `node   could not be worked out` already sits in on Capacity — and
 reworded so the text does not claim the drain would hang:

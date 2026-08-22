@@ -28,8 +28,11 @@ Nothing here is a plan, a box, or work. `todo.md` holds boxes,
 ## The sanitization rule — read it before pasting cluster output
 
 A report carries real cluster output into a **committed** file, which is exactly
-the path `scripts/sanitize.jq` exists to guard for fixtures — and that guard does
-not run here. Until it does, the rule is manual and narrow:
+the path `scripts/sanitize.jq` exists to guard for fixtures. Since 2026-08-20
+`scripts/reports-guard.py` runs over this directory on every `just check`, reading
+prose rather than JSON ([D126](../NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20)).
+It refuses what is listed below, and it refuses any non-`.md` file here unread —
+but it reads for known shapes, so the rule is still yours to follow and narrow:
 
 - **No object dumps.** Not `kubectl get -o yaml`, not `describe`, not a captured
   JSON body. Those are fixtures, they go through `just fixtures` and the
@@ -41,12 +44,28 @@ not run here. Until it does, the rule is manual and narrow:
   variable values, annotation payloads, node IPs or hostnames, Secret data — the
   same list as
   [REQUIREMENTS § DevSecOps](../REQUIREMENTS.md#devsecops-requirements), because
-  it is the same risk on a path with no guard yet.
+  it is the same risk on a path a reader trusts.
 
 A leak never leaves git history. When in doubt the value does not go in; name the
 field instead and say what it held.
 
-**The guard is owed.** Extending the fixture sanitization gate over `reports/` is
-`tester`'s, boxed in Phase 4. Until it lands, the paragraph above is enforced by
-the PM reading the diff, which is the weaker thing this repo has already been
-burned by — so keep reports thin.
+**What the guard cannot see is still yours.** It matches known shapes — a token, a
+PEM block, a kubeconfig, an env value, an annotation payload, a node IP, a
+hostname. A secret in a shape nobody planted walks past it, so keep reports thin
+and name the field rather than pasting the value.
+
+## Retention — nothing here is deleted for having landed
+
+Measured at Phase 4 close, `reports/` was 157K against `NOTES.md`'s 778K, and it
+is not one of the two files every agent *must* read, which is what D103 was
+about. So
+there is **no count, no age and no size bound** on this directory, and a report
+is **never** reduced to the `D##` that cites it — 13 of the 37 citations from
+outside point at a *section* of a report, and a decision is not where a
+measurement table lives
+([D138](../NOTES.md#d138--reports-keeps-everything-and-the-retention-rule-is-a-re-measure-trigger-2026-08-22)).
+
+Deleting a report is allowed and is guarded: `scripts/check-docs.py` fails on a
+link whose file is gone, so you may delete one that nothing cites and not one
+that something does. The ruling is re-taken — not re-argued — when `du -sb
+reports/ NOTES.md` stops putting this directory well below that file.

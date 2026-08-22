@@ -909,12 +909,21 @@ fn drain_row<'a>(
     // what keeps it a single reading: while a budget's spec is ahead of its status the three
     // counters beside it are not a measurement of anything, so the sentence that would be built
     // from them may not be built at all (NOTES § D130).
+    //
+    // **Unless the controller has already said why it stopped, and then that answer wins**
+    // ([`could_not_be_counted`]). `failSafe` writes `SyncFailed` and deliberately does *not*
+    // advance `status.observedGeneration`, so a budget whose first sync failed sits behind its
+    // spec forever — the permanent case arrives wearing the transient one's shape, and asked in
+    // the other order it drew this pane's quietest row over a drain that hangs until a human
+    // fixes the budget (NOTES § D139). Only the
+    // `SyncFailed` branch is reachable this way and it reads no counter, so *the counters are
+    // never read while the spec is ahead* still holds.
     let mut stale: Vec<NotCaughtUp> = Vec::new();
     let mut blocked: Vec<Blocked> = Vec::new();
     for budget in relevant {
         match has_not_caught_up(budget) {
-            Some(waiting) => stale.push(waiting),
-            None => blocked.extend(blocks_a_drain(budget)),
+            Some(waiting) if !could_not_be_counted(budget) => stale.push(waiting),
+            _ => blocked.extend(blocks_a_drain(budget)),
         }
     }
 
@@ -1391,8 +1400,9 @@ struct NotCaughtUp {
 /// returns for a full budget, so the failure does not explain itself (NOTES § D130).
 ///
 /// **It is not [`blocks_a_drain`]'s fourth branch any more, and the reband is the point.** The
-/// refusal is real, but it is normally over in well under a second and resolves without an
-/// operator: drawing it in this pane's loudest band, under *would never finish draining*, put
+/// refusal is real, but a controller that is merely behind is normally over in well under a
+/// second and resolves without an operator: drawing that in this pane's loudest band, under
+/// *would never finish draining*, put
 /// *"look again in a moment"* beneath the most urgent thing the screen can say
 /// (`screens/analysis.md` § *A budget that has not caught up yet*). It keeps its row and loses
 /// its band.
@@ -1400,6 +1410,11 @@ struct NotCaughtUp {
 /// **`observed_generation: None` counts as behind**: the field is an `int64` upstream, absent
 /// decodes as 0, and `0 < generation` is the comparison the API server makes. `generation: None`
 /// makes no comparison at all and says nothing — there is no number to be behind.
+///
+/// **Behind is not the same as still catching up, and the caller asks the second question too.**
+/// A budget whose sync failed never advances `status.observedGeneration`, so it answers this one
+/// the same way a budget edited a second ago does and stays that way until a human fixes it —
+/// [`could_not_be_counted`] is what tells the two apart, at [`drain_row`].
 fn has_not_caught_up(budget: &DisruptionBudgetSnapshot) -> Option<NotCaughtUp> {
     let generation = budget.generation?;
     if budget
@@ -1438,13 +1453,43 @@ struct Blocked {
     action: String,
 }
 
+/// **Has the controller reported that it tried to count this budget and could not?** — the one
+/// place the `DisruptionAllowed` condition is read, called from both [`drain_row`] and
+/// [`blocks_a_drain`], because two readings of one condition is how two rules come to disagree
+/// about one object.
+///
+/// **Only `failSafe` writes this reason, and every successful sync overwrites it.** Upstream
+/// (`release-1.34`, `pkg/controller/disruption/disruption.go`): `sync` calls `failSafe` when
+/// `trySync` returns a non-conflict error, and `failSafe` sets `DisruptionsAllowed = 0` and this
+/// condition with `ObservedGeneration: newPdb.Status.ObservedGeneration` — the value the status
+/// already had. A sync that succeeds goes through `updatePdbStatus`, which writes
+/// `ObservedGeneration: pdb.Generation` and then calls `UpdateDisruptionAllowedCondition`, whose
+/// only two reasons are `SufficientPods` and `InsufficientPods`. So this reason means *the last
+/// thing the controller did to this budget was fail*, which is why it outranks the generation gap
+/// at the caller ([`drain_row`]) rather than being ordered behind it.
+///
+/// **And it is the only field that separates the two, which was read rather than assumed.** Both
+/// upstream writers copy `status.observedGeneration` into the condition's own
+/// `observedGeneration`, so the per-condition number carries nothing the two carried generations
+/// do not — [`crate::rules::Condition`] drops it (NOTES § D46) and loses nothing here.
+fn could_not_be_counted(budget: &DisruptionBudgetSnapshot) -> bool {
+    budget
+        .conditions
+        .iter()
+        .find(|c| c.type_ == "DisruptionAllowed")
+        .and_then(|c| c.reason.as_deref())
+        == Some("SyncFailed")
+}
+
 /// **Would the eviction API refuse this budget's pods right now, and why?** — `None` when it
 /// would not.
 ///
-/// **Three refusals, and it is asked only about a budget whose status has caught up with its
-/// spec** — [`has_not_caught_up`] is the caller's question and is not repeated here, because
-/// while the spec is ahead none of the counters below is a measurement of anything (NOTES § D130,
-/// `reports/2026-08-21-family-c-corpus-drain-and-capacity.md` §§ 1, 13.4):
+/// **Three refusals, and the counters are read only about a budget whose status has caught up
+/// with its spec** — [`has_not_caught_up`] is the caller's question and is not repeated here,
+/// because while the spec is ahead none of the counters below is a measurement of anything
+/// (NOTES § D130, `reports/2026-08-21-family-c-corpus-drain-and-capacity.md` §§ 1, 13.4). The one
+/// budget that arrives here still behind its spec is the one [`could_not_be_counted`] answers for,
+/// and branch 1 returns before a counter is touched:
 ///
 /// 1. **`SyncFailed`** — the controller could not resolve the workload's `scale` subresource, so
 ///    the three counters beside it are not a measurement of anything and a sentence built from
@@ -1459,7 +1504,8 @@ struct Blocked {
 /// looked at the budget, and reading that as zero calls every freshly created budget blocking
 /// ([`crate::rules::DisruptionBudgetSnapshot::disruptions_allowed`]). [`has_not_caught_up`]
 /// already covers the shape that matters, because a budget the controller has not reached has no
-/// `observedGeneration` either.
+/// `observedGeneration` either — and a budget it reached and failed on carries `SyncFailed`, which
+/// branch 1 answers above without reading this counter at all.
 ///
 /// **`spec.minAvailable` is read nowhere here** — it is an `IntOrString`, `minAvailable: "50%"`
 /// is legal and common, and the API server resolves it *and* `maxUnavailable` into
@@ -1474,12 +1520,7 @@ fn blocks_a_drain(budget: &DisruptionBudgetSnapshot) -> Option<Blocked> {
         })
     };
 
-    let reason = budget
-        .conditions
-        .iter()
-        .find(|c| c.type_ == "DisruptionAllowed")
-        .and_then(|c| c.reason.as_deref());
-    if reason == Some("SyncFailed") {
+    if could_not_be_counted(budget) {
         return blocked(
             format!(
                 "Kubernetes could not work out how many copies of the pods {name} protects are \

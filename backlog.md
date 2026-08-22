@@ -232,19 +232,30 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   when a third rule wants the same clause. Found by `dev-core` while anchoring a
   red-proof script, 2026-08-20.
 
-- **Free text from the API is unbounded all the way to the screen, and the
-  temporary driver's header is the instance with a measurement.** Handed one
-  object whose `kind` is 10 MB of `K`, `k8rs` reads it, holds it and prints it:
-  a first line of 10 000 061 bytes, 51 MiB peak RSS, exit 0 — `sanitize` strips
-  and deliberately never truncates
-  ([D122](NOTES.md#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20),
-  `screens/widgets.md` § 7). **The box to write is not *bound the header***, or
-  Phase 5 closes the header and leaves the 50 MB annotation and the endless log
-  line beside it — it is *bound every free-text field at ingest*, which
-  [CLAUDE.md § Security gate](CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions)
-  already states and nothing below Phase 5 implements. Not a blocker today: the
-  input is argv, so only the operator can reach it. Measured by `tester`,
-  2026-08-20.
+- **`analysis.rs` claims the `hostPath: {path: "."}` shape is "in neither" list,
+  and it is in one.** A writable `.` hostPath outside `kube-system` draws a rule 8
+  card with the path simply missing — `container app ·  on the node · writable`,
+  two spaces, because `rules.rs` formats `{path} on the node` with `path` empty.
+  The card is frozen `rules.rs`; the false sentence is `analysis.rs`'s doc
+  comment. Measured at Phase 4's close
+  ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+  § 5).
+- **`Info` earns two different things across the seven reports.** Posture and
+  Restarts document `○` as *the pane makes no judgement*; Drain safety's `Info`
+  row (*needs one more flag for N pods*) **is** a judgement — a bare drain
+  refuses. Same glyph, one screen. Whether that matters is a question for the
+  phase that draws the bands, not a defect in either producer
+  ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+  § 7).
+- **The one unglossed sentence on the analysis screen.** Drain safety opens with
+  *"A drain below assumes `--ignore-daemonsets`, so DaemonSet pods never count as
+  moving"* — a bare flag name on the busiest pane, where every neighbour glosses
+  (*"what Kubernetes calls an emptyDir volume"*, *"started by hand, with no
+  Deployment behind them"*). The code matches `screens/analysis.md` verbatim, so
+  **the decision is what fails [invariant 14](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+  and the wording is `tui-designer`'s to re-take**
+  ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
+  § 8).
 - **Rule 6's action line says "the `--previous` flag below" and there is nothing
   below it in any renderer that exists.** In the console *below* would be the
   command-log strip, which carries what k8rs ran, not the finding's own

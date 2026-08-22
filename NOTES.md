@@ -159,6 +159,8 @@ its line moving with it.
 - [D135](#d135--family-b-the-trip-that-already-ran-the-resize-boxs-stale-premise-and-the-shape-a-capture-cannot-catch-2026-08-21) — Family B: the trip that already ran, the resize box's stale premise, and the shape a capture cannot catch
 - [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21) — three claims that were reasoned instead of measured, and the one sentence that catches all three
 - [D137](#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22) — Family D: the restart row got a pane of its own, and a real cluster took four claims away
+- [D138](#d138--reports-keeps-everything-and-the-retention-rule-is-a-re-measure-trigger-2026-08-22) — reports/ keeps everything, and the retention rule is a re-measure trigger
+- [D139](#d139--phase-4s-close-the-budget-whose-first-sync-failed-and-where-the-other-seven-findings-went-2026-08-22) — Phase 4's close: the budget whose first sync failed, and where the other seven findings went
 
 ## Why it exists — where the gap is
 
@@ -11901,3 +11903,179 @@ of one kind cluster in one afternoon. A corpus is a set of pinned moments; a
 claim about *what happens over time* — a card that ages out, a count that never
 comes back down, a pane that fills up after a reboot — cannot be checked against
 one. **When a claim's subject is time, the fixture cannot be the witness.**
+
+### D138 — reports/ keeps everything, and the retention rule is a re-measure trigger (2026-08-22)
+
+Phase 4's last box asked for a bound on `reports/` "before there is anything to
+bound", and named three candidates: a report whose decision landed is **deleted**,
+**kept**, or **reduced to the `D##` that cites it**. The box's premise was that
+"this repo's disease is append" and that `reports/` grows forever in the tree
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+ruled must get smaller. The box was written on 2026-08-16 (`1b2cf66`), when
+`reports/` held **no reports at all** — only its README. So *before there is
+anything to bound* was literal, and the premise about growth was a forecast, not
+a measurement.
+
+**Measured at Phase 4 close** (`du -sb`, 2026-08-22, twelve reports):
+
+| | bytes |
+|---|---|
+| `backlog.md` | 47,667 |
+| `reports/` | **160,742** |
+| `todo.md` | 217,654 |
+| `screens/` | 324,194 |
+| `NOTES.md` | 796,873 |
+
+`reports/` is one fifth of `NOTES.md`, and larger than only one of the other
+four. More to the point it is not one of the files D103 was
+about: that decision's subject was, in its own words, "the two files every agent
+must read — `NOTES.md` and `todo.md`". `reports/` is read when somebody wants a
+measurement, like `backlog.md` and `screens/` — none of the three is paged
+through on the way to something else. A per-turn cost and a disk cost are
+different diseases, and the cure for one is not owed to the other.
+
+**Ruled: kept.** No count, no age, no size bound on the directory, and nothing is
+deleted for having landed.
+
+**Reducing a report to its `D##` is the option the measurement actually
+forbids.** There are **37** by-name citations of a report from outside the
+directory — `backlog.md` 17, `screens/analysis.md` 10, `NOTES.md` 9, `todo.md` 1
+— and **13** of them carry a section number *into the report body*
+(`… § 13.1`, `… §§ 1–2`). What `screens/analysis.md` reaches into is
+`corpus-drain-and-capacity.md` § 13.1, *Node states, and where the pinned pod
+landed* — a table of what four nodes were doing on one afternoon, which no
+decision entry contains and none should: a decision says what was settled, the
+report says what was seen. Collapsing the report into the decision
+deletes the object the decision is checkable against, which is the failure
+[CLAUDE.md § Where a leak would actually happen](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand) names by hand —
+*the definition says what it is; only the object says what it does*.
+
+**What bounds the directory is already paid for, and neither half is new:**
+
+- **Per file** — the "no object dumps" rule in
+  [`reports/README.md`](reports/README.md), now enforced by
+  `scripts/reports-guard.py`
+  ([D126](#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20)).
+  A report is the command, its exit status, and the field values the finding
+  turns on. That is what keeps a file at 200 lines instead of 20 000, and it
+  refuses by content class rather than by length — a line ceiling would fire on a
+  legitimate thirteen-section measurement and stay quiet on a short leak.
+- **Per link** — `scripts/check-docs.py` walks every `*.md` in the repo and fails
+  on a link whose destination file does not exist (`missing file ->`). Deleting a
+  report is therefore *available and guarded*: you may delete one, you may not
+  delete one something still cites.
+
+**The re-decide trigger, because "no rule" needs one.** This ruling rests on one
+number and it is one command to re-take: when `reports/` is no longer a fraction
+of `NOTES.md` — say, when `du -sb reports/ NOTES.md` stops putting it in second
+place — the measurement that justified keeping everything has stopped holding and
+the bound is decided again. Not a gate, not a ritual step: a named condition, so
+the next PM re-measures instead of re-reasoning.
+
+**What the measurement found on the way.** Two reports are cited by no filename
+anywhere — `2026-08-16-capture-trip-review-measurements.md` and
+`2026-08-22-family-d-restarts-pane.md`. Neither is orphaned: the first carries
+its decision in its own title (D114), and the second is cited by the form several
+closed boxes use, `([reports/](reports/README.md), 2026-08-22)`. So a
+"delete what nothing cites" rule would have opened with two false positives on
+its first run, and a citation-by-date is a citation. It is not adopted.
+And `reports/README.md` still said the sanitization guard "does not run here",
+"on a path with no guard yet" and "owed", in three separate paragraphs, after
+`scripts/reports-guard.py` had been running in `just check` since 2026-08-20 —
+fixed in this same change. The guard that closed the gap did not update the page
+that describes it, which is the stale-second-copy failure this repo names in
+CLAUDE.md and had here in its own documentation of the fix.
+
+### D139 — Phase 4's close: the budget whose first sync failed, and where the other seven findings went (2026-08-22)
+
+The phase-close cross-family review read all seven reports together with the
+helpers they share ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)).
+One blocker, two should-fix, five nits. This entry is the blocker's ruling and
+the disposition of the other seven, so no finding is left resting only in a
+report.
+
+**The blocker: the permanent case arrived wearing the transient one's shape.**
+`drain_row` asked `has_not_caught_up` before `blocks_a_drain`, so a budget whose
+`status.observedGeneration` was behind its `generation` could never reach the
+`SyncFailed` branch. Upstream's `failSafe` sets `DisruptionsAllowed = 0` and the
+`SyncFailed` condition and **does not** advance `status.observedGeneration`, while
+`eviction.go` refuses every eviction while the status is behind. So a budget whose
+*first* sync failed sits at `generation: 1 / observedGeneration: 0` forever, every
+eviction of its pods is refused — and k8rs drew the pane's **quietest** row, no
+band, sorted with the ready nodes: *"needs a moment before it can be checked …
+wait a few seconds and look again"*.
+
+That is the exact failure
+[D132](#d132--the-trip-that-took-four-runs-and-the-sixteen-things-three-agents-settled-under-it-2026-08-21)
+§ *Blocker 2* carried both fields to prevent — *"this node is ready to drain, and
+then it hangs"* — reintroduced one layer up, in the order the two questions were
+asked. **A field carried for a reason is not the same as a reason honoured**, and
+nothing between the two was watching.
+
+**The fix is one guard and one shared reader.** `could_not_be_counted` is now the
+only place the `DisruptionAllowed` condition's reason is read, called from both
+`drain_row` and `blocks_a_drain`; the loop reads
+`Some(waiting) if !could_not_be_counted(budget)`.
+
+**Ruled: this is not a reversal of [D130](#d130--the-unblock-turn-what-the-export-gap-actually-cost-and-eleven-things-two-agents-settled-that-no-box-had-2026-08-20).**
+D130's rule is that the generation question is asked at the call site and never
+inside `blocks_a_drain`, and it still is — `blocks_a_drain` asks nothing about
+generations. What changed is that its answer no longer wins unconditionally. The
+invariant underneath D130 — *the counters are never read while the spec is ahead*
+— holds **by construction, and the PM checked the code rather than the report**:
+the only budget that now reaches `blocks_a_drain` while behind is one
+`could_not_be_counted` is true of, and that is branch 1, which returns before
+`disruptions_allowed` is touched.
+
+**An upstream reading that sharpens D132.** D132 hoped the `DisruptionAllowed`
+condition's own `observedGeneration` might separate the two cases and recorded
+that it "carries nothing to compare it against". Read at `release-1.34`, the
+reason is stronger than that: **both** writers copy the status value into it —
+`failSafe` with `ObservedGeneration: newPdb.Status.ObservedGeneration`, and the
+success path's `UpdateDisruptionAllowedCondition` the same. It can never differ
+from `status.observedGeneration`, so the field D46 drops would not have helped,
+and the `reason` is the only thing that separates them. Every successful sync
+overwrites `SyncFailed`, so it means *the last thing the controller did to this
+budget was fail*.
+
+**One case is not separable and draws the blocking row.** A generation bumped
+*after* a failed sync (`generation: 2 / observedGeneration: 1 / SyncFailed`) is
+indistinguishable from a budget mid-resync of a spec somebody has just fixed. It
+draws *would never finish draining*, because evictions are refused right now and
+the controller's last word was that it could not count this — both halves of the
+sentence stay true. Stated here rather than left as a silent judgement.
+
+**Where the other seven went.** Two should-fix and five nits, none of them boxed
+into the phase that was closing:
+
+- **`34 workloads` under a header saying `16 workloads`** — reproduced by the PM,
+  and it is starker with no user workload at all: `0 workloads` in the header and
+  `6 workloads have no memory or CPU limit` below it. Folded into Phase 5's
+  **owner-name-resolution** box, because resolving a ReplicaSet to its Deployment
+  changes that number anyway and fixing the noun twice is worse than once.
+- **`endpoints_behind` is quadratic in Services** (~1.4 s at 10 000) — its own
+  Phase 5 box. The finding is the growth rate; `REQUIREMENTS.md` states the paint
+  budget at ~1000 pods, which is not where this was measured
+  ([D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
+- **Posture sorts the one row worth reviewing last** — a pod in `default`
+  mounting `/etc/kubernetes/pki` read-only draws no card and folds into a
+  `kube-system` row. Its own Phase 5 box. **Not a reversal of
+  [D2](#d2--the-dividing-line-broken-now-vs-risky-later)**: D2's stated reason is
+  that a plain read-only hostPath "is how CNI, CSI and every node agent are
+  supposed to work" — a claim about **who** mounts it — and the code keys only on
+  **what** is mounted. Adding an escalation case is the move
+  [D79](#d79--the-review-that-found-the-door-beside-the-one-d78-closed-2026-08-13)
+  already made once.
+- **Three of the seven have never drawn their principal shape through the
+  binary** — the driver hard-codes `server_version`, `context`,
+  `client_certificate` and `metrics` to `None`. Its own Phase 5 box, which is
+  where those four stop being `None`.
+- **The `.` hostPath doc claim, the two meanings of `Info`, and the unglossed
+  `--ignore-daemonsets`** — [`backlog.md`](backlog.md). The last two are
+  presentation, and the phase that draws the bands is the one that can judge them.
+
+**`analysis.rs` freezes with this close, so every box above is a
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+question when it lands** — said here so the next PM meets it as a known cost and
+not a surprise. The cheapest of them is the quadratic join, whose output must not
+change at all.
