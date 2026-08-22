@@ -2,6 +2,7 @@ use super::*;
 
 use crate::rules::ObjectKind;
 use k8s_openapi::serde::de::DeserializeOwned;
+use std::collections::BTreeSet;
 
 // --- THE CAPTURES, AND HOW A STREAM IS SYNTHESISED ---
 //
@@ -824,5 +825,850 @@ async fn a_watch_that_only_fails_leaves_the_other_four_alone() {
     assert!(
         !snapshot.nodes.is_empty() && !snapshot.workloads.is_empty(),
         "the four watches that succeeded lost their objects to the one that failed"
+    );
+}
+
+// --- THE INGEST GUARD ---
+//
+// **What is proven here is what the store *kept*, never what something printed.** The printer
+// already had a guard (`main.rs`'s `sanitize`, NOTES § D122) and it is the half that was never
+// in doubt; the half nothing below this file implemented is that a 50 MB field is not held.
+//
+// Three routes reach a screen by three different mechanisms and each gets its own framing
+// (NOTES § D31): a kubelet's `state.waiting.message`, which rules 3 and 4 quote whole; a
+// `metadata.finalizer`, which rule 12 puts in `evidence` verbatim and which anyone with `patch`
+// on pods can set; and a `spec.volumes[].hostPath.path`, which Posture prints as a row's own
+// subject and which anyone who can create a pod chooses.
+
+/// One pod through the whole ingest path — decode, strip, bound — and the snapshot it became.
+fn ingested_pod(pod: Pod) -> PodSnapshot {
+    let mut store = all_but("pods");
+    list(&mut store, Store::pod, vec![pod]);
+    let mut snapshot = store.snapshot(now()).expect("every initial LIST landed");
+    assert_eq!(
+        snapshot.pods.len(),
+        1,
+        "one pod was listed and the store holds a different number"
+    );
+    snapshot.pods.remove(0)
+}
+
+/// The three fields the security gate names by hand, each on the capture that carries it.
+fn route(name: &str) -> (&'static str, Vec<&'static str>) {
+    match name {
+        "message" => (
+            "image",
+            vec![
+                "status",
+                "containerStatuses",
+                "0",
+                "state",
+                "waiting",
+                "message",
+            ],
+        ),
+        "finalizer" => ("stuck", vec!["metadata", "finalizers", "0"]),
+        "hostPath" => ("hostpath", vec!["spec", "volumes", "0", "hostPath", "path"]),
+        other => panic!("{other} is not one of the three routes the gate names"),
+    }
+}
+
+/// A capture with one field replaced, all the way through the ingest path.
+///
+/// The field is asserted to have been there first: a path that no longer resolves would create
+/// the value instead of replacing it, and the test would prove nothing while staying green.
+fn poisoned(name: &str, poison: &str) -> PodSnapshot {
+    let (fixture, path) = route(name);
+    let mut document = capture(fixture);
+    let mut at = &mut document;
+    for step in &path {
+        at = match step.parse::<usize>() {
+            Ok(index) => at
+                .get_mut(index)
+                .unwrap_or_else(|| panic!("{fixture}.json has no [{index}] on the {name} route")),
+            Err(_) => at
+                .get_mut(*step)
+                .unwrap_or_else(|| panic!("{fixture}.json has no {step} on the {name} route")),
+        };
+    }
+    assert!(
+        at.is_string(),
+        "{fixture}.json no longer carries a string at the end of the {name} route, so \
+         poisoning it proves nothing"
+    );
+    *at = serde_json::json!(poison);
+    ingested_pod(serde_json::from_value(document).expect("the poisoned capture decodes"))
+}
+
+/// What the store kept for that field, read back off the snapshot type.
+fn kept(name: &str, pod: &PodSnapshot) -> String {
+    match name {
+        "message" => pod
+            .containers
+            .iter()
+            .find_map(|container| match &container.state {
+                ContainerState::Waiting { message, .. } => message.clone(),
+                _ => None,
+            })
+            .expect("the capture's container is waiting with a message"),
+        "finalizer" => pod
+            .finalizers
+            .first()
+            .expect("the capture's pod carries a finalizer")
+            .clone(),
+        "hostPath" => pod
+            .host_path_mounts
+            .first()
+            .expect("the capture's pod mounts a host path")
+            .path
+            .clone(),
+        other => panic!("{other} is not one of the three routes the gate names"),
+    }
+}
+
+const ROUTES: [&str; 3] = ["message", "finalizer", "hostPath"];
+
+/// What each route is bounded at — the class the field belongs to, asserted rather than assumed.
+fn cap_of(name: &str) -> usize {
+    match name {
+        "finalizer" => IDENTIFIER,
+        _ => FREE_TEXT,
+    }
+}
+
+/// **Control characters die at ingest, wherever in the value they sit** (invariant 9, NOTES
+/// § D29, § D146): as the whole value, inside one, at either boundary, and as a C1 escape a
+/// UTF-8 stream can carry. Fed down all three routes, because each reaches the screen by its own
+/// mechanism.
+///
+/// **Both classes of control character are here, and one shape carries both at once**: a
+/// whitespace control becomes a single space, every other one is removed, and `one\ntwo\u{1b}…`
+/// proves the two happen in the same pass rather than one of them happening twice. The
+/// neighbours are the rest of the ruling — a run however it is spelled, either end, and a break
+/// beside a space the cluster sent, which stays the cluster's.
+#[test]
+fn control_characters_die_at_ingest_wherever_they_sit() {
+    for (shape, poison, survives) in [
+        ("the whole value", "\u{1b}\u{7}\u{0}", ""),
+        ("inside a value", "before\u{1b}[2Jafter", "before[2Jafter"),
+        ("at the front", "\nleading", "leading"),
+        ("at the back", "trailing\u{7f}", "trailing"),
+        ("a C1 escape", "one\u{9b}two", "onetwo"),
+        ("a tab and a carriage return", "a\tb\rc", "a b c"),
+        ("a vertical tab and a form feed", "a\u{b}b\u{c}c", "a b c"),
+        (
+            "NEL, the one C1 that is whitespace",
+            "one\u{85}two",
+            "one two",
+        ),
+        (
+            "both classes in one value",
+            "one\ntwo\u{1b}[2Jthree",
+            "one two[2Jthree",
+        ),
+        (
+            "a run of breaks, however it is spelled",
+            "one\r\n\r\ntwo",
+            "one two",
+        ),
+        ("a break the sentence ended with", "starting\n", "starting"),
+        (
+            "a break beside a space the cluster sent",
+            "one \n two",
+            "one  two",
+        ),
+        (
+            "two spaces the cluster sent, which stay two",
+            "one  two",
+            "one  two",
+        ),
+        (
+            "a non-breaking space, which is not a control",
+            "one\u{a0}two",
+            "one\u{a0}two",
+        ),
+        ("nothing but breaks", "\n\r\n\t", ""),
+    ] {
+        for name in ROUTES {
+            let pod = poisoned(name, poison);
+            let stored = kept(name, &pod);
+            assert!(
+                !stored.chars().any(char::is_control),
+                "{shape} survived the {name} route: {stored:?}"
+            );
+            assert_eq!(
+                stored, survives,
+                "the {name} route stripped more or less than the control characters of {shape}"
+            );
+        }
+    }
+}
+
+/// **A value at the bound is kept whole; one byte over is cut, and the cut is marked.** The two
+/// classes are asserted against each other in the same run: a 513-byte *message* is untouched
+/// and a 513-byte *finalizer* is not, which is what says the fields were sorted into classes
+/// rather than all given one number.
+#[test]
+fn a_value_at_the_bound_is_kept_whole_and_one_byte_over_is_marked() {
+    for name in ROUTES {
+        let cap = cap_of(name);
+
+        let exact = "a".repeat(cap);
+        let stored = kept(name, &poisoned(name, &exact));
+        assert_eq!(
+            stored, exact,
+            "a {name} of exactly {cap} bytes was changed on the way in"
+        );
+
+        let over = "a".repeat(cap + 1);
+        let stored = kept(name, &poisoned(name, &over));
+        assert_eq!(
+            stored,
+            format!("{}{SHORTENED}", "a".repeat(cap)),
+            "a {name} of {} bytes was not cut at {cap} and marked",
+            cap + 1
+        );
+        assert!(
+            stored.ends_with(SHORTENED),
+            "the cut on the {name} route is silent, which is what widgets.md § 7 forbids"
+        );
+    }
+
+    let past_an_identifier = "a".repeat(IDENTIFIER + 1);
+    for free_text in ["message", "hostPath"] {
+        assert_eq!(
+            kept(free_text, &poisoned(free_text, &past_an_identifier)),
+            past_an_identifier,
+            "a {free_text} was cut at the identifier bound, so the two classes are one number"
+        );
+    }
+    assert!(
+        kept("finalizer", &poisoned("finalizer", &past_an_identifier)).ends_with(SHORTENED),
+        "a finalizer was given the free-text bound, so the two classes are one number"
+    );
+}
+
+/// **The shape the security gate names**: 10 MB down each of the three routes, and nothing near
+/// it is held. What bounding buys is the resident set and not latency (NOTES § D115) — the whole
+/// object still arrives and is still deserialized before a field is dropped.
+#[test]
+fn an_enormous_value_is_never_held_whole() {
+    for name in ROUTES {
+        let cap = cap_of(name);
+        let enormous = "K".repeat(10_000_000);
+        let stored = kept(name, &poisoned(name, &enormous));
+        assert_eq!(
+            stored.len(),
+            cap + SHORTENED.len(),
+            "10 MB down the {name} route left {} bytes in the store",
+            stored.len()
+        );
+        println!(
+            "{name}: 10000000 bytes in, {} bytes kept — {}",
+            stored.len(),
+            &stored[cap - 8..]
+        );
+    }
+}
+
+/// **A multi-byte character is never cut in half.** `String::truncate` slices bytes and panics
+/// in the middle of one, and a crafted pod name is exactly how somebody would find that. Fed a
+/// 2-, 3- and 4-byte character straddling the cut, so the walk back to a boundary is exercised
+/// at one, two and three steps.
+#[test]
+fn a_multi_byte_character_is_never_cut_in_half() {
+    for name in ROUTES {
+        let cap = cap_of(name);
+        for (character, width) in [("ç", 2), ("€", 3), ("🙂", 4)] {
+            for straddle in 1..width {
+                // The character starts `width - straddle` bytes before the cut, so the cut lands
+                // inside it and the walk has to step back that far.
+                let head = cap - (width - straddle);
+                let poison = format!("{}{character}", "a".repeat(head));
+                assert!(
+                    poison.len() > cap,
+                    "the {character} does not reach past the cut, so nothing straddles it"
+                );
+                let stored = kept(name, &poisoned(name, &poison));
+                assert_eq!(
+                    stored,
+                    format!("{}{SHORTENED}", "a".repeat(head)),
+                    "a {width}-byte character straddling the {name} cut by {straddle} was not \
+                     dropped whole"
+                );
+                assert!(
+                    !stored.contains('\u{fffd}'),
+                    "the cut produced a replacement character, so it sliced a character in half"
+                );
+            }
+
+            // And the character that ends exactly on the bound is kept whole.
+            let poison = format!("{}{character}", "a".repeat(cap - width));
+            assert_eq!(poison.len(), cap);
+            assert_eq!(
+                kept(name, &poisoned(name, &poison)),
+                poison,
+                "a {width}-byte character ending exactly on the {name} bound was cut anyway"
+            );
+        }
+
+        // **A substituted space at the cut, with a four-byte character straddling it.** The
+        // strip only ever shortens — a control character is one or two bytes and a space is one
+        // — so nothing in the walk may assume the value it measures is the value that arrived.
+        let head = "a".repeat(cap - 3);
+        assert_eq!(
+            kept(name, &poisoned(name, &format!("{head}\n🙂"))),
+            format!("{head} {SHORTENED}"),
+            "a break became a space beside a straddling character and the {name} cut moved"
+        );
+    }
+}
+
+/// **Strip first, then bound** — so the bound counts what is actually kept. 10 MB of escape
+/// sequences leaves nothing behind and is not reported as shortened: nothing that could have
+/// been shown was lost, and a marker there would be the record lying the other way.
+#[test]
+fn a_value_of_nothing_but_control_characters_is_not_reported_as_shortened() {
+    for name in ROUTES {
+        let stored = kept(name, &poisoned(name, &"\u{1b}".repeat(10_000_000)));
+        assert_eq!(
+            stored, "",
+            "10 MB of escape sequences down the {name} route left something in the store"
+        );
+    }
+}
+
+/// **A delete has to find what the apply stored.** The key is namespace and name, both bounded,
+/// so a name long enough to be cut has to be cut the same way on both events or the object
+/// becomes unremovable.
+#[test]
+fn a_delete_finds_the_object_whose_name_was_shortened() {
+    let mut document = capture("crashloop");
+    document["metadata"]["name"] = serde_json::json!("z".repeat(IDENTIFIER + 40));
+    let pod: Pod = serde_json::from_value(document).expect("the poisoned capture decodes");
+    let mut store = bootstrapped();
+    let before = store
+        .snapshot(now())
+        .expect("every initial LIST landed")
+        .pods
+        .len();
+    store.pod(Event::Apply(pod.clone()));
+    let during = store.snapshot(now()).expect("every initial LIST landed");
+    assert_eq!(
+        during.pods.len(),
+        before + 1,
+        "the oversized pod never landed"
+    );
+    assert!(
+        during
+            .pods
+            .iter()
+            .any(|pod| pod.id.name.ends_with(SHORTENED)),
+        "the oversized name reached the store uncut"
+    );
+    store.pod(Event::Delete(pod));
+    assert_eq!(
+        store
+            .snapshot(now())
+            .expect("every initial LIST landed")
+            .pods
+            .len(),
+        before,
+        "the delete built a different key than the apply and the pod could not be removed"
+    );
+}
+
+/// **Two keys that shorten to the same thing are one key, and which value survives is decided
+/// rather than left to iteration order.** The first in key order keeps its value, so one store is
+/// one answer; this is the one place the guard loses something instead of shortening it, and it
+/// is named here so it cannot be discovered later as a surprise.
+#[test]
+fn two_labels_that_shorten_to_the_same_key_become_one_and_the_first_keeps_its_value() {
+    let mut document = capture("crashloop");
+    let shared = "k".repeat(IDENTIFIER);
+    document["metadata"]["labels"] = serde_json::json!({
+        format!("{shared}aaa"): "first",
+        format!("{shared}bbb"): "second",
+    });
+    let pod: Pod = serde_json::from_value(document).expect("the poisoned capture decodes");
+    let labels = ingested_pod(pod).labels;
+    assert_eq!(
+        labels.len(),
+        1,
+        "two keys that cut to the same 512 bytes stayed two keys: {labels:?}"
+    );
+    assert_eq!(
+        labels
+            .get(&format!("{shared}{SHORTENED}"))
+            .map(String::as_str),
+        Some("first"),
+        "the second colliding label overwrote the first"
+    );
+}
+
+// --- THE INGEST GUARD, OVER EVERY CAPTURE IN THE REPO ---
+
+/// A control character and a run far past both bounds, in one value.
+fn poison() -> String {
+    format!("\u{1b}[2J{}", "P".repeat(20_000))
+}
+
+/// Every string in a captured document replaced by [`poison`], with two exemptions and no
+/// others: anything shaped like a timestamp, and **the object's own `apiVersion`/`kind`**, which
+/// `k8s-openapi` checks on the way in. Neither reaches a snapshot type. An `ownerReference`'s
+/// `apiVersion` and `kind` are *not* exempt — they are unvalidated free text, they build
+/// `ObjectKind::Other`, and `rules.rs` names this guard as the thing that has to cover them.
+fn poison_every_string(value: &mut serde_json::Value, poison: &str, root: bool) {
+    match value {
+        serde_json::Value::String(text) => {
+            let bytes = text.as_bytes();
+            let is_a_timestamp =
+                bytes.len() >= 11 && bytes[4] == b'-' && bytes[7] == b'-' && bytes[10] == b'T';
+            if !is_a_timestamp {
+                *text = poison.to_string();
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                poison_every_string(item, poison, false);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for (name, field) in fields {
+                if root && (name == "apiVersion" || name == "kind") {
+                    continue;
+                }
+                poison_every_string(field, poison, false);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Every committed capture, one object at a time, with its `kind` — a `kind: List` unpacked.
+fn every_captured_object() -> Vec<(String, String, serde_json::Value)> {
+    let directory = format!("{}/tests/fixtures", env!("CARGO_MANIFEST_DIR"));
+    let mut objects = Vec::new();
+    let mut files: Vec<_> = std::fs::read_dir(&directory)
+        .expect("the fixture directory is readable")
+        .map(|entry| entry.expect("a fixture directory entry is readable").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .collect();
+    files.sort();
+    for path in files {
+        let name = path
+            .file_stem()
+            .expect("a .json file has a stem")
+            .to_string_lossy()
+            .into_owned();
+        let document: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("the capture is readable"))
+                .expect("the capture is JSON");
+        match document["items"].as_array() {
+            Some(items) => {
+                for item in items.clone() {
+                    let kind = item["kind"].as_str().unwrap_or_default().to_string();
+                    objects.push((name.clone(), kind, item));
+                }
+            }
+            None => {
+                let kind = document["kind"].as_str().unwrap_or_default().to_string();
+                objects.push((name, kind, document));
+            }
+        }
+    }
+    assert!(
+        objects.len() > 50,
+        "only {} objects were found in tests/fixtures, so this sweep is reading the wrong place",
+        objects.len()
+    );
+    objects
+}
+
+/// One captured object of a watched kind, through the real ingest path, as the store's own
+/// `Debug` of what it kept. `None` for a kind no watch decodes.
+///
+/// Each of the three workload kinds goes down its own stream, because each is a different API
+/// type — the one thing the driver's `Store::deployment` / `stateful_set` / `daemon_set` split
+/// exists for.
+fn ingested_dump(kind: &str, document: serde_json::Value) -> Option<String> {
+    let mut store;
+    let workloads = match kind {
+        "Pod" => {
+            let pod = serde_json::from_value(document).expect("a captured Pod decodes");
+            return Some(format!("{:?}", ingested_pod(pod)));
+        }
+        "Node" => {
+            store = all_but("nodes");
+            let node = serde_json::from_value(document).expect("a captured Node decodes");
+            list(&mut store, Store::node, vec![node]);
+            return Some(format!(
+                "{:?}",
+                store.snapshot(now()).expect("listed").nodes
+            ));
+        }
+        "Deployment" => {
+            store = all_but("deployments");
+            let workload = serde_json::from_value(document).expect("a captured Deployment decodes");
+            list(&mut store, Store::deployment, vec![workload]);
+            store.snapshot(now()).expect("listed").workloads
+        }
+        "StatefulSet" => {
+            store = all_but("statefulsets");
+            let workload =
+                serde_json::from_value(document).expect("a captured StatefulSet decodes");
+            list(&mut store, Store::stateful_set, vec![workload]);
+            store.snapshot(now()).expect("listed").workloads
+        }
+        "DaemonSet" => {
+            store = all_but("daemonsets");
+            let workload = serde_json::from_value(document).expect("a captured DaemonSet decodes");
+            list(&mut store, Store::daemon_set, vec![workload]);
+            store.snapshot(now()).expect("listed").workloads
+        }
+        _ => return None,
+    };
+    Some(format!("{workloads:?}"))
+}
+
+/// **Every capture in the repo, poisoned in every string it has, through the real ingest path.**
+///
+/// The assertion is made on the `Debug` of what the store *kept*: a control character survives
+/// as its `\u{..}` escape and an unbounded field survives as a run longer than any bound, so a
+/// `Bounded` impl that does nothing cannot pass — whichever of the three watched types, and
+/// whichever nested type, it belongs to.
+#[test]
+fn no_captured_object_can_carry_an_unbounded_or_unprintable_field_through_ingest() {
+    let poison = poison();
+    let too_long = "P".repeat(FREE_TEXT + 1);
+    let mut swept = 0;
+    for (fixture, kind, mut document) in every_captured_object() {
+        poison_every_string(&mut document, &poison, true);
+        let Some(dump) = ingested_dump(&kind, document) else {
+            continue;
+        };
+        let where_from = format!("{fixture}.json ({kind})");
+        swept += 1;
+        assert!(
+            !dump.contains(&too_long),
+            "{where_from} kept a field longer than {FREE_TEXT} bytes"
+        );
+        assert!(
+            !dump.contains("\\u{"),
+            "{where_from} kept a control character"
+        );
+        assert!(
+            dump.contains(SHORTENED),
+            "{where_from} came through the guard with nothing marked, so it proves nothing"
+        );
+    }
+    println!("{swept} poisoned objects swept through ingest");
+    assert!(
+        swept > 40,
+        "only {swept} objects reached the three watched kinds, so the sweep is nearly empty"
+    );
+}
+
+/// **The negative side of the bound: no object a real cluster sent is ever shortened.** Every
+/// committed Pod, Node and workload through the ingest path, and nothing in any of them carries
+/// the marker — which is the claim `IDENTIFIER` and `FREE_TEXT` are chosen to make, and the
+/// one that would fail first if either number were set too low.
+#[test]
+fn no_captured_object_is_shortened_by_the_guard() {
+    let mut compared = 0;
+    for (fixture, kind, document) in every_captured_object() {
+        let Some(dump) = ingested_dump(&kind, document) else {
+            continue;
+        };
+        compared += 1;
+        assert!(
+            !dump.contains(SHORTENED),
+            "{fixture}.json ({kind}) was shortened by the guard, so \
+             {IDENTIFIER}/{FREE_TEXT} are below what a real cluster sends"
+        );
+    }
+    println!("{compared} captured objects came through the guard with nothing shortened");
+    assert!(compared > 40, "only {compared} objects were compared");
+}
+
+/// **A real cluster does send control characters, and this is the message that decided how they
+/// are handled** (NOTES § D146). The committed `crashloop` capture carries a kubelet termination
+/// message with two newlines in it — found by this box, not assumed — and rules 1 and 5 put that
+/// message on a card. Removing the newline glued two words into `startingpanic`, which is not a
+/// word and is not a sentence a beginner can read; the whole result is asserted here so it can
+/// never come back.
+#[test]
+fn a_newline_a_real_kubelet_sent_becomes_a_space_and_never_glues_two_words() {
+    let pod: Pod = object("crashloop");
+    let sent = PodSnapshot::from(pod.clone()).containers[0]
+        .last_terminated
+        .as_ref()
+        .and_then(|ended| ended.message.clone())
+        .expect("the capture's container terminated with a message");
+    assert_eq!(
+        sent, "starting\npanic: dial tcp db.payments.svc:5432: connect: connection refused\n",
+        "crashloop.json's termination message has changed, so this test is about a different \
+         message than the one D146 was ruled on"
+    );
+
+    let kept = ingested_pod(pod).containers[0]
+        .last_terminated
+        .as_ref()
+        .and_then(|ended| ended.message.clone())
+        .expect("the message survived the guard");
+    assert_eq!(
+        kept, "starting panic: dial tcp db.payments.svc:5432: connect: connection refused",
+        "the message a card will print is not the sentence the kubelet wrote"
+    );
+    assert!(
+        !kept.contains("startingpanic"),
+        "the two words are glued back together: {kept:?}"
+    );
+    println!("crashloop lastState message: {sent:?}\n                        kept: {kept:?}");
+}
+
+// --- THE FIELD LIST, DERIVED RATHER THAN TYPED ---
+//
+// **The failure this box exists to prevent is a field nobody remembered.** The sweep above only
+// proves what the captures happen to carry; this proves what the *types* carry. `rules.rs`'s own
+// struct definitions are the field list — the same reason the prune is the decode — so the list
+// is read off them here instead of being written down a second time where it could go stale.
+
+/// `rules.rs` and `k8s.rs` as text, read at compile time.
+const RULES_SOURCE: &str = include_str!("rules.rs");
+const K8S_SOURCE: &str = include_str!("k8s.rs");
+
+/// `pub struct Foo {` / `enum Foo {` — the name, for a type declared at the top level.
+fn type_header(line: &'static str) -> Option<&'static str> {
+    let rest = line
+        .strip_prefix("pub struct ")
+        .or_else(|| line.strip_prefix("struct "))
+        .or_else(|| line.strip_prefix("pub enum "))
+        .or_else(|| line.strip_prefix("enum "))?;
+    let name = rest.strip_suffix(" {")?;
+    (!name.contains(['<', ' '])).then_some(name)
+}
+
+/// One line of a type body as (field, type), covering struct fields, struct-like enum variants
+/// and tuple variants — for which the variant's own name stands in for a field name.
+fn field_of(line: &'static str) -> Option<(&'static str, &'static str)> {
+    let mut body = line.trim();
+    if body.starts_with("//") || body.starts_with('#') {
+        return None;
+    }
+    // `Running { started_at: Option<Time> },`
+    if let Some((head, rest)) = body.split_once(" { ")
+        && head.starts_with(char::is_uppercase)
+    {
+        body = rest;
+    }
+    // `Other(String),`
+    if let Some((name, rest)) = body.split_once('(')
+        && let Some(inner) = rest.strip_suffix("),")
+        && name.starts_with(char::is_uppercase)
+    {
+        return Some((name, inner));
+    }
+    let body = body
+        .trim_end_matches(',')
+        .trim_end()
+        .trim_end_matches('}')
+        .trim_end();
+    let (name, kind) = body.split_once(": ")?;
+    let name = name.strip_prefix("pub ").unwrap_or(name);
+    (!name.contains(' ')).then_some((name, kind))
+}
+
+/// Every type `rules.rs` declares, with its fields.
+fn declared_types() -> BTreeMap<&'static str, Vec<(&'static str, &'static str)>> {
+    let mut types = BTreeMap::new();
+    let mut open: Option<(&'static str, Vec<(&'static str, &'static str)>)> = None;
+    for line in RULES_SOURCE.lines() {
+        if let Some(name) = type_header(line) {
+            open = Some((name, Vec::new()));
+            continue;
+        }
+        if open.is_none() {
+            continue;
+        }
+        if line == "}" {
+            let (name, fields) = open.take().expect("a type is open");
+            types.insert(name, fields);
+            continue;
+        }
+        if let Some(field) = field_of(line) {
+            open.as_mut().expect("a type is open").1.push(field);
+        }
+    }
+    types
+}
+
+/// Splits a line of Rust into the words a field name could be.
+fn words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|character: char| !character.is_alphanumeric() && character != '_')
+}
+
+/// The one region of `k8s.rs` that is allowed to be the answer.
+fn guard_region() -> &'static str {
+    let start = K8S_SOURCE
+        .find("// --- THE INGEST GUARD START ---")
+        .expect("k8s.rs no longer has an ingest guard region");
+    let end = K8S_SOURCE
+        .find("// --- THE INGEST GUARD END ---")
+        .expect("the ingest guard region is not closed");
+    &K8S_SOURCE[start..end]
+}
+
+/// The body of `impl Bounded for <type>`, or `None` if there is no such impl.
+fn bounded_impl(type_name: &str) -> Option<&'static str> {
+    let region = guard_region();
+    let head = format!("\nimpl Bounded for {type_name} {{\n");
+    let at = region.find(&head)? + head.len();
+    let rest = &region[at..];
+    Some(&rest[..rest.find("\n}\n")?])
+}
+
+/// **`ObjectKind` has no impl of its own** — it is one arm inside `ObjectId`'s, because it has
+/// exactly one text-carrying variant and no other owner. It is the only type allowed to be
+/// answered by the region as a whole rather than by its own impl.
+const BOUNDED_INSIDE_ANOTHER_IMPL: [&str; 1] = ["ObjectKind"];
+
+/// **Every `String` a watched snapshot type can carry is named by the ingest guard**, derived
+/// from `rules.rs` rather than typed out here. A field added to a snapshot type and forgotten in
+/// `k8s.rs` fails this test; a generic sentence about "names and messages" is what lets one be
+/// missed (todo.md, Phase 5 § Security gate).
+#[test]
+fn every_string_a_watched_snapshot_type_carries_is_named_by_the_ingest_guard() {
+    let types = declared_types();
+    assert!(
+        types.len() > 20,
+        "only {} types were parsed out of rules.rs, so this guard is reading nothing",
+        types.len()
+    );
+
+    // The three types the five permanent watches decode into, and everything they reach.
+    let mut reachable = BTreeSet::new();
+    let mut queue = vec!["PodSnapshot", "NodeSnapshot", "WorkloadSnapshot"];
+    while let Some(name) = queue.pop() {
+        if !reachable.insert(name) {
+            continue;
+        }
+        for (_, kind) in types.get(name).into_iter().flatten() {
+            for word in words(kind) {
+                if types.contains_key(word) {
+                    queue.push(word);
+                }
+            }
+        }
+    }
+    for expected in [
+        "ObjectId",
+        "ObjectKind",
+        "Condition",
+        "ContainerSnapshot",
+        "ContainerState",
+        "Terminated",
+        "ExitRule",
+        "HostPathMount",
+        "Toleration",
+        "Taint",
+    ] {
+        assert!(
+            reachable.contains(expected),
+            "{expected} is not reachable from the three watched types, so the walk is broken"
+        );
+    }
+    for fetched in [
+        "ClusterSnapshot",
+        "ServiceSnapshot",
+        "NodeUsage",
+        "Selector",
+    ] {
+        assert!(
+            !reachable.contains(fetched),
+            "{fetched} is not watched and the walk reached it anyway"
+        );
+    }
+
+    let mut checked = Vec::new();
+    for name in &reachable {
+        let carries_text: Vec<_> = types[name]
+            .iter()
+            .filter(|(_, kind)| words(kind).any(|word| word == "String"))
+            .map(|(field, _)| *field)
+            .collect();
+        if carries_text.is_empty() {
+            continue;
+        }
+        let body = if BOUNDED_INSIDE_ANOTHER_IMPL.contains(name) {
+            guard_region()
+        } else {
+            bounded_impl(name).unwrap_or_else(|| {
+                panic!("{name} carries {carries_text:?} and k8s.rs has no `impl Bounded` for it")
+            })
+        };
+        for field in carries_text {
+            assert!(
+                words(body).any(|word| word == field),
+                "{name}.{field} is a String the store keeps and the ingest guard never names it"
+            );
+            checked.push(format!("{name}.{field}"));
+        }
+    }
+
+    for named_by_the_security_gate in [
+        "ContainerState.message",
+        "PodSnapshot.finalizers",
+        "HostPathMount.path",
+        "ObjectKind.Other",
+        "ObjectId.name",
+        "Condition.message",
+    ] {
+        assert!(
+            checked
+                .iter()
+                .any(|found| found == named_by_the_security_gate),
+            "{named_by_the_security_gate} was not among the {} fields derived from rules.rs, so \
+             this guard is looking in the wrong place",
+            checked.len()
+        );
+    }
+    println!(
+        "{} String fields derived from rules.rs, all named by the guard:",
+        checked.len()
+    );
+    println!("  {}", checked.join(" · "));
+    assert!(
+        checked.len() >= 45,
+        "only {} String fields were derived, which is fewer than the snapshot types carry",
+        checked.len()
+    );
+}
+
+/// **What the bound buys is the resident set, and here it is measured rather than argued**
+/// (NOTES § D115). One pod whose every string is a megabyte long — 250 times `FREE_TEXT` and
+/// 2000 times `IDENTIFIER` — and the bytes the store kept of it.
+/// The whole object still arrives and is still deserialized before a field is dropped — that is
+/// the half no bound can change, and the half this number does not claim.
+#[test]
+fn a_pod_of_megabyte_fields_costs_the_store_kilobytes() {
+    let mut document = capture("hostpath");
+    poison_every_string(&mut document, &"K".repeat(1_000_000), true);
+    let sent = serde_json::to_string(&document)
+        .expect("the poisoned document re-serialises")
+        .len();
+    let pod: Pod = serde_json::from_value(document).expect("the poisoned Pod decodes");
+    let kept = format!("{:?}", ingested_pod(pod)).len();
+    println!("hostpath.json poisoned: {sent} bytes on the wire, {kept} bytes kept by the store");
+    assert!(
+        sent > 10_000_000,
+        "the poisoned object is only {sent} bytes, so it is not the shape the gate names"
+    );
+    assert!(
+        kept < 64 * 1024,
+        "the store kept {kept} bytes of a {sent}-byte object"
     );
 }

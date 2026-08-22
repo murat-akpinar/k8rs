@@ -167,6 +167,7 @@ its line moving with it.
 - [D143](#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22) — the eleventh crate, and why the list of ten was wrong rather than the task
 - [D144](#d144--the-snapshot-stores-shape-and-the-ten-choices-the-box-did-not-make-2026-08-22) — the snapshot store's shape, and the ten choices the box did not make
 - [D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22) — a failure that clears itself is a failure nobody sees, and the driver's six choices
+- [D146](#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22) — the ingest guard: two bounds off a census, a visible marker, and the newline a real kubelet sent
 
 ## Why it exists — where the gap is
 
@@ -12464,3 +12465,104 @@ with nothing saying so. kube's documentation says a `watcher()` stream recovers 
 the next poll rather than finishing — **that is read off the doc, not observed**,
 and it is written into `drive`'s doc comment as the reconnect box's inheritance
 rather than as something anybody measured.
+
+### D146 — the ingest guard: two bounds off a census, a visible marker, and the newline a real kubelet sent (2026-08-22)
+
+Phase 5's second box put the control-character strip and the size bound at one
+place, `k8s::ingest`, between the decode and the store. The box left the numbers,
+the marker and the class rule to whoever wrote it; they are ruled here.
+
+**Two classes, and the second one exists because of a measurement.**
+
+| Class | Bytes | What is in it |
+|---|---|---|
+| `IDENTIFIER` | 512 | names, namespaces, uids, kinds, images, labels and selectors (key *and* value), taints, tolerations, finalizers, claims, phase, condition type/status/**reason**, quantities, kubelet version |
+| `FREE_TEXT` | 4096 | waiting/termination/condition **messages**, `hostPath.path` and both subpaths |
+
+**The numbers come off a census of the committed captures, not off a definition.**
+The longest string that reaches a snapshot type is `image.json`'s
+`state.waiting.message` at **362 bytes — 71 % of 512**. That single figure is why
+the two classes cannot be one number, and why `reason` (a code the rules compare
+with `==`, twelve times its headroom) stays an identifier while `message` does
+not. The first draft's rule was *"everything the API validates the shape of is
+short"*, which **`hostPath`, `reason`, `phase`, `image` and `conditions[].type`
+all falsify** — none is length-validated. The rule is now what the value is *drawn
+as*: a word, or prose. `hostPath` moved to `FREE_TEXT` on that basis, `PATH_MAX`
+being 4096 and a path not being a word.
+
+**What the bound buys is the resident set and nothing else**
+([D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)),
+measured rather than argued: one capture with every string a megabyte long is
+**87 002 884 bytes on the wire and 35 945 bytes kept**. The object still arrives
+whole and is deserialized before a field is cut, exactly as the prune is.
+
+**A truncation the reader can see: `… (shortened by k8rs)`**, appended after the
+cut, stepping back to a whole character. **Attributed on purpose** — without the
+name the text reads as the cluster's own ending, and a diagnosis tool that
+silently shortens the evidence is lying quietly.
+
+**The ruling this box actually forced, and it is not in the box.** A real committed
+capture carries control characters that reach a snapshot type:
+`crashloop.json`'s kubelet termination message is
+`"starting\npanic: dial tcp db.payments.svc:5432: connect: connection refused\n"`,
+and rules 1 and 5 put it on a card. Under
+[D122](#d122--the-strip-goes-on-the-value-entering-the-sentence-not-on-the-finished-sentence-2026-08-20)'s
+*removed, never replaced*, that stores as **`startingpanic: dial tcp …`** — two
+words glued into a nonsense one, on a card a beginner is meant to read.
+
+**Ruled: a control character that is whitespace becomes one space; every other
+control character is still removed** — and **`char::is_whitespace` decides the
+membership**, so the list is the standard library's rather than one kept here:
+`HT`, `LF`, `VT`, `FF`, `CR` and `NEL` (U+0085), and nothing else in the control
+range. `\u{9b}` is a C1 control and is *not* whitespace; it is still removed, and
+that is tested. **Runs collapse and both ends are dropped**, which is not
+cosmetic: without collapsing, 10 MB of `\n` becomes 10 MB of spaces, fills the
+whole 4096-byte budget and gets **marked as shortened** — a marker claiming
+content was lost when none existed. Collapsed, it stores `""` unmarked, exactly as
+10 MB of `ESC` does. The collapse only ever suppresses a space *k8rs itself would
+have added*: two spaces the cluster sent stay two. The invariant is one sentence —
+**no character that prints as itself is ever changed or removed**.
+`\n`, `\r` and `\t` *are* word boundaries,
+and deleting a boundary destroys the sentence the message was; `ESC`, `NUL`, `DEL`
+and the C1 range are not whitespace, have no readable equivalent, and are the ones
+invariant 9 exists for. A space cannot rewrite a terminal, so nothing is given
+back to an attacker — a crafted pod name is still boring.
+
+**This does not reverse D122, it answers a question D122 did not have.** D122's
+subject was *where* the strip goes — on the value entering the sentence, never on
+the finished sentence, because `'\n'.is_control()` is true and a strip over the
+assembled message ate `USAGE`'s own line breaks. Removal was how it was written,
+not what it ruled, and at the time no real message with a newline had been
+measured at the value level. **`main.rs`'s `sanitize` keeps removing**: it strips a
+finished driver line where a space would be noise, and `dev-ui` deletes it at
+Phase 12 anyway.
+
+**Two ceilings, named at the point of choice.** **Collection lengths are not
+bounded** — a pod with 100 000 finalizers costs 100 000 × 512, and dropping list
+entries is a *silent* cut, which is the thing the marker exists to prevent; boxed
+rather than done. And **`Store::failure` is outside the guard**: it holds a
+`watcher::Error` whose text is the API server's and which is kube's type rather
+than a `String` this file owns, so whatever renders it strips it first — the
+reconnect box replaces the field
+([D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)).
+`server_version` owes `text` at the point `connect()` sets it, and `Store`'s doc
+says so where that box will read it.
+
+**A truncated map key collapses two entries into one, first in key order winning.**
+Deterministic rather than last-write-wins, and it is the single place the guard
+*loses* something instead of shortening it. Named in the code and tested.
+
+**The field list is derived, not typed.** A test parses `rules.rs` with
+`include_str!`, walks reachability from the three watched types, finds **51
+`String` fields** and asserts each is named in the matching `impl Bounded` — with
+canaries on four of them, and a negative assertion that the walk does *not* reach
+`ClusterSnapshot`, `ServiceSnapshot`, `Selector` or `NodeUsage`. That is the only
+thing that can catch a field nobody named.
+
+**And the first draft of this entry credited it with a defect that never
+shipped.** It said eyeballs had missed `Toleration.effect` and the whole of
+`Taint`. They had not: both were **deliberately injected** to prove the guard
+could fail, and the guard named them — which is the guard being *proven*, not the
+guard *finding* something. The author caught the PM's sentence and said so.
+Corrected because a decision that inflates its own evidence is worse than one with
+less of it, and this file is read as the record of what actually happened.

@@ -2091,7 +2091,7 @@ public release.
       `Err` is not a hot loop; and that a `watcher()` stream never ends, which is
       read off kube's doc and never observed — `select_all` **drops** a finished
       stream, so that kind would freeze and still be presented as live
-- [ ] **Bound every free-text field at ingest, not the one field that was
+- [x] **Bound every free-text field at ingest, not the one field that was
       measured.** The security gate has said *sizes are bounded* since Phase 1
       and nothing below this phase implements it, so today `k8rs` reads, holds
       and prints whatever the API sends: handed one object whose `kind` is 10 MB
@@ -2112,6 +2112,24 @@ public release.
       truncation, and a test per field that feeds the oversized shape and asserts
       what got stored — not what got printed, which is the half that already had
       a guard
+      Done: one region, `k8s::ingest`, between the decode and the store — the same
+      place the prune is, for the same reason. **The two bounds came off a census
+      of the committed captures, not a definition**: 512 bytes for a value drawn
+      as a word, 4096 for prose and paths, and the number that forced two classes
+      rather than one is `image.json`'s 362-byte waiting message, 71 % of 512. A
+      cut is visible and attributed — `… (shortened by k8rs)` — because text that
+      just stops reads as the cluster's own ending. Measured, not argued: one
+      capture with every string a megabyte long is **87 002 884 bytes on the wire
+      and 35 945 bytes kept**. The field list is **derived, not typed** — a test
+      parses `rules.rs` with `include_str!`, walks the three watched types and
+      asserts all 51 `String` fields are named. **A real capture then changed the
+      ruling**: `crashloop.json`'s kubelet message carries a newline, and
+      *removed, never replaced* glued it into `startingpanic:` on a card, so a
+      whitespace control now becomes one space and everything else is still
+      removed ([D146](NOTES.md#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22)).
+      453 + 7 tests, 27 mutants 0 missed, 15 shapes × 3 routes. **Collection
+      lengths are deliberately not bounded** and have their own box — dropping
+      list entries is a silent cut, which is what the marker exists to prevent
 - [ ] **How the initial LIST arrives is a decision, not a default** — the box
       above forbids publishing a snapshot until every initial LIST has landed,
       which makes the shape of that LIST load-bearing. An unpaginated
@@ -2179,6 +2197,23 @@ public release.
       and a first sync that does not complete becomes a state on screen instead
       of a wait
       ([PRIOR-ART § A7](PRIOR-ART.md#a7--the-watchs-own-initial-list-strategy-can-hang-forever))
+- [ ] **The ingest guard bounds every field and no collection, so the product of
+      the two is still unbounded.** `k8s::ingest` caps an identifier at 512 bytes
+      and free text at 4096
+      ([D146](NOTES.md#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22)),
+      but a pod with 100 000 finalizers costs 100 000 × 512 and every one of them
+      is individually legal. Same for `labels`, `tolerations`, `volumes`,
+      `containers` and `conditions`. **Deferred deliberately and not overlooked**:
+      dropping list entries is a *silent* cut, which is the exact thing
+      `… (shortened by k8rs)` exists to prevent, and the box that added the
+      per-field bound was asked for a bound per field. So this box's real
+      question is **what a reader is told when a list is cut**, and the field
+      answer does not transfer — *"3 of 100 000 finalizers shown"* is a sentence,
+      not a marker. Decide that first, then the numbers, and take them off a
+      census the way the field bounds were rather than inventing them. Note the
+      one place the guard already loses rather than shortens: two labels whose
+      keys truncate to the same string collapse into one, first in key order
+      winning
 - [ ] **Owner name resolution**: a pod's `ownerReferences` names its
       *ReplicaSet*, and the group heading has to read `web`, not
       `web-7d4f5c6b8`. Fetch the ReplicaSet on demand, cache by UID, never

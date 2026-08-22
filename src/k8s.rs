@@ -26,6 +26,12 @@
 //! loop names no kind: the three the browser's rule is written about (invariant 12) are worth
 //! avoiding here for the same reason, one layer down.
 //!
+//! **Every string a snapshot type carries is cleaned and bounded on the way in** — invariant 9's
+//! strip and the security gate's size bound, paid once in [`ingest`] so nothing downstream has to
+//! remember. A control character that is whitespace becomes one space and every other one is
+//! removed (NOTES § D146). What the bound buys is the resident set again, and not latency: the
+//! 50 MB field still arrives and is still deserialized before it is cut.
+//!
 //! **What is still missing is the `Client`**, and with it the five `Api<K>`s [`drive`] would be
 //! handed: that is the `connect()` box further down Phase 5. Nothing here has met an API
 //! server.
@@ -46,13 +52,314 @@
 #[path = "k8s_tests.rs"]
 mod tests;
 
-use crate::rules::{ClusterSnapshot, NodeSnapshot, ObjectId, PodSnapshot, WorkloadSnapshot};
+use crate::rules::{
+    ClusterSnapshot, Condition, ContainerSnapshot, ContainerState, ExitRule, HostPathMount,
+    NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, Taint, Terminated, Toleration,
+    WorkloadSnapshot,
+};
 use futures_util::stream::{BoxStream, Stream, StreamExt, TryStreamExt, select_all};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use kube::runtime::watcher::{self, Event};
 use std::collections::BTreeMap;
+
+// --- THE INGEST GUARD START ---
+//
+// **Every string a snapshot type carries is cleaned and bounded here, and nowhere else.**
+// Invariant 9 owes a strip to every printer and the security gate owes a bound to every field;
+// both are paid once, on the way into the decode, so no downstream consumer has to remember.
+// `main.rs`'s `sanitize` is the same rule one layer up and is superseded by this (NOTES § D122);
+// it stays until `dev-ui` removes it at Phase 12.
+//
+// **The one string this file keeps that does not come through here is [`Store::failure`]**,
+// which is kube's `watcher::Error` and not a `String` this file owns. Its own doc carries the
+// instruction, and the reconnect box that replaces the field is where it stops being an
+// instruction.
+//
+// **The field list is not repeated as a list.** It is one `Bounded` impl per snapshot type, and
+// `rules.rs`'s own struct definitions are what says a field exists — the same reason the prune
+// is the decode (see the module doc). `k8s_tests.rs` derives the list from `rules.rs` and
+// refuses an impl that does not name every `String` a watched type carries, so *every* is
+// mechanical rather than a claim.
+//
+// **Two classes, and the rule for a new field is what the value is drawn as**: a word the
+// reader scans is an [`IDENTIFIER`], a sentence or a path is [`FREE_TEXT`]. Both numbers, the
+// census they were chosen against, the marker, and the two ceilings this guard does not close —
+// collection *lengths*, and [`Store::failure`] — are NOTES § D146.
+
+/// The longest **identifier** kept from one field: 512 bytes (NOTES § D146).
+///
+/// A value that names or codes something and is read as a word: names, namespaces, uids, an
+/// `ownerReference`'s kind, container names, images, label and selector keys and values, taints,
+/// tolerations, finalizers, claims, phase, a condition's type and status, a `reason` the rules
+/// compare with `==`, quantities, the kubelet version, a restart-rule action.
+const IDENTIFIER: usize = 512;
+
+/// The longest **sentence or path** kept from one field: 4096 bytes (NOTES § D146).
+///
+/// Waiting, termination and condition **messages**, which rules 3, 4 and 10 put on the card
+/// verbatim (NOTES § D37) — and `hostPath` with its two subpaths, which Posture prints as a
+/// row's own subject. The two classes cannot be one number: the longest message in the committed
+/// captures is 362 bytes, already 71% of 512, while every identifier beside it is under 50.
+const FREE_TEXT: usize = 4096;
+
+/// What a cut looks like to the reader, in plain language and attributed to us (invariant 14,
+/// NOTES § D146).
+///
+/// `screens/widgets.md` § 7 forbids a *silent* cut and a *byte* cut, not every cut. This is
+/// neither.
+const SHORTENED: &str = "… (shortened by k8rs)";
+
+/// One untrusted string, made safe to hold and safe to print.
+///
+/// **A control character that is whitespace becomes one space; every other one is removed**
+/// (NOTES § D146). `char::is_whitespace` is what decides which — `HT`, `LF`, `VT`, `FF`, `CR`
+/// and `NEL`, and nothing else in the control range — so the split is the standard library's
+/// and not a list kept here. A boundary deleted glues two words into one; `ESC`, `NUL`, `DEL`
+/// and the rest of the C1 range have no readable equivalent and are what invariant 9 exists for.
+///
+/// **The space is added only between two characters that were kept, and only where there is not
+/// one already**, which settles the three end cases in one condition: a run of breaks however it
+/// is spelled is one boundary, a leading or trailing break separated the value from nothing and
+/// is dropped, and a break beside an ordinary space adds nothing. **No character that prints as
+/// itself is ever changed or removed** — a space the cluster sent stays, and two spaces it sent
+/// stay two.
+///
+/// Strip first, then bound, so the bound counts the bytes that are actually kept — a megabyte of
+/// escape sequences, or of newlines, leaves nothing behind and is not reported as shortened,
+/// because nothing that could be shown was lost.
+///
+/// **The cut steps back to a character boundary**, which `String::truncate` does not: it panics
+/// on a byte in the middle of a multi-byte character, and a crafted pod name is exactly how
+/// somebody would find that. A UTF-8 character is at most four bytes, so the boundary is at most
+/// three below the cap; the walk is a bounded range rather than a `while`, so no input and no
+/// edit of this function can turn it into a hang. Byte 0 is always a boundary, which is what
+/// makes the fallback safe rather than a second panic.
+fn text(value: &mut String, cap: usize) {
+    let mut kept = String::new();
+    let mut break_pending = false;
+    for character in value.chars() {
+        if !character.is_control() {
+            if break_pending && !kept.is_empty() && !kept.ends_with(' ') {
+                kept.push(' ');
+            }
+            break_pending = false;
+            kept.push(character);
+        } else if character.is_whitespace() {
+            break_pending = true;
+        }
+    }
+    *value = kept;
+    if value.len() <= cap {
+        return;
+    }
+    let cut = (cap.saturating_sub(3)..=cap)
+        .rev()
+        .find(|&index| value.is_char_boundary(index))
+        .unwrap_or(0);
+    value.truncate(cut);
+    value.push_str(SHORTENED);
+}
+
+/// [`text`], for a field the API may omit.
+fn maybe(value: &mut Option<String>, cap: usize) {
+    if let Some(value) = value {
+        text(value, cap);
+    }
+}
+
+/// [`text`] over both halves of a label-style map.
+///
+/// The map is rebuilt because a `BTreeMap` key cannot be edited in place. **Two keys that cut to
+/// the same bytes become one entry, and the first in key order keeps its value** — the one place
+/// this guard loses something instead of shortening it (NOTES § D146).
+fn pairs(map: &mut BTreeMap<String, String>, cap: usize) {
+    let mut bounded = BTreeMap::new();
+    for (mut key, mut value) in std::mem::take(map) {
+        text(&mut key, cap);
+        text(&mut value, cap);
+        bounded.entry(key).or_insert(value);
+    }
+    *map = bounded;
+}
+
+/// A snapshot type that has been through the guard above.
+trait Bounded {
+    fn bound(&mut self);
+}
+
+impl<T: Bounded> Bounded for Option<T> {
+    fn bound(&mut self) {
+        if let Some(value) = self {
+            value.bound();
+        }
+    }
+}
+
+impl<T: Bounded> Bounded for Vec<T> {
+    fn bound(&mut self) {
+        for item in self {
+            item.bound();
+        }
+    }
+}
+
+impl Bounded for ObjectId {
+    fn bound(&mut self) {
+        // `ownerReferences[].kind` and `.apiVersion` are unvalidated free text and the `Other`
+        // arm carries both into a string that reaches a card — `rules.rs`'s
+        // `ObjectKind::from_api` says so and names this guard.
+        if let ObjectKind::Other(kind) = &mut self.kind {
+            text(kind, IDENTIFIER);
+        }
+        maybe(&mut self.namespace, IDENTIFIER);
+        text(&mut self.name, IDENTIFIER);
+        maybe(&mut self.uid, IDENTIFIER);
+    }
+}
+
+impl Bounded for Condition {
+    fn bound(&mut self) {
+        text(&mut self.type_, IDENTIFIER);
+        text(&mut self.status, IDENTIFIER);
+        maybe(&mut self.reason, IDENTIFIER);
+        maybe(&mut self.message, FREE_TEXT);
+    }
+}
+
+impl Bounded for Terminated {
+    fn bound(&mut self) {
+        maybe(&mut self.reason, IDENTIFIER);
+        maybe(&mut self.message, FREE_TEXT);
+    }
+}
+
+impl Bounded for ContainerState {
+    fn bound(&mut self) {
+        match self {
+            Self::Waiting { reason, message } => {
+                maybe(reason, IDENTIFIER);
+                maybe(message, FREE_TEXT);
+            }
+            Self::Running { .. } => {}
+            Self::Terminated(ended) => ended.bound(),
+        }
+    }
+}
+
+impl Bounded for ExitRule {
+    fn bound(&mut self) {
+        text(&mut self.action, IDENTIFIER);
+        maybe(&mut self.operator, IDENTIFIER);
+    }
+}
+
+impl Bounded for ContainerSnapshot {
+    fn bound(&mut self) {
+        text(&mut self.name, IDENTIFIER);
+        text(&mut self.image, IDENTIFIER);
+        maybe(&mut self.restart_policy, IDENTIFIER);
+        self.restart_rules.bound();
+        self.state.bound();
+        self.last_terminated.bound();
+        maybe(&mut self.cpu_request, IDENTIFIER);
+        maybe(&mut self.memory_request, IDENTIFIER);
+        maybe(&mut self.memory_limit, IDENTIFIER);
+        maybe(&mut self.cpu_limit, IDENTIFIER);
+        maybe(&mut self.allocated_cpu, IDENTIFIER);
+        maybe(&mut self.allocated_memory, IDENTIFIER);
+    }
+}
+
+impl Bounded for HostPathMount {
+    fn bound(&mut self) {
+        text(&mut self.path, FREE_TEXT);
+        maybe(&mut self.sub_path, FREE_TEXT);
+        maybe(&mut self.sub_path_expr, FREE_TEXT);
+        text(&mut self.container, IDENTIFIER);
+    }
+}
+
+impl Bounded for Toleration {
+    fn bound(&mut self) {
+        maybe(&mut self.key, IDENTIFIER);
+        maybe(&mut self.operator, IDENTIFIER);
+        maybe(&mut self.value, IDENTIFIER);
+        maybe(&mut self.effect, IDENTIFIER);
+    }
+}
+
+impl Bounded for Taint {
+    fn bound(&mut self) {
+        text(&mut self.key, IDENTIFIER);
+        maybe(&mut self.value, IDENTIFIER);
+        text(&mut self.effect, IDENTIFIER);
+    }
+}
+
+impl Bounded for PodSnapshot {
+    fn bound(&mut self) {
+        self.id.bound();
+        self.owner.bound();
+        maybe(&mut self.node, IDENTIFIER);
+        maybe(&mut self.phase, IDENTIFIER);
+        self.containers.bound();
+        maybe(&mut self.cpu_request, IDENTIFIER);
+        maybe(&mut self.memory_request, IDENTIFIER);
+        self.scheduled.bound();
+        maybe(&mut self.nominated_node_name, IDENTIFIER);
+        self.ready.bound();
+        self.ready_to_start_containers.bound();
+        for finalizer in &mut self.finalizers {
+            text(finalizer, IDENTIFIER);
+        }
+        self.host_path_mounts.bound();
+        pairs(&mut self.node_selector, IDENTIFIER);
+        self.tolerations.bound();
+        pairs(&mut self.labels, IDENTIFIER);
+        maybe(&mut self.cpu_limit, IDENTIFIER);
+        maybe(&mut self.memory_limit, IDENTIFIER);
+        maybe(&mut self.overhead_cpu, IDENTIFIER);
+        maybe(&mut self.overhead_memory, IDENTIFIER);
+        for claim in &mut self.claims {
+            text(claim, IDENTIFIER);
+        }
+    }
+}
+
+impl Bounded for NodeSnapshot {
+    fn bound(&mut self) {
+        self.id.bound();
+        self.conditions.bound();
+        self.taints.bound();
+        pairs(&mut self.labels, IDENTIFIER);
+        maybe(&mut self.kubelet_version, IDENTIFIER);
+        maybe(&mut self.allocatable_cpu, IDENTIFIER);
+        maybe(&mut self.allocatable_memory, IDENTIFIER);
+    }
+}
+
+impl Bounded for WorkloadSnapshot {
+    fn bound(&mut self) {
+        self.id.bound();
+        self.owner.bound();
+        self.conditions.bound();
+    }
+}
+
+/// **The whole of what happens to an API object on its way into the store**: decode, which is
+/// the prune, then strip and bound.
+///
+/// One function so there is one answer, and [`Watch::take`] is the only caller — a second entry
+/// point into the store is a second place to forget the guard.
+fn ingest<K, T: From<K> + Bounded>(object: K) -> T {
+    let mut object = T::from(object);
+    object.bound();
+    object
+}
+
+// --- THE INGEST GUARD END ---
 
 // --- THE STORE START ---
 
@@ -121,17 +428,19 @@ impl<T> Default for Watch<T> {
 impl<T: Watched> Watch<T> {
     /// One watch event, applied.
     ///
-    /// **`K` is the API object and it does not survive this line**: `T::from` is `rules.rs`'s
-    /// decode, which is the prune (see the module doc). A `Delete` is converted too — the whole
-    /// object is already in memory, and one conversion means one place the identity is derived.
+    /// **`K` is the API object and it does not survive this line**: [`ingest`] is `rules.rs`'s
+    /// decode — which is the prune (see the module doc) — followed by the strip and the bound. A
+    /// `Delete` goes through it too: the whole object is already in memory, one conversion means
+    /// one place the identity is derived, and the key a delete looks up has to be built the same
+    /// way the key it stored was.
     fn take<K>(&mut self, event: Event<K>)
     where
-        T: From<K>,
+        T: From<K> + Bounded,
     {
         match event {
             Event::Init => self.filling = Some(BTreeMap::new()),
             Event::InitApply(object) => {
-                let object = T::from(object);
+                let object = ingest(object);
                 self.filling
                     .get_or_insert_default()
                     .insert(key(&object), object);
@@ -147,11 +456,12 @@ impl<T: Watched> Watch<T> {
                 }
             }
             Event::Apply(object) => {
-                let object = T::from(object);
+                let object = ingest(object);
                 self.live.insert(key(&object), object);
             }
             Event::Delete(object) => {
-                self.live.remove(&key(&T::from(object)));
+                let object: T = ingest(object);
+                self.live.remove(&key(&object));
             }
         }
     }
@@ -261,7 +571,9 @@ impl Store {
                 .collect(),
             // Read from the API server once at connect, and from the kubeconfig — neither came
             // from a watch (`docs/architecture.md` § Data flow). The `connect()` box further
-            // down Phase 5 fills them; until then N4 and C1 correctly say nothing.
+            // down Phase 5 fills them; until then N4 and C1 correctly say nothing. **They do not
+            // pass through [`ingest`]**, so `server_version` — the API server's own text — owes
+            // [`text`] at the point that box sets it.
             server_version: None,
             context: None,
             client_certificate: None,
