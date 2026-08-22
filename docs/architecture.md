@@ -36,11 +36,14 @@ Kubernetes API server
         │  (one LIST, then a watch stream — no polling loops)
         ├──────────────────────────────┬────────────────────────────┐
         ▼                              ▼                            ▼
-kube-rs watcher(Pod, Node)     discovery + Table lists      ops.rs (writes)
-        │  prune: ~10 fields,          │  server-side columns,      │  dry-run
-        │  drop managedFields          │  no per-kind code          │  → confirm
-        ▼                              │                            │  → apply
-Snapshot store (small structs)         │                            │  → audit
+kube-rs watcher × 5            discovery + Table lists      ops.rs (writes)
+        │  Pods, Nodes, Deployments,   │  server-side columns,      │  dry-run
+        │  StatefulSets, DaemonSets    │  no per-kind code          │  → confirm
+        │  prune: the fields the       │                            │  → apply
+        │  snapshot types name;        │                            │  → audit
+        │  drop managedFields          │                            │
+        ▼                              │                            │
+Snapshot store (small structs)         │                            │
         │                              │                            │
         ├──► rules::analyze()   -> Vec<Finding>    ← pure, per object, live
         └──► analysis::report() -> Report          ← pure, whole cluster
@@ -320,8 +323,9 @@ it the first paint reports what it is waiting for
   get -o json` omits `managedFields` unless explicitly asked, and the sanitizer
   deletes them regardless — so a fixture never carries the field pruning is
   about, and a test asserting it was pruned would pass over an object that
-  never had it. Pruning is verified against live watch data in the client
-  layer, where the field actually arrives
+  never had it. Pruning is to be verified against live watch data in the
+  client layer, where the field actually arrives — Phase 5 is where that
+  becomes true; no code in this repo has met an API server yet
   ([NOTES § D30](../NOTES.md#d30--the-guards-phase-2-added-and-the-freeze-they-collided-with-2026-08-12)).
 - **A decode test may set one field on a real capture** — a branch whose input
   the capture cannot contain is a branch no test can reach, and the corpus has

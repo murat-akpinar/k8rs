@@ -229,7 +229,7 @@ not a follow-up ticket. Reasoning: [docs/security.md](docs/security.md),
 **Six of these are `scripts/security-guard.py` and `just check` runs it**
 ([D105](NOTES.md#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16)):
 workflow hygiene, no shell spawned from `src/`, no dependency or hostname outside
-the ten, no `Debug` over a type that can hold a token, no in-cluster
+the approved list, no `Debug` over a type that can hold a token, no in-cluster
 ServiceAccount door, no TLS knob turned off by us. They are marked **`[auto]`**
 below and are not re-read by hand. **Everything unmarked is yours**, and a script
 that goes green says nothing about those.

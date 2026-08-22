@@ -608,7 +608,7 @@ that cites them expects to find them.
       the kill is older than the grace
       ([NOTES § D75](NOTES.md#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13))
       Closed — [D75](NOTES.md#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13)
-- [x] **Rule 13 — placed on a node, but the containers never started.** The
+- [ ] **Rule 13 — placed on a node, but the containers never started.** The
       twelfth Alerts rule, added on 2026-08-13 by an explicit reversal of
       [invariant 13](CLAUDE.md)'s scope guard: the `ContainerCreating` wedge is
       a weekly failure that no v1 rule sees, and **rule 10 does not see it
@@ -621,7 +621,21 @@ that cites them expects to find them.
       legitimately take minutes to pull and firing under that alerts on every
       cold start. **WARN, not CRITICAL:** the one healthy thing that still
       looks like this is a slow pull.
-      Closed — [D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13) · [D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)
+      Landed — [D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13) · [D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)
+      **Re-opened 2026-08-22: the residual it was written for is the one shape
+      it cannot see.** `pod.containers` is built from `status.containerStatuses`,
+      so a pod the kubelet has never written a status for gives the rule an empty
+      vector and its `stuck.first()?` returns `None` — and *no container started*
+      is this box's own wording. Measured: `PodScheduled: True`, 45 minutes old,
+      nothing else in `status` → `nothing is broken`. Rule 10 stands down
+      (`scheduled == True`) and rule 14 stands down (`scheduled.is_some()`), so
+      three rules hand the pod to each other. The code calls the silence the
+      N-series' gap, which holds only while the node is in the snapshot with
+      `Ready` not `True` — not for a deleted node, a node with no `Ready`
+      condition, or a hand-set `nodeName`. **Done when** that pod draws rule 13's
+      card, the empty-status shape has a fixture of its own, and the N-series
+      hand-off is stated where it is true rather than in general
+      ([D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22))
 - [x] **Rule 14 — nothing has even looked at this pod.** `phase == Pending`
       with **no `PodScheduled` condition at all**, older than **2 minutes**
       from `metadata.creationTimestamp` — a field `PodSnapshot` must gain, and
@@ -1596,7 +1610,13 @@ which freeze at Phase 4 close.** Phase 4's reports are the contract's second
 consumer and need fields no Phase 3 rule reads; they may add fields to those
 types and nothing else in the file — not a rule, not `Finding`, not `ObjectId`,
 not `analyze`
-([NOTES § D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+([NOTES § D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)) —
+**re-opened 2026-08-22 for exactly two fields**, `status.reason` and whatever
+distinguishes *no container status yet* from *no container*, both of them decode
+changes owed to the two boxes this file re-opened above. D42 named
+`status.reason` itself and Phase 4 closed without it; nothing else in the file
+un-freezes
+([NOTES § D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)).
 
 ## Phase 4 — Analysis reports
 
@@ -1868,7 +1888,7 @@ unchecked one from the top.
       local storage is its own row, split by `medium` because a tmpfs has
       nothing to copy off; a node that is not `Ready` is the pane's *cannot
       answer this yet* row, never a verdict ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
-- [x] **Waste** — **Services whose selector matches no pod first** (the 503
+- [ ] **Waste** — **Services whose selector matches no pod first** (the 503
       nobody can explain; it stays here rather than in Alerts because
       promoting it would cost a permanent Services + EndpointSlices watch, and
       the watch budget is why k8rs is lighter than k9s), then unbound/unused
@@ -1880,6 +1900,19 @@ unchecked one from the top.
       `DisruptionBudgetSnapshot::selector` became `Option<Selector>` here — an
       empty selector protects a whole namespace and an absent one protects
       nothing, and flattened they were one value ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+      **Re-opened 2026-08-22: only one of the two pileups landed, and the Done
+      note above records the narrowing.** `finished()` is `Succeeded | Failed`
+      and a node-pressure eviction is `Failed`, so evicted pods are counted with
+      completed Job pods and explained with the Job sentence. Measured on four
+      of them: Alerts prints `nothing is broken`, Waste prints *"4 pods finished
+      and were never removed — Kubernetes keeps a few finished Jobs by default,
+      so some of this is normal"* at `Info` with no action line. They did not
+      finish, they were killed for node memory or disk; they are often the only
+      evidence left after the node recovers; and `Evicted` is NOTES' own example
+      of jargon that must be translated. **Done when** the two pileups are two
+      rows with two sentences, the evicted one carries an action, and a fixture
+      holds the evicted shape
+      ([D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22))
 - [x] **`tui-designer` answers where the restart row lives, before it is
       written** —
       [D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)

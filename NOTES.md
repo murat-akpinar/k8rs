@@ -176,6 +176,7 @@ its line moving with it.
 - [D152](#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22) — discovery: what each call costs, and the four ways it fails quietly
 - [D153](#d153--the-pm-injected-ten-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22) — the PM injected ten boxes into a running Phase 5, which is the rule the PM was enforcing
 - [D154](#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22) — the browser's rows: a 37× that was one event, a floor measured from the answer, and a guard that stopped at `Cc`
+- [D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22) — a whole-project review found two boxes checked over work their own text does not describe
 
 ## Why it exists — where the gap is
 
@@ -13141,7 +13142,7 @@ because its three rulings are cited from the same regions and a reader who
 follows any one of them needs the other two. Sections, in the order the review
 found them.
 
-## The 37×
+#### The 37×
 
 **A Table *can* be watched**, and [§ Contradicts a document](#contradicts-a-document)
 recorded that correctly. What it then wrote down to justify watching metadata
@@ -13190,7 +13191,7 @@ is a design question with real work behind it, and it goes to
 [`backlog.md`](backlog.md) rather than into an open phase.
 
 
-## The floor is measured from the answer, not from the question
+#### The floor is measured from the answer, not from the question
 
 `Browsing` bounded how often a fetch is *issued* and knew nothing about one in
 flight. Its own doc claimed
@@ -13218,7 +13219,7 @@ phase yet.
 `REFRESH_FLOOR` stays 1 s and stays honestly labelled unmeasured; the numbers
 that would settle it are in the report.
 
-## The guard stopped at `Cc`, and a second spelling is what made it reachable
+#### The guard stopped at `Cc`, and a second spelling is what made it reachable
 
 `char::is_control` is Unicode `Cc` and nothing else, so U+202E RIGHT-TO-LEFT
 OVERRIDE, U+200B, U+00AD, U+FEFF and the bidi isolates all walked through
@@ -13252,3 +13253,61 @@ change with a phase behind it.
 **And this is the rule, again:** the second copy is the one that goes stale, and
 it is never the one that gets fixed. Here it was not even stale — it was simply
 never widened, and nothing pointed from one to the other.
+
+### D155 — a whole-project review found two boxes checked over work their own text does not describe (2026-08-22)
+
+Three reviewers read the repo as one thing rather than as a box: an operator over
+all four product files, a test engineer over the suite and the guards, and an
+outside reader over the process. `just check` was green throughout (504 + 7).
+
+**Two `[x]` boxes are re-opened, because their own done-when is not met.** Neither
+is a new requirement and no box is added anywhere; a false tick is corrected where
+it stands, which puts Phases 3 and 4 open underneath the running Phase 5 — the
+shape [D33](#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12)
+and [D47](#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)
+already describe. They are the next work by *lowest open phase*, and that ordering
+is what the release box at the end of Phase 5 needs: both are visible in `--once`.
+
+- **Waste counts an evicted pod as a finished Job.** `finished()` is
+  `Succeeded | Failed` (`rules.rs`), and a node-pressure eviction is `Failed`.
+  Four such pods print `nothing is broken` on Alerts and, on Waste,
+  *"4 pods finished and were never removed — Kubernetes keeps a few finished Jobs
+  by default, so some of this is normal"* at `Info` with no action. The box says
+  *"Evicted and Completed pod pileups"*; the Done note under it says *"the
+  finished-pod pileup"*, so the narrowing was written into the box and passed
+  three gates.
+- **A pod bound to a node the kubelet never touched draws nothing.**
+  `pod.containers` is built from `status.containerStatuses`, so a pod with none
+  gives `placed_but_never_started` an empty vector and its `stuck.first()?`
+  returns `None`. Measured: `PodScheduled: True`, 45 minutes old, `nothing is
+  broken`. Rule 13's box requires exactly this shape — *"no container started"* —
+  and rules 10 and 14 both stand down on it, so three rules hand it to each other.
+  The code documents the silence as the N-series' gap, which holds only when the
+  node is in the snapshot with `Ready` not `True`.
+
+**[D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+window is re-opened for two fields and nothing else.** It named `status.reason`
+for Evicted pileups itself, ten days before Phase 4 closed without it; the freeze
+took effect the same day the field was found missing. Re-opened for
+`status.reason`, and for whatever distinguishes *no container status yet* from
+*no container* — a decode change, not a rule change. Not re-opened for anything
+else: `analyze`, `Finding`, `ObjectId` and every rule stay frozen.
+
+**Everything else found is a `backlog.md` entry and is read at the next phase
+close, not now** — five product findings, four gate findings and the process
+findings, under one dated heading there. Two exceptions, both already owned:
+the read-only `ClusterRole` granting cluster-wide `list configmaps` and
+`list events` that no product code reads belongs to Phase 5's own unchecked role
+box, and the ten-vs-eleven crate contradiction left by
+[D143](#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)
+is a docs sync fixed in this change (`docs/security.md`, `docs/maps.md`,
+`CLAUDE.md`'s own security gate — `docs/tech-stack.md` was already right).
+
+**And the shrink rule is not being obeyed by the file that states it.** Since
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+landed, `NOTES.md` grew 61%, `CLAUDE.md` 19%, and the four prose files 60%
+together (8,258 -> 13,312 · 619 -> 734 · 11,446 -> 18,307, this entry
+included); 89% of every markdown line ever written is still here, against 37%
+of Rust deleted. `rules.rs` is 62% comment with one 166-line doc comment that
+re-argues five decisions it also links. This entry is capped at 60 lines on
+purpose, and the cap itself is a backlog entry rather than a rule added here.

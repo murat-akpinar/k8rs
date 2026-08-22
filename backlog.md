@@ -912,6 +912,126 @@ by what it costs to leave — the first two are reachable from a keypress once
   family.
 
 
+### From the whole-project review (2026-08-22)
+
+*Three reviewers read the repo as one thing — an operator over the product files,
+a test engineer over the suite and the guards, an outside reader over the process.
+The two blockers they found were false ticks and went back onto their own boxes;
+these are everything else
+([D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)).
+**The first two are marked `[before Phase 5 close]` because that is when they
+stop being cheap.***
+
+- **`[before Phase 5 close]` `just mutants` sweeps two files and Phase 5 writes a
+  third.** `justfile`'s recipe is pinned to `--file src/rules.rs --file
+  src/analysis.rs`. Measured with `cargo mutants --list`: 604 + 245 swept, **132
+  in `k8s.rs` and 61 in `main.rs` never swept**. Phase 5's entire product is
+  `k8s.rs`, so its close would run a green whole-file sweep over two files the
+  phase did not touch. `mutants-diff` covers each turn's diff, so this is a
+  phase-close hole and not a per-turn one. One word in `tester`'s file.
+
+- **`[before Phase 5 close]` `cargo mutants` generates nothing for a `const`, so
+  every threshold is outside the gate.** Measured: zero mutants naming
+  `RESTARTS_WARN`, `NOT_READY_GRACE`, `PROBE_FLOOR` or `SKEW_ALLOWANCE` in 604.
+  There are **19** numeric and duration `const`s across the four product files
+  and **6** are pinned by a literal `assert_eq!` naming the constant and its
+  number: `RESTARTS_WARN`, `RESTARTS_CRITICAL`, `CERT_EXPIRY_WARN`,
+  `INITIAL_LIST_PAGE`, `SUPPORTED_SKEW`, `TYPES_BUILT_FOR`. The other **13** —
+  `NOT_READY_GRACE`, `NODE_DOWN_GRACE`, `NEVER_JUDGED_GRACE`, `OVERDUE_MARGIN`,
+  `PROBE_FLOOR`, `SKEW_ALLOWANCE`, `FREE_TEXT`, `IDENTIFIER`, `REFRESH_FLOOR`,
+  `OLDEST_SERVER`, `UNREADABLE_SECTIONS`, `MOST_ROWS_PER_SECTION`,
+  `NAMESPACES_NAMED` — are constrained only by test timings *derived from the
+  constant symbol*, which move with it when somebody "fixes" a number. **The
+  review's own first count of this was wrong in both figures** (20 and 7): two
+  of the claimed pins turned out to be an `assert_eq!` on `seen.len()` and one
+  on `scheduled.status` that merely have the constant nearby — which is the
+  same shape as the defect, one level up. The gate's own box
+  discloses that it cannot mutate a struct literal's field; it does not say *and
+  never a `const`*, and that is the larger class.
+
+- **Drain safety says *waits forever* about a rollout that finishes on its own.**
+  The *at its floor* arm fires on `current_healthy >= desired_healthy`, which is
+  true both of 2 replicas at `minAvailable: 2` (blocked forever) and of 3
+  replicas at `minAvailable: 2` with one pod not Ready this second (blocked for
+  seconds). `status.expectedPods` separates them, it is **already in the
+  committed capture** at both values 2 and 3, and `DisruptionBudgetSnapshot` does
+  not decode it. The action bites hardest: *run one more copy* when a third copy
+  already exists scales to 4 or lowers a correct budget. `rules.rs` refuses this
+  exact shape one file over — a point sample of a transient deciding what the
+  user sees — and wins there.
+
+- **An OOM-killed container above three restarts draws two `Critical` cards.**
+  Rule 2 says *raise the memory limit*; rule 5, on the same container, says *read
+  the last run's log*, which for a `SIGKILL` ends mid-line and holds nothing. The
+  suppressors cannot fold them — different actions, and rule 5 is `Reads::Now`.
+  The rule 2 + rule 15 pair is already an entry above; this is the commoner pair
+  and was not recorded.
+
+- **Drain safety's `not_ready` row keys on severity and kind, not on the rule.**
+  It finds any `Critical` finding whose object is this node and then prints *this
+  node has stopped responding* as a fact. Correct only while N1 is the only
+  `Critical` node rule. The entry above records that the pin asserting that rests
+  on one cluster's output; this is the consumer that breaks when it stops holding,
+  and it breaks by asserting the wrong sentence rather than by drawing nothing.
+
+- **Waste says a Service with no endpoints gives its callers a `503`.** A
+  ClusterIP with no endpoints is an iptables/IPVS `REJECT` — the caller sees
+  *connection refused*, or an empty DNS answer for a headless Service. A `503`
+  comes from an Ingress controller, a mesh sidecar or a gateway, a layer this row
+  knows nothing about, and at 3am the word decides where the reader looks.
+  **Reasoned from the mechanism, not measured** — it needs a client pod on a live
+  cluster to settle, so it is an entry and not a finding.
+
+- **`check-docs.py` reads markdown only.** A planted `NOTES § D999` inside a
+  `.rs` file leaves it green; there are **1,636** `NOTES § D##` citations in
+  `src/` and `tests/` (1,867 counting the bare `§ D##` form), and all of them
+  resolve today. It matters because the assertion
+  *message* is where a reader decides whether an expected number was derived from
+  a requirement or transcribed from output, and nothing checks the citation in it.
+
+- **`k8s_tests.rs` writes the five-watch `drive(vec![one_watch(…), …])` list
+  inline three times** while `streams()`, `bootstrapped()` and `all_but()` already
+  exist. A normalized-block scan over all thirteen test files found it as the
+  only ≥8-line block repeated three times or more, which is worth stating in
+  both directions: § *Write function-based* looks broken here and nowhere else
+  in 39,620 lines. That scan is the reviewer's and was not re-run here.
+
+- **The read-only role's over-grant is the other half of a box that is already
+  open.** `docs/security.md` grants cluster-wide `list configmaps` and
+  `list events`; no product code reads either, and the test suite uses `ConfigMap`
+  as its example of *a kind nothing reads*. `list configmaps` cluster-wide is not
+  neutral — they routinely hold what should have been Secrets. Named here only so
+  it is not lost: it belongs to **Phase 5's own unchecked `ClusterRole` box**,
+  which already carries the under-grant half.
+
+- **The rule 8 `/` entry above is missing its worst half:** the `kube-system` +
+  DaemonSet exemption does not save `prometheus-node-exporter` either, so there is
+  no namespace an operator can move it into to silence the card — and the card
+  prints `read-only` on its own evidence line under a `Critical` title.
+
+- **Nothing shrinks, and the file that says so grew 19%.** Since D103: `NOTES.md`
+  +60%, `CLAUDE.md` +19%, the four prose files +61% together. 89% of every
+  markdown line ever written is still in the repo, against 37% of Rust deleted.
+  Three deletions, ranked by lines removed per unit of risk: **(1)** the doc
+  comments in `rules.rs` (62%) and `k8s.rs` (63%) cut to the contract `CLAUDE.md`
+  already states — comments compile to nothing, so the suite is a complete
+  regression check, and the longest single run is 166 lines re-arguing five
+  decisions it also links; **(2)** a 60-line cap on a decision body, with the
+  round-by-round narrative going to `reports/` where D108 already put it — 41
+  decisions are ≥100 lines and 17 are ≥150, against a median of 67; **(3)**
+  `chore(changelog): update` moved to phase close, which is **101 of 253
+  commits** regenerating a 168-line file.
+
+- **`NOTES.md`'s heading tree is fiction and only one break is guarded.**
+  D1–D133 are nested under a `##` dated to one day of design work in 2026-08-11;
+  D134–D155 are nested under `## Inspiration / reference tools`. D154's three
+  subsections escaped to `##` in `21f85a9` and were re-nested by hand in the
+  change that wrote this entry — `check-docs.py` could not see it, because it
+  matches a decision only at `level == 3`. Two things, in order: one real
+  `## Decisions` section, then ~10 lines in the guard requiring a `### D##` to be
+  its immediate child.
+
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
