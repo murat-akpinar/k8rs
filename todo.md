@@ -2289,7 +2289,7 @@ public release.
       one place the guard already loses rather than shortens: two labels whose
       keys truncate to the same string collapse into one, first in key order
       winning
-- [ ] **Owner name resolution**: a pod's `ownerReferences` names its
+- [x] **Owner name resolution**: a pod's `ownerReferences` names its
       *ReplicaSet*, and the group heading has to read `web`, not
       `web-7d4f5c6b8`. Fetch the ReplicaSet on demand, cache by UID, never
       watch it — and never strip the hash with a string heuristic, which is
@@ -2325,6 +2325,22 @@ public release.
       that sentence needs `uncapped == 0`
       ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
       § 2). Found by Phase 4's close, the only pass that saw both numbers at once
+      Done, and **the noun clause turned out to be the header's fault, not
+      `analysis.rs`'s** — so the D124 question the brief expected never arose. A
+      `workload` is one distinct owner identity after ReplicaSet → Deployment
+      resolution, and a hand-started pod is exactly one, static control-plane pods
+      included: the noun answers *how many things must I go and fix*. Re-measured,
+      the kube-system pair has **seven** owners and `kindnet` alone sets both
+      limits, so the `6` was right all along and `capacity.rs:890` stays true; the
+      header counted controller *objects read* and printed `0`. It is gone, which
+      narrows D121 to its second mechanism. Resolution itself is on-demand, cached
+      by uid, never watched, and **the heuristic is refused by an assertion on the
+      uid** — chopping the hash after an answer lands gets the name right every
+      time and the identity wrong, and only the uid catches that. Four failure
+      facts, nothing retries ever, and a cache miss does not gate the snapshot
+      ([D151](NOTES.md#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)).
+      480 + 7 tests, 22 mutants 0 missed. **W1 turned out to be unreachable through
+      this route** and has its own box
 - [ ] `kube::discovery`: enumerate every kind the cluster serves, CRDs
       included. This is what the sidebar is built from — never a hard-coded list
 - [ ] Server-side `Table` fetch for browser kinds — the columns come from the
@@ -2410,6 +2426,53 @@ public release.
       promise containment it does not have (`tester` wrote the limit into the
       docstring on 2026-08-22 — this box is the fix, not the disclosure).
       `tester`'s
+- [ ] **`tests/binary.rs` is the only test that runs the built binary, and it pins
+      two of the nine shapes that binary prints.** It caught the header change —
+      whole-stdout literal, so a *wrong* count would have reddened as loudly as a
+      removed noun — but only for one input: `healthy.json` is 1 pod, 0 nodes, no
+      unread kind, no finding. **Never covered at the process boundary**: the tally
+      (`20 critical, 9 warnings`), a card's shape, the unread-kind clause, and
+      `--analysis` entirely — `grep -c analysis tests/binary.rs` is **0**, so the
+      seven panes have never been printed by a process any test watched. **The
+      cheapest fix is one line of machinery that already exists**:
+      `a_reader_that_closed_the_pipe_costs_nothing` already runs the whole corpus
+      through the built binary and holds the entire report in `whole.stdout`, then
+      asserts only exit 0 and a length — pinning that report's first and last lines
+      puts the multi-object header and the tally under process cover for nothing.
+      Found by `tester`, 2026-08-22. `tester`'s
+- [ ] **Nothing committed exercises the driver's unread-kind branch, and a ruling
+      leans on it.** `take()` files Services and CertificateSigningRequests into
+      the snapshot, so all 55 fixtures are kinds the driver reads and
+      `k8rs tests/fixtures/*.json` prints `55 pods · 4 nodes` with no unread-kind
+      clause — the branch is dead over the whole corpus. It is covered whole-line
+      by unit tests over `header` with a synthesised pair, so the mechanism works;
+      but D121's own example of it went stale unnoticed and
+      [D151](NOTES.md#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)
+      then leaned on it as *the* surviving mechanism. Done: a committed fixture of
+      a kind no rule reads, so the branch is reachable from the corpus and from the
+      binary — or an explicit ruling that a synthesised unit test is enough,
+      recorded so the next reader is not the third to trip on it. Also:
+      **`width-guard.py` reads `src/` only** (`ROOT / "src"`), so `tests/`,
+      `examples/` and `benches/` are outside the 100-column rule — decide whether
+      that is intended and say so in the guard
+- [ ] **W1 draws no card at all on a live cluster for the refusal it exists to
+      catch.** Rule W1 reads a ReplicaSet's `ReplicaFailure` condition — *Kubernetes
+      refused to create the pods this workload asked for* — and the ReplicaSets it
+      is about have `replicas: 0` **because that is what the refusal means**. So no
+      pod carries their `ownerReference`, so owner resolution never names them, so
+      nothing ever fetches them, and invariant 6 forbids watching ReplicaSets.
+      Measured, not reasoned: the only controlling owners any pod in the corpus
+      names are `kindnet`, `kube-proxy`, a `Node` and three ReplicaSets — none of
+      them the quota-refused one — while `quota-replicasets.json` carries the
+      condition with `replicas: 0`
+      ([D151](NOTES.md#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)).
+      The rule passes every test because the file driver hands it a ReplicaSet the
+      live path cannot supply. **Two design choices and neither is obviously
+      right**: LIST the ReplicaSets of a Deployment that is short of pods — a LIST
+      and not a `get`, and arguably the same fetch Waste's `replica_sets` already
+      wants — or reconsider W1's kind gate, which exists so that one refusal does
+      not draw two cards, the Deployment carrying the same condition. Decide which,
+      and say what happens to the *other* card either way
 - [ ] **`TYPES_BUILT_FOR` is a third copy of the `k8s-openapi` pin and
       `fixture-audit.sh` compares only two of them.** The script already parses
       `features = ["v1_NN"]` out of `Cargo.toml` and compares it with

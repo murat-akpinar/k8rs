@@ -361,7 +361,7 @@ fn ordinary_and_multibyte_text_passes_through_whole() {
 
     assert_eq!(
         render(&[f], &nothing_read()),
-        "0 pods · 0 nodes · 0 workloads\n\
+        "0 pods · 0 nodes\n\
          \n\
          ● üretim/日本語-0\n  \
            Kapasite yetersiz — ğüşiİ\n  \
@@ -383,7 +383,7 @@ fn an_empty_evidence_draws_no_line_at_all() {
 
     assert_eq!(
         render(&[f], &nothing_read()),
-        "0 pods · 0 nodes · 0 workloads\n\
+        "0 pods · 0 nodes\n\
          \n\
          ▲ shop/api-7\n  \
            Something happened\n  \
@@ -439,17 +439,18 @@ fn a_finding_with_a_moment_draws_the_ladders_own_words() {
 
 /// *Read nothing* and *found nothing* must not print the same three lines
 /// (`screens/once.md` § When nothing is broken).
+///
+/// **This is the requirement the workload count was dropped against**, and it is D121's whole
+/// purpose: the count was one of two mechanisms serving it, and the assertions below are the
+/// half that has to keep holding without it.
 #[test]
 fn nothing_broken_still_says_what_was_read() {
     let read = read(&["oom.json"]);
 
-    assert_eq!(
-        render(&[], &read),
-        "1 pod · 0 nodes · 0 workloads\n\n○ nothing is broken"
-    );
+    assert_eq!(render(&[], &read), "1 pod · 0 nodes\n\n○ nothing is broken");
     assert_eq!(
         render(&[], &nothing_read()),
-        "0 pods · 0 nodes · 0 workloads\n\n○ nothing is broken"
+        "0 pods · 0 nodes\n\n○ nothing is broken"
     );
 }
 
@@ -606,9 +607,10 @@ fn a_kind_no_rule_reads_is_counted_and_named() {
     assert!(input.snapshot.pods.is_empty() && input.snapshot.nodes.is_empty());
     assert_eq!(
         header(&input),
-        "0 pods · 0 nodes · 0 workloads · 2 objects no rule reads (ConfigMap, Secret)",
-        "named, sorted, and counted — the header is where a reader decides whether the report \
-         covered what they handed it"
+        "0 pods · 0 nodes · 2 objects no rule reads (ConfigMap, Secret)",
+        "named, sorted, and counted — and this clause is now the only thing separating a file \
+         of objects no rule reads from a file of nothing, which is what NOTES § D121 was \
+         narrowed to when the workload count went"
     );
 }
 
@@ -696,7 +698,7 @@ fn an_empty_list_reads_as_nothing_at_all() {
     assert!(input.skipped.is_empty(), "{:?}", input.skipped);
     assert_eq!(
         render(&[], &input),
-        "0 pods · 0 nodes · 0 workloads\n\n○ nothing is broken"
+        "0 pods · 0 nodes\n\n○ nothing is broken"
     );
 }
 
@@ -786,7 +788,7 @@ fn a_document_with_nothing_that_names_a_kind_does_not_claim_the_field_is_missing
     );
     assert_eq!(
         header(&input),
-        "0 pods · 0 nodes · 0 workloads · 4 objects no rule reads ((no kind))"
+        "0 pods · 0 nodes · 4 objects no rule reads ((no kind))"
     );
 }
 
@@ -888,7 +890,7 @@ fn the_usage_text_keeps_its_three_lines() {
 fn a_healthy_capture_runs_end_to_end_and_reports_nothing_broken() {
     assert_eq!(
         run(&[fixture("healthy.json")]),
-        Ok("1 pod · 0 nodes · 0 workloads\n\n○ nothing is broken".to_string())
+        Ok("1 pod · 0 nodes\n\n○ nothing is broken".to_string())
     );
 }
 

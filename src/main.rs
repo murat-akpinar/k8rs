@@ -378,12 +378,20 @@ fn render(findings: &[Finding], input: &Input) -> String {
 
 /// What the report covered — the first line, so an empty report cannot be mistaken for a
 /// clean cluster (`screens/once.md` § When nothing is broken).
+///
+/// **No workload count, and its removal narrows NOTES § D121 rather than reversing it.** D121
+/// added two things for one purpose — *read nothing* and *found nothing* may not print the same
+/// line — and the second, `N objects no rule reads (Kind, Kind)`, does that job better than the
+/// count ever did, because it names what was read and not understood. What the count cost was a
+/// noun: it said `16 workloads` for the controller objects read while Capacity's row says
+/// `34 workloads` for the pod owners with no limit, and `34 of 16` is not defensible to a
+/// reader. `workload` now means one thing in this product — one distinct owner identity
+/// ([`crate::rules::ObjectId::group_key`]) — and it is said in one place, Capacity's row.
 fn header(input: &Input) -> String {
     let snapshot = &input.snapshot;
     let mut parts = vec![
         plural(snapshot.pods.len(), "pod"),
         plural(snapshot.nodes.len(), "node"),
-        plural(snapshot.workloads.len(), "workload"),
     ];
     if !input.skipped.is_empty() {
         let kinds: Vec<String> = input.skipped.keys().map(|k| sanitize(k)).collect();

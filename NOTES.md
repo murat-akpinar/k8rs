@@ -172,6 +172,7 @@ its line moving with it.
 - [D148](#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22) — nothing rate-limits us, something retries us for eight minutes in silence, and the watch sockets have no keepalive
 - [D149](#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22) — the floor is 1.29, because one rule's `else` turns a missing field into a claim
 - [D150](#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22) — a first sync that never finishes: two facts and no threshold
+- [D151](#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22) — owner resolution, and the noun collision that turned out to be the header's fault
 
 ## Why it exists — where the gap is
 
@@ -8871,9 +8872,18 @@ into the file's own module doc:
 **Two additions to the header are this driver's and not the console's**, for one
 reason: *read nothing* and *found nothing* must not print the same line. The
 counts carry `workloads` beside pods and nodes, and a kind no rule reads is
-counted and named — `4 objects no rule reads (CertificateSigningRequest,
-Service)` over the committed captures. `screens/once.md`'s header has neither,
-because a cluster connection cannot be handed the wrong file.
+counted and named. `screens/once.md`'s header has neither, because a cluster
+connection cannot be handed the wrong file.
+
+**Both halves of that have since moved and this paragraph is corrected rather than
+left standing.** The `workloads` count was removed on 2026-08-22
+([D151](#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)),
+which narrows this decision to its second mechanism. And the example given here —
+`4 objects no rule reads (CertificateSigningRequest, Service)` over the committed
+captures — **is no longer true and cannot be**: `take()` files both kinds into the
+snapshot, and every one of the 55 committed fixtures is now a kind the driver
+reads, so that branch is dead over the whole corpus. It is still reached by unit
+tests over `header`, whole-line, with a synthesised pair of unread kinds.
 
 **The label for a document that names no kind is `(no kind)`, one label for four
 shapes** — no `kind` field, `{"kind":42}`, a top-level array, a bare `null`.
@@ -12864,3 +12874,109 @@ cannot see the screen of.
 see a stall; that one is ever *seen* is a cluster measurement against a
 keepalive-less socket, and it is written into the test region as such rather than
 implied by a green run.
+
+### D151 — owner resolution, and the noun collision that turned out to be the header's fault (2026-08-22)
+
+Phase 5's sixth box: a pod's `ownerReferences` names its ReplicaSet, and a card
+must be headed `web`, not `web-7d4f5c6b8`.
+
+**The heuristic is refused by a test that no string operation can pass.** Chopping
+the hash is the guess that lies — a Deployment legitimately named `web-7d4f5c6b8`
+exists. The obvious red proves too little, though: chop the suffix *after* an
+answer has landed and the name is right every single time. So the assertion is on
+the **uid**, and the red run reads kind right, namespace right, **name right**, uid
+wrong — `65cd2217-…` appears nowhere in the pod, nowhere in its `ownerReference`,
+and nowhere in the ReplicaSet's name. Only in the ReplicaSet's own
+`ownerReferences`. That is what *never strip the hash with a heuristic* is worth as
+a test rather than as a comment.
+
+**Four failure facts, because a failed fetch may never silently become a name.**
+`Why::{NotAsked, Gone, Refused, Failed}` — 403 is `Refused`, 404 is `Gone` (and a
+404 is **normal** mid-rollout), and everything else folds into one `Failed`,
+because from the reader's side a timeout, a dead socket, a 500 and an exhausted 429
+are one fact and [D148](#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22)
+says nothing at this layer can tell them apart. **A ReplicaSet returned under a
+different uid is `Gone`, not an answer** — a rollback re-creates one with the same
+generated hash, so a `get` by name can bring back a different object, and *might be
+the right Deployment* is not what a heading may rest on. **An `ownerReference` with
+an empty uid is never asked about**, because the uid is the cache key and two such
+entries would each be handed the other's Deployment.
+
+**`get`, never `get_opt`, and it is written at the call site for the box that
+supplies the `Client`.** `get_opt` folds a 404 into `Ok(None)` and throws away the
+difference between *deleted mid-rollout* and *never existed* — the exact
+distinction `Why::Gone` exists to keep.
+
+**Nothing retries, ever.** A standing 403 would otherwise become one refused
+request per pod per pass, which is the retry loop the security gate forbids by
+name. The ceiling: a *transient* `Failed` pins a heading to the ReplicaSet for the
+life of the process. That is `Store::failure`'s shape exactly
+([D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)),
+for the same reason, and the reconnect box inherits both.
+
+**A cache miss does not gate the snapshot**, and the distinction from
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) is real: a
+short list makes a rule **count wrongly**, while an unresolved owner names the
+pod's true controller one step lower than the reader would. One is a lie, the other
+is a coarser truth. Gating would put every alert behind D148's 2.5-to-8-minute
+retry window.
+
+**A `workload` is one distinct owner identity, and a hand-started pod is exactly
+one.** After ReplicaSet → Deployment resolution: a Deployment for its pods, a
+StatefulSet/DaemonSet/Job/CRD controller for theirs, the **ReplicaSet** when it
+could not be resolved (an honest answer — we know something controls these pods and
+we know its name), and **the pod itself when nobody controls it**, including a
+static pod, whose `Node` ownerReference `rules.rs` discards. The noun answers *how
+many things must I go and fix*, and a pod nobody controls is one such thing because
+nothing else stands for it.
+
+**So Phase 4's `34 workloads` under a header saying `16 workloads` is the
+header's fault, and `analysis.rs` never needed to change.** Re-measured: the
+kube-system pair has **seven** distinct owners — two DaemonSets, four static pods
+and one ReplicaSet — of which `kindnet` alone sets both limits. **Six of seven.**
+The row is right. What is wrong is `main.rs`'s `header()`, which counts
+`snapshot.workloads.len()` — the *controller objects k8rs read* — and is therefore
+zero on a file pair containing no Deployment, StatefulSet or DaemonSet at all. Two
+sets, one noun. **There was no [D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+question to rule on**, which is the opposite of what the PM expected when the box
+was briefed.
+
+**Ruled: the workload count leaves the driver's header, and that narrows
+[D121](#d121--the-temporary-driver-and-the-three-places-it-does-not-draw-what-the-console-will-2026-08-20)
+rather than reversing it.** `screens/once.md`'s header is `prod-eu · 84 pods ·
+3 nodes` and carries no such count. D121 made **two** additions for one stated
+reason — *read nothing* and *found nothing* must not print the same line — and the
+second, `N objects no rule reads (Kind, Kind)`, does that job better than the first
+ever did, because it names what was read and not understood. Hand the driver a file
+of nothing but Services and `0 pods · 0 nodes` beside `1 object no rule reads
+(Service)` is unambiguous. The purpose survives with one mechanism removed, and the
+collision goes with it — leaving exactly one place in the product where `workload`
+appears with a number.
+
+**One honest qualification on that, found by `tester` reading this entry against
+the binary rather than against itself.** The surviving mechanism is **not exercised
+by any committed fixture**: `take()` now files Services and CertificateSigningRequests
+into the snapshot, so all 55 captures are kinds the driver reads and the branch is
+dead over the corpus — `k8rs tests/fixtures/*.json` prints `55 pods · 4 nodes` and
+no unread-kind clause. It is covered whole-line by unit tests over `header` with a
+synthesised pair, so the mechanism works; but *nothing that runs the built binary
+has ever printed it*. Leaning a ruling on a branch and then discovering no fixture
+reaches it is worth writing down, and D121's own example was stale for the same
+reason.
+
+**W1 is unreachable through this route, and it is measured.** The box says the
+cached object also supplies W1's `ReplicaFailure` message, and the cache does carry
+the whole object. But **the ReplicaSets W1 is about are exactly the ones nothing
+ever fetches**: its subject is *the pods were never created*, so the ReplicaSet has
+`replicas: 0`, so no pod carries its `ownerReference`, so it is never named as an
+unresolved owner. Confirmed from the corpus — the only controlling owners any pod
+names are `kindnet`, `kube-proxy`, a `Node`, and three ReplicaSets, none of them
+the quota-refused one. On a live cluster **W1 draws no card at all** for the pure
+zero-pod refusal. The information is on the watched Deployment, and W1 deliberately
+refuses to read it there to avoid two cards for one refusal. Boxed, with the two
+design choices named; not folded into a running box.
+
+**And one free repair fell out.** `workload_owner`'s Pod → ReplicaSet → Deployment
+hop looks in `snapshot.workloads`, which on a live cluster held no ReplicaSets at
+all — so W2's suppression list was silently unresolvable before this box, and is
+not now.

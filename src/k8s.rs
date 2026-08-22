@@ -85,12 +85,13 @@ use crate::rules::{
     WorkloadSnapshot, minor_version,
 };
 use futures_util::stream::{BoxStream, Stream, StreamExt, TryStreamExt, select_all};
-use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use k8s_openapi::jiff::Timestamp;
+use kube::core::response::reason;
 use kube::runtime::watcher::{self, Event};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 // --- THE INGEST GUARD START ---
 //
@@ -619,6 +620,14 @@ pub struct Store {
     ///
     /// **Whatever renders it strips it first** (invariant 9): the text is the API server's.
     failure: Option<watcher::Error>,
+    /// **Every ReplicaSet a pod named as its controller, keyed by the uid the pod named** —
+    /// § RESOLVING AN OWNER is the whole of what this is for.
+    ///
+    /// **Keyed by uid and not by name**, because a rollback re-creates a ReplicaSet under the
+    /// same name with a new uid, and the two are different objects with different pods.
+    /// `Err` is a fetch that did not produce one, kept so the same reference is not asked
+    /// about again on the next pass ([`Why`]).
+    owners: BTreeMap<String, Result<WorkloadSnapshot, Why>>,
 }
 
 impl Store {
@@ -713,15 +722,34 @@ impl Store {
     /// The lists are cloned out because [`ClusterSnapshot`] owns its contents and is frozen —
     /// **one deep copy of the watched set per call**, which is the ceiling to watch if a large
     /// cluster ever redraws faster than invariant 7's coalescing. They come out in namespace
-    /// then name order, so two calls over one store are the same list twice.
+    /// then name order, so two calls over one store are the same list twice — the resolved
+    /// ReplicaSets included, which follow the three watched kinds and are sorted the same way
+    /// ([`Store::resolved_sets`]).
+    ///
+    /// **This is also where a pod's owner is walked up to the workload the reader deployed**
+    /// (§ RESOLVING AN OWNER). It is the one place a snapshot type is edited on the way out
+    /// rather than on the way in, because the answer comes from a second object that arrives on
+    /// its own schedule.
     pub fn snapshot(&self, now: Time) -> Option<ClusterSnapshot> {
         if !self.listed() {
             return None;
         }
         Some(ClusterSnapshot {
             now,
-            pods: self.pods.live.values().cloned().collect(),
+            // **The pods come out with their owner walked up to the workload the reader
+            // deployed** (§ RESOLVING AN OWNER). A pod whose ReplicaSet the cache cannot answer
+            // for keeps the ReplicaSet, which is its true controller and is not a guess.
+            pods: self
+                .pods
+                .live
+                .values()
+                .map(|pod| self.with_owner(pod))
+                .collect(),
             nodes: self.nodes.live.values().cloned().collect(),
+            // **The three watched kinds, then the ReplicaSets the cache resolved.** W1 is
+            // written about a ReplicaSet and reads this list, and so does `rules.rs`'s own
+            // `workload_owner` — the file driver in `main.rs` already puts a ReplicaSet in both
+            // fields for that reason, and this is the live path saying the same thing.
             workloads: self
                 .deployments
                 .live
@@ -729,6 +757,7 @@ impl Store {
                 .chain(self.stateful_sets.live.values())
                 .chain(self.daemon_sets.live.values())
                 .cloned()
+                .chain(self.resolved_sets())
                 .collect(),
             // Read from the API server once at connect, and from the kubeconfig — neither came
             // from a watch (`docs/architecture.md` § Data flow). The `connect()` box further
@@ -745,6 +774,13 @@ impl Store {
             // these is watched (invariant 6); `k8s.rs` fetches them when a report's pane opens,
             // which is a later box, and an empty `Vec` here would tell Waste that nothing is
             // going to waste over lists it never read.
+            //
+            // **The owner cache is not this list and may not be poured into it**
+            // (§ RESOLVING AN OWNER). Waste's row is *ReplicaSets parked at 0 replicas*, and a
+            // parked ReplicaSet has no pods — so it is exactly what the owner cache structurally
+            // never holds. Filling this from the cache would answer *nothing is parked* off a
+            // list that cannot contain a parked one, which is D129's reassuring wrong answer
+            // with a new cause.
             replica_sets: None,
             services: None,
             endpoint_slices: None,
@@ -757,6 +793,276 @@ impl Store {
 }
 
 // --- THE STORE END ---
+
+// --- RESOLVING AN OWNER START ---
+//
+// **A pod's `ownerReferences` names its ReplicaSet, and the card has to read `web`** — the name
+// the reader deployed — rather than `web-7d4f5c6b8`, the name a controller generated
+// (todo.md § Phase 5, NOTES § D3). `rules.rs` files every pod finding under
+// [`PodSnapshot::owner`], `ObjectId::name`'s own doc says that name is *"the controller's,
+// resolved up to the Deployment where there is one"*, and it names this file as the place that
+// resolves it.
+//
+// **The hash is never chopped off the string, and that is the whole reason this costs a network
+// call.** `web-7d4f5c6b8` minus a dash and ten characters is a guess that is right most of the
+// time, and `metadata.name` has no field saying which part was generated: a Deployment may
+// legitimately be called `web-7d4f5c6b8`, and a ReplicaSet's suffix is a hash of the pod
+// template, not a fixed length. The answer is the ReplicaSet's **own** controlling
+// `ownerReference` — which carries a **uid**, a value no string operation on the pod could ever
+// produce. That is what [`Store::with_owner`] copies across, and what the tests assert.
+//
+// **Fetched on demand, cached by uid, never watched** (invariant 6). Watching ReplicaSets would
+// add a permanent stream over the busiest object a rollout produces to answer a question about
+// names; a `get` per distinct ReplicaSet a live pod names, kept until no pod names it, is the
+// same answer for one request per rollout.
+//
+// **Keyed by uid rather than by name, because a rollback re-uses the name.** Rolling back to a
+// previous pod template re-creates a ReplicaSet with the *same* generated hash and a new uid, so
+// a name-keyed cache would hand the new object's pods the old object's answer. The uid is also
+// what the fetch is checked against: the `get` goes out by name, and an object that comes back
+// under a different uid is not the one that was asked about.
+//
+// **A cache miss does not hold the snapshot back**, and that is a decision rather than an
+// omission. NOTES § D148 measured what one request costs when a server is throttling: kube
+// retries fifteen times inside a tower layer with no callback, so a single `get` can be silent
+// for **two and a half to eight minutes**. Gating [`Store::snapshot`] on resolution would put
+// every alert on this screen behind that window. So the snapshot is published with the
+// ReplicaSet as the owner, and the heading changes to the Deployment when the answer lands. This
+// is not the partial-list case NOTES § D28 forbids: a short list makes a rule *count wrongly*,
+// while an unresolved owner names the pod's true controller, one step lower than the reader
+// would have named it.
+//
+// **What is not here is the `get` itself**, for the reason § THE INITIAL LIST gives about
+// `page_size`: there is no `Client` in this build yet, and a function no test can fail on is
+// what the mutation gate exists to catch. Everything a fetch's answer means is decided here and
+// proven here; the `connect()` box supplies one line —
+// `Api::<ReplicaSet>::namespaced(client, ns).get(&name).await` — and hands the result to
+// [`Store::owner_fetched`] **unchanged**. Not `get_opt`, which folds a 404 into `Ok(None)` and
+// throws away the difference between *deleted mid-rollout* and *never existed*.
+
+/// **Why a pod's ReplicaSet owner has not been walked up to the workload above it.**
+///
+/// Four different facts, and none of them may be presented as *the group is called
+/// `web-7d4f5c6b8`* without saying which one it is. **The words are the caller's**, as with
+/// [`Listing`]: invariant 14's plain language is the screen's decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Why {
+    /// **Nothing has asked yet.** The ordinary state of every ReplicaSet a new pod names, and
+    /// the one state that is an instruction: these are the references the caller fetches.
+    NotAsked,
+    /// **The API server said the ReplicaSet is not there** — a `404`, or an object that came
+    /// back under a different uid.
+    ///
+    /// **This is normal traffic, not a fault.** Every rollout deletes the ReplicaSet it
+    /// replaced, and a pod read a moment before that can name one that is already gone.
+    Gone,
+    /// **The API server refused** — a `403`. The kubeconfig's role cannot `get replicasets`,
+    /// which is one missing verb on one resource and degrades exactly this feature: the cards
+    /// still draw, headed with the ReplicaSet.
+    ///
+    /// **The verb and the resource are not carried as data because they are constants of the one
+    /// call site** — `get replicasets` and nothing else is ever asked for here — so a screen
+    /// naming them, which the security gate requires of every 403, reads them off this variant.
+    /// A field for a value with one possible content is a second copy of it.
+    Refused,
+    /// **The fetch produced neither the object nor a refusal** — a timeout, a socket that died,
+    /// a `500`, a `429` that outlived kube's retries.
+    ///
+    /// **One variant for all of them on purpose.** From the reader's side they are one fact —
+    /// *k8rs could not ask* — and NOTES § D148 is why nothing here can tell them apart anyway:
+    /// the wait happens below the client in a layer with no callback and no counter.
+    Failed,
+}
+
+/// **One ReplicaSet a pod names as its controller, which the cache cannot answer for**, and why.
+///
+/// The shape is [`Listing`]'s: facts, not sentences, in namespace-then-name order.
+///
+/// **It derives `Debug` where [`Store`] deliberately does not**, for [`Listing`]'s reason: an
+/// identity and a four-way enum are values that never touched a credential.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unresolved {
+    /// The ReplicaSet, exactly as the pod's `ownerReference` named it — namespace, name and the
+    /// uid the fetch is keyed and checked on.
+    pub id: ObjectId,
+    pub why: Why,
+}
+
+/// The uid a ReplicaSet owner is cached under, or `None` where there is nothing safe to key on.
+///
+/// **Two refusals, and both are load-bearing.** An owner that is not a ReplicaSet is already the
+/// workload the reader deployed and there is nothing above it to walk to. An owner whose uid is
+/// **empty** is refused because the uid is the cache key: two different ReplicaSets would share
+/// the entry `""` and each would be handed the other's Deployment. The API server rejects an
+/// `ownerReference` with no uid, so this is a shape only something between us and it can
+/// produce — which is exactly invariant 9's class of input, one layer past the strip.
+///
+/// **The ceiling, named rather than guarded**: the uid has already been through [`ingest`], so
+/// two uids longer than [`IDENTIFIER`] sharing a 512-byte prefix would collapse into one entry —
+/// the same loss [`pairs`] documents for two label keys (NOTES § D146). A uid the API server
+/// generates is 36 bytes.
+fn owner_uid(owner: &ObjectId) -> Option<&str> {
+    if owner.kind != ObjectKind::ReplicaSet {
+        return None;
+    }
+    owner.uid.as_deref().filter(|uid| !uid.is_empty())
+}
+
+/// **What one failed fetch means**, from the answer the API server gave.
+///
+/// **Read off `code` as well as `reason`, because kube's own helpers cannot be used here.**
+/// `Status::is_not_found` and `Status::is_forbidden` are `self.reason == reason || (!is_known(
+/// reason) && self.code == code)` — and the `reason` they pass `is_known` is the *constant*
+/// they were called with, which is always known, so the `code` half is dead. Go's original
+/// tests the **response's** reason there. The consequence is measured in `k8s_tests.rs`: a
+/// `Status` carrying `code: 403` and no reason answers `is_forbidden() == false`, and that is
+/// the exact shape kube builds when a proxy's refusal does not parse as a `Status` —
+/// `Status::failure(text, "Failed to parse error data").with_code(403)`
+/// (`kube-client-4.2.0/src/client/mod.rs:556`).
+fn why(error: &kube::Error) -> Why {
+    let kube::Error::Api(status) = error else {
+        return Why::Failed;
+    };
+    match (status.code, status.reason.as_str()) {
+        (404, _) | (_, reason::NOT_FOUND) => Why::Gone,
+        (403, _) | (_, reason::FORBIDDEN) => Why::Refused,
+        _ => Why::Failed,
+    }
+}
+
+impl Store {
+    /// **Every ReplicaSet a live pod names as its controller that the cache has no object for**,
+    /// one entry per ReplicaSet however many pods name it.
+    ///
+    /// **Two callers, one list, for [`Store::still_listing`]'s reason.** The fetcher takes the
+    /// [`Why::NotAsked`] entries; a screen shows the rest, so a heading that stayed at the
+    /// generated name always has a fact behind it and never a silence.
+    ///
+    /// **A failure stays in the answer and is therefore not asked again.** A `403` on
+    /// `replicasets` is a standing fact about the kubeconfig's role, and a caller that re-read
+    /// it as *not asked* would send one refused request per pod per pass — the retry loop the
+    /// security gate forbids by name. **Nothing here retries, ever, and the ceiling that names
+    /// is a transient [`Why::Failed`]** — a socket that died once leaves the heading at the
+    /// ReplicaSet for the life of the process. Retry policy belongs to the reconnect box, which
+    /// is where per-watch identity arrives; this half is the one that is true without it,
+    /// exactly as [`Store::failure`] is.
+    pub fn unresolved_owners(&self) -> Vec<Unresolved> {
+        let mut found = BTreeMap::new();
+        for pod in self.pods.live.values() {
+            let Some(uid) = owner_uid(&pod.owner) else {
+                continue;
+            };
+            let why = match self.owners.get(uid) {
+                None => Why::NotAsked,
+                Some(Ok(_)) => continue,
+                Some(Err(why)) => *why,
+            };
+            found
+                .entry((pod.owner.namespace.as_deref(), pod.owner.name.as_str(), uid))
+                .or_insert_with(|| Unresolved {
+                    id: pod.owner.clone(),
+                    why,
+                });
+        }
+        found.into_values().collect()
+    }
+
+    /// **One fetch's answer**, filed under the uid that was asked about.
+    ///
+    /// `id` is the [`Unresolved::id`] that was handed out, and it rather than the returned
+    /// object is what the entry is keyed on: an `Err` carries no object to read a uid from, and
+    /// an `Ok` under the wrong uid is the case below.
+    ///
+    /// **An object that comes back under a different uid is [`Why::Gone`]**, not an answer. The
+    /// `get` goes out by name, and a name can have been re-used since the pod was read — a
+    /// rollback re-creates a ReplicaSet with the same generated hash — so the object on the wire
+    /// may be a different one that happens to be called the same thing. Its Deployment could
+    /// even be the right one; *could* is not what a card's heading may rest on.
+    ///
+    /// **The object goes through [`ingest`] like everything else**: the same prune, the same
+    /// strip and the same bound as a watched object, so nothing reaching a card by this route
+    /// skips invariant 9. That is also what makes the cached value the whole `WorkloadSnapshot`
+    /// rather than a resolved name — W1 reads `status.conditions[ReplicaFailure]` off it.
+    ///
+    /// **An `id` that is not a ReplicaSet, or carries no usable uid, is dropped** rather than
+    /// filed under a key that would collide ([`owner_uid`]). Nothing hands one out.
+    pub fn owner_fetched(&mut self, id: &ObjectId, answer: Result<ReplicaSet, kube::Error>) {
+        let Some(uid) = owner_uid(id).map(str::to_string) else {
+            return;
+        };
+        let answer = match answer {
+            Ok(set) => {
+                let set: WorkloadSnapshot = ingest(set);
+                if set.id.uid.as_deref() == Some(uid.as_str()) {
+                    Ok(set)
+                } else {
+                    Err(Why::Gone)
+                }
+            }
+            Err(error) => Err(why(&error)),
+        };
+        self.owners.insert(uid, answer);
+        self.prune_owners();
+    }
+
+    /// **Everything no live pod names any more, dropped.**
+    ///
+    /// **Run here because here is the only place the cache can grow.** A rollout an hour for a
+    /// month is a ReplicaSet an hour, and nothing else would ever take one out; pruning where
+    /// an entry is added bounds the map by what the pods referenced at that moment, without a
+    /// timer and without a size to tune.
+    fn prune_owners(&mut self) {
+        let referenced: BTreeSet<&str> = self
+            .pods
+            .live
+            .values()
+            .filter_map(|pod| owner_uid(&pod.owner))
+            .collect();
+        self.owners
+            .retain(|uid, _| referenced.contains(uid.as_str()));
+    }
+
+    /// The ReplicaSet this owner reference resolved to, if the cache holds one.
+    fn resolved(&self, owner: &ObjectId) -> Option<&WorkloadSnapshot> {
+        self.owners.get(owner_uid(owner)?)?.as_ref().ok()
+    }
+
+    /// **One pod, with its owner walked one step up.**
+    ///
+    /// [`WorkloadSnapshot::owner`] on the resolved ReplicaSet is already the answer: `rules.rs`
+    /// built it from that object's own controlling `ownerReference`, so a ReplicaSet a
+    /// Deployment controls yields the Deployment, and one nothing controls — or one an operator's
+    /// CRD controls, which `ObjectKind::from_api` leaves as `Other(_)` — yields whatever is
+    /// actually true, including itself. **One hop and no loop**: the chain NOTES § D28 describes
+    /// is Pod → ReplicaSet → Deployment and stops there.
+    fn with_owner(&self, pod: &PodSnapshot) -> PodSnapshot {
+        let mut pod = pod.clone();
+        if let Some(set) = self.resolved(&pod.owner) {
+            pod.owner = set.owner.clone();
+        }
+        pod
+    }
+
+    /// The ReplicaSets the cache resolved, in namespace then name order — the order
+    /// [`Store::snapshot`] promises for the watched kinds, so one list comes out sorted the same
+    /// way throughout.
+    ///
+    /// **The uid is in the sort key and not only in the map key.** Two ReplicaSets can share a
+    /// namespace and a name across a rollback, and a sort that ignored the uid would be free to
+    /// order them either way between calls.
+    fn resolved_sets(&self) -> Vec<WorkloadSnapshot> {
+        let mut sets: Vec<WorkloadSnapshot> = self
+            .owners
+            .values()
+            .filter_map(|answer| answer.as_ref().ok())
+            .cloned()
+            .collect();
+        sets.sort_by_key(|set| (key(set), set.id.uid.clone()));
+        sets
+    }
+}
+
+// --- RESOLVING AN OWNER END ---
 
 // --- THE INITIAL LIST START ---
 //

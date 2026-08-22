@@ -2405,3 +2405,529 @@ fn the_version_these_types_were_built_for_is_the_pin() {
          1.{TYPES_BUILT_FOR}"
     );
 }
+
+// --- RESOLVING AN OWNER ---
+//
+// **Every ReplicaSet below is a committed capture** (NOTES § D53) and the joins between them are
+// the cluster's own: `owned-pods.json`'s single pod names `owned-replicasets.json`'s single
+// ReplicaSet by uid, and that ReplicaSet names a Deployment by uid. Nothing here is edited to
+// make a test pass; the one synthesized shape is the empty-uid `ownerReference`, which the API
+// server rejects and no capture can hold (NOTES § D40), and it says so where it is built.
+//
+// **What is not proven here is the `get`**: there is no `Client` in this build, so every fetch
+// below is its *answer*, handed to `Store::owner_fetched` the way the `connect()` box will hand
+// it one. What the network does is that box's to show.
+
+/// The one ReplicaSet of a single-item capture.
+fn replica_set(name: &str) -> ReplicaSet {
+    let mut sets = items::<ReplicaSet>(name);
+    assert_eq!(
+        sets.len(),
+        1,
+        "{name}.json holds more than one ReplicaSet, so `the` is the wrong word for it"
+    );
+    sets.remove(0)
+}
+
+/// A store whose five watches have listed, with one named pod capture in place of the default.
+fn store_with_pods(capture: &str) -> Store {
+    let mut store = all_but("pods");
+    list(&mut store, Store::pod, items::<Pod>(capture));
+    store
+}
+
+fn api_error(code: u16, reason: &str) -> kube::Error {
+    kube::Error::Api(
+        kube::core::Status::failure("refused", reason)
+            .with_code(code)
+            .boxed(),
+    )
+}
+
+/// **The whole point of the box, and the uid is what proves it was not a string operation.**
+///
+/// `broken-owned-7bdb7645c8` minus its hash is `broken-owned`, so the *name* alone cannot tell a
+/// resolution from a chopped suffix. The Deployment's **uid** can: it is nowhere in the pod, in
+/// the pod's `ownerReference`, or in the ReplicaSet's name, and only the ReplicaSet's own
+/// `ownerReferences` carries it.
+#[test]
+fn the_group_reads_the_deployment_and_the_uid_is_what_proves_it() {
+    let set = replica_set("owned-replicasets");
+    let deployment = set
+        .metadata
+        .owner_references
+        .clone()
+        .expect("the captured ReplicaSet has no ownerReferences")
+        .remove(0);
+    assert_eq!(deployment.kind, "Deployment");
+    assert!(
+        !set.metadata.name.as_deref().unwrap_or_default().is_empty()
+            && set.metadata.name.as_deref() != Some(deployment.name.as_str()),
+        "the capture's ReplicaSet and Deployment share a name, so this test could not tell a \
+         resolution from doing nothing"
+    );
+    assert!(
+        !deployment
+            .name
+            .contains(deployment.uid.split('-').next().unwrap_or("")),
+        "the Deployment's uid would be readable out of its name, which would weaken the \
+         assertion below"
+    );
+
+    let mut store = store_with_pods("owned-pods");
+    let before = store.snapshot(now()).expect("every watch listed");
+    let pod = pod_named(&before, "broken-owned-7bdb7645c8-bwdfd");
+    assert_eq!(
+        (&pod.owner.kind, pod.owner.name.as_str()),
+        (&ObjectKind::ReplicaSet, "broken-owned-7bdb7645c8"),
+        "with nothing fetched the owner is the ReplicaSet, and nothing may chop its hash off"
+    );
+
+    let want = store.unresolved_owners();
+    assert_eq!(want.len(), 1);
+    assert_eq!(want[0].why, Why::NotAsked);
+    store.owner_fetched(&want[0].id, Ok(set));
+
+    let after = store.snapshot(now()).expect("every watch listed");
+    let pod = pod_named(&after, "broken-owned-7bdb7645c8-bwdfd");
+    assert_eq!(
+        (
+            &pod.owner.kind,
+            pod.owner.namespace.as_deref(),
+            pod.owner.name.as_str(),
+            pod.owner.uid.as_deref()
+        ),
+        (
+            &ObjectKind::Deployment,
+            Some("default"),
+            deployment.name.as_str(),
+            Some(deployment.uid.as_str())
+        ),
+        "the card must file under the Deployment the reader deployed, uid included"
+    );
+    assert!(
+        store.unresolved_owners().is_empty(),
+        "the answer landed, so nothing is outstanding"
+    );
+}
+
+/// **One entry per ReplicaSet, not one per pod** — two copies of one workload are one fetch and
+/// one card (NOTES § D3).
+#[test]
+fn many_pods_of_one_replicaset_are_one_reference_and_one_group() {
+    let mut store = store_with_pods("healthy-deploy-pods");
+    let pods = items::<Pod>("healthy-deploy-pods");
+    assert_eq!(pods.len(), 2, "the capture must hold the two copies");
+
+    let want = store.unresolved_owners();
+    assert_eq!(
+        want.len(),
+        1,
+        "two pods named one ReplicaSet and it must be asked about once"
+    );
+    store.owner_fetched(&want[0].id, Ok(replica_set("healthy-replicasets")));
+
+    let snapshot = store.snapshot(now()).expect("every watch listed");
+    let owners: Vec<&ObjectId> = snapshot.pods.iter().map(|pod| &pod.owner).collect();
+    assert_eq!(owners.len(), 2);
+    assert_eq!(
+        owners[0], owners[1],
+        "both copies must land on one group key"
+    );
+    assert_eq!(
+        (&owners[0].kind, owners[0].name.as_str()),
+        (&ObjectKind::Deployment, "healthy-deploy")
+    );
+}
+
+/// **A refusal, a deletion and a dead socket are three different facts**, and none of them may
+/// become *the group is called `broken-owned-7bdb7645c8`* with nothing said about why.
+///
+/// The owner is checked in every arm as well as the fact: a failed fetch must leave the pod's
+/// true controller in place, never a guess at the name above it.
+#[test]
+fn a_refusal_a_deletion_and_a_dead_socket_are_three_different_facts() {
+    for (answer, expected) in [
+        (api_error(403, "Forbidden"), Why::Refused),
+        (api_error(404, "NotFound"), Why::Gone),
+        (api_error(500, "InternalError"), Why::Failed),
+        (
+            kube::Error::Service(Box::new(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "timed out",
+            ))),
+            Why::Failed,
+        ),
+    ] {
+        let mut store = store_with_pods("owned-pods");
+        let want = store.unresolved_owners();
+        store.owner_fetched(&want[0].id, Err(answer));
+
+        let outstanding = store.unresolved_owners();
+        assert_eq!(
+            outstanding.len(),
+            1,
+            "a failed fetch must stay reportable, not vanish"
+        );
+        assert_eq!(outstanding[0].why, expected);
+        assert_eq!(
+            outstanding[0].id, want[0].id,
+            "the reference reported back is the one that was asked about"
+        );
+
+        let snapshot = store.snapshot(now()).expect("every watch listed");
+        let pod = pod_named(&snapshot, "broken-owned-7bdb7645c8-bwdfd");
+        assert_eq!(
+            (&pod.owner.kind, pod.owner.name.as_str()),
+            (&ObjectKind::ReplicaSet, "broken-owned-7bdb7645c8"),
+            "a fetch that failed must leave the ReplicaSet, which is true, rather than a name \
+             nothing answered for"
+        );
+        assert!(
+            snapshot
+                .workloads
+                .iter()
+                .all(|w| w.id.kind != ObjectKind::ReplicaSet),
+            "nothing was resolved, so no ReplicaSet may reach the workload list"
+        );
+    }
+}
+
+/// **kube's own `is_forbidden` and `is_not_found` cannot decide this**, which is why `why` reads
+/// `code` as well as `reason`. Measured against the crate rather than read off its doc.
+///
+/// `Status::reason_or_code` is `self.reason == reason || (!is_known(reason) && self.code ==
+/// code)`, and the `reason` handed to `is_known` is the **constant** the helper was called with
+/// — always known — so the `code` half never runs. Go's original tests the *response's* reason
+/// there. The shape it costs is the one kube builds itself when a refusal does not parse as a
+/// `Status`: `Status::failure(text, "Failed to parse error data").with_code(403)`
+/// (`kube-client-4.2.0/src/client/mod.rs:556`), which is what an authorizing proxy in front of
+/// the API server produces.
+#[test]
+fn a_refusal_that_carries_only_a_status_code_is_still_a_refusal() {
+    let proxy = kube::core::Status::failure("", "Failed to parse error data").with_code(403);
+    assert!(
+        !proxy.is_forbidden(),
+        "kube's helper started answering this, so `why` can be simplified to use it"
+    );
+    assert_eq!(why(&kube::Error::Api(proxy.boxed())), Why::Refused);
+
+    let deleted = kube::core::Status::failure("", "Failed to parse error data").with_code(404);
+    assert!(!deleted.is_not_found());
+    assert_eq!(why(&kube::Error::Api(deleted.boxed())), Why::Gone);
+
+    // And the other way round: the reason with no code, which is what the API server's own
+    // `Status` body carries when `code` is absent.
+    for (reason, expected) in [("Forbidden", Why::Refused), ("NotFound", Why::Gone)] {
+        assert_eq!(
+            why(&kube::Error::Api(
+                kube::core::Status::failure("refused", reason).boxed()
+            )),
+            expected,
+            "a {reason} with no HTTP code must still be read"
+        );
+    }
+}
+
+/// **A name can be re-used, so the uid decides.** A rollback re-creates a ReplicaSet with the
+/// same generated hash and a new uid; the `get` goes out by name and can bring back a different
+/// object than the pod named.
+#[test]
+fn an_object_that_comes_back_under_another_uid_is_not_the_one_that_was_asked_about() {
+    let asked = replica_set("owned-replicasets");
+    let other = replica_set("healthy-replicasets");
+    assert_ne!(
+        asked.metadata.uid, other.metadata.uid,
+        "the two captures must differ in uid or this test proves nothing"
+    );
+
+    let mut store = store_with_pods("owned-pods");
+    let want = store.unresolved_owners();
+    store.owner_fetched(&want[0].id, Ok(other));
+
+    assert_eq!(
+        store.unresolved_owners()[0].why,
+        Why::Gone,
+        "a different object under the same question is not an answer"
+    );
+    let snapshot = store.snapshot(now()).expect("every watch listed");
+    assert_eq!(
+        pod_named(&snapshot, "broken-owned-7bdb7645c8-bwdfd")
+            .owner
+            .name,
+        "broken-owned-7bdb7645c8",
+        "and the pod must not be filed under the other object's Deployment"
+    );
+}
+
+/// **The cache holds the whole ReplicaSet, not a resolved name** — the box's own clause, because
+/// W1 reads `status.conditions[ReplicaFailure]` off this object and files the card under the
+/// Deployment above it.
+#[test]
+fn the_cached_object_is_the_whole_replicaset_and_reaches_the_rules_as_one() {
+    let captured = replica_set("owned-replicasets");
+    let mut store = store_with_pods("owned-pods");
+    let want = store.unresolved_owners();
+    store.owner_fetched(&want[0].id, Ok(captured.clone()));
+
+    let snapshot = store.snapshot(now()).expect("every watch listed");
+    let resolved: Vec<&WorkloadSnapshot> = snapshot
+        .workloads
+        .iter()
+        .filter(|w| w.id.kind == ObjectKind::ReplicaSet)
+        .collect();
+    assert_eq!(
+        resolved.len(),
+        1,
+        "W1 is written about a ReplicaSet and reads `workloads`, so the resolved one has to be \
+         in it"
+    );
+    let expected: WorkloadSnapshot = ingest(captured);
+    assert_eq!(
+        *resolved[0], expected,
+        "every field of the ingested object must survive the cache, not only the name"
+    );
+    assert_eq!(
+        resolved[0].owner.name, "broken-owned",
+        "and its own owner is what a card drawn about it heads with"
+    );
+
+    // The condition W1 actually reads, on the capture that carries one. **It cannot be reached
+    // through the cache**: `broken-quota-59654c756` has `status.replicas: 0`, so no pod names it
+    // and no owner reference asks for it — see the report on this box.
+    let refused: WorkloadSnapshot = ingest(replica_set("quota-replicasets"));
+    let failure = refused
+        .conditions
+        .iter()
+        .find(|c| c.type_ == "ReplicaFailure")
+        .expect("the quota capture carries the condition W1 is written about");
+    assert_eq!(
+        (failure.status.as_str(), failure.reason.as_deref()),
+        ("True", Some("FailedCreate"))
+    );
+    assert!(
+        failure
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("quota"),
+        "the API server's own refusal must survive the ingest verbatim, and it reads {:?}",
+        failure.message
+    );
+}
+
+/// **`replica_sets` is a different list and the cache may not be poured into it** (NOTES § D129).
+/// Waste's row is *ReplicaSets parked at 0 replicas*, and a parked one has no pods — which is
+/// exactly what an owner cache structurally never holds.
+#[test]
+fn resolving_an_owner_does_not_answer_the_report_that_lists_every_replicaset() {
+    let mut store = store_with_pods("owned-pods");
+    let want = store.unresolved_owners();
+    store.owner_fetched(&want[0].id, Ok(replica_set("owned-replicasets")));
+    assert!(
+        store
+            .snapshot(now())
+            .expect("every watch listed")
+            .replica_sets
+            .is_none(),
+        "nobody listed the ReplicaSets, and `Some` here would tell Waste it had"
+    );
+}
+
+/// **The cache is bounded by what the pods reference**, so a month of rollouts is not a month of
+/// ReplicaSets held in memory.
+#[test]
+fn an_owner_no_pod_names_any_more_stops_being_cached() {
+    let mut store = store_with_pods("owned-pods");
+    let want = store.unresolved_owners();
+    store.owner_fetched(&want[0].id, Ok(replica_set("owned-replicasets")));
+    assert_eq!(
+        store
+            .snapshot(now())
+            .expect("listed")
+            .workloads
+            .iter()
+            .filter(|w| w.id.kind == ObjectKind::ReplicaSet)
+            .count(),
+        1
+    );
+
+    // The pod goes away, and the next answer to land is what sweeps the entry it held open.
+    store.pod(&now(), Event::Delete(items::<Pod>("owned-pods").remove(0)));
+    store.pod(
+        &now(),
+        Event::Apply(items::<Pod>("healthy-deploy-pods").remove(0)),
+    );
+    let second = store.unresolved_owners();
+    assert_eq!(
+        second.len(),
+        1,
+        "the new pod's ReplicaSet is the outstanding one"
+    );
+    store.owner_fetched(&second[0].id, Ok(replica_set("healthy-replicasets")));
+
+    let snapshot = store.snapshot(now()).expect("listed");
+    let sets: Vec<&str> = snapshot
+        .workloads
+        .iter()
+        .filter(|w| w.id.kind == ObjectKind::ReplicaSet)
+        .map(|w| w.id.name.as_str())
+        .collect();
+    assert_eq!(
+        sets,
+        ["healthy-deploy-7f84bdfb9b"],
+        "the ReplicaSet nothing names any more must be gone, not merely unreferenced"
+    );
+}
+
+/// **An `ownerReference` with no uid is never asked about**, because the uid is the cache key
+/// and two ReplicaSets sharing the entry `""` would each be handed the other's Deployment.
+///
+/// **Synthesized, and it names what it is waiting for** (NOTES § D40): `ValidateOwnerReferences`
+/// rejects an empty uid, so no capture of a real cluster can carry this. What can produce it is
+/// something between k8rs and the API server, which is invariant 9's class of input.
+#[test]
+fn an_owner_reference_with_no_uid_is_never_asked_about() {
+    // Read off the capture rather than off the store, so the plant below is a change to a real
+    // reference and not to whatever the store happened to make of one.
+    let real = items::<Pod>("owned-pods")[0]
+        .metadata
+        .owner_references
+        .clone()
+        .and_then(|refs| refs.into_iter().find(|o| o.controller == Some(true)))
+        .expect("the capture's pod has a controlling ownerReference");
+    assert!(!real.uid.is_empty(), "and that reference carries a uid");
+
+    let mut blanked = items::<Pod>("owned-pods");
+    for owner in blanked[0].metadata.owner_references.iter_mut().flatten() {
+        owner.uid = String::new();
+    }
+    let mut store = all_but("pods");
+    list(&mut store, Store::pod, blanked);
+    assert!(
+        store.unresolved_owners().is_empty(),
+        "a reference with no uid must not become a fetch, and must not become the key `\"\"`"
+    );
+
+    // And an answer filed against it is dropped rather than cached under a colliding key.
+    store.owner_fetched(
+        &ObjectId {
+            kind: ObjectKind::ReplicaSet,
+            namespace: Some("default".to_string()),
+            name: real.name,
+            uid: Some(String::new()),
+        },
+        Ok(replica_set("owned-replicasets")),
+    );
+    assert!(
+        store
+            .snapshot(now())
+            .expect("listed")
+            .workloads
+            .iter()
+            .all(|w| w.id.kind != ObjectKind::ReplicaSet),
+        "an answer with no key to file under must not reach the snapshot"
+    );
+}
+
+/// **A pod whose controller is not a ReplicaSet is already at the top of its chain**, and nothing
+/// is fetched for it — a DaemonSet, a StatefulSet, a pod nobody controls, and a static pod whose
+/// `Node` owner `rules.rs` discards (NOTES § D39) are all their own answer.
+#[test]
+fn only_a_replicaset_owner_is_ever_fetched() {
+    let store = bootstrapped();
+    let snapshot = store.snapshot(now()).expect("every watch listed");
+    let kinds: Vec<&ObjectKind> = snapshot.pods.iter().map(|pod| &pod.owner.kind).collect();
+    for shape in [
+        ObjectKind::DaemonSet,
+        ObjectKind::Pod,
+        ObjectKind::ReplicaSet,
+    ] {
+        assert!(
+            kinds.contains(&&shape),
+            "the kube-system capture must hold a {shape:?} owner and it holds {kinds:?}"
+        );
+    }
+    let asked = store.unresolved_owners();
+    assert_eq!(
+        asked.len(),
+        1,
+        "one ReplicaSet is named in that capture and only it may be fetched, not {asked:?}"
+    );
+    assert_eq!(asked[0].id.kind, ObjectKind::ReplicaSet);
+    assert_eq!(asked[0].id.name, "coredns-589f44dc88");
+}
+
+/// **The card, not the snapshot** — the resolution has to reach [`crate::rules::Finding::owner`],
+/// which is what `views.rs` will group by (NOTES § D3). Every other test here stops at the
+/// snapshot, and a rewrite that never reached a finding would pass all of them.
+///
+/// It prints both headings, so `cargo test -- --nocapture` is this box's own run.
+#[test]
+fn the_finding_a_pod_draws_files_under_the_deployment_once_the_owner_resolves() {
+    // The node captures come with the other four watches and draw their own cards; this test is
+    // about the pod's.
+    let about_the_pod = |cards: Vec<crate::rules::Finding>| -> Vec<crate::rules::Finding> {
+        cards
+            .into_iter()
+            .filter(|f| f.object.name == "broken-owned-7bdb7645c8-bwdfd")
+            .collect()
+    };
+    let mut store = store_with_pods("owned-pods");
+    let before = about_the_pod(crate::rules::analyze(
+        &store.snapshot(now()).expect("every watch listed"),
+    ));
+    assert!(
+        !before.is_empty(),
+        "the captured pod draws no card, so this test would prove nothing about headings"
+    );
+    for finding in &before {
+        println!(
+            "unresolved: {:?} {}/{}",
+            finding.owner.kind,
+            finding.owner.namespace.as_deref().unwrap_or("-"),
+            finding.owner.name
+        );
+        assert_eq!(finding.owner.kind, ObjectKind::ReplicaSet);
+    }
+
+    let want = store.unresolved_owners();
+    store.owner_fetched(&want[0].id, Ok(replica_set("owned-replicasets")));
+    let after = about_the_pod(crate::rules::analyze(
+        &store.snapshot(now()).expect("every watch listed"),
+    ));
+    assert_eq!(
+        after.len(),
+        before.len(),
+        "resolving an owner may change what a card is filed under and nothing else"
+    );
+    for finding in &after {
+        println!(
+            "resolved:   {:?} {}/{}",
+            finding.owner.kind,
+            finding.owner.namespace.as_deref().unwrap_or("-"),
+            finding.owner.name
+        );
+        assert_eq!(
+            (
+                &finding.owner.kind,
+                finding.owner.name.as_str(),
+                finding.owner.uid.as_deref()
+            ),
+            (
+                &ObjectKind::Deployment,
+                "broken-owned",
+                Some("65cd2217-b556-49ca-b69a-db40239997c1")
+            )
+        );
+    }
+    for cards in [&before, &after] {
+        assert!(
+            cards
+                .iter()
+                .all(|f| f.owner.group_key() == cards[0].owner.group_key()),
+            "every card of one pod files under one group key, before the resolution and after \
+             it — two group keys is D3's two-cards bug"
+        );
+    }
+}
