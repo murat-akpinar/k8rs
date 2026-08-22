@@ -139,6 +139,7 @@
 - *(docs)* Record the node-name regex wider than its own comment ([cd78cfc](https://github.com/murat-akpinar/k8rs/commit/cd78cfc1e7ae8e0a72fd61f051344a4b67e3fde5))
 - *(docs)* Triage the boxes that were injected into an open phase 5, and count them again ([bd4aea1](https://github.com/murat-akpinar/k8rs/commit/bd4aea1c504d2099db75c04e867e880a5b25a255)) — Eight of the ten go to backlog.md, which is where a finding needing a ruling lives; two stay because a guard of theirs goes vacuous exactly when connect() lands, and both say so in their own bodies.
 - *(docs)* Re-open two boxes checked over work their own text does not describe ([bba0003](https://github.com/murat-akpinar/k8rs/commit/bba0003832d859ba365b9218c6c12406ca9d80a9)) — A whole-project review — an operator over the product files, a test engineer over the suite and the guards, an outside reader over the process — found two `[x]` boxes whose own done-when is not met, and no new work is boxed anywhere.
+- *(docs)* Make phase 4's owed re-close visible to the next session ([bd089e6](https://github.com/murat-akpinar/k8rs/commit/bd089e621722ee36149ea1ec8a82b9554f4148cf))
 
 ### 🧪 Testing
 
