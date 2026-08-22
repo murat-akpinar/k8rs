@@ -37,6 +37,12 @@
 //! object across every page, one `InitDone` — and the page size is a number this repo chose
 //! rather than one inherited silently, written down at [`INITIAL_LIST_PAGE`].
 //!
+//! **Nothing throttles us on this side of the wire, and a wait still has to be drawable**
+//! (NOTES § D148). kube-rs ships no client-side rate limiter — tower's is not even compiled in —
+//! but it does retry a throttled request fifteen times in silence, and a bootstrap inside that
+//! window is indistinguishable from a hang. [`Store::still_listing`] is the state a screen draws
+//! it from; § WHAT A THROTTLE LOOKS LIKE is why there is nothing else to draw.
+//!
 //! **What is still missing is the `Client`**, and with it the five `Api<K>`s [`drive`] would be
 //! handed: that is the `connect()` box further down Phase 5. Nothing here has met an API
 //! server.
@@ -534,17 +540,44 @@ impl Store {
         self.failure.as_ref()
     }
 
-    /// Every initial LIST has landed, so there is something honest to publish (NOTES § D28).
-    fn listed(&self) -> bool {
+    /// The kinds whose first LIST has not landed, in the order the watches are declared.
+    ///
+    /// **The only thing that says anything more about a bootstrap than that one is running**
+    /// (NOTES § D148). [`Store::snapshot`] answers `None` for every reason at once — D28 forbids
+    /// publishing a partial list — so on its own a screen can say *waiting* and stop there, which
+    /// is the shape `PRIOR-ART § A3` warns about: a wait with nothing to see it by. Pods is the
+    /// kind that grows with the cluster and the one [`INITIAL_LIST_PAGE`] is reasoned about, so
+    /// *still reading: pods* twenty seconds in names the long list rather than leaving a hang to
+    /// be guessed at. **How the other four behave at size is not measured here** and no claim
+    /// about it is made.
+    ///
+    /// **It cannot say why, and no field here could.** A LIST inside kube's silent retry window
+    /// (§ WHAT A THROTTLE LOOKS LIKE) and a LIST against an enormous cluster are the same answer
+    /// here; the wait happens below `watcher()` in a tower layer with no callback. Empty means
+    /// every LIST landed — the gate `listed` is this method, so the two cannot disagree.
+    ///
+    /// **The words are the caller's.** This returns kinds, not sentences, because invariant 14's
+    /// plain language is the screen's decision and `views.rs` is not this file's.
+    pub fn still_listing(&self) -> Vec<ObjectKind> {
         [
-            self.pods.complete,
-            self.nodes.complete,
-            self.deployments.complete,
-            self.stateful_sets.complete,
-            self.daemon_sets.complete,
+            (ObjectKind::Pod, self.pods.complete),
+            (ObjectKind::Node, self.nodes.complete),
+            (ObjectKind::Deployment, self.deployments.complete),
+            (ObjectKind::StatefulSet, self.stateful_sets.complete),
+            (ObjectKind::DaemonSet, self.daemon_sets.complete),
         ]
         .into_iter()
-        .all(|complete| complete)
+        .filter_map(|(kind, complete)| (!complete).then_some(kind))
+        .collect()
+    }
+
+    /// Every initial LIST has landed, so there is something honest to publish (NOTES § D28).
+    ///
+    /// Derived from [`Store::still_listing`] rather than from the five fields a second time: the
+    /// gate and the state the screen draws the wait from cannot disagree if only one of them
+    /// reads the flags.
+    fn listed(&self) -> bool {
+        self.still_listing().is_empty()
     }
 
     /// The cluster as the rules read it, or `None` while any watch is still inside its first
@@ -671,6 +704,93 @@ const INITIAL_LIST_PAGE: u32 = 500;
 // cap the watch and re-LIST the whole cluster on that period.
 
 // --- THE INITIAL LIST END ---
+
+// --- WHAT A THROTTLE LOOKS LIKE START ---
+//
+// **kube-rs does not rate-limit us, and the thing it does instead is harder to see than a queue
+// would have been** (NOTES § D148). Read off the crates on disk, not recalled.
+//
+// **There is no client-side limiter, in the mechanical form of that claim.** client-go's is
+// `rest.Config{QPS, Burst}` and `PRIOR-ART § A3` is the k9s thread about what it costs. tower's
+// equivalent is `tower::limit::rate` — and `tower-0.5.3/src/lib.rs:175` gates the whole `limit`
+// module behind a Cargo feature, which `kube-client-4.2.0/Cargo.toml:296-303` does not enable
+// (`buffer`, `filter`, `util`, `retry`, and nothing else; `cargo tree -e features -i tower` over
+// this repo lists no `limit` either). **So the module is not compiled into this binary at all** —
+// there is nothing a grep could have missed. The three kube trees contain no other limiter: the
+// only `Burst` in them is a pod QoS class in two test fixtures
+// (`kube-runtime-4.2.0/src/wait.rs:508`, `:541`),
+// and `Cargo.lock` carries no `governor`, `leaky-bucket` or `ratelimit`. **k8rs queues no request
+// inside itself**, so A3's *make the queue visible* half has nothing to show.
+//
+// **What kube has instead is a retry layer that absorbs a 429 in silence, fifteen times.**
+// `Config::default_retry` is `true` in all three constructors — `new` (`config/mod.rs:199`),
+// `incluster` (`:284`) and the `new_from_loader` that every kubeconfig path ends at (`:347`) —
+// and `client/builder.rs:251` turns that into `RetryLayer::new(RetryPolicy::server_retry())`.
+// `server_retry()` is 5 ms → 1000 s exponential, **15 retries**, server-aware
+// (`client/retry.rs:108-110`); it retries 429, 503 and 504 (`:114-119`) and nothing else — a
+// transport error returns `None` and is not retried (`:164`). It takes the *longer* of its own
+// backoff and the server's `Retry-After` (`:151-161`), which it parses only as `u64` seconds
+// (`:154`), so the HTTP-date form of that header is silently ignored. **Our calls qualify**: a
+// LIST or a WATCH is a GET, `Body::empty()` is `Kind::Once(None)` (`client/body.rs:37-39`), and
+// `try_clone` — which `clone_request` needs (`retry.rs:170`) — returns `Some` for `Kind::Once`
+// (`:60-67`).
+//
+// **How long that silence lasts is arithmetic over those constants, not a measurement.** The
+// bases are `5 ms × 2^i` for i = 0..14, capped at 1000 s and never reaching it (5 ms × 2^14 =
+// 81.92 s), and tower adds `uniform(0, base × 2.0)` on top (`retry.rs:87`,
+// `tower-0.5.3/src/retry/backoff.rs:152-167`, `:176-183`), so each wait is `base .. 3 × base`.
+// The fifteen sum to **164 s** at the floor and **~491 s** at the jitter ceiling: a persistently
+// throttling API server keeps k8rs quiet for **between about two and a half and about eight
+// minutes** before the first error is ours at all — longer still if `Retry-After` beats the
+// backoff at every step.
+//
+// **And nothing can see it.** The wait is a `tokio::time::sleep` inside the tower stack, below
+// `watcher()`, with no callback and no counter; its only trace is a `tracing` debug span
+// (`builder.rs:254`) and invariant 10 gives us no subscriber. So during a throttle
+// [`Store::snapshot`] is `None`, [`Store::failure`] is `None`, and the only honest thing on this
+// store is [`Store::still_listing`]. **That is A3 one layer lower**: not a queue whose depth
+// could be drawn, just a wait.
+//
+// **The retry is kept on, deliberately.** `default_retry: false` would put every 429 straight
+// onto [`Store::failure`] where a screen could name it — but kube's bare `watcher()` restarts
+// "normally immediately" and its backoff is opt-in (`watcher.rs:778-779`), so k8rs would then
+// hammer a server that has just said *stop*. Being polite to the cluster is the right default;
+// the price is the silence, and the answer to silence is a state on screen, not a knob. Turning
+// it off, or adding a tower layer that counts retries in flight, both need a `Client` — so both
+// belong to `connect()` and the reconnect box, not here.
+//
+// **Once a throttle does become ours it is fully distinguishable, and that is the half worth
+// guarding.** Any 4xx/5xx becomes `Error::Api(Box<Status>)` — parsed from the body, or rebuilt as
+// `Status::failure(text, "Failed to parse error data").with_code(…)` when the body is not a
+// `Status` at all (`client/mod.rs:544-558`). **So `Status::code` survives both branches and
+// `reason` only the first**, which is why anything downstream should key on the number. `Status`
+// carries `code`, `reason`, `message` and `details.retry_after_seconds`
+// (`kube-core-4.2.0/src/response.rs:34`, `:50`, `:39`, `:199-200`), and it reaches this file
+// inside `watcher::Error::{InitialListFailed, WatchStartFailed, WatchFailed}` (`watcher.rs:31`,
+// `:35`, `:43`) — typed, and kept typed by [`Store::failure`] (NOTES § D145).
+//
+// **The other way this path looks hung, and it is worse: a dead connection is never noticed.**
+// `Config` sets `connect_timeout` 30 s and `write_timeout` 295 s (`config/mod.rs:418-419`) and
+// leaves **`read_timeout` unset** (`:191`, `:273`, `:339`); the connector is a bare
+// `HttpConnector::new()` (`client/builder.rs:117`) whose `TcpKeepaliveConfig::default()` is
+// all-`None`, so `into_tcpkeepalive()` yields `None` and `set_tcp_keepalive` is never called
+// (`hyper-util-0.1.20/src/client/legacy/connect/http.rs:94-98`, `:104-110`, `:842-843`).
+// **SO_KEEPALIVE is off on the watch sockets.** A connection that dies without a FIN or an RST —
+// a laptop suspending, a NAT entry expiring, a load balancer dropping an idle flow — raises no
+// error and hits no deadline: [`drive`] simply blocks, [`Store::failure`] stays `None`, and the
+// store keeps answering with the cluster as it last was. **It is not fixable from here.**
+// `read_timeout` is client-wide, a healthy watch is idle for long stretches, and kube's own
+// params doc says clients "should not assume bookmarks are returned at any specific interval"
+// (`kube-core-4.2.0/src/params.rs:329`) — so there is no period a read deadline could safely
+// use. That is the *deadline on the first watch sync* box, next in this phase, and the reconnect
+// box after it.
+//
+// **What source-reading cannot settle**, stated because the box asked for a number: whether any
+// real API server ever throttles a five-watch client at all, what its Priority-and-Fairness
+// `Retry-After` actually says, and whether its 429 body carries `retry_after_seconds` as well as
+// the header. Those are one cluster measurement, and nothing in this file has met one.
+
+// --- WHAT A THROTTLE LOOKS LIKE END ---
 
 // --- THE DRIVER START ---
 

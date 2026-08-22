@@ -169,6 +169,7 @@ its line moving with it.
 - [D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22) — a failure that clears itself is a failure nobody sees, and the driver's six choices
 - [D146](#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22) — the ingest guard: two bounds off a census, a visible marker, and the newline a real kubelet sent
 - [D147](#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22) — kube already paginates, so the box was a measurement; and one timeout field serves two very different calls
+- [D148](#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22) — nothing rate-limits us, something retries us for eight minutes in silence, and the watch sockets have no keepalive
 
 ## Why it exists — where the gap is
 
@@ -12646,3 +12647,79 @@ it without a cluster: the real `watcher()` against a localhost fake API server
 would **observe** `limit=500` and the continue follow-up instead of reading them.
 It needs `tokio`'s `net` feature — a feature on a crate already present, not an
 eleventh crate — and it is boxed rather than done.
+
+### D148 — nothing rate-limits us, something retries us for eight minutes in silence, and the watch sockets have no keepalive (2026-08-22)
+
+Phase 5's fourth box asked whether kube-rs rate-limits us and, if so, to keep it
+off the *looks like a hang* pile. Like [D147](#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22),
+the deliverable is the reading. All four lines below were re-verified by the PM
+against the crates on disk.
+
+**There is no client-side rate limiter, and the proof is mechanical rather than a
+grep.** tower's limiter lives in `tower::limit::rate`, and that module is behind a
+Cargo feature. `kube-client-4.2.0/Cargo.toml` enables `buffer`, `filter`, `util`
+and `retry` — **not `limit`** — and `cargo tree -e features -i tower` over this
+repo lists **zero** occurrences of `limit`. The module is not compiled into this
+binary at all, so there is nothing a text search could have missed. No
+`governor`, `leaky-bucket` or `ratelimit` in `Cargo.lock` either. **k8rs queues
+nothing inside itself**, and client-go's famous QPS/burst throttle was not ported.
+
+**What is there instead is worse for the box's actual question.**
+`Config::default_retry` is `true` in **all three** constructors (`config/mod.rs`
+`:199`, `:284`, `:347` — the last being the one every kubeconfig path lands at),
+and it becomes `RetryLayer::new(RetryPolicy::server_retry())`, which is
+`RetryPolicy::new(5ms, 1000s, 15, true)` retrying **429, 503 and 504 only** — a
+transport error is not retried. Bases are `5ms × 2^i` for i = 0..14 plus tower's
+`uniform(0, base × 2)` jitter, so the fifteen sum to **164 s at the floor and
+~491 s at the ceiling**. A persistently throttling API server therefore keeps
+k8rs silent for **about two and a half to about eight minutes** before the failure
+is ours at all. **That range is arithmetic over read constants, not a
+measurement**, and is labelled as such in the code.
+
+**And nothing can see the wait.** It is a `tokio::time::sleep` inside the tower
+stack, below `watcher()` — no callback, no counter, and its only trace is a
+`tracing` span, for which [invariant 10](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+gives us no subscriber. **The retry stays on** regardless: `default_retry: false`
+would make every 429 visible immediately, but bare `watcher()` restarts
+"normally immediately", so we would hammer a server that has just said stop.
+Turning it off, or adding a counting tower layer, both need a `Client` and belong
+to `connect()`.
+
+**The 429 that outlives the retries is fully distinguishable, and only by its
+number.** `client/mod.rs:544-558` turns any 4xx/5xx into `Error::Api(Box<Status>)`
+— parsed from the body, or rebuilt as `Status::failure(text, "Failed to parse
+error data").with_code(429)` when the body is not a `Status`. So **`code` survives
+both branches and `reason` only the first**: anything downstream must key on the
+number, never the word.
+
+**The finding that is worse than the throttle, and it is the box's own subject.**
+`Config` sets `connect_timeout` 30 s and `write_timeout` 295 s and leaves
+**`read_timeout` unset**, and the connector is a bare `HttpConnector::new()`
+(`client/builder.rs:117`) whose `TcpKeepaliveConfig::default()` is all-`None`, so
+`set_tcp_keepalive` is never called. **SO_KEEPALIVE is off on the watch sockets.**
+A connection that dies without FIN or RST — a laptop suspending, a NAT entry
+expiring, a load balancer dropping an idle flow — raises no error and meets no
+deadline: `drive` blocks, `failure()` stays `None`, and the store keeps serving
+the cluster exactly as it last was. **A stale screen with no indication it is
+stale** is the sharpest form of
+[§ Errors that lie](PRIOR-ART.md#c-errors-that-lie), and it is not fixable at this
+layer: `read_timeout` is client-wide, a healthy watch is legitimately idle, and
+kube's own params doc says clients *"should not assume bookmarks are returned at
+any specific interval"*, so there is no period a read deadline could safely use.
+It belongs to the *deadline on the first watch sync* box and to reconnect.
+
+**What the box could produce, and it is one method.** `Store::still_listing() ->
+Vec<ObjectKind>` — the kinds whose first LIST has not landed, in declaration
+order. `snapshot()` answers `None` for every reason at once, so a screen holding
+only that can say *waiting* and stop; this is the state that says more. It reuses
+`rules::ObjectKind` rather than inventing a type and returns **kinds, not
+sentences**, because the words are `views.rs`'s under invariant 14. `listed()` is
+now `still_listing().is_empty()`, so the gate and the drawn state read the five
+flags in one place and cannot disagree. **It cannot say why**: a LIST inside the
+retry window and a LIST against an enormous cluster are the same answer, and no
+field on `Store` separates them.
+
+**One upstream default was left unpinned by a test, deliberately.** Asserting
+`Config::default_retry == true` needs to build a `kube::Config`, which needs
+`http::Uri`, and `http` is neither a dependency nor re-exported — pinning it would
+cost a twelfth crate for a constant. Recorded here instead.

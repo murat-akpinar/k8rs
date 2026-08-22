@@ -2183,7 +2183,7 @@ public release.
       feature — **a feature on a crate already present, not a twelfth crate**, so
       invariant 10 is not in question. Done when a test drives the real watcher
       against it and each of the four is asserted from what crossed the socket
-- [ ] **Find out whether kube-rs rate-limits us, and if it does, put it on
+- [x] **Find out whether kube-rs rate-limits us, and if it does, put it on
       screen** — client-go ships a client-side QPS limiter, so for years a k9s
       user reporting "slow" was partly reporting a queue inside their own binary
       with nothing to see it by; the repair was a default raised from 5 to 50
@@ -2193,6 +2193,27 @@ public release.
       if requests are ever queued, a state the header can show rather than a
       silent default
       ([PRIOR-ART § A3](PRIOR-ART.md#a3--client-side-throttling-is-invisible-and-that-is-the-bug))
+      Done as a measurement, and the answer is **no client-side limiter exists**
+      — proven mechanically rather than by grep: tower's limiter is behind a Cargo
+      feature `kube-client` does not enable, and `cargo tree -e features -i tower`
+      finds no `limit` at all, so the module is not compiled into this binary.
+      **What is there instead is worse for this box's question.**
+      `Config::default_retry` is `true` in all three constructors and gives 15
+      retries over 429/503/504, summing to **164–491 seconds** — so a throttling
+      server keeps k8rs silent for roughly two and a half to eight minutes, inside
+      a `tokio::time::sleep` in the tower stack that has no callback and no
+      counter. It stays on: turning it off would hammer a server that just said
+      stop. **And the sharpest finding is not the throttle at all** — `read_timeout`
+      is unset and the connector never calls `set_tcp_keepalive`, so **SO_KEEPALIVE
+      is off on the watch sockets**: a connection dying without FIN or RST leaves
+      `drive` blocked, `failure()` `None`, and a stale cluster on screen with
+      nothing saying it is stale. Not fixable at this layer; it goes to the
+      first-watch-sync deadline and reconnect boxes. What this box could build is
+      one method, `Store::still_listing() -> Vec<ObjectKind>`, so a screen can say
+      *which* watch it is waiting on rather than only *waiting* — kinds and not
+      sentences, because the words are `views.rs`'s
+      ([D148](NOTES.md#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22)).
+      458 + 7 tests, 5 mutants 0 missed
 - [ ] **Name the oldest API server k8rs supports, enforce it at connect, and put
       a deadline on the first watch sync** — `Cargo.toml` pins `k8s-openapi` to
       `v1_32` and calls it *"the oldest supported version"*, which is a statement
@@ -2367,6 +2388,26 @@ public release.
       promise containment it does not have (`tester` wrote the limit into the
       docstring on 2026-08-22 — this box is the fix, not the disclosure).
       `tester`'s
+- [ ] **`{:?}` on a `kube::Config` prints a bearer token, and our own guard
+      structurally cannot see it.** `kube::Config` derives `Debug`
+      (`config/mod.rs:126`). Its `password`, `token` and `client_key_data` are
+      `SecretString` and redact — but `AuthInfo.auth_provider` is an
+      `AuthProviderConfig` whose `config: HashMap<String, String>` has a **plain
+      derived `Debug`** (`config/file_config.rs:306`), and that map is exactly
+      where the oidc and gcp providers keep `id-token` and `refresh-token`.
+      `AuthInfo.other: BTreeMap<String, Value>` is the same hazard for any
+      unmodeled key. **`scripts/security-guard.py`'s token-hygiene rule reads
+      *our* structs**, so it will report `0 can hold a token` however this goes —
+      the gate's own wording, *"no `Debug` is derived over a type that can hold
+      config"*, was written when every such type was ours. Done: `connect()`
+      never `{:?}`s a `Config` or anything containing one, and **the guard is
+      taught the one foreign type that matters** or says out loud that it cannot
+      see it. **It lands before `connect()`** — a rule whose enforcement goes
+      vacuous exactly when the credential arrives is the shape
+      [D141](NOTES.md#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
+      already cost this project once, and this is the second instance in one
+      phase. `tester`'s for the guard, `dev-core`'s for the call site
+      ([D148](NOTES.md#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22))
 - [ ] **Connecting is a function, not a step in `main`** — `connect(context)`
       builds the client, runs discovery and the capability probe and starts the
       watches, and can be called again after everything from the previous

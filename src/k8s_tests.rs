@@ -984,6 +984,155 @@ async fn a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land(
     );
 }
 
+// --- WHAT A THROTTLE LOOKS LIKE ---
+//
+// **There is no client-side rate limiter to test, and what is below is what was left instead**
+// (NOTES § D148). tower's limiter is not compiled into this binary — the `limit` module is behind
+// a Cargo feature `kube-client` does not enable — so no assertion could tell a build that has one
+// from a build that does not. What the source reading left behind that a test *can* hold is the
+// two states a screen has to draw from: which LIST is still outstanding, and what a throttle
+// looks like once it stops being silent. **The silence between them is covered by nothing here**
+// — kube retries a 429 below `watcher()`, in a tower layer with no callback — and it is recorded
+// rather than tested.
+
+/// The five streams [`all_but`] names, each with the kind [`Store::still_listing`] must report
+/// when it is the one left out.
+///
+/// Written out rather than derived from the store, so the assertions below are the requirement
+/// and not the implementation read back: [`all_but`] selects a stream by a string that predates
+/// this table, so a `still_listing` that reported nodes as pods fails the loop rather than
+/// agreeing with itself.
+fn kind_of_stream() -> Vec<(&'static str, ObjectKind)> {
+    vec![
+        ("pods", ObjectKind::Pod),
+        ("nodes", ObjectKind::Node),
+        ("deployments", ObjectKind::Deployment),
+        ("statefulsets", ObjectKind::StatefulSet),
+        ("daemonsets", ObjectKind::DaemonSet),
+    ]
+}
+
+/// **A bootstrap that is taking a while names the lists it is still waiting for** (NOTES § D148).
+/// [`Store::snapshot`] answers `None` for every reason at once, so it is the only thing a screen
+/// could draw a wait from and it says nothing about the wait; this is the state that does.
+///
+/// The order is asserted, not just the set: it is what stops a header re-shuffling between two
+/// draws of the same unfinished bootstrap. Empty and `snapshot` being `Some` are asserted
+/// together, because a `still_listing` that emptied early would open the gate with it.
+#[test]
+fn a_bootstrap_that_is_still_running_names_the_lists_it_is_waiting_for() {
+    let every_kind: Vec<ObjectKind> = kind_of_stream().into_iter().map(|(_, kind)| kind).collect();
+    assert_eq!(
+        Store::default().still_listing(),
+        every_kind,
+        "a store that has heard nothing reported one of the five watches as already listed"
+    );
+    for (stream, kind) in kind_of_stream() {
+        assert_eq!(
+            all_but(stream).still_listing(),
+            vec![kind],
+            "four of the five LISTs landed and the store did not name the {stream} one as the \
+             outstanding watch"
+        );
+    }
+    let done = bootstrapped();
+    assert_eq!(
+        done.still_listing(),
+        Vec::<ObjectKind>::new(),
+        "every initial LIST landed and the store still says it is waiting for one"
+    );
+    assert!(
+        done.snapshot(now()).is_some(),
+        "the gate and this state disagree about the same store"
+    );
+
+    // The shape a real bootstrap spends its whole time in, and the one `all_but` never
+    // produces: `Init` sent, objects arriving, no `InitDone` yet (NOTES § D29).
+    let mut mid_list = all_but("pods");
+    mid_list.pod(Event::Init);
+    for pod in items::<Pod>("kube-system-pods") {
+        mid_list.pod(Event::InitApply(pod));
+    }
+    assert_eq!(
+        mid_list.still_listing(),
+        vec![ObjectKind::Pod],
+        "a LIST that had delivered objects but not finished was reported as landed"
+    );
+
+    // And a **relist** does not put a finished watch back on the list: `complete` is never false
+    // again, because the last complete answer stays readable while the new LIST fills
+    // (NOTES § D28). A screen that took this state from a reconnect would blank on every one.
+    let mut relisting = bootstrapped();
+    relisting.pod(Event::Init);
+    assert_eq!(
+        relisting.still_listing(),
+        Vec::<ObjectKind>::new(),
+        "a reconnect put the pods watch back among the outstanding ones"
+    );
+}
+
+/// **A throttle that outlives kube's retries arrives as a code, not as prose** (NOTES § D148).
+/// The API server's own limiter answers `429` with a `Retry-After`, and `kube-client` retries it
+/// silently fifteen times before the error is ever ours (`client/retry.rs:108`,
+/// `client/builder.rs:251`) — so the one thing this layer owes the screen is that the fifteenth
+/// failure is still *distinguishable* when it lands, rather than flattened into a sentence.
+///
+/// **Half of that guard is the compiler and is meant to be**: the `match` below stops compiling
+/// if `failure` is ever stored as a `String`, which is the change that would quietly turn a
+/// throttle, a 403 and a dead API server into one banner. The runtime half is that the code that
+/// comes out is the code that went in.
+///
+/// `code` and not `reason`: a 429 whose body does not parse as a `Status` — a proxy's HTML, say —
+/// is rebuilt by kube as `Status::failure(text, "Failed to parse error data").with_code(429)`
+/// (`client/mod.rs:556-557`), so the numeric code survives that path and the reason does not.
+///
+/// **The `Status` below is written, not captured**, and nothing asserts its wording: no cluster
+/// here has ever been throttled, so what a real Priority-and-Fairness rejection says is one of
+/// the things § WHAT A THROTTLE LOOKS LIKE lists as unsettled.
+#[tokio::test]
+async fn a_throttled_api_server_reaches_the_store_as_a_code_and_not_as_prose() {
+    let mut store = all_but("pods");
+    drive(
+        vec![one_watch::<Pod>(
+            vec![Err(watcher::Error::InitialListFailed(kube::Error::Api(
+                Box::new(kube::core::Status {
+                    code: 429,
+                    reason: "TooManyRequests".to_string(),
+                    message: "the server has received too many requests and has asked the \
+                              client to try again later"
+                        .to_string(),
+                    ..Default::default()
+                }),
+            )))],
+            Store::pod,
+        )],
+        &mut store,
+    )
+    .await;
+
+    let code = match store.failure() {
+        Some(watcher::Error::InitialListFailed(kube::Error::Api(status))) => status.code,
+        other => panic!(
+            "a 429 on the initial LIST did not reach the store as a typed API error: {other:?}"
+        ),
+    };
+    assert_eq!(
+        code, 429,
+        "the store kept an API failure but not which one it was, so nothing downstream can tell \
+         a throttled server from a forbidden one"
+    );
+    assert_eq!(
+        store.still_listing(),
+        vec![ObjectKind::Pod],
+        "the LIST that failed is not reported as outstanding, so a screen would show the \
+         throttle and claim the pods had been read"
+    );
+    assert!(
+        store.snapshot(now()).is_none(),
+        "a watch that never listed published a cluster anyway (NOTES § D28)"
+    );
+}
+
 // --- THE INGEST GUARD ---
 //
 // **What is proven here is what the store *kept*, never what something printed.** The printer
