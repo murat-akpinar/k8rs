@@ -163,6 +163,7 @@ its line moving with it.
 - [D139](#d139--phase-4s-close-the-budget-whose-first-sync-failed-and-where-the-other-seven-findings-went-2026-08-22) — Phase 4's close: the budget whose first sync failed, and where the other seven findings went
 - [D140](#d140--phase-5s-two-dependencies-the-version-that-pairs-with-the-pin-and-rustls-because-the-release-targets-decide-it-2026-08-22) — Phase 5's two dependencies: the version that pairs with the pin, and rustls because the release targets decide it
 - [D141](#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22) — the write guard has never run, and the fix is to give the matching to the tool that resolves paths
+- [D142](#d142--a-write-does-not-have-to-go-through-apik-and-the-allowlist-already-fits-the-surface-that-was-missed-2026-08-22) — a write does not have to go through `Api<K>`, and the allowlist already fits the surface that was missed
 
 ## Why it exists — where the gap is
 
@@ -12217,3 +12218,82 @@ half goes; nothing is lost, because a kube method added between releases makes t
 derived set differ from `clippy.toml` and goes red in the same commit that bumps
 kube. A gate that is red for nothing is one people learn to wave through — which
 `scripts/guards.sh` already says in its own comments, about itself.
+
+### D142 — a write does not have to go through `Api<K>`, and the allowlist already fits the surface that was missed (2026-08-22)
+
+[D141](#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
+moved the matching to clippy and closed the false positives. `tester` then went
+looking for what clippy still cannot see and found something better than the
+holes the brief guessed at. `cfg`, macros, aliases and re-exports are all covered
+— a macro-generated `$a.delete(…)` fires, `use kube::Api as Aliased` fires,
+`<Aliased<Pod>>::delete(&a, …)` fires — and the only cfg that escapes is
+`#[cfg(target_os = "windows")]`, which is never type-checked on Linux.
+
+**The real hole: the ban list is derived from `impl Api<K>`, and a write need not
+go through `Api<K>`.** Measured with code that compiles:
+
+```rust
+use kube::core::Request;
+fn hole(c: kube::Client, r: Request) {
+    let req = r.delete("victim", &Default::default()).unwrap();
+    let _ = async move { c.request::<Pod>(req).await };
+}
+```
+
+A complete DELETE. **Zero disallowed-method warnings**, because no `Api` appears
+anywhere. This is not a regression — the deleted grep never caught it either, and
+it has been open since the guard was written.
+
+**The PM's own count of that surface was wrong, from reading one file.** This
+entry first named nine mutations, taken from `kube-core-4.2.0/src/request.rs`.
+`impl Request` is spread across **four** files — `request.rs`, `subresource.rs`,
+`util.rs` and `kubelet_debug.rs` — and the derivation `tester` built finds **24
+methods, 16 of them banned**. The seven the PM missed are `evict`, `attach`,
+`exec`, `portforward`, `restart`, `cordon` and `uncordon`; `Request::restart`
+fired in the verification probe, a real mutation that was invisible an hour
+earlier. **This is the same failure the phase that closed this morning was closed
+for** — a surface stated from the first file that looked like it held it, when
+`grep -l "impl Request"` was one command away
+([D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)).
+Corrected against the object, and left visible rather than quietly restated: a
+decision that hid its own miscount would be the second copy this file exists to
+prevent.
+
+**Ruled: the derivation extends to `impl Request`, and the allowlist is not
+widened to do it.** That is the part that makes this cheap.
+`Request`'s readers are `list`, `watch`, `get`, `get_subresource`,
+`get_metadata`, `list_metadata`, `watch_metadata` — every one already matches
+`get*` / `list*` / `watch*`. So the same rule, unchanged, partitions the second
+type correctly, and nine unambiguous mutations go from invisible to banned.
+
+**`Client` is a different question and is deliberately left open.**
+`Client::request` is *verb-agnostic* — the verb lives in the request object, not
+the method name — and Phase 5's browser box requires it outside `ops.rs` by
+design: server-side `Table` has no kube type and is *"hand-built through
+`Client::request`"*. Banning `Client` wholesale would forbid a planned **read**.
+
+**So the residual hole is named rather than papered over:** an `http::Request`
+built by hand with a write verb and posted through `Client::send` cannot be caught
+by a method-name ban at all, because the verb is *data*. No list closes that, and
+a guard that claimed to would be the kind of gate this repo has already been
+burned by. What actually stands there is
+[invariant 2](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision):
+no write is implicit — an explicitly selected object, a keypress, a confirmation
+naming the consequence, a server-side dry-run, an audit line. **The lint is
+defence in depth and was never the guarantee**; the guarantee is that a mutation
+has to pass a human, and `ops.rs` is where that path is written and reviewed.
+
+**The conflict this looked like it would create does not arise, and the reason is
+worth keeping.** The PM flagged `Request::new` as a constructor the allowlist
+would ban, since it is neither `get*`, `list*` nor `watch*` — which would have put
+a banned call on Phase 5's `Table` read path. It does not: `pub fn new<S:
+Into<String>>(url_path: S) -> Self` takes no `&self`, and the derivation yields
+only `&self` methods, so it never enters the list at all. The same rule has always
+kept `Api::namespaced` off it. Nothing was widened and nothing was
+special-cased to get that, and the self-test now asserts it.
+
+`Request::kubelet_node_attach` / `_exec` / `_logs` / `_portforward` are associated
+functions for the same reason and are likewise unbanned. They **build** a request
+rather than send one, so they fall under the residual named above — reaching a
+server still needs `Client` — and they are behind the `kubelet-debug` feature,
+which is off.

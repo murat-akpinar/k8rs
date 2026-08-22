@@ -5,33 +5,49 @@
 # grep that used to do this job produced five findings, all false, on the day
 # kube arrived (NOTES § D141). With `-D warnings` an entry below is a red build.
 #
-# It is not hand-maintained and must never be edited by hand. The list is every
-# `&self` method of `Api<K>` in the kube version in Cargo.lock, minus invariant
-# 1's allowlist (`get*` / `list*` / `watch*` / `logs` / `log_stream` /
-# `apiserver_version`), and `scripts/write-guard.py` fails unless this file
-# names exactly that set — so a kube bump that adds a method goes red in the
-# same commit. When it fails it prints the exact block to paste in place of
-# the one below — do not hand-add a line, because a path with a typo in it
-# bans nothing and says nothing about it (see below).
+# It is not hand-maintained. The list is every `&self` method of **`Api<K>` and
+# `kube_core::Request`** in the kube version in Cargo.lock, minus invariant 1's
+# allowlist (`get*` / `list*` / `watch*` / `logs` / `log_stream` /
+# `apiserver_version`), and `scripts/write-guard.py` fails unless this file names
+# exactly that set — so a kube bump that adds a method goes red in the same
+# commit. When it fails it prints the exact block to paste in place of the one
+# below; do not hand-add a line, because a path with a typo in it bans nothing
+# and says nothing about it (see below).
+#
+# **`Request` is here because a write does not have to go through `Api<K>`**
+# (NOTES § D142): a `Request` built by hand and posted through `Client::request`
+# was a complete DELETE that raised nothing. The allowlist did not widen to
+# absorb it — `Request`'s readers are `list`, `watch`, `get`, `get_subresource`,
+# `get_metadata`, `list_metadata`, `watch_metadata` and `logs`, so the same rule
+# partitions the second type unchanged. `Client` is deliberately absent: its
+# `request` is verb-agnostic and Phase 5 needs it outside `ops.rs` for a read.
 #
 # `namespace` and `resource_url` mutate nothing and are here anyway: the
 # allowlist is deliberately conservative, and a method is banned by default
-# until invariant 1 says otherwise. That is correct, not a bug.
+# until invariant 1 says otherwise. That is correct, not a bug. `Request::new`
+# is *not* here, and needs no exception: it takes no `&self`, so the derivation
+# never yields it — which is what keeps Phase 5's hand-built Table request off
+# this list without anyone widening anything.
 #
-# Spelling is `kube::Api::x`; `kube::api::Api::x` resolves to the same def-id
-# and would work identically, but one spelling is fixed so the guard can compare
-# strings. **A path clippy cannot resolve is only a warning, `-D warnings` does
-# not promote it, and it is not emitted at all by a crate that does not link
-# kube** — all measured 2026-08-22 (NOTES § D141). So the spelling is checked by
-# write-guard.py against kube's own re-export rather than trusted here.
+# Spellings are `kube::Api::x` and `kube::core::Request::x`. `kube::api::Api::x`
+# and `kube_core::request::Request::x` resolve to the same def-ids and would work
+# identically; one spelling per type is fixed so the guard can compare strings,
+# and both were confirmed by making a call fire, not by reading docs. **A path
+# clippy cannot resolve is only a warning, `-D warnings` does not promote it, and
+# it is not emitted at all by a crate that does not link kube** — all measured
+# (NOTES § D141). So the spellings are checked by write-guard.py against kube's
+# own re-exports, every hop, rather than trusted here.
 #
-# The three `allow-invalid` entries are kube's `ws` feature, which D140 leaves
-# off: they cannot compile, so they contain nothing today, and they are listed
-# anyway so that turning `ws` on needs no one to remember. `allow-invalid`
-# silences the unresolved-path warning for exactly these — **because clippy's
-# own help text offers that flag as the fix for that warning, and a baseline of
-# three permanent warnings is how a fourth, real one goes unread.**
-# write-guard.py pins the flagged set to these three for the same reason.
+# The six `allow-invalid` entries are kube's `ws` feature on both types, which
+# D140 leaves off: they cannot compile, so they contain nothing today, and they
+# are listed anyway so that turning `ws` on needs no one to remember.
+# `allow-invalid` silences the unresolved-path warning for exactly these —
+# **because clippy's own help text offers that flag as the fix for that warning,
+# and a baseline of permanent warnings is how a real one goes unread.**
+# write-guard.py pins the flagged set for the same reason. That the set is
+# exactly these six was read off clippy with the flags stripped, not off a
+# `#[cfg]`: kube-core's `kubelet-debug` feature is also off and also parsed, but
+# its `kubelet_node_*` functions take no `&self` and never enter the list.
 #
 # `ops.rs` carries the single visible `#![allow(clippy::disallowed_methods)]`
 # that announces the exception (Phase 7).
@@ -65,4 +81,20 @@ disallowed-methods = [
     "kube::Api::resource_url",
     "kube::Api::restart",
     "kube::Api::uncordon",
+    { path = "kube::core::Request::attach", allow-invalid = true },
+    "kube::core::Request::cordon",
+    "kube::core::Request::create",
+    "kube::core::Request::create_subresource",
+    "kube::core::Request::delete",
+    "kube::core::Request::delete_collection",
+    "kube::core::Request::evict",
+    { path = "kube::core::Request::exec", allow-invalid = true },
+    "kube::core::Request::patch",
+    "kube::core::Request::patch_metadata",
+    "kube::core::Request::patch_subresource",
+    { path = "kube::core::Request::portforward", allow-invalid = true },
+    "kube::core::Request::replace",
+    "kube::core::Request::replace_subresource",
+    "kube::core::Request::restart",
+    "kube::core::Request::uncordon",
 ]
