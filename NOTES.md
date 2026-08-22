@@ -174,7 +174,7 @@ its line moving with it.
 - [D150](#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22) — a first sync that never finishes: two facts and no threshold
 - [D151](#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22) — owner resolution, and the noun collision that turned out to be the header's fault
 - [D152](#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22) — discovery: what each call costs, and the four ways it fails quietly
-- [D153](#d153--the-pm-injected-nine-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22) — the PM injected nine boxes into a running Phase 5, which is the rule the PM was enforcing
+- [D153](#d153--the-pm-injected-ten-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22) — the PM injected ten boxes into a running Phase 5, which is the rule the PM was enforcing
 
 ## Why it exists — where the gap is
 
@@ -13037,7 +13037,7 @@ the wire to the sidebar's five sections**, so *workloads / network / storage /
 config / cluster* **cannot come from discovery**.
 [Invariant 12](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
 *never a hard-coded list* is true of the kinds and cannot be made true of the
-sections by this call. **Phase 9's sidebar box needs that ruling before it is
+sections by this call. **Phase 11's sidebar box needs that ruling before it is
 briefed**, and it is written down here so it is not discovered there.
 
 **`Browsable` carries four strings, a bool and the verbs**, goes through `ingest`
@@ -13056,7 +13056,7 @@ own *"common pitfall"*.
 `has_group("metrics.k8s.io")` is a cache lookup on the same result, zero extra
 round trips.
 
-### D153 — the PM injected nine boxes into a running Phase 5, which is the rule the PM was enforcing (2026-08-22)
+### D153 — the PM injected ten boxes into a running Phase 5, which is the rule the PM was enforcing (2026-08-22)
 
 **`CLAUDE.md` says a box is never added to an open phase.** Work found mid-phase is
 recorded where it belongs and boxed in a *later* one, so the phase that is running
@@ -13065,20 +13065,24 @@ can converge —
 exists because twelve boxes were injected into a running Phase 3 on 2026-08-14 and
 the phase stopped closing.
 
-**Over 2026-08-22 the PM injected nine into a running Phase 5**, one or two at a
-time, each one a genuine finding from the box that had just landed:
+**Over 2026-08-22 the PM injected ten into a running Phase 5**, one or two at a
+time, each one a genuine finding from the box that had just landed. The right-hand
+column is where the triage below sent it — line numbers are deliberately not
+recorded, because the first draft of this table carried nine of them and every one
+was stale within a day:
 
-| | box |
+| box | went |
 |---|---|
-| 2173 | nothing observes what k8rs puts on the wire (a fake API server) |
-| 2275 | the ingest guard bounds every field and no collection |
-| 2393 | the token-hygiene scan reads `struct` and not `enum` |
-| 2412 | `no second outbound path` catches only a literal hostname |
-| 2429 | `tests/binary.rs` pins two of nine printed shapes |
-| 2443 | nothing committed exercises the unread-kind branch |
-| 2458 | W1 draws no card on a live cluster |
-| 2476 | `TYPES_BUILT_FOR` is a third copy of the pin |
-| 2495 | rule 13's `else` states a fact the cluster never gave |
+| nothing observes what k8rs puts on the wire (a fake API server) | backlog |
+| the ingest guard bounds every field and no collection | backlog |
+| the token-hygiene scan reads `struct` and not `enum` | **stayed** |
+| `no second outbound path` catches only a literal hostname | backlog |
+| `tests/binary.rs` pins two of nine printed shapes | backlog |
+| nothing committed exercises the unread-kind branch | backlog |
+| W1 draws no card on a live cluster | backlog |
+| `TYPES_BUILT_FOR` is a third copy of the pin | backlog |
+| rule 13's `else` states a fact the cluster never gave | backlog |
+| `{:?}` on a `kube::Config` prints a bearer token | **stayed** |
 
 Every one is real and several are security findings. **That is exactly what makes
 the rule hard to keep** — each was justified on its own, in the turn that found it,
@@ -13087,24 +13091,42 @@ was made twice and was true both times.
 
 **It was caught by an agent and not by the PM**, on the discovery brief: the PM
 called discovery *"Phase 5's seventh box"*, and `dev-core` read the file and
-answered that it is the **third unchecked** one — 2173 and 2275 sit above it, and
-the PM put both there. **The same brief was the third in a row where the PM
+answered that it is the **third unchecked** one — the fake API server and the
+unbounded collections sat above it, and the PM put both there. **The same brief was the third in a row where the PM
 summarised a box instead of quoting it**, and an agent caught all three.
 
 **The rule that broke was not the one that was written down.** *A box is never
 added to an open phase* was known and quoted at agents repeatedly in the same
 session. What was missing is that **the PM never re-read the phase to see the
-shape of what it had become** — nine boxes accumulate one at a time, and no single
+shape of what it had become** — ten boxes accumulate one at a time, and no single
 addition looks like the failure. The cheap check is the one `dev-core` ran without
 being asked: **list the phase's unchecked boxes in file order and see whether the
 one you are about to brief is the first.** Forty seconds, and it is the same shape
 as every other gate in this repo — a machine or a list, never a memory.
 
-**Ruled, for the session that picks this up:** the nine stay where they are for now
-rather than being moved in the same turn that discovered the problem — a hurried
-triage is how the wrong thing gets deleted. **Phase 5 does not close until they are
-triaged**, and the triage is: anything that is a *finding needing a ruling* goes to
-[`backlog.md`](backlog.md), which is its designated home; anything genuinely
-blocking a Phase 5 box stays and says so in its own body. The note at Phase 5's
-head in `todo.md` carries this instruction so it is met before the next box, not
-after.
+**Ruled, and executed on 2026-08-22 before the next box was briefed.** The ten
+were deliberately left in place in the turn that found the problem — a hurried
+triage is how the wrong thing gets deleted — and moved in the next one. The test
+applied was *does this block a named Phase 5 box*, not *is this important*: every
+one of the ten is important, which is why importance decides nothing here. **Eight
+went to [`backlog.md`](backlog.md)**, under a heading that names this triage, and
+are read at a phase close like everything else in that file. **Two stayed**, and
+they are the same shape as each other: `connect()` is a Phase 5 box, and both name
+a guard that goes vacuous at exactly the moment `connect()` hands the process a
+credential — the token-hygiene scan that cannot see an `enum`, and `{:?}` over a
+`kube::Config`. That is [D141](#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)'s
+shape, which this project has already paid for once.
+
+**Two of the eight are live-path correctness and not test debt**, and the phase-close
+triage should rank them first: W1 draws no card on a real cluster at all, and rule
+13's `else` tells a reader their storage and network are fine on a cluster that
+never published the condition. Both need a ruling before they can be boxed, which is
+precisely why `backlog.md` and not a later phase is their home.
+
+**The count in the first draft of this entry was nine and it is ten.** The agent
+counted what it could see in one read; the triage counted by diffing the phase's box
+list against the commit before the phase opened, and found `{:?}` on a
+`kube::Config` — injected the same day, by the same PM, in the same pattern. A
+process failure gets measured the same way as a claim about the code
+([D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)):
+the file says what happened, the reader's count says what was noticed.

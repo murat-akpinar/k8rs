@@ -2021,22 +2021,24 @@ the temporary main can print any of them.
 Goal: the same findings and reports, from a living cluster — and the first
 public release.
 
-> **⚠ Read before picking the next box.** Over 2026-08-22 the PM injected **nine**
-> boxes into this phase while it was running — 2173, 2275, 2393, 2412, 2429, 2443,
-> 2458, 2476 and 2495 — which is the rule `CLAUDE.md` states and D103 exists to
-> enforce. Every one is a real finding from the box that had just landed, and
-> several are security findings; that is what made each addition easy to justify
-> and the pattern invisible until an agent counted
-> ([D153](NOTES.md#d153--the-pm-injected-nine-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22)).
-> **Triage them before briefing anything else**: a finding that needs a ruling goes
-> to [`backlog.md`](backlog.md), which is its designated home; one that genuinely
-> blocks a Phase 5 box stays and says so in its own body. **This phase does not
-> close until that is done.**
+> **⚠ Read before picking the next box.** Over 2026-08-22 the PM injected **ten**
+> boxes into this phase while it was running, which is the rule `CLAUDE.md` states
+> and D103 exists to enforce. Every one is a real finding from the box that had
+> just landed, and several are security findings; that is what made each addition
+> easy to justify and the pattern invisible until an agent counted
+> ([D153](NOTES.md#d153--the-pm-injected-ten-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22)).
+>
+> **Triaged 2026-08-22 and this gate is met.** Eight went to
+> [`backlog.md`](backlog.md) under a heading that names this triage; **two stayed**,
+> both because a guard of theirs goes vacuous exactly when `connect()` lands, and
+> both say so in their own bodies. Nothing else is added to this phase.
 >
 > And the cheap check that would have caught it, which costs forty seconds: **list
 > this phase's unchecked boxes in file order and confirm the one you are about to
 > brief is the first.** The PM briefed discovery as "the seventh box"; it was the
-> third unchecked one.
+> third unchecked one. **The count in this note was itself wrong until the triage
+> re-measured it** — the agent counted nine, the diff against the phase's pre-open
+> state says ten.
 
 - [x] `k8s.rs`: kube-rs `watcher` over Pods, Nodes and
       Deployments/StatefulSets/DaemonSets + prune (drop `managedFields`) →
@@ -2187,19 +2189,6 @@ public release.
       cannot be distinguished from inheriting it
       ([D147](NOTES.md#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)).
       456 + 7 tests, 27 mutants 0 missed
-- [ ] **Nothing observes what k8rs actually puts on the wire — every claim about
-      it is read off kube's source.** D147 established the initial LIST pages at
-      500 and follows `continue` itself **by reading
-      `kube-runtime-4.2.0/src/watcher.rs`**, and the tests synthesise the
-      `Init → InitApply* → InitDone` sequence rather than receiving it. A
-      **localhost fake API server** answering canned paginated responses would let
-      the real `watcher()` run against it and turn four read claims into observed
-      ones: that `limit=500` is sent, that the `continue` token comes back, that a
-      compacted token restarts the LIST, and that a 403 arrives as
-      `InitialListFailed` rather than another variant. It needs `tokio`'s `net`
-      feature — **a feature on a crate already present, not a twelfth crate**, so
-      invariant 10 is not in question. Done when a test drives the real watcher
-      against it and each of the four is asserted from what crossed the socket
 - [x] **Find out whether kube-rs rate-limits us, and if it does, put it on
       screen** — client-go ships a client-side QPS limiter, so for years a k9s
       user reporting "slow" was partly reporting a queue inside their own binary
@@ -2289,23 +2278,6 @@ public release.
       [D150](NOTES.md#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22)).
       469 + 7 tests, 27 mutants 0 missed. **The PM's brief quoted this box's title
       wrongly and dropped the third clause**; the author read the file and said so
-- [ ] **The ingest guard bounds every field and no collection, so the product of
-      the two is still unbounded.** `k8s::ingest` caps an identifier at 512 bytes
-      and free text at 4096
-      ([D146](NOTES.md#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22)),
-      but a pod with 100 000 finalizers costs 100 000 × 512 and every one of them
-      is individually legal. Same for `labels`, `tolerations`, `volumes`,
-      `containers` and `conditions`. **Deferred deliberately and not overlooked**:
-      dropping list entries is a *silent* cut, which is the exact thing
-      `… (shortened by k8rs)` exists to prevent, and the box that added the
-      per-field bound was asked for a bound per field. So this box's real
-      question is **what a reader is told when a list is cut**, and the field
-      answer does not transfer — *"3 of 100 000 finalizers shown"* is a sentence,
-      not a marker. Decide that first, then the numbers, and take them off a
-      census the way the field bounds were rather than inventing them. Note the
-      one place the guard already loses rather than shortens: two labels whose
-      keys truncate to the same string collapse into one, first in key order
-      winning
 - [x] **Owner name resolution**: a pod's `ownerReferences` names its
       *ReplicaSet*, and the group heading has to read `web`, not
       `web-7d4f5c6b8`. Fetch the ReplicaSet on demand, cache by UID, never
@@ -2372,7 +2344,7 @@ public release.
       kube's doc claims the opposite. Proven by test. **`verbs` is the resource's,
       not the reader's** — the brief said otherwise and was wrong; only a
       `SelfSubjectAccessReview` answers permission and that lives in `ops.rs`.
-      **And `categories` never survives kube's parse**, so Phase 9's five sidebar
+      **And `categories` never survives kube's parse**, so Phase 11's five sidebar
       sections cannot come from discovery — a ruling that box needs before it is
       briefed ([D152](NOTES.md#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22)).
       486 + 7 tests, 5 mutants 0 missed. **This was not the first unchecked box and
@@ -2431,7 +2403,7 @@ public release.
       field are all caught. But its `STRUCT` regex matches `struct` only, so
       **`enum Conn { Up(kube::Client), Down }` is invisible, and so is the struct
       that owns it**; `src/` already has 11 enums, and a connection-state enum is
-      the natural shape for the box directly below this one. Also missed: a type
+      the natural shape for the `connect()` box below. Also missed: a type
       alias (`type C = kube::Client`), and `ClientBuilder`, because `\bClient\b`
       has no boundary before `B`. Measured shape by shape by `tester`,
       2026-08-22 — **and its first probe run reported two of these as caught
@@ -2443,118 +2415,6 @@ public release.
       when the credential arrives is the shape
       [D141](NOTES.md#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
       already cost this project once
-- [ ] **`no second outbound path` catches only a hostname somebody typed as a
-      literal.** Fed the shapes rather than read as a regex: a literal
-      `"https://telemetry.k8rs.dev/collect"` is caught, and
-      `format!("https://{host}/collect")`, string concatenation, a bare hostname
-      with no scheme, and a host handed in at runtime are all **missed** — as is
-      an HTTP crate declared under `[target."cfg(unix)".dependencies]`, because
-      the dependency walk reads only `dependencies`, `dev-dependencies` and
-      `build-dependencies`. So the check **cannot tell the API server from a
-      second path**: it passes the kube path not by recognising it as the one
-      allowed connection but because that path happens to contain no hostname
-      literal. The literal form is the only one refused, and it is the form
-      nobody adding telemetry would use. The `[target.*]` walk is cheap and
-      should just be done; **an assembled host is not decidable by grep, so the
-      honest half is to say what the check covers** rather than let its name
-      promise containment it does not have (`tester` wrote the limit into the
-      docstring on 2026-08-22 — this box is the fix, not the disclosure).
-      `tester`'s
-- [ ] **`tests/binary.rs` is the only test that runs the built binary, and it pins
-      two of the nine shapes that binary prints.** It caught the header change —
-      whole-stdout literal, so a *wrong* count would have reddened as loudly as a
-      removed noun — but only for one input: `healthy.json` is 1 pod, 0 nodes, no
-      unread kind, no finding. **Never covered at the process boundary**: the tally
-      (`20 critical, 9 warnings`), a card's shape, the unread-kind clause, and
-      `--analysis` entirely — `grep -c analysis tests/binary.rs` is **0**, so the
-      seven panes have never been printed by a process any test watched. **The
-      cheapest fix is one line of machinery that already exists**:
-      `a_reader_that_closed_the_pipe_costs_nothing` already runs the whole corpus
-      through the built binary and holds the entire report in `whole.stdout`, then
-      asserts only exit 0 and a length — pinning that report's first and last lines
-      puts the multi-object header and the tally under process cover for nothing.
-      Found by `tester`, 2026-08-22. `tester`'s
-- [ ] **Nothing committed exercises the driver's unread-kind branch, and a ruling
-      leans on it.** `take()` files Services and CertificateSigningRequests into
-      the snapshot, so all 55 fixtures are kinds the driver reads and
-      `k8rs tests/fixtures/*.json` prints `55 pods · 4 nodes` with no unread-kind
-      clause — the branch is dead over the whole corpus. It is covered whole-line
-      by unit tests over `header` with a synthesised pair, so the mechanism works;
-      but D121's own example of it went stale unnoticed and
-      [D151](NOTES.md#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)
-      then leaned on it as *the* surviving mechanism. Done: a committed fixture of
-      a kind no rule reads, so the branch is reachable from the corpus and from the
-      binary — or an explicit ruling that a synthesised unit test is enough,
-      recorded so the next reader is not the third to trip on it. Also:
-      **`width-guard.py` reads `src/` only** (`ROOT / "src"`), so `tests/`,
-      `examples/` and `benches/` are outside the 100-column rule — decide whether
-      that is intended and say so in the guard
-- [ ] **W1 draws no card at all on a live cluster for the refusal it exists to
-      catch.** Rule W1 reads a ReplicaSet's `ReplicaFailure` condition — *Kubernetes
-      refused to create the pods this workload asked for* — and the ReplicaSets it
-      is about have `replicas: 0` **because that is what the refusal means**. So no
-      pod carries their `ownerReference`, so owner resolution never names them, so
-      nothing ever fetches them, and invariant 6 forbids watching ReplicaSets.
-      Measured, not reasoned: the only controlling owners any pod in the corpus
-      names are `kindnet`, `kube-proxy`, a `Node` and three ReplicaSets — none of
-      them the quota-refused one — while `quota-replicasets.json` carries the
-      condition with `replicas: 0`
-      ([D151](NOTES.md#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)).
-      The rule passes every test because the file driver hands it a ReplicaSet the
-      live path cannot supply. **Two design choices and neither is obviously
-      right**: LIST the ReplicaSets of a Deployment that is short of pods — a LIST
-      and not a `get`, and arguably the same fetch Waste's `replica_sets` already
-      wants — or reconsider W1's kind gate, which exists so that one refusal does
-      not draw two cards, the Deployment carrying the same condition. Decide which,
-      and say what happens to the *other* card either way
-- [ ] **`TYPES_BUILT_FOR` is a third copy of the `k8s-openapi` pin and
-      `fixture-audit.sh` compares only two of them.** The script already parses
-      `features = ["v1_NN"]` out of `Cargo.toml` and compares it with
-      `tests/fixtures/K8S_VERSION`; `src/k8s.rs` now carries the same number again,
-      as the version k8rs tells users it understands. A test ladder guards two of
-      the three ways they can drift apart — pin lowered, constant edited alone —
-      and **not the third: the pin raised to `v1_37` on a newer `k8s-openapi`**,
-      which would tell every user on 1.37 that their cluster is newer than this
-      build, i.e. D99's table stated backwards **in a user-facing string**. The
-      author's own argument for the ladder was that raising the pin needs a
-      dependency bump a human reads — and the author then withdrew it, because
-      `just check` is where drift is supposed to be caught and this is the one
-      guard whose green says nothing about the case that matters. Done: the script
-      greps `const TYPES_BUILT_FOR: u32 = NN;` and asserts equality, its
-      `--self-test` gains a row where they disagree **and** one where the file
-      fails to parse (which must fail loudly, never pass as agreement — the trap
-      D99's own guard fell into), and the ladder test is **deleted in the same
-      change**, because two guards for one number is the second copy again.
-      `tester`'s
-- [ ] **Rule 13 tells a reader their storage and network are fine on any cluster
-      that never published the condition — and every `else` over an API `Option`
-      is the same shape.** `placed_but_never_started` reads
-      `ready_to_start_containers`, and its `else` prints *"this pod has its
-      storage and its network, so the block is later — the image is still
-      downloading, or the container could not be created"*. An **absent**
-      condition takes that branch, so on a cluster below 1.29 — where the
-      `PodReadyToStartContainers` condition does not exist in the API types at all
-      — the card asserts something the cluster never said, and sends a reader
-      whose CNI is broken to look at the image pull. **This is the whole reason
-      the supported floor is 1.29**, so fixing it is what would let the floor
-      move down ([D149](NOTES.md#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22)).
-      The fix is a third arm: say nothing about storage or network when the
-      condition is absent. `rules.rs` is frozen, so this is a
-      [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
-      question — and its first condition is *a defect proven on a committed
-      capture*, which this is **not**: every committed capture comes from
-      v1.36.1, where the condition is always present. So it needs either a
-      capture from an older cluster or an explicit ruling that the API types are
-      the object.
-      **And the general form is the part worth more than the one rule.** D99 names
-      two ways an old cluster does worse than answer nothing; this is a third —
-      **an `else` that treats *absent* as *the negative case is false*, turning a
-      missing field into a positive claim.** Invariant 5's *a missing field means
-      no finding* does not cover it, because the missing field does not remove the
-      finding, it changes the finding's **text**. Done when rule 13 has its third
-      arm **and** every other `else` over an `Option` from the API has been read
-      against the same question, with the ones that are safe named so nobody
-      re-audits them
 - [ ] **`{:?}` on a `kube::Config` prints a bearer token, and our own guard
       structurally cannot see it.** `kube::Config` derives `Debug`
       (`config/mod.rs:126`). Its `password`, `token` and `client_key_data` are
@@ -3061,7 +2921,14 @@ string and key was settled in the design phase, so this phase is drawing.
       `6 days ago` sits flush against it, so the mockup does not say whether
       the timestamp is right-aligned or trailing the title. Pre-existing, and
       an ambiguous mockup transcribes into an arbitrary renderer
-- [ ] Layout: sidebar · content pane · command log strip · key footer
+- [ ] Layout: sidebar · content pane · command log strip · key footer.
+      **The sidebar's five sections cannot come from discovery** —
+      `categories` is the closest thing on the wire to *workloads / network /
+      storage / config / cluster* and it does not survive kube's parse, so
+      [invariant 12](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
+      *never a hard-coded list* holds for the kinds and cannot be made to hold
+      for the sections by that call. **Rule it before briefing this box**
+      ([D152](NOTES.md#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22))
 - [ ] **Alerts view** (the default on startup): findings list, severity symbol,
       title bright / evidence dim, blank line between findings
 - [ ] **Resources view**: generic table driven by server-side columns; works
