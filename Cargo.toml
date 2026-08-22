@@ -54,6 +54,16 @@ tokio = { version = "1.53.1", default-features = false, features = [
     "macros",
 ] }
 
+# **The eleventh crate, and the one reversal of invariant 10**
+# ([NOTES § D143](NOTES.md)). Every entry point in `kube-runtime` returns
+# `impl Stream` and `Stream` is not in `std`, so the ten approve a client and
+# nothing that can consume it. This adds no compiled code: `futures-util` is
+# already linked under `kube-client`. The facade `futures` would bring channels,
+# sinks, executors and `io` for the one trait we need, so this is the narrow one.
+futures-util = { version = "0.3.34", default-features = false, features = [
+    "std",
+] }
+
 [dev-dependencies]
 # Only the fixture tests parse JSON in Phase 3 — the decode they exercise is
 # `serde` into `k8s_openapi::api::core::v1::Pod`. It moves up to a real

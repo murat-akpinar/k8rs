@@ -169,13 +169,21 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
    the temp file behind `e` edit: mode 0600, removed after use.
 9. **Free text from the API is untrusted.** Strip control characters before it
    reaches the screen, or a crafted pod name rewrites the user's terminal.
-10. **No new dependencies without asking.** The ten allowed crates: `kube`,
-    `k8s-openapi`, `ratatui`, `crossterm`, `tokio`, `anyhow`, `serde_json`,
-    `serde_yaml_ng`, `x509-parser`, `similar`. `similar` arrives only in v0.4
-    with `edit` — approved is not the same as present. No `clap` while the flags
-    are `--read-only` / `--context` / `--namespace` / `--once`; no `tracing`
-    until debugging demands it
+10. **No new dependencies without asking.** The **eleven** allowed crates:
+    `kube`, `k8s-openapi`, `ratatui`, `crossterm`, `tokio`, `anyhow`,
+    `serde_json`, `serde_yaml_ng`, `x509-parser`, `similar`, `futures-util`.
+    `similar` arrives only in v0.4 with `edit` — approved is not the same as
+    present. No `clap` while the flags are `--read-only` / `--context` /
+    `--namespace` / `--once`; no `tracing` until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
+    **The eleventh was a reversal and is the shape to argue from**
+    ([D143](NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)):
+    every `kube-runtime` entry point returns `impl Stream`, `Stream` is not in
+    `std`, so the ten approved a client and nothing that could consume it. It
+    added **no compiled code** — 213 crates in `Cargo.lock` before and after —
+    because `futures-util` was already linked under `kube-client`. A crate that
+    is already in the build and only needs *naming* is the narrow case; `clap`
+    and `tracing` are not, which is why they are still refused.
 11. **Eight product files, flat.** `main.rs / k8s.rs / ops.rs / rules.rs /
     analysis.rs / views.rs / ui.rs / theme.rs` — no `mod.rs` pyramid, no trait
     layer, no plugin system. Exactly one ninth is pre-approved: `dialog.rs`, if

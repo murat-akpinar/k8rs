@@ -164,6 +164,9 @@ its line moving with it.
 - [D140](#d140--phase-5s-two-dependencies-the-version-that-pairs-with-the-pin-and-rustls-because-the-release-targets-decide-it-2026-08-22) — Phase 5's two dependencies: the version that pairs with the pin, and rustls because the release targets decide it
 - [D141](#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22) — the write guard has never run, and the fix is to give the matching to the tool that resolves paths
 - [D142](#d142--a-write-does-not-have-to-go-through-apik-and-the-allowlist-already-fits-the-surface-that-was-missed-2026-08-22) — a write does not have to go through `Api<K>`, and the allowlist already fits the surface that was missed
+- [D143](#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22) — the eleventh crate, and why the list of ten was wrong rather than the task
+- [D144](#d144--the-snapshot-stores-shape-and-the-ten-choices-the-box-did-not-make-2026-08-22) — the snapshot store's shape, and the ten choices the box did not make
+- [D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22) — a failure that clears itself is a failure nobody sees, and the driver's six choices
 
 ## Why it exists — where the gap is
 
@@ -12297,3 +12300,167 @@ functions for the same reason and are likewise unbanned. They **build** a reques
 rather than send one, so they fall under the residual named above — reaching a
 server still needs `Client` — and they are behind the `kubelet-debug` feature,
 which is off.
+
+### D143 — the eleventh crate, and why the list of ten was wrong rather than the task (2026-08-22)
+
+**This is a reversal of [invariant 10](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)** — *no new dependencies without asking* — written here before it was
+acted on, which is what that section requires of a reversal. The user was not
+available; the reasoning is set out in full so it can be overturned cheaply if
+they disagree, and overturning it costs one line.
+
+**The plan could not build the thing it approved.** `kube` is one of the ten. Every
+public entry point in `kube-runtime 4.2.0` — `watcher`, `metadata_watcher`,
+`watch_object`, `reflector` — returns `impl Stream`, and `store()` hands back a
+`Writer` that only a stream fills. There is no callback API and no async-iterator
+API. `Stream` is **not in `std`** (it is still unstable as `AsyncIterator`), so
+naming the trait, or the `StreamExt::next` that drives it, requires a crate none of
+the ten provides. Measured against rustc rather than read off documentation:
+
+    error[E0599]: no method named `next` found for struct
+                  `Pin<Box<impl Stream<Item = Result<Event<Pod>, Error>> + Send>>`
+    help: trait `StreamExt` which provides `next` is implemented but not in scope
+
+So the ten approve a client and nothing that can consume it. That is the plan being
+wrong, and `CLAUDE.md` says what to do with a plan that is wrong: **fix the plan,
+record the reversal, continue** — not work around it.
+
+**It adds no compiled code.** `futures` and `futures-util` are already in
+`Cargo.lock` at 0.3.34, pulled by `kube-client`, which is a hard dependency of the
+`client` feature D140 turned on. `cargo tree -i futures-util -e normal` puts them
+under `kube-client → kube → k8rs` today. Declaring one makes an already-linked
+trait *nameable*; it does not add a crate to the build. That is what separates this
+from `clap` or `tracing`, the two invariant 10 names by hand — both of those would
+be new code bought for convenience, and both have alternatives. This has none.
+
+**Ruled: `futures-util`, not the `futures` facade**, and with
+`default-features = false`. The facade re-exports channels, sinks, executors,
+`io` and the `async-await` macros; the one thing needed is `StreamExt`. Narrower
+is the point — the same reasoning D140 used to keep `oauth`, `oidc`, `socks5` and
+`ws` out of a binary whose whole trust model is one kubeconfig and one API server.
+
+**The list of ten becomes eleven and `CLAUDE.md` says so**, because a rule that no
+longer describes the repo is worse than no rule: the next agent reads *ten* and
+either believes it or stops trusting the invariant. If the user prefers the
+facade, or prefers to stay at ten and give up `kube`'s watcher, this entry is the
+one to reverse.
+
+### D144 — the snapshot store's shape, and the ten choices the box did not make (2026-08-22)
+
+Phase 5's first box said *watcher → prune → store*. It did not say what the store
+does when a watch relists, what it keys on, or whether the clock is a field or a
+parameter. `dev-core` had to settle all of that to write the file and reported
+every one; they are ruled here rather than left in a turn that ends.
+
+**The prune is the decode, and there is no prune step.** `rules.rs`'s `From` impls
+already read a whole API object and construct the reduced struct, so converting on
+ingest keeps exactly the fields the snapshot types name and nothing else. A
+separate pre-decode prune buys nothing — the object is deserialized by the time we
+see it
+([D115](#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18))
+— and it is precisely where
+[D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)'s
+trap bites, because a prune written from the structs keeps the container's restart
+policy and drops the pod's. **That trap is guarded by a test and not by a
+comment**: the exact literal prune the box warns about is injected and the test
+goes red.
+
+**The biggest field dropped is not `managedFields`.** On a real cluster it is a
+node's `status.images` — every cached image with every tag. Worth knowing, because
+`managedFields` is the one everybody names.
+
+**`snapshot(now: Time)` takes the clock as a parameter, and the brief was looser
+than the decision.** The brief said *`k8s.rs` captures `now`*;
+[D18](#d18--the-clock-is-an-input-not-an-ambient-fact) says the caller captures it
+once per pass. The decision wins. It also keeps `main.rs`'s `wall_clock()` from
+growing a second copy — that function exists because `jiff`'s `Timestamp::now` sits
+behind a feature `k8s-openapi` does not enable — and it keeps the tests
+deterministic.
+
+**`complete` latches: once true it never goes false.** A relist buffers into a
+fresh map and swaps atomically, so the *last complete* answer stays readable while
+the watch re-lists.
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12) forbids
+publishing a **partial** list; it does not forbid a slightly stale one, and
+blanking the screen on every watch restart is the worse answer. **An `InitDone`
+with no `Init` behind it publishes nothing** rather than an empty cluster — it
+fails closed, which is the same rule one level down.
+
+**The key is `(namespace, name)`, not the uid.** `ObjectId` derives neither `Ord`
+nor `Hash`, deliberately, so it cannot key a map — and a delete-then-recreate must
+leave one object in the store, not two. **One map per stream, five maps for three
+types**, so a Deployment and a DaemonSet may share a name and one kind can relist
+without disturbing the other two.
+
+**Two costs named at the point of choice rather than discovered later.** The store
+iterates `BTreeMap`, so watch output is namespace-then-name ordered while
+`main.rs`'s `load()` gives file order — the finding order within a severity band
+therefore differs between the two builders of one `ClusterSnapshot`, and that is
+cheap and strictly better, not a defect. And `snapshot()` **deep-copies the whole
+watched set per call**, forced by `ClusterSnapshot` being owned and frozen; it is a
+ceiling in the doc comment, to watch if a large cluster ever redraws faster than
+[invariant 7](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
+coalescing.
+
+**What the resident-set claim rests on, and what it does not.** The `< 50MB` figure
+was **not** measured: `PodSnapshot` is not `Serialize` and heap size is not
+readable without a new crate or a derive on a frozen type. What was proven is
+*equivalence* — `managedFields` injected into a capture before decode, asserted to
+have reached the decoded `Pod`, changes nothing the store holds. **The size claim
+is still a claim**, and Phase 5's *measure resident memory against 10 000 pods*
+box is where it stops being one.
+
+### D145 — a failure that clears itself is a failure nobody sees, and the driver's six choices (2026-08-22)
+
+`dev-core` wrote the driver loop, then wrote a test that killed its own design and
+reported it rather than quietly keeping the green. The ruling and the five other
+choices it had to make are here.
+
+**The defect, and it was invisible to every single-watch test.** The first draft
+cleared `Store::failure` on every successful event — *"the last failure, cleared by
+the next event"*, which reads as sensible. Five watches run at once. On a live
+cluster the four healthy ones deliver traffic constantly, so **a permanent 403 on
+the pod watch would be erased within milliseconds** and the screen would show a
+cluster with no pods and nothing saying why. That is swallowing the error with
+extra steps, and it is the failure
+[§ Errors that lie](PRIOR-ART.md#c-errors-that-lie) is a whole section about. No
+one-stream test could see it; the test that found it is *one watch failing while
+four stay healthy*, which is the shape a 403 actually takes.
+
+**Ruled: `failure` is monotone — nothing clears it.** Clearing it correctly needs
+per-watch identity, and that is the reconnect box's design, not this one's. Between
+a stale failure that is visible and a real failure that is invisible, a diagnosis
+tool takes the first every time. The cost is named and is real: **one transient
+error at startup makes the tool report a failure for the rest of the session.**
+That is a false alarm the reader can see and dismiss, against a silent blind spot
+they cannot. **The reconnect box replaces this field rather than reading it
+forever**, and its box in `todo.md` says so.
+
+**`dev-core` changed a test it had already seen green, and said so.** The old test
+asserted `failure().is_none()` after a later event — it pinned the behaviour that
+turned out to be wrong. Replaced by one asserting the opposite. Recorded because
+*changed a test to reach green* is the shape this repo distrusts most, and the
+distinction that makes this the honest case is that the **requirement** moved, not
+the expectation: the new test asserts what the requirement says must happen, which
+is [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)'s own rule.
+
+**The five other choices, ruled as made.** One `Update = Box<dyn FnOnce(&mut Store)
++ Send>` gives five streams of three API types a common item to merge, so
+`select_all` can pump all five in **one task with one `&mut Store`** — no lock, no
+channel, and no per-kind code in the loop. The alternatives were `tokio::select!`
+with five generic parameters and five near-identical arms, or five tasks behind a
+lock. `drive` and `updates` stay private until `connect()` needs them. The failure
+is kept as `watcher::Error` rather than a string, so the reconnect box can switch
+on the variant and so no untrusted-text field is created before the strip exists —
+whatever renders it strips it first
+([invariant 9](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)),
+because that text is the API server's and can name a pod. And `drive(Vec::new(),
+…)` returns immediately with the gate still shut — `select_all` on an empty `Vec`
+does not panic, **measured rather than assumed**, and pinned by a test.
+
+**One ceiling the loop inherits and does not close.** `select_all` **drops** a
+stream that finishes and carries on with the rest, so if one of the five ever
+ended, that kind would freeze at whatever it last held and be presented as live
+with nothing saying so. kube's documentation says a `watcher()` stream recovers on
+the next poll rather than finishing — **that is read off the doc, not observed**,
+and it is written into `drive`'s doc comment as the reconnect box's inheritance
+rather than as something anybody measured.

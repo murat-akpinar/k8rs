@@ -827,6 +827,7 @@ dependencies = [
 name = "k8rs"
 version = "0.0.0"
 dependencies = [
+ "futures-util",
  "k8s-openapi",
  "kube",
  "serde_json",

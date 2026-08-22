@@ -2021,7 +2021,7 @@ the temporary main can print any of them.
 Goal: the same findings and reports, from a living cluster — and the first
 public release.
 
-- [ ] `k8s.rs`: kube-rs `watcher` over Pods, Nodes and
+- [x] `k8s.rs`: kube-rs `watcher` over Pods, Nodes and
       Deployments/StatefulSets/DaemonSets + prune (drop `managedFields`) →
       snapshot store. **The prune line is "the fields the snapshot types in
       `rules.rs` name, across metadata, spec *and* status" — "metadata + status
@@ -2066,6 +2066,31 @@ public release.
       claim load-bearing; this is D69's shape a second time, caught before the
       code instead of after
       ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14))
+      Done: `Store`, `Watch<T>`, the bootstrap gate and the driver loop — five
+      watches merged into **one task holding one `&mut Store`**, no lock and no
+      channel, and no per-kind code in the loop. **The prune is the decode**, not
+      a step before it: `rules.rs`'s `From` impls already keep exactly the fields
+      the snapshot types name, and D97's literal trap — the prune that keeps the
+      container's restart policy and drops the pod's — is guarded by a test that
+      injects it and goes red, not by a comment. D143 had to be ruled to get
+      here: the ten crates approved a client and nothing that could consume it.
+      **The driver's own first draft was wrong and a test killed it** — clearing
+      `Store::failure` on the next successful event would have had a permanent
+      403 erased in milliseconds by the four healthy watches, so the field is
+      monotone and the reconnect box replaces it
+      ([D144](NOTES.md#d144--the-snapshot-stores-shape-and-the-ten-choices-the-box-did-not-make-2026-08-22) ·
+      [D145](NOTES.md#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)).
+      441 + 7 tests, 22 mutants 0 missed.
+      **Six things are not proven and cannot be until `connect()` lands**, and
+      they are listed rather than implied: that kube delivers the
+      `Init → InitApply* → InitDone` sequence the tests synthesise; that a
+      reconnect re-`Init`s rather than resuming silently; the `< 50MB` resident
+      set, which was **not measured** — only *equivalence* was, that injected
+      `managedFields` changes nothing the store holds; that a 403 arrives as
+      `InitialListFailed` rather than another variant; that kube's retry after an
+      `Err` is not a hot loop; and that a `watcher()` stream never ends, which is
+      read off kube's doc and never observed — `select_all` **drops** a finished
+      stream, so that kind would freeze and still be presented as live
 - [ ] **Bound every free-text field at ingest, not the one field that was
       measured.** The security gate has said *sizes are bounded* since Phase 1
       and nothing below this phase implements it, so today `k8rs` reads, holds
@@ -2214,12 +2239,60 @@ public release.
       reconnector permanently · it called `BailOut` after five retries, so a VPN
       blip over lunch meant the tool was gone on return · each failed check held
       the 120-second call timeout, making recovery slower than the outage. The
-      lesson under all three: k9s survived disconnects during *active* use, where
+      **This box inherits two things from the driver loop and replaces one of
+      them** ([D145](NOTES.md#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)).
+      `Store::failure` is **monotone** — nothing clears it — because clearing it
+      correctly needs per-watch identity and this box is where that lands: a
+      draft that cleared it on the next successful event would have had a
+      permanent 403 on the pod watch erased in milliseconds by the four healthy
+      watches beside it. Replace the field; do not keep reading it. The second is
+      a ceiling nobody has closed: `select_all` **drops** a stream that finishes,
+      so a watch that ended would leave its kind frozen at whatever it last held
+      and presented as live. kube's doc says a `watcher()` stream recovers rather
+      than finishing — **read off the doc, never observed**, so this box is where
+      it gets observed or defended against.
+      The lesson under all three k9s failures: k9s survived disconnects during *active* use, where
       navigation restarts the watches by accident, and only the **idle** path was
       broken — the path nobody tests. So this box is proven idle: leave it
       running against kind, `docker stop` the node, wait past any timeout, start
       it again, and the findings must come back on their own
       ([PRIOR-ART § B3](PRIOR-ART.md#b3--reconnect-logic-dies-quietly))
+- [ ] **The token-hygiene scan reads `struct` and not `enum`, and `connect()` is
+      about to write the enum it cannot see.** `security-guard.py` decides *can
+      this type hold a credential* by matching field types against `\bClient\b`,
+      which works — `kube::Client`, `Arc<kube::Client>` and a rustfmt-wrapped
+      field are all caught. But its `STRUCT` regex matches `struct` only, so
+      **`enum Conn { Up(kube::Client), Down }` is invisible, and so is the struct
+      that owns it**; `src/` already has 11 enums, and a connection-state enum is
+      the natural shape for the box directly below this one. Also missed: a type
+      alias (`type C = kube::Client`), and `ClientBuilder`, because `\bClient\b`
+      has no boundary before `B`. Measured shape by shape by `tester`,
+      2026-08-22 — **and its first probe run reported two of these as caught
+      because the empty-tree canary was firing over a file with no struct in it
+      at all**, which is worth knowing before anybody re-measures. Done: the scan
+      reads enums and their variants' payloads, the alias case is closed or
+      named, and each shape above has a plant proven red (D29). `tester`'s. **It
+      lands before `connect()`, not after** — a guard that goes vacuous exactly
+      when the credential arrives is the shape
+      [D141](NOTES.md#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
+      already cost this project once
+- [ ] **`no second outbound path` catches only a hostname somebody typed as a
+      literal.** Fed the shapes rather than read as a regex: a literal
+      `"https://telemetry.k8rs.dev/collect"` is caught, and
+      `format!("https://{host}/collect")`, string concatenation, a bare hostname
+      with no scheme, and a host handed in at runtime are all **missed** — as is
+      an HTTP crate declared under `[target."cfg(unix)".dependencies]`, because
+      the dependency walk reads only `dependencies`, `dev-dependencies` and
+      `build-dependencies`. So the check **cannot tell the API server from a
+      second path**: it passes the kube path not by recognising it as the one
+      allowed connection but because that path happens to contain no hostname
+      literal. The literal form is the only one refused, and it is the form
+      nobody adding telemetry would use. The `[target.*]` walk is cheap and
+      should just be done; **an assembled host is not decidable by grep, so the
+      honest half is to say what the check covers** rather than let its name
+      promise containment it does not have (`tester` wrote the limit into the
+      docstring on 2026-08-22 — this box is the fix, not the disclosure).
+      `tester`'s
 - [ ] **Connecting is a function, not a step in `main`** — `connect(context)`
       builds the client, runs discovery and the capability probe and starts the
       watches, and can be called again after everything from the previous
