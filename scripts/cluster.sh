@@ -10,9 +10,12 @@
 #   ./scripts/cluster.sh verify      assert each pod reached the state its rule needs
 #   ./scripts/cluster.sh break-runtime reboot a node out from under a container
 #                                    that never crashed, and assert it
-#   ./scripts/cluster.sh break-nodes cordon / taint / stop a kubelet, and assert it
+#   ./scripts/cluster.sh break-nodes cordon / taint / stop a kubelet, place the pod
+#                                    nothing will ever start on that last node, and
+#                                    assert all four
 #   ./scripts/cluster.sh status      nodes, demo pods, memory
-#   ./scripts/cluster.sh unbreak     remove them (clears the stuck finalizer,
+#   ./scripts/cluster.sh unbreak     remove them (clears the stuck finalizer, forces
+#                                    the one pod no kubelet is left to confirm,
 #                                    uncordons, untaints, starts a node whose
 #                                    container is stopped, restarts the kubelet)
 #   ./scripts/cluster.sh reset       down + up + break
@@ -21,8 +24,10 @@
 # `break-runtime` and `break-nodes` are deliberately not part of `break`, and
 # both run *after* the pod fixtures have been captured. `break-runtime` reboots
 # the node one pod is on; `break-nodes` makes one node unschedulable, evicts
-# whatever does not tolerate a NoExecute taint from a second, and kills the
-# kubelet on a third. Any of those changes a pod fixture that is still being
+# whatever does not tolerate a NoExecute taint from a second, kills the kubelet on
+# a third and binds `broken-unstarted` to that third one — the only pod capture
+# this script places itself, and the only one that cannot be taken before this
+# step (NOTES § D156). Any of those changes a pod fixture that is still being
 # settled — a reboot alone raises `restartCount` on every pod on that worker — so
 # `verify` runs before them, the two run in that order, and the node capture
 # comes last (see the `fixtures` recipe in the justfile, which is the only caller
@@ -362,6 +367,20 @@ unbreak() {
   # broken-stuck carries a finalizer nothing ever removes — that is the point
   # of the fixture, and it is why a plain delete would hang here forever.
   "${kc[@]}" patch pod broken-stuck -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+  # The other pod a plain delete does not remove, and for the opposite reason:
+  # `broken-unstarted` is bound to the worker `break-nodes` stopped the kubelet
+  # on, and the kubelet that would confirm a delete is that one. Measured, a plain
+  # `kubectl delete pod` printed `deleted`, blocked to a 40 s timeout, and left the
+  # pod `Terminating` indefinitely
+  # (reports/2026-08-22-rule-13-the-pod-with-no-container-status.md § Undoing it).
+  # The kubelet restart at the foot of this function *does* reap it — but that is
+  # the one step here that is allowed to fail (docker access is per-login on this
+  # machine), and a failure there would leave the pod outliving the promise this
+  # subcommand makes. So it comes down through the API server alone, which is what
+  # PodGC would do to it eventually anyway. Named on its own rather than folded
+  # into the label-selected delete below: `--force` there would change how forty
+  # other fixtures come down, including the finalizer this line above unpicks.
+  "${kc[@]}" delete pod broken-unstarted --force --grace-period=0 --ignore-not-found
   # Every kind that owns a pod, not only Pod: deleting the pod of an owned
   # fixture deletes nothing, because the controller above it puts one straight
   # back. The Service is the StatefulSet's required headless one.
@@ -1122,9 +1141,17 @@ break_runtime() {
 # which every pod on it reads Unknown and, minutes later, is marked for
 # deletion. So this runs *after* the pod fixtures are captured and immediately
 # before the node capture, and `unbreak` puts all three back.
+#
+# **And one pod capture, which is here because it cannot be anywhere else**
+# (NOTES § D156): `broken-unstarted` is bound by hand to the kubelet-less worker,
+# so that it is placed and yet never started. It is the one pod in the file the
+# sentence above does not apply to — its NoExecute tolerations carry no
+# `tolerationSeconds`, so it is the pod on that node that is *not* marked for
+# deletion five minutes later, which is the whole reason it survives to be
+# captured.
 break_nodes() {
   need kubectl; need docker; need jq
-  local kc=(kubectl --context "kind-$CLUSTER") w n
+  local kc=(kubectl --context "kind-$CLUSTER") w n got
   mapfile -t w < <(workers)
   [ ${#w[@]} -ge 3 ] || {
     echo "break-nodes: this cluster has ${#w[@]} worker(s) and the three states need three." >&2
@@ -1208,9 +1235,108 @@ break_nodes() {
   # kind names the container after the node, which is why `workers` can be read
   # from the API and handed to docker unchanged.
   docker exec "${rest[1]}" systemctl stop kubelet
+
+  # --- THE POD THE KUBELET NEVER SEES (NOTES § D156) ---
+  # `broken-unstarted` was created by `break` carrying `schedulerName:
+  # does-not-exist`, so nothing has placed it. Placing it here, by hand, is what
+  # gives rule 13 its empty-status fixture: `PodScheduled: True` with a stamp,
+  # and no `status.containerStatuses` key at all.
+  #
+  # **Through the `binding` subresource, and after the kubelet stop above.** Both
+  # halves are measured
+  # (reports/2026-08-22-rule-13-the-pod-with-no-container-status.md). The
+  # subresource, because it is the only thing that writes the condition — a
+  # create carrying `spec.nodeName` writes none at all, which is rule 14's shape
+  # and not this one's (report § 1 against § 2). After the stop, because a
+  # running kubelet would pull the pod and write a container status for it within
+  # seconds, and the whole fixture is that no such status exists. The pod's own
+  # infinite NoExecute tolerations (scripts/broken.yaml states why) are what stop
+  # the taint manager evicting it once this node goes Unknown a minute from now.
+  #
+  # `default` is spelled out because a raw path has no context to take a
+  # namespace from; every pod in broken.yaml lands there. `-f -` is stdin, which
+  # `kubectl create --raw` names in its own refusal message ("--raw can only use
+  # a single local file or stdin") — no temp file to clean up on a failure.
+  #
+  # **Read the whole pod first, and take three different exits from it**, like the
+  # resize in `break_it` and every undo in `unbreak`. There are three states here
+  # and a probe that only asks *is it bound* collapses two of them:
+  #
+  #   - **not there at all** — `break` was never run, or was run against another
+  #     cluster. Nothing to place, and it is this function that has to say so:
+  #     an empty jsonpath reads exactly like an unbound pod, so the bind below
+  #     would fire and the POST would 404 with `set -e` ending the run on
+  #     kubectl's message. That was this block's own defect, found by the
+  #     operator review (reports/2026-08-22-rule-13-family-review.md § 5).
+  #   - **there and unbound** — the first `break-nodes` of a trip. Bind it.
+  #   - **there and already bound** — the second `break-nodes` of a trip that
+  #     failed at a guard and was re-run, which the cordon pick above goes to some
+  #     length to keep working. A binding POST against a pod that already has one
+  #     is a 409 and `set -e` would end the run on that instead, so it is skipped.
+  #
+  # The assertion below runs in the last two cases alike, so a re-run re-proves
+  # the shape rather than inheriting the first run's claim about it.
+  # stderr is **not** swallowed here, unlike the reads in `unbreak`: kubectl has
+  # already said whether this is a NotFound or an API server that stopped
+  # answering, and those need different things done about them. Guessing between
+  # them in our own words would be the same mistake one line down — a message
+  # that names the wrong cause is worse than the raw one it replaced.
+  local pod
+  pod=$("${kc[@]}" get pod broken-unstarted -o json) || {
+    echo "break-nodes: the line above is why — there is nothing to place on ${rest[1]}." >&2
+    echo "             broken-unstarted is rule 13's empty-status fixture — scripts/broken.yaml" >&2
+    echo "             § broken-unstarted, NOTES § D156 — and 'break' is what creates it." >&2
+    echo "             The three node states above are already applied and ${rest[1]}'s kubelet" >&2
+    echo "             is stopped, so the way back is: $0 unbreak, then $0 break." >&2
+    return 1
+  }
+  if [ -z "$(jq -r '.spec.nodeName // ""' <<<"$pod")" ]; then
+    "${kc[@]}" create -f - --raw "/api/v1/namespaces/default/pods/broken-unstarted/binding" >/dev/null <<EOF
+{"apiVersion":"v1","kind":"Binding","metadata":{"name":"broken-unstarted","namespace":"default"},"target":{"apiVersion":"v1","kind":"Node","name":"${rest[1]}"}}
+EOF
+  fi
+  # Asserted here rather than through the predicate table `assert_states` polls,
+  # and the difference is not style: the bind writes the condition synchronously
+  # (report § 2), so there is nothing to wait for, and a shape that is wrong is
+  # wrong *now* — polling it for seven minutes would only delay the message.
+  #
+  # Four clauses, one per way this capture goes quietly wrong. The node, because
+  # a pod bound to any *other* worker is the positive of D156 ruling 2 wearing the
+  # negative's name, and on a re-run it is the one thing the `if` above could have
+  # skipped past. Then: a bind that wrote no condition, a kubelet that was in fact
+  # still running and wrote a status, and a pod the taint manager already marked
+  # (rule 13 is silent on a deletionTimestamp, so that capture is a fixture of
+  # nothing). `has` and never a length test, because the **absent key** is the
+  # fixture — `containerStatuses: []` is a different object, and one the API
+  # server will not even accept (D156 § 1). `.status // {}` so a pod with no
+  # status block at all fails on the first clause with this message rather than on
+  # a jq type error.
+  "${kc[@]}" get pod broken-unstarted -o json | jq -e --arg n "${rest[1]}" '
+      .spec.nodeName == $n
+      and ([.status.conditions[]? | select(.type == "PodScheduled" and .status == "True"
+                                           and .lastTransitionTime != null)] | length) == 1
+      and (.status // {} | has("containerStatuses") | not)
+      and .metadata.deletionTimestamp == null' >/dev/null || {
+    echo "break-nodes: broken-unstarted did not land on ${rest[1]} as {PodScheduled True, no" >&2
+    echo "             container status, not deleting}, which is the whole of rule 13's" >&2
+    echo "             empty-status fixture (NOTES § D156)." >&2
+    # Not `diagnose`: that one is shared by every other fixture here and prints
+    # neither the node nor the difference between an absent containerStatuses and
+    # a present one with no state — which is three of these four clauses. Its own
+    # line, naming exactly what was asked.
+    got=$("${kc[@]}" get pod broken-unstarted -o json 2>/dev/null \
+          | jq -c '{node: .spec.nodeName,
+                    conditions: [.status.conditions[]? | {type, status, lastTransitionTime}],
+                    containerStatuses: (if (.status // {} | has("containerStatuses"))
+                                        then [.status.containerStatuses[].name] else "ABSENT" end),
+                    deletionTimestamp: .metadata.deletionTimestamp}') || got=
+    echo "             got: ${got:-the pod is gone — something deleted it between the bind and this read}" >&2
+    return 1
+  }
   echo "  cordoned $cordon · tainted ${rest[0]} · stopped the kubelet on ${rest[1]}"
   echo "  (the node controller takes about a minute to notice the third, and it is the"
   echo "   controller — never kubectl — that stamps a timeAdded on a taint)"
+  echo "  broken-unstarted is on ${rest[1]}: placed, and no kubelet left there to start it"
 
   assert_states "${NODE_STATES[@]}"
 }

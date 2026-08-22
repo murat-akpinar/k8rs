@@ -300,7 +300,7 @@ fn the_worst_leads_and_the_row_is_the_container_fact_with_both_numbers_under_it(
         detail_of(&report.rows[1]),
         [
             "Restarted 10 times since this pod started.".to_string(),
-            "This run started 50 min ago.".to_string(),
+            "This run started 2 days ago.".to_string(),
         ],
         "both numbers, one paragraph each, and never divided"
     );
@@ -465,7 +465,7 @@ fn both_numbers_are_the_container_s_own_and_the_row_jumps_to_its_pod() {
             detail_of(row),
             [
                 "Restarted 3 times since this pod started.".to_string(),
-                "This run started 1 hour ago.".to_string(),
+                "This run started 2 days ago.".to_string(),
             ],
             "the count first, then the run's own age off `state.running.startedAt`"
         );

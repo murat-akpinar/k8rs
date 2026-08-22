@@ -20,7 +20,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 certs="$here/../tests/fixtures/certs"
 
-now="2026-08-21 00:00:00Z"   # the reference `now` C1's tests ask about
+now="2026-08-23 00:00:00Z"   # the reference `now` C1's tests ask about
 warn_days=30                 # C1's threshold
 now_s=$(date -u -d "$now" +%s)
 
@@ -32,17 +32,20 @@ declare -A left              # fixture name -> days of validity at `now`
 # `now` above and `fn now()` in each file below are the same fact written twice —
 # the dates below are asserted against this one, and the `Snapshot` every
 # certificate assertion is built with comes from those. Nothing else compares
-# them, so a drift is silent: every file keeps passing while "22 days left" and
-# "expires in" are computed from different instants. Compared as seconds, because
-# they spell the same moment differently (`... 00:00:00Z` here, RFC 3339
-# `...T00:00:00Z` there).
+# them, so a drift is silent: every file keeps passing while the day count below
+# and the card's "expires in" are computed from different instants. Compared as
+# seconds, because they spell the same moment differently (`... 00:00:00Z` here,
+# RFC 3339 `...T00:00:00Z` there).
 #
 # **Two files became three on 2026-08-21** and the check read one of them: the
 # analysis reports pin the same instant in `src/analysis_tests.rs`, and the
-# Certificates pane's `15d` badge and `expired 12 days ago` row are measured from
+# Certificates pane's day badge and its `expired … ago` row are measured from
 # *that* pin against *these* bytes. A guard that reads only `rules_tests.rs` says
 # nothing when the second pin moves — and the repair a moved pin invites is to
-# edit `15d` to match, which is the failure this whole file exists to prevent.
+# edit that badge to match, which is the failure this whole file exists to
+# prevent. The counts themselves live in `pinned[]` below and in no comment here:
+# a fact that moves with every capture is pointed at, never restated, because a
+# copy nothing compares is a lie with a delay on it (NOTES § D57).
 #
 # The spelling differs per file (`time("…")` there, a bare `Time("…".parse())`
 # here), so the pattern takes the first date-shaped string inside `fn now()`
@@ -86,9 +89,9 @@ done
 
 # name | notBefore | notAfter | days left at the reference `now`
 pinned=(
-  "expiring-client|2026-08-12 00:00:00Z|2026-09-05 00:00:00Z|15"
-  "healthy-client |2026-08-12 00:00:00Z|2027-08-12 00:00:00Z|356"
-  "expired-client |2025-08-12 00:00:00Z|2026-08-09 00:00:00Z|-12"
+  "expiring-client|2026-08-12 00:00:00Z|2026-09-05 00:00:00Z|13"
+  "healthy-client |2026-08-12 00:00:00Z|2027-08-12 00:00:00Z|354"
+  "expired-client |2025-08-12 00:00:00Z|2026-08-09 00:00:00Z|-14"
 )
 
 # --- PINNED DATES START ---

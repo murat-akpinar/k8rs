@@ -608,7 +608,7 @@ that cites them expects to find them.
       the kill is older than the grace
       ([NOTES § D75](NOTES.md#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13))
       Closed — [D75](NOTES.md#d75--the-third-role-nobody-asked-about-and-the-card-that-never-cleared-2026-08-13)
-- [ ] **Rule 13 — placed on a node, but the containers never started.** The
+- [x] **Rule 13 — placed on a node, but the containers never started.** The
       twelfth Alerts rule, added on 2026-08-13 by an explicit reversal of
       [invariant 13](CLAUDE.md)'s scope guard: the `ContainerCreating` wedge is
       a weekly failure that no v1 rule sees, and **rule 10 does not see it
@@ -621,21 +621,12 @@ that cites them expects to find them.
       legitimately take minutes to pull and firing under that alerts on every
       cold start. **WARN, not CRITICAL:** the one healthy thing that still
       looks like this is a slow pull.
-      Landed — [D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13) · [D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)
-      **Re-opened 2026-08-22: the residual it was written for is the one shape
-      it cannot see.** `pod.containers` is built from `status.containerStatuses`,
-      so a pod the kubelet has never written a status for gives the rule an empty
-      vector and its `stuck.first()?` returns `None` — and *no container started*
-      is this box's own wording. Measured: `PodScheduled: True`, 45 minutes old,
-      nothing else in `status` → `nothing is broken`. Rule 10 stands down
-      (`scheduled == True`) and rule 14 stands down (`scheduled.is_some()`), so
-      three rules hand the pod to each other. The code calls the silence the
-      N-series' gap, which holds only while the node is in the snapshot with
-      `Ready` not `True` — not for a deleted node, a node with no `Ready`
-      condition, or a hand-set `nodeName`. **Done when** that pod draws rule 13's
-      card, the empty-status shape has a fixture of its own, and the N-series
-      hand-off is stated where it is true rather than in general
-      ([D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22))
+      **Two shapes, not one:** the `ContainerCreating` wedge, and a pod the
+      kubelet has never written a status for at all — which decodes with an
+      empty `containers` and drew nothing until 2026-08-22. That one stands
+      down only where N1 already draws the card, and `unstarted.json` is the
+      capture.
+      Closed — [D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13) · [D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13) · [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22) · [D156](NOTES.md#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)
 - [x] **Rule 14 — nothing has even looked at this pod.** `phase == Pending`
       with **no `PodScheduled` condition at all**, older than **2 minutes**
       from `metadata.creationTimestamp` — a field `PodSnapshot` must gain, and
@@ -1611,12 +1602,16 @@ consumer and need fields no Phase 3 rule reads; they may add fields to those
 types and nothing else in the file — not a rule, not `Finding`, not `ObjectId`,
 not `analyze`
 ([NOTES § D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)) —
-**re-opened 2026-08-22 for exactly two fields**, `status.reason` and whatever
-distinguishes *no container status yet* from *no container*, both of them decode
-changes owed to the two boxes this file re-opened above. D42 named
-`status.reason` itself and Phase 4 closed without it; nothing else in the file
-un-freezes
+**re-opened 2026-08-22 for exactly one field**, `status.reason` — the decode
+change owed to the Waste box this file re-opened above. D42 named it itself and
+Phase 4 closed without it; nothing else in the file un-freezes
 ([NOTES § D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)).
+**D155 opened it for a second field and that half is closed unused**: telling
+*no container status yet* from *no container* needs nothing, because the API
+server refuses a pod whose `spec.containers` is empty or absent, so an empty
+`PodSnapshot::containers` already means exactly one thing
+([NOTES § D156](NOTES.md#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)
+ruling 1).
 
 ## Phase 4 — Analysis reports
 

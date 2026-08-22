@@ -177,6 +177,7 @@ its line moving with it.
 - [D153](#d153--the-pm-injected-ten-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22) — the PM injected ten boxes into a running Phase 5, which is the rule the PM was enforcing
 - [D154](#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22) — the browser's rows: a 37× that was one event, a floor measured from the answer, and a guard that stopped at `Cc`
 - [D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22) — a whole-project review found two boxes checked over work their own text does not describe
+- [D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22) — rule 13's silence is ruled on the node, and the three-of-four routes to its own shape that delete themselves
 
 ## Why it exists — where the gap is
 
@@ -2909,6 +2910,21 @@ in Rust, not code.
 > sits one day after it. Nothing asserts that equality in either direction, so
 > no guard would have caught it had it mattered
 > ([D64](#d64--the-capture-trip-what-the-cluster-settled-and-the-approval-it-reversed-2026-08-13)).
+
+> **Since 2026-08-22 the pin is `2026-08-23T00:00:00Z` and it lives in *three*
+> places, not four or five** — `src/rules_tests.rs`'s `fn now()` (this entry's
+> `src/rules.rs` predates the test split), `src/analysis_tests.rs`, and
+> `scripts/certs-test.sh`'s `now` beside its `pinned[]`. **`scripts/make-certs.sh`
+> is off the list**: it was the last file still restating the counts, its header
+> had rotted through two repins with nothing comparing it, and the treatment this
+> entry already prescribes — delete the copy, point at `pinned[]` — was finally
+> applied to it. Its `notAfter` dates stay, because those are the generator's
+> input rather than a derived number. The counts at the new instant are 13 / 354
+> / −14. The move itself was one targeted capture rather than a trip
+> ([D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)),
+> which is the `neverback.json` shape above, and the gap below is no longer 43
+> minutes: the pin sits **8 h 09 m** after the newest capture, because that
+> capture landed mid-afternoon and the shape of the value is the midnight after it.
 
 **What the pin costs, which is the part nobody had written down.** It sits 43
 minutes after the newest captured timestamp, so **nothing in the fixture set can
@@ -10589,7 +10605,7 @@ all of them testable.
 | 8 | hostPath mount — **only the escalated case** (`/`, a runtime socket **or a directory one sits under**, writable) | `spec.volumes[].hostPath` | "Mounts the node's own filesystem, writable" |
 | 10 | **Pending — and why** | `conditions[PodScheduled].reason == Unschedulable` + that condition's own `message` | "No node can accept it" + the scheduler's own sentence (insufficient cpu / nodeSelector / taint) |
 | 12 | **Pod stuck Terminating** | `deletionTimestamp` already in the past — the apiserver sets it to *request time + grace*, so it is the deadline, not the moment ([D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)) | "Asked to shut down N minutes ago and still hasn't — held by *(the finalizer, named)* / the kubelet" |
-| 13 | **Placed on a node, but the containers never started** — the `ContainerCreating` wedge, the *residual* after rules 1/3/4 explain themselves. Gate: `conditions[PodScheduled] == True`, no container started, > 10 min since that transition. `conditions[PodReadyToStartContainers]` is the **evidence**, not the gate — `False` = no sandbox/network yet, `True` = the block is after it, almost always a volume ([D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)) | `conditions[PodScheduled]` + `containerStatuses[].state` + `conditions[PodReadyToStartContainers]` | "It was given a machine to run on, but it has not been able to start — the node cannot give it *(a network / its storage)*" |
+| 13 | **Placed on a node, but the containers never started** — the `ContainerCreating` wedge, the *residual* after rules 1/3/4 explain themselves. Gate: `conditions[PodScheduled] == True`, no container started, > 10 min since that transition. `conditions[PodReadyToStartContainers]` is the **evidence**, not the gate — `False` = no sandbox/network yet, `True` = the block is after it, almost always a volume, **absent = say nothing about either** ([D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13), [D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)). **A pod with no container status at all is the same card**, and it stands down only where N1 covers it: the pod's node in the snapshot with `Ready` not `True` ([D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)) | `conditions[PodScheduled]` + `containerStatuses[].state` + `conditions[PodReadyToStartContainers]` | "It was given a machine to run on, but it has not been able to start — the node cannot give it *(a network / its storage)*" |
 | 14 | **Nothing has even looked at this pod** — `phase == Pending` with **no `PodScheduled` condition at all**, older than 2 minutes from `metadata.creationTimestamp`. kube-scheduler is down or crashlooping, or `schedulerName` names one that is not installed or lacks RBAC. Without it every pod is Pending and `--once` prints *nothing is broken* ([D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13)) | absence of `conditions[PodScheduled]` + `metadata.creationTimestamp` | "Nothing has even looked at this pod yet — the scheduler that should give it a machine may not be running" |
 | 15 | **A container has stopped and nothing is starting it again** — `state.terminated` with a bad ending, `restartCount == 0`, and an effective `restartPolicy` of `Never`, inside a pod that is **not** over. The one exception [D96](#d96--the-run-a-container-is-sitting-in-is-no-rules-subject-and-the-one-reader-may-only-suppress-2026-08-15) carves out of *the run a container is sitting in is no rule's subject*: that state is a transient everywhere else, and here it is permanent — `kubectl get pods` prints `Error` for such a pod while every other rule in the file is silent. CRITICAL, and the card is the file's first `kubectl logs` ([D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)) | `containerStatuses[].state.terminated` + `restartCount` + `spec.containers[].restartPolicy` falling back to `spec.restartPolicy` | "This container has stopped and nothing is starting it again — read its log; nothing is waiting to start it again, so the pod has to be replaced" |
 
@@ -11279,9 +11295,9 @@ in the prose.
 | 9 | `broken-nolimits` | No limits set. **Not an alert** — this fixture exists to prove the *Capacity report* row |
 | 12 | `broken-stuck` | Stuck Terminating: a finalizer nothing removes. Applied by the script, put into Terminating by the capture step |
 | 1–6 (init) | `broken-init` | `Init:CrashLoopBackOff` — an init container that exits non-zero while the app container never starts. The pod the old rule set could not see ([D27](#d27--two-findings-the-open-watch-already-paid-for-2026-08-12)) |
-| 14 | **none yet, and this one is easy** | `schedulerName: does-not-exist` on an otherwise ordinary pod. Nothing picks it up, so no `PodScheduled` condition is ever written — the exact shape, with no control-plane surgery and nothing to clean up ([D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13)) |
+| 14 | `broken-unjudged` | `schedulerName: does-not-exist` on an otherwise ordinary pod. Nothing picks it up, so no `PodScheduled` condition is ever written — the exact shape, with no control-plane surgery and nothing to clean up ([D74](#d74--two-candidate-rules-one-refused-and-one-taken-decided-on-who-actually-runs-this-2026-08-13)) |
 | 15 | `broken-neverback` | `restartPolicy: Never`, three containers: one exits 1 (the finding), one exits 0 (the clean-exit negative on the same object), one sleeps so the pod never reaches `Failed` and leaves through `finished(pod)`. Captured single-file rather than by re-running the whole corpus, which moved the pinned `now` with it ([D97](#d97--a-container-that-cannot-come-back-gets-rule-15-and-a-restart-count-stands-in-for-a-field-the-pinned-types-cannot-see-2026-08-15)) |
-| 13 | **none yet** | The `ContainerCreating` wedge. Every captured pod has `PodReadyToStartContainers: True`, so rule 13 ships with a negative side only until the next trip. The residual branch is reachable — a `configMap` **volume** naming an object that does not exist — and the network branch may not be, since it needs the sandbox itself to fail ([D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13)) |
+| 13 | `broken-wedged` **and** `broken-unstarted` | Two shapes, because the rule has two. `broken-wedged` is the `ContainerCreating` residual — a `configMap` **volume** naming an object that does not exist, so the kubelet never reaches the sandbox and the condition reads `False` ([D72](#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13), [D76](#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)). `broken-unstarted` is the pod the kubelet never wrote a status for at all: `schedulerName: does-not-exist` so nothing places it, then bound by `break-nodes` through the **`binding` subresource** — the only thing that writes `PodScheduled: True` — onto the worker whose kubelet it has just stopped, carrying both NoExecute tolerations with `tolerationSeconds` omitted so the taint manager never evicts it. That pairing is the rule's *negative*: its node is not `Ready`, so N1 owns the card ([D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)) |
 | W1 | `broken-quota` (namespace `k8rs-quota`) | A Deployment whose ReplicaSet cannot create a single pod — the quota allows zero. `kubectl get pods` is empty and the truth lives only on the ReplicaSet's `ReplicaFailure`. It sits in its own namespace because a `pods: "0"` quota applies namespace-wide and would block every pod above ([D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)) |
 
 `broken-stuck` is why `cluster.sh unbreak` patches the finalizer away before
@@ -12775,6 +12791,20 @@ later"*. An **absent** condition takes that branch — so on a cluster that neve
 published it, the card asserts something the cluster never said, and sends a
 reader whose CNI is broken to look at the image pull instead.
 
+> **That one branch was fixed on 2026-08-22 and the floor did not move**
+> ([D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)
+> ruling 4). It stopped being a *frozen-file* question when a committed capture
+> reached the absent condition on a **1.36** cluster — `unstarted.json`, the pod
+> no kubelet ever wrote a status for — which is
+> [D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+> first condition met, so no old cluster was needed after all. The branch is three
+> arms and the absent one claims nothing; `Unknown` shares it, because a writer
+> that says `Unknown` and a writer that says nothing have told the reader the same
+> thing. **What is written below this line still stands**: the generalisation — every
+> `else` over an API `Option` that reads *absent* as *the negative case is false* —
+> is unaudited, it is an open [backlog](backlog.md) entry, and the floor stays 1.29
+> until it is answered. One rule was fixed; the class was not.
+
 **That is a third form of [D99](#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)'s
 exception, and it is the generalisable part of this entry.** D99 names two ways an
 old cluster does worse than answer nothing — a required field defaulting, and a
@@ -13311,3 +13341,123 @@ included); 89% of every markdown line ever written is still here, against 37%
 of Rust deleted. `rules.rs` is 62% comment with one 166-line doc comment that
 re-argues five decisions it also links. This entry is capped at 60 lines on
 purpose, and the cap itself is a backlog entry rather than a rule added here.
+
+### D156 — rule 13's silence is ruled on the node, and the three-of-four routes to its own shape that delete themselves (2026-08-22)
+
+[D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+re-opened rule 13's box on a shape it cannot see: a pod the kubelet has never
+written a status for decodes with an empty `containers`, so `stuck.first()?`
+returns `None`. What it left open was *how* that shape is reached and what the
+rule should do about it. Both were measured on an ephemeral review cluster
+before anything was written
+([reports/2026-08-22-rule-13-the-pod-with-no-container-status.md](reports/2026-08-22-rule-13-the-pod-with-no-container-status.md)).
+The rulings below were written as the box ran, not in one sitting: 1–5 before
+anything was coded, 6 when the first capture route turned out to be wrong, and 7
+out of the family review that read the result
+([reports/2026-08-22-rule-13-family-review.md](reports/2026-08-22-rule-13-family-review.md)).
+
+**1 — No decode field. D42's window stays shut for this box.** D155 re-opened it
+for "whatever distinguishes *no container status yet* from *no container*". There
+is nothing to distinguish: measured against the API server rather than the types,
+`spec.containers: []` and an absent `spec.containers` are both refused —
+`the Pod "…" is invalid: spec.containers: Required value`. So an empty
+`PodSnapshot::containers` on a decoded pod already means exactly one thing, and a
+field carrying the spec count would be a second way to ask a question the first
+one answers. The window is used for `status.reason` (Phase 4's Waste box) and for
+nothing else.
+
+**2 — The silence is ruled on the node, which is D155's own predicate put into
+code.** D155 wrote that the code's hand-off to the N-series "holds only when the
+node is in the snapshot with `Ready` not `True`". That is the gate:
+`placed_but_never_started` takes `&snapshot.nodes` — the shape
+[`no_node_accepted_it`] already has, so it is not a new one — and on the
+empty-status branch it **stands down when the pod's node is in the snapshot
+carrying a `Ready` condition that is not `True`**, because N1 draws exactly that
+card and names the node and its owners. Everywhere else it fires. The box's
+"that pod draws rule 13's card" is under-specified about which pod, and this is
+the reading D155's own sentence forces; the PM ruled it rather than leaving two
+agents to guess.
+
+**3 — Three of the four routes to this shape delete themselves, which is why the
+gate can be this narrow.** Measured, not reasoned: a pod naming a node that is
+not in the cluster is force-deleted by kube-controller-manager in **47 s**
+(`"Forced deletion of orphaned Pod succeeded"`); a bare `Node` object gains all
+four conditions as `Unknown` in **61 s**; a hand-set `spec.nodeName` gets **no
+`PodScheduled` condition at all** — it is rule 14's shape, and the rule returns
+`None` at `pod.scheduled.as_ref()?`, not at `stuck.first()?`. The fourth, a real
+node whose kubelet stopped, is evicted at exactly **300 s** by
+`DefaultTolerationSeconds`, and rule 13 is already silent on a
+`deletionTimestamp`. So the shape only *reaches* rule 13's ten-minute gate on a
+pod carrying NoExecute tolerations with `tolerationSeconds` omitted, or on a node
+kept `Ready` by something that is not a working kubelet — virtual-kubelet, KWOK,
+or a kubelet whose node-status loop still beats while its pod worker is wedged.
+Those are the cases the card is for, and they are real: this repo already cites
+one such provider (`PodSnapshot::containers`, the Tencent TKE virtual node).
+
+**4 — `PodReadyToStartContainers` absent stops being read as `True`, and that is
+this box's defect rather than the backlog's.** The card's last fact branches
+`is_some_and(status == "False")`, so an **absent** condition takes the `else` and
+prints *"this pod has its storage and its network, so the block is later"*. On
+the shape this box adds, the condition is absent — measured — and the pod has no
+storage, no network and no image pull. The branch becomes three arms and the
+absent one says nothing about either. This is the narrow half of a backlog entry
+that asks the same question of every `else` over an API `Option`
+([D149](#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22)):
+that entry stays open, the supported floor stays 1.29, and what closes here is
+one branch that this box's own fixture reaches.
+
+**5 — The fixture captures the half kind can produce, and the other half is two
+captures joined.** The only route that holds this shape past ten minutes on kind
+is a pod bound — through the `binding` subresource, which is what actually writes
+`PodScheduled: True`; a create with `nodeName` does not — to the node
+`break-nodes` stops the kubelet on, with infinite NoExecute tolerations so the
+taint manager never evicts it. That node reads `Ready: Unknown`, so the captured
+pod is ruling 2's **negative**: the fixture proves the hand-off is real. The
+**positive** is the same captured bytes with `spec.nodeName` naming a `Ready`
+worker out of `nodes.json`, through `capture_but` — a composition of two real
+captures and not an edited one, which is the line
+[D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
+draws. Stated rather than hidden: kind cannot produce the positive, because every
+route to *node `Ready: True` with no container status* needs a heartbeat writer
+that is not a kubelet. Two consequences for the trip — the `PodScheduled` stamp
+is written once at bind and never refreshed, so the capture needs no wait; and
+`unbreak` for this pod must force the delete, because the kubelet that would
+confirm it is the stopped one (a plain `kubectl delete pod` blocked, and the pod
+sat `Terminating` indefinitely).
+
+**6 — The corpus is not re-taken for one fixture, and the number is why.** The PM
+took `unstarted.json` as a single targeted capture off the live fixture cluster,
+which put it 40 h after the rest of the corpus and past the pinned `now()` —
+`the_pinned_now_is_not_before_the_captures_it_is_read_against` said so, correctly.
+The reflex fix was a full trip, and it was run: `cluster.sh reset` → `just
+fixtures` went green end to end in about 35 minutes and re-took all 60 fixtures
+**including this one, through the new `break-nodes` binding step, which is how
+that machinery got proven at all**. Then the suite: **72 red**, because a
+re-capture moves every generated ReplicaSet pod suffix and every age, and
+`src/k8s_tests.rs` spells one of those suffixes out. Against **15** for keeping
+the targeted capture and moving the pin. The corpus was restored to HEAD and the
+one new capture kept — which is the shape
+`fn now()`'s own doc comment in `src/rules_tests.rs` already records for `neverback.json` on
+2026-08-15: *the pin follows the corpus*, not the corpus the pin. The 72 are not
+this box's work and none of them is boxed anywhere; they are what the next full
+trip costs whoever runs it, and the hard-coded pod suffix in `k8s_tests.rs` is the
+part of that bill that is a defect rather than arithmetic. The pin moves to
+**2026-08-23T00:00:00Z**, the midnight after the newest capture, in the three
+places that spell it.
+
+**7 — N1's card names a verb, and the hand-off is what made the verb load-bearing.**
+Ruling 2 lets rule 13 stay silent *because* N1 draws the card instead. The family
+review then read what N1 actually prints about this pod and found
+*"default/broken-unstarted **was running here** (1 pod)"* — about a pod no kubelet
+ever picked up, which is the one thing the fixture exists to prove is not true of
+it. The tense came from a ternary on whether the node answered: `was`/`were` for a
+node gone quiet, `is`/`are` for one that answered `Ready: False`. **Both are false
+for a pod with no container status**, so the split is deleted rather than
+half-fixed, and the sentence is `was placed here` on both branches — placement is
+the one thing every pod in that list is known to have done, and it stays true of a
+status nobody can trust, which is
+[D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)'s
+fossil argument. **This was cosmetic until ruling 2 cited it**: a card nobody
+leans on may be loosely worded, and a card another rule stands down in favour of
+may not. `screens/alerts.md` § N1 moves with it — the specification is that file,
+and `src/rules_tests/node.rs` cites it as the requirement.

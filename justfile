@@ -241,6 +241,13 @@ fixtures:
     # whose tests name the face it has to be caught in, and they are fetched under
     # their own retry below. One writer per file — a bulk fetch here and a re-fetch
     # there means the bytes that land depend on which one ran last.
+    #
+    # `unstarted` is not here either, for a reason no retry could fix: the pod
+    # exists at this point but nothing has placed it, so it carries no
+    # `PodScheduled` condition at all and is `broken-unjudged` wearing another
+    # name. It is bound by `break-nodes` and captured beside `nodes.json` at the
+    # foot of this recipe, which is the first moment the shape exists at all
+    # (NOTES § D156).
     for p in oom image config pending hostpath readiness nolimits stuck \
              resize podlimit \
              socket succeeded failed restarts10 restarts10serving startup \
@@ -889,6 +896,31 @@ fixtures:
     # the sanitizer could quietly drop, and the join with the pod captures, which
     # is the only place both halves of N2 are on disk at the same time.
     scripts/cluster.sh break-nodes
+    # Rule 13's empty-status shape, and it is captured here because this is the
+    # first moment it exists: `break-nodes` stops a kubelet and then binds
+    # `broken-unstarted` to that node through the `binding` subresource, which is
+    # the only thing that writes `PodScheduled: True` (NOTES § D156, measured in
+    # reports/2026-08-22-rule-13-the-pod-with-no-container-status.md). Before that
+    # step the pod is unplaced and carries no condition at all; after it, no
+    # kubelet will ever write it a container status. It sits above `nodes.json`
+    # rather than below it to keep the capture next to the step that made it —
+    # nothing else turns on the order of these two, and the node capture is the
+    # one that has to be last against everything *else* in this recipe.
+    "${kc[@]}" get pod broken-unstarted -o json | "${jqs[@]}" > tests/fixtures/unstarted.json
+    # Three fields, named rather than the file, and every one of them is a way
+    # this capture goes wrong while writing perfectly valid JSON. The
+    # `lastTransitionTime` is asserted as hard as the status: it is the only clock
+    # on this object — there is no container, so no `state.running.startedAt` and
+    # no `startedAt` on any record — and it is what rule 13 measures its ten
+    # minutes from, so a condition without one is a fixture the rule cannot fire
+    # on. `has(...) | not` and never a length test, because the *absent key* is
+    # the entire fixture (D156 § 1): `[] | length == 0` would also pass on
+    # `"containerStatuses": []`, which is a different object. `.status // {}` so
+    # that a capture of the wrong thing — `{}`, an empty List, a pod that never
+    # got a status block — fails on the first clause with this message instead of
+    # on a jq type error.
+    guard unstarted.json "pod placed on a node and never started — PodScheduled True carrying the stamp rule 13 measures its ten minutes from, no status.containerStatuses key at all, and no deletionTimestamp (D156)" \
+      '([.status.conditions[]? | select(.type == "PodScheduled" and .status == "True" and .lastTransitionTime != null)] | length) == 1 and (.status // {} | has("containerStatuses") | not) and .metadata.deletionTimestamp == null'
     "${kc[@]}" get nodes -A -o json | "${jqs[@]}" > tests/fixtures/nodes.json
     guard nodes.json "cordoned worker that is otherwise healthy, carrying the taint the controller adds beside the field kubectl sets (N2)" \
       '[.items[] | select(.spec.unschedulable == true and ([.status.conditions[] | select(.type == "Ready") | .status] | first) == "True" and ([.spec.taints[]? | select(.key == "node.kubernetes.io/unschedulable" and .effect == "NoSchedule")] | length) > 0)] | length > 0'
@@ -919,6 +951,30 @@ fixtures:
        | any(inputs | .spec.nodeName? // empty; IN($cordoned[]))' \
       tests/fixtures/*.json >/dev/null \
       || { echo "fixtures: no captured pod is running on the cordoned node — the joined snapshot is N2's negative under N2's name" >&2; exit 1; }
+
+    # D156 ruling 2's own predicate, made against the bytes, and the second join
+    # in this recipe for the same reason as the first: neither file can state it
+    # alone. Rule 13 hands this pod to the N-series *only* when its node is in the
+    # snapshot carrying a `Ready` condition that is not `True` — and
+    # `unstarted.json` names a node while saying nothing about it, while
+    # `nodes.json` has an unready node and does not know which pod is on it.
+    # Without this the fixture is only "a pod with no container status", which is
+    # a weaker claim than the one it is committed for: the same bytes on a `Ready`
+    # worker are ruling 2's *positive*, the case kind cannot produce at all and
+    # `capture_but` composes from these two captures instead.
+    #
+    # It holds by construction rather than by luck — `break-nodes` binds the pod
+    # to the worker whose kubelet it stopped and does not return until its own
+    # `notready` predicate has gone green — so this is here to catch that going
+    # away, not to hope. An empty `$unready` fails it, which is the half that
+    # matters: "no unready node" and "the pod is on the wrong one" must not print
+    # the same line.
+    jq -e -n --slurpfile nodes tests/fixtures/nodes.json \
+             --slurpfile pod tests/fixtures/unstarted.json \
+      '[$nodes[0].items[] | select([.status.conditions[]? | select(.type == "Ready" and .status != "True")] | length > 0)
+        | .metadata.name] as $unready
+       | (($pod[0].spec.nodeName // "") | IN($unready[]))' >/dev/null \
+      || { echo "fixtures: broken-unstarted is not on a node nodes.json shows as not Ready — the joined snapshot is rule 13's positive wearing the negative's name (D156 ruling 2)" >&2; exit 1; }
 
     "${kc[@]}" version -o json | jq -r .serverVersion.gitVersion > tests/fixtures/K8S_VERSION
     echo "captured $(ls tests/fixtures | wc -l) fixtures from $(cat tests/fixtures/K8S_VERSION)"

@@ -1830,9 +1830,9 @@ Control plane v1.34.2 · 2 of 3 kubelets match
   relax.
 - **The expired badge reads `out`, with no digits at all — confirmed rather
   than invented.** `in_days` drops the sign because the *card's sentence*
-  already carries direction — *"expired 12 days ago"* — and a badge has no
+  already carries direction — *"expired 14 days ago"* — and a badge has no
   sentence beside it: `0d` would read as *expires today* (still valid),
-  `12d` would be indistinguishable from twelve days left, and `-12d` teaches
+  `14d` would be indistinguishable from fourteen days left, and `-14d` teaches
   a minus sign to a reader this screen is written for
   ([invariant 14](../CLAUDE.md)). `out` is the one spelling that cannot be
   misread in either direction, and it is what the C1 card itself already

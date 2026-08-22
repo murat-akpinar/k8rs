@@ -820,14 +820,13 @@ a node that has been `NotReady` for ten minutes still reads `Running`, so no
 pod rule ever fires for it. Without this card, Alerts says "a node is down" in
 one place and nothing about the workload that is actually offline
 ([NOTES § D71](../NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
-So the card names what was running there, not only the node:
+So the card names what was placed there, not only the node:
 
 ```
 ● node-1                                    6 min ago
   This node has stopped responding — nothing on it
   can be trusted until it does
-  payments/web and shop/api were running here (5
-  pods)
+  payments/web and shop/api were placed here (5 pods)
   → check the node itself: is it powered on and
     reachable?
 ```
@@ -848,7 +847,7 @@ nothing to put on it elsewhere on this screen:
   "how much would a drain move" and a number is enough; N1's job is to hand the
   reader a workload to go check, because no other card will. Up to two owners
   by name, alphabetically; past that, `payments/web, shop/api and 2 more were
-  running here (9 pods)` — the count still carries the total the way N2's does.
+  placed here (9 pods)` — the count still carries the total the way N2's does.
 - The action line does not promise the node is actually down — a severed
   network link reads identically to a dead machine from the API's side, and
   the card says only what is knowable from here.

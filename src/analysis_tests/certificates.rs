@@ -14,7 +14,7 @@ use k8s_openapi::api::certificates::v1::{
 // contract is that it picks one card out of the slice the rule engine already returned, so a test
 // that handed it a card built in this file would prove the picking and not the pipeline
 // (NOTES § D29). `scripts/certs-test.sh` pins the three committed certificates against the same
-// instant [`now`] spells — 15 days left, 356 days left, 12 days past — and refuses to let that
+// instant [`now`] spells — 13 days left, 354 days left, 14 days past — and refuses to let that
 // script and the test files disagree about it.
 //
 // **C2 has no row and no test asserting one**: the API server's serving certificate needs a TLS
@@ -117,8 +117,8 @@ fn the_kubeconfig_row_is_picked_by_identity_and_jumps_to_the_finding_a_rule_alre
     assert_eq!(action_of(row), finding.action);
     assert_eq!(
         text_of(row),
-        "Your kubeconfig certificate expires in 15 days",
-        "the committed certificate is 15 days from the pin `scripts/certs-test.sh` holds"
+        "Your kubeconfig certificate expires in 13 days",
+        "the committed certificate is 13 days from the pin `scripts/certs-test.sh` holds"
     );
 
     // **The band is the pane's and the rule's `Info` is its routing** (NOTES § D87): on a
@@ -153,7 +153,7 @@ fn an_expired_kubeconfig_keeps_the_rules_band_because_it_is_broken_now() {
     );
     assert_eq!(
         text_of(row),
-        "Your kubeconfig certificate expired 12 days ago — the cluster is refusing you"
+        "Your kubeconfig certificate expired 14 days ago — the cluster is refusing you"
     );
     assert!(
         action_of(row).contains("kubectl has stopped working for you too"),
@@ -172,7 +172,7 @@ fn a_certificate_with_a_year_left_draws_no_row_at_all() {
         !analyze(&cluster)
             .iter()
             .any(|f| matches!(&f.object.kind, ObjectKind::Other(k) if k == "kubeconfig")),
-        "356 days out, the rule says nothing — and this report may not say it for it"
+        "354 days out, the rule says nothing — and this report may not say it for it"
     );
     let report = certificates_pane(&cluster);
     println!("{}", pane(&report));
@@ -319,9 +319,9 @@ fn the_badge_is_c1s_own_countdown_and_the_pane_never_disagrees_with_it() {
     let badge = report
         .badge
         .clone()
-        .expect("a certificate 15 days out is badged");
+        .expect("a certificate 13 days out is badged");
 
-    assert_eq!(badge.value, "15d");
+    assert_eq!(badge.value, "13d");
     assert_eq!(
         badge.severity,
         Severity::Warn,
@@ -344,12 +344,12 @@ fn the_badge_is_c1s_own_countdown_and_the_pane_never_disagrees_with_it() {
 #[test]
 fn a_certificate_that_has_run_out_badges_a_word_and_never_a_number() {
     // **The expired case, and why it is not a duration.** `in_days` drops the sign because the
-    // *card's sentence* carries the direction — *expired 12 days ago*. A badge has no sentence
+    // *card's sentence* carries the direction — *expired 14 days ago*. A badge has no sentence
     // beside it, so every numeric spelling is wrong in the dangerous direction: `0d` reads as
-    // *expires today*, which is *still valid*; `12d` is indistinguishable from twelve days left;
-    // and `-12d` is a minus sign a beginner has to be taught (invariant 14). So the expired band
-    // leaves the number behind altogether and says the one thing the card says — you are locked
-    // out.
+    // *expires today*, which is *still valid*; `14d` is indistinguishable from fourteen days
+    // left; and `-14d` is a minus sign a beginner has to be taught (invariant 14). So the expired
+    // band leaves the number behind altogether and says the one thing the card says — you are
+    // locked out.
     let report = certificates_pane(&with_kubeconfig(corpus(), "expired-client"));
     println!("{}", pane(&report));
     let badge = report
@@ -374,7 +374,7 @@ fn a_certificate_that_has_run_out_badges_a_word_and_never_a_number() {
     assert!(badge.value.len() <= 3, "{} does not fit", badge.value);
 
     // And the row still carries the count, so nothing is lost — only the sidebar drops it.
-    assert!(text_of(&report.rows[0]).contains("expired 12 days ago"));
+    assert!(text_of(&report.rows[0]).contains("expired 14 days ago"));
 }
 
 #[test]

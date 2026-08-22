@@ -1390,21 +1390,34 @@ const INITIAL_LIST_PAGE: u32 = 500;
 //
 // Five of the six are self-explaining: a cluster that cannot run a native sidecar has no sidecar
 // to describe, so the absence *is* the answer, and every rule already reads it that way.
-// **The sixth is the floor.** Rule 13 — `rules.rs`'s `placed_but_never_started` — reads the
-// condition through `is_some_and(|c| c.status == "False")`, so an *absent* condition falls into
-// the `else` and the card **states a fact**: *"this pod has its storage and its network, so the
-// block is later"*. On a server that never set the condition nothing said that, and the comment
-// above that branch names the reader it misdirects — the one whose ConfigMap is missing, sent to
-// look at the CNI.
+// **The sixth is where the number came from.** Rule 13 — `rules.rs`'s `placed_but_never_started`
+// — *read* the condition through `is_some_and(|c| c.status == "False")`, so an absent condition
+// fell into the `else` and the card **stated a fact**: *"this pod has its storage and its
+// network, so the block is later"*. On a server that never set the condition nothing had said
+// that, and it sent the reader whose ConfigMap is missing to look at the CNI.
+//
+// **That branch has been three arms since 2026-08-22, and the floor did not move with it**
+// (NOTES § D156, ruling 4). An absent condition — and a present `Unknown` one — take an arm that
+// claims neither side, so the one case this number was measured from can no longer misdirect
+// anybody on any server. What holds 1.29 up afterwards is the case nobody has audited: D149's
+// generalisable half asks the same question of every `else` over an API `Option` in this
+// repository, it is still open, and a lower floor would be a claim about branches nobody has
+// read. **The live defect is gone and the unfinished audit is not**, which is a weaker
+// foundation than the original and is why the number stays where it is rather than following
+// the fix.
 //
 // **Where the condition starts existing is measured off the API types and not off the gate
 // table**, because the two disagree: the gate is listed as alpha at 1.28, but
 // `staging/src/k8s.io/api/core/v1/types.go` carries no `PodReadyToStartContainers` constant on
 // `release-1.28`, and no `PodHasNetwork` one on `release-1.25` … `release-1.27` either — the
 // old name was a kubelet-internal constant. It appears in the public `PodConditionType` block
-// for the first time on **`release-1.29`** (`types.go:3005`). So 1.29 is the oldest minor on
-// which every sentence k8rs prints is backed by something the server actually said, and that is
-// the whole derivation.
+// for the first time on **`release-1.29`** (`types.go:3005`) — which is also what the table's
+// *beta, default on* column gives, so the disagreement above is confined to the *alpha 1.28*
+// cell and nothing else moved: a gate can be alpha while the public type still carries no
+// constant, and *when the field can exist at all* is the type's question. That is the whole
+// derivation of the number — the oldest minor on which the one sentence measured to be unbacked
+// is backed by something the server actually said. It was never a proof that the same holds of
+// *every* sentence k8rs prints, which is what D149's open half is for.
 //
 // **D99's two exceptions were checked against this surface and both are empty.** A *required*
 // field does not become `None`, it becomes `Default` — a value, not an absence — so the 64

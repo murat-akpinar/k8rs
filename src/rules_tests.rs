@@ -203,9 +203,11 @@ fn captured_item<'a>(list: &'a serde_json::Value, name: &str) -> &'a serde_json:
 ///
 /// **The value is not free.** `scripts/certs-test.sh` extracts this literal out of this
 /// function, refuses to disagree with it, and asserts the committed certificates against
-/// it on every `just check`. **Moving it moves `scripts/certs-test.sh` and
-/// `scripts/make-certs.sh` in the same change** — the pin is one fact spelled in four
-/// places across two ownership rows (NOTES § D57).
+/// it on every `just check`. **Moving it moves `scripts/certs-test.sh` in the same
+/// change** — the pin is one fact spelled in three places across two ownership rows, here,
+/// in `analysis_tests.rs`, and in that script (NOTES § D57). `scripts/make-certs.sh` writes
+/// the certificates and no longer spells the pin or a count taken at it: its dates are
+/// absolute, so a repin changes what those bytes *mean* and nothing this file has to move.
 ///
 /// It also lands after every `Time` the snapshot types *expose*, which
 /// `the_pinned_now_is_not_before_the_captures_it_is_read_against` asserts rather than
@@ -223,15 +225,18 @@ fn captured_item<'a>(list: &'a serde_json::Value, name: &str) -> &'a serde_json:
 /// that survives is the general one: **the pin follows the corpus**, because every capture
 /// ever taken is newer than a clock pinned before it.
 ///
-/// **The corpus is one trip again since 2026-08-20** — `just fixtures` re-took all of it from
-/// one cluster in one afternoon, and four captures landed with it — `healthy-disk`, `overhead`,
-/// `endpointslices` and, on the 2026-08-21 re-run, `healthy-deploy-pods` — so the two readings
-/// agree today and the general rule is what is written down (NOTES § D114). **A repin is an
-/// edit in two ownership rows**: `scripts/certs-test.sh` extracts this literal, compares it
-/// against its own `now=`, and asserts three certificate day-counts against it, so it moves in
-/// the same change or `just check` goes red on the guard rather than on anything here.
+/// **The corpus is one trip plus one targeted capture since 2026-08-22**, which is the
+/// `neverback.json` shape again and not the single-trip one. `just fixtures` re-took everything
+/// from one cluster on 2026-08-20 — and again on 2026-08-21 for `healthy-deploy-pods` — and then
+/// `unstarted.json` was taken alone on 2026-08-22, 40 h later, because a full re-trip to carry
+/// one fixture cost 72 red assertions against 15 for moving the pin (NOTES § D156). So the two
+/// readings do **not** agree: the pin is the midnight after the newest capture, the trip sits two
+/// days behind it, and every age off that trip reads on the days rung. **A repin is an edit in
+/// two ownership rows**: `scripts/certs-test.sh` extracts this literal, compares it against its
+/// own `now=`, and asserts three certificate day-counts against it, so it moves in the same
+/// change or `just check` goes red on the guard rather than on anything here.
 fn now() -> Time {
-    time("2026-08-21T00:00:00Z")
+    time("2026-08-23T00:00:00Z")
 }
 
 fn container<'a>(pod: &'a PodSnapshot, name: &str) -> &'a ContainerSnapshot {
@@ -252,7 +257,7 @@ fn container<'a>(pod: &'a PodSnapshot, name: &str) -> &'a ContainerSnapshot {
 /// and [`every_captured_pod`] together with the lists — and a second copy is a second list to
 /// keep in step. `the_whole_capture_through_the_rules_at_once` names which of these are allowed
 /// to draw nothing.
-const CAPTURED_PODS: [&str; 38] = [
+const CAPTURED_PODS: [&str; 39] = [
     "config",
     "crashloop",
     "exit0",
@@ -290,6 +295,7 @@ const CAPTURED_PODS: [&str; 38] = [
     "stuck",
     "succeeded",
     "unjudged",
+    "unstarted",
     "wedged",
 ];
 

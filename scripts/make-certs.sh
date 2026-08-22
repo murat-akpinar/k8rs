@@ -5,29 +5,27 @@
 #
 # The dates are **pinned, not relative**. A fixture generated with `-days 20`
 # is a test that passes today and fails in three weeks, and the usual repair
-# for that is to weaken the test. `Snapshot` carries `now`
-# (NOTES § D18), so the test states the date it is asking about and the
-# fixture never expires:
+# for that is to weaken the test. `Snapshot` carries `now` (NOTES § D18), so
+# the test states the date it is asking about and the fixture never expires:
+# one certificate inside C1's warning window, one far outside it, one already
+# past its notAfter.
 #
-#   reference now  = 2026-08-21
-#   expiring cert  = notAfter 2026-09-05  → 15 days left  → C1 reports it (< 30)
-#   healthy cert   = notAfter 2027-08-12  → 356 days left → C1 says nothing
+# **Which is which, in days and from when, is not written here.** That moves
+# with every repin, and a copy nothing compares is a lie with a delay on it
+# (NOTES § D57). Pinning is in any case a claim about the committed bytes and
+# not about the intent in this file, so both halves are asserted where the
+# bytes are read: `scripts/certs-test.sh` checks these exact dates against the
+# three PEMs on every `just check`, and is the one place holding the reference
+# `now` and — in its `pinned[]` — the days left at it. Change a date below and
+# the build is red until it changes there too — the dates here are absolute,
+# so a repin changes what the certificates *mean* and never the bytes this
+# script writes.
 #
-# The dates below are absolute, so moving that reference instant (NOTES § D57)
-# changes what the certificates *mean*, never the bytes this script writes —
-# only these three lines, the expired count in the comment above the third
-# `gen`, and the day counts in scripts/certs-test.sh. This sentence named the
-# three lines alone until 2026-08-16, and that fourth number is the one a repin
-# following it to the letter leaves behind.
-#
-# Both are self-signed: C1 reads `notAfter` out of the kubeconfig's
+# All three are self-signed: C1 reads `notAfter` out of the kubeconfig's
 # `client-certificate-data`, and a chain would prove nothing extra.
 #
-# Pinning is a claim about the committed bytes, so it is asserted there rather
-# than trusted here: `scripts/certs-test.sh` reads the three PEMs and checks
-# these exact dates on every `just check`. Change a date below and the build is
-# red until it changes there too. Needs openssl >= 3.5 for -not_before /
-# -not_after; on anything older the flags are rejected, loudly (see gen).
+# Needs openssl >= 3.5 for -not_before / -not_after; on anything older the
+# flags are rejected, loudly (see gen).
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,8 +58,9 @@ gen() {
 gen expiring-client "kubernetes-admin-expiring" 20260812000000Z 20260905000000Z
 gen healthy-client  "kubernetes-admin"          20260812000000Z 20270812000000Z
 
-# A certificate that is already past its notAfter: C1 must say "expired", not
-# "expires in -12 days", and the renderer must not produce a negative duration.
+# A certificate that is already past its notAfter: C1 must say "expired" rather
+# than counting down past zero, and the renderer must not produce a negative
+# duration.
 gen expired-client  "kubernetes-admin-expired"  20250812000000Z 20260809000000Z
 
 echo "certificate fixtures written to tests/fixtures/certs (dates pinned; they do not expire)"

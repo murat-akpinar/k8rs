@@ -803,15 +803,22 @@ in their own bodies why.*
   v1.36.1, where the condition is always present. So it needs either a
   capture from an older cluster or an explicit ruling that the API types are
   the object.
+  **Half of this closed on 2026-08-22, and it is the half worth *least*.** Rule
+  13's own branch is three arms now, and it needed no old cluster after all:
+  `unstarted.json` reaches the absent condition on the 1.36 fixture cluster,
+  which is [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+  first condition met ([D156](NOTES.md#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)
+  ruling 4). **The floor stays 1.29 and this entry stays open for the audit.**
+
   **And the general form is the part worth more than the one rule.** D99 names
   two ways an old cluster does worse than answer nothing; this is a third —
   **an `else` that treats *absent* as *the negative case is false*, turning a
   missing field into a positive claim.** Invariant 5's *a missing field means
   no finding* does not cover it, because the missing field does not remove the
-  finding, it changes the finding's **text**. If boxed: rule 13 has its third
-  arm **and** every other `else` over an `Option` from the API has been read
-  against the same question, with the ones that are safe named so nobody
-  re-audits them
+  finding, it changes the finding's **text**. If boxed — and rule 13's own arm is
+  already done, so this is the whole of it: every other `else` over an `Option`
+  from the API has been read against the same question, with the ones that are
+  safe named so nobody re-audits them
 
 ### From the browser's-rows family and its operator review (2026-08-22)
 
@@ -1043,3 +1050,56 @@ long-form version and stays the authority.*
   twice, by `NOTES.md` and by the session memory directory, and a hosted instance
   would put project data on an outbound connection that
   [docs/security.md](docs/security.md) says does not exist.
+
+### From the rule 13 family review (2026-08-22)
+
+*Two findings from [`reports/2026-08-22-rule-13-family-review.md`](reports/2026-08-22-rule-13-family-review.md)
+that are not defects in the box that produced them. Read at the next phase close.*
+
+- **A node whose `Ready` flaps faster than five minutes gets no N1 card and a
+  blinking rule 13 card, and closing that means one rule reading another's
+  clock.** Measured on the review cluster: a condition's `lastTransitionTime` is
+  rewritten on **every** flip — `Unknown` at `14:24:24Z`, `True` at `14:26:37Z`,
+  `Unknown` again with a fresh stamp at `14:27:29Z`. N1's grace runs from that
+  stamp, so a node flapping under `NODE_DOWN_GRACE` never reaches it, while rule
+  13 stands down on every `Unknown` phase and fires on every `True` phase
+  ([D156](NOTES.md#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)
+  ruling 2 is what couples them). The ordinary producer is a kubelet missing
+  heartbeats under memory pressure — not exotic. **And the honest form of the cost
+  is sharper than the doc comment's**: `tester` ran the binary at a node two
+  minutes into `Unknown` with the pod bound 42 minutes earlier, and the screen
+  printed **`nothing is broken`** — the one claim
+  [`screens/once.md`](screens/once.md) says has to be true, and the exact sentence
+  [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+  re-opened this box over. Still strictly better than before, when the shape drew
+  nothing ever. **Neither obvious fix is free**:
+  suppressing the blink means rule 13 reading N1's clock, and dating the flap
+  means the snapshot carrying a condition's *history*, which it deliberately does
+  not. There is a third reading — that a flapping node is its own finding and
+  neither rule should own it — and that is a new rule, so [invariant
+  13](CLAUDE.md) applies. Decide which; the code change is small once it is
+  decided
+
+- **`src/analysis_tests/restarts.rs:459`'s comment claims the assertion proves
+  something the assertion cannot see.** It says *"The two runs began three seconds
+  apart … each row measures its own"*, and the assertion is a loop requiring both
+  rows to produce the **same** string. Three seconds render identically at every
+  granularity the renderer has, so it cannot tell "each row measures its own" from
+  "both read the same one". Pre-existing, untouched by the repin that made it
+  visible — true at `1 hour ago` and true at `2 days ago`. If boxed: either the
+  fixture gains two runs far enough apart to render differently, or the comment
+  stops claiming what the loop does not check
+
+- **`break_nodes`' binding step has no offline test, and the only honest shape for
+  one is a new file.** Every other predicate in `cluster.sh` is proved offline by
+  `scripts/verify-test.sh`; the binding block is not, because proving it needs a
+  stub `kubectl` that answers `get`, `create --raw` and a 409 — a second
+  implementation of the API server's semantics. `tester` built one in a scratchpad
+  to prove the missing-pod fix and it **lied twice inside twenty minutes** (a 201
+  for a binding whose pod does not exist; a `-o jsonpath` match served from its
+  `-o json` case), each lie producing a confident wrong red. That is the argument
+  for the box and against a quick one: a committed stub drifts the same way with
+  nobody watching. If boxed: a `tester`-owned `scripts/break-nodes-test.sh` with
+  the stub beside it and a line in `guards.sh`, and the stub's own dishonesty is
+  what its `--self-test` has to catch first. What holds today is the capture trip
+  itself, which is a real cluster and runs once a phase

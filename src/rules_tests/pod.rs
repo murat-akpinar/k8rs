@@ -645,7 +645,7 @@ fn the_crash_looping_pod_gets_the_loop_the_count_and_the_exit() {
     );
     assert_eq!(
         looping.age(&now()).as_deref(),
-        Some("50 min ago"),
+        Some("2 days ago"),
         "a duration, not English parsed back into a number"
     );
 
@@ -5877,8 +5877,25 @@ fn every_card_the_rule_set_draws_fits_the_four_caps_it_is_budgeted_for() {
         container_status(p, "flaky").restart_count = 1;
     }));
 
+    // **A node name a real cluster produces.** Rule 13's empty-status card reaches this sweep
+    // through [`every_shape_a_container_reaches`] with no node list, and it carried
+    // `k8rs-worker3` — twelve characters, an accident of how kind names workers and the shortest
+    // name any test here will ever see. Every default EKS, GKE and AKS name is over thirty; this
+    // is GKE's default shape at 48. The card must fit whatever the cluster is called, and the
+    // only way to keep that true is to measure it against a name that is not kind's.
+    let on_a_cloud_node = capture_but("unstarted", |p| {
+        p.spec
+            .as_mut()
+            .expect("the captured pod has a spec")
+            .node_name = Some("gke-prod-europe-west1-default-pool-3f2a1b9c-xk7m".to_string());
+    });
+
     let mut cards = analyze(&fixture_snapshot());
     cards.extend(analyze(&pods_at(every_shape_a_container_reaches(), now())));
+    cards.extend(analyze(&pods_at(
+        vec![on_a_cloud_node],
+        after_the_bind(SignedDuration::from_mins(45)),
+    )));
     cards.extend(analyze(&pods_at(
         vec![
             forgotten("restarts10", "flaky"),
@@ -9994,7 +10011,7 @@ fn the_pending_pod_carries_the_schedulers_verdict_and_the_sentence_behind_it() {
     );
     assert_eq!(
         unplaced.age(&now()).as_deref(),
-        Some("1 hour ago"),
+        Some("2 days ago"),
         "a duration, not English parsed back into a number"
     );
 
@@ -10518,7 +10535,7 @@ fn an_init_container_still_doing_its_work_is_not_a_pod_that_never_started() {
 /// `ContainerCreating` with `PodReadyToStartContainers: False` — D72's own proposed shape,
 /// which the 2026-08-13 trip brought back and which was a decoded copy until then. The
 /// second shape has no capture behind it: on this cluster nothing reaches the sandbox and
-/// then stops, so `True` and the absent condition stay decoded copies.
+/// then stops, so `True`, `Unknown` and the absent condition stay decoded copies.
 ///
 /// **What the card has to say is decided by the order the kubelet does its work, not by
 /// what this rule happens to return.** `kubelet.SyncPod` waits for volumes to attach and
@@ -10641,9 +10658,6 @@ fn the_wedged_pod_names_the_side_of_the_sandbox_the_kubelet_actually_stopped_on(
             "the container could not be created",
             wedged("CreateContainerError", Some("True")),
         ),
-        // Absent is not a third case: an old server or a kubelet that has said nothing
-        // is read as "not False", the only claim that survives both.
-        ("no condition at all", wedged("ContainerCreating", None)),
     ] {
         let card = one_card(p);
         assert!(
@@ -10660,6 +10674,75 @@ fn the_wedged_pod_names_the_side_of_the_sandbox_the_kubelet_actually_stopped_on(
             card.evidence
         );
     }
+
+    // --- NO CONDITION AT ALL: a third arm, because absent is not `True` ---
+    // **It read as `True` until 2026-08-22 and that was a claim with no field behind it**
+    // (NOTES § D156). `is_some_and(status == "False")` sends an absent condition down the same
+    // branch as a present `True` one, so the card told a reader whose pod had no storage, no
+    // network, no image pull and no container that it had *its storage and its network* and the
+    // block was later. **The producer is inside the supported floor**: 1.29 is the oldest minor
+    // k8rs supports and the condition exists there (NOTES § D149, § D156 ruling 4), so what
+    // reaches the absence is not an old server but a kubelet that has written nothing about the
+    // sandbox — the whole of `unstarted.json` — or one that has written a container status
+    // without it. Neither is evidence that the sandbox exists.
+    let card = one_card(wedged("ContainerCreating", None));
+    assert!(
+        card.evidence.contains("has not said how far it got")
+            && card.evidence.contains("PodReadyToStartContainers"),
+        "the card says the line is missing and names it, which is the only claim the object \
+         supports: {}",
+        card.evidence
+    );
+    assert!(
+        !card.evidence.contains("storage and its network"),
+        "and it does not tell the reader the pod already has what it is waiting for — that \
+         sentence is `True`'s, and this pod carries no such condition: {}",
+        card.evidence
+    );
+    assert!(
+        !card.evidence.contains("has not been able to give"),
+        "nor does it blame storage, which is `False`'s sentence and is just as unsupported \
+         here: {}",
+        card.evidence
+    );
+    // The first two facts are the container's own and are unaffected by the arm, so a branch
+    // that swallowed the rest of the card would not show up in the three assertions above.
+    assert!(
+        card.evidence.contains("container app")
+            && card
+                .evidence
+                .contains("where it is stuck: ContainerCreating"),
+        "and the rest of the card is the ordinary residual's, unchanged: {}",
+        card.evidence
+    );
+
+    // --- A CONDITION THAT SAYS `Unknown`: the same absence, worn by a present field ---
+    // **`Some(_)` is the same defect as the old `else`, one value narrower.** A tri-state
+    // condition has three values, and `Unknown` is a writer saying it cannot tell — reading it as
+    // the sandbox exists is a claim the object does not make, which is what the arm above was
+    // split for. It shares the absent arm rather than getting a fourth, because *missing the
+    // line* would be false about a condition that is right there: what both have in common is
+    // that nothing has said how far the kubelet got.
+    let card = one_card(wedged("ContainerCreating", Some("Unknown")));
+    assert!(
+        !card.evidence.contains("storage and its network"),
+        "`Unknown` is not `True`: a writer that cannot tell has not told the reader their \
+         mounts succeeded, and this is the sentence that sends someone past the fault: {}",
+        card.evidence
+    );
+    assert!(
+        card.evidence.contains("has not said how far it got")
+            && card.evidence.contains("PodReadyToStartContainers"),
+        "it takes the arm that claims neither side and names the field, the same as an absent \
+         condition: {}",
+        card.evidence
+    );
+    assert!(
+        !card.evidence.contains("missing"),
+        "and it must not say the line is missing — the condition is present and says `Unknown`, \
+         so a reader sent to look for an absent line finds it and stops trusting the card: {}",
+        card.evidence
+    );
 }
 
 /// **The pod that reports `PodInitializing` and nothing else**, which is the shape rule
@@ -11097,6 +11180,706 @@ fn a_pod_only_just_placed_is_a_slow_pull_and_not_a_wedge() {
     );
 }
 
+// --- RULE 13'S SECOND SHAPE: THE POD NO KUBELET EVER REPORTED ON ---
+//
+// `unstarted.json` is the capture, and it is the **negative**: `broken-unstarted` was bound
+// through the `binding` subresource to the worker whose kubelet `break-nodes` stops, so that node
+// reads `Ready: Unknown` and N1 owns the incident (NOTES § D156). The **positive** is those same
+// bytes over a node the same capture shows as `Ready: True`, and it is a composition of two real
+// captures rather than an edited one (D53) — see
+// [`the_pod_nothing_reported_on_draws_the_card_when_the_machine_says_it_is_healthy`] for why kind
+// cannot produce it at all.
+
+/// **The moment `broken-unstarted` was bound, plus an offset** — every reading of that capture is
+/// derived from its own `PodScheduled` stamp and never from the pinned [`now`](now), which is what
+/// keeps the pair below meaningful across a re-capture (NOTES § D114). The API server writes that
+/// stamp once, at bind, and never refreshes it, so at capture time it is as old as the wait.
+fn after_the_bind(offset: SignedDuration) -> Time {
+    Time(
+        captured_time(
+            captured_condition(&fixture("unstarted"), "PodScheduled"),
+            &["lastTransitionTime"],
+        )
+        .0
+        .checked_add(offset)
+        .expect("an offset from a captured bind is a moment"),
+    )
+}
+
+/// The captured node list with one node picked out of it by its `Ready` status, read rather than
+/// transcribed: `break-nodes` chooses which worker it stops, and a name written down here would
+/// assert the trip that happened to be taken (NOTES § D65).
+fn a_node_that_is(ready: &str) -> NodeSnapshot {
+    let mut matching: Vec<NodeSnapshot> = captured_nodes()
+        .into_iter()
+        .filter(|n| {
+            n.conditions
+                .iter()
+                .any(|c| c.type_ == "Ready" && c.status == ready)
+        })
+        .collect();
+    matching.sort_by(|a, b| a.id.name.cmp(&b.id.name));
+    matching
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("the node capture has no node whose Ready is {ready}"))
+}
+
+/// **The pod nothing has reported on, over the node that stopped answering — and N1 draws it.**
+///
+/// This is the committed capture exactly as it came off the cluster, joined to the committed node
+/// list, and it is rule 13's *negative* (NOTES § D156, ruling 2). The pod satisfies every clause
+/// of [`placed_but_never_started`] — bound, past the ten minutes, not being deleted, nothing
+/// running, no container status at all — and the rule stands down because
+/// [`node_stopped_being_ready`] is already drawing this incident with the node named and the
+/// workloads on it listed. Two cards there would be one incident said twice, and the second one
+/// would give the worse advice: *check the machine that says it is healthy* about a machine that
+/// is saying nothing.
+///
+/// **The silence is only worth asserting beside the card that replaces it.** A test that checked
+/// rule 13 alone would pass just as well if N1 had gone quiet too and this pod drew nothing at
+/// all, which is the screen `screens/once.md` promises means *nothing is broken* — and it was
+/// this pod's measured behaviour before this box (D155).
+///
+/// **Read at four moments, and two of them prove a different thing.** At `+0:00` and `+10:00` the
+/// rule is still inside [`NOT_READY_GRACE`], so its silence there is the clock's and not the
+/// node's — what those two show is the other half of the hand-off: N1's card is **already** on
+/// the screen, because its grace runs from the node's own `Ready` transition, which this capture
+/// cleared long before the pod was bound. Past the ten minutes — `+10:01`, and a year — the
+/// silence is the stand-down's, which is what this test is named for.
+#[test]
+fn the_pod_nothing_reported_on_is_the_nodes_card_when_the_node_went_quiet() {
+    let p = pod("unstarted");
+    let quiet = a_node_that_is("Unknown");
+    assert_eq!(
+        p.node.as_deref(),
+        Some(quiet.id.name.as_str()),
+        "the capture has to be sitting on the node whose kubelet was stopped, or this test is \
+         about the other branch: {:?} against {}",
+        p.node,
+        quiet.id.name
+    );
+
+    for offset in [
+        SignedDuration::from_secs(0),
+        SignedDuration::from_mins(10),
+        SignedDuration::from_mins(10) + SignedDuration::from_secs(1),
+        SignedDuration::from_hours(24 * 365),
+    ] {
+        let moment = after_the_bind(offset);
+        let all = analyze(&ClusterSnapshot {
+            nodes: captured_nodes(),
+            ..pods_at(vec![p.clone()], moment.clone())
+        });
+        show_at(&all, &moment);
+        assert!(
+            !all.iter()
+                .any(|f| f.object.name == p.id.name && f.title == NEVER_STARTED),
+            "{offset:?} after the bind: N1 owns a pod whose machine stopped answering, and a \
+             card telling the reader to go and look at that machine's kubelet is the same \
+             incident said twice with the worse of the two actions: {:?}",
+            titles(&all)
+        );
+        let down = only(&all, &quiet.id.name, "stopped responding");
+        assert_eq!(
+            down.evidence,
+            format!("{} was placed here (1 pod)", qualified(&p.owner)),
+            "{offset:?} after the bind: and the card that *is* drawn has to be true of *this* \
+             pod, not merely to contain its name (NOTES § D156). It is the whole of what the \
+             reader gets about a pod rule 13 stood down on, and the pod it is about is the one \
+             nothing ever started — so *was running here* is a sentence the hand-off delivers \
+             about a container that has never existed: {}",
+            down.evidence
+        );
+    }
+}
+
+/// **A node that answered `Ready: False` is N1's card too, and the stand-down covers it.**
+///
+/// The gate is *a `Ready` that is not `True`* and not *a `Ready` that is `Unknown`*, which are
+/// different rules on a real cluster: `Unknown` is a kubelet that went quiet, `False` is one that
+/// answered and said no — a container runtime that will not start, a full disk, a CNI that never
+/// came up ([`node_stopped_being_ready`]). Both draw N1, both name this pod, so a second card
+/// would be the same incident twice — and the second one would tell the reader to go and find out
+/// something the first already quotes from the kubelet.
+///
+/// **Nothing fed this branch until now.** Narrowing the gate to `== "Unknown"` and running the
+/// suite: **this test is the only one that fails**, measured. `nodes.json` holds no `Ready: False`
+/// node — `break-nodes` stops a kubelet, which produces `Unknown` — and every other test here
+/// feeds `"Unknown"` or `"True"`. That is NOTES § D29 exactly, so the shape is planted rather
+/// than left to a capture that cannot hold it.
+///
+/// **The plant is the captured quiet node with the whole `Ready` condition moved**, because the
+/// three fields are one fact: a kubelet that answered wrote a reason and a sentence, and
+/// `NodeStatusUnknown` / *Kubelet stopped posting node status* is what the **node controller**
+/// writes when nobody answered at all. The reason and the sentence are
+/// [`a_node_that_answered_and_said_no_is_a_different_card_from_one_that_went_quiet`]'s, to the
+/// character: two tests planting one object and disagreeing about what it says is the defect this
+/// repository has paid most for.
+#[test]
+fn the_pod_nothing_reported_on_is_the_nodes_card_when_the_machine_answered_and_said_no() {
+    const KUBELET_SAID: &str = "container runtime network not ready: NetworkReady=false \
+                                reason:NetworkPluginNotReady message:Network plugin returns \
+                                error: cni plugin not initialized";
+    let p = pod("unstarted");
+    let quiet = a_node_that_is("Unknown");
+    let answered = NodeSnapshot {
+        conditions: quiet
+            .conditions
+            .iter()
+            .map(|c| match c.type_.as_str() {
+                "Ready" => Condition {
+                    status: "False".to_string(),
+                    reason: Some("KubeletNotReady".to_string()),
+                    message: Some(KUBELET_SAID.to_string()),
+                    ..c.clone()
+                },
+                _ => c.clone(),
+            })
+            .collect(),
+        ..quiet.clone()
+    };
+    let moment = after_the_bind(SignedDuration::from_mins(45));
+    let all = analyze(&ClusterSnapshot {
+        nodes: vec![answered.clone()],
+        ..pods_at(vec![p.clone()], moment.clone())
+    });
+    show_at(&all, &moment);
+
+    assert!(
+        !all.iter().any(|f| f.title == NEVER_STARTED),
+        "a kubelet that answered *no* is still a machine N1 has the card for, and *go and look \
+         at whether the kubelet is working* is worse advice than the sentence the kubelet itself \
+         wrote, which N1 is already showing: {:?}",
+        titles(&all)
+    );
+    let down = only(&all, &answered.id.name, "cannot run pods");
+    assert_eq!(
+        down.evidence,
+        format!(
+            "{} was placed here (1 pod) · the kubelet's own words (the kubelet is the part of \
+             Kubernetes that runs on the machine): {KUBELET_SAID}",
+            qualified(&p.owner)
+        ),
+        "and the card it is handed off to reaches this pod by name and carries the diagnosis \
+         with it (NOTES § D156, ruling 7): {}",
+        down.evidence
+    );
+}
+
+/// **A node the snapshot does not hold is not a node this pod can be handed off to** — the
+/// lookup's *miss* against a list that has something in it.
+///
+/// The three-branch test above feeds the miss with an **empty** `Vec`, which any lookup at all
+/// returns `None` for. Replacing `.find(…)` with `.find(…).or_else(|| nodes.first())` — a rule
+/// that shrugs and takes whichever node came first — and running the suite: **this test is the
+/// only one that fails**, measured. Nothing else asks the lookup for a name that is not there
+/// while a name that *is* sits beside it (NOTES § D29).
+///
+/// **The shape is ordinary, not exotic**: a `--namespace` scope, a 403 on nodes, or a LIST that
+/// raced a node deletion all leave a pod naming a machine the node list does not carry. The list
+/// here holds the *quiet* node on purpose — a fallback that picked it would stand the rule down,
+/// so the assertion below is what tells a shrugging lookup from a correct one.
+#[test]
+fn a_node_the_snapshot_does_not_hold_cannot_be_the_card_this_pod_hands_off_to() {
+    let quiet = a_node_that_is("Unknown");
+    let elsewhere = capture_but("unstarted", |pod| {
+        pod.spec
+            .as_mut()
+            .expect("the captured pod has a spec")
+            .node_name = Some("k8rs-worker9".to_string());
+    });
+    assert!(
+        elsewhere.node.as_deref() != Some(quiet.id.name.as_str()),
+        "the whole point is a name the list does not carry: {:?} against {}",
+        elsewhere.node,
+        quiet.id.name
+    );
+    let moment = after_the_bind(SignedDuration::from_mins(45));
+    let all = analyze(&ClusterSnapshot {
+        nodes: vec![quiet.clone()],
+        ..pods_at(vec![elsewhere.clone()], moment.clone())
+    });
+    show_at(&all, &moment);
+
+    let card = only(&all, &elsewhere.id.name, "not been able to start");
+    assert!(
+        card.evidence.contains("on node k8rs-worker9"),
+        "the pod draws its own card and names the machine it was given, which is the one the \
+         reader has to go and find: {}",
+        card.evidence
+    );
+    let down = only(&all, &quiet.id.name, "stopped responding");
+    assert_eq!(
+        down.evidence, "",
+        "and the node that *is* in the list is a different incident that carries nothing of this \
+         pod — which is why standing down on it would leave this pod on no card at all: {}",
+        down.evidence
+    );
+}
+
+/// **Under `--namespace` there is nothing to hand off to, so the pod keeps its own card**
+/// (NOTES § D156, ruling 2). [`node_stopped_being_ready`] drops its whole workload line under a
+/// namespace scope rather than count from a fraction of the pods (NOTES § D43), and on a node
+/// that went *quiet* it has no kubelet sentence to carry either — so its evidence is the empty
+/// string, and standing rule 13 down there leaves the pod that will never start on **no card
+/// anywhere**, which is the screen `screens/once.md` promises means nothing is broken.
+///
+/// **The scope is not an exotic shape.** `--namespace` is a documented flag, and the same field
+/// is what the 403 fallback sets when a user may not list pods cluster-wide — to a rule the two
+/// are one fact ([`ClusterSnapshot::namespace_scope`]).
+///
+/// **The negative's own committed bytes, unedited**: the only thing that differs from
+/// [`the_pod_nothing_reported_on_is_the_nodes_card_when_the_node_went_quiet`] is one field of the
+/// snapshot around them, so a difference in the verdict can be nothing else.
+#[test]
+fn the_pod_nothing_reported_on_speaks_when_the_scope_leaves_the_nodes_card_naming_nobody() {
+    let p = pod("unstarted");
+    let quiet = a_node_that_is("Unknown");
+    let moment = after_the_bind(SignedDuration::from_mins(45));
+    let all = analyze(&ClusterSnapshot {
+        namespace_scope: Some(
+            p.id.namespace
+                .clone()
+                .expect("the captured pod is namespaced"),
+        ),
+        nodes: captured_nodes(),
+        ..pods_at(vec![p.clone()], moment.clone())
+    });
+    show_at(&all, &moment);
+
+    let down = only(&all, &quiet.id.name, "stopped responding");
+    assert_eq!(
+        down.evidence, "",
+        "the premise, asserted rather than assumed: the node card is still drawn — a node's own \
+         condition is not namespaced — and it says nothing about anything that was on the node: {}",
+        down.evidence
+    );
+    let card = only(&all, &p.id.name, "not been able to start");
+    assert!(
+        card.evidence
+            .contains(&format!("on node {}", quiet.id.name)),
+        "so this pod draws its own card and names the machine it was given — the hand-off is a \
+         hand-off only where the other card catches it, and here it does not: {}",
+        card.evidence
+    );
+}
+
+/// **The same captured bytes over a machine that says it is healthy, which is the card.**
+///
+/// **Kind cannot produce this object and no trip will ever bring it back** (NOTES § D156, ruling
+/// 5): every route to *node `Ready: True` with no container status* needs a heartbeat writer that
+/// is not a kubelet — a virtual node, KWOK, or a real kubelet whose node-status loop still beats
+/// while its pod worker is wedged. On the review cluster it took a `phantom-node` held ready by a
+/// fifteen-second patch loop. So this is **two real captures joined** — `unstarted.json`'s pod and
+/// `nodes.json`'s healthy node — and not a capture edited to make a test pass (D53). Nobody should
+/// later "fix" it into a capture; there is nothing to capture it from.
+///
+/// **The whole card is asserted and not a phrase of it.** The evidence, the action and the command
+/// are the three things this box changed, and each of them was wrong before it: the evidence line
+/// claimed the pod had its storage and its network, the action sent the reader to Events that
+/// `kubectl describe` prints as `<none>` on this pod, and there was no card at all.
+///
+/// **Which node it is does not matter and is deliberately not chosen for its role.** The rule
+/// reads one field of it — `conditions[Ready]` — so the first `Ready: True` node in the capture is
+/// as good as any, and picking one by role would be this test asserting something the rule does
+/// not read.
+#[test]
+fn the_pod_nothing_reported_on_draws_the_card_when_the_machine_says_it_is_healthy() {
+    let healthy = a_node_that_is("True");
+    let placed = capture_but("unstarted", |pod| {
+        pod.spec
+            .as_mut()
+            .expect("the captured pod has a spec")
+            .node_name = Some(healthy.id.name.clone());
+    });
+    assert!(
+        placed.containers.is_empty() && placed.ready_to_start_containers.is_none(),
+        "only the node name moves — the pod is still the one nothing has reported on: {:?}",
+        placed.containers
+    );
+
+    // **The node list is the one node this pod is on**, so `all.len() == 1` below is a claim
+    // about the whole screen rather than about a filtered slice of it. `nodes.json` also holds
+    // the worker whose kubelet was stopped, and N1's card about *that* node is real and nothing
+    // to do with this pod.
+    let moment = after_the_bind(SignedDuration::from_mins(45));
+    let all = analyze(&ClusterSnapshot {
+        nodes: vec![healthy.clone()],
+        ..pods_at(vec![placed], moment.clone())
+    });
+    show_at(&all, &moment);
+    assert_eq!(
+        all.len(),
+        1,
+        "one card, and it is this one — **of this pod**, whose spec carries no hostPath volume \
+         and nothing else any rule reads. It is not a claim that nothing else can see a pod with \
+         no container statuses: measured, adding a `/var/run/docker.sock` mount to these same \
+         bytes draws *A container can drive the container runtime* beside it, because that rule \
+         reads the spec and never looks at a container status: {:?}",
+        titles(&all)
+    );
+    let card = &all[0];
+
+    assert_eq!(
+        card.title, NEVER_STARTED,
+        "the same sentence as the wedged pod's, because it is the same sentence to the reader: \
+         it was given a machine and it has not started"
+    );
+    assert_eq!(
+        card.severity,
+        Severity::Warn,
+        "one pod is not up. A machine that answers and does nothing is not the outage N1 is"
+    );
+    assert_eq!(
+        card.evidence,
+        format!(
+            "on node {} · the machine has written nothing at all about this pod: not one of its \
+             containers has a status, not even a failed attempt, so nothing there has picked it up",
+            healthy.id.name
+        ),
+        "every fact on the card has to be true of *this* pod: there is no container to name, no \
+         waiting reason to quote and no PodReadyToStartContainers to read, so what is left is the \
+         machine it was given and the fact that nothing has been written"
+    );
+    assert!(
+        !card.evidence.contains("storage") && !card.evidence.contains("network"),
+        "and it must not carry the sandbox sentence at all — this pod has no storage, no \
+         network, no image pull and no container, so both halves of that line are false about \
+         it: {}",
+        card.evidence
+    );
+    assert_eq!(
+        card.action,
+        "check the machine itself: look at whether the part of Kubernetes that starts \
+         containers there (the kubelet) is working, and whether that machine is still in the \
+         cluster",
+        "the action has to be reachable. `kubectl describe` on this pod prints `Events: <none>` \
+         — measured — so *read the Events* is a dead end, and what is left to check is the \
+         machine that accepted it and then did nothing"
+    );
+    assert!(
+        !card.action.contains(healthy.id.name.as_str()),
+        "**and it names no machine**, which is what keeps it inside the five-line action budget \
+         on a cluster that is not kind. The name is the one thing on this card whose width \
+         nobody here controls — 48 characters is GKE's default — and the line it opened with \
+         repeated the fact above it word for word. The evidence names the machine; this line \
+         says *the machine itself*: {}",
+        card.action
+    );
+    assert!(
+        !card.action.contains("healthy") && !card.action.contains("says"),
+        "and it must not repeat what the machine claimed: this is the one branch of three where \
+         the node *is* saying it is ready, and the same sentence ships on a node that is missing \
+         from the snapshot and on one carrying no Ready line at all: {}",
+        card.action
+    );
+    assert_eq!(
+        card.kubectl_cmd.as_deref(),
+        Some("kubectl get pod broken-unstarted -n default -o yaml"),
+        "and the command is rule 14's and not rule 13's usual `describe`, for rule 14's reason: \
+         the evidence is an absence, and `describe` renders an absence as the `Events: <none>` \
+         the reader has already looked at"
+    );
+    assert_eq!(
+        card.timestamp,
+        Some(captured_time(
+            captured_condition(&fixture("unstarted"), "PodScheduled"),
+            &["lastTransitionTime"]
+        )),
+        "the age is the moment it was bound — the API server writes that stamp once and never \
+         refreshes it, so it is exactly how long nothing has been happening"
+    );
+    assert_eq!(
+        card.owner, card.object,
+        "`scripts/broken.yaml` creates this one bare, so it files under itself"
+    );
+}
+
+/// **The three other ways the node cannot be the card, and the rule speaks in all of them**
+/// (NOTES § D156, ruling 2). The stand-down is one node state wide — *in the snapshot, carrying a
+/// `Ready` that is not `True`* — and everything outside it is a pod nobody else in the file will
+/// say anything about.
+///
+/// - **The node is not in the snapshot.** kube-controller-manager force-deletes a pod whose node
+///   has left the cluster in about 47 s, measured — but the snapshot is also what a `--namespace`
+///   scope or a 403 on nodes leaves behind, and a rule that goes quiet because a *list* is short
+///   is a rule that fails silently.
+/// - **The node has no `Ready` condition.** A bare `Node` object gains all four as `Unknown`
+///   within 61 s, so this is a minute-wide window on a live cluster — and it is the window in
+///   which [`node_stopped_being_ready`] returns `None` at its own first line, so nothing else is
+///   drawing anything.
+/// - **The pod names no node at all.** `PodScheduled: True` without a `nodeName` is not something
+///   the binding handler produces — it writes both — but a pruned or partial object reaches the
+///   rule the same way, and the card must not then name a machine it cannot name.
+///
+/// **Each case is asserted to have silenced N1 as well**, because *rule 13 fires* only matters
+/// beside *and nothing else was going to*.
+#[test]
+fn the_pod_nothing_reported_on_speaks_wherever_the_node_is_not_already_the_card() {
+    let quiet = a_node_that_is("Unknown");
+    let cases: [(&str, Vec<NodeSnapshot>, PodSnapshot); 3] = [
+        ("no node in the snapshot", Vec::new(), pod("unstarted")),
+        (
+            "a node with no Ready condition",
+            vec![NodeSnapshot {
+                conditions: quiet
+                    .conditions
+                    .iter()
+                    .filter(|c| c.type_ != "Ready")
+                    .cloned()
+                    .collect(),
+                ..quiet.clone()
+            }],
+            pod("unstarted"),
+        ),
+        (
+            "a pod that names no node",
+            vec![a_node_that_is("True")],
+            capture_but("unstarted", |pod| {
+                pod.spec
+                    .as_mut()
+                    .expect("the captured pod has a spec")
+                    .node_name = None;
+            }),
+        ),
+    ];
+
+    for (label, nodes, p) in cases {
+        let moment = after_the_bind(SignedDuration::from_mins(45));
+        let all = analyze(&ClusterSnapshot {
+            nodes,
+            ..pods_at(vec![p.clone()], moment.clone())
+        });
+        show_at(&all, &moment);
+        let card = only(&all, &p.id.name, "not been able to start");
+        assert!(
+            !all.iter()
+                .any(|f| f.title.contains("stopped responding") || f.title.contains("cannot run")),
+            "{label}: N1 says nothing here, which is why this pod would otherwise draw nothing \
+             at all: {:?}",
+            titles(&all)
+        );
+        match &p.node {
+            Some(node) => assert!(
+                card.evidence.contains(&format!("on node {node}"))
+                    && !card.action.contains(node.as_str()),
+                "{label}: the card names the machine it was given **once**, in the evidence. The \
+                 action carries no name at all, because the action has a five-line budget and a \
+                 node name is the one string on this card whose width nobody here controls: {} / \
+                 {}",
+                card.evidence,
+                card.action
+            ),
+            None => {
+                assert!(
+                    !card.evidence.contains("on node"),
+                    "{label}: there is no machine to name, so the card does not invent one: {}",
+                    card.evidence
+                );
+                assert_eq!(
+                    card.action,
+                    "find out which machine this pod was given and whether anything there \
+                     actually starts containers",
+                    "{label}: and the action asks the reader for the name the object does not \
+                     carry, rather than sending them to look at a blank"
+                );
+            }
+        }
+    }
+}
+
+/// **A pod whose status says it is running is not a pod nothing has picked up.** The card's
+/// sentence — *nothing there has picked it up* — is a claim about whatever writes `status`, and
+/// `phase: Running` is that same writer saying it did. D156's ruling 1 is about
+/// **`spec.containers`**, which the API server refuses empty; it says nothing about a `status`
+/// that arrived without its container list, and the two are written by different components.
+///
+/// **Planted, and it has to be**: no capture on this cluster can hold one. Two producers are
+/// already named in this file — a virtual-node provider that reports a pod and never fills the
+/// list in ([`PodSnapshot::containers`], the Tencent TKE node of k9s #4145) and a partial or
+/// pruned object, which is the route the *names no node* case above arrives by.
+///
+/// **Both directions of the guard are read**, because *not `Pending`* and *`Running`* are
+/// different gates and only one of them is right: a pod carrying no phase at all cannot support
+/// the claim either, and it is silence for the same reason rule 14 requires the phase it names.
+#[test]
+fn a_pod_whose_status_says_it_is_running_is_not_one_nothing_has_picked_up() {
+    let healthy = a_node_that_is("True");
+    let moment = after_the_bind(SignedDuration::from_mins(45));
+    for (label, phase) in [
+        ("Running", Some("Running".to_string())),
+        ("no phase at all", None),
+    ] {
+        let claimed = capture_but("unstarted", |pod| {
+            pod.spec
+                .as_mut()
+                .expect("the captured pod has a spec")
+                .node_name = Some(healthy.id.name.clone());
+            pod.status.as_mut().expect("the capture has a status").phase = phase;
+        });
+        assert!(
+            claimed.containers.is_empty(),
+            "{label}: only the phase moves — the pod is still the one with no container status, \
+             which is the whole shape this branch exists for: {:?}",
+            claimed.containers
+        );
+        nothing(
+            &analyze(&ClusterSnapshot {
+                nodes: vec![healthy.clone()],
+                ..pods_at(vec![claimed], moment.clone())
+            }),
+            &format!(
+                "{label}: a card saying nothing on that machine has picked this pod up, about a \
+                 pod the machine's own status says is up, sends its reader to check a kubelet \
+                 while the pod serves traffic"
+            ),
+        );
+    }
+}
+
+/// **The ten minutes, on the shape that has no container to blame it on.** Rule 13's grace is one
+/// clock for both of its shapes, and a threshold nobody crosses is a threshold nobody has tested.
+///
+/// The pair is read off the capture's own bind stamp at `+10:00` and `+10:01`, so it survives a
+/// recapture without being repinned, and the **ten minutes are written out** rather than taken
+/// from [`NOT_READY_GRACE`], since a boundary computed from the constant under test agrees with
+/// every value that constant could hold.
+///
+/// **Over a healthy node**, or the silence at `+10:00` would be the hand-off's doing rather than
+/// the clock's.
+#[test]
+fn the_pod_nothing_reported_on_is_a_slow_bind_for_its_first_ten_minutes() {
+    let healthy = a_node_that_is("True");
+    let placed = || {
+        capture_but("unstarted", |pod| {
+            pod.spec
+                .as_mut()
+                .expect("the captured pod has a spec")
+                .node_name = Some(healthy.id.name.clone());
+        })
+    };
+    let at = |offset: SignedDuration| {
+        let moment = after_the_bind(offset);
+        analyze(&ClusterSnapshot {
+            nodes: vec![healthy.clone()],
+            ..pods_at(vec![placed()], moment)
+        })
+    };
+
+    nothing(
+        &at(SignedDuration::from_mins(10)),
+        "ten minutes to the second is inside the window, not past it: a kubelet that has just \
+         been handed a pod has not written a status for it yet either, and a rule firing under \
+         `progressDeadlineSeconds`' own default alerts on every bind in the cluster",
+    );
+
+    let past = SignedDuration::from_mins(10) + SignedDuration::from_secs(1);
+    let all = at(past);
+    show_at(&all, &after_the_bind(past));
+    assert_eq!(
+        all.len(),
+        1,
+        "one second later the same pod is a finding — and the pair is what keeps the constant \
+         from being deleted with the suite still green: {:?}",
+        titles(&all)
+    );
+}
+
+/// **The two clauses above the clock still hold on the second shape** — they are the same three
+/// lines of [`placed_but_never_started`] for both, and a branch added below them could not change
+/// that, which is exactly why it is worth asserting rather than assuming.
+///
+/// - **Somebody has already deleted it** → rule 12's card alone, for the reason it is rule 12's
+///   alone on the wedged pod: *go and look at that machine* has stopped being a question anyone
+///   can act on once the pod is on its way out. Measured on the review cluster, this is the shape
+///   an undo actually produces — a plain `kubectl delete pod` on it blocks and leaves the pod
+///   `Terminating` indefinitely, because the kubelet that would confirm the delete is the stopped
+///   one.
+/// - **The pod is over** → silence, and this one is [`analyze`]'s gate rather than the rule's:
+///   [`finished`] skips every pod rule but rule 12 before this one is called. It is fed here
+///   because the *shape* is new — the gate has never been asked about a pod with no container
+///   statuses, and a check is proven only for the shapes it was fed (CLAUDE.md, NOTES § D29).
+/// - **The `PodScheduled` line carries no stamp** → silence, because here the ten minutes *is* the
+///   gate and a condition with no moment on it cannot be shown to have cleared one.
+#[test]
+fn a_deleted_finished_or_undated_pod_nothing_reported_on_is_not_this_rules_card() {
+    let healthy = a_node_that_is("True");
+    let onto_the_healthy_node = |pod: &mut Pod| {
+        pod.spec
+            .as_mut()
+            .expect("the captured pod has a spec")
+            .node_name = Some(healthy.id.name.clone());
+    };
+    let moment = after_the_bind(SignedDuration::from_mins(45));
+
+    let abandoned = capture_but("unstarted", |pod| {
+        onto_the_healthy_node(pod);
+        pod.metadata.deletion_timestamp = Some(after_the_bind(SignedDuration::from_mins(11)));
+        pod.metadata.deletion_grace_period_seconds = Some(30);
+        pod.metadata.finalizers = Some(vec!["k8rs.test/never-removed".to_string()]);
+    });
+    let all = analyze(&ClusterSnapshot {
+        nodes: vec![healthy.clone()],
+        ..pods_at(vec![abandoned], moment.clone())
+    });
+    show_at(&all, &moment);
+    assert_eq!(
+        all.len(),
+        1,
+        "rule 12 alone: what the machine never did has stopped being actionable once the pod \
+         has been asked to go, and what is left to do is find what holds the delete: {:?}",
+        titles(&all)
+    );
+    only(&all, "broken-unstarted", "asked to shut down");
+
+    for phase in ["Succeeded", "Failed"] {
+        let over = capture_but("unstarted", |pod| {
+            onto_the_healthy_node(pod);
+            pod.status.as_mut().expect("the capture has a status").phase = Some(phase.to_string());
+        });
+        nothing(
+            &analyze(&ClusterSnapshot {
+                nodes: vec![healthy.clone()],
+                ..pods_at(vec![over], moment.clone())
+            }),
+            &format!(
+                "{phase}: a pod that is over is not what is broken now, and `analyze` drops it \
+                 before this rule sees it — the branch added for the empty container list sits \
+                 under that gate and not beside it"
+            ),
+        );
+    }
+
+    let undated = capture_but("unstarted", |pod| {
+        onto_the_healthy_node(pod);
+        pod.status
+            .as_mut()
+            .and_then(|s| s.conditions.as_mut())
+            .expect("the capture has conditions")
+            .iter_mut()
+            .for_each(|c| c.last_transition_time = None);
+    });
+    assert!(
+        undated
+            .scheduled
+            .as_ref()
+            .is_some_and(|c| c.status == "True" && c.last_transition.is_none()),
+        "the verdict has to survive the edit and only its moment go, or the silence below is \
+         the gate above it: {:?}",
+        undated.scheduled
+    );
+    nothing(
+        &analyze(&ClusterSnapshot {
+            nodes: vec![healthy.clone()],
+            ..pods_at(vec![undated], moment)
+        }),
+        "an unstamped PodScheduled fires nothing, the opposite direction from rule 10: here the \
+         ten minutes is the gate, and a pod that cannot be shown to have been waiting is one \
+         that may have been bound a second ago",
+    );
+}
+
 /// **The clause the rule is named after, and it was held in place by nothing** — the
 /// defect [D73](NOTES.md) recorded on rule 10, one box later and caught by looking for
 /// it: deleting `if scheduled.status != "True"` leaves the whole suite green.
@@ -11527,9 +12310,14 @@ fn the_whole_capture_through_the_rules_at_once() {
     // The number also absorbed a card that *went*: rule 13 drew on `broken-init` whenever the
     // capture caught its init container between runs rather than in backoff, naming the **app**
     // container — [`nothing_else_to_point_at`] is where that was fixed in the same change.
+    // **25 since `unstarted.json` landed on 2026-08-22** (NOTES § D156). This snapshot carries
+    // no nodes at all, which is one of the three shapes rule 13's second branch fires on — the
+    // hand-off to N1 needs the pod's node *in the snapshot* — so the pod nothing ever reported
+    // on speaks here, and the two-capture join that silences it is
+    // [`the_pod_nothing_reported_on_is_the_nodes_card_when_the_node_went_quiet`].
     assert_eq!(
         all.len(),
-        24,
+        25,
         "one card per thing that is broken across every pod the repository has captured, \
          counted rather than described: the list is long enough now that a sentence naming \
          each one would be a second copy of the tests above, and a number that moves when a \
