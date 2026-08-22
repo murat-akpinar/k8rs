@@ -203,7 +203,7 @@ fn captured_replica_sets() -> Vec<WorkloadSnapshot> {
 /// here because `ClusterSnapshot` has no `Default` and `now` cannot be invented away.
 fn now() -> Time {
     Time(
-        "2026-08-21T00:00:00Z"
+        "2026-08-23T00:00:00Z"
             .parse()
             .expect("the pin is a timestamp"),
     )
@@ -711,7 +711,7 @@ const CANARIES: [&str; 8] = [
     // `scripts/certs-test.sh` holds, asserted for itself in `certificates.rs` — so if this line
     // and that one go red together, the certificate moved and this sweep is the echo.
     "Things that cost you something for nothing",
-    "15d",
+    "13d",
 ];
 
 #[test]

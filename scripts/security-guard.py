@@ -14,17 +14,26 @@ mattered became a script (`write-guard.py` for invariant 1, `test-guard.py` for
    at all today; the guard keeps the *class* empty, so it is already standing
    when `$EDITOR` arrives with `e` in v0.4 — the one place this repo will ever
    spawn a process, and the one that must use an argument vector.
-3. **No telemetry, no second outbound path** — the dependency list is the ten
-   invariant 10 allows and nothing else (an allowlist, because a denylist of
-   HTTP crates would need to know about `reqwest`, `hyper`, `ureq`, `isahc`,
-   `attohttpc`… and whatever ships next month), and no hardcoded host in the
-   code.
+3. **No telemetry, no second outbound path** — the dependency list is the
+   eleven invariant 10 allows and nothing else (an allowlist, because a
+   denylist of HTTP crates would need to know about `reqwest`, `hyper`,
+   `ureq`, `isahc`, `attohttpc`… and whatever ships next month), and no
+   hardcoded host in the code. Both halves are narrower than the name: the
+   allowlist reads the three dependency tables of `Cargo.toml`, and the code
+   scan matches a *literal* `https?://host`. A host that is assembled
+   (`format!("https://{h}/x")`) or handed to us at runtime is not visible to
+   either, and neither is the kubeconfig's own API server — this check never
+   sees the one allowed path, it only refuses the ways a second one is
+   usually typed.
 4. **Token hygiene** — a type that can hold a kube `Config`/`Client` may not
    *derive* `Debug`: the derived one prints the auth info, and the gate's line
-   is "any type that can hold config has a wrapped `Debug`". `kube` is not a
-   dependency until Phase 5, so the run says so out loud rather than passing in
-   silence, in `write-guard.py`'s own pattern — the logic is proven by
-   `--self-test` until the surface exists.
+   is "any type that can hold config has a wrapped `Debug`". The taint follows
+   a *field type spelled `Client`* into the struct that owns it, to a fixpoint,
+   so it catches a foreign type without reading kube. It reads `struct` only:
+   an `enum` variant holding a `Client` is not seen, and neither is one behind
+   a `type` alias. `kube` landed in Phase 5, so the note that said this check
+   was still waiting no longer prints; nothing in the tree holds a `Client`
+   yet, which is why the count is zero rather than the scan being broken.
 
 What is deliberately **not** here: every gate item about code that does not
 exist yet (the write path and `dryRun`, the audit log's mode, `--read-only`
@@ -48,12 +57,17 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # --- what each check is allowed to see -----------------------------------
 
-# The ten of invariant 10 (CLAUDE.md § Hard invariants). An eleventh is a
+# The eleven of invariant 10 (CLAUDE.md § Hard invariants). A twelfth is a
 # recorded decision, so it lands here and in CLAUDE.md in the same change —
-# which is exactly the review this line exists to force.
+# which is exactly the review this line exists to force. It forced the
+# eleventh: `futures-util` is a reversal of "no new dependencies", ruled in
+# NOTES § D143 — every entry point in kube-runtime returns `impl Stream`,
+# `Stream` is not in `std`, and the crate was already linked under
+# `kube-client`, so it names a trait rather than adding compiled code.
 ALLOWED_CRATES = {
     "kube", "k8s-openapi", "ratatui", "crossterm", "tokio",
     "anyhow", "serde_json", "serde_yaml_ng", "x509-parser", "similar",
+    "futures-util",
 }
 
 # Reserved names that cannot resolve to a real service (RFC 2606 / RFC 6761),
@@ -308,10 +322,11 @@ def check_outbound(files: list[Path], root: Path) -> tuple[list[str], str]:
         for name in manifest.get(table, {}):
             crates.append(name)
             if name not in ALLOWED_CRATES:
-                problems.append(f"Cargo.toml [{table}]  {name} — not one of the "
-                                f"ten crates invariant 10 allows. A new "
-                                f"dependency is a recorded decision: NOTES.md "
-                                f"and CLAUDE.md first, this list with them")
+                problems.append(f"Cargo.toml [{table}]  {name} — not one of "
+                                f"the {len(ALLOWED_CRATES)} crates invariant 10 "
+                                f"allows. A new dependency is a recorded "
+                                f"decision: NOTES.md and CLAUDE.md first, this "
+                                f"list with them")
 
     # Our own repository URL is display text (`main.rs` prints it) and is read
     # from the manifest rather than copied here, so it moves when the repo does.
@@ -620,11 +635,11 @@ def self_test() -> None:
         assert not only("no shell"), only("no shell")
         (fake / "src" / "spawn.rs").unlink()
 
-        # 3a — a crate outside the ten.
+        # 3a — a crate outside the allowlist.
         cargo = (fake / "Cargo.toml").read_text()
         (fake / "Cargo.toml").write_text(cargo + 'reqwest = "0.12"\n')
-        planted["dependency outside the ten"] = only("no second outbound path")
-        assert any("reqwest" in p for p in planted["dependency outside the ten"])
+        planted["a dependency outside the allowlist"] = only("no second outbound path")
+        assert any("reqwest" in p for p in planted["a dependency outside the allowlist"])
         (fake / "Cargo.toml").write_text(cargo)
 
         # 3b — a hardcoded host in code. Written next to a `//` inside a string

@@ -489,6 +489,151 @@ assert_refused "Node ownerReference" <<<'
  "ownerReferences":[{"apiVersion":"v1","kind":"Node","name":"prod-master-01","controller":true}]}}'
 # --- SHAPE: `kubectl get pods -n kube-system -o json` END ---
 
+# --- SHAPE: a server-side `Table`, as the browser fetches one START ---
+# The fifth shape, and the first that is not an object at all. A `Table` is what
+# the API server prints for `kubectl get` (`src/k8s.rs` § THE BROWSER'S ROWS):
+# one `columnDefinitions` array and one `cells` array per row, with the node
+# name arriving as **a bare string in `cells`** — matching none of the five
+# places `node_names` used to look. Committed on 2026-08-22 as
+# `tests/fixtures/table-pods.json` from the `k8rs` cluster, so the bytes on disk
+# are legal; what was not legal is that a Table captured anywhere else walked
+# straight past the refusal, which is D94's shape one door along.
+#
+# **The trap, and it is why this is not a whole-cells scan.** The same capture's
+# `Name` column holds `kube-apiserver-k8rs-control-plane` — a *pod* name that
+# carries a node name inside it and is not itself in the allowed set. A filter
+# that read every cell would refuse the very capture that is committed. So the
+# column is found the way the document identifies it: `columnDefinitions` says
+# which column is `Node` (and `Nominated Node`), and the cell at that index in
+# each row is the node name. Column-aware, never per-kind.
+
+# A pods Table, in the shape the API server actually sends one. $1 and $2 are
+# the `Node` and `Nominated Node` cells of the single row; the column order is
+# $3 so a case can prove the index is read rather than assumed.
+table_pods() { # $1 node cell  $2 nominated cell  [$3 = "reordered"]
+  if [ "${3:-}" = "reordered" ]; then
+    cat <<JSON
+{"kind":"Table","apiVersion":"meta.k8s.io/v1",
+ "columnDefinitions":[
+   {"name":"Node","type":"string","priority":1},
+   {"name":"Name","type":"string","format":"name","priority":0},
+   {"name":"Nominated Node","type":"string","priority":1}],
+ "rows":[{"cells":["$1","kube-apiserver-k8rs-control-plane","$2"],
+          "object":{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",
+                    "metadata":{"name":"kube-apiserver-k8rs-control-plane",
+                                "namespace":"kube-system","uid":"3b8815bc-0000-0000-0000-000000000001"}}}]}
+JSON
+  else
+    cat <<JSON
+{"kind":"Table","apiVersion":"meta.k8s.io/v1",
+ "columnDefinitions":[
+   {"name":"Name","type":"string","format":"name","priority":0},
+   {"name":"Ready","type":"string","priority":0},
+   {"name":"Status","type":"string","priority":0},
+   {"name":"Restarts","type":"string","priority":0},
+   {"name":"Age","type":"string","priority":0},
+   {"name":"IP","type":"string","priority":1},
+   {"name":"Node","type":"string","priority":1},
+   {"name":"Nominated Node","type":"string","priority":1},
+   {"name":"Readiness Gates","type":"string","priority":1}],
+ "rows":[{"cells":["kube-apiserver-k8rs-control-plane","1/1","Running","0","34h","10.244.2.7","$1","$2","<none>"],
+          "object":{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",
+                    "metadata":{"name":"kube-apiserver-k8rs-control-plane",
+                                "namespace":"kube-system","uid":"3b8815bc-0000-0000-0000-000000000001"}}}]}
+JSON
+  fi
+}
+
+assert_refused "Table, foreign name in the Node column" \
+  < <(table_pods "ip-10-3-44-201.eu-west-1.compute.internal" "<none>")
+# On its own, because `Node` sits beside it on every real pods Table and a
+# suppressor proven beside a second suppressor is proven by neither.
+assert_refused "Table, foreign name in the Nominated Node column only" \
+  < <(table_pods "<none>" "ip-10-3-44-203.eu-west-1.compute.internal")
+assert_refused "Table, the review cluster D94 is about, in a Node cell" \
+  < <(table_pods "k8rs-review-control-plane" "<none>")
+# The index comes from `columnDefinitions` and not from a position: the same
+# names, in a column order no printer uses.
+assert_refused "Table whose Node column is not where a pods Table puts it" \
+  < <(table_pods "ip-10-3-44-201.eu-west-1.compute.internal" "<none>" reordered)
+
+# The other half, and the one that decides whether this is a guard or a capture
+# trip that cannot run. Every one of these is what the k8rs cluster produces.
+assert_accepted "Table, kind's own node name, with a pod name that contains one beside it" \
+  < <(table_pods "k8rs-worker2" "<none>")
+assert_accepted "Table, the dotted form the LAN host hands out" \
+  < <(table_pods "k8rs-worker.lan" "<none>")
+# `<none>` is what the printer writes for a pod no scheduler has placed. It is
+# not a DNS subdomain and cannot be a node name — a Table full of them is an
+# ordinary capture, not a foreign one.
+assert_accepted "Table of unscheduled pods — every Node cell is <none>" \
+  < <(table_pods "<none>" "<none>")
+assert_accepted "Table with a Node column at a position nothing assumes" \
+  < <(table_pods "k8rs-control-plane" "<none>" reordered)
+
+# The node name is a reference: refused when it is foreign, kept byte-for-byte
+# when it is kind's own, exactly as `.endpoints[].nodeName` is.
+tbl_clean=$(table_pods "k8rs-worker2" "<none>" | jq -f "$filter") || tbl_clean=
+tbl_kept=$(jq -r '.rows[0].cells[6]' <<<"$tbl_clean" 2>/dev/null)
+if [ "$tbl_kept" != "k8rs-worker2" ]; then
+  echo "FAIL  [Table] the node name in the Node cell did not survive: '$tbl_kept'"
+  fail=1
+fi
+# And the pod name that merely contains one is not touched either — the trap,
+# asserted rather than reasoned about.
+if ! grep -qF -- "kube-apiserver-k8rs-control-plane" <<<"$tbl_clean"; then
+  echo "FAIL  [Table] a pod name carrying a node name inside it was destroyed"
+  fail=1
+fi
+# The IP in a cell is an address like any other and goes, which is what says the
+# payload rules reach inside a Table at all.
+if grep -qF -- "10.244.2.7" <<<"$tbl_clean"; then
+  echo "FAIL  [Table] a pod IP in a cell survived the filter"
+  fail=1
+fi
+
+# The shapes a Table arrives in that have no Node column at all. Every cell in
+# them is arbitrary text, so a filter that read cells instead of columns turns
+# `broken-owned` and `busybox` into node-name candidates and refuses the trip.
+assert_accepted "Table of Deployments — no Node column, number cells, object null" <<<'
+{"kind":"Table","apiVersion":"meta.k8s.io/v1",
+ "columnDefinitions":[{"name":"Name","priority":0},{"name":"Ready","priority":0},
+   {"name":"Up-to-date","priority":0},{"name":"Available","priority":0},
+   {"name":"Age","priority":0},{"name":"Containers","priority":1},
+   {"name":"Images","priority":1},{"name":"Selector","priority":1}],
+ "rows":[{"cells":["broken-owned","0/1",1,0,"34h","quitter","busybox","app=broken-owned"],
+          "object":null}]}'
+# A row the server sent fewer cells for than it declared columns, which is the
+# shape `Table::from` pads: the index has nothing at it, and that is not a
+# refusal and not a jq error either.
+assert_accepted "Table whose row has fewer cells than columns" <<<'
+{"kind":"Table","apiVersion":"meta.k8s.io/v1",
+ "columnDefinitions":[{"name":"Name","priority":0},{"name":"Node","priority":1}],
+ "rows":[{"cells":["web"]}]}'
+assert_accepted "Table with no rows at all" <<<'
+{"kind":"Table","apiVersion":"meta.k8s.io/v1",
+ "columnDefinitions":[{"name":"Name","priority":0},{"name":"Node","priority":1}],"rows":[]}'
+# A row with no `cells` key whatsoever. jq errors hard on the wrong type and an
+# error reads exactly like a refusal to anyone reading the exit status, so the
+# degenerate shapes are asserted *accepted* rather than left to chance.
+assert_accepted "Table row carrying no cells key at all" <<<'
+{"kind":"Table","apiVersion":"meta.k8s.io/v1",
+ "columnDefinitions":[{"name":"Node","priority":1}],"rows":[{"object":null}]}'
+# The walk is the document's, not a path: a Table nested anywhere is read the
+# same way every other clause in this filter reads a List's items.
+assert_refused "Table wrapped in a List, foreign name in its Node column" <<<'
+{"apiVersion":"v1","kind":"List","items":[
+ {"kind":"Table","columnDefinitions":[{"name":"Name"},{"name":"Node"}],
+  "rows":[{"cells":["web","ip-10-3-44-201.eu-west-1.compute.internal"]}]}]}'
+# The committed bytes themselves, both of them, straight off disk: the filter
+# ran on them once at capture time and has to still accept them, or the next
+# trip cannot rewrite the file it already wrote.
+for t in table-pods table-deployments; do
+  assert_accepted "the committed $t.json, back through the filter" \
+    < "$here/../tests/fixtures/$t.json"
+done
+# --- SHAPE: a server-side `Table`, as the browser fetches one END ---
+
 # --- CSR REQUESTER IDENTITY START ---
 # A CertificateSigningRequest names who asked for the certificate, in
 # `.spec.username` and `.spec.groups`. That is a *reference* to a real person or
@@ -746,6 +891,6 @@ done
 # --- CSR REQUESTER IDENTITY END ---
 
 if [ $fail -eq 0 ]; then
-  echo "sanitize-test: single object, List, endpointslices List and kube-system List — every planted secret removed (field, message, flag and URL framings), every reference kept, foreign capture, foreign Node owner and foreign requester identity refused; a review cluster refused by both identifier rules, every node name the fixture cluster produces still accepted, and an EndpointSlice's .endpoints[].nodeName refused foreign in every framing and kept intact when it is kind's own"
+  echo "sanitize-test: single object, List, endpointslices List and kube-system List — every planted secret removed (field, message, flag and URL framings), every reference kept, foreign capture, foreign Node owner and foreign requester identity refused; a review cluster refused by both identifier rules, every node name the fixture cluster produces still accepted, an EndpointSlice's .endpoints[].nodeName refused foreign in every framing and kept intact when it is kind's own, and a server-side Table refused on a foreign name in the column columnDefinitions calls Node or Nominated Node — at any column index, wrapped or bare — while the pod name that contains a node name beside it is kept"
 fi
 exit $fail

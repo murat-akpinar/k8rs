@@ -136,6 +136,10 @@ fn the_node_that_went_quiet_names_the_workloads_that_went_with_it() {
 
     // The requirement re-derived, not the implementation re-read: up to two owners
     // alphabetically, then how many were left out, then the total pod count beside it.
+    //
+    // **The verb is placement and not running** (NOTES § D156): the list is *which workloads went
+    // with this node*, and on a node that stopped answering the only thing every pod in it is
+    // known to have done is arrive. A pod the kubelet never started is in this list too.
     let mut owners: Vec<String> = here
         .iter()
         .map(|p| match &p.owner.namespace {
@@ -153,7 +157,7 @@ fn the_node_that_went_quiet_names_the_workloads_that_went_with_it() {
     assert_eq!(
         card.evidence,
         format!(
-            "{}, {} and {} more were running here ({} pods)",
+            "{}, {} and {} more were placed here ({} pods)",
             owners[0],
             owners[1],
             owners.len() - 2,
@@ -172,7 +176,7 @@ fn the_node_that_went_quiet_names_the_workloads_that_went_with_it() {
     );
     assert_eq!(
         card.age(&now()).as_deref(),
-        Some("47 min ago"),
+        Some("2 days ago"),
         "a duration off the pinned now, not English parsed back into a number"
     );
     assert_eq!(
@@ -309,9 +313,17 @@ fn a_node_that_answered_and_said_no_is_a_different_card_from_one_that_went_quiet
     let here = on_node(&pods, "k8rs-worker2");
     assert!(
         card.evidence
-            .contains(&format!("are running here ({} pods)", here.len())),
-        "and the tense follows: these pods are still reporting, because the kubelet that \
-         reports them is up: {}",
+            .contains(&format!("placed here ({} pods)", here.len())),
+        "and the workload line is the same sentence on both branches (NOTES § D156): what the \
+         node answered decides the title, the action and whether there is a kubelet sentence to \
+         quote — it cannot decide a verb, because *running* is not a claim either branch can \
+         make about a pod nothing ever started: {}",
+        card.evidence
+    );
+    assert!(
+        !card.evidence.contains("running here"),
+        "and specifically not *running*: the pods on a node that says it cannot run pods are \
+         exactly the pods that may never have run: {}",
         card.evidence
     );
 }
@@ -421,7 +433,7 @@ fn the_cordoned_node_counts_only_the_pods_a_drain_would_actually_move() {
         "the age is the taint's, which the controller stamps — never `Ready`'s, which does \
          not move when a node is cordoned (D65)"
     );
-    assert_eq!(card.age(&now()).as_deref(), Some("47 min ago"));
+    assert_eq!(card.age(&now()).as_deref(), Some("2 days ago"));
 }
 
 /// **A node a drain finished with is parked, not broken** — and both of the two shapes a drain
@@ -558,7 +570,7 @@ fn a_node_an_autoscaler_is_taking_away_is_not_a_half_finished_drain() {
 /// banner, and deliberately not a finding from this file.
 ///
 /// **N1 is unaffected as a card and loses its evidence line**: the node's own condition is not
-/// namespaced, but *"one pod was running here"* about a node carrying forty is the wrong
+/// namespaced, but *"one pod was placed here"* about a node carrying forty is the wrong
 /// number this screen exists not to print.
 #[test]
 fn the_two_rules_that_need_every_pod_do_not_answer_from_one_namespace() {

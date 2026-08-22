@@ -621,7 +621,12 @@ that cites them expects to find them.
       legitimately take minutes to pull and firing under that alerts on every
       cold start. **WARN, not CRITICAL:** the one healthy thing that still
       looks like this is a slow pull.
-      Closed — [D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13) · [D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13)
+      **Two shapes, not one:** the `ContainerCreating` wedge, and a pod the
+      kubelet has never written a status for at all — which decodes with an
+      empty `containers` and drew nothing until 2026-08-22. That one stands
+      down only where N1 already draws the card, and `unstarted.json` is the
+      capture.
+      Closed — [D72](NOTES.md#d72--rule-13-is-added-to-v1-and-the-field-it-was-proposed-on-is-narrower-than-the-case-2026-08-13) · [D76](NOTES.md#d76--the-review-that-built-a-cluster-and-the-premise-it-measured-away-2026-08-13) · [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22) · [D156](NOTES.md#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)
 - [x] **Rule 14 — nothing has even looked at this pod.** `phase == Pending`
       with **no `PodScheduled` condition at all**, older than **2 minutes**
       from `metadata.creationTimestamp` — a field `PodSnapshot` must gain, and
@@ -1125,12 +1130,14 @@ that cites them expects to find them.
       under them** — `the_clean_exit_actions_fit_the_card_they_are_drawn_on`,
       which measures those three strings and no others
       ([NOTES § D90](NOTES.md#d90--the-third-door-and-the-command-trade-d88-made-a-day-earlier-2026-08-15)).
-      **Exactly five actions in the file still exceed the cap**, with the same
-      wrap at 49 columns: `stopped_action`'s two arms at 6 lines each,
-      `failed_action(Init)` at **8** — a 14-row card, which is the one that
-      breaks the ten-line cap outright — rule 5's `None` arm at 6, and rule 6's
-      action at 6. That is the whole list; the count fell from nine because two
-      rule 1 strings were folded away, not because anything was shortened.
+      **Five actions exceeded the cap when this box was written and none does
+      now** — `stopped_action`'s two arms, `failed_action(Init)` at 8 (a 14-row
+      card, the one that broke the ten-line cap outright), rule 5's `None` arm
+      and rule 6's action. `failed_action` no longer exists in `src/` at all
+      ([NOTES § D113](NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)).
+      The count is not restated here or in `screens/`: it is `cargo test --
+      --nocapture` with every distinct `→ ` line wrapped at 49, run fresh, and
+      this line went stale for weeks precisely because it was a copy.
       **The doors are not what costs the space**: three readings fit in five
       lines once the preamble and the restatements come out, which is what the
       rewrite above proved on the hardest of them. **One correction to carry into
@@ -1525,7 +1532,13 @@ that cites them expects to find them.
       being spelled by hand
       ([D119](NOTES.md#d119--the-last-surviving-mutant-was-equivalent-and-the-fix-is-to-stop-spelling-the-tie-by-hand-2026-08-20)).
       The count falls 558 → 553 for that reason and the trade is recorded there
-      ([NOTES § D41](NOTES.md#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12))
+      ([NOTES § D41](NOTES.md#d41--cargo-mutants-cannot-see-the-defect-it-was-put-there-to-catch-2026-08-12)).
+      **Re-run at the 2026-08-22 re-close, over the same four shards: 854
+      mutants, 761 caught, 93 unviable, 0 MISSED, 0 timeouts** — the file has
+      grown by 301 mutants since, and the per-turn `--in-diff` gate does not
+      cover the unchanged lines of a rewritten function, which is why this box's
+      numbers are re-taken at a close and not carried
+      ([NOTES § D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22))
 - [x] Temporary `main.rs` shell (~10 lines): load a fixture path from args,
       print findings. It cannot reach a cluster yet — `k8s.rs` is Phase 5, and
       that is where the v0.0.1 release therefore sits. **It strips control
@@ -1596,7 +1609,17 @@ which freeze at Phase 4 close.** Phase 4's reports are the contract's second
 consumer and need fields no Phase 3 rule reads; they may add fields to those
 types and nothing else in the file — not a rule, not `Finding`, not `ObjectId`,
 not `analyze`
-([NOTES § D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+([NOTES § D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)) —
+**re-opened 2026-08-22 for exactly one field**, `status.reason` — the decode
+change owed to the Waste box this file re-opened above. D42 named it itself and
+Phase 4 closed without it; nothing else in the file un-freezes
+([NOTES § D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)).
+**D155 opened it for a second field and that half is closed unused**: telling
+*no container status yet* from *no container* needs nothing, because the API
+server refuses a pod whose `spec.containers` is empty or absent, so an empty
+`PodSnapshot::containers` already means exactly one thing
+([NOTES § D156](NOTES.md#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)
+ruling 1).
 
 ## Phase 4 — Analysis reports
 
@@ -1868,7 +1891,7 @@ unchecked one from the top.
       local storage is its own row, split by `medium` because a tmpfs has
       nothing to copy off; a node that is not `Ready` is the pane's *cannot
       answer this yet* row, never a verdict ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
-- [x] **Waste** — **Services whose selector matches no pod first** (the 503
+- [ ] **Waste** — **Services whose selector matches no pod first** (the 503
       nobody can explain; it stays here rather than in Alerts because
       promoting it would cost a permanent Services + EndpointSlices watch, and
       the watch budget is why k8rs is lighter than k9s), then unbound/unused
@@ -1880,6 +1903,19 @@ unchecked one from the top.
       `DisruptionBudgetSnapshot::selector` became `Option<Selector>` here — an
       empty selector protects a whole namespace and an absent one protects
       nothing, and flattened they were one value ([D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21))
+      **Re-opened 2026-08-22: only one of the two pileups landed, and the Done
+      note above records the narrowing.** `finished()` is `Succeeded | Failed`
+      and a node-pressure eviction is `Failed`, so evicted pods are counted with
+      completed Job pods and explained with the Job sentence. Measured on four
+      of them: Alerts prints `nothing is broken`, Waste prints *"4 pods finished
+      and were never removed — Kubernetes keeps a few finished Jobs by default,
+      so some of this is normal"* at `Info` with no action line. They did not
+      finish, they were killed for node memory or disk; they are often the only
+      evidence left after the node recovers; and `Evicted` is NOTES' own example
+      of jargon that must be translated. **Done when** the two pileups are two
+      rows with two sentences, the evicted one carries an action, and a fixture
+      holds the evicted shape
+      ([D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22))
 - [x] **`tui-designer` answers where the restart row lives, before it is
       written** —
       [D101](NOTES.md#d101--a-point-sample-cannot-separate-a-settled-container-from-one-on-a-long-cycle-so-the-count-becomes-a-report-row-2026-08-15)
@@ -2021,7 +2057,26 @@ the temporary main can print any of them.
 Goal: the same findings and reports, from a living cluster — and the first
 public release.
 
-- [ ] `k8s.rs`: kube-rs `watcher` over Pods, Nodes and
+> **⚠ Read before picking the next box.** Over 2026-08-22 the PM injected **ten**
+> boxes into this phase while it was running, which is the rule `CLAUDE.md` states
+> and D103 exists to enforce. Every one is a real finding from the box that had
+> just landed, and several are security findings; that is what made each addition
+> easy to justify and the pattern invisible until an agent counted
+> ([D153](NOTES.md#d153--the-pm-injected-ten-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22)).
+>
+> **Triaged 2026-08-22 and this gate is met.** Eight went to
+> [`backlog.md`](backlog.md) under a heading that names this triage; **two stayed**,
+> both because a guard of theirs goes vacuous exactly when `connect()` lands, and
+> both say so in their own bodies. Nothing else is added to this phase.
+>
+> And the cheap check that would have caught it, which costs forty seconds: **list
+> this phase's unchecked boxes in file order and confirm the one you are about to
+> brief is the first.** The PM briefed discovery as "the seventh box"; it was the
+> third unchecked one. **The count in this note was itself wrong until the triage
+> re-measured it** — the agent counted nine, the diff against the phase's pre-open
+> state says ten.
+
+- [x] `k8s.rs`: kube-rs `watcher` over Pods, Nodes and
       Deployments/StatefulSets/DaemonSets + prune (drop `managedFields`) →
       snapshot store. **The prune line is "the fields the snapshot types in
       `rules.rs` name, across metadata, spec *and* status" — "metadata + status
@@ -2066,7 +2121,32 @@ public release.
       claim load-bearing; this is D69's shape a second time, caught before the
       code instead of after
       ([NOTES § D88](NOTES.md#d88--an-exit-code-names-an-ending-never-an-agent-and-the-boundary-for-folding-a-found-defect-in-2026-08-14))
-- [ ] **Bound every free-text field at ingest, not the one field that was
+      Done: `Store`, `Watch<T>`, the bootstrap gate and the driver loop — five
+      watches merged into **one task holding one `&mut Store`**, no lock and no
+      channel, and no per-kind code in the loop. **The prune is the decode**, not
+      a step before it: `rules.rs`'s `From` impls already keep exactly the fields
+      the snapshot types name, and D97's literal trap — the prune that keeps the
+      container's restart policy and drops the pod's — is guarded by a test that
+      injects it and goes red, not by a comment. D143 had to be ruled to get
+      here: the ten crates approved a client and nothing that could consume it.
+      **The driver's own first draft was wrong and a test killed it** — clearing
+      `Store::failure` on the next successful event would have had a permanent
+      403 erased in milliseconds by the four healthy watches, so the field is
+      monotone and the reconnect box replaces it
+      ([D144](NOTES.md#d144--the-snapshot-stores-shape-and-the-ten-choices-the-box-did-not-make-2026-08-22) ·
+      [D145](NOTES.md#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)).
+      441 + 7 tests, 22 mutants 0 missed.
+      **Six things are not proven and cannot be until `connect()` lands**, and
+      they are listed rather than implied: that kube delivers the
+      `Init → InitApply* → InitDone` sequence the tests synthesise; that a
+      reconnect re-`Init`s rather than resuming silently; the `< 50MB` resident
+      set, which was **not measured** — only *equivalence* was, that injected
+      `managedFields` changes nothing the store holds; that a 403 arrives as
+      `InitialListFailed` rather than another variant; that kube's retry after an
+      `Err` is not a hot loop; and that a `watcher()` stream never ends, which is
+      read off kube's doc and never observed — `select_all` **drops** a finished
+      stream, so that kind would freeze and still be presented as live
+- [x] **Bound every free-text field at ingest, not the one field that was
       measured.** The security gate has said *sizes are bounded* since Phase 1
       and nothing below this phase implements it, so today `k8rs` reads, holds
       and prints whatever the API sends: handed one object whose `kind` is 10 MB
@@ -2087,7 +2167,25 @@ public release.
       truncation, and a test per field that feeds the oversized shape and asserts
       what got stored — not what got printed, which is the half that already had
       a guard
-- [ ] **How the initial LIST arrives is a decision, not a default** — the box
+      Done: one region, `k8s::ingest`, between the decode and the store — the same
+      place the prune is, for the same reason. **The two bounds came off a census
+      of the committed captures, not a definition**: 512 bytes for a value drawn
+      as a word, 4096 for prose and paths, and the number that forced two classes
+      rather than one is `image.json`'s 362-byte waiting message, 71 % of 512. A
+      cut is visible and attributed — `… (shortened by k8rs)` — because text that
+      just stops reads as the cluster's own ending. Measured, not argued: one
+      capture with every string a megabyte long is **87 002 884 bytes on the wire
+      and 35 945 bytes kept**. The field list is **derived, not typed** — a test
+      parses `rules.rs` with `include_str!`, walks the three watched types and
+      asserts all 51 `String` fields are named. **A real capture then changed the
+      ruling**: `crashloop.json`'s kubelet message carries a newline, and
+      *removed, never replaced* glued it into `startingpanic:` on a card, so a
+      whitespace control now becomes one space and everything else is still
+      removed ([D146](NOTES.md#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22)).
+      453 + 7 tests, 27 mutants 0 missed, 15 shapes × 3 routes. **Collection
+      lengths are deliberately not bounded** and have their own box — dropping
+      list entries is a silent cut, which is what the marker exists to prevent
+- [x] **How the initial LIST arrives is a decision, not a default** — the box
       above forbids publishing a snapshot until every initial LIST has landed,
       which makes the shape of that LIST load-bearing. An unpaginated
       `LIST pods -A` on a 10 000-pod cluster is one response the API server has
@@ -2108,7 +2206,26 @@ public release.
       output — measure it, do not estimate it**, and neither number already
       written near it is that measurement
       ([NOTES § D25](NOTES.md#d25--what-this-review-did-not-decide))
-- [ ] **Find out whether kube-rs rate-limits us, and if it does, put it on
+      Done, and it turned out to be a **measurement rather than code**: kube
+      already paginates. `watcher::Config::default()` sets `page_size: Some(500)`
+      under its own *"same default page size limit as client-go"*, and
+      `to_list_params()` says *"The watcher handles pagination internally"* — the
+      watcher follows `continue` itself. **Paging is invisible to the bootstrap
+      gate**, which was the answer that mattered: one `Init`, one `InitApply` per
+      object across every page, one `InitDone` only when a page returns with no
+      token — so the gate is correct as built, without a line changing. A page
+      that fails restarts the whole LIST, which makes `Event::Init` clearing the
+      buffer load-bearing rather than defensive, and that was untested until now.
+      `INITIAL_LIST_PAGE = 500` is kept with its derivation written down: the
+      binding constraint is **memory, not round trips**, because kube buffers a
+      whole page before emitting anything — median 3708 bytes per captured pod, so
+      ~1.9 MB a page. **Neither 500 nor 1000 is a measured crossing point** and
+      only a cluster can find one. A `watch_config()` helper was written and then
+      **deleted**: its red run stayed green, because a number equal to kube's own
+      cannot be distinguished from inheriting it
+      ([D147](NOTES.md#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)).
+      456 + 7 tests, 27 mutants 0 missed
+- [x] **Find out whether kube-rs rate-limits us, and if it does, put it on
       screen** — client-go ships a client-side QPS limiter, so for years a k9s
       user reporting "slow" was partly reporting a queue inside their own binary
       with nothing to see it by; the repair was a default raised from 5 to 50
@@ -2118,10 +2235,34 @@ public release.
       if requests are ever queued, a state the header can show rather than a
       silent default
       ([PRIOR-ART § A3](PRIOR-ART.md#a3--client-side-throttling-is-invisible-and-that-is-the-bug))
-- [ ] **Name the oldest API server k8rs supports, enforce it at connect, and put
-      a deadline on the first watch sync** — `Cargo.toml` pins `k8s-openapi` to
-      `v1_32` and calls it *"the oldest supported version"*, which is a statement
-      about the types we compile against and is enforced nowhere at runtime.
+      Done as a measurement, and the answer is **no client-side limiter exists**
+      — proven mechanically rather than by grep: tower's limiter is behind a Cargo
+      feature `kube-client` does not enable, and `cargo tree -e features -i tower`
+      finds no `limit` at all, so the module is not compiled into this binary.
+      **What is there instead is worse for this box's question.**
+      `Config::default_retry` is `true` in all three constructors and gives 15
+      retries over 429/503/504, summing to **164–491 seconds** — so a throttling
+      server keeps k8rs silent for roughly two and a half to eight minutes, inside
+      a `tokio::time::sleep` in the tower stack that has no callback and no
+      counter. It stays on: turning it off would hammer a server that just said
+      stop. **And the sharpest finding is not the throttle at all** — `read_timeout`
+      is unset and the connector never calls `set_tcp_keepalive`, so **SO_KEEPALIVE
+      is off on the watch sockets**: a connection dying without FIN or RST leaves
+      `drive` blocked, `failure()` `None`, and a stale cluster on screen with
+      nothing saying it is stale. Not fixable at this layer; it goes to the
+      first-watch-sync deadline and reconnect boxes. What this box could build is
+      one method, `Store::still_listing() -> Vec<ObjectKind>`, so a screen can say
+      *which* watch it is waiting on rather than only *waiting* — kinds and not
+      sentences, because the words are `views.rs`'s
+      ([D148](NOTES.md#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22)).
+      458 + 7 tests, 5 mutants 0 missed
+- [x] **Name the oldest API server k8rs supports, enforce it at connect, and put
+      a deadline on the first watch sync** — `Cargo.toml` pinned `k8s-openapi` to
+      `v1_32` when this box was written and called it *"the oldest supported
+      version"*, which is a statement about the types we compile against and is
+      enforced nowhere at runtime. **The pin is `v1_36` since D99** and the
+      "oldest supported" wording is gone from `Cargo.toml` with it; the box's
+      point survives the correction, because a pin is still not a runtime floor.
       *(The pin is the **newest** offered since 2026-08-15,
       [D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15),
       which makes this box more pressing rather than less: no line anywhere now
@@ -2154,7 +2295,26 @@ public release.
       and a first sync that does not complete becomes a state on screen instead
       of a wait
       ([PRIOR-ART § A7](PRIOR-ART.md#a7--the-watchs-own-initial-list-strategy-can-hang-forever))
-- [ ] **Owner name resolution**: a pod's `ownerReferences` names its
+      Done, all three clauses. **The floor is 1.29 and it is derived, not
+      conventional**: nothing k8rs *sends* is refused down to at least 1.19, and
+      the floor comes from the single case where an old cluster makes k8rs
+      **state** something rather than omit it — rule 13's `else`, which now has
+      its own box. `sendInitialEvents` is the parameter that would set a real
+      floor and this design never sends it, which closes D147's deferral twice
+      over: an older server *ignores* it and hangs, a newer one with the gate off
+      *rejects* it with 403, and the gate is not monotonic. **k8rs warns and does
+      not refuse** — two sentences, one per end of the window, neither naming a
+      minor version and neither echoing the server's string, so invariant 9 holds
+      structurally. The third clause landed as **two facts and no threshold**:
+      `Listing { kind, so_far, since }` — a working LIST moves both numbers, a
+      hung one moves neither, and there is no constant to tune because *slow* and
+      *hung* genuinely overlap. `Event::Init` arrives before the request is made,
+      so a watch that never answers still stamps a start
+      ([D149](NOTES.md#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22) ·
+      [D150](NOTES.md#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22)).
+      469 + 7 tests, 27 mutants 0 missed. **The PM's brief quoted this box's title
+      wrongly and dropped the third clause**; the author read the file and said so
+- [x] **Owner name resolution**: a pod's `ownerReferences` names its
       *ReplicaSet*, and the group heading has to read `web`, not
       `web-7d4f5c6b8`. Fetch the ReplicaSet on demand, cache by UID, never
       watch it — and never strip the hash with a string heuristic, which is
@@ -2190,18 +2350,67 @@ public release.
       that sentence needs `uncapped == 0`
       ([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md)
       § 2). Found by Phase 4's close, the only pass that saw both numbers at once
-- [ ] `kube::discovery`: enumerate every kind the cluster serves, CRDs
+      Done, and **the noun clause turned out to be the header's fault, not
+      `analysis.rs`'s** — so the D124 question the brief expected never arose. A
+      `workload` is one distinct owner identity after ReplicaSet → Deployment
+      resolution, and a hand-started pod is exactly one, static control-plane pods
+      included: the noun answers *how many things must I go and fix*. Re-measured,
+      the kube-system pair has **seven** owners and `kindnet` alone sets both
+      limits, so the `6` was right all along and `capacity.rs:890` stays true; the
+      header counted controller *objects read* and printed `0`. It is gone, which
+      narrows D121 to its second mechanism. Resolution itself is on-demand, cached
+      by uid, never watched, and **the heuristic is refused by an assertion on the
+      uid** — chopping the hash after an answer lands gets the name right every
+      time and the identity wrong, and only the uid catches that. Four failure
+      facts, nothing retries ever, and a cache miss does not gate the snapshot
+      ([D151](NOTES.md#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)).
+      480 + 7 tests, 22 mutants 0 missed. **W1 turned out to be unreachable through
+      this route** and has its own box
+- [x] `kube::discovery`: enumerate every kind the cluster serves, CRDs
       included. This is what the sidebar is built from — never a hard-coded list
-- [ ] Server-side `Table` fetch for browser kinds — the columns come from the
+      Done, and mostly a recorded finding: `Browsable` (four strings, a bool, the
+      verbs), built from `(ApiResource, ApiCapabilities)` so it is testable with no
+      `Client`, filtered on `list` alone, through `ingest` like everything else.
+      **Round trips counted off the calls**: `Discovery::run()` is `2 + ΣV(g)`
+      sequentially — kube's own doc says `N+2` **per group** and the loop is per
+      *version* — while `run_aggregated()` is 2 at any cluster size, and its 1.27
+      floor sits above D149's 1.29. **Three of its four failure shapes are quiet**,
+      the worst being that a server too old for the aggregated call answers `Ok`
+      with **zero groups and no error** — an empty sidebar, not a broken one, and
+      kube's doc claims the opposite. Proven by test. **`verbs` is the resource's,
+      not the reader's** — the brief said otherwise and was wrong; only a
+      `SelfSubjectAccessReview` answers permission and that lives in `ops.rs`.
+      **And `categories` never survives kube's parse**, so Phase 11's five sidebar
+      sections cannot come from discovery — a ruling that box needs before it is
+      briefed ([D152](NOTES.md#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22)).
+      486 + 7 tests, 5 mutants 0 missed. **This was not the first unchecked box and
+      the PM did not notice** — see the note at this phase's head
+- [x] Server-side `Table` fetch for browser kinds — the columns come from the
       API server, not from us. Hand-built through `Client::request` (kube-rs
       has no `Table` type), Accept header
       `application/json;as=Table;g=meta.k8s.io;v=v1,application/json`, and the
       `406`-from-an-aggregated-API case handled by falling back to the plain
-      object list
-- [ ] Watch lifecycle: browser views watch `watch_metadata` (tiny) to learn
-      *that* something changed and re-fetch the Table, debounced — Table
-      cannot be watched. Only the Pod and Node watches stay permanent; a
-      closed view drops its stream
+      object list. **The `406` is not the only door that list arrives
+      through** — the Accept header's own `,application/json` half means an
+      ordinary server answers `200` with it, which `not_acceptable` never sees,
+      so the branch that reads it is in the decode, on `kind`. Two captured
+      fixtures, `table-pods.json` and `table-deployments.json`, and the second
+      is why cells are `Value` and not `String`
+      ([D154](NOTES.md#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22))
+- [x] Watch lifecycle: browser views watch a metadata stream to learn *that*
+      something changed and re-fetch the Table, with a floor between fetches.
+      **A Table *can* be watched and the 37× that said not to was one event
+      read as if it were every event** — the design stands on what kube gives
+      the metadata path for free, and the numbers are in
+      [D154](NOTES.md#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22).
+      **The floor is measured from the answer, not from the question**: nothing
+      bounded fetches in flight, and out-of-order arrival put `PRIOR-ART § A5`
+      back inside the type whose doc said it was prevented. **The permanent
+      watches are invariant 6's five** —
+      Pods, Nodes and Deployments/StatefulSets/DaemonSets — and this box said
+      *Pod and Node* until 2026-08-22, contradicting the invariant, `screens/
+      resources.md` and the code that had already shipped. A browser view's own
+      stream is not one of them: a closed view drops it
 - [ ] Capability probe from the same discovery call: `metrics.k8s.io`,
       `policy`, `cert-manager.io`, `monitoring.coreos.com`, Istio/Linkerd/
       Cilium. Absent capability = the feature says why it is off, never hides
@@ -2214,12 +2423,70 @@ public release.
       reconnector permanently · it called `BailOut` after five retries, so a VPN
       blip over lunch meant the tool was gone on return · each failed check held
       the 120-second call timeout, making recovery slower than the outage. The
-      lesson under all three: k9s survived disconnects during *active* use, where
+      **`Config::timeout` is one field and it feeds two calls** — `to_list_params`
+      and `to_watch_params` both read it — so a timeout short enough to bound the
+      initial LIST also caps the **watch** and re-LISTs the whole cluster on that
+      period, turning a bound into a poll and inverting invariant 6. The initial
+      LIST cannot be given its own deadline through this config; this box inherits
+      that rather than discovering it
+      ([D147](NOTES.md#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)).
+      **This box inherits two more things from the driver loop and replaces one of
+      them** ([D145](NOTES.md#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)).
+      `Store::failure` is **monotone** — nothing clears it — because clearing it
+      correctly needs per-watch identity and this box is where that lands: a
+      draft that cleared it on the next successful event would have had a
+      permanent 403 on the pod watch erased in milliseconds by the four healthy
+      watches beside it. Replace the field; do not keep reading it. The second is
+      a ceiling nobody has closed: `select_all` **drops** a stream that finishes,
+      so a watch that ended would leave its kind frozen at whatever it last held
+      and presented as live. kube's doc says a `watcher()` stream recovers rather
+      than finishing — **read off the doc, never observed**, so this box is where
+      it gets observed or defended against.
+      The lesson under all three k9s failures: k9s survived disconnects during *active* use, where
       navigation restarts the watches by accident, and only the **idle** path was
       broken — the path nobody tests. So this box is proven idle: leave it
       running against kind, `docker stop` the node, wait past any timeout, start
       it again, and the findings must come back on their own
       ([PRIOR-ART § B3](PRIOR-ART.md#b3--reconnect-logic-dies-quietly))
+- [ ] **The token-hygiene scan reads `struct` and not `enum`, and `connect()` is
+      about to write the enum it cannot see.** `security-guard.py` decides *can
+      this type hold a credential* by matching field types against `\bClient\b`,
+      which works — `kube::Client`, `Arc<kube::Client>` and a rustfmt-wrapped
+      field are all caught. But its `STRUCT` regex matches `struct` only, so
+      **`enum Conn { Up(kube::Client), Down }` is invisible, and so is the struct
+      that owns it**; `src/` already has 11 enums, and a connection-state enum is
+      the natural shape for the `connect()` box below. Also missed: a type
+      alias (`type C = kube::Client`), and `ClientBuilder`, because `\bClient\b`
+      has no boundary before `B`. Measured shape by shape by `tester`,
+      2026-08-22 — **and its first probe run reported two of these as caught
+      because the empty-tree canary was firing over a file with no struct in it
+      at all**, which is worth knowing before anybody re-measures. Done: the scan
+      reads enums and their variants' payloads, the alias case is closed or
+      named, and each shape above has a plant proven red (D29). `tester`'s. **It
+      lands before `connect()`, not after** — a guard that goes vacuous exactly
+      when the credential arrives is the shape
+      [D141](NOTES.md#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
+      already cost this project once
+- [ ] **`{:?}` on a `kube::Config` prints a bearer token, and our own guard
+      structurally cannot see it.** `kube::Config` derives `Debug`
+      (`config/mod.rs:126`). Its `password`, `token` and `client_key_data` are
+      `SecretString` and redact — but `AuthInfo.auth_provider` is an
+      `AuthProviderConfig` whose `config: HashMap<String, String>` has a **plain
+      derived `Debug`** (`config/file_config.rs:306`), and that map is exactly
+      where the oidc and gcp providers keep `id-token` and `refresh-token`.
+      `AuthInfo.other: BTreeMap<String, Value>` is the same hazard for any
+      unmodeled key. **`scripts/security-guard.py`'s token-hygiene rule reads
+      *our* structs**, so it will report `0 can hold a token` however this goes —
+      the gate's own wording, *"no `Debug` is derived over a type that can hold
+      config"*, was written when every such type was ours. Done: `connect()`
+      never `{:?}`s a `Config` or anything containing one, and **the guard is
+      taught the one foreign type that matters** or says out loud that it cannot
+      see it. **It lands before `connect()`** — a rule whose enforcement goes
+      vacuous exactly when the credential arrives is the shape
+      [D141](NOTES.md#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
+      already cost this project once, and this is the second instance in one
+      phase. `tester`'s for the guard, `dev-core`'s for the call site
+      ([D148](NOTES.md#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22))
 - [ ] **Connecting is a function, not a step in `main`** — `connect(context)`
       builds the client, runs discovery and the capability probe and starts the
       watches, and can be called again after everything from the previous
@@ -2408,7 +2675,18 @@ public release.
       verified by running v0.0.1 against kind under exactly that role and
       nothing more. It ships with the first release because it is what a
       stranger needs in order to run the thing at all; the admin role follows
-      in Phase 7 with the writes it exists for
+      in Phase 7 with the writes it exists for. **Measured 2026-08-22 and it
+      does not cover the browser today**: `k8rs-readonly` names 15 resources
+      and discovery offers 42 on a bare kind cluster, every CRD on a real one,
+      so most rows 403 — and the role has no `nonResourceURLs: ["/api",
+      "/apis"]` rule at all, which usually works only because `system:discovery`
+      is bound to `system:authenticated` by default. The browser's verbs are
+      `list` + `watch` per resource plus non-resource `get` on `/api` and
+      `/apis`. The server already names the verb, resource, group and namespace
+      in `status.message`; rendering it satisfies the gate's *names the missing
+      verb* literally, and swallowing it into *could not load resources* is
+      [PRIOR-ART § C](PRIOR-ART.md#c-errors-that-lie) by name
+      ([reports/2026-08-22-browser-rows-table-watch-and-refresh.md](reports/2026-08-22-browser-rows-table-watch-and-refresh.md))
 - [ ] **Say in the docs where `--once` output ends up.** Findings carry
       controller messages verbatim, and a validating webhook can echo the
       object it rejected — env values included — into one. On the terminal
@@ -2706,7 +2984,14 @@ string and key was settled in the design phase, so this phase is drawing.
       `6 days ago` sits flush against it, so the mockup does not say whether
       the timestamp is right-aligned or trailing the title. Pre-existing, and
       an ambiguous mockup transcribes into an arbitrary renderer
-- [ ] Layout: sidebar · content pane · command log strip · key footer
+- [ ] Layout: sidebar · content pane · command log strip · key footer.
+      **The sidebar's five sections cannot come from discovery** —
+      `categories` is the closest thing on the wire to *workloads / network /
+      storage / config / cluster* and it does not survive kube's parse, so
+      [invariant 12](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
+      *never a hard-coded list* holds for the kinds and cannot be made to hold
+      for the sections by that call. **Rule it before briefing this box**
+      ([D152](NOTES.md#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22))
 - [ ] **Alerts view** (the default on startup): findings list, severity symbol,
       title bright / evidence dim, blank line between findings
 - [ ] **Resources view**: generic table driven by server-side columns; works

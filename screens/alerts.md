@@ -341,18 +341,23 @@ by two rows.
   DaemonSet broken on forty nodes is one twelve-line card and not four hundred
   lines.
 - **An action that wraps past five lines is a `rules.rs` finding, not a layout
-  problem** — and that sentence has been in this file for weeks while four
-  actions broke it, so here is what a rule author measures against. **Five lines
-  is 232 to 245 characters** at the 49 columns a continuation has; the spread is
-  where the words happen to break. **Measured on the run, not estimated**
-  (`cargo test -- --nocapture`, every distinct `→ ` line wrapped at 49): of 44
-  distinct author-written actions, **4 are over** — `stopped_action`'s two arms
-  at 6 lines, rule 5's no-record arm at 6, and `failed_action(Init)` at **8**,
-  which draws a 14-line card. The fifth string that measured over is the runtime
-  quote two bullets up, and it is not an action at all. **What that costs is
-  40 · 36 · 18 · 105 characters**, in that order. Nothing here says which words
-  go: that is `rules.rs`'s, and D90 is the proof it can be paid without closing
-  a door.
+  problem — and this page is not where that gets checked.** **Five lines is
+  232 to 245 characters** at the 49 columns a continuation has; the spread is
+  where the words happen to break. **The check is a command, run fresh, not a
+  count kept here:** `cargo test -- --nocapture`, every distinct `→ ` line
+  wrapped at 49. This page has already gone stale on exactly this measurement
+  once — a worked example it was built around, `failed_action(Init)`, is gone
+  from the code, and the breach count printed beside it went unnoticed for as
+  long as the example did
+  ([NOTES § D113](../NOTES.md#d113--a-cards-parts-were-budgeted-separately-and-never-added-up-and-everything-else-this-family-found-was-reached-by-fixing-that-2026-08-16)).
+  A number copied in here rots the same way; the command above does not. **That
+  is true of a tally over the whole rule set** — every action, summed, drifting
+  the moment any one of them changes while nobody is looking at this page. **A
+  count pinned to one named string is a different risk, not the same one:** it
+  goes stale only when that string does, and whoever rewrites `finished_action`
+  is already looking straight at the line the count describes — the two below
+  are that kind, and keep theirs. Nothing here says which words go: that is
+  `rules.rs`'s, and D90 is the proof it can be paid without closing a door.
 - **Ten more actions sit *at* five lines, and the cap does not move for them
   either.** The two clean-exit arms D90 rewrote have **3 and 0 free columns** on
   their last line — so a later box that wants to add four or six characters to
@@ -361,9 +366,9 @@ by two rows.
   a budget down instead of reading it off whatever shipped last.
 
 The tallest card the budget allows, in the frame, at the floor it is budgeted
-for — 12 rows, the separator, and the three the next finding gets. **Three card
-shapes are over it today**, all of them the same eight-line action, so this is
-the shape the rule set is coming back to rather than one it is safely inside:
+for — 12 rows, the separator, and the three the next finding gets. It is not
+drawn to the arithmetic alone: the card below is real, off the committed
+captures, and reaches all four caps at once:
 
 ```
  nodes 3/3                          k8rs         ctx: prod-eu · live · admin
@@ -820,14 +825,13 @@ a node that has been `NotReady` for ten minutes still reads `Running`, so no
 pod rule ever fires for it. Without this card, Alerts says "a node is down" in
 one place and nothing about the workload that is actually offline
 ([NOTES § D71](../NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
-So the card names what was running there, not only the node:
+So the card names what was placed there, not only the node:
 
 ```
 ● node-1                                    6 min ago
   This node has stopped responding — nothing on it
   can be trusted until it does
-  payments/web and shop/api were running here (5
-  pods)
+  payments/web and shop/api were placed here (5 pods)
   → check the node itself: is it powered on and
     reachable?
 ```
@@ -848,7 +852,7 @@ nothing to put on it elsewhere on this screen:
   "how much would a drain move" and a number is enough; N1's job is to hand the
   reader a workload to go check, because no other card will. Up to two owners
   by name, alphabetically; past that, `payments/web, shop/api and 2 more were
-  running here (9 pods)` — the count still carries the total the way N2's does.
+  placed here (9 pods)` — the count still carries the total the way N2's does.
 - The action line does not promise the node is actually down — a severed
   network link reads identically to a dead machine from the API's side, and
   the card says only what is knowable from here.

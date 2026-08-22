@@ -39,5 +39,12 @@ __pycache__/
 *.swp
 *~
 
+# Core dumps. A killed process drops `core.<pid>` in the working directory, and
+# `git add -A` does not ask: an operator review's stray `pkill` left 16 of them,
+# 149 MB, in the repo root on 2026-08-22. The name is the kernel's default
+# `core_pattern` and a tuned one still starts with it.
+core.*
+core
+
 # OS
 .DS_Store

@@ -1,0 +1,632 @@
+{
+  "kind": "Table",
+  "apiVersion": "meta.k8s.io/v1",
+  "metadata": {
+    "resourceVersion": "218581"
+  },
+  "columnDefinitions": [
+    {
+      "name": "Name",
+      "type": "string",
+      "format": "name",
+      "description": "Name must be unique within a namespace. Is required when creating resources, although some resources may allow a client to request the generation of an appropriate name automatically. Name is primarily intended for creation idempotence and configuration definition. Cannot be updated. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names",
+      "priority": 0
+    },
+    {
+      "name": "Ready",
+      "type": "string",
+      "format": "",
+      "description": "The aggregate readiness state of this pod for accepting traffic.",
+      "priority": 0
+    },
+    {
+      "name": "Status",
+      "type": "string",
+      "format": "",
+      "description": "The aggregate status of the containers in this pod.",
+      "priority": 0
+    },
+    {
+      "name": "Restarts",
+      "type": "string",
+      "format": "",
+      "description": "The number of times the containers in this pod have been restarted and when the last container in this pod has restarted.",
+      "priority": 0
+    },
+    {
+      "name": "Age",
+      "type": "string",
+      "format": "",
+      "description": "CreationTimestamp is a timestamp representing the server time when this object was created. It is not guaranteed to be set in happens-before order across separate operations. Clients may not set this value. It is represented in RFC3339 form and is in UTC.\n\nPopulated by the system. Read-only. Null for lists. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+      "priority": 0
+    },
+    {
+      "name": "IP",
+      "type": "string",
+      "format": "",
+      "description": "podIP address allocated to the pod. Routable at least within the cluster. Empty if not yet allocated.",
+      "priority": 1
+    },
+    {
+      "name": "Node",
+      "type": "string",
+      "format": "",
+      "description": "NodeName indicates in which node this pod is scheduled. If empty, this pod is a candidate for scheduling by the scheduler defined in schedulerName. Once this field is set, the kubelet for this node becomes responsible for the lifecycle of this pod. This field should not be used to express a desire for the pod to be scheduled on a specific node. https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodename",
+      "priority": 1
+    },
+    {
+      "name": "Nominated Node",
+      "type": "string",
+      "format": "",
+      "description": "nominatedNodeName is set only when this pod preempts other pods on the node, but it cannot be scheduled right away as preemption victims receive their graceful termination periods. This field does not guarantee that the pod will be scheduled on this node. Scheduler may decide to place the pod elsewhere if other nodes become available sooner. Scheduler may also decide to give the resources on this node to a higher priority pod that is created after preemption. As a result, this field may be different than PodSpec.nodeName when the pod is scheduled.",
+      "priority": 1
+    },
+    {
+      "name": "Readiness Gates",
+      "type": "string",
+      "format": "",
+      "description": "If specified, all readiness gates will be evaluated for pod readiness. A pod is ready when all its containers are ready AND all conditions specified in the readiness gates have status equal to \"True\" More info: https://git.k8s.io/enhancements/keps/sig-network/580-pod-readiness-gates",
+      "priority": 1
+    }
+  ],
+  "rows": [
+    {
+      "cells": [
+        "coredns-589f44dc88-hdrv5",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-control-plane",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "coredns-589f44dc88-hdrv5",
+          "namespace": "kube-system",
+          "uid": "3b8815bc-e888-4e9f-b9e1-c84ec2258f31",
+          "resourceVersion": "612",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:35Z",
+          "labels": {
+            "k8s-app": "kube-dns",
+            "pod-template-hash": "589f44dc88"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "coredns-589f44dc88",
+              "uid": "d34d3f93-efe9-482f-a305-a5fb29cc55aa",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "coredns-589f44dc88-lbkj6",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-control-plane",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "coredns-589f44dc88-lbkj6",
+          "namespace": "kube-system",
+          "uid": "f17ae92f-28e1-4432-86f1-98adeb117e82",
+          "resourceVersion": "611",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:35Z",
+          "labels": {
+            "k8s-app": "kube-dns",
+            "pod-template-hash": "589f44dc88"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "coredns-589f44dc88",
+              "uid": "d34d3f93-efe9-482f-a305-a5fb29cc55aa",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "etcd-k8rs-control-plane",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-control-plane",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "etcd-k8rs-control-plane",
+          "namespace": "kube-system",
+          "uid": "88deb91e-f1cf-4385-afe6-4fc89b7f13a1",
+          "resourceVersion": "580",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:26Z",
+          "labels": {
+            "component": "etcd",
+            "tier": "control-plane"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "v1",
+              "kind": "Node",
+              "name": "k8rs-control-plane",
+              "uid": "f1371cb3-bfbc-4678-8eb6-59ccc2e1a662",
+              "controller": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kindnet-bhzgd",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-control-plane",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kindnet-bhzgd",
+          "namespace": "kube-system",
+          "uid": "3930af81-0c91-43f6-b659-9a444842d482",
+          "resourceVersion": "1796",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:35Z",
+          "labels": {
+            "app": "kindnet",
+            "controller-revision-hash": "69f48cc4df",
+            "k8s-app": "kindnet",
+            "pod-template-generation": "1",
+            "tier": "node"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "DaemonSet",
+              "name": "kindnet",
+              "uid": "a8c83bc8-222f-45e3-a17b-fa0b6247a795",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kindnet-h2st9",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-worker",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kindnet-h2st9",
+          "namespace": "kube-system",
+          "uid": "a7ef0b3b-1ff3-4832-8d55-17616c854c63",
+          "resourceVersion": "1958",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:40Z",
+          "labels": {
+            "app": "kindnet",
+            "controller-revision-hash": "69f48cc4df",
+            "k8s-app": "kindnet",
+            "pod-template-generation": "1",
+            "tier": "node"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "DaemonSet",
+              "name": "kindnet",
+              "uid": "a8c83bc8-222f-45e3-a17b-fa0b6247a795",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kindnet-qwlg5",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-worker2",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kindnet-qwlg5",
+          "namespace": "kube-system",
+          "uid": "2fdd9720-3c14-4b05-ac26-bf53e240f1d4",
+          "resourceVersion": "1940",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:40Z",
+          "labels": {
+            "app": "kindnet",
+            "controller-revision-hash": "69f48cc4df",
+            "k8s-app": "kindnet",
+            "pod-template-generation": "1",
+            "tier": "node"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "DaemonSet",
+              "name": "kindnet",
+              "uid": "a8c83bc8-222f-45e3-a17b-fa0b6247a795",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kindnet-szmvh",
+        "1/1",
+        "Running",
+        "3 (34h ago)",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-worker3",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kindnet-szmvh",
+          "namespace": "kube-system",
+          "uid": "2b9be084-aafa-45fb-8146-ae69a2b20b61",
+          "resourceVersion": "6737",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:40Z",
+          "labels": {
+            "app": "kindnet",
+            "controller-revision-hash": "69f48cc4df",
+            "k8s-app": "kindnet",
+            "pod-template-generation": "1",
+            "tier": "node"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "DaemonSet",
+              "name": "kindnet",
+              "uid": "a8c83bc8-222f-45e3-a17b-fa0b6247a795",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kube-apiserver-k8rs-control-plane",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-control-plane",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kube-apiserver-k8rs-control-plane",
+          "namespace": "kube-system",
+          "uid": "1a89e553-bbc3-4a7a-af34-743382784e4c",
+          "resourceVersion": "570",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:26Z",
+          "labels": {
+            "component": "kube-apiserver",
+            "tier": "control-plane"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "v1",
+              "kind": "Node",
+              "name": "k8rs-control-plane",
+              "uid": "f1371cb3-bfbc-4678-8eb6-59ccc2e1a662",
+              "controller": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kube-controller-manager-k8rs-control-plane",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-control-plane",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kube-controller-manager-k8rs-control-plane",
+          "namespace": "kube-system",
+          "uid": "e2070733-b81d-431a-a670-68ce99e27216",
+          "resourceVersion": "548",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:26Z",
+          "labels": {
+            "component": "kube-controller-manager",
+            "tier": "control-plane"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "v1",
+              "kind": "Node",
+              "name": "k8rs-control-plane",
+              "uid": "f1371cb3-bfbc-4678-8eb6-59ccc2e1a662",
+              "controller": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kube-proxy-5d9xj",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-worker",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kube-proxy-5d9xj",
+          "namespace": "kube-system",
+          "uid": "b52d28b1-9837-455f-b6d0-99beef065658",
+          "resourceVersion": "531",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:40Z",
+          "labels": {
+            "controller-revision-hash": "794fc6b47c",
+            "k8s-app": "kube-proxy",
+            "pod-template-generation": "1"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "DaemonSet",
+              "name": "kube-proxy",
+              "uid": "156793d3-913b-4922-8537-c33db53a578e",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kube-proxy-kvqmm",
+        "1/1",
+        "Running",
+        "3 (34h ago)",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-worker3",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kube-proxy-kvqmm",
+          "namespace": "kube-system",
+          "uid": "6109a255-9394-449c-a913-2866b49417eb",
+          "resourceVersion": "6734",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:40Z",
+          "labels": {
+            "controller-revision-hash": "794fc6b47c",
+            "k8s-app": "kube-proxy",
+            "pod-template-generation": "1"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "DaemonSet",
+              "name": "kube-proxy",
+              "uid": "156793d3-913b-4922-8537-c33db53a578e",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kube-proxy-n8hgn",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-control-plane",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kube-proxy-n8hgn",
+          "namespace": "kube-system",
+          "uid": "fee9e6bb-73d5-4a86-bd00-72cbb1306a77",
+          "resourceVersion": "397",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:35Z",
+          "labels": {
+            "controller-revision-hash": "794fc6b47c",
+            "k8s-app": "kube-proxy",
+            "pod-template-generation": "1"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "DaemonSet",
+              "name": "kube-proxy",
+              "uid": "156793d3-913b-4922-8537-c33db53a578e",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kube-proxy-nx52c",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-worker2",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kube-proxy-nx52c",
+          "namespace": "kube-system",
+          "uid": "ec726300-c1df-4d5f-8333-039283679a02",
+          "resourceVersion": "528",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:40Z",
+          "labels": {
+            "controller-revision-hash": "794fc6b47c",
+            "k8s-app": "kube-proxy",
+            "pod-template-generation": "1"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "DaemonSet",
+              "name": "kube-proxy",
+              "uid": "156793d3-913b-4922-8537-c33db53a578e",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kube-scheduler-k8rs-control-plane",
+        "1/1",
+        "Running",
+        "0",
+        "34h",
+        "REDACTED-IP",
+        "k8rs-control-plane",
+        "<none>",
+        "<none>"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kube-scheduler-k8rs-control-plane",
+          "namespace": "kube-system",
+          "uid": "4077e6c0-1089-4dba-9816-d6b07e80308f",
+          "resourceVersion": "422",
+          "generation": 1,
+          "creationTimestamp": "2026-08-20T22:42:26Z",
+          "labels": {
+            "component": "kube-scheduler",
+            "tier": "control-plane"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "v1",
+              "kind": "Node",
+              "name": "k8rs-control-plane",
+              "uid": "f1371cb3-bfbc-4678-8eb6-59ccc2e1a662",
+              "controller": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

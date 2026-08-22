@@ -1,0 +1,145 @@
+{
+  "kind": "Table",
+  "apiVersion": "meta.k8s.io/v1",
+  "metadata": {
+    "resourceVersion": "218581"
+  },
+  "columnDefinitions": [
+    {
+      "name": "Name",
+      "type": "string",
+      "format": "name",
+      "description": "Name must be unique within a namespace. Is required when creating resources, although some resources may allow a client to request the generation of an appropriate name automatically. Name is primarily intended for creation idempotence and configuration definition. Cannot be updated. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names",
+      "priority": 0
+    },
+    {
+      "name": "Ready",
+      "type": "string",
+      "format": "",
+      "description": "Number of the pod with ready state",
+      "priority": 0
+    },
+    {
+      "name": "Up-to-date",
+      "type": "string",
+      "format": "",
+      "description": "Total number of non-terminating pods targeted by this deployment that have the desired template spec.",
+      "priority": 0
+    },
+    {
+      "name": "Available",
+      "type": "string",
+      "format": "",
+      "description": "Total number of available non-terminating pods (ready for at least minReadySeconds) targeted by this deployment.",
+      "priority": 0
+    },
+    {
+      "name": "Age",
+      "type": "string",
+      "format": "",
+      "description": "CreationTimestamp is a timestamp representing the server time when this object was created. It is not guaranteed to be set in happens-before order across separate operations. Clients may not set this value. It is represented in RFC3339 form and is in UTC.\n\nPopulated by the system. Read-only. Null for lists. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+      "priority": 0
+    },
+    {
+      "name": "Containers",
+      "type": "string",
+      "format": "",
+      "description": "Names of each container in the template.",
+      "priority": 1
+    },
+    {
+      "name": "Images",
+      "type": "string",
+      "format": "",
+      "description": "Images referenced by each container in the template.",
+      "priority": 1
+    },
+    {
+      "name": "Selector",
+      "type": "string",
+      "format": "",
+      "description": "Label selector for pods. Existing ReplicaSets whose pods are selected by this will be the ones affected by this deployment. It must match the pod template's labels.",
+      "priority": 1
+    }
+  ],
+  "rows": [
+    {
+      "cells": [
+        "broken-owned",
+        "0/1",
+        1,
+        0,
+        "34h",
+        "quitter",
+        "busybox",
+        "app=broken-owned"
+      ],
+      "object": null
+    },
+    {
+      "cells": [
+        "broken-rollout",
+        "0/2",
+        1,
+        0,
+        "34h",
+        "app",
+        "registry.invalid/does-not-exist:v9",
+        "app=broken-rollout"
+      ],
+      "object": null
+    },
+    {
+      "cells": [
+        "healthy-deploy",
+        "0/2",
+        2,
+        0,
+        "34h",
+        "app",
+        "busybox",
+        "app=healthy-deploy"
+      ],
+      "object": null
+    },
+    {
+      "cells": [
+        "broken-quota",
+        "0/1",
+        0,
+        0,
+        "34h",
+        "app",
+        "busybox",
+        "app=broken-quota"
+      ],
+      "object": null
+    },
+    {
+      "cells": [
+        "coredns",
+        "2/2",
+        2,
+        2,
+        "34h",
+        "coredns",
+        "registry.k8s.io/coredns/coredns:v1.14.2",
+        "k8s-app=kube-dns"
+      ],
+      "object": null
+    },
+    {
+      "cells": [
+        "local-path-provisioner",
+        "1/1",
+        1,
+        1,
+        "34h",
+        "local-path-provisioner",
+        "docker.io/kindest/local-path-provisioner:v20260521-9fb22683",
+        "app=local-path-provisioner"
+      ],
+      "object": null
+    }
+  ]
+}

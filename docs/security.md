@@ -190,7 +190,7 @@ resource.
   somebody re-reads:
   [`scripts/security-guard.py`](../scripts/security-guard.py) fails the build on
   a workflow that grants write or names an action by tag, a shell spawned from
-  `src/`, a dependency or a hostname outside the ten, a `Debug` derived over a
+  `src/`, a dependency or a hostname outside the approved list, a `Debug` derived over a
   type that can hold a token, a call into the in-cluster ServiceAccount
   environment, or a TLS verification knob turned off by us. It bans the **call**
   and never the word, so a kubeconfig that itself sets

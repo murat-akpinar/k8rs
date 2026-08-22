@@ -1011,9 +1011,14 @@ pub struct PodSnapshot {
     /// of its own class — [`placed_but_never_started`] gates on the residual and reads this only
     /// to say which side of the sandbox the block is on (NOTES § D72, § D76).
     ///
-    /// **`None` is not a third case, it is the second one.** The condition is written only once
-    /// the kubelet has looked at the pod, and it did not exist before 1.28; an old server and a
-    /// silent kubelet both read as "not `False`".
+    /// **`None` *is* a third case, and it stopped being read as the second one on 2026-08-22**
+    /// (NOTES § D156). Read as *not `False`* it sent an absent condition down `True`'s branch and
+    /// told a pod with no sandbox, no network and no container that it already had its storage
+    /// and its network. **The producer is inside the supported floor and is not an old server**:
+    /// 1.29 is the oldest minor k8rs supports and the condition exists there (NOTES § D149,
+    /// `k8s.rs` § *what an older server omits*), so what leaves this `None` is a kubelet that has
+    /// not yet looked at the pod. `Unknown` is the same fact wearing a present field and takes the
+    /// same arm.
     pub ready_to_start_containers: Option<Condition>,
     /// Rule 12. **Not the moment the delete was accepted: it is request time plus the grace
     /// period**, so the pod is overdue once `now` passes this field itself, and a rule reading
@@ -2420,7 +2425,7 @@ pub fn analyze(snapshot: &ClusterSnapshot) -> Vec<Finding> {
         }
         findings.extend(escalated_host_path(pod));
         findings.extend(no_node_accepted_it(&snapshot.now, pod, &snapshot.nodes));
-        findings.extend(placed_but_never_started(&snapshot.now, pod));
+        findings.extend(placed_but_never_started(snapshot, pod));
         findings.extend(nothing_has_looked_at_it(&snapshot.now, pod));
         for c in &pod.containers {
             // Collected per container rather than appended straight to the list, because
@@ -5909,6 +5914,12 @@ fn stuck_at_the_starting_line(c: &ContainerSnapshot, bare: bool) -> Option<(&str
     Some((reason, message))
 }
 
+/// **Rule 13's one title, and both of its shapes wear it** — a pod wedged mid-start and a pod no
+/// kubelet has reported on are the same sentence to the reader, and the difference between them
+/// is the evidence under it ([`placed_but_never_started`], NOTES § D156).
+const NEVER_STARTED: &str = "This pod was given a machine to run on, but it has not been able to \
+                             start";
+
 /// **Rule 13 — it was given a machine to run on, and it has not been able to start.** The
 /// `ContainerCreating` wedge: WARN, on a pod whose `PodScheduled` condition has read `True` for
 /// more than [`NOT_READY_GRACE`] while nothing in it is running (NOTES § D72).
@@ -5919,8 +5930,31 @@ fn stuck_at_the_starting_line(c: &ContainerSnapshot, bare: bool) -> Option<(&str
 /// **the image-error family is on the other side of that line** (NOTES § D76). **Rule 10 does not
 /// see this pod, which is why the rule exists** — such a pod *is* scheduled.
 ///
-/// **Silent on a pod that has no container statuses at all, and that gap is the N-series'** —
-/// firing on the absence would name the pod when the fault is the node; N1 owns that.
+/// **A pod the kubelet has never written a status for is this rule's own second shape, and the
+/// hand-off to the N-series is exactly one node state wide** (NOTES § D156). An empty
+/// [`PodSnapshot::containers`] can only mean *nothing has reported on this pod* — the API server
+/// refuses a pod whose `spec.containers` is empty or absent — so the rule fires on it while the
+/// **phase still says `Pending`**, and stands down only where **the pod's node is in the snapshot
+/// carrying a `Ready` that is not `True`, and the view is the whole cluster**: there
+/// [`node_stopped_being_ready`] draws the same incident, names the node and lists the workloads
+/// that went with it, and a second card would be the worse-advised of the two. Node `Ready: True`,
+/// node absent from the snapshot, node with no `Ready` line, no `nodeName` at all, **or a
+/// namespace scope, under which that card names nobody**: this card. Both guards are argued where
+/// they stand, at the branch itself.
+///
+/// **The two clocks are independent, and the gap between them has no width that can be stated.**
+/// [`NODE_DOWN_GRACE`] runs from the node's own `Ready` transition and [`NOT_READY_GRACE`] from
+/// the bind, so which card appears first depends on when the node went quiet. A node that goes
+/// quiet once and stays quiet has the bounded version: this rule stands down the moment `Ready`
+/// leaves `True`, N1 does not speak for another five minutes, and a pod already past its ten
+/// minutes draws no card at all in between. **A node that flaps has no bound at all**, because a
+/// condition's `lastTransitionTime` is *rewritten on every flip* — measured on the review
+/// cluster: `Unknown` at `14:24:24Z`, `True` at `14:26:37Z`, `Unknown` again with a fresh stamp
+/// at `14:27:29Z`. A `Ready` flapping faster than [`NODE_DOWN_GRACE`] never reaches N1's grace at
+/// all, while this rule stands down on every `Unknown` and fires again on every `True`: a card
+/// blinking on and off for as long as the flapping lasts, and its ordinary producer is a kubelet
+/// missing heartbeats under memory pressure rather than anything exotic (NOTES § D156). Closing
+/// either would mean one rule reading the other's clock.
 ///
 /// **Ten minutes, from `scheduled.last_transition`** — rule 7's `progressDeadlineSeconds` borrow,
 /// because pulling a large image onto a cold node legitimately takes minutes. **An unstamped
@@ -5941,19 +5975,26 @@ fn stuck_at_the_starting_line(c: &ContainerSnapshot, bare: bool) -> Option<(&str
 /// **`describe` and not `get -o yaml`, the opposite of rules 3, 4 and 10**: this card quotes a
 /// reason that usually carries no message at all, and the sentence that finishes the diagnosis
 /// exists only as an Event — re-emitted continuously for a wedged pod, so the `--event-ttl`
-/// argument does not reach this rule.
+/// argument does not reach this rule. **The empty-status shape takes rule 14's command instead**,
+/// for rule 14's reason: its evidence is an absence, `describe` renders that absence as
+/// `Events: <none>` — measured on the review cluster, this pod has no Events at all — and that is
+/// the dead end the reader has already reached.
 ///
 /// **Its positive is captured**: `wedged.json` asks for a `configMap` that does not exist, so the
 /// kubelet never reaches the sandbox — `ContainerCreating` with `PodReadyToStartContainers: False`,
 /// which is the storage branch of the evidence line. The `True` and absent branches stay decoded
-/// copies: nothing on this cluster reaches the sandbox and then stops.
-fn placed_but_never_started(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
+/// copies: nothing on this cluster reaches the sandbox and then stops. **The empty-status shape
+/// is captured the other way up** (NOTES § D156): `unstarted.json` is bound to the worker whose
+/// kubelet was stopped, so it is the *negative* — its node reads `Ready: Unknown` and N1 owns it —
+/// and the positive is those same bytes over a `Ready` worker, because every route to *node
+/// `Ready: True` with no container status* needs a heartbeat writer that is not a kubelet.
+fn placed_but_never_started(snapshot: &ClusterSnapshot, pod: &PodSnapshot) -> Option<Finding> {
     let scheduled = pod.scheduled.as_ref()?;
     if scheduled.status != "True" {
         return None;
     }
     let since = scheduled.last_transition.as_ref()?;
-    if now.0.duration_since(since.0) <= NOT_READY_GRACE {
+    if snapshot.now.0.duration_since(since.0) <= NOT_READY_GRACE {
         return None;
     }
     if pod.deletion_timestamp.is_some() {
@@ -5962,6 +6003,85 @@ fn placed_but_never_started(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
     // Anything serving makes the title false, whatever else is wrong with the pod.
     if pod.containers.iter().any(is_running) {
         return None;
+    }
+    if pod.containers.is_empty() {
+        // **Nothing has reported on this pod at all** — the second shape. Two guards below, and
+        // only the second of them is the hand-off to N1 (NOTES § D156).
+        //
+        // **The phase has to say the pod is still waiting.** *Nothing there has picked it up* is
+        // a claim about whatever writes `status`, and `phase: Running` is that writer saying it
+        // did — ruling 1's *the API server refuses an empty `spec.containers`* is a different
+        // field written by a different component (NOTES § D156). Two producers of a status with
+        // no container list are named in this file: a virtual-node provider that never fills it
+        // in ([`PodSnapshot::containers`]) and a partial object. **The gate is *is `Pending`* and
+        // not *is not `Running`***, which is [`nothing_has_looked_at_it`]'s one rule over: a pod
+        // carrying no phase at all cannot support the claim either.
+        if pod.phase.as_deref() != Some("Pending") {
+            return None;
+        }
+        // **A hand-off only counts where the other card names this pod.** Under a namespace scope
+        // [`node_stopped_being_ready`] drops its whole workload line rather than count from a
+        // fraction of the pods, and on a *quiet* node it has no kubelet sentence to carry either,
+        // so its card's evidence is empty — standing down there is silence, not a hand-off.
+        if snapshot.namespace_scope.is_none()
+            && pod
+                .node
+                .as_deref()
+                .and_then(|name| snapshot.nodes.iter().find(|n| n.id.name == name))
+                .and_then(|n| node_condition(n, "Ready"))
+                .is_some_and(|ready| ready.status != "True")
+        {
+            return None;
+        }
+        let mut facts = Vec::new();
+        if let Some(node) = &pod.node {
+            facts.push(format!("on node {node}"));
+        }
+        facts.push(
+            // **The absence framed by what would have written it**, rule 14's technique for the
+            // same reason: there is no plainer name for a line that is not there, and a reader
+            // meeting this needs to be told that a machine which had started — or had tried and
+            // failed — would have said so.
+            "the machine has written nothing at all about this pod: not one of its containers \
+             has a status, not even a failed attempt, so nothing there has picked it up"
+                .to_string(),
+        );
+        return Some(Finding {
+            severity: Severity::Warn,
+            title: NEVER_STARTED.to_string(),
+            evidence: facts.join(FACTS),
+            // **The machine, and not this pod's Events** — measured, it has none. What is left to
+            // check is whether anything on that machine actually runs pods: a real kubelet that
+            // is still posting its heartbeat while its pod worker is wedged, or a virtual node
+            // that reports itself ready and runs nothing ([`PodSnapshot::containers`]).
+            //
+            // **It may not say the machine is claiming to be healthy**, which is true on only one
+            // of the branches that reach here: the node can equally be missing from the snapshot
+            // or carrying no `Ready` line at all, and a card that tells the reader what the
+            // machine said when nothing said anything is this box's own defect one rule over.
+            //
+            // **And it interpolates no name, which is what keeps it inside the five-line action
+            // budget on every cluster.** It used to open *"nothing on {node} has picked this pod
+            // up"* — a word-for-word repeat of the fact above it, paid for with the one thing on
+            // this card whose width nobody here controls: with kind's twelve-character
+            // `k8rs-worker3` the action was 5 lines of 5, and every default EKS, GKE and AKS node
+            // name is over thirty, which is 6. The evidence names the machine; *the machine
+            // itself* is the line above.
+            action: if pod.node.is_some() {
+                "check the machine itself: look at whether the part of Kubernetes that starts \
+                 containers there (the kubelet) is working, and whether that machine is still \
+                 in the cluster"
+                    .to_string()
+            } else {
+                "find out which machine this pod was given and whether anything there actually \
+                 starts containers"
+                    .to_string()
+            },
+            kubectl_cmd: get_yaml("pod", &pod.id),
+            owner: pod.owner.clone(),
+            object: pod.id.clone(),
+            timestamp: Some(since.clone()),
+        });
     }
     let bare = nothing_else_to_point_at(pod);
     let stuck: Vec<_> = pod
@@ -6009,24 +6129,42 @@ fn placed_but_never_started(now: &Time, pod: &PodSnapshot) -> Option<Finding> {
         // `containerRuntime.SyncPod` creates the sandbox, so the condition is `False` for a
         // volume failure as much as for a network one. Inverted, this pair sends a reader whose
         // ConfigMap is missing to look at the CNI (NOTES § D76).
-        if pod
+        //
+        // **Three arms, because only `True` is a `True` one** (NOTES § D156). Read as `not False`
+        // it claimed the pod already had its storage and its network — a sentence with no field
+        // behind it. **The producer is inside the supported floor and is not an old server**:
+        // 1.29 is the oldest minor k8rs supports and the condition exists there (NOTES § D149),
+        // so what reaches the last arm is a kubelet that has said nothing about the sandbox at
+        // all — `unstarted.json`'s whole shape — or one that wrote a container status without it.
+        //
+        // **`Unknown` shares that arm rather than taking a fourth**: a writer that cannot tell
+        // has not told the reader anything, which is the same fact — but *missing the line* is
+        // false about a condition that is right there, so the sentence says what neither has
+        // said instead of where it is not.
+        match pod
             .ready_to_start_containers
             .as_ref()
-            .is_some_and(|c| c.status == "False")
+            .map(|c| c.status.as_str())
         {
-            "the machine has not been able to give this pod its storage or its network yet — \
-             it has not got as far as creating the container"
-                .to_string()
-        } else {
-            "this pod has its storage and its network, so the block is later — the image is \
-             still downloading, or the container could not be created"
-                .to_string()
-        },
+            Some("False") => {
+                "the machine has not been able to give this pod its storage or its network yet \
+                 — it has not got as far as creating the container"
+            }
+            Some("True") => {
+                "this pod has its storage and its network, so the block is later — the image is \
+                 still downloading, or the container could not be created"
+            }
+            _ => {
+                "the machine has not said how far it got — this pod's status does not say \
+                 whether it ever got as far as creating the container \
+                 (PodReadyToStartContainers)"
+            }
+        }
+        .to_string(),
     );
     Some(Finding {
         severity: Severity::Warn,
-        title: "This pod was given a machine to run on, but it has not been able to start"
-            .to_string(),
+        title: NEVER_STARTED.to_string(),
         evidence: facts.join(FACTS),
         action: "read the Events at the bottom of the describe output — that is where the \
                  machine says what it is still waiting for"
@@ -6455,6 +6593,13 @@ pub(crate) fn a_drain_would_move(pod: &PodSnapshot) -> bool {
 /// **owners**, up to two alphabetically and then a count, with the total beside it
 /// (`screens/alerts.md` § N1) — a bare number would answer N2's question, not this one.
 ///
+/// **The verb is placement, and it does not follow the node's answer** (NOTES § D156). It was
+/// `was`/`were` on a silent node and `is`/`are` on one that answered — two tenses of *running*,
+/// and neither is a claim this card can make: [`placed_but_never_started`] stands down on a pod
+/// nothing has reported on **because this card is the one the reader gets**, so the hand-off
+/// would arrive saying a container ran that has never existed. What is true of every pod in the
+/// list, on both branches, is that something put it here.
+///
 /// **Two statuses, two cards, and only one of them is `screens/alerts.md`'s.** `Unknown` is a
 /// kubelet that went quiet, which is the one the fossil argument is about and the one the screen
 /// draws. `False` is a kubelet that answered and said no — a container runtime that will not start,
@@ -6467,7 +6612,7 @@ pub(crate) fn a_drain_would_move(pod: &PodSnapshot) -> bool {
 /// rather than no card.
 ///
 /// **Under a namespace scope the evidence line is dropped** rather than counted from a fraction of
-/// the pods: *"one pod was running here"* about a node carrying forty reads as complete and is the
+/// the pods: *"one pod was placed here"* about a node carrying forty reads as complete and is the
 /// wrong number this screen exists not to print (NOTES § D43). The card itself is unaffected — the
 /// node's own condition is not namespaced.
 fn node_stopped_being_ready(snapshot: &ClusterSnapshot, node: &NodeSnapshot) -> Option<Finding> {
@@ -6495,14 +6640,9 @@ fn node_stopped_being_ready(snapshot: &ClusterSnapshot, node: &NodeSnapshot) -> 
             .collect();
         if !owners.is_empty() {
             facts.push(format!(
-                "{} {} running here ({})",
+                "{} {} placed here ({})",
                 listed(&owners),
-                match (answered, owners.len()) {
-                    (false, 1) => "was",
-                    (false, _) => "were",
-                    (true, 1) => "is",
-                    (true, _) => "are",
-                },
+                if owners.len() == 1 { "was" } else { "were" },
                 counted(pods.len() as i64, "pod")
             ));
         }

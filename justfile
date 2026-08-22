@@ -241,6 +241,13 @@ fixtures:
     # whose tests name the face it has to be caught in, and they are fetched under
     # their own retry below. One writer per file — a bulk fetch here and a re-fetch
     # there means the bytes that land depend on which one ran last.
+    #
+    # `unstarted` is not here either, for a reason no retry could fix: the pod
+    # exists at this point but nothing has placed it, so it carries no
+    # `PodScheduled` condition at all and is `broken-unjudged` wearing another
+    # name. It is bound by `break-nodes` and captured beside `nodes.json` at the
+    # foot of this recipe, which is the first moment the shape exists at all
+    # (NOTES § D156).
     for p in oom image config pending hostpath readiness nolimits stuck \
              resize podlimit \
              socket succeeded failed restarts10 restarts10serving startup \
@@ -692,6 +699,120 @@ fixtures:
     guard daemonsets.json "DaemonSet whose pods cannot start — desired is per node, and nothing captured had it disagree with ready (D40)" \
       '[.items[]? | select(.metadata.name == "broken-ds" and .status.desiredNumberScheduled > 0 and .status.numberReady == 0)] | length == 1'
 
+    # --- THE TWO TABLES, AND THE PROXY THEY NEED (Phase 5, src/k8s.rs § THE BROWSER'S ROWS) ---
+    # A `Table` is not an object, it is what the API server *prints* for
+    # `kubectl get` — and `kubectl` has no flag that hands one back, because it
+    # consumes the Table itself and writes columns. So this is the one capture in
+    # the file that does not go through `kubectl get`: `kubectl proxy` puts an
+    # authenticated local endpoint in front of the same API server, and `curl`
+    # asks it with the Accept header `src/k8s.rs`'s `TABLE_ACCEPT` sends, byte for
+    # byte. The two committed Tables were taken by hand this way on 2026-08-22;
+    # this is that trip written down so the next one reproduces both.
+    #
+    # **Here, and not later in the file**, for the reason every other placement in
+    # this recipe has one: `table-pods.json` is the same fourteen kube-system pods
+    # `kube-system-pods.json` holds — same uids, checked — and both are on disk
+    # before `break-runtime` reboots a node (which raises RESTARTS in the Table's
+    # own column) and before `break-nodes` stops a kubelet (which turns the STATUS
+    # column of everything on that node into `Unknown`).
+    #
+    # **The port is asked for rather than chosen.** `--port=0` makes the kernel
+    # pick one and the proxy print it, which removes the failure a fixed port
+    # has: a proxy leaked by an earlier failed trip is still listening on it,
+    # still pointed at whatever context *it* was started with, and a Deployments
+    # Table carries no node name for `sanitize.jq` to refuse — so a foreign
+    # capture would land silently. The trap is what stops this trip leaking one
+    # in turn, on the failure path as much as on the way out.
+    table_log=$(mktemp)
+    kubectl --context "$ctx" proxy --port=0 >"$table_log" 2>&1 &
+    table_proxy=$!
+    trap 'kill "$table_proxy" 2>/dev/null || true; rm -f "$table_log"' EXIT
+    # **Anchored to the sentence kubectl prints on success, and that is not
+    # tidiness.** `kubectl proxy` writes `Starting to serve on 127.0.0.1:<port>`
+    # when it is up (`kubectl/pkg/cmd/proxy`) — and on a *bind failure* it writes
+    # `error: listen tcp 127.0.0.1:8001: bind: address already in use`, which
+    # carries an address in the same framing. An unanchored match reads the port
+    # out of the error and this recipe then curls a port nothing is serving, or
+    # somebody else's proxy. Measured on both lines before this was written.
+    table_port=""
+    for _ in $(seq 100); do
+      table_port=$(sed -n 's/^Starting to serve on 127\.0\.0\.1:\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$table_log" | head -1)
+      [ -n "$table_port" ] && break
+      kill -0 "$table_proxy" 2>/dev/null || break
+      sleep 0.1
+    done
+    [ -n "$table_port" ] || { echo "fixtures: kubectl proxy never said it was serving — $(cat "$table_log")" >&2; exit 1; }
+    # The exact string `TABLE_ACCEPT` is. The `,application/json` half is not
+    # decoration: without it a server with no Table support answers 406 instead
+    # of the list, and `the_table_fetch_is_one_path_one_header...` asserts this
+    # header character for character.
+    table_accept='Accept: application/json;as=Table;g=meta.k8s.io;v=v1,application/json'
+    # **Through a temp, for `fetch_until`'s reason and one that is sharper here.**
+    # A redirect straight onto the fixture truncates it before the pipeline runs,
+    # so the file is already empty when `sanitize.jq` refuses — and the refusal
+    # this capture is most likely to meet is a Table from the *wrong cluster*,
+    # reached through a proxy somebody else left running. That is the one case
+    # where the previous good capture must survive on disk. Copied through a
+    # redirect rather than `mv`d so the mode stays 0644 like every other capture.
+    table() { # $1 fixture stem  $2 path with its query, if any
+      local tmp; tmp=$(mktemp)
+      curl -sf --retry 10 --retry-connrefused --retry-delay 1 -H "$table_accept" \
+        "http://127.0.0.1:$table_port$2" | "${jqs[@]}" > "$tmp"
+      cat "$tmp" > "tests/fixtures/$1.json"
+      rm -f "$tmp"
+    }
+    # The default `includeObject`, which is what k8rs sends (no query string at
+    # all — `src/k8s.rs` § THE BROWSER'S ROWS keeps the server default rather
+    # than asking for it). Every row carries a `PartialObjectMetadata`.
+    table table-pods /api/v1/namespaces/kube-system/pods
+    # And `?includeObject=None`, which k8rs does *not* send: it is here so the
+    # decode is proven against both shapes a Table arrives in rather than the one
+    # this repo happens to ask for.
+    table table-deployments '/apis/apps/v1/deployments?includeObject=None'
+
+    # The bytes, and every guard names the field rather than the file, for the
+    # reason the rest of this recipe does: a capture of the wrong thing writes
+    # perfectly valid JSON.
+    guard table-pods.json "Table with columns on it — the whole of invariant 12 is that these come off the wire" \
+      '.kind == "Table" and (.columnDefinitions | length) > 0 and (.rows | length) > 0'
+    # Both sides of the priority split, because `screens/resources.md` draws the
+    # `priority: 0` set and drops the rest: a capture where every column is
+    # narrow proves the filter does nothing, and one where none is draws a blank
+    # screen. `the_columns_come_from_the_server_and_two_kinds_never_share_one_list`
+    # reads five and four off this file.
+    guard table-pods.json "columns on both sides of priority 0 — the narrow set a screen draws and the wide set kubectl -o wide adds" \
+      '([.columnDefinitions[] | select(.priority == 0)] | length) > 0 and ([.columnDefinitions[] | select(.priority > 0)] | length) > 0'
+    # The identity `screens/resources.md` matches a finding onto a row by, and
+    # every dialog names. It is the entire reason the default `includeObject` is
+    # kept and its 19× paid, so a capture that lost it retires the decision
+    # silently.
+    guard table-pods.json "PartialObjectMetadata under every row, carrying the uid a finding is matched onto a row by" \
+      'all(.rows[]; .object.kind == "PartialObjectMetadata" and (.object.metadata.uid | type) == "string" and (.object.metadata.name | type) == "string")'
+    # **The canary for the sanitizer's own newest clause.** `node_names` learned
+    # to read the cell under the column `columnDefinitions` calls `Node`
+    # (scripts/sanitize.jq); if this capture carried no such column, or no node
+    # name under it, that clause would be running on nothing and a foreign Table
+    # would be refused by nobody — "found none" and "there were none" print the
+    # same line.
+    guard table-pods.json "node name in the cell under the Node column — the only thing scripts/sanitize.jq's Table clause can be exercised by" \
+      '[.columnDefinitions | to_entries[] | select(.value.name == "Node") | .key] as $n
+       | ($n | length) == 1 and ([.rows[] | .cells[$n[0]] | select(test("^k8rs-"))] | length) > 0'
+    # The second shape, and the field whose absence is the point: `"object": null`
+    # is what `?includeObject=None` sends, and the decode has to survive it
+    # without inventing an identity.
+    guard table-deployments.json "rows with no object under them — the ?includeObject=None shape, decoded by the same type as the one above" \
+      '.kind == "Table" and (.rows | length) > 0 and all(.rows[]; .object == null)'
+    # **A cell is not a string**, and this is the shape whose absence lets
+    # `cells: Vec<String>` back in: a Deployment's `Up-to-date` and `Available`
+    # arrive as JSON numbers, so a corpus without one would compile a decode that
+    # fails on every Deployment table a real cluster serves.
+    guard table-deployments.json "cell that is a JSON number — the shape a Vec<String> would have refused to deserialise" \
+      '[.rows[].cells[] | select(type == "number")] | length > 0'
+
+    kill "$table_proxy" 2>/dev/null || true
+    rm -f "$table_log"
+    trap - EXIT
+
     # --- THE THREE REPORT INPUTS THAT HAD NO POSITIVE AT ALL (NOTES § D129) ---
     # `poddisruptionbudgets.json` and `persistentvolumeclaims.json` were both
     # `"items": []` and every Service in `services.json` matched pods, so Drain
@@ -775,6 +896,31 @@ fixtures:
     # the sanitizer could quietly drop, and the join with the pod captures, which
     # is the only place both halves of N2 are on disk at the same time.
     scripts/cluster.sh break-nodes
+    # Rule 13's empty-status shape, and it is captured here because this is the
+    # first moment it exists: `break-nodes` stops a kubelet and then binds
+    # `broken-unstarted` to that node through the `binding` subresource, which is
+    # the only thing that writes `PodScheduled: True` (NOTES § D156, measured in
+    # reports/2026-08-22-rule-13-the-pod-with-no-container-status.md). Before that
+    # step the pod is unplaced and carries no condition at all; after it, no
+    # kubelet will ever write it a container status. It sits above `nodes.json`
+    # rather than below it to keep the capture next to the step that made it —
+    # nothing else turns on the order of these two, and the node capture is the
+    # one that has to be last against everything *else* in this recipe.
+    "${kc[@]}" get pod broken-unstarted -o json | "${jqs[@]}" > tests/fixtures/unstarted.json
+    # Three fields, named rather than the file, and every one of them is a way
+    # this capture goes wrong while writing perfectly valid JSON. The
+    # `lastTransitionTime` is asserted as hard as the status: it is the only clock
+    # on this object — there is no container, so no `state.running.startedAt` and
+    # no `startedAt` on any record — and it is what rule 13 measures its ten
+    # minutes from, so a condition without one is a fixture the rule cannot fire
+    # on. `has(...) | not` and never a length test, because the *absent key* is
+    # the entire fixture (D156 § 1): `[] | length == 0` would also pass on
+    # `"containerStatuses": []`, which is a different object. `.status // {}` so
+    # that a capture of the wrong thing — `{}`, an empty List, a pod that never
+    # got a status block — fails on the first clause with this message instead of
+    # on a jq type error.
+    guard unstarted.json "pod placed on a node and never started — PodScheduled True carrying the stamp rule 13 measures its ten minutes from, no status.containerStatuses key at all, and no deletionTimestamp (D156)" \
+      '([.status.conditions[]? | select(.type == "PodScheduled" and .status == "True" and .lastTransitionTime != null)] | length) == 1 and (.status // {} | has("containerStatuses") | not) and .metadata.deletionTimestamp == null'
     "${kc[@]}" get nodes -A -o json | "${jqs[@]}" > tests/fixtures/nodes.json
     guard nodes.json "cordoned worker that is otherwise healthy, carrying the taint the controller adds beside the field kubectl sets (N2)" \
       '[.items[] | select(.spec.unschedulable == true and ([.status.conditions[] | select(.type == "Ready") | .status] | first) == "True" and ([.spec.taints[]? | select(.key == "node.kubernetes.io/unschedulable" and .effect == "NoSchedule")] | length) > 0)] | length > 0'
@@ -805,6 +951,30 @@ fixtures:
        | any(inputs | .spec.nodeName? // empty; IN($cordoned[]))' \
       tests/fixtures/*.json >/dev/null \
       || { echo "fixtures: no captured pod is running on the cordoned node — the joined snapshot is N2's negative under N2's name" >&2; exit 1; }
+
+    # D156 ruling 2's own predicate, made against the bytes, and the second join
+    # in this recipe for the same reason as the first: neither file can state it
+    # alone. Rule 13 hands this pod to the N-series *only* when its node is in the
+    # snapshot carrying a `Ready` condition that is not `True` — and
+    # `unstarted.json` names a node while saying nothing about it, while
+    # `nodes.json` has an unready node and does not know which pod is on it.
+    # Without this the fixture is only "a pod with no container status", which is
+    # a weaker claim than the one it is committed for: the same bytes on a `Ready`
+    # worker are ruling 2's *positive*, the case kind cannot produce at all and
+    # `capture_but` composes from these two captures instead.
+    #
+    # It holds by construction rather than by luck — `break-nodes` binds the pod
+    # to the worker whose kubelet it stopped and does not return until its own
+    # `notready` predicate has gone green — so this is here to catch that going
+    # away, not to hope. An empty `$unready` fails it, which is the half that
+    # matters: "no unready node" and "the pod is on the wrong one" must not print
+    # the same line.
+    jq -e -n --slurpfile nodes tests/fixtures/nodes.json \
+             --slurpfile pod tests/fixtures/unstarted.json \
+      '[$nodes[0].items[] | select([.status.conditions[]? | select(.type == "Ready" and .status != "True")] | length > 0)
+        | .metadata.name] as $unready
+       | (($pod[0].spec.nodeName // "") | IN($unready[]))' >/dev/null \
+      || { echo "fixtures: broken-unstarted is not on a node nodes.json shows as not Ready — the joined snapshot is rule 13's positive wearing the negative's name (D156 ruling 2)" >&2; exit 1; }
 
     "${kc[@]}" version -o json | jq -r .serverVersion.gitVersion > tests/fixtures/K8S_VERSION
     echo "captured $(ls tests/fixtures | wc -l) fixtures from $(cat tests/fixtures/K8S_VERSION)"

@@ -58,16 +58,20 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
 /// `healthy.json` is the one fixture whose report does not move with the clock — every other one
 /// carries an age and the binary reads the real one. Findings do not change the exit code
 /// (NOTES § D17), and this is the arm that proves `0` is reachable at all.
+///
+/// **The whole report is one literal, header included**, so a count that goes *wrong* reddens
+/// this as loudly as one that goes away — which is how the workload count leaving the header
+/// was caught (NOTES § D151). The header is `screens/once.md` § When nothing is broken's own
+/// line — `prod-eu · 84 pods · 3 nodes` — minus the cluster name a driver that reads files
+/// cannot know, and with **no third noun**: `workload` is said once in this product, and it is
+/// said on Capacity's row.
 #[test]
 fn a_healthy_capture_is_the_report_on_stdout_and_exit_0() {
     let out = k8rs(&[&fixture("healthy.json")]);
 
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     assert!(out.stderr.is_empty(), "{:?}", text(out.stderr.clone()));
-    assert_eq!(
-        text(out.stdout),
-        "1 pod · 0 nodes · 0 workloads\n\n○ nothing is broken\n"
-    );
+    assert_eq!(text(out.stdout), "1 pod · 0 nodes\n\n○ nothing is broken\n");
 }
 
 /// A path that is not there is exit 2 and a sentence naming the file, on stderr and with k8rs's

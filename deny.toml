@@ -2,8 +2,11 @@
 #
 # k8rs itself is GPL-3.0-or-later; this file is about what we *pull in*, which
 # is a different question ([NOTES § D13](NOTES.md)). Dependencies stay
-# permissive: a copyleft dependency would put its terms on top of ours, and
-# every approved crate is MIT/Apache already.
+# permissive: a copyleft dependency would put its terms on top of ours. The
+# lists below are the whole of that policy, and "permissive" is not the same as
+# "MIT or Apache" — a transitive crate ships under whatever it likes, and the
+# test an entry has to pass is whether its terms would bind the binary we ship,
+# not whether the name is a familiar one.
 
 [advisories]
 # Unmaintained and unsound advisories are warnings by default in newer
@@ -11,8 +14,11 @@
 yanked = "deny"
 
 [licenses]
-# Permissive only. Unicode-3.0 is here because it is what `icu`/`zerovec` ship
-# under, and they arrive transitively through the k8s client stack.
+# Permissive only. Unicode-3.0 is here because `unicode-ident` ships under
+# `(MIT OR Apache-2.0) AND Unicode-3.0`, and the AND makes the Unicode term
+# mandatory — allowing MIT is not enough. This line credited `icu`/`zerovec`
+# until 2026-08-22; neither has ever been in this lock file, because the line
+# was written before there was one.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -25,12 +31,31 @@ allow = [
 ]
 confidence-threshold = 0.9
 
-# k8rs itself is GPL-3.0-or-later and cargo-deny checks the root crate along
-# with everything it pulls in — so without this line our own licence fails our
-# own dependency policy. The exception is scoped to this one crate on purpose:
-# the policy above still rejects a copyleft *dependency*, which is the thing it
-# exists to prevent ([NOTES § D13](NOTES.md)).
-exceptions = [{ name = "k8rs", allow = ["GPL-3.0-or-later"] }]
+# Two crates, each allowed one licence the list above rejects, and each scoped
+# to that single crate on purpose ([NOTES § D13](NOTES.md)).
+#
+# `k8rs` — cargo-deny checks the root crate along with everything it pulls in,
+# so without this line our own licence fails our own dependency policy. The
+# policy above still rejects a copyleft *dependency*, which is what it is for.
+#
+# `webpki-root-certs` — the Mozilla CA root certificate bundle, and the only
+# entry in this file that is not a code licence: CDLA-Permissive-2.0 is the
+# Community Data License Agreement, written for *data*. 2.0 dropped the
+# attribution-on-output obligation that 1.0 carried, so no term of it reaches
+# our binary. It cannot be dropped by feature selection —
+# `rustls-platform-verifier` is a hard `dep:` of kube-client's `rustls-tls` —
+# but as of that crate's 0.7.0 the bundle is gated
+# `cfg(target_arch = "wasm32")`, so it sits in the dependency *graph*, which is
+# what cargo-deny reads, and in no k8rs binary.
+#
+# An exception and not a line in `allow` above, so the next crate to arrive
+# under a data licence is a decision somebody makes rather than a silent pass.
+# With no `version`: measured 2026-08-22, a pinned one goes red on a routine
+# bump, while an exception whose crate has left the tree is only a warning.
+exceptions = [
+    { name = "k8rs", allow = ["GPL-3.0-or-later"] },
+    { name = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
+]
 
 [bans]
 multiple-versions = "warn"

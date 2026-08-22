@@ -141,8 +141,20 @@ sends ([rule 2](#rules-this-screen-adds),
 holding a tag value of `prod` + U+202E (RIGHT-TO-LEFT OVERRIDE) + `reversed`
 — written here as the codepoint, never pasted as the character itself, for
 the same reason it must never reach the screen — has that codepoint stripped
-before the tag ever becomes a `Span`. A bidi-formatting character is exactly
-the class [invariant 9](../CLAUDE.md) exists for, not a special case for tags:
+before the tag ever becomes a `Span`, by the same predicate every other
+untrusted string on this screen goes through: `k8s::unprintable`, Unicode's
+own control category (`Cc`) plus the zero-width and bidi-formatting ranges —
+the embedding/override block (U+202A–U+202E, which is where U+202E sits),
+the zero-width block (U+200B–U+200F, which is where the zero-width
+joiner/non-joiner and the left/right-to-left marks sit), U+00AD SOFT HYPHEN,
+U+FEFF ZERO WIDTH NO-BREAK SPACE, and the invisible-operator block that
+carries the bidi isolates (U+2066–U+2069). **U+2028, U+2029 and U+00A0 are
+deliberately kept** — a terminal draws something for each of them — and why
+the zero-width joiner is removed anyway despite being load-bearing elsewhere
+is
+[NOTES § D154](../NOTES.md#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22)'s
+to say, not restated here. A bidi-formatting character is exactly the class
+[invariant 9](../CLAUDE.md) exists for, not a special case for tags:
 
 ```
 ┌────────────────────────────────────────────────────────────┐

@@ -304,20 +304,23 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
     // this line and fail on the phrase instead, with a message about cards saying when —
     // which is the confusion the check exists to prevent, not to cause.
     //
-    // **The pin is the midnight after the *newest* capture, and the rung follows the trip**
-    // (NOTES § D57, § D97). The corpus is one trip again since 2026-08-16 — every fixture
-    // re-captured from one cluster in one sitting — so the whole corpus sits inside a single
-    // day of the pin, and where inside that day decides the rung. This cordon has stood on
-    // three different rungs — minutes, then days at 48h 24m, then hours, and minutes again now
-    // at 47m 52s — which is why the number above is asserted at all: the rung is a property of
-    // the hour the trip finished and of nothing this test is about.
+    // **The pin is the midnight after the *newest* capture, and the rung follows the gap
+    // between that capture and this one** (NOTES § D57, § D97, § D156). The corpus is one trip
+    // plus one targeted capture since 2026-08-22 — `unstarted.json` was taken 40 h after the
+    // rest and the pin followed it — so the trip no longer sits inside a single day of the pin,
+    // and that distance decides the rung. This cordon has stood on three different rungs —
+    // minutes, then days at 48h 24m, then hours, then minutes at 47m 52s, and days again now at
+    // 48h 47m 52s — which is why the number above is asserted at all: the rung is a property of
+    // how far apart the two captures fell and of nothing this test is about.
     //
-    // **This cordon now sits 12 minutes under the hours rung**, which is the near boundary —
-    // a trip finishing a quarter of an hour earlier against the same midnight pin prints
-    // `1 hour ago` here. The far one is 48 hours, where the hours rung ends and the days rung
-    // starts. Crossing either is the same edit as any other repin, and the one that looks like
-    // a bug rather than a clock move. The number above is the guard: it fails first, with the
-    // arithmetic in the message.
+    // **The pin lands on a midnight, so the lever is a whole day and never an hour.** Any
+    // targeted capture taken on 2026-08-22 pins 2026-08-23 and prints `2 days ago` here; one
+    // taken a day earlier would have pinned 2026-08-22 and printed `24 hours ago`, and a day
+    // later `3 days ago`. So the near boundary is not the 48 minutes this cordon happens to sit
+    // over the days rung — it is one fewer day of gap, and the far one is one more. Crossing
+    // either is the same edit as any other repin, and the one that looks like a bug rather than
+    // a clock move. The number above is the guard: it fails first, with the arithmetic in the
+    // message.
     let stamped = cordon.added_at.clone().expect(
         "the controller stamps timeAdded on the taint it mirrors from spec.unschedulable \
          — a capture without it is D64's premise back again",
@@ -325,14 +328,14 @@ fn the_captured_cordon_dates_itself_and_the_hand_applied_taint_leaves_the_age_bl
     let elapsed = now().0.duration_since(stamped.0);
     assert_eq!(
         elapsed.as_mins(),
-        47,
-        "the cordon is {elapsed:?} before the pinned now, and the phrase below says 47 \
-         min — if `just fixtures` was re-run, repin `fn now()` (see the note there for \
+        2927,
+        "the cordon is {elapsed:?} before the pinned now, and the phrase below says 2 \
+         days — if `just fixtures` was re-run, repin `fn now()` (see the note there for \
          what moves with it) and move both together"
     );
     assert_eq!(
         dated.age(&now()).as_deref(),
-        Some("47 min ago"),
+        Some("2 days ago"),
         "a cordon the controller stamped has a moment, and the card says when"
     );
     assert_eq!(
@@ -733,6 +736,117 @@ fn pending_pod_carries_the_schedulers_sentence_and_no_containers() {
         p.containers.is_empty(),
         "the kubelet never reported on it, so no container rule can fire: {:?}",
         p.containers
+    );
+}
+
+/// **The pod that was placed and then reported on by nobody** — the decode every rule-side test
+/// of rule 13's second shape rests on (NOTES § D156).
+///
+/// `broken-unstarted` was bound to a node through the `binding` subresource — which is what
+/// actually writes `PodScheduled: True`; a create carrying `spec.nodeName` writes no condition at
+/// all — and that node's kubelet was stopped before the bind, so nothing ever wrote a status for
+/// it. What lands on disk is a `status` with one condition in it and no `containerStatuses` key.
+///
+/// **The two halves are asserted separately and neither is the other.** The capture's
+/// `spec.containers` is a real container the API server accepted; its `status.containerStatuses`
+/// is not there. That pairing is the whole of D156's first ruling — `spec.containers: []` and an
+/// absent `spec.containers` are both refused by the API server (`spec.containers: Required
+/// value`), so an empty [`PodSnapshot::containers`] on a decoded pod means *the kubelet has
+/// written no status* and can mean nothing else. A decode that filled `containers` from the spec
+/// would satisfy neither assertion below, and rule 13's second shape would have no input.
+///
+/// **And the property the fixture has to keep:** the node it names reads `Ready: Unknown` in
+/// `nodes.json`. That is what makes the committed capture rule 13's *negative* and N1's positive
+/// — a recapture that brought this pod back on a healthy node would silently turn
+/// [`the_pod_nothing_reported_on_is_the_nodes_card_when_the_node_went_quiet`] into a test of the
+/// other branch.
+#[test]
+fn the_placed_pod_no_kubelet_ever_reported_on_decodes_with_no_containers_at_all() {
+    let raw = fixture("unstarted");
+    let p = pod("unstarted");
+    println!(
+        "{:?}\n  scheduled: {:?}\n  node: {:?}\n  containers: {:?}\n  ready_to_start: {:?}",
+        p.id, p.scheduled, p.node, p.containers, p.ready_to_start_containers
+    );
+
+    assert!(
+        !at(&raw, &["spec", "containers"])
+            .as_array()
+            .expect("a Pod the API server accepted declares spec.containers")
+            .is_empty(),
+        "the pod declares a container — without that the empty decode below would be a pod \
+         with nothing to run rather than a pod nothing has run"
+    );
+    assert!(
+        at(&raw, &["status", "containerStatuses"]).is_null(),
+        "and the kubelet wrote no statuses for it — the key is absent, which is the framing a \
+         real API server produces: {:?}",
+        at(&raw, &["status", "containerStatuses"])
+    );
+    assert!(
+        p.containers.is_empty(),
+        "so the snapshot's container list is empty, and that is rule 13's second trigger: {:?}",
+        p.containers
+    );
+
+    let c = p
+        .scheduled
+        .as_ref()
+        .expect("a bound pod carries a PodScheduled condition");
+    assert_eq!(c.type_, "PodScheduled");
+    assert_eq!(
+        c.status, "True",
+        "it was given a machine — this is not rule 10's pod and not rule 14's"
+    );
+    assert_eq!(
+        c.last_transition.as_ref(),
+        Some(&captured_time(
+            captured_condition(&raw, "PodScheduled"),
+            &["lastTransitionTime"]
+        )),
+        "and the moment it was bound, which is both rule 13's clock and the age on its card — \
+         the API server writes it once at bind and never refreshes it"
+    );
+    assert_eq!(
+        at(&raw, &["status", "conditions"])
+            .as_array()
+            .expect("the capture has a conditions array")
+            .len(),
+        1,
+        "PodScheduled is the only line in this pod's status: no Ready, no Initialized, and no \
+         PodReadyToStartContainers"
+    );
+    assert!(
+        p.ready_to_start_containers.is_none(),
+        "so the sandbox condition is absent rather than False, which is the arm of rule 13's \
+         evidence line that must not claim this pod has its storage: {:?}",
+        p.ready_to_start_containers
+    );
+
+    assert_eq!(
+        p.node.as_deref(),
+        Some(captured_str(&raw, &["spec", "nodeName"])),
+        "the bind set a node name, and that name is the whole of rule 13's hand-off to N1"
+    );
+    assert_eq!(p.phase.as_deref(), Some("Pending"));
+    assert_eq!(
+        p.deletion_timestamp, None,
+        "nobody has asked for it to go, so rule 12 is not the card here"
+    );
+
+    let node = captured_nodes()
+        .into_iter()
+        .find(|n| Some(n.id.name.as_str()) == p.node.as_deref())
+        .expect("the pod's node is in the committed node capture");
+    assert_ne!(
+        node.conditions
+            .iter()
+            .find(|c| c.type_ == "Ready")
+            .map(|c| c.status.as_str()),
+        Some("True"),
+        "and that node is not saying it is ready — this capture is rule 13's negative, and a \
+         recapture that landed it on a healthy worker would turn the hand-off test into a test \
+         of the branch it exists to contrast with"
     );
 }
 

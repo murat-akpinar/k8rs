@@ -20,11 +20,15 @@
 | X.509 | **x509-parser** | Certificate expiry warnings. Hand-parsing ASN.1 dates in a security-adjacent path is the wrong place to be clever. |
 | Diff | **similar** *(v0.4)* | The diff shown before an edit is applied — the thing that makes `e` safe to press. Approved, but it enters the build with `edit`, not before. |
 
-Full dependency list (ten crates approved; nine ship in v0.1, `similar`
-arrives with `edit` in v0.4):
+Full dependency list (**eleven** crates approved; ten ship in v0.1, `similar`
+arrives with `edit` in v0.4). The eleventh, `futures-util`, was a reversal of
+invariant 10 and added no compiled code — `kube-runtime` returns `impl Stream`,
+`Stream` is not in `std`, and `futures-util` was already linked under
+`kube-client`
+([NOTES § D143](../NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)):
 
 ```toml
-kube            # client + runtime (watcher/reflector) + discovery features
+kube            # client + runtime (watcher/reflector); discovery comes with `client`
 k8s-openapi     # API types — one k8s version feature pinned
 ratatui
 crossterm
@@ -34,10 +38,33 @@ serde_json      # fixtures, dynamic objects, Table responses
 serde_yaml_ng   # edit / view YAML
 x509-parser     # certificate expiry
 similar         # edit diff
+futures-util    # StreamExt::next — the only way to drive kube's watcher
 ```
 
 The last three were added by the 2026-08-11 scope reversal. Everything else
 predates it.
+
+**What is actually in `Cargo.toml` today** — approved is not the same as present,
+and four of the ten have not arrived yet:
+
+| Crate | Pin | Landed | Features |
+|---|---|---|---|
+| `k8s-openapi` | `0.28.0` | Phase 3 | `v1_36` |
+| `x509-parser` | `0.18.1` | Phase 3 | — |
+| `kube` | `4.2.0` | Phase 5 | `client`, `runtime`, `rustls-tls`, no defaults |
+| `tokio` | `1.53.1` | Phase 5 | `rt-multi-thread`, `macros`, no defaults |
+| `futures-util` | `0.3.34` | Phase 5 | `std`, no defaults — the narrow crate, not the `futures` facade |
+| `serde_json` | `1` | Phase 3, as a **dev**-dependency | — |
+
+`kube` 4.x is the line that resolves against the `k8s-openapi` pin — 3.1.0 wants
+`^0.27.0` — and the two are upgraded together, never separately.
+**`rustls-tls` is chosen by the release targets**, not by preference: `openssl-tls`
+wants a system OpenSSL and a C toolchain for each of the four cross-compiled
+targets. The cost is that rustls parses certificates more strictly than OpenSSL,
+so a CA that `kubectl` accepts can be one k8rs rejects
+([NOTES § D140](../NOTES.md#d140--phase-5s-two-dependencies-the-version-that-pairs-with-the-pin-and-rustls-because-the-release-targets-decide-it-2026-08-22)).
+`openssl-probe` appears in `Cargo.lock` and links no OpenSSL — it locates the
+system trust store on disk.
 
 ## Deliberately absent
 

@@ -834,6 +834,57 @@ spec:
       image: busybox
       command: ["sleep", "86400"]
 ---
+# Rule 13's *other* positive (NOTES § D156) — the pod the kubelet has never
+# written a status for. `broken-wedged` above is stuck with a container status
+# saying `ContainerCreating`; this one has `status.containerStatuses` **absent**,
+# so `PodSnapshot::containers` decodes empty and every clause rule 13 reads off a
+# container has nothing behind it at all. D156 § 5 is the ruling this manifest
+# follows; the measurement under it is
+# reports/2026-08-22-rule-13-the-pod-with-no-container-status.md.
+#
+# Two fields make the shape and neither is decoration.
+#
+# `schedulerName` names a scheduler nobody installed, exactly as
+# `broken-unjudged` above does — but for the opposite end. There it is the whole
+# fixture: nothing ever looks at the pod, so no `PodScheduled` condition is
+# written at all. Here it only keeps the real scheduler's hands off the pod so
+# that `cluster.sh break-nodes` can place it by hand, through the **`binding`
+# subresource**, on the one worker whose kubelet it has just stopped. That
+# subresource is what actually writes `PodScheduled: True`: a create carrying
+# `spec.nodeName` writes no condition at all — measured, report § 1 against § 2 —
+# and that shape is rule 14's, not this one's.
+#
+# The two NoExecute tolerations are written out **with `tolerationSeconds`
+# omitted**, and that is the single thing that lets this shape survive long
+# enough to be captured. The API server's `DefaultTolerationSeconds` admission
+# plugin writes `tolerationSeconds: 300` onto every pod that does not spell these
+# two out for itself. The node this pod is bound to goes `Ready: Unknown` about a
+# minute after its kubelet stops, and the taint manager then sets
+# `DisruptionTarget: True` and a `deletionTimestamp` at exactly 300 s — measured,
+# report § 2c — five minutes before the ten-minute gate rule 13 is about even
+# opens. Rule 13 is already silent on a `deletionTimestamp`, so the evicted
+# version of this pod is a fixture of nothing. Spelled out here they never
+# expire, and the pod held this status unchanged for the whole of a 17-minute
+# sample with both stamps and `containerStatuses: ABSENT` identical in every one
+# (report § 4).
+#
+# **No `nodeName:`, deliberately** — it is the one key this pod cannot carry.
+# `cluster.sh break_it` rewrites `nodeName: k8rs-` per cluster for
+# `broken-overhead`, and this pod's node is not known to anything until
+# `break-nodes` has read the cluster and picked one.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-unstarted, labels: { demo: broken } }
+spec:
+  schedulerName: does-not-exist
+  tolerations:
+    - { key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute }
+    - { key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute }
+  containers:
+    - name: app
+      image: busybox
+      command: ["sleep", "86400"]
+---
 # Rule 2's recency clause (NOTES § D75) — a container OOMKilled once that has
 # been serving ever since. `oom.json`'s container is crashlooping, so both
 # directions of "silent only when it is doing its job **and** the kill is old"

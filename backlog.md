@@ -335,7 +335,7 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   fixtures, no cluster: `k8rs tests/fixtures/nodes.json tests/fixtures/healthy.json`
   draws N1 on `k8rs-worker3` with **no pod line at all**; add
   `tests/fixtures/kube-system-pods.json` and the same card reads
-  `kube-system/kindnet and kube-system/kube-proxy were running here (2 pods)`.
+  `kube-system/kindnet and kube-system/kube-proxy were placed here (2 pods)`.
   N1's own doc comment refuses exactly this — *"one pod was running here" about a
   node carrying forty reads as complete* — and N2's count and N5's sum are gated
   on the same field. Visible in this phase's own close review, where the operator
@@ -657,6 +657,388 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   D, 2026-08-22
   ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
 
+### Moved out of a running Phase 5 by the D153 triage (2026-08-22)
+
+*Eight of the ten boxes the PM injected into an open Phase 5. Each is a real
+finding and none of them blocks a Phase 5 box, which is the test
+[D153](NOTES.md#d153--the-pm-injected-ten-boxes-into-a-running-phase-5-which-is-the-rule-the-pm-was-enforcing-2026-08-22)
+set. Read at a phase close like everything else here; the two that stayed say
+in their own bodies why.*
+
+- **Nothing observes what k8rs actually puts on the wire — every claim about
+  it is read off kube's source.** D147 established the initial LIST pages at
+  500 and follows `continue` itself **by reading
+  `kube-runtime-4.2.0/src/watcher.rs`**, and the tests synthesise the
+  `Init → InitApply* → InitDone` sequence rather than receiving it. A
+  **localhost fake API server** answering canned paginated responses would let
+  the real `watcher()` run against it and turn four read claims into observed
+  ones: that `limit=500` is sent, that the `continue` token comes back, that a
+  compacted token restarts the LIST, and that a 403 arrives as
+  `InitialListFailed` rather than another variant. It needs `tokio`'s `net`
+  feature — **a feature on a crate already present, not a twelfth crate**, so
+  invariant 10 is not in question. If boxed: a test drives the real watcher
+  against it and each of the four is asserted from what crossed the socket
+
+- **The ingest guard bounds every field and no collection, so the product of
+  the two is still unbounded.** `k8s::ingest` caps an identifier at 512 bytes
+  and free text at 4096
+  ([D146](NOTES.md#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22)),
+  but a pod with 100 000 finalizers costs 100 000 × 512 and every one of them
+  is individually legal. Same for `labels`, `tolerations`, `volumes`,
+  `containers` and `conditions`. **Deferred deliberately and not overlooked**:
+  dropping list entries is a *silent* cut, which is the exact thing
+  `… (shortened by k8rs)` exists to prevent, and the box that added the
+  per-field bound was asked for a bound per field. So the real
+  question is **what a reader is told when a list is cut**, and the field
+  answer does not transfer — *"3 of 100 000 finalizers shown"* is a sentence,
+  not a marker. Decide that first, then the numbers, and take them off a
+  census the way the field bounds were rather than inventing them. Note the
+  one place the guard already loses rather than shortens: two labels whose
+  keys truncate to the same string collapse into one, first in key order
+  winning
+
+- **`no second outbound path` catches only a hostname somebody typed as a
+  literal.** Fed the shapes rather than read as a regex: a literal
+  `"https://telemetry.k8rs.dev/collect"` is caught, and
+  `format!("https://{host}/collect")`, string concatenation, a bare hostname
+  with no scheme, and a host handed in at runtime are all **missed** — as is
+  an HTTP crate declared under `[target."cfg(unix)".dependencies]`, because
+  the dependency walk reads only `dependencies`, `dev-dependencies` and
+  `build-dependencies`. So the check **cannot tell the API server from a
+  second path**: it passes the kube path not by recognising it as the one
+  allowed connection but because that path happens to contain no hostname
+  literal. The literal form is the only one refused, and it is the form
+  nobody adding telemetry would use. The `[target.*]` walk is cheap and
+  should just be done; **an assembled host is not decidable by grep, so the
+  honest half is to say what the check covers** rather than let its name
+  promise containment it does not have (`tester` wrote the limit into the
+  docstring on 2026-08-22 — what is wanted here is the fix, not the disclosure).
+
+- **`tests/binary.rs` is the only test that runs the built binary, and it pins
+  two of the nine shapes that binary prints.** It caught the header change —
+  whole-stdout literal, so a *wrong* count would have reddened as loudly as a
+  removed noun — but only for one input: `healthy.json` is 1 pod, 0 nodes, no
+  unread kind, no finding. **Never covered at the process boundary**: the tally
+  (`20 critical, 9 warnings`), a card's shape, the unread-kind clause, and
+  `--analysis` entirely — `grep -c analysis tests/binary.rs` is **0**, so the
+  seven panes have never been printed by a process any test watched. **The
+  cheapest fix is one line of machinery that already exists**:
+  `a_reader_that_closed_the_pipe_costs_nothing` already runs the whole corpus
+  through the built binary and holds the entire report in `whole.stdout`, then
+  asserts only exit 0 and a length — pinning that report's first and last lines
+  puts the multi-object header and the tally under process cover for nothing.
+  Found by `tester`, 2026-08-22
+
+- **Nothing committed exercises the driver's unread-kind branch, and a ruling
+  leans on it.** `take()` files Services and CertificateSigningRequests into
+  the snapshot, so all 55 fixtures are kinds the driver reads and
+  `k8rs tests/fixtures/*.json` prints `55 pods · 4 nodes` with no unread-kind
+  clause — the branch is dead over the whole corpus. It is covered whole-line
+  by unit tests over `header` with a synthesised pair, so the mechanism works;
+  but D121's own example of it went stale unnoticed and
+  [D151](NOTES.md#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)
+  then leaned on it as *the* surviving mechanism. If boxed: a committed fixture of
+  a kind no rule reads, so the branch is reachable from the corpus and from the
+  binary — or an explicit ruling that a synthesised unit test is enough,
+  recorded so the next reader is not the third to trip on it. Also:
+  **`width-guard.py` reads `src/` only** (`ROOT / "src"`), so `tests/`,
+  `examples/` and `benches/` are outside the 100-column rule — decide whether
+  that is intended and say so in the guard
+
+- **W1 draws no card at all on a live cluster for the refusal it exists to
+  catch.** Rule W1 reads a ReplicaSet's `ReplicaFailure` condition — *Kubernetes
+  refused to create the pods this workload asked for* — and the ReplicaSets it
+  is about have `replicas: 0` **because that is what the refusal means**. So no
+  pod carries their `ownerReference`, so owner resolution never names them, so
+  nothing ever fetches them, and invariant 6 forbids watching ReplicaSets.
+  Measured, not reasoned: the only controlling owners any pod in the corpus
+  names are `kindnet`, `kube-proxy`, a `Node` and three ReplicaSets — none of
+  them the quota-refused one — while `quota-replicasets.json` carries the
+  condition with `replicas: 0`
+  ([D151](NOTES.md#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22)).
+  The rule passes every test because the file driver hands it a ReplicaSet the
+  live path cannot supply. **Two design choices and neither is obviously
+  right**: LIST the ReplicaSets of a Deployment that is short of pods — a LIST
+  and not a `get`, and arguably the same fetch Waste's `replica_sets` already
+  wants — or reconsider W1's kind gate, which exists so that one refusal does
+  not draw two cards, the Deployment carrying the same condition. Decide which,
+  and say what happens to the *other* card either way
+
+- **`TYPES_BUILT_FOR` is a third copy of the `k8s-openapi` pin and
+  `fixture-audit.sh` compares only two of them.** The script already parses
+  `features = ["v1_NN"]` out of `Cargo.toml` and compares it with
+  `tests/fixtures/K8S_VERSION`; `src/k8s.rs` now carries the same number again,
+  as the version k8rs tells users it understands. A test ladder guards two of
+  the three ways they can drift apart — pin lowered, constant edited alone —
+  and **not the third: the pin raised to `v1_37` on a newer `k8s-openapi`**,
+  which would tell every user on 1.37 that their cluster is newer than this
+  build, i.e. D99's table stated backwards **in a user-facing string**. The
+  author's own argument for the ladder was that raising the pin needs a
+  dependency bump a human reads — and the author then withdrew it, because
+  `just check` is where drift is supposed to be caught and this is the one
+  guard whose green says nothing about the case that matters. If boxed: the script
+  greps `const TYPES_BUILT_FOR: u32 = NN;` and asserts equality, its
+  `--self-test` gains a row where they disagree **and** one where the file
+  fails to parse (which must fail loudly, never pass as agreement — the trap
+  D99's own guard fell into), and the ladder test is **deleted in the same
+  change**, because two guards for one number is the second copy again.
+
+- **Rule 13 tells a reader their storage and network are fine on any cluster
+  that never published the condition — and every `else` over an API `Option`
+  is the same shape.** `placed_but_never_started` reads
+  `ready_to_start_containers`, and its `else` prints *"this pod has its
+  storage and its network, so the block is later — the image is still
+  downloading, or the container could not be created"*. An **absent**
+  condition takes that branch, so on a cluster below 1.29 — where the
+  `PodReadyToStartContainers` condition does not exist in the API types at all
+  — the card asserts something the cluster never said, and sends a reader
+  whose CNI is broken to look at the image pull. **This is the whole reason
+  the supported floor is 1.29**, so fixing it is what would let the floor
+  move down ([D149](NOTES.md#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22)).
+  The fix is a third arm: say nothing about storage or network when the
+  condition is absent. `rules.rs` is frozen, so this is a
+  [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  question — and its first condition is *a defect proven on a committed
+  capture*, which this is **not**: every committed capture comes from
+  v1.36.1, where the condition is always present. So it needs either a
+  capture from an older cluster or an explicit ruling that the API types are
+  the object.
+  **Half of this closed on 2026-08-22, and it is the half worth *least*.** Rule
+  13's own branch is three arms now, and it needed no old cluster after all:
+  `unstarted.json` reaches the absent condition on the 1.36 fixture cluster,
+  which is [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
+  first condition met ([D156](NOTES.md#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)
+  ruling 4). **The floor stays 1.29 and this entry stays open for the audit.**
+
+  **And the general form is the part worth more than the one rule.** D99 names
+  two ways an old cluster does worse than answer nothing; this is a third —
+  **an `else` that treats *absent* as *the negative case is false*, turning a
+  missing field into a positive claim.** Invariant 5's *a missing field means
+  no finding* does not cover it, because the missing field does not remove the
+  finding, it changes the finding's **text**. If boxed — and rule 13's own arm is
+  already done, so this is the whole of it: every other `else` over an `Option`
+  from the API has been read against the same question, with the ones that are
+  safe named so nobody re-audits them
+
+### From the browser's-rows family and its operator review (2026-08-22)
+
+*Everything the family found that is not a defect in the family. Ranked roughly
+by what it costs to leave — the first two are reachable from a keypress once
+`connect()` lands, and the third has a deadline that is not a phase close.*
+
+- **A kind that can be listed and cannot be watched exists on every cluster, and
+  nothing here has a state for it.** Measured: of the 42 resources a bare kind
+  cluster advertises `list` on, `componentstatuses` has no `watch`, and the
+  server answers `watch is not supported on resources of kind
+  "componentstatuses"` — **permanently, not transiently**. `browsable()` filters
+  on `list` alone, so the sidebar offers it; a caller then opens a metadata watch
+  and gets a 405 forever, and kube's `watcher` carries no backoff, so that is a
+  hot loop against the API server reachable by pressing Enter on a sidebar row —
+  the security gate's *never retries in a loop* by name. **Not the
+  reconnect/backoff box**: that one is about a watch that should work and
+  blipped; this one can never work. `Browsable` already carries `verbs`, so the
+  data-side check costs nothing; the screen half — a view with no change signal
+  fetches once and offers a manual refresh key — is the ruling. Named in
+  `k8s.rs`'s doc, not built ([reports/2026-08-22-browser-rows-table-watch-and-refresh.md](reports/2026-08-22-browser-rows-table-watch-and-refresh.md)).
+
+- **`Row::name` is what a kubectl line and every dialog will name, and nothing
+  judges it beyond the strip and a 512-byte bound.** `path_safe` guards the URL
+  and argues from exactly the right threat — an aggregated API server chooses
+  `resources[].resource` — and it chooses `metadata.name` by the same amount. A
+  name of `web -n kube-system` renders a command log line reading `kubectl
+  delete pod web -n kube-system -n payments`: k8rs does not execute it, but
+  [invariant 4](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)
+  says *neither record may lie*, and that one does. The same string later builds
+  the `e` edit temp file path, where `../` is the gate's named case. No command
+  log and no `ops.rs` exists yet, so it was named in the doc rather than fixed.
+
+- **The Table is fetched unpaged, and the field that would say *truncated* is
+  dropped at the decode — and `k8s.rs` freezes after Phase 6.** `ListParams::
+  default().limit` is `None`, so the browser asks for everything in one body: 34 MB
+  at 5 000 rows, which is `PRIOR-ART § A2`'s complaint one door along from the
+  initial-LIST box that owns it. A Table pages perfectly well — measured,
+  `?limit=5` returns 5 rows with `metadata.continue` and `remainingItemCount:
+  48` — but `TableResponse` names no `metadata`, so the *showing 500 of 5 048*
+  line has nothing to read. **This is the one entry here with a deadline that is
+  not a phase close**: after Phase 6 the file is frozen and adding the field is a
+  plan correction rather than an edit.
+
+- **Should the browser watch the Table after all?** [D154](NOTES.md#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22)'s boxed question. The
+  measured comparison does not favour what shipped: a Table watch event is ~3 062
+  bytes and already carries the row identity, a metadata event is ~2 624 bytes
+  **plus** a whole re-fetch at 6 852 bytes per row. What shipped is defended by
+  what kube gives the metadata path for free — `resourceVersion` bookkeeping, the
+  410 relist, the init event — and a Table watch is a hand-rolled
+  `Client::request_stream` owing all three. Real work either way; nobody has
+  ruled which is less.
+
+- **`path_safe` sits at the sink and the stronger placement was refused for a
+  reason worth revisiting.** Putting it in `browsable()` would keep a hostile row
+  out of the sidebar entirely, but it reversed two behaviours the discovery box
+  proved — a CRD naming itself with control characters is *offered with its name
+  stripped*, and a runaway plural is *offered shortened* — and neither survives
+  the predicate afterwards. The PM ruled the sink is enough (the row degrades to
+  *cannot fetch* rather than exploiting anything). The question is whether
+  *offered but unopenable* is the right screen.
+
+- **A Table with no `priority: 0` column renders nothing.** Fed `columns=[A(1),
+  B(1)]`, the drawn output is `"\n"`; same for zero `columnDefinitions` with rows
+  present. Built-in printers and the CRD table convertor always emit `Name` at 0,
+  but an aggregated API server writes its own Table. The screen needs a rule for
+  *the server gave me no narrow columns*.
+
+- **`kubectl get pods` with no `-n` is not what k8rs will have done.**
+  `Fetch::table(kind, None)` is `/api/v1/pods`, every namespace; the honest
+  command log line is `kubectl get pods -A`, because plain `kubectl get pods`
+  uses the kubeconfig's current namespace. A trap for the command-log box, and
+  invariant 4 again.
+
+- **The fixture that would turn one test's claim into invariant 12 proper.**
+  `assert_ne!` over two captures proves the columns are *per-kind*, which a
+  hand-written map would also give; what proves there is no map is a `Table` of a
+  kind no built-in printer knows. One namespaced CRD with
+  `additionalPrinterColumns`, captured with the same Accept header, on the next
+  capture trip — it is also the only shape that exercises a column header written
+  by somebody outside the control plane.
+
+- **`unprintable` has two disposals and they differ.** `text` turns a removed
+  *whitespace* character into a space and bounds the result; `main.rs`'s
+  `sanitize` removes it. So on the fixture path a `\n` inside a cluster-sent
+  message glues two words together where the ingest path leaves one space. The
+  real fix is that `load` should go through `Store` rather than straight through
+  `rules.rs`'s `From` impls — a plan question, named in [D154](NOTES.md#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22)'s third section.
+  **And there is a third spelling, in a test**: `k8s_tests.rs:1547` and `:2438`
+  assert `!chars().any(char::is_control)` — true, weaker than the guard beside
+  them, and exactly the shape that let the narrow word come back. Not a hole
+  (their siblings feed the wider set); a widening nobody would notice.
+
+- **`bounded_impl` reads an impl body as raw text**, so a field named only in a
+  *comment* inside the body would satisfy `every_string_the_browsers_rows_keep_is
+  _named_by_the_ingest_guard`. `Row`'s and `Column`'s impls carry no comments
+  today, so it holds; `ObjectId`'s does. Pre-existing, found while attacking this
+  family.
+
+
+### From the whole-project review (2026-08-22)
+
+*Three reviewers read the repo as one thing — an operator over the product files,
+a test engineer over the suite and the guards, an outside reader over the process.
+The two blockers they found were false ticks and went back onto their own boxes;
+these are everything else
+([D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)).
+**The first two are marked `[before Phase 5 close]` because that is when they
+stop being cheap.***
+
+- **`[before Phase 5 close]` `just mutants` sweeps two files and Phase 5 writes a
+  third.** `justfile`'s recipe is pinned to `--file src/rules.rs --file
+  src/analysis.rs`. Measured with `cargo mutants --list`: 604 + 245 swept, **132
+  in `k8s.rs` and 61 in `main.rs` never swept**. Phase 5's entire product is
+  `k8s.rs`, so its close would run a green whole-file sweep over two files the
+  phase did not touch. `mutants-diff` covers each turn's diff, so this is a
+  phase-close hole and not a per-turn one. One word in `tester`'s file.
+
+- **`[before Phase 5 close]` `cargo mutants` generates nothing for a `const`, so
+  every threshold is outside the gate.** Measured: zero mutants naming
+  `RESTARTS_WARN`, `NOT_READY_GRACE`, `PROBE_FLOOR` or `SKEW_ALLOWANCE` in 604.
+  There are **19** numeric and duration `const`s across the four product files
+  and **6** are pinned by a literal `assert_eq!` naming the constant and its
+  number: `RESTARTS_WARN`, `RESTARTS_CRITICAL`, `CERT_EXPIRY_WARN`,
+  `INITIAL_LIST_PAGE`, `SUPPORTED_SKEW`, `TYPES_BUILT_FOR`. The other **13** —
+  `NOT_READY_GRACE`, `NODE_DOWN_GRACE`, `NEVER_JUDGED_GRACE`, `OVERDUE_MARGIN`,
+  `PROBE_FLOOR`, `SKEW_ALLOWANCE`, `FREE_TEXT`, `IDENTIFIER`, `REFRESH_FLOOR`,
+  `OLDEST_SERVER`, `UNREADABLE_SECTIONS`, `MOST_ROWS_PER_SECTION`,
+  `NAMESPACES_NAMED` — are constrained only by test timings *derived from the
+  constant symbol*, which move with it when somebody "fixes" a number. **The
+  review's own first count of this was wrong in both figures** (20 and 7): two
+  of the claimed pins turned out to be an `assert_eq!` on `seen.len()` and one
+  on `scheduled.status` that merely have the constant nearby — which is the
+  same shape as the defect, one level up. The gate's own box
+  discloses that it cannot mutate a struct literal's field; it does not say *and
+  never a `const`*, and that is the larger class.
+
+- **Drain safety says *waits forever* about a rollout that finishes on its own.**
+  The *at its floor* arm fires on `current_healthy >= desired_healthy`, which is
+  true both of 2 replicas at `minAvailable: 2` (blocked forever) and of 3
+  replicas at `minAvailable: 2` with one pod not Ready this second (blocked for
+  seconds). `status.expectedPods` separates them, it is **already in the
+  committed capture** at both values 2 and 3, and `DisruptionBudgetSnapshot` does
+  not decode it. The action bites hardest: *run one more copy* when a third copy
+  already exists scales to 4 or lowers a correct budget. `rules.rs` refuses this
+  exact shape one file over — a point sample of a transient deciding what the
+  user sees — and wins there.
+
+- **An OOM-killed container above three restarts draws two `Critical` cards.**
+  Rule 2 says *raise the memory limit*; rule 5, on the same container, says *read
+  the last run's log*, which for a `SIGKILL` ends mid-line and holds nothing. The
+  suppressors cannot fold them — different actions, and rule 5 is `Reads::Now`.
+  The rule 2 + rule 15 pair is already an entry above; this is the commoner pair
+  and was not recorded.
+
+- **Drain safety's `not_ready` row keys on severity and kind, not on the rule.**
+  It finds any `Critical` finding whose object is this node and then prints *this
+  node has stopped responding* as a fact. Correct only while N1 is the only
+  `Critical` node rule. The entry above records that the pin asserting that rests
+  on one cluster's output; this is the consumer that breaks when it stops holding,
+  and it breaks by asserting the wrong sentence rather than by drawing nothing.
+
+- **Waste says a Service with no endpoints gives its callers a `503`.** A
+  ClusterIP with no endpoints is an iptables/IPVS `REJECT` — the caller sees
+  *connection refused*, or an empty DNS answer for a headless Service. A `503`
+  comes from an Ingress controller, a mesh sidecar or a gateway, a layer this row
+  knows nothing about, and at 3am the word decides where the reader looks.
+  **Reasoned from the mechanism, not measured** — it needs a client pod on a live
+  cluster to settle, so it is an entry and not a finding.
+
+- **`check-docs.py` reads markdown only.** A planted `NOTES § D999` inside a
+  `.rs` file leaves it green; there are **1,636** `NOTES § D##` citations in
+  `src/` and `tests/` (1,867 counting the bare `§ D##` form), and all of them
+  resolve today. It matters because the assertion
+  *message* is where a reader decides whether an expected number was derived from
+  a requirement or transcribed from output, and nothing checks the citation in it.
+
+- **`k8s_tests.rs` writes the five-watch `drive(vec![one_watch(…), …])` list
+  inline three times** while `streams()`, `bootstrapped()` and `all_but()` already
+  exist. A normalized-block scan over all thirteen test files found it as the
+  only ≥8-line block repeated three times or more, which is worth stating in
+  both directions: § *Write function-based* looks broken here and nowhere else
+  in 39,620 lines. That scan is the reviewer's and was not re-run here.
+
+- **The read-only role's over-grant is the other half of a box that is already
+  open.** `docs/security.md` grants cluster-wide `list configmaps` and
+  `list events`; no product code reads either, and the test suite uses `ConfigMap`
+  as its example of *a kind nothing reads*. `list configmaps` cluster-wide is not
+  neutral — they routinely hold what should have been Secrets. Named here only so
+  it is not lost: it belongs to **Phase 5's own unchecked `ClusterRole` box**,
+  which already carries the under-grant half.
+
+- **The rule 8 `/` entry above is missing its worst half:** the `kube-system` +
+  DaemonSet exemption does not save `prometheus-node-exporter` either, so there is
+  no namespace an operator can move it into to silence the card — and the card
+  prints `read-only` on its own evidence line under a `Critical` title.
+
+- **Nothing shrinks, and the file that says so grew 19%.** Since D103: `NOTES.md`
+  +60%, `CLAUDE.md` +19%, the four prose files +61% together. 89% of every
+  markdown line ever written is still in the repo, against 37% of Rust deleted.
+  Three deletions, ranked by lines removed per unit of risk: **(1)** the doc
+  comments in `rules.rs` (62%) and `k8s.rs` (63%) cut to the contract `CLAUDE.md`
+  already states — comments compile to nothing, so the suite is a complete
+  regression check, and the longest single run is 166 lines re-arguing five
+  decisions it also links; **(2)** a 60-line cap on a decision body, with the
+  round-by-round narrative going to `reports/` where D108 already put it — 41
+  decisions are ≥100 lines and 17 are ≥150, against a median of 67; **(3)**
+  `chore(changelog): update` moved to phase close, which is **101 of 253
+  commits** regenerating a 168-line file.
+
+- **`NOTES.md`'s heading tree is fiction and only one break is guarded.**
+  D1–D133 are nested under a `##` dated to one day of design work in 2026-08-11;
+  D134–D155 are nested under `## Inspiration / reference tools`. D154's three
+  subsections escaped to `##` in `21f85a9` and were re-nested by hand in the
+  change that wrote this entry — `check-docs.py` could not see it, because it
+  matches a decision only at `level == 3`. Two things, in order: one real
+  `## Decisions` section, then ~10 lines in the guard requiring a `### D##` to be
+  its immediate child.
+
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
@@ -668,3 +1050,109 @@ long-form version and stays the authority.*
   twice, by `NOTES.md` and by the session memory directory, and a hosted instance
   would put project data on an outbound connection that
   [docs/security.md](docs/security.md) says does not exist.
+
+### From the rule 13 family review (2026-08-22)
+
+*Two findings from [`reports/2026-08-22-rule-13-family-review.md`](reports/2026-08-22-rule-13-family-review.md)
+that are not defects in the box that produced them. Read at the next phase close.*
+
+- **A node whose `Ready` flaps faster than five minutes gets no N1 card and a
+  blinking rule 13 card, and closing that means one rule reading another's
+  clock.** Measured on the review cluster: a condition's `lastTransitionTime` is
+  rewritten on **every** flip — `Unknown` at `14:24:24Z`, `True` at `14:26:37Z`,
+  `Unknown` again with a fresh stamp at `14:27:29Z`. N1's grace runs from that
+  stamp, so a node flapping under `NODE_DOWN_GRACE` never reaches it, while rule
+  13 stands down on every `Unknown` phase and fires on every `True` phase
+  ([D156](NOTES.md#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)
+  ruling 2 is what couples them). The ordinary producer is a kubelet missing
+  heartbeats under memory pressure — not exotic. **And the honest form of the cost
+  is sharper than the doc comment's**: `tester` ran the binary at a node two
+  minutes into `Unknown` with the pod bound 42 minutes earlier, and the screen
+  printed **`nothing is broken`** — the one claim
+  [`screens/once.md`](screens/once.md) says has to be true, and the exact sentence
+  [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+  re-opened this box over. Still strictly better than before, when the shape drew
+  nothing ever. **Neither obvious fix is free**:
+  suppressing the blink means rule 13 reading N1's clock, and dating the flap
+  means the snapshot carrying a condition's *history*, which it deliberately does
+  not. There is a third reading — that a flapping node is its own finding and
+  neither rule should own it — and that is a new rule, so [invariant
+  13](CLAUDE.md) applies. Decide which; the code change is small once it is
+  decided
+
+- **`src/analysis_tests/restarts.rs:459`'s comment claims the assertion proves
+  something the assertion cannot see.** It says *"The two runs began three seconds
+  apart … each row measures its own"*, and the assertion is a loop requiring both
+  rows to produce the **same** string. Three seconds render identically at every
+  granularity the renderer has, so it cannot tell "each row measures its own" from
+  "both read the same one". Pre-existing, untouched by the repin that made it
+  visible — true at `1 hour ago` and true at `2 days ago`. If boxed: either the
+  fixture gains two runs far enough apart to render differently, or the comment
+  stops claiming what the loop does not check
+
+- **`break_nodes`' binding step has no offline test, and the only honest shape for
+  one is a new file.** Every other predicate in `cluster.sh` is proved offline by
+  `scripts/verify-test.sh`; the binding block is not, because proving it needs a
+  stub `kubectl` that answers `get`, `create --raw` and a 409 — a second
+  implementation of the API server's semantics. `tester` built one in a scratchpad
+  to prove the missing-pod fix and it **lied twice inside twenty minutes** (a 201
+  for a binding whose pod does not exist; a `-o jsonpath` match served from its
+  `-o json` case), each lie producing a confident wrong red. That is the argument
+  for the box and against a quick one: a committed stub drifts the same way with
+  nobody watching. If boxed: a `tester`-owned `scripts/break-nodes-test.sh` with
+  the stub beside it and a line in `guards.sh`, and the stub's own dishonesty is
+  what its `--self-test` has to catch first. What holds today is the capture trip
+  itself, which is a real cluster and runs once a phase
+
+### From the Phase 3 re-close review (2026-08-22)
+
+*Two findings from [`reports/2026-08-22-phase-3-reclose-family-review.md`](reports/2026-08-22-phase-3-reclose-family-review.md)
+that are not defects and not docs sync. The first has a deadline that is a phase,
+not a phase close.*
+
+- **Rule 13's new evidence is four lines against a three-line cap, and the line
+  the cut would take is the diagnosis.** Measured at 49, 51 and 53 columns:
+  *"on node X · the machine has written nothing at all about this pod: not one of
+  its containers has a status, not even a failed attempt, **so nothing there has
+  picked it up**"* — and it is that last clause, the one that turns an absence
+  into a finding, that falls off a three-line cut. **No cut exists yet**:
+  `main.rs` prints evidence whole, so nothing is wrong today and this is a
+  **Phase 8 deadline**, when the pane that cuts arrives.
+  [`screens/alerts.md`](screens/alerts.md) § the evidence cap justifies cutting
+  because an evidence line carries an unbounded API quote — and this one quotes
+  nothing, which is the question to answer before the cut is written: either the
+  cap is about quoted text and this line is outside it, or the evidence is
+  reworded so the diagnosis survives three lines.
+  **`tui-designer` has already answered the design half and the answer is
+  narrow**: `screens/alerts.md` § the evidence cap argues the cut by *contrast* —
+  every author-written part (title, action) is never cut, because an author can
+  measure and shorten their own sentence, and the evidence alone is cut because
+  it carries a controller's sentence quoted verbatim that no author bounds
+  ([D37](NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)). Rule 13's
+  new evidence quotes nothing and is bounded, so **a straight `…` cut is the
+  wrong tool** — it would reclassify an author-written sentence as unmeasurable.
+  What is left to decide is which of the two: author-shorten it to three lines
+  like every other bounded field, or give the cap a second, wider budget for the
+  author-written case
+
+- **`scripts/mutants.sh`'s three log scans read `mutants.out` unconditionally, so
+  a run that never got the lock reports another run's numbers.** Reproduced by
+  accident during the re-close review: an invocation that tested **zero** mutants
+  printed *"180 log(s) read"* and *"18 unviable"*, all of them `analysis.rs`, from
+  a sweep another process was running in the same tree. cargo-mutants only rotates
+  its output directory once it holds the lock. **The exit status is unaffected**
+  (`exit $rc`), so nothing has ever passed on this — what it corrupts is the
+  human-readable line the script exists to make trustworthy, which is the whole
+  point of [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21).
+  **Seen a second way an hour later, which is what makes it a box rather than a
+  curiosity**: `just mutants-diff` over a diff that contains **only** a
+  `#[cfg(test)]` module printed `INFO No mutants to filter` and then thirteen
+  `src/rules.rs` unviables from a shard of the whole-file sweep that had ended
+  twenty minutes earlier. Exit 0 both times. The recipe already refuses an
+  *empty* diff for exactly this reason — nothing to test reads like nothing got
+  past — and does not refuse a diff with **no mutants in it**, which is the same
+  sentence. If boxed: the scans run only when this invocation owned the lock and
+  actually tested something, the stale output directory is cleared or
+  timestamped, and the `--self-test` gains both cases — a run that never held the
+  lock, and a run that held it and tested zero — each of which must print
+  *nothing read*, never a count
