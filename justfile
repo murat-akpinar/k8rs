@@ -250,7 +250,7 @@ fixtures:
     # (NOTES § D156).
     for p in oom image config pending hostpath readiness nolimits stuck \
              resize podlimit \
-             socket succeeded failed restarts10 restarts10serving startup \
+             socket succeeded failed evicted restarts10 restarts10serving startup \
              notfound wedged unjudged oomserving neverback neverrules gang \
              overhead; do
       "${kc[@]}" get pod "broken-$p" -o json | "${jqs[@]}" > "tests/fixtures/$p.json"
@@ -493,6 +493,25 @@ fixtures:
       '.status.phase == "Succeeded" and ([.status.containerStatuses[]? | select(.restartCount >= 3 and .lastState.terminated.exitCode == 1)] | length > 0)'
     guard failed.json "Failed pod carrying the same restarts and the same failed run — the half of that skip D71 records as missed, and the phase an Evicted pod arrives in" \
       '.status.phase == "Failed" and ([.status.containerStatuses[]? | select(.restartCount >= 3 and .lastState.terminated.exitCode == 1)] | length > 0)'
+    # The pod that arrives in it, which is what D155 re-opened the box for: the
+    # Waste report counts a pod the kubelet threw off a node as a finished Job,
+    # because `finished()` is `Succeeded | Failed`. The phase clause alone would
+    # be satisfied by `failed.json` one line up, so the whole delta is
+    # `status.reason` — the only such field in the corpus besides that file's
+    # `DeadlineExceeded`, and the field NOTES § D42's re-opened window is for.
+    #
+    # **In the plain loop above and not under `fetch_until`, because this object
+    # has one face and keeps it.** The six retried fixtures are containers still
+    # cycling between a `waiting` and a `terminated` reading, where the bytes that
+    # land depend on the second they were fetched in. This pod is over: killed
+    # under `restartPolicy: Never`, phase and reason and message set together, and
+    # nothing writes to it again. Measured rather than argued — sampled four times
+    # over a minute, 23 minutes after the eviction, and `metadata.resourceVersion`
+    # was the same 38794 every time, which says no writer touched the object at
+    # all and not merely that the fields still read alike. A retry could only
+    # re-fetch identical bytes, out of the single `FETCH_BUDGET` those six share.
+    guard evicted.json "eviction on the pod itself — phase Failed carrying status.reason Evicted, which is the one field that tells this capture from the pod above that reached the same phase at its own deadline (D155)" \
+      '.status.phase == "Failed" and .status.reason == "Evicted"'
     guard restarts10.json "container past ten restarts, up and not serving — rule 5's CRITICAL band" \
       '[.status.containerStatuses[]? | select(.restartCount >= 10 and .ready == false and .state.running != null)] | length > 0'
     guard restarts10serving.json "container past ten restarts that is serving — the && !serving half of the same branch, which stays WARN" \

@@ -1,0 +1,256 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "creationTimestamp": "2026-08-22T22:04:18Z",
+    "generation": 1,
+    "labels": {
+      "demo": "broken"
+    },
+    "name": "broken-evicted",
+    "namespace": "default",
+    "resourceVersion": "41864",
+    "uid": "1137111a-cc23-429d-8d47-b20f9e8695a1"
+  },
+  "spec": {
+    "containers": [
+      {
+        "command": [
+          "/bin/sh",
+          "-c",
+          "dd if=/dev/zero of=/scratch/fill bs=1M count=64 && sleep 86400"
+        ],
+        "image": "busybox",
+        "imagePullPolicy": "Always",
+        "name": "app",
+        "resources": {
+          "limits": {
+            "cpu": "50m",
+            "ephemeral-storage": "8Mi",
+            "memory": "32Mi"
+          },
+          "requests": {
+            "cpu": "10m",
+            "ephemeral-storage": "8Mi",
+            "memory": "16Mi"
+          }
+        },
+        "terminationMessagePath": "/dev/termination-log",
+        "terminationMessagePolicy": "File",
+        "volumeMounts": [
+          {
+            "mountPath": "/scratch",
+            "name": "scratch"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-dtwg2",
+            "readOnly": true
+          }
+        ]
+      }
+    ],
+    "dnsPolicy": "ClusterFirst",
+    "enableServiceLinks": true,
+    "nodeName": "k8rs-worker",
+    "preemptionPolicy": "PreemptLowerPriority",
+    "priority": 0,
+    "restartPolicy": "Never",
+    "schedulerName": "default-scheduler",
+    "securityContext": {},
+    "serviceAccount": "default",
+    "serviceAccountName": "default",
+    "terminationGracePeriodSeconds": 30,
+    "tolerations": [
+      {
+        "effect": "NoExecute",
+        "key": "node.kubernetes.io/not-ready",
+        "operator": "Exists",
+        "tolerationSeconds": 300
+      },
+      {
+        "effect": "NoExecute",
+        "key": "node.kubernetes.io/unreachable",
+        "operator": "Exists",
+        "tolerationSeconds": 300
+      }
+    ],
+    "volumes": [
+      {
+        "emptyDir": {},
+        "name": "scratch"
+      },
+      {
+        "name": "kube-api-access-dtwg2",
+        "projected": {
+          "defaultMode": 420,
+          "sources": [
+            {
+              "serviceAccountToken": {
+                "expirationSeconds": 3607,
+                "path": "token"
+              }
+            },
+            {
+              "configMap": {
+                "items": [
+                  {
+                    "key": "ca.crt",
+                    "path": "ca.crt"
+                  }
+                ],
+                "name": "kube-root-ca.crt"
+              }
+            },
+            {
+              "downwardAPI": {
+                "items": [
+                  {
+                    "fieldRef": {
+                      "apiVersion": "v1",
+                      "fieldPath": "metadata.namespace"
+                    },
+                    "path": "namespace"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "status": {
+    "allocatedResources": {
+      "cpu": "10m",
+      "ephemeral-storage": "8Mi",
+      "memory": "16Mi"
+    },
+    "conditions": [
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-22T22:04:33Z",
+        "observedGeneration": 1,
+        "status": "False",
+        "type": "PodReadyToStartContainers"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-22T22:04:18Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "Initialized"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-22T22:04:33Z",
+        "observedGeneration": 1,
+        "reason": "PodFailed",
+        "status": "False",
+        "type": "Ready"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-22T22:04:33Z",
+        "observedGeneration": 1,
+        "reason": "PodFailed",
+        "status": "False",
+        "type": "ContainersReady"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-08-22T22:04:18Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "PodScheduled"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "allocatedResources": {
+          "cpu": "10m",
+          "ephemeral-storage": "8Mi",
+          "memory": "16Mi"
+        },
+        "containerID": "containerd://12b64eca9aa48532abcfb8ac52ecc888311a81d355541269ad92d120d6aeb9f8",
+        "image": "docker.io/library/busybox:latest",
+        "imageID": "docker.io/library/busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616",
+        "lastState": {},
+        "name": "app",
+        "ready": false,
+        "resources": {
+          "limits": {
+            "cpu": "50m",
+            "ephemeral-storage": "8Mi",
+            "memory": "32Mi"
+          },
+          "requests": {
+            "cpu": "10m",
+            "ephemeral-storage": "8Mi",
+            "memory": "16Mi"
+          }
+        },
+        "restartCount": 0,
+        "started": false,
+        "state": {
+          "terminated": {
+            "containerID": "containerd://12b64eca9aa48532abcfb8ac52ecc888311a81d355541269ad92d120d6aeb9f8",
+            "exitCode": 137,
+            "finishedAt": "2026-08-22T22:04:33Z",
+            "reason": "Error",
+            "startedAt": "2026-08-22T22:04:21Z"
+          }
+        },
+        "user": {
+          "linux": {
+            "gid": 0,
+            "supplementalGroups": [
+              0,
+              10
+            ],
+            "uid": 0
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/scratch",
+            "name": "scratch"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-dtwg2",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          }
+        ]
+      }
+    ],
+    "hostIP": "REDACTED-IP",
+    "hostIPs": [
+      {
+        "ip": "REDACTED-IP"
+      }
+    ],
+    "message": "Pod ephemeral local storage usage exceeds the total limit of containers 8Mi. ",
+    "observedGeneration": 1,
+    "phase": "Failed",
+    "podIP": "REDACTED-IP",
+    "podIPs": [
+      {
+        "ip": "REDACTED-IP"
+      }
+    ],
+    "qosClass": "Burstable",
+    "reason": "Evicted",
+    "resources": {
+      "limits": {
+        "cpu": "50m",
+        "memory": "32Mi"
+      },
+      "requests": {
+        "memory": "16Mi"
+      }
+    },
+    "startTime": "2026-08-22T22:04:18Z"
+  }
+}

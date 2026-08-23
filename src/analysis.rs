@@ -81,10 +81,11 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 // --- THE REPORT SHAPE START ---
 
 /// One report — **one pane's worth of content**, and not one pane and one sidebar entry. Which
-/// panes exist, and which of them share one, is `screens/`'s: `Versions` has its own sidebar entry
-/// but is drawn at the foot of the Certificates pane (`screens/analysis.md` § *Certificates and
-/// Versions*), and Phase 4's `Posture` report is in no sketch at all. So the count of `Report`s
-/// and the count of panes are two facts, and this type states neither.
+/// panes exist, and which of them share one, is `screens/`'s, and its opening line counts the
+/// reports, the sidebar entries and the panes separately: `Versions` has its own sidebar entry but
+/// is drawn at the foot of the Certificates pane (`screens/analysis.md`, head and § *Certificates
+/// and Versions*). So the count of `Report`s and the count of panes are two facts, and this type
+/// states neither.
 ///
 /// **Every string reachable from here is untrusted** (invariant 9): a row's text is built from
 /// names and messages the API sent. Nothing in this file strips control characters. The guard
@@ -101,8 +102,9 @@ pub struct Report {
     ///
     /// **`None` means nothing is drawn there, and that covers three different reports**: one
     /// that never badges (`drain safety` carries nothing in the very mockup that draws
-    /// `node-2  ● BLOCKS`), one that ran and found nothing, and one that could not run. Across
-    /// all five mockups exactly two entries badge — `capacity  1 ▲` and `certificates  30d`.
+    /// `node-2  ● BLOCKS`), one that ran and found nothing, and one that could not run. Only two
+    /// ANALYSIS entries are drawn with a value anywhere in `screens/` — `capacity  1 ▲` and
+    /// `certificates  30d`; every other one is blank in every sidebar drawn.
     ///
     /// **The badge is not the discriminator and was never meant to be**: it "has room for a
     /// number, not for a reason, so the report itself carries the reason"
@@ -1642,8 +1644,13 @@ fn satisfies(requirement: &SelectorRequirement, labels: &BTreeMap<String, String
 // --- THE WASTE REPORT START ---
 
 /// **Things that cost something and give nothing back** — the Service nobody can reach, the disk
-/// nobody mounted, the pods that finished and stayed, the ReplicaSets left at zero
-/// (`screens/analysis.md` § Waste).
+/// nobody mounted, the pods a node removed, the pods that finished and stayed, the ReplicaSets
+/// left at zero (`screens/analysis.md` § Waste).
+///
+/// **Five rows from four sections**: the pods that are over are one section drawing two rows, one
+/// per cause (NOTES § D155, [`finished_pods_left_behind`]), which is why [`UNREADABLE_SECTIONS`]
+/// is still three — that section is counted straight off the pods and can contribute no
+/// [`Row::NotComputed`] to fold.
 ///
 /// **It runs unchanged when the view is scoped, and only the title changes.** Every input it has
 /// is namespaced, and every number on it is the length of a list rather than a share of a total,
@@ -1698,7 +1705,8 @@ pub fn waste(snapshot: &ClusterSnapshot, _findings: &[Finding]) -> Report {
         // print.
         rows.push(Row::Prose(
             "Nothing here is going to waste. Every Service reaches a pod, every disk that was \
-             reserved is mounted, and nothing finished is lying around."
+             reserved is mounted, and no pod — finished or removed by a node — is left lying \
+             around."
                 .to_string(),
         ));
     }
@@ -1722,21 +1730,22 @@ const UNREADABLE_SECTIONS: usize = 3;
 ///
 /// **Read off the pane, not picked.** The report region is 16 body lines at the 80×24 floor
 /// (`screens/analysis.md` § *How a report is drawn*), and a per-object row there is its text, one
-/// or two wrapped `detail` lines and sometimes an action — three to four lines, which is what the
-/// § Waste mockup's four rows take in twelve. Five is therefore one pane-height of one section:
-/// past it the reader is scrolling a list they cannot act on item by item, and the answer they
-/// need is the count. On a cluster with 812 broken Services this pane is five rows and a line
-/// that says so, not 812 rows and 3200 lines of scrolling.
+/// or two wrapped `detail` lines and sometimes an action — three to five lines, which is what
+/// the § Waste mockup's four rows take in fourteen of its sixteen. Five is therefore one
+/// pane-height of one section: past it the reader is scrolling a list they cannot act on item by
+/// item, and the answer they need is the count. On a cluster with 812 broken Services this pane
+/// is five rows and a line that says so, not 812 rows and 3200 lines of scrolling.
 ///
 /// **Per section and not per pane**, so a cluster with 812 broken Services still shows its three
 /// orphaned disks: one loud section may not starve the others.
 ///
 /// **The line is per-object against aggregate, and it is why two panes on this screen cap
 /// nothing.** What is cut here is the rows that are one *per object*, which grow with the
-/// cluster's object count. A counted row does not — `47 pods finished` and `12 replicasets` are
-/// one row each whatever the number is — and neither does a Posture row, which is one per host
-/// path with its pod count inside it ([`posture`]). Capacity's node list is unbounded and is not
-/// cut either, because `screens/analysis.md` § Capacity rules that that pane scrolls.
+/// cluster's object count. A counted row does not — this pane's three (`4 pods were removed by
+/// a node`, `47 pods finished`, `12 replicasets`) are one row each whatever the number is — and
+/// neither does a Posture row, which is one per host path with its pod count inside it
+/// ([`posture`]). Capacity's node list is unbounded and is not cut either, because
+/// `screens/analysis.md` § Capacity rules that that pane scrolls.
 const MOST_ROWS_PER_SECTION: usize = 5;
 
 /// The section's rows, cut to [`MOST_ROWS_PER_SECTION`] with a line saying what was left off.
@@ -1914,50 +1923,119 @@ fn disks_nobody_mounts(snapshot: &ClusterSnapshot) -> Vec<Row> {
     )
 }
 
-/// **The pods that finished and were never removed** — Evicted and Completed under one row,
-/// because [`finished`] is already that predicate and the reader does one thing about both.
+/// **The pods that are over and were never removed, in two rows, one per cause**
+/// (`screens/analysis.md` § *The pileup splits in two, one per cause*, NOTES § D155).
 ///
-/// **`Info`, and the sentence no longer accuses a retention policy.**
-/// `kubectl explain cronjob.spec.successfulJobsHistoryLimit` defaults to keeping **three**
-/// finished Jobs, forever (`reports/2026-08-21-family-c-analysis-report-family-review.md` § 11),
-/// so every cluster running a CronJob carries some of these on purpose — and `Warn` over a fact
-/// that is often deliberate teaches the wrong lesson the first time a reader chases it and finds
-/// nothing to fix. It is the shape Posture already takes, pairing `Info` with *"Nothing here is
-/// broken"* (`screens/analysis.md` § Waste). The row stays, because a genuine pileup of thousands
-/// is still worth a look; it is quieter, and honest about the normal case.
+/// **[`finished`] is the outer gate and does not move.** It is `Succeeded | Failed`, and a
+/// node-pressure eviction is `Failed` — so it decides whether a pod reaches this section at all
+/// and the two rows *partition* what it let through: they always sum to the count one row used to
+/// draw, no pod lands on both, and none falls through and lands on neither. The `if`/`else` below
+/// is that partition, and it is why the second count is not a second filter.
 ///
-/// **One counted row and no per-object rows**, so no cap: it is the length of a list, honest at
-/// any scope (PRIOR-ART § F2). **No threshold either** — the box says *pileup* and every number
-/// that could stand for one would be invented here; one finished pod left behind is one row
-/// saying so, and a cluster with none draws nothing.
+/// **Only the literal `Evicted` splits off** ([`crate::rules::PodSnapshot::reason`]).
+/// `DeadlineExceeded`, `NodeAffinity`, `Terminated`, `NodeShutdown`, `OutOfcpu` and every other
+/// `Failed` reason stay in the completed row: this pane draws a row for a shape it has measured,
+/// not one it is guessing at.
 ///
-/// **[`Row::Answer::jump`] is `None`** — a selectable row with no destination recorded, standing
-/// for a set (NOTES § D128).
+/// **The word `Evicted` is said once, in parentheses, and the translation comes first.** The
+/// translation lives in NOTES § Positioning item 4 and is deliberately not copied here: that line
+/// holds both the words and the constraint that shapes them, that it name no cause. The copy that
+/// used to sit in this comment outlived the sentence it was taken from, which is why it is a
+/// citation now (NOTES § D158, invariant 14). The row's text and the whole of its explanation are
+/// written from that line; the API's own word follows in brackets at the end, the shape
+/// `rules.rs` has used for every term this project translates since Phase 3
+/// (`… (CrashLoopBackOff)`, `… (OOMKilled)`). It has to be said somewhere: `printPod` overwrites
+/// `status.reason` with the container's own terminated reason, so `kubectl get pods` prints
+/// `Error` for the capture behind this row and the parenthetical is the only place on the screen
+/// the word appears (`reports/2026-08-23-waste-evicted-row-operator-review.md` § 6).
+///
+/// **Both rows are `Info`.** The killing is what deserved a look and it already happened; what is
+/// left behind today costs an etcd entry and a longer `kubectl get pods`, which is exactly the
+/// completed row's own cost. An evicted pod is collected only once a node passes 12 500 finished
+/// pods (NOTES § D71), so a `Warn` here would stay lit for good after one bad half-hour, clearable
+/// only by deleting this pane's own evidence. And it is the completed row's own argument applied
+/// to the row that used to be exempt from it: `Warn` over a fact that is often deliberate teaches
+/// the wrong lesson the first time a reader chases it and finds nothing to fix — a pod that
+/// overran a disk limit it declared for itself is exactly that kind of fact
+/// (`screens/analysis.md` § *The pileup splits in two, one per cause*).
+///
+/// **The removed row is still first, on different ground.** Both are `Info` now, so *louder
+/// first* no longer orders them: it leads because it is the more specific statement — it names a
+/// cause where the completed row names the absence of one — and because it is the row carrying an
+/// action. `severity` and `action` are independent fields on [`Row::Answer`] and the renderer
+/// proves it: `main.rs`'s [`Row::Answer`] arm prints the action without reading `severity` at
+/// all.
+///
+/// **The action is the one row's and not the other's, and it points at the object.** These pods
+/// did not finish; something killed them. `status.reason: Evicted` has two producers in the
+/// kubelet — node pressure, and the pod's own declared storage limit, which consults no node
+/// threshold and runs first — so a row that sent the reader to N3 would be sending them to a
+/// screen that is silent for the commoner cause
+/// (`reports/2026-08-23-waste-evicted-row-operator-review.md` §§ 2–4). What does name the exact
+/// resource and moment is each pod's own `status.message`, a field this pane deliberately does
+/// not decode ([`crate::rules::PodSnapshot::reason`]).
+///
+/// **Counted rows and no per-object rows**, so no cap on either: each is the length of a list,
+/// honest at any scope (PRIOR-ART § F2). **No threshold either** — the box says *pileup* and every
+/// number that could stand for one would be invented here; one pod left behind is one row saying
+/// so, and a cluster with none draws nothing.
+///
+/// **[`Row::Answer::jump`] is `None` on both** — a selectable row with no destination recorded,
+/// standing for a set (NOTES § D128).
 fn finished_pods_left_behind(snapshot: &ClusterSnapshot) -> Vec<Row> {
-    let count = snapshot.pods.iter().filter(|pod| finished(pod)).count();
-    if count == 0 {
-        return Vec::new();
+    let (mut removed, mut completed) = (0usize, 0usize);
+    for pod in snapshot.pods.iter().filter(|pod| finished(pod)) {
+        if pod.reason.as_deref() == Some("Evicted") {
+            removed += 1;
+        } else {
+            completed += 1;
+        }
     }
-    let (text, detail) = if count == 1 {
-        (
-            "1 pod finished and was never removed".to_string(),
-            "Kubernetes keeps a few finished Jobs by default, so some of this is normal. It uses \
-             no CPU or memory — it only makes every pod list longer.",
-        )
-    } else {
-        (
-            format!("{count} pods finished and were never removed"),
-            "Kubernetes keeps a few finished Jobs by default, so some of this is normal. They \
-             use no CPU or memory — they only make every pod list longer.",
-        )
-    };
-    vec![Row::Answer {
-        severity: Some(Severity::Info),
-        text,
-        detail: vec![detail.to_string()],
-        action: String::new(),
-        jump: None,
-    }]
+    let mut rows = Vec::new();
+    if removed > 0 {
+        rows.push(Row::Answer {
+            severity: Some(Severity::Info),
+            text: if removed == 1 {
+                "1 pod was removed by a node and remains".to_string()
+            } else {
+                format!("{removed} pods were removed by a node and remain")
+            },
+            // One sentence for one pod and for four: nothing in it is counted, because nothing
+            // this row can see says which node or which resource. **Both causes, because the
+            // capture this row is measured against is the second one** — a pod over its own
+            // `8Mi` ephemeral-storage limit, on a node whose three pressure conditions were all
+            // `False` at the same moment.
+            detail: vec![
+                "Either the node was short, or the pod went over its own disk limit (Evicted)."
+                    .to_string(),
+            ],
+            action: "look at one of the pods — its own message names what ran out".to_string(),
+            jump: None,
+        });
+    }
+    if completed > 0 {
+        let (text, detail) = if completed == 1 {
+            (
+                "1 pod finished and was never removed".to_string(),
+                "Kubernetes keeps a few finished Jobs by default, so some of this is normal. It \
+                 uses no CPU or memory — it only makes every pod list longer.",
+            )
+        } else {
+            (
+                format!("{completed} pods finished and were never removed"),
+                "Kubernetes keeps a few finished Jobs by default, so some of this is normal. They \
+                 use no CPU or memory — they only make every pod list longer.",
+            )
+        };
+        rows.push(Row::Answer {
+            severity: Some(Severity::Info),
+            text,
+            detail: vec![detail.to_string()],
+            action: String::new(),
+            jump: None,
+        });
+    }
+    rows
 }
 
 /// **ReplicaSets left at zero when a Deployment moved on** — the quietest row on the pane, and

@@ -655,6 +655,86 @@ spec:
       image: busybox
       command: ["sh", "-c", "echo cannot connect to the database >&2; exit 1"]
 ---
+# **The second pod in this file that reaches phase `Failed`**, and the one
+# NOTES § D155 re-opened this box for: a pod the kubelet threw off its node.
+# `finished()` is `Succeeded | Failed` (`rules.rs`), a kubelet eviction is
+# `Failed`, so the Waste report counts it as a finished Job — *"4 pods finished
+# and were never removed … some of this is normal"* at `Info`, with no action,
+# about pods a node threw away. `broken-failed` above is what makes that
+# provable rather than a second copy of it: also `Failed`, and carrying
+# `status.reason: DeadlineExceeded` — measured, the only `status.reason` anywhere
+# in the committed corpus before this pod — so a reader that stops at the phase
+# cannot tell the two apart, and one that reads the reason has both directions on
+# disk.
+#
+# **A pod's own ephemeral-storage limit, and not node pressure.** The kubelet
+# evicts on a node-level condition (memory, disk, PIDs) and, separately, on a pod
+# exceeding storage *it declared for itself*. Node-level pressure means pushing a
+# whole worker into a condition, which throws off whatever else the trip has
+# settled there; the per-pod limit is compared against this pod alone and touches
+# nothing else on the machine. Measured after the eviction below: `DiskPressure`
+# stayed `False` on all four nodes.
+#
+# Measured on kindest/node:v1.36.1, 2026-08-22: container started 21:33:52,
+# `Evicted` event 21:34:33, `Failed`/`Evicted` on the object 21:34:35 — **43
+# seconds** from container start, well inside `verify`'s 420s. The kubelet's own
+# sentence lands in `status.message` (*"Pod ephemeral local storage usage exceeds
+# the total limit of containers 8Mi. "*) and carries nothing address-shaped, so
+# `scripts/sanitize.jq` hands it back whole.
+#
+# **64 MiB against an 8Mi limit, and the write is deliberately not shrunk.** A
+# kind node's ephemeral storage is the host's own filesystem — measured
+# 999678260Ki (~953 GiB) on every node here — so the transient is 0.007% of it,
+# held for the seconds between the write and the kubelet's next housekeeping
+# pass. There is nothing to shrink for, and a smaller number would be an
+# unmeasured change to the one thing about this object that was measured.
+#
+# **`nodeName`, for `broken-overhead`'s reason and one this pod adds.** Once
+# `break-nodes` has run only one worker can produce this state: nothing schedules
+# onto the cordoned one at all, `k8rs-worker3`'s kubelet is stopped and a stopped
+# kubelet evicts nothing, and a pod on `k8rs-worker2` is deleted by the taint
+# manager before it can evict itself — measured on this cluster, where an earlier
+# probe pod that landed there drew `TaintManagerEviction: Marking for deletion`.
+# `nodeName` skips the scheduler, so the cordon is no obstacle to a pod that is
+# **bound** rather than scheduled, which leaves `k8rs-worker`.
+#
+# It is the cordoned one because `broken-overhead` pins a movable `demo` pod
+# there (that manifest argues the pick against `cluster.sh` § break_nodes). This
+# pod does not weaken it: `movable` excludes Succeeded and Failed pods, so a
+# `Failed` pod is invisible to the choice it depends on. If the pick ever did
+# drift, this pod would be taint-manager deleted *after* its capture and
+# `[evicted]` would fail on a later run with `object not found` — loud, not
+# silent. `cluster.sh` § break rewrites the prefix per cluster, so the node name
+# now sits in **four places that must agree by construction**: this file's two
+# `nodeName:` values, the `k8rs-` prefix in that sed, and the
+# `.spec.nodeName == "k8rs-worker"` clause in `justfile` § fixtures.
+#
+# `restartPolicy: Never` is what stops the kubelet putting the container back;
+# `sleep 86400` is `broken-reboot`'s day rather than an hour, so an expiry could
+# never turn this `Failed` pod into a `Succeeded` one. Neither is reached — the
+# eviction is 43 seconds in. Its cpu and memory requests are read by nothing:
+# `analysis.rs` filters `!finished(pod)` wherever it sums, and `broken-overhead`'s
+# per-node arithmetic counts *live* pods. A sum over every pod in the corpus
+# rather than every live one would pick up 10m and 16Mi on `k8rs-worker`.
+apiVersion: v1
+kind: Pod
+metadata: { name: broken-evicted, labels: { demo: broken } }
+spec:
+  nodeName: k8rs-worker
+  restartPolicy: Never
+  containers:
+    - name: app
+      image: busybox
+      command: ["/bin/sh", "-c", "dd if=/dev/zero of=/scratch/fill bs=1M count=64 && sleep 86400"]
+      resources:
+        requests: { cpu: "10m", memory: "16Mi", ephemeral-storage: "8Mi" }
+        limits: { cpu: "50m", memory: "32Mi", ephemeral-storage: "8Mi" }
+      volumeMounts:
+        - { name: scratch, mountPath: /scratch }
+  volumes:
+    - name: scratch
+      emptyDir: {}
+---
 # Rule 5's CRITICAL band, and the `&& !serving` half of it (NOTES § D71). Both
 # pods climb past `RESTARTS_CRITICAL` (10) and then stay up; the only difference
 # between them is whether the container is *serving* at the end of it, which is
@@ -869,9 +949,10 @@ spec:
 # (report § 4).
 #
 # **No `nodeName:`, deliberately** — it is the one key this pod cannot carry.
-# `cluster.sh break_it` rewrites `nodeName: k8rs-` per cluster for
-# `broken-overhead`, and this pod's node is not known to anything until
-# `break-nodes` has read the cluster and picked one.
+# `cluster.sh break_it` rewrites `nodeName: k8rs-` per cluster for the two pods
+# that do carry one — `broken-overhead` and `broken-evicted` — and this pod's
+# node is not known to anything until `break-nodes` has read the cluster and
+# picked one.
 apiVersion: v1
 kind: Pod
 metadata: { name: broken-unstarted, labels: { demo: broken } }

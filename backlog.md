@@ -1038,18 +1038,46 @@ stop being cheap.***
   `## Decisions` section, then ~10 lines in the guard requiring a `### D##` to be
   its immediate child.
 
+- **Waste counts every `Failed` pod that is not `Evicted` as a finished Job, and
+  two of those reasons arrive in hundreds.** `OutOfcpu` / `OutOfmemory` /
+  `OutOfpods` / `OutOfephemeral-storage` (`pkg/kubelet/lifecycle/predicate.go`)
+  are the kubelet refusing a pod the scheduler already bound — *a node that
+  literally ran out of room*, being told *"Kubernetes keeps a few finished Jobs by
+  default, so some of this is normal"*. `Terminated`
+  (`nodeshutdown_manager.go:88`) is every managed node-pool upgrade and every spot
+  reclaim; a 30-node rolling upgrade leaves hundreds. Both read as CronJob
+  leftovers today. A third pileup row was refused as *not this box*
+  ([D158](NOTES.md#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23));
+  the alternative is narrowing the completed row's sentence to what it can prove —
+  the Job sentence over `Succeeded`, a neutral one over `Failed`
+  ([reports/2026-08-23-waste-evicted-row-operator-review.md](reports/2026-08-23-waste-evicted-row-operator-review.md) § 5).
 
-## Ruled out
+- **Waste's removed-pods row could name the node when there is exactly one.**
+  `PodSnapshot::node` is already carried and `listed()` is already `pub(crate)`,
+  so `1 pod was removed by k8rs-worker and remains` costs nothing new and answers
+  half of what its action reaches for. Refused for the general case, measured
+  rather than assumed: real node names are `ip-10-0-1-23.ec2.internal` and two of
+  them through `listed()` blow the pane's 53-column content budget (D158,
+  same report § 9).
 
-*Entries that were considered and deliberately not built keep one line here with
-the decision that refused them, so the same idea does not arrive twice.
-[NOTES § Out of scope](NOTES.md#out-of-scope-the-most-important-section) is the
-long-form version and stays the authority.*
+- **Waste's disk row counts a finished pod as a mounter, and one of those pods is
+  now visibly dead on the same pane.** Deliberate and documented — a `Succeeded`
+  CronJob pod is evidence something mounts the claim every run — but an evicted
+  pod under `restartPolicy: Never` with no owner will never mount anything again,
+  and since D158 the pane prints `N pods were removed by a node` two rows under
+  the claim that their disk is in use. The argument for the row (never push a
+  reader at deleting a volume) still holds; what is new is that one screen now
+  asserts both (same report § 8).
 
-- **mem0 as a persistent-memory service** (2026-08-16) — the job is already done
-  twice, by `NOTES.md` and by the session memory directory, and a hosted instance
-  would put project data on an outbound connection that
-  [docs/security.md](docs/security.md) says does not exist.
+- **The eviction the corpus does not hold is the node-pressure one.** Every claim
+  about that half of `status.reason: Evicted` rests on upstream source and on the
+  *absence* of a `DisruptionTarget` condition from `evicted.json`, not on an
+  object. The capture that would settle it: a pod evicted while a node's
+  `MemoryPressure` is `True`, carrying `The node was low on resource: memory.` and
+  a `DisruptionTarget: True / TerminationByKubelet` condition. With it the row
+  could say *which* mechanism instead of naming both — which is the only reason
+  `status.message` would be worth decoding (D158, same report § 1).
+
 
 ### From the rule 13 family review (2026-08-22)
 
@@ -1156,3 +1184,48 @@ not a phase close.*
   timestamped, and the `--self-test` gains both cases — a run that never held the
   lock, and a run that held it and tested zero — each of which must print
   *nothing read*, never a count
+
+### From the Phase 4 re-close review (2026-08-23)
+
+*Two findings from [`reports/2026-08-23-phase-4-reclose-family-review.md`](reports/2026-08-23-phase-4-reclose-family-review.md)
+that are not defects in any checked box. Both are in `analysis.rs`, which freezes
+at this close, so both need a ruling before they can be written — the same
+position the four findings above them are in
+([D159](NOTES.md#d159--the-phase-4-re-close-and-the-three-counts-that-only-a-close-re-takes-2026-08-23)).*
+
+- **The Restarts comparator ties on the joined `namespace/name` string, which
+  this family already ruled against once.** `analysis.rs`'s Restarts sort ends
+  `.then_with(|| qualified(&a.pod.id).cmp(&qualified(&b.pod.id)))`, while
+  `drain_row` records why the budget list stopped doing exactly that: `'-'`
+  (0x2D) sorts before `'/'` (0x2F), so `team-a/api` comes out ahead of
+  `team/web` while `kubectl get -A` prints `team web` first. Waste's two
+  per-object sections and the budget list all key the `(namespace, name)` tuple;
+  this one comparator does not. **Reachable rather than theoretical** — `Time` is
+  second-granular, so two pods in different namespaces with the same restart
+  count that came back in the same second land on this tie-break, which is what a
+  node reboot across a DaemonSet produces (D137 measured a reboot taking a set
+  from 6 to 17). Cost is a pane whose order differs from the reader's own
+  `kubectl`, which is the one thing this pane is read beside. If boxed: key the
+  tuple, and the assertion is two namespaces whose names straddle `'/'`
+- **`capacity` and `drain_safety` are both O(nodes × pods) by construction** —
+  `pods_on` scans every pod once per node, and `node_overcommitted` scans them
+  again. **This is an algorithmic reading, not a measurement**, and the review
+  says so: at 5000 pods across 200 nodes the seven reports added nothing
+  detectable (0.531/0.499/0.507 s against 0.517/0.563/0.488 s without), and the
+  larger shapes it tried varied 1.6→4.0 s run to run under a load average of
+  18.80 from the mutation sweep, so those numbers were discarded rather than
+  reported. It is in no checked box. If boxed: measure it on a quiet machine
+  first and only then decide whether an index earns its complexity — Phase 5's
+  store is where a node→pods map would live, not here
+
+## Ruled out
+
+*Entries that were considered and deliberately not built keep one line here with
+the decision that refused them, so the same idea does not arrive twice.
+[NOTES § Out of scope](NOTES.md#out-of-scope-the-most-important-section) is the
+long-form version and stays the authority.*
+
+- **mem0 as a persistent-memory service** (2026-08-16) — the job is already done
+  twice, by `NOTES.md` and by the session memory directory, and a hosted instance
+  would put project data on an outbound connection that
+  [docs/security.md](docs/security.md) says does not exist.

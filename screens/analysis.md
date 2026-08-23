@@ -1114,15 +1114,15 @@ answer.
 │ ANALYSIS           │      A disk was reserved for it and no pod is │
 │   capacity      1 ▲│      mounting it. It stays reserved until     │
 │   certificates  30d│      somebody deletes it.                     │
-│   drain safety     │  ○ 47 pods finished and were never removed    │
-│   posture          │      Kubernetes keeps a few finished Jobs by  │
-│   restarts         │      default, so some of this is normal. They │
-│▸  waste            │      use no CPU or memory — they only make    │
-│   versions         │      every pod list longer.                   │
-│                    │  ○ 12 replicasets are parked at 0 replicas    │
+│   drain safety     │  ○ 4 pods were removed by a node and remain   │
+│   posture          │      Either the node was short, or the pod    │
+│   restarts         │      went over its own disk limit (Evicted).  │
+│▸  waste            │      → look at one of the pods — its own      │
+│   versions         │        message names what ran out             │
+│                    │  ○ 47 pods finished and were never removed    │
 ├────────────────────┴───────────────────────────────────────────────┤
-│  $ kubectl get svc,endpointslices -A                               │
-│  $ kubectl get pvc,replicasets -A                                  │
+│  $ kubectl get svc,endpointslices,pvc,replicasets -A               │
+│  $ kubectl get pods -A --watch                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
 └────────────────────────────────────────────────────────────────────┘
@@ -1145,9 +1145,9 @@ answer.
   catching one mid rolling-update, is enough to put its pods' own database
   volumes on this pane. Deleting one is the classic irrecoverable
   Kubernetes mistake, and *technically true, operationally a trap* is not a
-  sentence this report may leave standing — the same shape
-  `finished_pods_left_behind` already solves in the next bullet gets one
-  more sentence here, on every row of this kind:
+  sentence this report may leave standing — the same shape the completed
+  row [below](#the-pileup-splits-in-two-one-per-cause) already solves gets
+  one more sentence here, on every row of this kind:
 
 ```
 ▲ data/pgdata-old is 128Mi nobody is using
@@ -1158,23 +1158,15 @@ answer.
     is scaled down, so some of this is normal.
 ```
 
-  It stays `▲` and not `○`, unlike the finished-pods row: nothing about a
+  It stays `▲` and not `○`, unlike the completed row
+  [below](#the-pileup-splits-in-two-one-per-cause): nothing about a
   claim k8rs can see tells it whether the StatefulSet that made this one is
   still around, still scaled down on purpose, or gone — an idle disk with a
   real cost is still worth a look, the caveat only stops the sentence from
   pushing a reader toward the delete key before they have checked.
-- **The finished-pods row is rebanded to `○`, and the words no longer accuse
-  a retention policy.** `kubectl explain cronjob.spec.successfulJobsHistoryLimit`
-  defaults to keeping **three** finished Jobs *forever*
-  (`reports/2026-08-21-family-c-analysis-report-family-review.md` § 11), so
-  any cluster running a CronJob carries some of these on purpose — the same
-  shape Posture already solved by pairing `Info` with *"Nothing here is
-  broken."* `▲` over a fact that is often deliberate teaches the wrong
-  lesson the first time a reader chases it and finds nothing to fix. The
-  count still matters at scale — a genuine pileup of thousands is still
-  worth a look — so the row stays, quieter and honest about the normal case.
 - **Every per-object row on this pane is a `Row::Answer`**; the counted rows
-  (`47 pods`, `12 replicasets`) are `Row::Answer`s too, with no destination
+  (`4 pods were removed`, `47 pods`, `12 replicasets`) are `Row::Answer`s
+  too, with no destination
   recorded (`jump: None`) — [owed](#what-this-screen-owes-and-what-it-deliberately-leaves-off).
   **`Row::Prose` does appear on this pane now**, and only as the cap's
   overflow line — [below](#a-pane-that-caps-and-a-pane-that-folds).
@@ -1196,9 +1188,138 @@ answer.
 
 ```
 Nothing here is going to waste. Every Service reaches
-a pod, every disk that was reserved is mounted, and
-nothing finished is lying around.
+a pod, every disk that was reserved is mounted, and no
+pod — finished or removed by a node — is left lying
+around.
 ```
+
+### The pileup splits in two, one per cause
+
+**Re-opened 2026-08-22: the box asked for *"Evicted and Completed pod
+pileups"* and one row shipped, over both at once —
+[NOTES § D155](../NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22).**
+`finished()` — `Succeeded | Failed` — stays exactly what it was and still
+decides whether a pod reaches this section at all. Inside that gate, the
+discriminator is `status.reason` alone, not the phase: a pod whose reason is
+the literal string `Evicted` draws the removed row whether it is `Failed` or
+`Succeeded` — `finished()` already narrowed the set once, and a second,
+phase-shaped narrowing on top of it would strand a pod that passed the gate
+on neither row, which is the one thing this partition may never do. Every pod
+whose reason is anything else — `DeadlineExceeded`, `NodeAffinity`,
+`Terminated`, `NodeShutdown`, `OutOfcpu`, anything else this report has no
+capture of, or no reason at all — stays in the row below, unmoved: this pane
+draws a row for a shape it has measured, not one it is guessing at. The two
+rows always sum to the count the one row used to draw; no pod lands on both,
+and none falls through and lands on neither.
+
+```
+○ 4 pods were removed by a node and remain
+    Either the node was short, or the pod went over
+    its own disk limit (Evicted).
+    → look at one of the pods — its own message names
+      what ran out
+○ 47 pods finished and were never removed
+    Kubernetes keeps a few finished Jobs by default,
+    so some of this is normal. They use no CPU or
+    memory — they only make every pod list longer.
+```
+
+Singular: `1 pod was removed by a node and remains` /
+`Either the node was short, or the pod went over its own disk limit
+(Evicted).` / `look at one of the pods — its own message names what ran
+out` (detail and action do not change with the count).
+
+- **`○`, the same band as the completed row — the earlier ruling for `Warn`
+  argued from a correlation, not a constraint.** *"This pane's two `Info`
+  rows carry no action"* is true of both, but `severity` and `action` are
+  independent fields on `Row::Answer`, and the renderer proves it:
+  `src/main.rs:560-579` prints `→ {action}` inside the `Row::Answer` arm with
+  no reference to `severity` at all. Three reasons carry the reband on their
+  own ground, and a fourth explains why the row still leads:
+  - **Waste's charter is cost, and this row's cost is the completed row's own
+    cost** — an etcd entry and a longer `kubectl get pods`, nothing more. The
+    *killing* is what deserved a look, and it already happened, possibly
+    months ago, on a node that has likely since recovered; what is left
+    behind today is exactly as cheap as what the completed row already calls
+    `Info`.
+  - **Evicted pods are garbage-collected only once a node's finished-pod
+    count passes 12 500**
+    ([NOTES § D71](../NOTES.md#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)),
+    so a `Warn` here would stay lit for good after one bad half-hour,
+    clearable only by deleting the very pods that are this pane's own
+    evidence. A warning with no way to clear it except destroying what it
+    warns about is what makes an alert screen stop being believed.
+  - **It is the completed row's own argument, applied to the row that used
+    to be exempt from it.** *"`▲` over a fact that is often deliberate
+    teaches the wrong lesson the first time a reader chases it and finds
+    nothing to fix"* — the completed row's own reason for staying `Info`,
+    below. A pod a node removed is exactly that kind of fact: sometimes a
+    real problem, sometimes a pod that overran a limit it declared for
+    itself and nothing else, and neither this pane nor N3 can tell the two
+    apart from here.
+  - **Still first of the two, on different ground.** Both rows are `Info`
+    now, so *louder first* no longer orders them. This row leads because it
+    is the more specific statement — it names a cause, where the completed
+    row names the absence of one — and because it is the row that carries an
+    action; the completed row carries none.
+- **The word this pane names once, in parentheses, is `Evicted`.** NOTES'
+  own translation of the term is *"removed by the node because it ran out of
+  room"* ([NOTES § Positioning, item 4](../NOTES.md#positioning--lazygit-for-kubernetes-user-2026-08-11),
+  invariant 14), and the detail sentence is built from that translation
+  first — the API's own word comes after, in parentheses, the shape
+  `rules.rs` already uses for every other term this project translates
+  (`… (CrashLoopBackOff)`, `… (OOMKilled)`). It has to be said somewhere:
+  `kubectl get pods` never prints `Evicted` for this object at all —
+  `printPod` overwrites `status.reason` with the container's own terminated
+  reason (`Error`, on the capture this row is measured against), so the
+  parenthetical here is the only place on the whole screen the word appears.
+  Naming it is what lets a reader who already knows the term, or who needs to
+  hand this off to a runbook written against it, connect the row to
+  something they can search for — both halves of invariant 13, not the one
+  this bullet used to keep.
+- **Nothing on the pod says which resource or which node, so the row never
+  claims to know — and the action no longer pretends another screen does.**
+  The API object behind this row carries a message like *"Pod ephemeral
+  local storage usage exceeds the total limit of containers 8Mi"* — one
+  pod's disk, one moment — and the row is a count over many pods, possibly
+  many nodes, so no single sentence here could name either. The action used
+  to send the reader to N3, which answers *which node, and whether it is
+  memory, disk or process IDs* — but only for a node under pressure right
+  now ([alerts.md § N3](alerts.md#n3--a-node-running-low-on-something)), and
+  the corpus this row is measured against proves the commoner cause never
+  trips that condition at all: a pod's own disk limit, not the node's
+  (`reports/2026-08-23-waste-evicted-row-operator-review.md` §§ 2–4). Sending
+  the reader to a screen that is silent for the ordinary case is worse than
+  sending them nowhere, so the action points at the object itself instead:
+  the pod's own message names the exact resource and moment, a field this
+  pane does not decode
+  ([D155](../NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+  reopened only the reason string, not the message).
+- **The action is the one thing the completed row still does not carry.**
+  These pods did not finish; something killed them, and that is worth
+  a look. A pod that ran to completion on its own is not.
+- **The completed row keeps its own wording, its own `○` and no action** —
+  narrowed only in what it now counts: every `Failed` pod that is not this
+  one, plus every `Succeeded` one. `kubectl explain
+  cronjob.spec.successfulJobsHistoryLimit` defaults to keeping **three**
+  finished Jobs *forever*
+  (`reports/2026-08-21-family-c-analysis-report-family-review.md` § 11), so
+  any cluster running a CronJob carries some of these on purpose — the same
+  shape Posture already solved by pairing `Info` with *"Nothing here is
+  broken."* `▲` over a fact that is often deliberate teaches the wrong
+  lesson the first time a reader chases it and finds nothing to fix. The
+  count still matters at scale — a genuine pileup of thousands is still
+  worth a look — so the row stays, quieter and honest about the normal case.
+- **Both are counted rows, not per-object.** No cap, no `jump`, no per-pod
+  name: the pane says how many, not which ones, the same shape the row had
+  before the split and the same reason Capacity's node list and every
+  Posture row do not cap either
+  ([§ A pane that caps, and a pane that folds](#a-pane-that-caps-and-a-pane-that-folds)).
+- **The main mockup above scrolls past this point.** At the 80×24 floor the
+  Service, the disk and this row leave room for only the completed row's own
+  headline; its `detail` and the ReplicaSets row below it are the first
+  things a reader scrolls to, the same way a busy Drain safety pane scrolls
+  past its own fourth row kind.
 
 ### Waste under one namespace — and the number a reader must not misread
 
@@ -1213,6 +1334,7 @@ nothing
     This Service points at nothing. Anything calling
     it gets a 503.
     → fix its selector, or delete it
+○ 1 pod was removed by a node and remains
 ○ 6 pods finished and were never removed
 ```
 
@@ -1265,16 +1387,16 @@ and 810 more Services match no pod
   because the cursor landing on it would advertise `⏎` over nothing
   openable — not one object, and not a *set* [`Jump`] has a case for either,
   since what it names is the *remainder* of a list and has no identity of
-  its own. The counted rows of this pane (`47 pods finished`,
-  `12 replicasets`) are different and stay `Row::Answer`s, `jump: None`:
-  each is the report's own complete answer to its own question, not a
-  truncated list.
-- **The two counted rows do not cap, and neither does Capacity's node list
+  its own. The counted rows of this pane (`4 pods were removed by a node`,
+  `47 pods finished`, `12 replicasets`) are different and stay
+  `Row::Answer`s, `jump: None`: each is the report's own complete answer to
+  its own question, not a truncated list.
+- **The three counted rows do not cap, and neither does Capacity's node list
   or any Posture row**, for the same reason as each other: a counted row is
   the length of a list, one row whatever the number is, never one row per
   object. What grows unboundedly with the cluster is what gets cut; what is
   already an aggregate scrolls (Capacity) or simply keeps counting (Waste's
-  `47 pods`, every Posture row).
+  three counted rows, every Posture row).
 
 **When every section is unread, the pane folds three `NotComputed`s into
 one**, the way [§ Capacity](#capacity)'s namespace scope already folds two
@@ -1296,12 +1418,12 @@ persistentvolumeclaims and replicasets.
 
 - **Only when all three unreadable sections drew nothing but a
   `NotComputed`, and only when there are exactly three of them.** The
-  fourth section — finished pods — is counted straight off pods, which are
-  always in scope, so it can never contribute a fourth `NotComputed` to
-  fold; if even one of the three answered (found something, or found
-  nothing), that section's real row stays and the fold does not happen,
-  because a pane with one true answer on it is not a pane that could not
-  check anything.
+  fourth section — the two finished-pod rows — is counted straight off
+  pods, which are always in scope, so it can never contribute a fourth
+  `NotComputed` to fold; if even one of the three answered (found
+  something, or found nothing), that section's real rows stay and the fold
+  does not happen, because a pane with one true answer on it is not a pane
+  that could not check anything.
 - **Three excuses stacked over an empty pane is three ways out for a reader
   who can only take one** — the same reasoning rule 7 gives one report
   section; here it is applied once across the whole pane instead of once
@@ -1952,8 +2074,9 @@ shared notice ([states.md](states.md#the-second-paragraph-is-the-point-of-this-s
   landed for Waste's per-*object* rows** (`and 810 more Services match no
   pod`,
   [§ A pane that caps, and a pane that folds](#a-pane-that-caps-and-a-pane-that-folds)).
-  What remains owed is narrower than it was: `34 workloads`, `47 pods`,
-  `12 replicasets`, `2 kubelets`, and every Posture row are *counted* rows,
+  What remains owed is narrower than it was: `34 workloads`,
+  `4 pods were removed by a node`, `47 pods`, `12 replicasets`,
+  `2 kubelets`, and every Posture row are *counted* rows,
   not capped lists — each is already the report's one complete answer to its
   own question, and `Jump` still has a case for one object and one for one
   finding and none for a set. The suffix comes back on every counted row in

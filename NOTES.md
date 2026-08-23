@@ -179,6 +179,8 @@ its line moving with it.
 - [D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22) — a whole-project review found two boxes checked over work their own text does not describe
 - [D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22) — rule 13's silence is ruled on the node, and the three-of-four routes to its own shape that delete themselves
 - [D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22) — what a re-close runs, and the two numbers that only a close re-takes
+- [D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23) — the Waste box's second half, and the jargon translation that was wrong in this file first
+- [D159](#d159--the-phase-4-re-close-and-the-three-counts-that-only-a-close-re-takes-2026-08-23) — the Phase 4 re-close, and the three counts that only a close re-takes
 
 ## Why it exists — where the gap is
 
@@ -264,8 +266,15 @@ several things that were otherwise open:
 3. **Zero configuration on first run.** No flags, no config file, no setup
    step. It reads your kubeconfig's current context and works.
 4. **Plain language over jargon, everywhere** — not only in findings. Column
-   headers, confirmation dialogs, error messages. `Evicted` is "removed by the
-   node because it ran out of room".
+   headers, confirmation dialogs, error messages. `Evicted` is "its node stopped
+   it and took the room back" — **and the translation names no cause**, because
+   the kubelet writes that one word for two of them: a node under pressure, and a
+   pod over a limit it declared for itself. The first draft of this line said
+   "because it ran out of room", and a report row built faithfully on it told
+   operators their node was short when a single container overran its own disk
+   limit ([D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23)).
+   **A translation that is shorter than the term is where the meaning gets lost**;
+   the plain sentence names what happened, and the cause only where it is known.
 5. **Confirmations explain the consequence, not the API call.** "This starts 2
    more copies of your app" above the `kubectl` line, not instead of it.
 6. **Per-object detail tabs**, the lazydocker pattern: logs · describe · yaml ·
@@ -13515,3 +13524,167 @@ not a test*, three were stale copies in `NOTES.md`, `todo.md` and `backlog.md`, 
 two went to [`backlog.md`](backlog.md). The triage rule held: a non-blocker is
 boxed later and the phase still closes
 ([reports/2026-08-22-phase-3-reclose-family-review.md](reports/2026-08-22-phase-3-reclose-family-review.md)).
+
+### D158 — the Waste box's second half, and the jargon translation that was wrong in this file first (2026-08-23)
+
+[D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+re-opened Phase 4's **Waste** box: `finished()` is `Succeeded | Failed`, a
+kubelet eviction is `Failed`, so a pod a node threw away was counted with
+completed Job pods and explained with the Job sentence. It is closed —
+`PodSnapshot::reason` (the only field D42's window was re-opened for), one
+ingest-guard line, and one `if`/`else` inside the gate that already existed, so
+the two rows **partition** what `finished()` lets through and always sum to the
+count the one row drew. `tests/fixtures/evicted.json` is a real capture, taken
+targeted rather than by a full re-trip ([D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22)'s
+precedent), and its stamp landed before the pin, so nothing repinned.
+
+**The row's first sentence was false, and the file it was copied from is this
+one.** *"A node does this when it runs out of room"* describes one of the two
+producers of `status.reason: Evicted`. Both go through `evictPod`
+(`pkg/kubelet/eviction/eviction_manager.go:633`), but `localStorageEviction`
+(`:514-630`) compares a pod against a limit **it declared for itself**, consults
+no node threshold, and runs *before* the pressure path. The committed capture is
+that one: an `8Mi` ephemeral-storage limit, no `DisruptionTarget` condition, and
+`nodes.json` from the same trip has its node at all three pressures `False` with
+~953 GiB free. So the row told an operator their node was short when one
+container overran its own limit. **§ Positioning item 4 said the same wrong
+thing** — *"`Evicted` is 'removed by the node because it ran out of room'"* — and
+is corrected here rather than only in the row, because the next reader would
+otherwise re-derive the sentence from it.
+
+**Three rulings the review reversed, and two of them were the PM's own.**
+
+1. **The band is `Info`, not `Warn`.** The PM's ground was *this pane's `Info`
+   rows carry no action* — a correlation, not a constraint: `main.rs`'s
+   `Row::Answer` arm prints the action without reading `severity`, which the PM
+   read only when the reviewer named it. The reasons that survive are the pane's:
+   Waste's charter is cost, an evicted pod's cost is the completed row's cost,
+   and a pod is collected only above 12 500 ([D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13))
+   — so a `Warn` here stays lit for good after one bad half-hour, clearable only
+   by deleting this pane's own evidence.
+2. **The action may not name another screen.** `→ check Alerts for what a node is
+   low on` pointed at N3, which needs a pressure condition `True` *now* and can
+   never fire for the pod-limit cause at all. The old detail said *"often the only
+   sign left once the node recovers"* — two lines that cannot both be obeyed.
+3. **The API's word is printed, in brackets, after the translation.** Invariant 14
+   says plain language, not *hide the term*; `rules.rs` has said
+   `… (CrashLoopBackOff)` and `… (OOMKilled)` since Phase 3. It matters most here:
+   `printPod` overwrites `status.reason` with the container's terminated reason,
+   so `kubectl get pods` prints `Error` for this object and the parenthetical is
+   the only thread from the row to anything typable.
+
+**`Shutdown` is not a value any kubelet writes** — `NodeShutdownNotAdmittedReason`
+is `"NodeShutdown"` and `nodeShutdownReason` is `"Terminated"`. The PM invented
+it in a brief, `tui-designer` put it in the screen, `dev-core` planted it in a
+test as a real value beside two the same file carefully labels as invented. One
+string, three files, no gate: a shape fed to a check that does not exist is
+[D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12) from the
+other end.
+
+**Four correct findings were refused and went to [`backlog.md`](backlog.md)**, not
+because they are wrong but because a third pileup row, a per-object section and a
+node name in the text are not the box that is open, and a box is never added to a
+running phase.
+
+**An agent ran `git checkout` over a dirty file and destroyed two turns of
+uncommitted work.** It recovered them from another agent's scratchpad copy, which
+is luck, not a process, and it reported it unprompted. The recovery was verified
+by the PM independently of the agent's own account — the file carries no probe
+appendix and its diffstat matches the figure a third agent's report had recorded
+before the loss. **Nothing new is added: `scratchpad-per-agent`
+([D60](#d60--claudemd-was-compressed-and-four-stories-moved-here-2026-08-12)) is
+what made the copy exist, and the standing rule against a destructive git command
+on a dirty tree already covered it.** What this run adds is the evidence that the
+rule is worth its cost, and that the safety net under it is another agent's
+housekeeping.
+
+### D159 — the Phase 4 re-close, and the three counts that only a close re-takes (2026-08-23)
+
+Phase 4 closed on 2026-08-22. [D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+re-opened its Waste box, the box landed on 2026-08-23
+([D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23)),
+and this is the second close. It ran the whole of
+[CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+rather than a diff of it, which is
+[D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)'s
+rule, and D157's shape held a second time: **the review was pointed at the boxes
+before it was pointed at any rule**, and that is where two of the five findings
+came from. **Five findings from the review, two more from the closing second
+pass, none blocking**, so the phase closed on all seven.
+
+**The sweep is 865 mutants — 772 caught, 0 missed, 0 timeout, 93 unviable.** The
+first close recorded 849/756/93; the two swept files gained 16 mutants in a day.
+What this
+run adds to D157 is **how it was sharded, and that the shard count is not a free
+parameter**: `--shard 0/8` was killed by the ten-minute foreground cap at 109
+mutants, so the sweep went to **sixteen** shards. The 8-shard result was
+discarded rather than merged, because cargo-mutants shards **contiguous blocks
+and not modulo** — measured, `0/8`'s 109 mutants are not `0/16` ∪ `8/16` — so
+two partitions cannot be mixed and a sweep is only whole within one of them.
+`--jobs 6` did not move a full 55-mutant shard below 7 minutes on 12 cores; the
+per-mutant cost is the rebuild, not the tests.
+
+**Three things are re-taken at a close, not two, and nothing that moved was in
+the code.** D157 named the first two. The third is this close's own, and it only
+exists because Phase 5 has been running beside a closed Phase 4.
+
+- **`todo.md` said the Drain safety report had *five row kinds*. It has seven**,
+  and it had seven on the day the box was checked (`git show 1ef9e3f`): the Done
+  note collapsed *five bands* into *five row kinds*, while `analysis.rs`'s own doc
+  comment and `screens/analysis.md` both said seven throughout. Nothing in the
+  code, the screen or the tests was wrong — only the box's summary of them, which
+  is [D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+  read from the other side and exactly what a re-close is for.
+- **Two numbers holding up a ruling that does not need them.** The `reports/`
+  retention box argued *keep* from `157K against 778K` and *13 of the 37 by-name
+  citations point at a section*. Re-measured: 292K against 893K, and **77 of 136**
+  across 16 distinct reports. The ruling is unchanged and the second figure is now
+  far stronger — so both counts are **deleted rather than updated**, which is this
+  file's own rule about a fact that moves on a schedule, and
+  [D138](#d138--reports-keeps-everything-and-the-retention-rule-is-a-re-measure-trigger-2026-08-22)
+  already makes re-measuring them the trigger rather than the record. Same for
+  *over all 55 fixtures* beside a guard that counts them itself.
+- **Anything a box says about a file another phase may also write** — the new
+  one. The security-gate paragraph read *"`Cargo.toml`, `Cargo.lock` and
+  `deny.toml` are untouched end to end"*, which was true when Phase 4 first
+  closed and false a day later, because three Phase 5 commits touched them. The
+  substance survives — the one `Cargo.toml` edit is a **comment**, `k8s-openapi`
+  re-exports `serde_json`, and invariant 10's eleven are still eleven — but the
+  sentence had become false in letter while nobody's phase owned it. **A closed
+  phase's claim about a shared file has a shelf life the phase cannot see**, and
+  a re-close is the only thing that looks again.
+
+**The stale copy this close cleared was a comment, and it was created by the
+decision that fixed the file it was copied from.** D158 corrected § Positioning
+item 4 *"rather than only in the row, because the next reader would otherwise
+re-derive the sentence from it"* — and left `analysis.rs`'s doc comment carrying
+the deleted sentence *and citing § Positioning as its authority*, so the citation
+pointed at a section that now said the opposite. That is
+[CLAUDE.md](CLAUDE.md#every-file-here-also-has-to-get-smaller)'s *the second copy
+is the one that goes stale, and it is never the one that gets fixed*, collecting
+one day later on the decision that wrote the rule's own best example. It is a
+citation now, not a copy. **A comment-only diff generates no mutants**, so the
+sweep above still stands over the tree that shipped.
+
+**`backlog.md` had two sections of open work filed under `## Ruled out`** — the
+rule 13 family review's and the Phase 3 re-close's, both blurbed *"read at the
+next phase close"*, both full of `If boxed:`, under the heading that means
+*deliberately not built*. Found by this close's second pass, which is the first
+close that would have been misled by them: `backlog.md` is read **at** a phase
+close and nowhere else
+([D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)),
+so a mis-filed section is not merely untidy, it is invisible at the one moment it
+exists to be seen. Both moved into `## Open`, which is now down to the one entry
+that really was refused. **No guard can see this** — the heading is prose and the
+distinction is meaning — and it was in a PM file, which
+[CLAUDE.md](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)
+already names as the edits nobody reviews.
+
+**Two findings went to `backlog.md` against a file that freezes at this close**,
+which is a worse position than the usual one: the Restarts comparator ties on a
+joined `namespace/name` string where the same family ruled for the `(namespace,
+name)` tuple in `drain_row`, and `capacity`/`drain_safety` are O(nodes × pods) by
+construction. Both are non-blocking and the triage rule is not bent for a
+deadline — but they now need a ruling to be written at all, and they join four
+findings from D158 in that position. **That is the cost of a freeze, recorded
+rather than argued with.**

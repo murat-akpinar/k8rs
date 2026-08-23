@@ -934,6 +934,32 @@ pub struct PodSnapshot {
     /// pod keeps its `nodeName` for as long as nobody collects it, and its requests are charged
     /// to nobody.
     pub phase: Option<String>,
+    /// `status.reason` — the word the API server writes beside a terminal phase, and **the only
+    /// thing that tells a pod a node killed to get its room back from a Job pod that ran to
+    /// completion**: both are [`finished`], so that predicate cannot separate them and the Waste
+    /// report's two rows are this field (NOTES § D155, `screens/analysis.md` § *The pileup splits
+    /// in two, one per cause*).
+    ///
+    /// **A decode addition, not a rule input.** This struct's own window shut at Phase 3's close
+    /// (NOTES § D42) and D155 re-opened it for this field alone, for `analysis.rs`'s benefit —
+    /// **no rule reads it**, and a rule that started to would be reading a report's field.
+    ///
+    /// **An identifier and not a sentence**, which is why the `status.message` beside it is not
+    /// kept: the reason is a word compared with `==`, while the message is one pod's own moment
+    /// (*"Pod ephemeral local storage usage exceeds the total limit of containers 8Mi"*) and the
+    /// row it would feed is a count over many pods on possibly many nodes.
+    ///
+    /// **The `==` is against the value after `k8s.rs` has bounded it, never the API's raw
+    /// string**, so a reason padded with anything invariant 9 deletes still matches: measured
+    /// through the real ingest path, `"Evicted\0"`, `"Evicted\n"`, a leading `U+FEFF`, an
+    /// interior `U+200B`, a trailing `U+202E` and an interior soft hyphen all arrive here as
+    /// `"Evicted"`, while `" Evicted"` — a space, which prints as itself and is kept — does not.
+    /// Normalisation runs in the safe direction, but a test that builds a snapshot straight from
+    /// `PodSnapshot::from` without `Bounded::bound` is answering about the raw string and can
+    /// disagree with the binary.
+    ///
+    /// **Prune line: `status.reason`.**
+    pub reason: Option<String>,
     /// **Driven by `status`, not by `spec`:** every container rule reads a status field, so a
     /// container the kubelet has not reported on cannot produce a finding, and inventing one
     /// would hand rule 7 a `ready: false` for every container that has not started yet. The
@@ -2084,6 +2110,7 @@ impl From<Pod> for PodSnapshot {
             mirror,
             node: spec.node_name,
             phase: status.phase,
+            reason: status.reason,
             containers,
             cpu_request,
             memory_request,

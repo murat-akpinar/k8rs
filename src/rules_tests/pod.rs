@@ -12401,6 +12401,13 @@ fn the_whole_capture_through_the_rules_at_once() {
         "healthy-disk",
         "succeeded",
         "failed",
+        // **The third pod that is *over*, and the one this screen is most often blamed for not
+        // drawing.** A node killed it to get its room back, which is a real fault — but it is
+        // the *node's*, and N3 already draws it while the node is still low. What is left here
+        // is the corpse, and a card per corpse would fill Alerts with one node's bad half-hour
+        // (NOTES § D2, § D96). The Waste report is where it is counted, which is what NOTES
+        // § D155 re-opened `status.reason` for.
+        "evicted",
     ];
     for name in CAPTURED_PODS {
         let object = pod(name);
@@ -13395,6 +13402,13 @@ fn every_captured_container_sitting_in_a_terminated_run_is_healthy_or_is_the_cap
     assert_eq!(
         over,
         [
+            // **`evicted/app` is the third, and the only one whose `137` is a real kill.** A
+            // node reclaiming its ephemeral storage SIGKILLs the container and the kubelet
+            // writes `Error` beside it, so the exit code is the whole of what the container
+            // says — the *reason* the pod is over is one level up, in `status.reason`, which is
+            // the field NOTES § D155 re-opened this struct for and the Waste report reads.
+            "evicted/app (Regular, Failed, 0 restarts) exit 137 (killed with SIGKILL — a stop \
+             the program cannot refuse, and the code does not say what sent it)",
             "failed/app (Regular, Failed, 4 restarts) exit 137 (Kubernetes lost track of the \
           container and wrote this code in its place)",
             "succeeded/migrate (Regular, Succeeded, 3 restarts) exit 0 (the run ended without an \
@@ -14350,6 +14364,12 @@ fn one_committed_capture_holds_containers_nothing_will_restart_and_it_is_the_one
     assert_eq!(
         never,
         [
+            // **The eighth, and it is rule 15's own shape held back by a gate one level up**:
+            // `Terminated` at `exit 137` under a pod-level `Never` with `restartCount: 0`, which
+            // is every condition of that rule. What refuses it is [`finished`] — the pod is
+            // `Failed`, so `analyze` drops it before any pod rule runs, and the card-count
+            // assertion below is where that is proven rather than assumed.
+            "evicted/app",
             "gang/bystander",
             "gang/trigger",
             "neverback/broke",
@@ -14358,12 +14378,13 @@ fn one_committed_capture_holds_containers_nothing_will_restart_and_it_is_the_one
             "neverrules/keeper",
             "neverrules/retry",
         ],
-        "three captures and every container of each, named. A fourth pod arriving under `Never` \
-         is a shape the plants below stopped being the only proof of, and it has to redden this \
-         line rather than slip in behind a count"
+        "four captures and every container of each, named — `evicted`, `gang`, `neverback`, \
+         `neverrules`. A fifth pod arriving under `Never` is a shape the plants below stopped \
+         being the only proof of, and it has to redden this line rather than slip in behind a \
+         count"
     );
 
-    // **And the claim that actually justifies the plants**: of those seven, exactly one draws the
+    // **And the claim that actually justifies the plants**: of those eight, exactly one draws the
     // card. Counting policies alone stopped being the interesting number the moment a second and
     // third `Never` pod landed — what the section below needs is that no committed object reaches
     // rule 15 except the one taken for it, and that is asserted over the whole corpus rather than
@@ -14376,7 +14397,7 @@ fn one_committed_capture_holds_containers_nothing_will_restart_and_it_is_the_one
     assert_eq!(
         drew.len(),
         1,
-        "one committed container draws rule 15's card and the other six are refused by a \
+        "one committed container draws rule 15's card and the other seven are refused by a \
          condition each — a second card here is a capture that quietly became this rule's \
          positive without anybody choosing it: {drew:?}"
     );

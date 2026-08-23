@@ -257,9 +257,10 @@ fn container<'a>(pod: &'a PodSnapshot, name: &str) -> &'a ContainerSnapshot {
 /// and [`every_captured_pod`] together with the lists — and a second copy is a second list to
 /// keep in step. `the_whole_capture_through_the_rules_at_once` names which of these are allowed
 /// to draw nothing.
-const CAPTURED_PODS: [&str; 39] = [
+const CAPTURED_PODS: [&str; 40] = [
     "config",
     "crashloop",
+    "evicted",
     "exit0",
     "failed",
     "gang",
