@@ -1629,8 +1629,26 @@ Goal: the cluster-wide answers no per-object rule can give. Pure functions
 over a `ClusterSnapshot`, so this phase is as testable as Phase 3 and needs no
 cluster either.
 
-**The 21 boxes below are four families, three singles and two closing gates**
-([D109](NOTES.md#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)).
+> **This phase is CLOSED (2026-08-23), on its second close.** It first closed on
+> 2026-08-22; [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+> re-opened the Waste box, [D158](NOTES.md#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23)
+> landed it, and the re-close ran the whole ritual rather than a diff of it
+> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22) ·
+> [D159](NOTES.md#d159--the-phase-4-re-close-and-the-three-counts-that-only-a-close-re-takes-2026-08-23)).
+> 22 boxes, `just check` exit 0, 518 + 7 tests. The product works: the real
+> binary, built and run on the test host, draws all seven panes over the
+> committed fixtures byte-identically to the dev machine. The whole-file mutation
+> gate is clean — **0 missed** across `rules.rs` and `analysis.rs` together.
+> Five findings from the closing review and two more from the closing second
+> pass, none blocking, all triaged.
+> **`analysis.rs` is frozen from here**, and so are the snapshot types and their
+> decode, whose one-phase window
+> ([D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12))
+> closes with it.
+
+**The 22 boxes below are four families, three singles, two closing gates and the
+re-close** ([D109](NOTES.md#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16) ·
+[D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
 They are **not reordered** — the brief names them, the file keeps them where the
 text that cites them expects to find them, and the next box is still the first
 unchecked one from the top.
@@ -1717,11 +1735,15 @@ unchecked one from the top.
       whether a report whose decision landed is deleted, kept, or reduced to the
       `D##` that cites it. PM's, at a phase close, not mid-phase
       Ruled **kept**, and the box's own premise is what the measurement took
-      away: `reports/` is 157K against `NOTES.md`'s 778K and is not one of the two
+      away: `reports/` is a fraction of `NOTES.md` and is not one of the two
       files D103 was about — the two every agent *must* read — so a per-turn cost
       was being charged to a disk cost. **Reduce-to-`D##` is the option the
-      numbers forbid** — 13 of the 37 by-name citations point at a *section* of a
-      report. What bounds it was already paid for: `reports-guard.py` per file,
+      numbers forbid** — well over half the by-name citations point at a
+      *section* of a report, and a `D##` has no sections to point at. Both counts
+      this line used to carry are gone rather than updated: they move every turn,
+      and D138 makes re-measuring them the trigger rather than the record
+      ([D159](NOTES.md#d159--the-phase-4-re-close-and-the-three-counts-that-only-a-close-re-takes-2026-08-23)).
+      What bounds it was already paid for: `reports-guard.py` per file,
       and `check-docs.py`'s `missing file` per link, which makes deleting an
       uncited report available and a cited one red. A "delete what nothing
       cites" rule was drafted and **dropped after it opened with two false
@@ -1761,8 +1783,9 @@ unchecked one from the top.
       only in `.spec.username`, and `system:node:k8rs-review-worker` was proven
       **accepted** by the committed filter. `cluster.sh` refuses the family name
       in `up` as the loud second guard, both refusals run from `just check`, and
-      `fixture-audit.sh` prints a byte-identical line before and after over all
-      55 fixtures ([D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20))
+      `fixture-audit.sh` prints a byte-identical line before and after over every
+      committed fixture, counting them itself so no second copy can go stale
+      ([D126](NOTES.md#d126--the-guards-family-a-added-and-the-five-judgement-calls-they-could-not-avoid-making-2026-08-20))
 - [x] **`Report` shape: title · rows · the finding each row can jump to** — the
       contract all six report boxes fill, written alone because a shared
       contract's blast radius is not a family. Done: a plain-language pane
@@ -1884,7 +1907,8 @@ unchecked one from the top.
 - [x] **Drain safety** — for each node, what a drain would do and what would
       block it. A PDB whose `minAvailable` equals the replica count means the
       drain never finishes; say so before, not 40 minutes in
-      Done: five row kinds. Two operator-review rounds took away two green lights
+      Done: seven row kinds, five bands deep. Two operator-review rounds took
+      away two green lights
       — *ready to drain* said about a node a bare `kubectl drain` refuses
       (DaemonSet pods, local storage), and about a node N1's own card called
       dead. `--ignore-daemonsets` is stated once as the pane's opening line;
@@ -2013,22 +2037,18 @@ unchecked one from the top.
       `rules.rs` gets in Phase 3. A report that quietly stops flagging looks
       identical to a report with nothing to flag
       ([NOTES § D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12))
-      Run whole and in four shards (D118), and **`just mutants` sweeps both pure
-      files**, so this run is also
+      Done: **0 missed**, sharded under
+      [D118](NOTES.md#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)
+      and read for an honest `unviable` under
+      [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21).
+      **`just mutants` sweeps both pure files**, so the run is also
       [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)'s
-      fourth condition — the whole-file `rules.rs` gate the card-changing box
-      owed this close. **751 caught · 0 missed · 0 timeout · 93 unviable**, each
-      shard writing its own `mutants.out` and each naming a type rather than a
-      filesystem (D133).
-      **Re-run whole at the close, over the tree the blocker fix landed on**, in
-      eight shards rather than four because 213 mutants no longer fit one
-      ten-minute foreground call
-      ([D118](NOTES.md#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)):
-      **849 mutants · 756 caught · 0 missed · 0 timeout · 93 unviable**, the five
-      new ones being the fix's own. Every unviable log names `error[E0277]`, a
-      trait bound, and `no space left`/`os error 28` was grepped for after each
-      shard and found in none — an honest unviable names a type, a dishonest one
-      names a filesystem
+      fourth condition — the whole-file `rules.rs` gate the card-changing box owed
+      this close. **The counts are not kept here**: a sweep is re-taken at every
+      close and never carried, so the figure that is true of the tree as it stands
+      lives in
+      [D159](NOTES.md#d159--the-phase-4-re-close-and-the-three-counts-that-only-a-close-re-takes-2026-08-23),
+      with what sharding it took and why the shard count is not a free parameter
 
 **🔒 Security gate:** this phase had none of its own until it closed, which is
 why the list below says what *was run* rather than what is owed. A report is a
@@ -2043,30 +2063,35 @@ no `expect`, no `panic!`, no indexing, one division and it is by the constant
 source cannot yield more than it. **Length bounding is deliberately not here** —
 it is Phase 5's ingest gate, which this close amended to name
 `spec.volumes[].hostPath.path`, the field Posture prints as a row's own subject.
-No dependency changed in this phase: `Cargo.toml`, `Cargo.lock` and `deny.toml`
-are untouched end to end.
+No dependency changed in this phase, and the eleven of invariant 10 are still
+eleven. The three files that could say otherwise were re-checked at the re-close
+rather than taken from the first close, because Phase 5 has been running beside
+this one: `deny.toml` and `Cargo.lock` were last touched by Phase 5 commits, and
+`Cargo.toml`'s one later edit (`21f85a9`) is a **comment** correcting a
+forward-looking note — `k8s-openapi` re-exports `serde_json`, so the browser's
+Table decode named no new dependency at all.
 
-- [ ] **Re-close this phase.** [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
-      re-opened the Waste box **after** this phase had closed, and it landed on
-      2026-08-23 ([D158](NOTES.md#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23)).
-      Everything above it therefore reads as closed while the close it describes
-      is one box out of date — which is what makes this a box rather than a
-      sentence: `/basla` picks the first *unchecked* box, and prose here would be
-      stepped over on the way to Phase 5. **Not new work**; it is the ritual this
-      phase already owes.
-      [D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)
-      says what a re-close runs: **the whole of
+- [x] **Re-close this phase.** The ritual this phase already owed, after
+      [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+      re-opened the Waste box and
+      [D158](NOTES.md#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23)
+      landed it. Run under
+      [D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22):
+      **the whole of
       [CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase),
-      not a diff of it** — the thing that re-opened the phase was a box checked
-      over work narrower than its own text, which nothing scoped by a diff can
-      see. Two numbers are **re-taken, never carried**: the whole-file mutation
-      sweep (the figures recorded above are the previous close's, and both
-      `rules.rs` and `analysis.rs` changed on 2026-08-23), and every count this
-      phase's boxes state. Step 4's family review is pointed at the boxes again
-      and hunts *checked over work narrower than its text* before it re-reads any
-      rule. Ends with the PR to `main`, merged
-      Done when: the ritual's eleven steps have each been run and said so, the
-      sweep is 0 missed over the tree as it now stands, and `main` carries it
+      not a diff of it**, with the family review pointed at the boxes before any
+      rule
+      Done: eleven steps run and said so. `just check` exit 0 (518 + 7 tests,
+      every guard self-tested); the real binary built on the test host prints all
+      seven panes byte-identically to the dev machine over the committed
+      fixtures; the whole-file sweep **0 missed**; **five findings from the
+      review and two from the closing second pass, none blocking**, so the phase
+      closed on all seven — three counts corrected here, one stale comment
+      cleared in `analysis.rs`, two sections of open work rescued from
+      `backlog.md`'s *Ruled out*, and two findings boxed against a file that
+      freezes today
+      ([D159](NOTES.md#d159--the-phase-4-re-close-and-the-three-counts-that-only-a-close-re-takes-2026-08-23) ·
+      [reports/](reports/README.md), 2026-08-23)
 
 **Done when:** every report is correct against the cluster-wide fixture, and
 the temporary main can print any of them.

@@ -180,6 +180,7 @@ its line moving with it.
 - [D156](#d156--rule-13s-silence-is-ruled-on-the-node-and-the-three-of-four-routes-to-its-own-shape-that-delete-themselves-2026-08-22) — rule 13's silence is ruled on the node, and the three-of-four routes to its own shape that delete themselves
 - [D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22) — what a re-close runs, and the two numbers that only a close re-takes
 - [D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23) — the Waste box's second half, and the jargon translation that was wrong in this file first
+- [D159](#d159--the-phase-4-re-close-and-the-three-counts-that-only-a-close-re-takes-2026-08-23) — the Phase 4 re-close, and the three counts that only a close re-takes
 
 ## Why it exists — where the gap is
 
@@ -13596,3 +13597,94 @@ what made the copy exist, and the standing rule against a destructive git comman
 on a dirty tree already covered it.** What this run adds is the evidence that the
 rule is worth its cost, and that the safety net under it is another agent's
 housekeeping.
+
+### D159 — the Phase 4 re-close, and the three counts that only a close re-takes (2026-08-23)
+
+Phase 4 closed on 2026-08-22. [D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+re-opened its Waste box, the box landed on 2026-08-23
+([D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23)),
+and this is the second close. It ran the whole of
+[CLAUDE.md § Phase close](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+rather than a diff of it, which is
+[D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)'s
+rule, and D157's shape held a second time: **the review was pointed at the boxes
+before it was pointed at any rule**, and that is where two of the five findings
+came from. **Five findings from the review, two more from the closing second
+pass, none blocking**, so the phase closed on all seven.
+
+**The sweep is 865 mutants — 772 caught, 0 missed, 0 timeout, 93 unviable.** The
+first close recorded 849/756/93; the two swept files gained 16 mutants in a day.
+What this
+run adds to D157 is **how it was sharded, and that the shard count is not a free
+parameter**: `--shard 0/8` was killed by the ten-minute foreground cap at 109
+mutants, so the sweep went to **sixteen** shards. The 8-shard result was
+discarded rather than merged, because cargo-mutants shards **contiguous blocks
+and not modulo** — measured, `0/8`'s 109 mutants are not `0/16` ∪ `8/16` — so
+two partitions cannot be mixed and a sweep is only whole within one of them.
+`--jobs 6` did not move a full 55-mutant shard below 7 minutes on 12 cores; the
+per-mutant cost is the rebuild, not the tests.
+
+**Three things are re-taken at a close, not two, and nothing that moved was in
+the code.** D157 named the first two. The third is this close's own, and it only
+exists because Phase 5 has been running beside a closed Phase 4.
+
+- **`todo.md` said the Drain safety report had *five row kinds*. It has seven**,
+  and it had seven on the day the box was checked (`git show 1ef9e3f`): the Done
+  note collapsed *five bands* into *five row kinds*, while `analysis.rs`'s own doc
+  comment and `screens/analysis.md` both said seven throughout. Nothing in the
+  code, the screen or the tests was wrong — only the box's summary of them, which
+  is [D155](#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22)
+  read from the other side and exactly what a re-close is for.
+- **Two numbers holding up a ruling that does not need them.** The `reports/`
+  retention box argued *keep* from `157K against 778K` and *13 of the 37 by-name
+  citations point at a section*. Re-measured: 292K against 893K, and **77 of 136**
+  across 16 distinct reports. The ruling is unchanged and the second figure is now
+  far stronger — so both counts are **deleted rather than updated**, which is this
+  file's own rule about a fact that moves on a schedule, and
+  [D138](#d138--reports-keeps-everything-and-the-retention-rule-is-a-re-measure-trigger-2026-08-22)
+  already makes re-measuring them the trigger rather than the record. Same for
+  *over all 55 fixtures* beside a guard that counts them itself.
+- **Anything a box says about a file another phase may also write** — the new
+  one. The security-gate paragraph read *"`Cargo.toml`, `Cargo.lock` and
+  `deny.toml` are untouched end to end"*, which was true when Phase 4 first
+  closed and false a day later, because three Phase 5 commits touched them. The
+  substance survives — the one `Cargo.toml` edit is a **comment**, `k8s-openapi`
+  re-exports `serde_json`, and invariant 10's eleven are still eleven — but the
+  sentence had become false in letter while nobody's phase owned it. **A closed
+  phase's claim about a shared file has a shelf life the phase cannot see**, and
+  a re-close is the only thing that looks again.
+
+**The stale copy this close cleared was a comment, and it was created by the
+decision that fixed the file it was copied from.** D158 corrected § Positioning
+item 4 *"rather than only in the row, because the next reader would otherwise
+re-derive the sentence from it"* — and left `analysis.rs`'s doc comment carrying
+the deleted sentence *and citing § Positioning as its authority*, so the citation
+pointed at a section that now said the opposite. That is
+[CLAUDE.md](CLAUDE.md#every-file-here-also-has-to-get-smaller)'s *the second copy
+is the one that goes stale, and it is never the one that gets fixed*, collecting
+one day later on the decision that wrote the rule's own best example. It is a
+citation now, not a copy. **A comment-only diff generates no mutants**, so the
+sweep above still stands over the tree that shipped.
+
+**`backlog.md` had two sections of open work filed under `## Ruled out`** — the
+rule 13 family review's and the Phase 3 re-close's, both blurbed *"read at the
+next phase close"*, both full of `If boxed:`, under the heading that means
+*deliberately not built*. Found by this close's second pass, which is the first
+close that would have been misled by them: `backlog.md` is read **at** a phase
+close and nowhere else
+([D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)),
+so a mis-filed section is not merely untidy, it is invisible at the one moment it
+exists to be seen. Both moved into `## Open`, which is now down to the one entry
+that really was refused. **No guard can see this** — the heading is prose and the
+distinction is meaning — and it was in a PM file, which
+[CLAUDE.md](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)
+already names as the edits nobody reviews.
+
+**Two findings went to `backlog.md` against a file that freezes at this close**,
+which is a worse position than the usual one: the Restarts comparator ties on a
+joined `namespace/name` string where the same family ruled for the `(namespace,
+name)` tuple in `drain_row`, and `capacity`/`drain_safety` are O(nodes × pods) by
+construction. Both are non-blocking and the triage rule is not bent for a
+deadline — but they now need a ruling to be written at all, and they join four
+findings from D158 in that position. **That is the cost of a freeze, recorded
+rather than argued with.**

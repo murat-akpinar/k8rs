@@ -81,10 +81,11 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 // --- THE REPORT SHAPE START ---
 
 /// One report — **one pane's worth of content**, and not one pane and one sidebar entry. Which
-/// panes exist, and which of them share one, is `screens/`'s: `Versions` has its own sidebar entry
-/// but is drawn at the foot of the Certificates pane (`screens/analysis.md` § *Certificates and
-/// Versions*), and Phase 4's `Posture` report is in no sketch at all. So the count of `Report`s
-/// and the count of panes are two facts, and this type states neither.
+/// panes exist, and which of them share one, is `screens/`'s, and its opening line counts the
+/// reports, the sidebar entries and the panes separately: `Versions` has its own sidebar entry but
+/// is drawn at the foot of the Certificates pane (`screens/analysis.md`, head and § *Certificates
+/// and Versions*). So the count of `Report`s and the count of panes are two facts, and this type
+/// states neither.
 ///
 /// **Every string reachable from here is untrusted** (invariant 9): a row's text is built from
 /// names and messages the API sent. Nothing in this file strips control characters. The guard
@@ -101,8 +102,9 @@ pub struct Report {
     ///
     /// **`None` means nothing is drawn there, and that covers three different reports**: one
     /// that never badges (`drain safety` carries nothing in the very mockup that draws
-    /// `node-2  ● BLOCKS`), one that ran and found nothing, and one that could not run. Across
-    /// all five mockups exactly two entries badge — `capacity  1 ▲` and `certificates  30d`.
+    /// `node-2  ● BLOCKS`), one that ran and found nothing, and one that could not run. Only two
+    /// ANALYSIS entries are drawn with a value anywhere in `screens/` — `capacity  1 ▲` and
+    /// `certificates  30d`; every other one is blank in every sidebar drawn.
     ///
     /// **The badge is not the discriminator and was never meant to be**: it "has room for a
     /// number, not for a reason, so the report itself carries the reason"
@@ -1935,11 +1937,13 @@ fn disks_nobody_mounts(snapshot: &ClusterSnapshot) -> Vec<Row> {
 /// `Failed` reason stay in the completed row: this pane draws a row for a shape it has measured,
 /// not one it is guessing at.
 ///
-/// **The word `Evicted` is said once, in parentheses, and the translation comes first.** NOTES'
-/// own words for the term are *removed by the node because it ran out of room* (NOTES §
-/// Positioning, invariant 14), so the row's text and the whole of its explanation are written
-/// from that and the API's own word follows in brackets at the end, the shape `rules.rs` already
-/// uses for every term this project translates
+/// **The word `Evicted` is said once, in parentheses, and the translation comes first.** The
+/// translation lives in NOTES § Positioning item 4 and is deliberately not copied here: that line
+/// holds both the words and the constraint that shapes them, that it name no cause. The copy that
+/// used to sit in this comment outlived the sentence it was taken from, which is why it is a
+/// citation now (NOTES § D158, invariant 14). The row's text and the whole of its explanation are
+/// written from that line; the API's own word follows in brackets at the end, the shape
+/// `rules.rs` has used for every term this project translates since Phase 3
 /// (`… (CrashLoopBackOff)`, `… (OOMKilled)`). It has to be said somewhere: `printPod` overwrites
 /// `status.reason` with the container's own terminated reason, so `kubectl get pods` prints
 /// `Error` for the capture behind this row and the parenthetical is the only place on the screen
