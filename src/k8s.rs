@@ -114,7 +114,7 @@ use crate::rules::{
     NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, Taint, Terminated, Toleration,
     WorkloadSnapshot, minor_version,
 };
-use futures_util::stream::{BoxStream, Stream, StreamExt, TryStreamExt, select_all};
+use futures_util::stream::{self, BoxStream, Stream, StreamExt, select_all};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
@@ -151,10 +151,10 @@ use std::collections::{BTreeMap, BTreeSet};
 // break into one space — because a driver that strips at the `format!` cannot tell a value
 // from the sentence around it.
 //
-// **The one string this file keeps that does not come through here is [`Store::failure`]**,
-// which is kube's `watcher::Error` and not a `String` this file owns. Its own doc carries the
-// instruction, and the reconnect box that replaces the field is where it stops being an
-// instruction.
+// **The one string this file keeps that does not come through here is [`Trouble::failure`]**,
+// which is kube's `watcher::Error` and not a `String` this file owns. The reconnect box gave it
+// per-watch identity (NOTES § D162) and did not change that: it is still kube's type, and the
+// instruction it carries is still that whatever renders it strips it first.
 //
 // **The field list is not repeated as a list.** It is one `Bounded` impl per snapshot type, and
 // `rules.rs`'s own struct definitions are what says a field exists — the same reason the prune
@@ -165,7 +165,7 @@ use std::collections::{BTreeMap, BTreeSet};
 // **Two classes, and the rule for a new field is what the value is drawn as**: a word the
 // reader scans is an [`IDENTIFIER`], a sentence or a path is [`FREE_TEXT`]. Both numbers, the
 // census they were chosen against, the marker, and the two ceilings this guard does not close —
-// collection *lengths*, and [`Store::failure`] — are NOTES § D146.
+// collection *lengths*, and [`Trouble::failure`] — are NOTES § D146.
 
 /// The longest **identifier** kept from one field: 512 bytes (NOTES § D146).
 ///
@@ -602,6 +602,22 @@ struct Watch<T> {
     /// refuses to answer for a complete watch, so a stale stamp from the last bootstrap can
     /// never be presented as a live one. A reconnect's `Init` overwrites it before it could be.
     last_progress: Option<Time>,
+    /// **The last failure *this* watch reported, and no other** (NOTES § D162). The store-wide
+    /// field this replaces had to be monotone because it could not tell whose failure it held
+    /// (NOTES § D145); identity is what buys the clearing back, and [`Watch::take`] is where it
+    /// is cleared.
+    ///
+    /// **Whatever renders it strips it first** (invariant 9): the text is the API server's, and
+    /// this is kube's type rather than a `String` § THE INGEST GUARD owns (NOTES § D146).
+    failure: Option<watcher::Error>,
+    /// **This watch's stream finished, so nothing will ever arrive on it again**
+    /// (NOTES § D162). `select_all` drops a finished stream and carries on with the rest, which
+    /// is why this is a field and not an absence: without it a kind would sit frozen at whatever
+    /// it last held and be read as live.
+    ///
+    /// **Never cleared.** A stream that ended cannot deliver the event that would clear it, and
+    /// [`updates`] appends this as the last item of the stream, so nothing follows it.
+    ended: bool,
 }
 
 // Written out rather than derived: `#[derive(Default)]` would demand `T: Default`, which no
@@ -613,6 +629,8 @@ impl<T> Default for Watch<T> {
             filling: None,
             complete: false,
             last_progress: None,
+            failure: None,
+            ended: false,
         }
     }
 }
@@ -637,6 +655,57 @@ impl<T: Watched> Watch<T> {
         if matches!(event, Event::Init | Event::InitApply(_)) {
             self.last_progress = Some(now.clone());
         }
+        // **This watch's own failure is over when this watch has delivered a complete answer,
+        // and a relist in flight is not one** (NOTES § D162). Two events qualify and the line
+        // between them and the other three is drawn off kube's state machine, not off what the
+        // names suggest:
+        //
+        // * **`InitDone` for a LIST this watch started** — a whole list, landed. The
+        //   `filling.is_some()` half is the arm below's own distrust, spelled once: a stream
+        //   broken enough to finish a LIST it never started is the thing that gate exists to
+        //   refuse, and a watch may not be declared recovered by an event it is not trusted to
+        //   be listed by. kube sends `Init` before every `InitDone` (`:548` and `:555-559` are
+        //   reached only from `State::InitPage`, which only `Init` enters), so this is
+        //   defensive in exactly the way that arm is.
+        // * **`Apply` and `Delete`** — ordinary traffic on a watch that already listed, and on
+        //   two paths **the only evidence a recovery can have**. `State::Watching` on
+        //   `Some(Err(_))` returns `WatchFailed` and goes straight back to `State::Watching`
+        //   with the *same stream* (`kube-runtime-4.2.0/src/watcher.rs:709`), and
+        //   `State::InitListed` on a failed watch start stays `InitListed` (`:650-652`) and
+        //   resumes into `Watching`. **Neither re-lists**, so a clear point of *the next
+        //   complete LIST* would never fire on them and one blip would stand for the session —
+        //   D145's named cost, which per-watch identity exists to stop paying.
+        //
+        // **`Init` and `InitApply` do not clear, and `InitApply` is the one that reads as
+        // though it should.** `NoResourceVersion` (`:568`) and `InitialListFailed` (`:584`) both
+        // return `State::Empty`, which emits `Init` (`:523`) and then `InitApply`s (`:548`) — so
+        // after those two the objects arriving are a **relist that has not finished**, and
+        // withdrawing the failure on the first of them announces a recovery the LIST has not
+        // achieved. It is worse than a wrong word: `complete` is never reset, so
+        // [`Watch::progress`] returns `None` for a relisting watch and [`Store::still_listing`]
+        // says nothing either. Clearing here would take **both** facts quiet at once — and the
+        // call this relist is sitting in is `api.list()`, which is the **unbounded** half of
+        // § WHAT A THROTTLE LOOKS LIKE: the watch poll unblocks at ~295 s, a LIST against a
+        // keepalive-less socket never does. So the store would read perfectly healthy, for as
+        // long as the process ran, while it served a cluster from before the failure.
+        //
+        // **This is the same fact D150 reads for a different question, not a contradiction of
+        // it.** There, `Init` and `InitApply` both count, because the question is *is this LIST
+        // moving* and an object arriving proves it is. Here neither counts, because the question
+        // is *has this watch delivered an answer* and a LIST in flight has not.
+        //
+        // **Stated for `ListWatch`, which is kube's default (`:201-202`) and the strategy
+        // `k8s_tests.rs` pins.** Under `StreamingList` an interrupted initial watch stays on its
+        // own stream and `InitApply` would be same-stream evidence, exactly as `Apply` is here;
+        // the rule below still terminates on that path, at the end-bookmark's `InitDone`.
+        let answered = match &event {
+            Event::Init | Event::InitApply(_) => false,
+            Event::InitDone => self.filling.is_some(),
+            _ => true,
+        };
+        if answered {
+            self.failure = None;
+        }
         match event {
             Event::Init => self.filling = Some(BTreeMap::new()),
             Event::InitApply(object) => {
@@ -649,6 +718,14 @@ impl<T: Watched> Watch<T> {
             // cluster. kube sends `Init` before every `InitDone`, so this only fires on a broken
             // stream — and a broken stream that says "your cluster has no nodes" is the failure
             // this gate exists to prevent.
+            //
+            // **It catches a LIST that never *started*, not one that was *interrupted*.** An
+            // `Init`, some `InitApply`s, an `Err` and then an `InitDone` leaves `filling` full,
+            // and this arm publishes it as a complete cluster that is short whatever the failed
+            // page held. Nothing here can tell that apart — kube does not send it, because both
+            // list failures return `State::Empty` and re-`Init` (`:568`, `:584`, `:523`), which
+            // is what `k8s_tests.rs`'s pin of `ListWatch` is worth. Said plainly because this
+            // gate is described as defensive and one of the two broken shapes walks through it.
             Event::InitDone => {
                 if let Some(listed) = self.filling.take() {
                     self.live = listed;
@@ -740,6 +817,73 @@ pub struct Listing {
     pub since: Option<Time>,
 }
 
+/// **One watch that is not delivering, and why** (NOTES § D162). `PRIOR-ART § B3` is the failure
+/// this exists for: k9s ran its first refresh outside the retry loop and called `BailOut` after
+/// five, so one blip killed the reconnector and a VPN drop over lunch meant the tool was gone on
+/// return. Nothing here counts retries and nothing here gives up: [`drive`] cannot return on a
+/// failure, and this is the state that says one is standing.
+///
+/// **At least one of the two below is always true** — [`Store::troubles`] does not report a watch
+/// that has neither.
+///
+/// **Nothing here is a duration.** *How long* is [`Listing::since`]'s question for a bootstrap
+/// that has not landed; a failure is answered by *is it still standing*, which is one read of
+/// [`failure`](Trouble::failure) and needs no clock. Adding a second stamp would give this file a
+/// second meaning for the one clock read § THE DRIVER owns (NOTES § D150), and no screen has
+/// asked for one.
+///
+/// **It derives `Debug` where [`Store`] deliberately does not**, for [`Listing`]'s reason and one
+/// more: the borrow it holds is kube's `watcher::Error`, which derives `Debug` in kube already,
+/// so nothing here widens what a `{:?}` can reach. **That is not the obligation this type owes**
+/// — read [`failure`](Trouble::failure) for the one that is.
+#[derive(Debug)]
+pub struct Trouble<'a> {
+    /// Which watch.
+    pub kind: ObjectKind,
+    /// **The last failure this watch reported and has not recovered from.** `None` beside an
+    /// `ended` of `true` is a stream that finished without ever saying why.
+    ///
+    /// # A renderer selects fields off this error. It never formats it whole.
+    ///
+    /// **`format!("{}", failure)` can print a bearer token, and so can `{:?}`.** Not a
+    /// theoretical reach — the whole chain is `#[error("…{0}")]`, which interpolates the source
+    /// at every hop:
+    ///
+    /// ```text
+    /// watcher.rs:30   InitialListFailed(kube_client::Error)
+    ///                 "failed to perform initial object list: {0}"
+    /// error.rs:104    Auth(AuthError)
+    ///                 "auth error: {0}"
+    /// auth/mod.rs:55  AuthExecRun { cmd, status, out: std::process::Output }
+    ///                 "auth exec command '{cmd}' failed with status {status}: {out:?}"
+    /// ```
+    ///
+    /// `std::process::Output`'s `Debug` renders `stdout` **as a string when it is valid UTF-8**
+    /// — measured, not read off a definition: a one-line program formatting the `Output` of a
+    /// script that prints an `ExecCredential` and exits 1 puts the token in the output verbatim.
+    /// And an `exec` credential plugin writes exactly that JSON to stdout. The trigger is
+    /// ordinary rather than exotic: an EKS/GKE/AKS `exec` block whose SSO session expired
+    /// mid-session, or a wrapper script tripping `set -e` after it emitted the credential.
+    ///
+    /// **So the rule is *select*, never *format*:** the variant, and `Status.code` /
+    /// `Status.reason` where there is one (§ WHAT A THROTTLE LOOKS LIKE lists which variants
+    /// carry a `Status` and how). Keeping this typed rather than a `String` is what makes that
+    /// possible, which is why the boundary is here (NOTES § D145, § D146).
+    ///
+    /// **This is not the rule beside it.** Invariant 9 — strip control characters — is owed
+    /// *as well*, on whatever text is selected, because it is the API server's. Stripping does
+    /// nothing about a token: a token prints as itself. **`scripts/security-guard.py` cannot see
+    /// this either** — its taint follows a field whose type is spelled `Client` — so the guard
+    /// belongs with the `{:?}`-on-`kube::Config` box below in this phase, which is already about
+    /// foreign types the guard cannot reach.
+    pub failure: Option<&'a watcher::Error>,
+    /// **This watch's stream finished**, so what its kind holds is the last thing it ever held.
+    /// kube documents a `watcher()` stream as recovering rather than finishing — read off its
+    /// doc, never observed — so in a live cluster this is expected to stay `false`; it is a field
+    /// because *expected* is not *guaranteed*, and the alternative to a field was silence.
+    pub ended: bool,
+}
+
 /// Everything the permanent watch holds, and the gate that decides whether any of it may be
 /// read.
 ///
@@ -758,22 +902,6 @@ pub struct Store {
     deployments: Watch<WorkloadSnapshot>,
     stateful_sets: Watch<WorkloadSnapshot>,
     daemon_sets: Watch<WorkloadSnapshot>,
-    /// The last failure any watch reported, and **nothing clears it**.
-    ///
-    /// **Reconnect and backoff are a later box and are not here.** kube's `watcher` retries by
-    /// itself on the next poll and calls every one of these errors retryable, so what this turn
-    /// owes is that the failure is not swallowed while that box is unwritten — a 403 on one
-    /// watch, a dead API server and a resourceVersion the server has forgotten all arrive here.
-    ///
-    /// **It is not cleared by the next event, and the first draft of it was.** A failure belongs
-    /// to the watch that raised it and only that watch can say it is over; with one field and no
-    /// per-watch identity, "cleared by the next event" means the four healthy watches erase a
-    /// standing 403 on the fifth with their own ordinary traffic, which is swallowing it with
-    /// extra steps. Keeping it is the half that is true without the identity the reconnect box
-    /// introduces, and that box is what replaces this field rather than reading it forever.
-    ///
-    /// **Whatever renders it strips it first** (invariant 9): the text is the API server's.
-    failure: Option<watcher::Error>,
     /// **Every ReplicaSet a pod named as its controller, keyed by the uid the pod named** —
     /// § RESOLVING AN OWNER is the whole of what this is for.
     ///
@@ -805,9 +933,65 @@ impl Store {
         self.daemon_sets.take(now, event);
     }
 
-    /// The last thing that went wrong on any watch, since the loop started.
-    pub fn failure(&self) -> Option<&watcher::Error> {
-        self.failure.as_ref()
+    /// **Every watch that is not delivering, and why** — empty when all five are healthy
+    /// (NOTES § D162).
+    ///
+    /// **Built like [`Store::still_listing`] and read beside it**: the same five watches in the
+    /// same declared order, each answering for itself and for nothing else. That is the whole
+    /// of what this box bought — the field this replaced was store-wide, so it had to be
+    /// monotone or four healthy watches would erase the fifth's standing 403 with their own
+    /// ordinary traffic (NOTES § D145). With identity, a watch may clear its own.
+    ///
+    /// **The two facts are not one enum, because they answer different questions.** `failure`
+    /// is *what went wrong and may still be going wrong*; `ended` is *nothing will arrive here
+    /// again*. Both together is the ordinary shape of a watch that died of the failure beside
+    /// it, and either alone is a real state: a watch retrying a 403 has no `ended`, and a stream
+    /// that finished cleanly has no `failure`.
+    ///
+    /// **The gate is not closed by either** (NOTES § D28, § D162). A watch that ends before it
+    /// lists leaves [`Store::snapshot`] shut already, and one that ends after listing holds a
+    /// real answer that is merely no longer fresh — blanking the screen would replace *stale,
+    /// and it says so* with *nothing, and it does not*.
+    ///
+    /// # This call wins over [`Store::still_listing`] for the same kind
+    ///
+    /// **A kind reported here is not listing, whatever that call says about it.** A refused watch
+    /// re-`Init`s in a tight loop and every `Init` refreshes [`Listing::since`], so it appears
+    /// there as a LIST that is moving briskly (NOTES § D150 explains why `Init` counts *for that
+    /// question*). A caller joins the two by kind; where both answer, this one is the truth and
+    /// that one is an artefact of the retry. The reasoning is written out at
+    /// [`Store::still_listing`], which is the call that can mislead.
+    ///
+    /// **The words are the caller's**, exactly as for [`Store::still_listing`]: this returns
+    /// facts, and invariant 14's plain language is `views.rs`'s.
+    pub fn troubles(&self) -> Vec<Trouble<'_>> {
+        [
+            (ObjectKind::Pod, &self.pods.failure, self.pods.ended),
+            (ObjectKind::Node, &self.nodes.failure, self.nodes.ended),
+            (
+                ObjectKind::Deployment,
+                &self.deployments.failure,
+                self.deployments.ended,
+            ),
+            (
+                ObjectKind::StatefulSet,
+                &self.stateful_sets.failure,
+                self.stateful_sets.ended,
+            ),
+            (
+                ObjectKind::DaemonSet,
+                &self.daemon_sets.failure,
+                self.daemon_sets.ended,
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, failure, ended)| failure.is_some() || *ended)
+        .map(|(kind, failure, ended)| Trouble {
+            kind,
+            failure: failure.as_ref(),
+            ended,
+        })
+        .collect()
     }
 
     /// The initial LISTs that have not landed, in the order the watches are declared — each
@@ -834,6 +1018,21 @@ impl Store {
     /// it — so *still reading: pods, 4 500 so far* names the long list rather than leaving a hang
     /// to be guessed at. **How the other four behave at size is not measured** and no claim about
     /// it is made here.
+    ///
+    /// # A kind in [`Store::troubles`] is not listing, whatever this call says about it
+    ///
+    /// **These two are siblings and have to be read together, because on one shape this one
+    /// reads healthy and is wrong.** A watch the cluster refuses runs `Err → Init → list() → 403`
+    /// with no backoff (§ THE DRIVER), and `Init` stamps [`Listing::since`] every time round
+    /// (NOTES § D150, deliberately — an `Init` proves the watch *began*). So a permanently
+    /// refused watch reports *pods, 0 so far, since just now*, several times a second, forever:
+    /// D150's separator is *a hung LIST produces numbers that do not move*, and this one's move
+    /// beautifully while nothing whatever is happening.
+    ///
+    /// **[`Store::troubles`] is what saves it, and only for a caller who joins them by kind and
+    /// lets `Trouble` win.** Said here and there rather than in one of the two, because a screen
+    /// that reads one of these and not the other is the whole failure — and this is the file's
+    /// own version of the two-rules-one-container defect it has paid most for.
     ///
     /// **The words are the caller's.** This returns facts, not sentences: invariant 14's plain
     /// language is the screen's decision and `views.rs` is not this file's.
@@ -1098,8 +1297,9 @@ impl Store {
     /// security gate forbids by name. **Nothing here retries, ever, and the ceiling that names
     /// is a transient [`Why::Failed`]** — a socket that died once leaves the heading at the
     /// ReplicaSet for the life of the process. Retry policy belongs to the reconnect box, which
-    /// is where per-watch identity arrives; this half is the one that is true without it,
-    /// exactly as [`Store::failure`] is.
+    /// is where per-watch identity arrives; this half is the one that is true without it. The
+    /// store-wide `failure` field was the same shape and has since been replaced by one per
+    /// watch (NOTES § D162); **this heading's retry has not**, and no box has claimed it.
     pub fn unresolved_owners(&self) -> Vec<Unresolved> {
         let mut found = BTreeMap::new();
         for pod in self.pods.live.values() {
@@ -1330,12 +1530,12 @@ const INITIAL_LIST_PAGE: u32 = 500;
 // **And nothing can see it.** The wait is a `tokio::time::sleep` inside the tower stack, below
 // `watcher()`, with no callback and no counter; its only trace is a `tracing` debug span
 // (`builder.rs:254`) and invariant 10 gives us no subscriber. So during a throttle
-// [`Store::snapshot`] is `None`, [`Store::failure`] is `None`, and the only honest thing on this
+// [`Store::snapshot`] is `None`, [`Store::troubles`] is empty, and the only honest thing on this
 // store is [`Store::still_listing`]. **That is A3 one layer lower**: not a queue whose depth
 // could be drawn, just a wait.
 //
 // **The retry is kept on, deliberately.** `default_retry: false` would put every 429 straight
-// onto [`Store::failure`] where a screen could name it — but kube's bare `watcher()` restarts
+// onto [`Trouble::failure`] where a screen could name it — but kube's bare `watcher()` restarts
 // "normally immediately" and its backoff is opt-in (`watcher.rs:778-779`), so k8rs would then
 // hammer a server that has just said *stop*. Being polite to the cluster is the right default;
 // the price is the silence, and the answer to silence is a state on screen, not a knob. Turning
@@ -1350,23 +1550,48 @@ const INITIAL_LIST_PAGE: u32 = 500;
 // carries `code`, `reason`, `message` and `details.retry_after_seconds`
 // (`kube-core-4.2.0/src/response.rs:34`, `:50`, `:39`, `:199-200`), and it reaches this file
 // inside `watcher::Error::{InitialListFailed, WatchStartFailed, WatchFailed}` (`watcher.rs:31`,
-// `:35`, `:43`) — typed, and kept typed by [`Store::failure`] (NOTES § D145).
+// `:35`, `:43`) — typed, and kept typed by [`Trouble::failure`] (NOTES § D145, § D162).
 //
-// **The other way this path looks hung, and it is worse: a dead connection is never noticed.**
-// `Config` sets `connect_timeout` 30 s and `write_timeout` 295 s (`config/mod.rs:418-419`) and
-// leaves **`read_timeout` unset** (`:191`, `:273`, `:339`); the connector is a bare
+// **A fourth variant carries a `Status` and does not carry it that way: `WatchError(Box<Status>)`
+// (`watcher.rs:39`).** It holds the `Status` **directly**, not behind `Error::Api`, and it is the
+// one a busy cluster produces most — the 410 desync that ends a watch (`:702`) and an in-band 403
+// arrive on it. A formatter written from the three-variant list above unwraps `Error::Api`, finds
+// nothing, and falls through to a generic message for the commonest watch failure there is, which
+// is `PRIOR-ART § C1` exactly. **Four variants carry a `Status`; three of them wrap it.**
+//
+// **A dead connection, and the two halves of it are not the same story.** `Config` sets
+// `connect_timeout` 30 s and `write_timeout` 295 s (`config/mod.rs:418-419`) and leaves
+// **`read_timeout` unset** (`:191`, `:273`, `:339`); the connector is a bare
 // `HttpConnector::new()` (`client/builder.rs:117`) whose `TcpKeepaliveConfig::default()` is
 // all-`None`, so `into_tcpkeepalive()` yields `None` and `set_tcp_keepalive` is never called
 // (`hyper-util-0.1.20/src/client/legacy/connect/http.rs:94-98`, `:104-110`, `:842-843`).
-// **SO_KEEPALIVE is off on the watch sockets.** A connection that dies without a FIN or an RST —
-// a laptop suspending, a NAT entry expiring, a load balancer dropping an idle flow — raises no
-// error and hits no deadline: [`drive`] simply blocks, [`Store::failure`] stays `None`, and the
-// store keeps answering with the cluster as it last was. **It is not fixable from here.**
-// `read_timeout` is client-wide, a healthy watch is idle for long stretches, and kube's own
-// params doc says clients "should not assume bookmarks are returned at any specific interval"
-// (`kube-core-4.2.0/src/params.rs:329`) — so there is no period a read deadline could safely
-// use. That is the *deadline on the first watch sync* box, next in this phase, and the reconnect
-// box after it.
+// **SO_KEEPALIVE is off on the watch sockets**, so a connection that dies without a FIN or an
+// RST — a laptop suspending, a NAT entry expiring, a load balancer dropping an idle flow —
+// raises no error at the socket at all. What happens next depends on which call is waiting.
+//
+// **The watch is bounded, and kube does it above the socket.** `next_with_idle_timeout` wraps
+// the stream poll in a `tokio::time::timeout` of `Config::timeout.unwrap_or(290)` plus a 5 s
+// margin (`watcher.rs:483`, `:494`) and is used by both watching states (`:589`, `:659`). So a
+// severed watch unblocks after **~295 s** and reconnects with nobody at the keyboard — kube
+// found a period it could safely use, and it is the watch's own `timeoutSeconds=290` rather
+// than a client-wide read deadline. **The timeout arm returns `None`, not `Err`** (`:714`,
+// which goes to `State::InitListed` and re-watches from the stored resourceVersion without
+// re-listing), so for up to five minutes the store serves a frozen cluster and
+// [`Store::troubles`] is **correctly empty**. Stale, silent, self-healing, bounded — and the
+// silence is the honest answer, because nothing failed.
+//
+// **The initial LIST is genuinely unbounded, and that is where `PRIOR-ART § A7` stands.**
+// `next_with_idle_timeout` does not wrap `State::InitPage`'s `api.list()`, and no deadline
+// reaches the wire either: `to_list_params` copies `timeout` into the `ListParams`
+// (`watcher.rs:400`) and `ListParams::populate_qp` never serialises it
+// (`kube-core-4.2.0/src/params.rs:94-122`) — `timeoutSeconds` is appended in exactly one place
+// in that crate, `:381`, which is the **watch** builder. `ListParams::timeout`'s own doc says
+// *"Defaults to 290s"* (`:137-139`) and the query builder one screen away disagrees with it.
+// So a LIST against a dead socket blocks forever: [`drive`] waits, [`Store::troubles`] stays
+// empty, and [`Store::still_listing`] is the only thing with anything to say. **Not fixable
+// from here** — `read_timeout` is client-wide and a healthy watch is idle for long stretches,
+// and kube's params doc says clients "should not assume bookmarks are returned at any specific
+// interval" (`:329`). That is the *deadline on the first watch sync* box, next in this phase.
 //
 // **What source-reading cannot settle**, stated because the box asked for a number: whether any
 // real API server ever throttles a five-watch client at all, what its Priority-and-Fairness
@@ -1545,8 +1770,40 @@ type Update = Box<dyn FnOnce(&mut Store) + Send>;
 
 /// One `watcher()` stream, ready for [`drive`].
 ///
-/// `apply` is the [`Store`] method for the kind the stream carries — `Store::pod` for a Pod
-/// watch — and this is the only line in the driver where a kind is named at all.
+/// `of` picks the [`Watch`] the stream feeds — `|store| &mut store.pods` for a Pod watch — and
+/// this is the only line in the driver where a kind is named at all.
+///
+/// **One argument and not two, so the identity cannot disagree with itself** (NOTES § D162). The
+/// first draft took the [`Store`] method *and* somewhere to record a failure, and
+/// `updates(pods, Store::node, …pods…)` would have compiled. Everything this stream does now
+/// goes through the one watch `of` returns: the events, the failure, and the end of it.
+///
+/// **Both arms produce an [`Update`], so the item type carries no `Result`** — an `Err` is a
+/// thing that happened to one watch and is recorded on it, exactly as an event is. That is the
+/// same refusal [`drive`]'s old `Err` arm made, moved to the only place that knows *whose*
+/// failure it is.
+///
+/// **The last item is always the end of the stream**, appended with `chain`: `select_all` drops
+/// a stream that finishes and says nothing, so the marker has to be inside the stream that is
+/// about to finish. It is what keeps a kind that stopped from being read as live.
+///
+/// # One stream per [`Watch`], for the life of the process
+///
+/// `of` is a plain `fn` pointer and nothing stops a second `updates(…, |s| &mut s.pods)`. **Do
+/// not.** `ended` is deliberately never cleared (NOTES § D162), so the moment a second stream
+/// feeds the same watch, `Trouble { kind: Pod, ended: true }` is permanent while pods stream in
+/// normally — a banner saying *stopped* about a live watch, which
+/// `objects_arriving_again_do_not_take_back_the_end_of_a_watch` pins as the behaviour. **A
+/// reconnect resubscribes below `drive`, inside the stream `of` already names, and never by
+/// building a second one for the same `of`.**
+///
+/// **For this file that is free, and it is `connect()` that walks into it.** kube's `watcher()`
+/// is `stream::unfold` whose closure returns `Some(..)` unconditionally (`watcher.rs:791-797`),
+/// so it provably cannot end and the marker never fires. But the obvious way to add the backoff
+/// [`drive`] asks the caller for is `StreamBackoff`, whose doc reads: *"If
+/// `Backoff::next_backoff` returns `None` then the backing stream is given up on, and closed"*
+/// (`utils/stream_backoff.rs:9-14`) — k9s's `BailOut` inside kube's own utility. That is what
+/// `ended` is a defence against, and `default_backoff` is the policy that never returns `None`.
 ///
 /// **The one clock read in this file, and it is here because this is the only place that knows
 /// when an event arrived** (NOTES § D150). [`Store`] never calls one: [`Store::snapshot`] is
@@ -1559,42 +1816,75 @@ type Update = Box<dyn FnOnce(&mut Store) + Send>;
 /// gets its own stamp, so [`Listing::since`] means *the last object landed*, not *the batch
 /// started* — which is the difference between seeing a stall inside a page and seeing it only
 /// between pages.
-fn updates<K: Send + 'static>(
+fn updates<K, T>(
     watch: impl Stream<Item = watcher::Result<Event<K>>> + Send + 'static,
-    apply: fn(&mut Store, &Time, Event<K>),
-) -> BoxStream<'static, watcher::Result<Update>> {
+    of: fn(&mut Store) -> &mut Watch<T>,
+) -> BoxStream<'static, Update>
+where
+    K: Send + 'static,
+    T: Watched + From<K> + Bounded + Send + 'static,
+{
     watch
-        .map_ok(move |event| {
-            let now = Time(Timestamp::now());
-            Box::new(move |store: &mut Store| apply(store, &now, event)) as Update
+        .map(move |next| match next {
+            Ok(event) => {
+                let now = Time(Timestamp::now());
+                Box::new(move |store: &mut Store| of(store).take(&now, event)) as Update
+            }
+            Err(failure) => {
+                Box::new(move |store: &mut Store| of(store).failure = Some(failure)) as Update
+            }
         })
+        .chain(stream::once(async move {
+            Box::new(move |store: &mut Store| of(store).ended = true) as Update
+        }))
         .boxed()
 }
 
-/// **Every watch into one store, until they all end.** A `watcher()` stream is documented not
-/// to end — kube says it recovers on the next poll after an `Err` rather than finishing — which
-/// is read off its doc and not off a cluster; a stream that *does* end is the ceiling below.
+/// **Every watch into one store, until they all end** — and **nothing here can make it end
+/// early** (NOTES § D162, `PRIOR-ART § B3`).
 ///
-/// **An `Err` is not the end of the loop, and that is the whole of this function's error
-/// handling.** `?` here, or `try_for_each`, would end the stream on the first failure, which is
-/// k9s [#3922](https://github.com/derailed/k9s/issues/3922) exactly: one blip and the tool
-/// never reconnects. So the failure is recorded and the next poll is taken. **The `Err` arm
-/// reaches no watch at all** — only an `Update` can, and a failure is not one — which is what
-/// keeps it from opening the bootstrap gate: a stream that fails part-way through its initial
-/// LIST has not listed, and D28 still says nothing may be published.
+/// **There is no error handling left in this function, and that is the point.** [`updates`]
+/// turns an `Err` into an [`Update`] against the watch that raised it, so this loop has no
+/// `Result` to unwrap and **no place a `?` could be written** — the failure that killed k9s's
+/// reconnector permanently ([#3922](https://github.com/derailed/k9s/issues/3922)) cannot be
+/// reintroduced here by an edit, only by rewriting [`updates`]. **There is no retry budget
+/// either**: nothing counts failures and nothing returns because there have been enough of
+/// them, so a cluster that goes away over lunch is a state on screen and not an exit.
 ///
-/// **The ceiling, for the reconnect box.** `select_all` drops a stream that finishes and the
-/// loop runs on with the rest, so a watch that ended would leave its kind frozen at whatever it
-/// last held, presented as live with nothing saying so. Noticing that, backing off, and putting
-/// either state on screen are that box's; what is decided here is only that a failure does not
-/// take the other four watches down with it.
-async fn drive(watches: Vec<BoxStream<'static, watcher::Result<Update>>>, store: &mut Store) {
+/// **`PRIOR-ART § B3`'s rule is *retried forever*, not *retried as fast as the socket allows*,
+/// and the second half is the caller's to pay.** kube's own `Error` doc says it
+/// (`watcher.rs:26`): *"To avoid constantly looping errors, make sure backoff is applied."*
+/// Backoff is **opt-in** — `watcher()` restarts "normally immediately" and `StreamBackoff` is
+/// something you wrap it in (`:777-779`) — so a watch the cluster refuses runs
+/// `Err → Init → list() → 403` bounded only by round-trip time, which is § WHAT A THROTTLE
+/// LOOKS LIKE's own warning pointed back at us. **This function cannot fix it**: it takes an
+/// `impl Stream` and never builds a `watcher()`, so **the caller owes `.default_backoff()`** and
+/// `connect()`'s box carries it. That default is safe to hand a permanent failure —
+/// `ExponentialBackoff::new` calls `.without_max_times()` (`:930`), so it slows down forever and
+/// never gives up.
+///
+/// **And if it returns anyway, the caller does not exit.** Every stream ending is not a reason to
+/// stop: `drive` returning `()` means nothing is being watched any more, which is a state to
+/// draw — every kind is in [`Store::troubles`] with `ended` — and not a shutdown. A `main` that
+/// lets this fall off the end takes the tool down for exactly the reason this box exists to
+/// prevent.
+///
+/// **A failure reaches its own watch and no other.** It cannot open the bootstrap gate — only
+/// `InitDone` on a watch that saw its `Init` does that (NOTES § D28) — and it cannot be erased
+/// by the four healthy watches beside it, which is the whole of what per-watch identity bought
+/// (NOTES § D145).
+///
+/// **The ceiling `select_all` left is closed rather than inherited.** It still drops a stream
+/// that finishes, and the loop still runs on with the rest — but [`updates`] appends an end
+/// marker *inside* each stream, so the kind that stopped is recorded as stopped instead of
+/// sitting frozen and being read as live. kube documents a `watcher()` stream as recovering on
+/// the next poll rather than finishing, which is read off its doc and not off a cluster; that a
+/// **real** severed socket comes back with nobody touching the keyboard is the `connect()`
+/// box's proof and not this function's (NOTES § D161).
+async fn drive(watches: Vec<BoxStream<'static, Update>>, store: &mut Store) {
     let mut merged = select_all(watches);
-    while let Some(next) = merged.next().await {
-        match next {
-            Ok(update) => update(store),
-            Err(failure) => store.failure = Some(failure),
-        }
+    while let Some(update) = merged.next().await {
+        update(store);
     }
 }
 

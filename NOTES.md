@@ -182,6 +182,9 @@ its line moving with it.
 - [D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23) — the Waste box's second half, and the jargon translation that was wrong in this file first
 - [D159](#d159--the-phase-4-re-close-and-the-three-counts-that-only-a-close-re-takes-2026-08-23) — the Phase 4 re-close, and the three counts that only a close re-takes
 - [D160](#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26) — the capability probe, the seven group strings a cluster confirmed, and the two prose claims it took away
+- [D161](#d161--the-reconnect-boxs-code-lands-before-connect-and-its-proof-can-only-run-after-it-2026-08-26) — the reconnect box's code lands before `connect()` and its proof can only run after it
+- [D162](#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26) — per-watch identity, and the six choices the reconnect box had to make
+- [D163](#d163--the-operator-review-of-the-reconnect-box-eleven-findings-and-the-one-that-is-older-than-the-box-2026-08-26) — the operator review of the reconnect box: eleven findings, and the one that is older than the box
 
 ## Why it exists — where the gap is
 
@@ -13836,3 +13839,302 @@ server API group list` storm, which is the retry loop the gate forbids by name.
 passing over it: nothing here prints a kubectl line, executes anything, builds a
 path, or returns a string the cluster wrote. Seven unit variants is invariant 9
 made structural.
+
+### D161 — the reconnect box's code lands before `connect()` and its proof can only run after it (2026-08-26)
+
+Phase 5's reconnect box asks for two things that do not fit in one turn, and the
+PM ruled on the split before briefing rather than discovering it at the gate.
+
+**What it asks for.** Replace the monotone `Store::failure`
+([D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22))
+with per-watch identity, close the ceiling `select_all` leaves when a stream
+finishes, and never exit because the cluster went away. Then prove it *idle*:
+leave it running against kind, `docker stop` the node, wait past any timeout,
+start it again, and the findings come back on their own
+([PRIOR-ART § B3](PRIOR-ART.md#b3--reconnect-logic-dies-quietly)).
+
+**The order is genuinely opposed, and neither half can move.** The code has to
+land **before** `connect()`, because `connect()` *starts the watches* — written
+against `Store::failure` it would be rewritten within the same phase, which is
+the frozen-file failure the build-order rule exists to prevent. The proof can
+only run **after** `connect()`, because nothing in this build constructs a
+`Client`: `kube`'s `client` feature is compiled in, but the first line that
+builds one is `connect()`'s, three boxes below. `docker stop` against a binary
+that reads a fixture measures the fixture.
+
+**Ruled: the code and its synthetic proof close this box; the idle kind proof
+moves into the `connect()` box's done-when.** Both boxes are in Phase 5, so the
+phase cannot close without the proof — the obligation is relocated, not dropped.
+No box is added ([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)):
+this is one existing done-when moved to the first box that can run it, and both
+box texts are edited in the same change so neither claims a proof it did not get.
+
+**What the synthetic half can actually prove, and it is most of it.** The failure
+shapes this box exists for are all reachable by feeding streams: one watch
+erroring while four stay healthy (D145's defect), a stream that *ends* — which
+`select_all` drops silently and which kube's doc says cannot happen, read off the
+doc and never observed — and a loop that keeps taking the next poll after an
+`Err` instead of returning. What the synthetic half cannot reach is the one thing
+k9s got wrong: whether a **real** severed socket comes back with nobody touching
+the keyboard. That is the half that waits.
+
+**The timeout is inherited, not fixed here.** `Config::timeout` feeds both
+`to_list_params` and `to_watch_params`, so a deadline short enough to bound the
+initial LIST also caps the watch and re-LISTs the cluster on that period —
+invariant 6 inverted. The initial LIST cannot be given its own deadline through
+this config
+([D147](#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)).
+No timeout is set by this box.
+
+### D162 — per-watch identity, and the six choices the reconnect box had to make (2026-08-26)
+
+`dev-core` replaced the store-wide `Store::failure` with state on each `Watch<T>`,
+and closed the ceiling `select_all` left. The brief decided none of the following;
+they are ruled as made.
+
+**1. A watch clears its own failure, and the clear point is *a complete answer*.**
+This is the recovery half
+[D145](#d145--a-failure-that-clears-itself-is-a-failure-nobody-sees-and-the-drivers-six-choices-2026-08-22)
+had no identity to spend: a failure now belongs to one watch, so no healthy
+neighbour can erase it, and the reason to keep it monotone is gone. What clears
+it is a LIST this watch actually started **and finished** (`InitDone` with
+`filling.is_some()`), or ordinary traffic on an established watch (`Apply`,
+`Delete`). What does not is `Init` and **`InitApply`**.
+
+**The first draft cleared on `InitApply` and that was a defect `tester` measured**
+— it is the shape this repo keeps paying for, a claim reasoned from one code path
+and applied to two. Read off kube's source: `State::Watching` on `Some(Err(err))`
+returns `Error::WatchFailed` and goes straight back to `State::Watching { stream }`
+(`kube-runtime-4.2.0/src/watcher.rs:709`) — same stream, no relist, so an ordinary
+`Apply` really is the only evidence available there. But `NoResourceVersion`
+(`:568`) and `InitialListFailed` (`:584`) both return `State::Empty`, which
+re-emits `Init` (`:523`) and then drains `InitApply`s (`:548`) — a **relist in
+flight**. Clearing on its first object withdraws the failure before the answer
+that would justify it exists, and `complete` is never reset, so
+[`Watch::progress`](#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22)
+and `still_listing()` say nothing either. Measured, after a 410:
+
+```
+after the 410:  failing=[Pod] outstanding=[]                      correct
+mid-relist:     failing=[]    outstanding=[] snapshot_pods=Some(14)   reads fully healthy
+```
+
+If that relist then stalls on a dead socket, the store reads healthy forever while
+serving a cluster from before the 410. **A state new to this box** — the monotone
+field could not have it. `dev-core` found a *third* non-relisting path when it
+checked the ruling before implementing it: `State::InitListed` on a failed watch
+start returns `WatchStartFailed` and stays `InitListed` (`:650-652`), which the
+`Apply`/`Delete` side already covers.
+
+**2. `Event::Init` does not clear it either, for a different reason.** `Init` is
+returned from `State::Empty` **with no `.await`, before the request is made**
+(`watcher.rs:522-527`), so a watch whose LIST is refused forever emits
+`Err, Init, Err, Init` — clearing on `Init` would leave it reading healthy on about
+half the instants a screen sampled it, which is D145's defect rebuilt inside a
+single watch. **This does not contradict
+[D150](#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22)**,
+which counts `Init` for `last_progress`: there the question is *has this watch
+begun* and an `Init` answers it; here the question is *has the server answered
+completely* and an `Init` answers nothing. Both places say so and cite each other.
+
+**The rule is stated for `ListWatch`**, kube's default (`:201-202`) and the
+strategy `kube_still_pages_the_initial_list_at_the_number_this_repo_chose` pins
+(`k8s_tests.rs`, and the test is named rather than given a line because this file's
+line numbers move while the pinned crate's do not — a first draft of this entry
+cited a line that had become an unrelated `Ok(Event::Init)`).
+
+**The first draft of this paragraph then said `StreamingList` would be fine, and
+the operator review found it wrong twice** — both halves measured against the
+crate. It said an interrupted initial watch *stays on its own stream* (`:624-630`):
+true of one path out of three, since `State::InitialWatch` goes to
+`State::default()` on a 410 (`:608-612`) and on an idle timeout (`:632`), and under
+`StreamingList` `Empty` opens a **fresh** initial watch — a relist in flight,
+exactly as under `ListWatch`. And it said the rule *still terminates at the
+end-bookmark's `InitDone`*: it does not. Under `StreamingList`, `State::Empty`
+emits **no `Event::Init` at all** — `(None, State::InitialWatch { stream })`,
+`:528-530`. For a kind with **zero objects** — a cluster with no StatefulSets,
+entirely ordinary — no `InitApply` fires either, so `filling` is still `None` when
+`InitDone` arrives, `answered` is `false`, and `Watch::take` sets neither `live`
+nor `complete`. **The bootstrap gate never opens and the tool shows nothing,
+forever, with no RBAC involved.**
+
+The code is correct because `ListWatch` is pinned. What this is worth is a **third
+reason not to enable streaming lists**, and a stronger one than the two already
+written at `k8s.rs`'s § THE INITIAL LIST: not a degradation but an outright hang.
+Recorded here so that whoever reads that list later does not assume the clearing
+rule already covers it.
+
+**3. An `InitDone` whose `Init` never arrived clears nothing either** — found by
+`dev-core`'s own second pass, and it is the file contradicting itself in one
+function. The arm below already refuses to *publish* from such an event, because a
+stream broken enough to finish a LIST it never started is what that gate distrusts;
+declaring the same watch **recovered** from it said the opposite about one event
+three lines apart. `Event::InitDone => self.filling.is_some()`.
+
+**4. Two fields, not one enum.** `failure` is *what went wrong and may still be
+going wrong*; `ended` is *nothing will arrive here again*. Either alone is a real
+state — a watch retrying a 403 has no `ended`, a stream that finished cleanly has
+no `failure` — and collapsing them loses the error that explains the end. `ended`
+is never cleared and **does not shut the bootstrap gate**: a watch that ended
+before listing leaves the gate shut already, and one that ended after it holds a
+real answer that is merely stale. Blanking the screen would replace *stale, and it
+says so* with *nothing, and it does not*.
+
+**4b. `ended` being never cleared is pinned by a test, and the obvious test for it
+was vacuous.** `dev-core`'s first attempt drove a second stream and passed with the
+mutation planted, because `updates` appends its end marker last and a second
+`drive` re-sets `ended` on the way out whatever `take` did. The claim lives in
+`Watch::take`, so the second delivery goes in through `Store::pod` instead. Worth
+recording because a test that passes *for the wrong reason* is the exact thing
+step 4 exists to catch, and here the mutation gate could not: there is no line to
+mutate, only an absent one.
+
+**5. No timestamp on a failure, and the operator review narrowed what that is
+allowed to claim.** *How long* is `Listing::since`'s question; *is it still
+standing* is this one, and it needs no clock. A second stamp would give this file a
+second meaning for the one clock read D150 owns. **That much stands. What the first
+draft also claimed — that no caller needs the fact — does not.** At 3am the
+question is not *is it standing* but **since when** and **is it flapping**, and
+`Trouble` answers neither: `failure` is *replaced* on every `Err`, never counted, so
+a watch failing forty times a second in a hot retry loop is byte-identical to one
+that failed once an hour ago, and a 410 relist sets and clears it within a second
+while the banner flickers.
+
+**The usual answer — the screen keeps first-seen, keyed by kind — is not available
+either, and that is the part worth recording.** `watcher::Error` derives only
+`Debug, Error`: no `PartialEq`. `Trouble` is not `Clone` and holds a `&'a`. So a UI
+**structurally cannot** tell *the same failure still standing* from *cleared, then
+failed again*. Ruled: no clock and no counter land in `k8s.rs` now — nothing draws
+this yet and a field with no reader is the speculative kind — but the screen box
+inherits a stated ceiling rather than discovering it, and whatever closes it does so
+by making the fact **derivable**, not by a second clock read.
+
+One more fact a banner wants and cannot get today: **have I ever had data for this
+kind?** *pods: failing* means something very different if pods never listed. It is
+derivable — a kind in `troubles()` **and** in `still_listing()` — but ruling 7 below
+is why that join needs stating.
+
+**6. The identity is one argument, not two.** `updates` now takes
+`of: fn(&mut Store) -> &mut Watch<T>` in place of the apply function, so the
+events, the failure and the end of the stream all reach the one watch `of` names.
+The first draft passed the `Store` method *and* a separate failure sink, which
+would have compiled `updates(pods, Store::node, …pods…)` — the "two rules reading
+one container and disagreeing" shape this repo has paid most for
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+The cost is named: `K` is unconstrained on a test stream carrying only errors, so
+four call sites spell `one_watch::<Pod, _>(…)`.
+
+**7. When a kind is in both lists, `troubles()` wins — and this had to be written
+down because the two docs disagree by construction.** `Init` stamps `last_progress`
+(D150, deliberately), and a watch whose LIST is refused emits `Err, Init, Err,
+Init` several times a second, so `still_listing()` reports its `since` as *just
+now*, permanently. D150's whole design is *a LIST that is hung produces a count
+that does not move* — and a refused one moves beautifully while nothing happens.
+The two functions were written as siblings to be read together, and neither said
+which fact wins. Both now do: **a kind present in `troubles()` is not listing,
+whatever `still_listing()` says about it.** This is the two-rules-reading-one-
+container shape ([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15))
+occurring inside a single file, between two decisions that are each correct on
+their own.
+
+**8. A renderer selects fields off `Trouble::failure`; it never formats it whole.**
+Added after the operator review
+([D163](#d163--the-operator-review-of-the-reconnect-box-eleven-findings-and-the-one-that-is-older-than-the-box-2026-08-26)),
+because the first draft of the doc defended the `Debug` derive against a risk that
+was not the risk. `Display` interpolates the source at every hop —
+`watcher.rs:30` → `error.rs:104` → `client/auth/mod.rs:55`, ending at `{out:?}`
+over a `std::process::Output` — and `Output`'s `Debug` renders stdout as a string
+when it is valid UTF-8. **Measured rather than read off a definition**, because the
+std source is not vendored here: a one-line program formatting the `Output` of a
+script that prints an `ExecCredential` and exits 1 put the token in the output
+verbatim. An `exec` credential plugin writes exactly that JSON to stdout, so
+`format!("{}", err)` on an expired EKS/GKE/AKS session prints a bearer token.
+
+**The rule is therefore *select*, never *format*:** the variant, and `Status.code` /
+`Status.reason` where there is one. Keeping the error **typed** rather than a
+`String` is what makes selecting possible, which is why the boundary sits here and
+not at the renderer. **This is not invariant 9 sitting beside it** — stripping
+control characters is owed *as well*, on whatever text is selected, and does
+nothing about a token, which prints as itself. Mirrored in
+[`docs/security.md § Token hygiene`](docs/security.md#token-hygiene); the guard is
+the `{:?}`-on-`kube::Config` box's, because `scripts/security-guard.py`'s taint
+follows a field type spelled `Client` and cannot reach a foreign error type.
+
+**And `drive` has no error handling left, which is the point.** Every arm of
+`updates` produces an `Update`, so the loop holds no `Result` and there is **no
+expression a `?` could attach to** — k9s's permanently-dead reconnector
+([#3922](https://github.com/derailed/k9s/issues/3922)) cannot be reintroduced by
+an edit to `drive`, only by rewriting `updates`. No retry budget exists to be
+exhausted. The end marker is appended *inside* each stream with `chain`, so
+`select_all` dropping a finished stream now drops one that has already recorded
+itself as stopped. That kube's `watcher()` never finishes is still read off its
+doc and never observed
+([D161](#d161--the-reconnect-boxs-code-lands-before-connect-and-its-proof-can-only-run-after-it-2026-08-26)).
+
+### D163 — the operator review of the reconnect box: eleven findings, and the one that is older than the box (2026-08-26)
+
+`k8s-admin` read the reconnect box against the vendored crates and returned eleven
+findings, two marked blocking. The triage is here because *where a finding goes* is
+the ruling that keeps a phase converging
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)),
+and because one of the two blockers is **older than the box that found it**.
+
+**The rule applied, and it is the one already written:** a defect in the box being
+landed is the same box; everything else is recorded where it belongs and boxed
+later. The test is not *how bad is it* but **did this diff cause it** — and for
+finding 1 the answer is measurably no.
+
+**Finding 1 — a 403 on one watch blanks the whole tool — is pre-existing and is
+already boxed.** `listed()` is `still_listing().is_empty()`, `progress()` answers
+for any watch with `complete == false`, and a refused LIST never sets `complete`;
+so one denied kind means `snapshot()` is `None` and every rule is silent for the
+life of the process, behind a screen that says *loading*. It is
+[PRIOR-ART § B4](PRIOR-ART.md#b4--a-denied-permission-must-degrade-one-feature-not-the-tool)
+and [§ C2](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens)
+together, and it contradicts
+[D5](#d5--namespace-scoping-is-a-v1-requirement-not-a-filter). **Verified not to be
+this diff's:** no line of it touches `listed`, `snapshot` or `still_listing`. The
+gate is D28's, from a box checked earlier in this phase. So it went to the
+`--namespace` box in the same phase, which already promised D5's outcome and can
+now actually deliver it — **per-watch identity is the ingredient it lacked**, and
+what it must reopen is the gate, counting a refused watch as *answered* rather than
+*pending*. **The Authorization row of the security gate is therefore not tickable
+until that box closes, and is recorded as owed rather than ticked** — an honest
+open row beats a false one, and the row is now named in the box that earns it.
+
+**Finding 2 — a bearer token in a rendered error — is the box's, and only its
+contract could be fixed here.** `Display` interpolates the source at every hop
+down to `AuthError::AuthExecRun`'s `{out:?}` over a `std::process::Output`, whose
+`Debug` prints stdout as a string; an `exec` credential plugin writes the
+ExecCredential JSON, token included, to stdout. Confirmed by reading the crates,
+not the citation. The *boundary* was already right — keep the error typed, strip at
+the renderer — and the *stated contract* was wrong, defending the `Debug` derive
+against a risk that was not the risk. Three places, three owners: the doc comment
+was `dev-core`'s and was rewritten; the rule is now in
+`docs/security.md § Token hygiene`; the **guard** joined the `{:?}`-on-`kube::Config`
+box two boxes below, which is already about foreign types
+`scripts/security-guard.py` structurally cannot see. That is one missing capability
+with a second instance, not a second box.
+
+**Findings 3 and 6 could not be fixed here at all, and that is the useful part.**
+Nothing in this build constructs a `watcher()`, and `updates()` takes an
+`impl Stream` — so the caller owes the backoff, and the caller is `connect()`. Both
+became done-whens on that box rather than doc comments hoping to be read: apply a
+backoff (kube's is opt-in, `watcher.rs:778-779`, and without one a 403 is a LIST
+storm bounded only by round-trip time), and keep **one `updates()` stream per
+`Watch<T>`**, because `StreamBackoff` closes a stream whose backoff returns `None`
+(`utils/stream_backoff.rs:9-14`) — k9s's `BailOut` inside kube's own utility.
+
+**Findings 4, 5, 9, 10 and the two against this file were fixed in the turn.** Four
+of them are the same species and it is the one this repo keeps paying for: a claim
+**reasoned from one code path and stated as if it covered all of them**. The
+dead-connection paragraph said no deadline exists when kube caps the watch at 295 s
+(`watcher.rs:483`, `:494`) — while missing that the *initial LIST* genuinely has
+none, because `ListParams::populate_qp` never appends `timeoutSeconds` despite its
+own doc claiming a 290 s default. The variant list omitted `WatchError`, the one
+carrying a `Status` directly and the one a 410 desync actually produces. And **two
+of the four were in this file, written by the PM** — D162's `StreamingList` clause
+was wrong twice over, and a line citation had drifted onto an unrelated statement.
+That is the reason step 7's pass reads the PM's edits with the agents': nobody else
+reviews them.
+

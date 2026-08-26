@@ -559,17 +559,17 @@ async fn the_rules_read_what_the_loop_lands() {
     let mut store = Store::default();
     drive(
         vec![
-            one_watch(pods, Store::pod),
-            one_watch(listing(items::<Node>("nodes")), Store::node),
-            one_watch(
-                listing(items::<Deployment>("deployments")),
-                Store::deployment,
-            ),
-            one_watch(
-                listing(items::<StatefulSet>("statefulsets")),
-                Store::stateful_set,
-            ),
-            one_watch(listing(items::<DaemonSet>("daemonsets")), Store::daemon_set),
+            one_watch(pods, |s| &mut s.pods),
+            one_watch(listing(items::<Node>("nodes")), |s| &mut s.nodes),
+            one_watch(listing(items::<Deployment>("deployments")), |s| {
+                &mut s.deployments
+            }),
+            one_watch(listing(items::<StatefulSet>("statefulsets")), |s| {
+                &mut s.stateful_sets
+            }),
+            one_watch(listing(items::<DaemonSet>("daemonsets")), |s| {
+                &mut s.daemon_sets
+            }),
         ],
         &mut store,
     )
@@ -622,11 +622,35 @@ fn pod_events() -> Vec<Event<Pod>> {
     events
 }
 
-fn one_watch<K: Send + 'static>(
+/// **One argument names the watch, and it is the only one** (NOTES § D162) — `updates` takes the
+/// [`Watch`] the stream feeds rather than a method plus somewhere to file a failure, so no test
+/// here can wire a pod stream to the node watch's failures and still compile.
+fn one_watch<K, T>(
     events: Vec<watcher::Result<Event<K>>>,
-    apply: fn(&mut Store, &Time, Event<K>),
-) -> BoxStream<'static, watcher::Result<Update>> {
-    updates(stream::iter(events), apply)
+    of: fn(&mut Store) -> &mut Watch<T>,
+) -> BoxStream<'static, Update>
+where
+    K: Send + 'static,
+    T: Watched + From<K> + Bounded + Send + 'static,
+{
+    updates(stream::iter(events), of)
+}
+
+/// What a caller reads for one watch, or `None` when that watch has nothing wrong with it.
+fn trouble_for(store: &Store, kind: ObjectKind) -> Option<Trouble<'_>> {
+    store.troubles().into_iter().find(|t| t.kind == kind)
+}
+
+/// Every watch that is *failing*, as opposed to merely finished. `ended` is true of every stream
+/// in this file — `stream::iter` runs out — so a failure assertion says which watch, and an
+/// `ended` assertion is its own test below.
+fn failing_kinds(store: &Store) -> Vec<ObjectKind> {
+    store
+        .troubles()
+        .into_iter()
+        .filter(|t| t.failure.is_some())
+        .map(|t| t.kind)
+        .collect()
 }
 
 /// **The loop is a faithful pump.** The same events by hand and through `drive` land the same
@@ -653,10 +677,9 @@ async fn the_loop_lands_what_the_store_lands_when_it_is_fed_by_hand() {
 
     let mut by_loop = bootstrapped();
     drive(
-        vec![one_watch(
-            pod_events().into_iter().map(Ok).collect(),
-            Store::pod,
-        )],
+        vec![one_watch(pod_events().into_iter().map(Ok).collect(), |s| {
+            &mut s.pods
+        })],
         &mut by_loop,
     )
     .await;
@@ -674,17 +697,17 @@ async fn the_five_watches_share_one_loop_and_each_reaches_its_own_kind() {
     let mut store = Store::default();
     drive(
         vec![
-            one_watch(listing(items::<Pod>("kube-system-pods")), Store::pod),
-            one_watch(listing(items::<Node>("nodes")), Store::node),
-            one_watch(
-                listing(items::<Deployment>("deployments")),
-                Store::deployment,
-            ),
-            one_watch(
-                listing(items::<StatefulSet>("statefulsets")),
-                Store::stateful_set,
-            ),
-            one_watch(listing(items::<DaemonSet>("daemonsets")), Store::daemon_set),
+            one_watch(listing(items::<Pod>("kube-system-pods")), |s| &mut s.pods),
+            one_watch(listing(items::<Node>("nodes")), |s| &mut s.nodes),
+            one_watch(listing(items::<Deployment>("deployments")), |s| {
+                &mut s.deployments
+            }),
+            one_watch(listing(items::<StatefulSet>("statefulsets")), |s| {
+                &mut s.stateful_sets
+            }),
+            one_watch(listing(items::<DaemonSet>("daemonsets")), |s| {
+                &mut s.daemon_sets
+            }),
         ],
         &mut store,
     )
@@ -714,21 +737,35 @@ fn listing<K>(objects: Vec<K>) -> Vec<watcher::Result<Event<K>>> {
 
 /// **A failure does not end the loop.** `?` or `try_for_each` here would stop on the first one,
 /// which is how k9s lost its reconnector permanently to a single blip.
+///
+/// **Three failure positions are fed and only one thing is asserted: that the events after them
+/// arrived.** An `Err` in the middle of an initial LIST is a shape kube cannot produce under
+/// `ListWatch` — both list failures return `State::Empty` and re-`Init` (`watcher.rs:568`,
+/// `:584`, `:523`) — so it is fed for coverage (NOTES § D29) and nothing is asserted about *what
+/// it did to the half-filled list*. That question is unruled, and the sibling test
+/// [`a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land`] asserts the
+/// opposite outcome for the shape that is reachable. **Counting the pods would have pinned the
+/// unruled half by accident**; naming a pod that arrived after the last `Err` pins the
+/// requirement instead.
 #[tokio::test]
 async fn a_failed_watch_does_not_end_the_loop() {
-    let pods = items::<Pod>("kube-system-pods");
     let mut events: Vec<watcher::Result<Event<Pod>>> = vec![Err(watcher::Error::NoResourceVersion)];
-    events.extend(listing(pods.clone()));
+    events.extend(listing(items::<Pod>("kube-system-pods")));
     events.insert(3, Err(watcher::Error::NoResourceVersion));
+    events.push(Err(watcher::Error::NoResourceVersion));
+    events.push(Ok(Event::Apply(object::<Pod>("crashloop"))));
+
     let mut store = all_but("pods");
-    drive(vec![one_watch(events, Store::pod)], &mut store).await;
+    drive(vec![one_watch(events, |s| &mut s.pods)], &mut store).await;
     let snapshot = store
         .snapshot(now())
         .expect("the LIST landed after the failures and the gate opened");
-    assert_eq!(
-        snapshot.pods.len(),
-        pods.len(),
-        "the loop stopped at a failure and the events after it never arrived"
+    assert!(
+        snapshot
+            .pods
+            .iter()
+            .any(|pod| pod.id.name == "broken-crashloop"),
+        "the loop stopped at one of the three failures and the event after them never arrived"
     );
 }
 
@@ -745,14 +782,16 @@ async fn a_watch_that_fails_mid_list_publishes_nothing() {
     );
     events.push(Err(watcher::Error::NoResourceVersion));
     let mut store = all_but("pods");
-    drive(vec![one_watch(events, Store::pod)], &mut store).await;
+    drive(vec![one_watch(events, |s| &mut s.pods)], &mut store).await;
     assert!(
         store.snapshot(now()).is_none(),
         "a watch that failed part-way through its first LIST published a partial cluster"
     );
-    assert!(
-        store.failure().is_some(),
-        "the failure was swallowed: nothing on the store says the watch broke"
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "the failure was swallowed, or landed on a watch that did not raise it: nothing on the \
+         store says the pod watch broke"
     );
 }
 
@@ -763,16 +802,18 @@ async fn a_watch_that_fails_mid_list_publishes_nothing() {
 async fn a_failure_survives_the_events_that_follow_it() {
     let mut store = all_but("pods");
     drive(
-        vec![one_watch(
+        vec![one_watch::<Pod, _>(
             vec![Err(watcher::Error::NoResourceVersion), Ok(Event::Init)],
-            Store::pod,
+            |s| &mut s.pods,
         )],
         &mut store,
     )
     .await;
-    assert!(
-        store.failure().is_some(),
-        "an event arrived after the failure and took the record of it away"
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "an `Init` arrived after the failure and took the record of it away — but kube returns \
+         `Init` before the request is made, so it is no evidence the watch recovered"
     );
 }
 
@@ -796,23 +837,23 @@ async fn a_watch_that_only_fails_leaves_the_other_four_alone() {
     let mut store = Store::default();
     drive(
         vec![
-            one_watch(
+            one_watch::<Pod, _>(
                 vec![
                     Err(watcher::Error::NoResourceVersion),
                     Err(watcher::Error::NoResourceVersion),
                 ],
-                Store::pod,
+                |s| &mut s.pods,
             ),
-            one_watch(listing(items::<Node>("nodes")), Store::node),
-            one_watch(
-                listing(items::<Deployment>("deployments")),
-                Store::deployment,
-            ),
-            one_watch(
-                listing(items::<StatefulSet>("statefulsets")),
-                Store::stateful_set,
-            ),
-            one_watch(listing(items::<DaemonSet>("daemonsets")), Store::daemon_set),
+            one_watch(listing(items::<Node>("nodes")), |s| &mut s.nodes),
+            one_watch(listing(items::<Deployment>("deployments")), |s| {
+                &mut s.deployments
+            }),
+            one_watch(listing(items::<StatefulSet>("statefulsets")), |s| {
+                &mut s.stateful_sets
+            }),
+            one_watch(listing(items::<DaemonSet>("daemonsets")), |s| {
+                &mut s.daemon_sets
+            }),
         ],
         &mut store,
     )
@@ -821,7 +862,11 @@ async fn a_watch_that_only_fails_leaves_the_other_four_alone() {
         store.snapshot(now()).is_none(),
         "the pod watch never listed and the other four published the cluster without it"
     );
-    assert!(store.failure().is_some(), "the failure was swallowed");
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "the failure was swallowed, or the four healthy watches were reported as failing too"
+    );
 
     list(&mut store, Store::pod, items::<Pod>("kube-system-pods"));
     let snapshot = store
@@ -830,6 +875,454 @@ async fn a_watch_that_only_fails_leaves_the_other_four_alone() {
     assert!(
         !snapshot.nodes.is_empty() && !snapshot.workloads.is_empty(),
         "the four watches that succeeded lost their objects to the one that failed"
+    );
+}
+
+/// **The defect NOTES § D145 could only refuse by never clearing: four healthy watches erasing a
+/// fifth's standing failure with their own ordinary traffic.** The old field was store-wide, so
+/// *cleared by the next event* meant cleared by somebody else's event. Here the four healthy
+/// watches deliver a full bootstrap **and then a stream of `Apply`s after** the pod watch has
+/// already failed, and the pod watch's failure has to be exactly where it was.
+///
+/// **Two `drive` calls and not one**, because `select_all` interleaves and the point of the test
+/// is the *order*: the traffic has to arrive after the failure, or the test proves nothing about
+/// erasing it.
+#[tokio::test]
+async fn ordinary_traffic_on_the_other_watches_does_not_clear_a_failing_one() {
+    let mut store = Store::default();
+    drive(
+        vec![
+            one_watch::<Pod, _>(vec![Err(watcher::Error::NoResourceVersion)], |s| {
+                &mut s.pods
+            }),
+            one_watch(listing(items::<Node>("nodes")), |s| &mut s.nodes),
+            one_watch(listing(items::<Deployment>("deployments")), |s| {
+                &mut s.deployments
+            }),
+            one_watch(listing(items::<StatefulSet>("statefulsets")), |s| {
+                &mut s.stateful_sets
+            }),
+            one_watch(listing(items::<DaemonSet>("daemonsets")), |s| {
+                &mut s.daemon_sets
+            }),
+        ],
+        &mut store,
+    )
+    .await;
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "the pod watch's failure did not survive its own bootstrap round"
+    );
+
+    // Every healthy watch now delivers ordinary traffic, which is what a live cluster does every
+    // second of the day.
+    drive(
+        vec![
+            one_watch(
+                items::<Node>("nodes")
+                    .into_iter()
+                    .map(Event::Apply)
+                    .map(Ok)
+                    .collect(),
+                |s| &mut s.nodes,
+            ),
+            one_watch(
+                items::<Deployment>("deployments")
+                    .into_iter()
+                    .map(Event::Apply)
+                    .map(Ok)
+                    .collect(),
+                |s| &mut s.deployments,
+            ),
+        ],
+        &mut store,
+    )
+    .await;
+
+    let pods = trouble_for(&store, ObjectKind::Pod).expect("the pod watch reported nothing");
+    println!(
+        "what a caller reads · kind {:?} · failing {} · ended {} · text {:?}",
+        pods.kind,
+        pods.failure.is_some(),
+        pods.ended,
+        pods.failure.map(ToString::to_string),
+    );
+    assert!(
+        pods.failure.is_some(),
+        "the other watches' ordinary traffic erased the pod watch's failure, which is the whole \
+         of the defect NOTES § D145 had to make the field monotone to refuse"
+    );
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "a watch that never failed was reported as failing"
+    );
+}
+
+/// **A watch that has already listed recovers *without* re-listing, and that is measured off
+/// kube rather than reasoned about** (NOTES § D162). `State::Watching` on `Some(Err(err))`
+/// returns `Error::WatchFailed` and goes straight back to `State::Watching { stream }` —
+/// `kube-runtime-4.2.0/src/watcher.rs:706-712` — so the next thing an established watch emits
+/// after a blip is an ordinary `Apply`, with no `Init` and no `InitDone` anywhere near it.
+///
+/// **A clear point of *the next complete LIST* would therefore never fire on this path** and the
+/// banner would stand for the rest of the session after one blip: D145's named cost, which per
+/// watch identity exists to stop paying.
+#[tokio::test]
+async fn an_established_watch_recovers_on_ordinary_traffic_with_no_relist() {
+    let mut events = listing(items::<Pod>("kube-system-pods"));
+    events.push(Err(watcher::Error::NoResourceVersion));
+    events.push(Ok(Event::Apply(object::<Pod>("crashloop"))));
+
+    let mut store = all_but("pods");
+    drive(vec![one_watch(events, |s| &mut s.pods)], &mut store).await;
+
+    assert_eq!(
+        failing_kinds(&store),
+        Vec::new(),
+        "an established watch delivered again after a blip and the store still calls it failing"
+    );
+    let snapshot = store.snapshot(now()).expect("every initial LIST landed");
+    assert!(
+        snapshot
+            .pods
+            .iter()
+            .any(|pod| pod.id.name == "broken-crashloop"),
+        "the Apply that proved the watch had recovered never reached the store"
+    );
+}
+
+/// **The `Init` that opens a relist is a LIST beginning, not a LIST landing, so it clears
+/// nothing.** kube returns it from `State::Empty` with no `.await`, before the request is made
+/// (`watcher.rs:522-527`), so a watch whose LIST is refused forever emits `Err`, `Init`, `Err`,
+/// `Init` — and a clear on `Init` would leave it reading healthy on about half the instants a
+/// screen sampled it. That is NOTES § D145's defect rebuilt inside one watch.
+///
+/// **Four of these tests pin the boundary between them, and none of them alone does.** The clear
+/// point is *this watch delivered a complete answer* (NOTES § D162): `Init` here and `InitApply`
+/// in [`a_relist_in_flight_does_not_withdraw_the_failure_it_is_answering`] are the two that do
+/// not qualify, and [`a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land`]
+/// (a finished LIST) and [`an_established_watch_recovers_on_ordinary_traffic_with_no_relist`]
+/// (ordinary traffic on a watch that already listed) are the two that do.
+#[tokio::test]
+async fn a_watch_that_keeps_failing_its_list_is_never_reported_healthy() {
+    let mut events: Vec<watcher::Result<Event<Pod>>> = Vec::new();
+    for _ in 0..4 {
+        events.push(Err(watcher::Error::NoResourceVersion));
+        events.push(Ok(Event::Init));
+    }
+    let mut store = all_but("pods");
+    drive(vec![one_watch(events, |s| &mut s.pods)], &mut store).await;
+
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "a watch that has done nothing but fail and restart its LIST was reported healthy, \
+         because the `Init` it emits before every attempt was read as a LIST landing"
+    );
+    assert!(
+        store.snapshot(now()).is_none(),
+        "a watch that never listed published a cluster anyway (NOTES § D28)"
+    );
+}
+
+/// **A watch is not declared recovered by an event it is not trusted to be listed by**
+/// (NOTES § D162). An `InitDone` with no `Init` before it is the broken stream `Watch::take`
+/// already refuses to publish from — *your cluster has no pods* — and the same distrust has to
+/// reach the failure beside it, or one file says two things about one event.
+///
+/// kube never sends that sequence (`watcher.rs:548`, `:555-559` are reached only from
+/// `State::InitPage`, which only `Init` enters), so this is defensive exactly as that gate is —
+/// and it is a shape a synthetic stream can feed and a real one cannot, which is the whole
+/// reason to feed it here.
+#[tokio::test]
+async fn an_init_done_that_never_had_an_init_neither_publishes_nor_clears() {
+    let mut store = all_but("pods");
+    drive(
+        vec![one_watch::<Pod, _>(
+            vec![Err(watcher::Error::NoResourceVersion), Ok(Event::InitDone)],
+            |s| &mut s.pods,
+        )],
+        &mut store,
+    )
+    .await;
+
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "an `InitDone` this watch never saw an `Init` for was read as a recovery, while the \
+         very same event was distrusted too much to publish a single pod from"
+    );
+    assert!(
+        store.snapshot(now()).is_none(),
+        "a watch that never listed published a cluster anyway (NOTES § D28)"
+    );
+}
+
+/// **A stream that finishes is recorded on its own watch instead of being dropped in silence**
+/// (NOTES § D162). `select_all` removes a finished stream and carries on with the rest, so
+/// without the marker [`updates`] appends, the pod watch here would keep answering with the pods
+/// it last held and nothing anywhere would say they had stopped arriving.
+///
+/// **The gate is deliberately left open.** This watch listed completely before it ended, so what
+/// it holds is a real answer that is merely no longer fresh; closing the gate would replace
+/// *stale, and it says so* with *nothing, and it does not*.
+#[tokio::test]
+async fn a_stream_that_ends_is_recorded_and_the_other_watches_are_not() {
+    let mut store = all_but("pods");
+    drive(
+        vec![one_watch(listing(items::<Pod>("kube-system-pods")), |s| {
+            &mut s.pods
+        })],
+        &mut store,
+    )
+    .await;
+
+    let ended: Vec<ObjectKind> = store
+        .troubles()
+        .into_iter()
+        .filter(|t| t.ended)
+        .map(|t| t.kind)
+        .collect();
+    println!(
+        "watches that stopped: {ended:?} · failing: {:?}",
+        failing_kinds(&store)
+    );
+    assert_eq!(
+        ended,
+        vec![ObjectKind::Pod],
+        "a stream that ran out was dropped by `select_all` without a word, so its kind is \
+         presented as live"
+    );
+    assert_eq!(
+        failing_kinds(&store),
+        Vec::new(),
+        "a stream that ended cleanly was reported as having failed"
+    );
+    assert!(
+        store.snapshot(now()).is_some(),
+        "a watch that listed completely and then ended had its whole cluster withheld"
+    );
+}
+
+/// **A failure is not withdrawn by the relist that is still in flight to answer it**
+/// (NOTES § D162). After `NoResourceVersion` (`watcher.rs:568`) and `InitialListFailed` (`:584`)
+/// kube returns `State::Empty`, which emits `Init` (`:523`) and then `InitApply`s (`:548`) — so
+/// the objects arriving after those two errors are a **relist that has not finished**, and the
+/// first of them is not the watch delivering an answer.
+///
+/// **The half that makes it a defect rather than a wrong word is the second assertion.**
+/// `complete` is never reset, so a relisting watch is invisible to `still_listing` too. A clear
+/// here takes both facts quiet at once — and a relist is sitting in `api.list()`, the half of
+/// `k8s.rs` § WHAT A THROTTLE LOOKS LIKE that has **no** deadline: a watch poll unblocks at
+/// ~295 s, a LIST against a dead socket never does. The store would read healthy for the life of
+/// the process while serving a cluster from before the failure.
+///
+/// The `InitDone` at the end is what is allowed to clear it, and it is asserted too, or this
+/// test would pass on a watch that never recovers at all.
+#[tokio::test]
+async fn a_relist_in_flight_does_not_withdraw_the_failure_it_is_answering() {
+    let pods = items::<Pod>("kube-system-pods");
+    let mut store = all_but("pods");
+    drive(
+        vec![one_watch(listing(pods.clone()), |s| &mut s.pods)],
+        &mut store,
+    )
+    .await;
+    assert_eq!(
+        failing_kinds(&store),
+        Vec::new(),
+        "a watch that listed cleanly was reported as failing"
+    );
+
+    // The 410 a compacted `continue` token produces, then the relist kube starts for it — its
+    // `Init` and its first object, and no more.
+    let mut relist: Vec<watcher::Result<Event<Pod>>> = vec![
+        Err(watcher::Error::InitialListFailed(kube::Error::Api(
+            Box::new(kube::core::Status {
+                code: 410,
+                reason: "Expired".to_string(),
+                ..Default::default()
+            }),
+        ))),
+        Ok(Event::Init),
+    ];
+    relist.push(Ok(Event::InitApply(
+        pods.first().cloned().expect("the capture holds pods"),
+    )));
+    drive(vec![one_watch(relist, |s| &mut s.pods)], &mut store).await;
+
+    println!(
+        "mid-relist · failing {:?} · outstanding {:?} · pods {:?}",
+        failing_kinds(&store),
+        outstanding_kinds(&store),
+        store.snapshot(now()).map(|c| c.pods.len()),
+    );
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Pod],
+        "one object of an unfinished relist withdrew the failure it was sent to answer, and \
+         `complete` is still true so nothing else on this store says a LIST is running: the \
+         store reads fully healthy while it serves a cluster from before the 410"
+    );
+
+    // And the LIST that finishes *is* what clears it, or the rule above would just be "never".
+    drive(
+        vec![one_watch::<Pod, _>(vec![Ok(Event::InitDone)], |s| {
+            &mut s.pods
+        })],
+        &mut store,
+    )
+    .await;
+    assert_eq!(
+        failing_kinds(&store),
+        Vec::new(),
+        "the relist finished and the failure it answered is still standing"
+    );
+}
+
+/// **All five rows of `troubles()` are exercised, not just the first.** Every other assertion in
+/// this file names `ObjectKind::Pod`, so deleting a row from the five-entry table in
+/// `Store::troubles` broke nothing — the `write-guard.py` `CANARIES` rule, one file over: a
+/// derived list has to assert it found something, and finding only the first entry is not that.
+///
+/// The sibling of [`a_bootstrap_that_is_still_running_names_the_lists_it_is_waiting_for`], off
+/// the same [`kind_of_stream`] table so the two cannot drift.
+#[tokio::test]
+async fn every_watch_reports_its_own_failure_under_its_own_kind() {
+    for (failing, kind) in kind_of_stream() {
+        let store = five_watches_one_failing(failing).await;
+        assert_eq!(
+            failing_kinds(&store),
+            vec![kind.clone()],
+            "the {failing} watch failed and `troubles()` did not report it as {kind:?} — a row \
+             of the five-kind table is missing, or names the wrong watch"
+        );
+    }
+}
+
+/// The five watches driven together with exactly one of them delivering nothing but an error.
+async fn five_watches_one_failing(failing: &str) -> Store {
+    fn or_broken<K>(
+        events: Vec<watcher::Result<Event<K>>>,
+        broken: bool,
+    ) -> Vec<watcher::Result<Event<K>>> {
+        if broken {
+            vec![Err(watcher::Error::NoResourceVersion)]
+        } else {
+            events
+        }
+    }
+    assert!(
+        kind_of_stream().iter().any(|(name, _)| *name == failing),
+        "{failing} is not one of the five streams"
+    );
+    let mut store = Store::default();
+    drive(
+        vec![
+            one_watch(
+                or_broken(listing(items::<Pod>("kube-system-pods")), failing == "pods"),
+                |s| &mut s.pods,
+            ),
+            one_watch(
+                or_broken(listing(items::<Node>("nodes")), failing == "nodes"),
+                |s| &mut s.nodes,
+            ),
+            one_watch(
+                or_broken(
+                    listing(items::<Deployment>("deployments")),
+                    failing == "deployments",
+                ),
+                |s| &mut s.deployments,
+            ),
+            one_watch(
+                or_broken(
+                    listing(items::<StatefulSet>("statefulsets")),
+                    failing == "statefulsets",
+                ),
+                |s| &mut s.stateful_sets,
+            ),
+            one_watch(
+                or_broken(
+                    listing(items::<DaemonSet>("daemonsets")),
+                    failing == "daemonsets",
+                ),
+                |s| &mut s.daemon_sets,
+            ),
+        ],
+        &mut store,
+    )
+    .await;
+    store
+}
+
+/// **`ended` is never cleared, and this is what pins it** (NOTES § D162). It is an *absent*
+/// line, so `cargo mutants` has nothing to mutate: the guard has to be a test or it is nothing.
+///
+/// **Fed through [`Store::pod`] and not through a second [`drive`], and the first draft of this
+/// test was the second and proved nothing.** [`updates`] appends the end marker as its stream's
+/// last item, so a second `drive` sets `ended` back to `true` on its way out whatever
+/// [`Watch::take`] did in between — the assertion passed with the clear planted. The claim lives
+/// in `take`, so the events go into `take`.
+///
+/// **A watch that stopped and was resubscribed is not a watch that never stopped**, and the
+/// objects landing again may not be allowed to make it look like one.
+#[tokio::test]
+async fn objects_arriving_again_do_not_take_back_the_end_of_a_watch() {
+    let mut store = all_but("pods");
+    drive(
+        vec![one_watch(listing(items::<Pod>("kube-system-pods")), |s| {
+            &mut s.pods
+        })],
+        &mut store,
+    )
+    .await;
+    assert!(
+        trouble_for(&store, ObjectKind::Pod).is_some_and(|t| t.ended),
+        "the stream ran out and nothing recorded it"
+    );
+
+    // Everything a resubscribed watch delivers, straight into the store: a whole fresh LIST and
+    // then ordinary traffic. Every one of these clears a *failure*; none may clear this.
+    for event in listing(items::<Pod>("kube-system-pods")) {
+        store.pod(&now(), event.expect("the synthesised LIST holds no errors"));
+    }
+    store.pod(&now(), Event::Apply(object::<Pod>("crashloop")));
+
+    assert!(
+        trouble_for(&store, ObjectKind::Pod).is_some_and(|t| t.ended),
+        "a whole LIST and an Apply landed on a watch whose stream had ended and took the record \
+         of it away, so a kind nothing is watching any more is presented as live"
+    );
+}
+
+/// **There is no retry budget, and this is the count that would have caught one.** k9s called
+/// `BailOut` after five ([#3922](https://github.com/derailed/k9s/issues/3922)), so a VPN blip
+/// over lunch meant the tool was gone on return. Twenty failures here, and the LIST that follows
+/// them still lands.
+///
+/// It is a different question from [`a_failed_watch_does_not_end_the_loop`], which catches a `?`:
+/// a budget is not an early `return`, it is a counter, and a counter survives every test that
+/// only feeds one or two failures.
+#[tokio::test]
+async fn twenty_failures_do_not_use_up_a_budget_that_does_not_exist() {
+    let pods = items::<Pod>("kube-system-pods");
+    let mut events: Vec<watcher::Result<Event<Pod>>> = (0..20)
+        .map(|_| Err(watcher::Error::NoResourceVersion))
+        .collect();
+    events.extend(listing(pods.clone()));
+
+    let mut store = all_but("pods");
+    drive(vec![one_watch(events, |s| &mut s.pods)], &mut store).await;
+
+    let snapshot = store
+        .snapshot(now())
+        .expect("the LIST after twenty failures landed and the gate opened");
+    assert_eq!(
+        snapshot.pods.len(),
+        pods.len(),
+        "the loop stopped somewhere in twenty failures, so there is a budget after all"
     );
 }
 
@@ -867,13 +1360,58 @@ fn kube_still_pages_the_initial_list_at_the_number_this_repo_chose() {
         watcher::Config::default().timeout,
         None,
         "kube grew a default timeout, and it is one field for the list call and the watch \
-         (watcher.rs:400, :414) — a bounded LIST would now also re-LIST the cluster on that \
-         period"
+         (watcher.rs:400, :414) — the watch would then close and reconnect on that period \
+         instead of ~295s. It would NOT bound the LIST: `to_list_params` copies the field but \
+         `ListParams::populate_qp` never serialises it (kube-core params.rs:94-122, and :381 is \
+         the only timeoutSeconds in that crate, on the watch builder)"
     );
 }
 
 /// **A LIST that arrives in pages is still one LIST** (NOTES § D147, D28). The gate is shut at
 /// every page boundary — not merely before the first one — it opens once, and it opens on the
+/// **`Config::timeout` bounds the watch and does not reach the LIST at all** — the fact
+/// `k8s.rs` § WHAT A THROTTLE LOOKS LIKE now rests on, pinned here because it is a claim about a
+/// dependency and the doc that makes it cannot notice kube changing its mind.
+///
+/// `to_list_params` copies the field into the `ListParams` (`watcher.rs:400`) and
+/// `ListParams::populate_qp` never serialises it, so a deadline set there is dropped by the
+/// query builder one screen away — while `ListParams::timeout`'s own doc claims *"Defaults to
+/// 290s"* (`kube-core-4.2.0/src/params.rs:137-139`). **Asserted off the URL kube would actually
+/// send** rather than off either doc, and the watch is asserted beside it or the test would pass
+/// just as well on a build that had lost `timeoutSeconds` everywhere.
+#[test]
+fn a_list_timeout_never_reaches_the_wire_and_a_watch_one_does() {
+    let request = kube::core::Request::new("/api/v1/pods");
+    let listed = request
+        .list(&kube::api::ListParams {
+            timeout: Some(60),
+            ..Default::default()
+        })
+        .expect("a LIST request builds");
+    let watched = request
+        .watch(
+            &kube::api::WatchParams {
+                timeout: Some(60),
+                ..Default::default()
+            },
+            "1",
+        )
+        .expect("a watch request builds");
+    println!("LIST  {}\nWATCH {}", listed.uri(), watched.uri());
+    assert!(
+        !listed.uri().to_string().contains("timeoutSeconds"),
+        "kube now sends the list timeout, so § WHAT A THROTTLE LOOKS LIKE's \"the initial LIST \
+         is unbounded\" has stopped being true: {}",
+        listed.uri()
+    );
+    assert!(
+        watched.uri().to_string().contains("timeoutSeconds=60"),
+        "the watch stopped carrying the timeout, so the ~295s bound the same section claims for \
+         a severed watch is gone too: {}",
+        watched.uri()
+    );
+}
+
 /// union of every page rather than on the last one.
 #[test]
 fn a_paged_initial_list_keeps_the_gate_shut_until_the_last_page() {
@@ -968,7 +1506,7 @@ async fn a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land(
     events.extend(listing(vec![relisted]));
 
     let mut store = all_but("pods");
-    drive(vec![one_watch(events, Store::pod)], &mut store).await;
+    drive(vec![one_watch(events, |s| &mut s.pods)], &mut store).await;
 
     let snapshot = store
         .snapshot(now())
@@ -983,9 +1521,16 @@ async fn a_page_that_fails_restarts_the_list_and_the_pages_before_it_never_land(
         BTreeSet::from(["broken-crashloop"]),
         "the pages the failed attempt had already delivered were published as part of the cluster"
     );
-    assert!(
-        store.failure().is_some(),
-        "the page that failed was swallowed: nothing on the store says the LIST restarted"
+    // **The 410 is cleared by the relist that answered it, and that is the point of the box.**
+    // The old store-wide field could not clear, because it could not tell whose failure it held
+    // (NOTES § D145); this one can, because the events that cleared it arrived on the same watch
+    // (NOTES § D162). What survives is the *observation* — the pages the dead attempt delivered
+    // were still thrown away, asserted above.
+    assert_eq!(
+        failing_kinds(&store),
+        Vec::new(),
+        "the LIST that failed was answered by a complete relist on the same watch and the store \
+         still reports it as failing"
     );
 }
 
@@ -1118,7 +1663,7 @@ fn listing_for(store: &Store, kind: ObjectKind) -> Listing {
 async fn a_throttled_api_server_reaches_the_store_as_a_code_and_not_as_prose() {
     let mut store = all_but("pods");
     drive(
-        vec![one_watch::<Pod>(
+        vec![one_watch::<Pod, _>(
             vec![Err(watcher::Error::InitialListFailed(kube::Error::Api(
                 Box::new(kube::core::Status {
                     code: 429,
@@ -1129,13 +1674,14 @@ async fn a_throttled_api_server_reaches_the_store_as_a_code_and_not_as_prose() {
                     ..Default::default()
                 }),
             )))],
-            Store::pod,
+            |s| &mut s.pods,
         )],
         &mut store,
     )
     .await;
 
-    let code = match store.failure() {
+    let refused = trouble_for(&store, ObjectKind::Pod).expect("the pod watch reported nothing");
+    let code = match refused.failure {
         Some(watcher::Error::InitialListFailed(kube::Error::Api(status))) => status.code,
         other => panic!(
             "a 429 on the initial LIST did not reach the store as a typed API error: {other:?}"
@@ -1359,7 +1905,7 @@ async fn the_loop_stamps_every_event_it_pumps() {
             .into_iter()
             .map(|pod| Ok(Event::InitApply(pod))),
     );
-    drive(vec![one_watch(opening, Store::pod)], &mut store).await;
+    drive(vec![one_watch(opening, |s| &mut s.pods)], &mut store).await;
     let after = Time(Timestamp::now());
 
     let listing = listing_for(&store, ObjectKind::Pod);

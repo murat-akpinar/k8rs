@@ -2476,7 +2476,7 @@ public release.
       box below already says in its own text that it runs discovery *and the
       capability probe*, which is the same split `browsable` and its fetch made
       ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26))
-- [ ] Reconnect/backoff surfaced as a state the UI can show — **and the tool
+- [x] Reconnect/backoff surfaced as a state the UI can show — **and the tool
       never exits because the cluster went away.** A connectivity failure is a
       banner, retried for as long as the user leaves it open; there is no retry
       budget after which k8rs quits. k9s had the opposite of each half
@@ -2509,7 +2509,34 @@ public release.
       broken — the path nobody tests. So this box is proven idle: leave it
       running against kind, `docker stop` the node, wait past any timeout, start
       it again, and the findings must come back on their own
-      ([PRIOR-ART § B3](PRIOR-ART.md#b3--reconnect-logic-dies-quietly))
+      ([PRIOR-ART § B3](PRIOR-ART.md#b3--reconnect-logic-dies-quietly)).
+      **That last proof is not this box's to run and has moved to the `connect()`
+      box below** ([D161](NOTES.md#d161--the-reconnect-boxs-code-lands-before-connect-and-its-proof-can-only-run-after-it-2026-08-26)):
+      nothing in this build constructs a `Client` — `connect()` is the first line
+      that does, and `docker stop` against a binary reading a fixture measures the
+      fixture. The code has to land here anyway, because `connect()` *starts the
+      watches* and would otherwise be written against the field this box replaces.
+      **Done here: the failure shapes a fed stream can reach** — one watch erroring
+      while four stay healthy, a stream that *ends* (which `select_all` drops in
+      silence and kube's doc says cannot happen), and a loop that takes the next
+      poll after an `Err` rather than returning.
+      Done: `Watch<T>` carries `failure` and `ended`; `Store::failure` is deleted,
+      not left beside them; `Trouble`/`Store::troubles()` is what a screen reads.
+      **The clear point is *a complete answer*** — a LIST this watch started and
+      finished, or ordinary traffic — and the first draft, which cleared on
+      `InitApply`, was a defect `tester` measured: a relist in flight withdrew the
+      failure it was sent to answer, and `complete` is never reset, so the store
+      read fully healthy while serving a cluster from before the 410
+      ([D162](NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26)).
+      `drive` holds no `Result`, so there is no expression a `?` could attach to.
+      The end marker is appended *inside* each stream, so `select_all` now drops a
+      stream that has already recorded itself as stopped. **The operator review
+      returned eleven findings and two were blocking**; one — a bearer token
+      reachable through `Display` on a `kube` error — was this box's contract and
+      is fixed here and in `docs/security.md`, and one is older than this box and
+      went to the `--namespace` box, which is why the security gate's
+      Authorization row is **owed rather than ticked**
+      ([D163](NOTES.md#d163--the-operator-review-of-the-reconnect-box-eleven-findings-and-the-one-that-is-older-than-the-box-2026-08-26))
 - [ ] **The token-hygiene scan reads `struct` and not `enum`, and `connect()` is
       about to write the enum it cannot see.** **The first one is already in the
       tree**: `k8s.rs`'s `Capability` landed on 2026-08-26 and the scan's count
@@ -2544,7 +2571,17 @@ public release.
       derived `Debug`** (`config/file_config.rs:306`), and that map is exactly
       where the oidc and gcp providers keep `id-token` and `refresh-token`.
       `AuthInfo.other: BTreeMap<String, Value>` is the same hazard for any
-      unmodeled key. **`scripts/security-guard.py`'s token-hygiene rule reads
+      unmodeled key. **And a second foreign type joined the class on 2026-08-26,
+      from the reconnect box's operator review: `watcher::Error`.** Its `Display`
+      interpolates its source at every hop down to
+      `AuthError::AuthExecRun`'s `{out:?}` over a `std::process::Output`
+      (`watcher.rs:29` → `error.rs:104` → `client/auth/mod.rs:55`), so one
+      `format!("{}", err)` on an expired `exec` credential prints the plugin's
+      stdout — which is the ExecCredential JSON, token included. The **contract**
+      is already written (`docs/security.md § Token hygiene`: a `kube` error is
+      never formatted whole, a renderer selects fields); the **guard** is this
+      box's, and it is the same missing capability, not a second one
+      ([D162](NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26)). **`scripts/security-guard.py`'s token-hygiene rule reads
       *our* structs**, so it will report `0 can hold a token` however this goes —
       the gate's own wording, *"no `Debug` is derived over a type that can hold
       config"*, was written when every such type was ours. Done: `connect()`
@@ -2567,7 +2604,26 @@ public release.
       paths *disagree* about a cluster whose metrics-server is down, so one of
       them has to be chosen; a crashlooping aggregated APIService takes the whole
       sidebar with `Discovery::run()`; and `filter()` drops the core group too,
-      which removes the capability probe's own emptiness guard ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26))
+      which removes the capability probe's own emptiness guard ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+      **And this box carries the reconnect box's idle proof**, because it is the
+      first box that can run one
+      ([D161](NOTES.md#d161--the-reconnect-boxs-code-lands-before-connect-and-its-proof-can-only-run-after-it-2026-08-26)):
+      leave it running against kind, `docker stop` the node, wait past any
+      timeout, start it again, and the findings must come back on their own with
+      nobody touching the keyboard. **And it applies the backoff, which nothing
+      else can**: `updates()` takes an `impl Stream`, so the caller that builds
+      the `watcher()` owes it, and kube's own `watcher::Error` doc says
+      *"to avoid constantly looping errors, make sure backoff is applied"* —
+      backoff is opt-in (`watcher.rs:778-779`), so today a 403 on `list nodes`
+      would run `Err → Init → list() → 403` bounded only by round-trip time,
+      which is the security gate's *never retries in a loop* broken. `PRIOR-ART
+      § B3`'s rule is *retried forever*, not *as fast as the socket allows*.
+      `DefaultBackoff` is safe to reach for — `ExponentialBackoff::new` calls
+      `.without_max_times()` (`watcher.rs:930`) — but **`StreamBackoff` closes a
+      stream whose backoff returns `None`** (`utils/stream_backoff.rs:9-14`),
+      which is k9s's `BailOut` inside kube's own utility, so whatever is wired
+      here keeps one `updates()` stream per `Watch<T>` and resubscribes below
+      `drive` ([D162](NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26))
 - [ ] 403 vs 401 vs no-connection distinguished (**three** variants, not two).
       `401` is a credential-plugin token that expired mid-session — the normal
       case on EKS/GKE/AKS — and it names the renewal command from the user's
@@ -2744,7 +2800,29 @@ public release.
       falls back to the context's namespace (then `default`), with the header
       stating which scope is in effect and why. A namespace-scoped user must
       get a working tool, not an empty one
-      ([NOTES § D5](NOTES.md#d5--namespace-scoping-is-a-v1-requirement-not-a-filter))
+      ([NOTES § D5](NOTES.md#d5--namespace-scoping-is-a-v1-requirement-not-a-filter)).
+      **The premise, measured 2026-08-26 and worse than this box assumed: today a
+      403 on any one watch blanks the whole tool, and the screen it shows is
+      *loading*.** `listed()` is `still_listing().is_empty()` and `progress()`
+      answers for any watch with `complete == false`, so a refused kind means
+      `snapshot()` is `None` and **every rule is silent for the life of the
+      process** — while `still_listing()` reports that kind as a LIST whose
+      `since` is *just now*, refreshed by each `Init` of the retry loop. `nodes`
+      is cluster-scoped and cannot be granted by a namespaced `Role`, so this is
+      the ordinary enterprise developer, not an edge case, and `kubectl get pods
+      -n mine` works instantly beside it. It is
+      [PRIOR-ART § B4](PRIOR-ART.md#b4--a-denied-permission-must-degrade-one-feature-not-the-tool)
+      ([k9s#4160](https://github.com/derailed/k9s/pull/4160)) and
+      [§ C2](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens)'s *loading ·
+      empty · denied* collapsed into two. **The ingredient this box needs now
+      exists** — per-watch failure identity landed with the reconnect box
+      ([D162](NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26)) —
+      **and the thing it must reopen is the gate**: `listed()` has to count a
+      refused watch as *answered*, not *pending*, which is the explicit exception
+      [D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)
+      does not yet carry. Found by the operator review of the reconnect box, which
+      is also what makes the Authorization row of the security gate **not
+      tickable until this box closes** — that row is this box's to earn
 - [ ] Wire into the same print loop; verify against kind while breaking pods
 - [ ] The **read-only `ClusterRole`** written out in `docs/security.md`, and
       verified by running v0.0.1 against kind under exactly that role and

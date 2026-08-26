@@ -214,6 +214,23 @@ resource.
   embedded in an error message. The config type's `Debug` output is wrapped.
 - This includes the panic path: a backtrace dumped to stderr must not
   contain credentials.
+- **A `kube` error is never formatted whole — not with `{}`, not with `{:?}`.**
+  A renderer selects fields off the typed error: the variant, and
+  `Status.code` / `Status.reason` where there is one. Measured against the
+  crates on 2026-08-26, `Display` interpolates the source at every hop —
+  `watcher::Error::InitialListFailed` is `"…: {0}"` (`watcher.rs:29`),
+  `kube_client::Error::Auth` is `"auth error: {0}"` (`error.rs:104`), and
+  `AuthError::AuthExecRun` is
+  `"auth exec command '{cmd}' failed with status {status}: {out:?}"`
+  (`client/auth/mod.rs:55`) over a `std::process::Output`, whose `Debug` prints
+  stdout as a string when it is valid UTF-8. An `exec` credential plugin writes
+  `{"kind":"ExecCredential","status":{"token":"…"}}` to **stdout**, so one
+  `format!("{}", err)` on an expired EKS/GKE/AKS session prints a bearer token.
+  Turning `oauth` and `oidc` off removes two variants and not this one.
+  `scripts/security-guard.py` cannot see it — its taint follows a field type
+  spelled `Client` — so this rule is checked by hand until the box that teaches
+  the guard foreign types closes
+  ([NOTES § D162](../NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26)).
 - **One thing off the kubeconfig does enter our own structs, and it is the
   public half only.** Certificate rule C1 warns when the client certificate is
   about to expire, so `ClusterSnapshot` carries the **certificate** bytes and
