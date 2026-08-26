@@ -2511,7 +2511,14 @@ public release.
       it again, and the findings must come back on their own
       ([PRIOR-ART § B3](PRIOR-ART.md#b3--reconnect-logic-dies-quietly))
 - [ ] **The token-hygiene scan reads `struct` and not `enum`, and `connect()` is
-      about to write the enum it cannot see.** `security-guard.py` decides *can
+      about to write the enum it cannot see.** **The first one is already in the
+      tree**: `k8s.rs`'s `Capability` landed on 2026-08-26 and the scan's count
+      did not move — still *43 structs, 0 can hold a token* — because the diff
+      added no `struct` line. That enum is harmless (unit variants, no data), so
+      nothing is wrong today; what it proves is that the counter goes green
+      without having looked, which is this box's whole subject with a live
+      example instead of a hypothetical
+      ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)). `security-guard.py` decides *can
       this type hold a credential* by matching field types against `\bClient\b`,
       which works — `kube::Client`, `Arc<kube::Client>` and a rustfmt-wrapped
       field are all caught. But its `STRUCT` regex matches `struct` only, so
