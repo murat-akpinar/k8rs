@@ -181,6 +181,7 @@ its line moving with it.
 - [D157](#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22) — what a re-close runs, and the two numbers that only a close re-takes
 - [D158](#d158--the-waste-boxs-second-half-and-the-jargon-translation-that-was-wrong-in-this-file-first-2026-08-23) — the Waste box's second half, and the jargon translation that was wrong in this file first
 - [D159](#d159--the-phase-4-re-close-and-the-three-counts-that-only-a-close-re-takes-2026-08-23) — the Phase 4 re-close, and the three counts that only a close re-takes
+- [D160](#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26) — the capability probe, the seven group strings a cluster confirmed, and the two prose claims it took away
 
 ## Why it exists — where the gap is
 
@@ -11056,7 +11057,17 @@ serves, so the probe is free — no extra request, no configuration:
 | `policy/PodDisruptionBudget` | drain safety |
 | `cert-manager.io` | C4 certificate findings |
 | `monitoring.coreos.com` (kube-prometheus-stack) | the traffic view, later |
-| `networking.istio.io` / Linkerd / Cilium | service-to-service traffic, later |
+| `networking.istio.io` | service-to-service traffic, later |
+| `linkerd.io` or `policy.linkerd.io` | the same, for Linkerd |
+| `cilium.io` | the same, for Cilium |
+
+The last three are **one feature and three facts** — what a reader is told to
+install differs per mesh — so the code carries three variants and not one
+([D160](#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26),
+where every string above is measured against a cluster). **A served group is a
+floor on what the cluster once had, never proof the product is running**: CRDs
+outlive the operator that installed them, so rule 1's *installed* is the
+stronger word and *registered* is the fact.
 
 Two rules make this honest rather than magic:
 
@@ -13688,3 +13699,140 @@ construction. Both are non-blocking and the triage rule is not bent for a
 deadline — but they now need a ruling to be written at all, and they join four
 findings from D158 in that position. **That is the cost of a freeze, recorded
 rather than argued with.**
+
+### D160 — the capability probe, the seven group strings a cluster confirmed, and the two prose claims it took away (2026-08-26)
+
+`capabilities(&[(ApiResource, ApiCapabilities)]) -> Option<BTreeSet<Capability>>`
+in `k8s.rs` § WHAT ELSE THE CLUSTER SERVES: one exact `match (group, kind)` over
+the answer [D152](#d152--discovery-what-each-call-costs-and-the-four-ways-it-fails-quietly-2026-08-22)
+already promised it free. Seven unit variants, no string kept, no round trip of
+its own. Measurements:
+[reports/2026-08-26](reports/2026-08-26-capability-probe-group-strings.md).
+
+**`None` is *nothing was discovered* and `Some(∅)` is *asked, none installed*** —
+the empty input is D152's failure 1, a server too old for the aggregated call
+answering `Ok` with zero groups. Flattened into one spelling, a cluster that has
+metrics-server, cert-manager and Istio is told once per feature to install what
+it already has: invariant 14 broken by a plain sentence that is false. It is the
+distinction `ClusterSnapshot`'s six `Option<Vec<_>>` fields already draw.
+`browsable` refuses to interpret the same emptiness and that is not a
+contradiction — an empty sidebar is *visible*, an absent capability's whole
+output is one sentence about something not on the screen.
+
+**It reads the raw pairs and not `browsable`'s output, and the second reason
+was measured rather than reasoned.** That output has already dropped what nobody
+can `list`, and a capability is not a row. It has also already been through
+`ingest`, and **`text()` *removes* an unprintable rather than replacing it** —
+so `metrics.k8s\u{200b}.io` comes back out of the guard spelled exactly
+`metrics.k8s.io`. Six spellings do this, not one: U+200B, U+202E, U+00AD,
+U+FEFF, NUL and a **trailing newline** — the last because `text()` only inserts
+a space *between two characters it kept*. A probe reading the stripped word
+reports metrics-server present on a cluster that has no such group.
+
+**Seven group strings, and the evidence behind them is not one grade** — worth
+saying, because the review's own table grades them and a summary that flattens
+it is the failure this file keeps naming. **All seven are read off the shipped
+manifests** at each project's HEAD (`spec.group` per CRD, or the APIService's):
+`metrics.k8s.io` · `policy`+`PodDisruptionBudget` · `cert-manager.io` ·
+`monitoring.coreos.com` · `networking.istio.io` · `linkerd.io` |
+`policy.linkerd.io` · `cilium.io`. **Four were then confirmed in a live
+discovery answer** — metrics-server and cert-manager installed, Istio's CRDs
+applied, `policy` built in. `monitoring.coreos.com`, `linkerd.io` and
+`cilium.io` were never on a cluster and stand on their bundles alone.
+`acme.cert-manager.io` is a *distinct* group in the same answer, so the exact
+match cannot swallow it, and `networking.istio.io` came back at **three versions
+at once** — which is why a capability is keyed by group and PRIOR-ART § F4's
+*group + version + resource* does not govern here: F4 identifies a **row**, and
+a capability is not a row.
+
+**Two claims the code shipped with were measurably false, and both were mine to
+catch and were caught by the operator review instead.**
+
+1. *`policy` carried `PodSecurityPolicy` until 1.25, and `--runtime-config` can
+   switch a kind off without its group going anywhere.* PSP is gone below
+   [D149](#d149--the-floor-is-129-because-one-rules-else-turns-a-missing-field-into-a-claim-2026-08-22)'s floor of 1.29, and both `--runtime-config`
+   shapes were measured to take the group off `/apis` with them, because
+   `policy/v1` serves exactly one resource. **The kind key stays; its reason is
+   replaced.** `policy` is a built-in every supported server serves, so
+   `DisruptionBudgets` missing from a `Some(set)` is a canary that the answer is
+   incomplete — not a fact about the cluster.
+2. *The empty set is a real, ordinary answer: a bare cluster with none of these
+   installed.* A cluster exactly as `kind create cluster` left it answers
+   **`Some({DisruptionBudgets})`** — 51 resources, `policy v1` among them.
+   `Some(∅)` needs `policy` gone, so it is the alarming answer and the prose
+   told the next reader the opposite.
+
+**Registered is not running, and this is the 3am lie nobody had written down.**
+The review went hunting for a false *absence* and found a false *presence*:
+**CRDs outlive their operator** — `helm uninstall` does not delete them,
+`istioctl uninstall` leaves them without `--purge` — measured live with
+cert-manager's four CRDs served and its controller never run. **`Prometheus` is
+the row that lies out loud**, because § Capability probe rule 2 has that feature
+say *"Prometheus is installed, tell me where to reach it"*: on a cluster whose
+operator was removed six months ago the reader is asked to type an address for
+something gone. Istio's `remote` profile is the same shape by design. `Metrics`
+is immune — an APIService is not a CRD. **A served group is a floor on what the
+cluster once had, never proof the product is running**, and the word *installed*
+that rule 1 licenses is stronger than the fact *registered*.
+
+**The three meshes are three variants where § Capability probe wrote one row.**
+They are one *feature* and not one fact — what a reader is told to install
+differs per mesh — and `k8s.rs` freezes at Phase 5 close, so collapsing them now
+would cost a later box an answer it could not get back. That section's table is
+corrected to the strings the code uses. Linkerd is two groups because
+`linkerd-crds` ships both and neither alone is the install.
+
+**What `connect()` inherits, so that box does not rediscover it.** Three facts,
+all measured:
+
+- **The two discovery paths disagree about the same cluster at the same moment.**
+  With metrics-server scaled to zero, `GET /apis` still lists `metrics.k8s.io`
+  while `GET /apis/metrics.k8s.io/v1beta1` answers `503`, and the aggregated
+  answer carries `freshness: Stale` with `resources: []` — which reaches
+  `capabilities()` as **absent**, because kube's `from_v2` builds one pair per
+  `resources[]` entry (`parse.rs:94-108`) and discards `freshness` (D152's
+  failure 3). So the hand-rolled legacy fallback answers *present* where
+  `run_aggregated()` answers *absent*, and the user gets a different sentence
+  depending on which path won. **`connect()` has to decide which answer wins**;
+  it is a decision, not an implementation detail.
+- **That 503 is D152's failure 2, measured.** `Discovery::run()`'s `?` is inside
+  the loop, so one crashlooping aggregated APIService takes the **entire
+  browser sidebar** with it — and metrics-server is the aggregated APIService
+  almost every cluster has.
+- **A trimmed discovery zeroes the probe silently, and the core group does not
+  survive it.** `filter()` sets `DiscoveryMode::Allow`, `is_queryable` is
+  `allowed.contains(group)` (`mod.rs:24-29`) and `CORE_GROUP` is `""`
+  (`apigroup.rs:207`), so `filter()` drops the core group too unless `""` is
+  listed — only `exclude()` keeps it. The `is_empty()` guard's own premise, *a
+  working server always serves `v1`*, stops holding at the same moment. **The
+  PM's brief claimed the core group survives; `dev-core` read the source and
+  it does not.** One more of the class D136 named, in the file that names it.
+
+**`rules::Metrics` survives the measurement with four arms.** `Stale`/0 is
+identical for *installed and crashlooping* and *orphaned by a bad uninstall*, so
+discovery cannot tell them apart — and `Silent`'s wording, *"installed and did
+not answer"*, is honest for both. No fifth arm. What the poll box must not do is
+route a `Stale` group to `NotInstalled`, which would make `Silent` unreachable
+and print *install metrics-server* to somebody who has it.
+
+**The documented read-only role could not run discovery, and that is fixed
+here.** `docs/security.md`'s `k8rs-readonly` has no `nonResourceURLs` rule; it
+works today only because Kubernetes ships `system:discovery` bound to
+`system:authenticated`, and deleting that binding is ordinary hardening. Applied
+verbatim to a service account on such a cluster, every resource grant still
+worked and `/apis` answered `403`. **Phase 5 is the phase that introduced the
+requirement** — nothing before it called discovery — which is PRIOR-ART § B4
+landing on our own role. The rule is added in the same change.
+
+**And that 403 names no verb and no resource.** The measured `Status` carries an
+empty `details` — it is a `nonResourceURL` refusal — so a formatter reading
+`details.group`/`details.kind` prints an empty sentence, and the only true one
+is *"this kubeconfig may not `get /apis`"*. `CLAUDE.md`'s gate said *names the
+missing verb + resource* with no room for that case, and is corrected in the
+same change. kubectl's own answer here is a repeating `couldn't get current
+server API group list` storm, which is the retry loop the gate forbids by name.
+
+**Invariant 4 has no subject in this box** and the review says so rather than
+passing over it: nothing here prints a kubectl line, executes anything, builds a
+path, or returns a string the cluster wrote. Seven unit variants is invariant 9
+made structural.

@@ -2458,9 +2458,24 @@ public release.
       *Pod and Node* until 2026-08-22, contradicting the invariant, `screens/
       resources.md` and the code that had already shipped. A browser view's own
       stream is not one of them: a closed view drops it
-- [ ] Capability probe from the same discovery call: `metrics.k8s.io`,
+- [x] Capability probe from the same discovery call: `metrics.k8s.io`,
       `policy`, `cert-manager.io`, `monitoring.coreos.com`, Istio/Linkerd/
       Cilium. Absent capability = the feature says why it is off, never hides
+      Done: `capabilities()` over the answer discovery already returned, seven
+      variants, no round trip of its own. **`None` is *nothing was discovered*
+      and `Some(∅)` is *asked, none installed*** — one spelling would tell a
+      fully-equipped cluster to install everything it has. **All seven group
+      strings are read off the shipped manifests and four were then confirmed in
+      a live discovery answer** — the other three stand on their bundles — and
+      that review took two shipped prose claims away and found the lie on the
+      *presence* side: a served group
+      is a floor on what the cluster once had, never proof the product runs. The
+      documented read-only role could not run discovery at all — 403, measured —
+      so `docs/security.md` gains the `nonResourceURLs` rule here. **Nothing
+      consumes the probe yet and this box does not wire it**: the `connect()`
+      box below already says in its own text that it runs discovery *and the
+      capability probe*, which is the same split `browsable` and its fetch made
+      ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26))
 - [ ] Reconnect/backoff surfaced as a state the UI can show — **and the tool
       never exits because the cluster went away.** A connectivity failure is a
       banner, retried for as long as the user leaves it open; there is no retry
@@ -2539,7 +2554,13 @@ public release.
       watches, and can be called again after everything from the previous
       context has been dropped. The `X` switcher in Phase 11 is that call;
       writing it as one-shot startup code here would mean reaching back into a
-      frozen `k8s.rs` later ([NOTES § D16](NOTES.md#d16--the-context-switcher))
+      frozen `k8s.rs` later ([NOTES § D16](NOTES.md#d16--the-context-switcher)).
+      **Three measured facts are waiting for this box** and it is briefed with
+      them rather than rediscovering them: the aggregated and legacy discovery
+      paths *disagree* about a cluster whose metrics-server is down, so one of
+      them has to be chosen; a crashlooping aggregated APIService takes the whole
+      sidebar with `Discovery::run()`; and `filter()` drops the core group too,
+      which removes the capability probe's own emptiness guard ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26))
 - [ ] 403 vs 401 vs no-connection distinguished (**three** variants, not two).
       `401` is a credential-plugin token that expired mid-session — the normal
       case on EKS/GKE/AKS — and it names the renewal command from the user's

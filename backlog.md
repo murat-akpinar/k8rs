@@ -1218,6 +1218,37 @@ position the four findings above them are in
   first and only then decide whether an index earns its complexity — Phase 5's
   store is where a node→pods map would live, not here
 
+### From the capability-probe operator review (2026-08-26)
+
+*Every entry measured against an ephemeral cluster —
+[reports/2026-08-26](reports/2026-08-26-capability-probe-group-strings.md) —
+and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26).*
+
+- **C4 has a capability and no permission, so an empty list would read as
+  *healthy*.** `docs/security.md` omits the `cert-manager.io` grant from
+  `k8rs-readonly` **deliberately**, and the probe answers *present* off the CRDs
+  alone — so on a cluster that really runs cert-manager, C4's every list is a
+  403 over a row the screen was told to draw. `Capability::CertManager`'s doc
+  already says a 403 is the feature's to report; the C4 box has to actually
+  report it rather than render zero findings. C4 has no phase yet, which is why
+  this is here and not a box.
+- **Nothing runs rustdoc, so a doc link rots unseen.** `just check` has no
+  `cargo doc` step, and `RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo
+  doc --no-deps --document-private-items` reports three already broken, all in
+  frozen files: `crate::rules::in_days` (`analysis.rs:3028`),
+  `crate::analysis::capped` (`rules.rs:973`) and `Row::NotComputed`
+  (`rules.rs:1812`). This repo writes more doc comment than code and cites items
+  by path throughout, so it is the one gate whose absence is invisible — and
+  `check-docs.py` covers markdown anchors only. Found while proving the
+  capability probe's own new links resolve, which nothing else would have done.
+  `tester`'s, and forward-only says the three existing ones are not this box's.
+- **`kind delete cluster` was refused four times by the session's permission
+  system**, so the review's teardown went through `docker rm -f
+  <name>-control-plane` plus `kubectl config delete-context/delete-cluster`.
+  Verified clean, and the fixture cluster was untouched — but a measurement
+  brief should say which teardown path is expected rather than leaving the
+  agent to find one under time pressure.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

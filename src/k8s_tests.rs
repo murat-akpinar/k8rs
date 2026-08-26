@@ -3354,6 +3354,434 @@ fn a_server_too_old_for_aggregated_discovery_decodes_to_no_groups_and_no_error()
     );
 }
 
+// --- WHAT ELSE THE CLUSTER SERVES ---
+//
+// **These name real groups where the region above names none, and that is the difference between
+// the two functions rather than a lapse.** [`browsable`] must not be able to tell a built-in from
+// a CRD (invariant 12), so its inputs are invented; [`capabilities`] answers *is cert-manager
+// installed*, and a probe that could not name `cert-manager.io` would answer nothing. The invented
+// CRDs are still here — they are the **negative**: `widgets` and `sprockets` are what a cluster
+// with none of these on it serves, and every row has to stay absent for them.
+//
+// Every input is built with `served()` above, so what is synthesised is the discovery answer and
+// not a cluster, exactly as it is for the sidebar.
+
+/// One resource in the core group — what *every* working API server serves, so a fixture built
+/// around it has the shape a real discovery answer has.
+///
+/// **[`capabilities`] never looks for it.** The check is `served.is_empty()`, and any non-empty
+/// answer is a real one; an answer with no core group in it at all still probes normally. It is
+/// here because the inputs should look like the wire, and because it is what makes the
+/// *nothing installed* case a non-empty answer rather than the *nothing discovered* one.
+fn core_group() -> (ApiResource, ApiCapabilities) {
+    served(
+        "",
+        "v1",
+        "Pod",
+        "pods",
+        Scope::Namespaced,
+        &["get", "list", "watch"],
+    )
+}
+
+/// Each capability, the group that turns it on, and one kind that group really serves.
+///
+/// `Linkerd` appears twice because it ships two groups and either one means it is installed.
+const ROWS: &[(Capability, &str, &str, &str)] = &[
+    (
+        Capability::Metrics,
+        "metrics.k8s.io",
+        "NodeMetrics",
+        "nodes",
+    ),
+    (
+        Capability::DisruptionBudgets,
+        "policy",
+        "PodDisruptionBudget",
+        "poddisruptionbudgets",
+    ),
+    (
+        Capability::CertManager,
+        "cert-manager.io",
+        "Certificate",
+        "certificates",
+    ),
+    (
+        Capability::Prometheus,
+        "monitoring.coreos.com",
+        "Prometheus",
+        "prometheuses",
+    ),
+    (
+        Capability::Istio,
+        "networking.istio.io",
+        "VirtualService",
+        "virtualservices",
+    ),
+    (
+        Capability::Linkerd,
+        "linkerd.io",
+        "ServiceProfile",
+        "serviceprofiles",
+    ),
+    (
+        Capability::Linkerd,
+        "policy.linkerd.io",
+        "Server",
+        "servers",
+    ),
+    (
+        Capability::Cilium,
+        "cilium.io",
+        "CiliumNetworkPolicy",
+        "ciliumnetworkpolicies",
+    ),
+];
+
+/// **Every [`Capability`] there is, walked out of an exhaustive `match`.**
+///
+/// [`ROWS`] is hand-written, and nothing hand-written is complete by construction: `cargo mutants`
+/// mutates function bodies and not `const` data, and `test-guard` counts test attributes, so a row
+/// deleted from that table takes its only coverage with it and every gate stays green. `after`'s
+/// `match` is what makes the compiler the reader instead — a variant added to [`Capability`] has
+/// no arm, the tests stop building until it is given one, and the arm it is given is what walks it
+/// into the check below (CLAUDE.md § *A derived list asserts it found something*, one level up:
+/// the list here is of variants, not of findings).
+///
+/// **What it does not close**, said plainly: an arm that answers `None` where the chain should
+/// have continued leaves its own variant unwalked, and nothing here can see that. The compile
+/// error is what makes writing one a deliberate act rather than an oversight, and it is as far as
+/// a `match` reaches without a derive macro — a crate invariant 10 refuses. Keep the chain a
+/// chain: exactly one arm ends it.
+///
+/// (Spelling the test attribute out in this comment would have been *counted* as one, which is a
+/// red `just check` and not a typo — the guard said so before this sentence existed.)
+fn every_capability() -> Vec<Capability> {
+    fn after(capability: Capability) -> Option<Capability> {
+        match capability {
+            Capability::Metrics => Some(Capability::DisruptionBudgets),
+            Capability::DisruptionBudgets => Some(Capability::CertManager),
+            Capability::CertManager => Some(Capability::Prometheus),
+            Capability::Prometheus => Some(Capability::Istio),
+            Capability::Istio => Some(Capability::Linkerd),
+            Capability::Linkerd => Some(Capability::Cilium),
+            Capability::Cilium => None,
+        }
+    }
+    std::iter::successors(Some(Capability::Metrics), |capability| after(*capability)).collect()
+}
+
+/// **No [`Capability`] is missing a row above**, and therefore none is missing the test that walks
+/// them.
+///
+/// The defect this closes was measured, not imagined: deleting the `Cilium` row left the whole
+/// suite green, because with it gone only the negative — `cilium.io` absent from a bare cluster —
+/// still ran, and nothing at all asserted that `cilium.io` turns anything *on*.
+#[test]
+fn every_capability_has_a_row_in_the_table() {
+    let covered: BTreeSet<Capability> = ROWS.iter().map(|(capability, ..)| *capability).collect();
+    let missing: Vec<Capability> = every_capability()
+        .into_iter()
+        .filter(|capability| !covered.contains(capability))
+        .collect();
+    println!("ROWS covers {covered:?}");
+    assert!(
+        missing.is_empty(),
+        "these capabilities have no row above, so nothing asserts what turns them on: {missing:?}"
+    );
+}
+
+/// **Every row of NOTES § Capability probe turns on when its group is served, and only its own.**
+///
+/// The assertion is the whole set and not `contains`, so a row that also switched a neighbour on —
+/// `policy.linkerd.io` reading as `policy`, `cert-manager.io` as a substring of somebody's CRD
+/// group — fails here rather than somewhere a screen would show it. **That is also where most of
+/// the negatives are**: each pass asserts the other six capabilities absent, and the test below
+/// adds the case where all of them are.
+#[test]
+fn each_capability_turns_on_for_its_own_group_and_switches_on_nothing_else() {
+    for (capability, group, kind, plural) in ROWS {
+        let answer = capabilities(&[
+            core_group(),
+            listable("example.com", "Widget", "widgets"),
+            served(
+                group,
+                "v1",
+                kind,
+                plural,
+                Scope::Namespaced,
+                &["get", "list", "watch"],
+            ),
+        ]);
+        println!("{group} serves {kind} -> {answer:?}");
+        assert_eq!(
+            answer,
+            Some(BTreeSet::from([*capability])),
+            "a cluster serving {group}/{kind} answered {answer:?}"
+        );
+    }
+}
+
+/// **A group that serves several kinds is one capability, which is the ordinary shape and not an
+/// edge case.**
+///
+/// `metrics.k8s.io` serves exactly two — `nodes` and `pods` — so every cluster with
+/// metrics-server on it hands this function the row twice. A set is what absorbs that; a list
+/// would have put metrics-server in the answer twice and left every consumer to notice.
+#[test]
+fn a_group_that_serves_more_than_one_kind_is_still_one_capability() {
+    let answer = capabilities(&[
+        core_group(),
+        served(
+            "metrics.k8s.io",
+            "v1beta1",
+            "NodeMetrics",
+            "nodes",
+            Scope::Cluster,
+            &["get", "list"],
+        ),
+        served(
+            "metrics.k8s.io",
+            "v1beta1",
+            "PodMetrics",
+            "pods",
+            Scope::Namespaced,
+            &["get", "list"],
+        ),
+    ]);
+    println!("both metrics kinds -> {answer:?}");
+    assert_eq!(
+        answer,
+        Some(BTreeSet::from([Capability::Metrics])),
+        "metrics-server's two kinds have to be one capability"
+    );
+}
+
+/// **A cluster with none of them on it says so, and a group that merely spells like one is not a
+/// hit.**
+///
+/// The absent case is the one the box is about: rule 1 has the feature print *not installed in
+/// this cluster*, which it may only do because it was told. The near misses are here because a
+/// guard is proven only for the shapes it was fed (NOTES § D29) and only for the framing it was
+/// written for (§ D31), and they are of two framings — a capability's name as a **suffix** of a
+/// longer group, and as a **prefix** of one.
+///
+/// **The suffix framing is fed twice, and the separator is the whole reason.** `not-metrics.k8s.io`
+/// and `my-cilium.io` join with a hyphen; `acme.cert-manager.io`, `custom.metrics.k8s.io` and
+/// `external.metrics.k8s.io` join with a dot — and those three are **groups that really ship**,
+/// not invented. `acme.cert-manager.io` is in cert-manager's own CRD manifest and came back in a
+/// live discovery answer beside `cert-manager.io`
+/// (`reports/2026-08-26-capability-probe-group-strings.md` §§ 1-2); the other two are what
+/// Prometheus Adapter and KEDA register, read off those projects and never on a cluster here.
+/// Widening either arm to a dot-joined suffix — `ends_with(".metrics.k8s.io")`,
+/// `ends_with(".cert-manager.io")` — is caught only by the dotted three and **passes** the
+/// hyphenated two, measured both ways: without those three the widened arms answer `Some({})` and
+/// this test is green, with them it answers `Some({Metrics, CertManager})` and fails. That is why
+/// an invented near miss is not a substitute for one that ships. What the widening would cost:
+/// [`Capability::Metrics`] on a cluster with an adapter and no metrics-server, and the Capacity
+/// report promising real usage numbers nothing can serve.
+///
+/// **Each sibling is fed alone, on purpose.** A real cert-manager install serves
+/// `acme.cert-manager.io` *and* `cert-manager.io`; feeding both would turn the row on for the
+/// right reason and hide a wrong one, so the assertion could not fail. Isolating the sibling is
+/// what makes it a guard rather than a screenshot. (`custom.metrics.k8s.io` without
+/// `metrics.k8s.io` needs no isolating — an adapter runs on clusters with no metrics-server.)
+///
+/// **The prefix framing has no real sibling to use.** `metrics.k8s.io.example.com` and
+/// `cert-manager.io.example.com` put a capability's whole name in front of a longer group; nothing
+/// ships a group of that shape, so an invented string is the only way to feed the framing at all.
+///
+/// `policy` carrying a kind that is not `PodDisruptionBudget` is the third thing that must not be a
+/// hit, and it is the next test rather than a fixture here — it needs its own failure message.
+#[test]
+fn nothing_installed_answers_none_of_them_and_a_near_miss_is_not_a_hit() {
+    let answer = capabilities(&[
+        core_group(),
+        listable("example.com", "Widget", "widgets"),
+        listable("sprockets.example.com", "Sprocket", "sprockets"),
+        // Real siblings that ship beside a capability's group and are not it.
+        listable("acme.cert-manager.io", "Order", "orders"),
+        listable("custom.metrics.k8s.io", "MetricValue", "metricvalues"),
+        listable(
+            "external.metrics.k8s.io",
+            "ExternalMetricValue",
+            "externalmetricvalues",
+        ),
+        // Groups that carry a capability's name in a longer string and are not it.
+        listable("not-metrics.k8s.io", "Widget", "widgets"),
+        listable("metrics.k8s.io.example.com", "Widget", "widgets"),
+        listable("cert-manager.io.example.com", "Widget", "widgets"),
+        listable("my-cilium.io", "Widget", "widgets"),
+    ]);
+    println!("a cluster with none of them: {answer:?}");
+    assert_eq!(
+        answer,
+        Some(BTreeSet::new()),
+        "a cluster with none of these installed has to answer that it was asked and has none"
+    );
+}
+
+/// **`policy` carrying a kind that is not `PodDisruptionBudget` is a historical shape, kept
+/// deliberately.**
+///
+/// It is the only input that exercises the kind half of the `("policy", "PodDisruptionBudget")`
+/// arm, and **no supported server can produce it**: `PodSecurityPolicy` left the group at 1.25,
+/// D149's floor is 1.29, and `policy/v1` serves exactly one resource at 1.36 — measured, a
+/// `--runtime-config` disabling either the version or that one resource takes the whole group off
+/// `/apis` with it (`reports/2026-08-26-capability-probe-group-strings.md` § 3). So the narrowing
+/// is unreachable-but-harmless on every cluster k8rs supports, `k8s.rs` says so where it is
+/// written, and this test is what keeps the arm from being widened by someone who reads that and
+/// concludes the kind may as well go. Pointing it at a reachable state is not available: there is
+/// no second `policy` kind left to point at.
+#[test]
+fn policy_without_the_disruption_budget_kind_is_not_drain_safety() {
+    let answer = capabilities(&[
+        core_group(),
+        served(
+            "policy",
+            "v1beta1",
+            "PodSecurityPolicy",
+            "podsecuritypolicies",
+            Scope::Cluster,
+            &["get", "list", "watch"],
+        ),
+    ]);
+    println!("policy serving only PodSecurityPolicy -> {answer:?}");
+    assert_eq!(
+        answer,
+        Some(BTreeSet::new()),
+        "the group alone is not the capability — drain safety needs PodDisruptionBudget"
+    );
+}
+
+/// **A discovery answer that named nothing is `None`, and that is not *none of them installed*.**
+///
+/// The first of the four failures `k8s.rs` § EVERY KIND THE CLUSTER SERVES lists: a server too old
+/// for the aggregated call answers `Ok` with zero groups. Read as *absent*, every feature then
+/// says *not installed in this cluster* about a cluster that has them all — one plain false
+/// sentence per screen, which is invariant 14 broken in the confident direction.
+///
+/// The two answers are asserted **against each other**, because a `None` that happened to equal
+/// the empty-set answer would prove nothing.
+///
+/// **The second input is not a bare cluster and must not be read as one.** A cluster exactly as
+/// `kind create cluster` left it answers 51 resources including `policy v1`, so its real answer is
+/// `Some({DisruptionBudgets})` (`reports/2026-08-26-capability-probe-group-strings.md` § 2). What
+/// is fed here is the narrower thing this test needs: an answer that *named resources* and named
+/// none of these, which is the only way to hold `None` up against a real `Some`.
+#[test]
+fn a_discovery_answer_that_named_nothing_is_not_a_cluster_with_nothing_installed() {
+    let nothing_discovered = capabilities(&[]);
+    let named_none_of_them = capabilities(&[core_group()]);
+    println!("zero groups came back: {nothing_discovered:?}");
+    println!("an answer naming none of them came back: {named_none_of_them:?}");
+    assert_eq!(
+        nothing_discovered, None,
+        "a discovery answer with nothing in it was read as a fact about the cluster"
+    );
+    assert_eq!(
+        named_none_of_them,
+        Some(BTreeSet::new()),
+        "a real answer with none of these in it is the empty set, not the missing answer"
+    );
+    assert_ne!(
+        nothing_discovered, named_none_of_them,
+        "the two cannot share a spelling — one is a sentence a screen prints, the other is not a \
+         fact anybody has"
+    );
+}
+
+/// **The probe reads the bytes the server sent, because [`ingest`] rewrites them.**
+///
+/// [`text`] *removes* an unprintable character rather than replacing it — it only inserts a space
+/// between two characters it kept — so **six** spellings of `metrics.k8s.io`, not one, come out of
+/// the sidebar's guard as `metrics.k8s.io` exactly: a zero-width space, a bidi override, a soft
+/// hyphen, a leading BOM, an embedded NUL, and a plain trailing newline. A probe reading
+/// [`Browsable`] would report metrics-server present on a cluster whose only such group is any one
+/// of them — the strip is doing what invariant 9 asks and the comparison is the wrong place to
+/// stand behind it.
+///
+/// Both halves are asserted for every spelling: the probe refuses it, **and** the sidebar really
+/// does produce the word that would have been believed. Without the second, this test would pass
+/// on a strip that never touched the character.
+#[test]
+fn a_lookalike_group_is_refused_because_the_probe_never_sees_the_stripped_spelling() {
+    for (what, lookalike) in [
+        ("zero width space", "metrics.k8s\u{200b}.io"),
+        ("bidi override", "metrics.k8s\u{202e}.io"),
+        ("soft hyphen", "metrics.k8s\u{ad}.io"),
+        ("leading BOM", "\u{feff}metrics.k8s.io"),
+        ("embedded NUL", "metrics.k8s\0.io"),
+        ("trailing newline", "metrics.k8s.io\n"),
+    ] {
+        let served_by_the_cluster = vec![
+            core_group(),
+            served(
+                lookalike,
+                "v1",
+                "NodeMetrics",
+                "nodes",
+                Scope::Cluster,
+                &["get", "list"],
+            ),
+        ];
+        let answer = capabilities(&served_by_the_cluster);
+        println!("{what}: {lookalike:?} probed as {answer:?}");
+        assert_eq!(
+            answer,
+            Some(BTreeSet::new()),
+            "a {what} group that is not metrics.k8s.io turned metrics-server on"
+        );
+
+        let sidebar = browsable(served_by_the_cluster);
+        let groups: Vec<&str> = sidebar.iter().map(|kind| kind.group.as_str()).collect();
+        println!("{what}: the same input through the sidebar's guard: {groups:?}");
+        assert!(
+            groups.contains(&"metrics.k8s.io"),
+            "the ingest guard no longer produces the spelling this {what} case exists to refuse, \
+             so it proves nothing: {groups:?}"
+        );
+    }
+}
+
+/// **A capability is what the cluster serves, not what anybody may do to it.**
+///
+/// The verbs belong to the resource and not to the reader (§ EVERY KIND THE CLUSTER SERVES), and
+/// [`browsable`] drops what cannot be listed **at all** because a sidebar row has one verb. A
+/// capability has no verb: an aggregated API server offering one kind nobody can enumerate is
+/// still that product, installed. So the probe reads the answer and never the sidebar — asserted
+/// by taking both from one input and getting different sizes.
+#[test]
+fn a_capability_whose_kind_cannot_be_listed_is_still_installed() {
+    let unlistable = vec![
+        core_group(),
+        served(
+            "metrics.k8s.io",
+            "v1beta1",
+            "NodeMetrics",
+            "nodes",
+            Scope::Cluster,
+            &["get"],
+        ),
+    ];
+    let answer = capabilities(&unlistable);
+    let sidebar: Vec<String> = browsable(unlistable)
+        .iter()
+        .map(|kind| format!("{}/{}", kind.group, kind.plural))
+        .collect();
+    println!("probe: {answer:?}");
+    println!("sidebar: {sidebar:?}");
+    assert_eq!(
+        answer,
+        Some(BTreeSet::from([Capability::Metrics])),
+        "metrics-server is installed on this cluster and the probe missed it"
+    );
+    assert!(
+        !sidebar.iter().any(|row| row.starts_with("metrics.k8s.io/")),
+        "the sidebar kept the unlistable kind, so this input no longer shows the difference \
+         between the two readings: {sidebar:?}"
+    );
+}
 // --- THE BROWSER'S ROWS ---
 //
 // **Two committed captures and no hand-written JSON** (NOTES § D53): `table-pods.json` is the

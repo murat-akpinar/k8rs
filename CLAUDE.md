@@ -247,8 +247,16 @@ that goes green says nothing about those.
 **Authorization**
 
 - [ ] Least privilege holds: the documented read-only role runs everything
-      except the operations. A 403 degrades that one feature and names the
-      missing verb + resource; it never crashes and never retries in a loop.
+      except the operations — **including the `nonResourceURLs` grant discovery
+      needs**, which the role lacked until 2026-08-26 and which only a cluster
+      without the default `system:discovery` binding reveals
+      ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+      A 403 degrades that one feature and names the missing verb + resource; it
+      never crashes and never retries in a loop. **A `nonResourceURL` refusal
+      has neither** — the measured `Status` for `/apis` carries an empty
+      `details`, so a formatter reading `details.group`/`details.kind` prints an
+      empty sentence and the only true one names the path: *"this kubeconfig may
+      not `get /apis`"*.
 - [ ] `--read-only` is structurally true — `ops.rs` unreachable, keys unbound.
 
 **The write path**

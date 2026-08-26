@@ -48,7 +48,7 @@ frozen. Layer order is the row order below. A file's tests sit beside it in
 |---|---|---|---|
 | [rules.rs](../src/rules.rs) | `Finding`, the snapshot types, `analyze(&Snapshot) -> Vec<Finding>`. Pure: no network, no terminal, no clock — `now` is a field | `dev-core` | **frozen** (Phase 3 close), and the snapshot types and their decode with it since Phase 4 close ([NOTES § D42](../NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)) — the whole file is now closed to a later phase |
 | [analysis.rs](../src/analysis.rs) | The **seven** reports: Capacity, Drain safety, Waste, Posture, Restarts, Versions, Certificates. Pure, same discipline. A producer is `fn(&ClusterSnapshot, &[Finding]) -> Report` — it takes the findings `analyze` already returned, because the rule functions are private to its *sibling* and a row that restates a card has no other way to reach one | `dev-core` | **frozen** (Phase 4 close) |
-| `k8s.rs` | Watches, discovery, server-side `Table`, reconnect. Fills the snapshot types | `dev-core` | Phase 5 |
+| `k8s.rs` | Watches, discovery, the capability probe, server-side `Table`, reconnect. Fills the snapshot types | `dev-core` | Phase 5 |
 | `ops.rs` | **Every mutation, and nowhere else.** Carries the single `#![allow(clippy::disallowed_methods)]` | `dev-core` | Phase 7 |
 | `theme.rs` | Colours and constants — one file, so a change propagates from one place | `dev-ui` | Phase 9 |
 | `views.rs` | The three views, grouping, sorting | `dev-ui` | Phase 10 |

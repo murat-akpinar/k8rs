@@ -69,6 +69,14 @@
 //! including the one where a server too old for the aggregated call answers `Ok` with an empty
 //! cluster in it.
 //!
+//! **The same answer says which optional pieces the cluster brought with it**
+//! (§ WHAT ELSE THE CLUSTER SERVES, NOTES § Capability probe). [`capabilities`] is a read of the
+//! discovery result and not a call, so metrics-server, PodDisruptionBudgets, cert-manager,
+//! kube-prometheus-stack and the three meshes cost nothing to ask about. It answers *present*,
+//! never *permitted* and never *where* — and it distinguishes **nothing was discovered** from
+//! **this is absent**, because the second is a sentence a screen puts in front of a reader and
+//! the first is not a fact anybody has.
+//!
 //! **The browser's rows are the API server's own printed table, and the fallback under it is one
 //! column** (invariant 12, § THE BROWSER'S ROWS). [`Fetch`] is where a list is asked for and
 //! [`Table`] is what comes back — cells that are not all strings, an identity per row that the
@@ -1864,6 +1872,243 @@ pub fn browsable(
 }
 
 // --- EVERY KIND THE CLUSTER SERVES END ---
+
+// --- WHAT ELSE THE CLUSTER SERVES START ---
+//
+// **The optional half of the same answer, and it costs nothing to read** (NOTES § Capability
+// probe, § D152). The region above turns the discovery result into a sidebar; this one asks it a
+// second question — *does this cluster have metrics-server, PodDisruptionBudgets, cert-manager,
+// kube-prometheus-stack, a mesh?* — with no request of its own. D152's closing line is the
+// promise: a lookup over what `run_aggregated()` already returned, zero extra round trips.
+//
+// **These group names are written down here, and that is not invariant 12 broken.** That
+// invariant is about the *browser*: a sidebar built from a list of kinds is a design failure
+// because the cluster already knows the answer. Nothing knows whether cert-manager is worth
+// asking about except k8rs, and a probe that could not spell `cert-manager.io` would answer
+// nothing at all. What stays true is that no *browsable kind* is named — every string below
+// belongs to a feature this repo has decided to build, and § EVERY KIND THE CLUSTER SERVES
+// still names none.
+//
+// **Rule 1 of that section is why this returns what is *there* rather than what is missing.** A
+// missing capability is stated and never hidden — the Analysis row stays and reads *needs
+// metrics-server — not installed in this cluster* — so the feature is the one that owns the
+// sentence, and it can only write it if it can ask. A list of absences would have to be a list of
+// everything k8rs might ever want, which is the hard-coded list invariant 12 refuses one layer up.
+//
+// **Rule 2 is why nothing here is an address.** Presence comes from the API; *where to reach
+// Prometheus* comes from the reader and from nowhere else, never from a pod annotation
+// (REQUIREMENTS § DevSecOps, SSRF). This function returns no string at all, which is that rule
+// made structural rather than remembered.
+//
+// ## Nothing discovered is not the same fact as nothing installed
+//
+// **Failure 1 above is a lie waiting for a consumer.** A server too old for the aggregated call
+// answers `Ok` with zero groups, and a probe keyed on group presence then reads *absent* for
+// every capability — so a cluster with metrics-server, cert-manager and Istio on it is told, once
+// per feature, to install the thing it already has. That is invariant 14 broken in the worst
+// direction: not jargon, but a plain sentence that is false.
+//
+// **So the answer is `Option`, and the empty input is the `None`.** It is the distinction
+// `ClusterSnapshot`'s six `Option<Vec<_>>` fields already draw — *nobody asked* against *asked and
+// there are none* — and **for an unfiltered answer** the check is exact: a working API server
+// always serves `v1`, so a discovery answer that named no resource at all did not come from a
+// cluster with nothing on it. **That premise is not unconditional**: the trimmed-discovery
+// paragraph below says what withdraws it, and what `connect()` owes as a result.
+//
+// **[`browsable`] refuses to interpret the same emptiness and that is not a contradiction.** An
+// empty sidebar is *visible*: the reader sees no rows and knows something is wrong without being
+// told. An absent capability is invisible by construction — its whole output is one sentence
+// about a thing that is not on the screen — so the same input has to be handled where it is
+// consumed, and here it is consumed as prose.
+//
+// **A group the server names but does not fill is invisible here, and that is the constraint
+// `connect()` inherits.** kube builds one pair per entry in a group version's `resources` array
+// (`kube-client-4.2.0/src/discovery/parse.rs:94-108`), so a version that came back with an empty
+// array contributes no pair at all — and failure 3 above has already discarded `freshness`, the
+// one field that would have named it. A registered APIService whose backend is down is exactly
+// that shape. So a row missing from `Some(set)` means **no resource of that group was named**,
+// never **that group is not registered**: the probe is a floor and not a census.
+// [`crate::rules::Metrics::Silent`] is written for the cluster this produces — installed, and not
+// answering — so a caller that routes on this set alone sends that reader to `NotInstalled` and
+// tells them to install what they already have, which is invariant 14 broken in failure 1's
+// direction. **`connect()` owns the distinction**, out of the direct
+// `list_api_groups_aggregated()` call that failure 3 already names, and is told so here rather
+// than left to rediscover it.
+//
+// **A trimmed discovery answer is the same shape and is `connect()`'s to not build.**
+// `Discovery::filter`/`exclude` set a mode every group is gated on before it is kept
+// (`kube-client-4.2.0/src/discovery/mod.rs:24-29`, applied at `:182` and `:190`), so a discovery
+// narrowed to trim the sidebar comes back non-empty, the guard below never fires, and every
+// capability reads absent as `Some(∅)` — and `filter` drops the core group with the rest
+// (`CORE_GROUP` is `""`, `apigroup.rs:207`), so the *a working server always serves `v1`* reasoning
+// the guard rests on stops holding at the same moment. Only an unfiltered answer may reach here.
+//
+// ## Registered is not running, and the word *installed* is stronger than the fact
+//
+// **A served group is a floor on what the cluster once had, never proof the product is running.**
+// CRDs outlive their operator by design — `helm uninstall` leaves them behind, `istioctl uninstall`
+// leaves them without `--purge` — so a cluster whose operator was removed six months ago answers
+// this function exactly as one running it does. Measured: cert-manager's CRDs applied with no
+// controller ever started still come back `cert-manager.io v1 Current 4`, and
+// `kubectl get certificates.cert-manager.io -A` prints *No resources found*
+// (`reports/2026-08-26-capability-probe-group-strings.md` § 4).
+//
+// **The function is right and the sentence a caller writes is what has to be careful.** There is
+// nothing better in the discovery answer to read, and asking is still worth it — that is all
+// `Some(row)` claims. **[`Capability::Prometheus`] is where the strong word would cost the reader
+// something**, because NOTES § Capability probe rule 2 has its feature ask them for an address and
+// there is no address for something that is gone; its variant doc below is written in the weak
+// word for that reason, and any sentence a later box builds on it has to be too.
+// [`Capability::Istio`] is the same shape as a *shipping* configuration, not only a leftover — the
+// `remote` profile puts the CRDs here and istiod in another cluster. [`Capability::Metrics`] is
+// immune: an APIService is not a CRD and nothing leaves one behind.
+//
+// ## Why the pairs, and not the sidebar
+//
+// [`browsable`]'s output is the wrong input for this, twice over, and neither is a preference:
+//
+// **It has already dropped what nobody can list.** That filter is about opening a row, and a
+// capability is not a row — a group whose kinds are all `create`-only is still a capability the
+// cluster has. Reading the sidebar would tie a feature's existence to the browser's one verb.
+//
+// **And it has already been through [`ingest`], which *rewrites* these strings.** [`text`] removes
+// a zero-width character rather than replacing it, so `metrics.k8s\u{200b}.io` — a group name no
+// CRD may carry but the aggregated parse validates nothing about, which is [`path_safe`]'s reason
+// one region down — comes back out of the guard spelled exactly `metrics.k8s.io`. A probe reading
+// the stripped word would report metrics-server present on a cluster that has no such group. The
+// bytes the server sent are the only ones that may answer this, so the comparison happens before
+// the strip and keeps nothing afterwards: [`Capability`] holds no text, and there is nothing here
+// for the ingest guard to bound.
+//
+// ## What each row is keyed on
+//
+// **`policy` is matched with its kind and everything else by group alone, and on a supported
+// server that narrowing is unreachable rather than load-bearing.** It is the spelling NOTES §
+// Capability probe uses for this row and no other, and the kind is in the same answer at no cost,
+// so the narrower fact is the one taken. What it does *not* buy is a second kind to tell apart:
+// `PodSecurityPolicy` left this group at 1.25 and D149's floor is 1.29, and `policy/v1` serves
+// exactly one resource at 1.36, so a `--runtime-config` that switches off either the version or
+// the resource alone takes the whole group off `/apis` with it — measured both shapes, both
+// absent (`reports/2026-08-26-capability-probe-group-strings.md`). On every server k8rs supports
+// `("policy", "PodDisruptionBudget")` and `("policy", _)` are the same function.
+//
+// **What the row is really worth is the opposite of what it looks like: `policy` is a built-in
+// every supported server serves**, so it is the one capability whose absence is not a fact about
+// what anybody installed — nobody installs PodDisruptionBudgets. `DisruptionBudgets` missing from
+// a `Some(set)` has exactly two reachable causes, and a caller should read it as either: the
+// answer was **trimmed** before it got here, the shape the trimmed-discovery paragraph above hands
+// `connect()` and the one the `is_empty()` guard cannot catch; or an operator **turned the group
+// off** with `--runtime-config`, which the paragraph directly above measures taking the whole
+// group off `/apis`. Every other row is a group whose presence *is* the product being installed,
+// and naming one of its kinds would put a per-kind list here for no gain.
+//
+// **The three meshes are three variants, where NOTES writes them on one row.** They are one
+// *feature* — service-to-service traffic, later — and not one fact: what a reader is told to
+// install, and what an operator would have to configure, differs per mesh, and this file freezes
+// at the end of Phase 5. Collapsing them now would cost a later box the answer and could not be
+// undone by that box.
+//
+// **Linkerd is two groups because it ships two and neither is the whole install.** `linkerd.io`
+// carries `ServiceProfile` and `policy.linkerd.io` the `Server`/`HTTPRoute` family; both come from
+// the `linkerd-crds` chart, and either one present means Linkerd. A set is what absorbs the
+// overlap.
+//
+// **Nothing here re-probes.** Discovery is a photograph (the region above) and this is a read of
+// the same photograph — a capability that appeared after connect appears when discovery is run
+// again, on the triggers that region names, and never on a timer of this function's own.
+
+/// **One optional thing a cluster may have brought with it**, and one feature that turns on if
+/// it did (NOTES § Capability probe).
+///
+/// Every variant is a fact about the *cluster*, never about the reader: a group being served says
+/// nothing about whether this kubeconfig may touch it, which is § EVERY KIND THE CLUSTER SERVES'
+/// distinction and holds here unchanged. A 403 on the feature's own call is the feature's to
+/// report.
+///
+/// **And the fact is *registered*, which is weaker than *installed*.** CRDs outlive the operator
+/// that shipped them, so every variant below whose group is a CRD group is a floor on what the
+/// cluster once had — the region above has the mechanism and the measurement. A feature turning on
+/// here is licence to *ask*, never a sentence saying the product is running.
+///
+/// **`Debug` is free of credentials**: the variants carry nothing at all — no address, no name,
+/// no string the cluster wrote.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Capability {
+    /// `metrics.k8s.io` — real usage numbers in the Capacity report, [`crate::rules::Metrics`]'s
+    /// subject. **Present is what this row can say**, and which of that enum's four arms a reader
+    /// is shown is not decidable from this set alone: absent here reaches
+    /// [`crate::rules::Metrics::Silent`] as readily as [`crate::rules::Metrics::NotInstalled`] —
+    /// the region above says why — and this is the variant where taking the wrong one prints a
+    /// false sentence, telling a reader with metrics-server installed to install it. That choice is
+    /// the metrics poll's; a probe that answered `None` has said nothing at all.
+    Metrics,
+    /// `policy/PodDisruptionBudget` — drain safety: what a drain would violate, before it runs.
+    DisruptionBudgets,
+    /// `cert-manager.io` — the C-series' C4 findings, which have no other source of truth about
+    /// a certificate that cert-manager owns.
+    CertManager,
+    /// `monitoring.coreos.com` — kube-prometheus-stack's CRDs are **registered**, which is not the
+    /// same as its operator running. **Where to reach it is still the reader's to type** (rule 2
+    /// above), and that is exactly why this row is the one that must not overstate: on a cluster
+    /// whose operator was removed and whose CRDs were left behind, the strong word asks the reader
+    /// to type an address for something that is gone. *Prometheus may be installed — where should
+    /// I look?* is the sentence this supports; *Prometheus is installed* is not.
+    Prometheus,
+    /// `networking.istio.io` — Istio's traffic API.
+    Istio,
+    /// `linkerd.io` or `policy.linkerd.io` — Linkerd's CRDs.
+    Linkerd,
+    /// `cilium.io` — Cilium's CRDs.
+    Cilium,
+}
+
+/// **Which of [`Capability`]'s rows this cluster serves — or `None` if nothing was discovered at
+/// all.**
+///
+/// Takes the same `(ApiResource, ApiCapabilities)` pairs [`browsable`] does, borrowed rather than
+/// consumed so one discovery answer feeds both, and reads only the group and the kind. The verbs
+/// are not consulted: a capability is what the cluster has, not what it will let anyone do.
+///
+/// **`None` is *the discovery answer named nothing*, which is not *this cluster has none of
+/// these*.** The region above is why the two cannot share a spelling, and which failure produces
+/// it. A caller that flattens `None` into an empty set has put the lie back.
+///
+/// **`Some(set)` is complete for the answer it was handed, which is not the same as complete for
+/// the cluster.** Every row not in the set named no resource in these pairs. **A group whose
+/// `resources` array came back empty is invisible to it**, so absent here is never *not
+/// registered* — the region above says which caller owns that difference, where the field it needs
+/// still exists, and why rule 1's sentence is that caller's to write rather than this function's.
+///
+/// **`Some(∅)` is not the bare-cluster answer — it is the alarming one.** A cluster exactly as
+/// `kind create cluster` left it, nothing installed, answers 51 resources with `policy v1` among
+/// them, so a bare cluster is `Some({DisruptionBudgets})`
+/// (`reports/2026-08-26-capability-probe-group-strings.md` § 2). Reaching the empty set means
+/// `policy` was absent, which on a supported server means the answer was trimmed rather than the
+/// cluster being empty — the region's `policy` note seen from the other side, and the same canary.
+pub fn capabilities(served: &[(ApiResource, ApiCapabilities)]) -> Option<BTreeSet<Capability>> {
+    if served.is_empty() {
+        return None;
+    }
+    Some(
+        served
+            .iter()
+            .filter_map(
+                |(resource, _)| match (resource.group.as_str(), resource.kind.as_str()) {
+                    ("metrics.k8s.io", _) => Some(Capability::Metrics),
+                    ("policy", "PodDisruptionBudget") => Some(Capability::DisruptionBudgets),
+                    ("cert-manager.io", _) => Some(Capability::CertManager),
+                    ("monitoring.coreos.com", _) => Some(Capability::Prometheus),
+                    ("networking.istio.io", _) => Some(Capability::Istio),
+                    ("linkerd.io" | "policy.linkerd.io", _) => Some(Capability::Linkerd),
+                    ("cilium.io", _) => Some(Capability::Cilium),
+                    _ => None,
+                },
+            )
+            .collect(),
+    )
+}
+
+// --- WHAT ELSE THE CLUSTER SERVES END ---
 
 // --- THE BROWSER'S ROWS START ---
 //

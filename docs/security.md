@@ -93,6 +93,13 @@ kind: ClusterRole
 metadata:
   name: k8rs-readonly
 rules:
+  # API discovery — the sidebar, and the capability probe that decides which
+  # analysis rows can answer at all. `system:discovery` is bound to
+  # `system:authenticated` by default, so this rule looks redundant until a
+  # cluster removes that binding as ordinary hardening; then every resource
+  # grant below still works and `/apis` alone answers 403 (NOTES § D160)
+  - nonResourceURLs: ["/api", "/apis", "/api/*", "/apis/*", "/version"]
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services", "nodes",
                 "persistentvolumeclaims", "configmaps"]
