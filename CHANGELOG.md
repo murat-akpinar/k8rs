@@ -149,6 +149,10 @@
 - *(docs)* Give the token-hygiene box the enum that already landed ([ec146f7](https://github.com/murat-akpinar/k8rs/commit/ec146f73eb8204e1a2842f7783ed0a508e89ccd1))
 - *(docs)* Correct the phase 5 gate row the token-hygiene box overturned ([4f52616](https://github.com/murat-akpinar/k8rs/commit/4f526163250bb88177a50fe3378dea12c684e653)) — The gate still read "Debug is wrapped on anything that could hold it", which is the rule D164 replaced: the ban is on the derive, because a hand-written impl leaves {:?} compiling forever and the guard cannot tell whether one leaks. It is the row somebody ticks at phase close, so a stale copy here is worse than a stale sentence in prose - it also names the mechanical half and the hand-checked half, which the old wording ran together.
 
+### ⚡ Performance
+
+- *(rules)* Join EndpointSlices to Services once instead of per Service ([b75271b](https://github.com/murat-akpinar/k8rs/commit/b75271b1090704c25668319c050ddcddd5ec42a8)) — The Waste pane walked every EndpointSlice for every Service, and MOST_ROWS_PER_SECTION caps the rows drawn rather than the objects visited, so the cost grew about 4x per doubling of the Service count. It is now one pass into a map keyed on (namespace, kubernetes.io/service-name); after the change the same input grows linearly.
+
 ### 🧪 Testing
 
 - *(fixtures)* Prove the predicates that decide a fixture is trustworthy ([03a1deb](https://github.com/murat-akpinar/k8rs/commit/03a1deb1c12d23cee7d38418fe297d4c628ac929)) — cluster.sh verify holds one jq predicate per fixture, and each decides whether that fixture reached the state its rule is about. They had only ever run against a live cluster, where being wrong is invisible both ways: too loose passes a pod in the wrong state, too tight burns the 420s timeout and fails a correct one — and jq cannot tell a broken filter from an unmet condition either, since both exit non-zero.
