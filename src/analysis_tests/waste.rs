@@ -299,6 +299,103 @@ fn a_service_behind_two_endpointslices_is_counted_across_both_of_them() {
 }
 
 #[test]
+fn one_name_in_two_namespaces_is_two_services_and_neither_answers_for_the_other() {
+    // **The shape a join keyed on the name alone gets wrong, and the corpus cannot hold it**: no
+    // Service in the capture repeats another's name in a second namespace, so a lookup that
+    // dropped the namespace passes every other test in this file. On a real cluster it is the
+    // ordinary case — `web` exists in `staging` and in `payments` — and the wrong answer runs both
+    // ways: the one with nothing behind it goes silent because the other's endpoints were counted
+    // for it, which is a 503 this pane was built to name and now does not.
+    //
+    // `default/broken-sts` is the captured Service with two endpoints behind it; the copy planted
+    // in `kube-system` differs from it in its namespace and nothing else, and no slice in
+    // `kube-system` names it (NOTES § D40).
+    let elsewhere: ServiceSnapshot =
+        captured_item_but("services", "broken-sts", |service: &mut Service| {
+            service.metadata.namespace = Some("kube-system".to_string());
+        });
+    let cluster = ClusterSnapshot {
+        services: Some(captured_services().into_iter().chain([elsewhere]).collect()),
+        ..waste_corpus()
+    };
+    let report = super::waste(&cluster, &[]);
+    println!("{}", pane(&report));
+    let rows = selectable(&report);
+    assert!(
+        rows.contains(&"kube-system/broken-sts matches no pod"),
+        "the copy with no slice in its own namespace is the one that matches no pod: {rows:?}"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.starts_with("default/broken-sts ")),
+        "and the captured one, which has two endpoints behind it, is not: {rows:?}"
+    );
+}
+
+#[test]
+fn a_slice_that_names_no_service_answers_for_none_however_it_is_named() {
+    // **The other half of the key, and the shape the corpus cannot hold either.** A slice belongs
+    // to a Service by the `kubernetes.io/service-name` label and by nothing else; a slice carrying
+    // no such label is hand-managed and says nothing about any Service
+    // ([`crate::rules::EndpointSliceSnapshot::service`]). The controller names its slices
+    // `<service>-<hash>`, so in every capture the label and the object's own name agree — and a
+    // join that read the *name* passes every other test in this file. Nothing makes a
+    // hand-managed slice keep that convention, so the plant is a slice named exactly
+    // `broken-sts` with the label taken off (NOTES § D40).
+    //
+    // **The empty label is the third shape and it is a different one.** The API server accepts
+    // `kubernetes.io/service-name: ""`, and the decode keeps a present-but-empty label as
+    // `Some("")` rather than `None` (`rules.rs` § the snapshot types), so it reaches the join by
+    // the other door. It is fed here because the pipeline can hand it over
+    // ([D29](NOTES.md#d29)), not because a branch guards it: this arm pins a shape and expects
+    // the same answer as the arm above it.
+    let planted = |label: Option<&str>| {
+        captured_item_but::<EndpointSlice, EndpointSliceSnapshot>(
+            "endpointslices",
+            "broken-sts-jt74f",
+            |slice| {
+                slice.metadata.name = Some("broken-sts".to_string());
+                if let Some(labels) = slice.metadata.labels.as_mut() {
+                    match label {
+                        Some(value) => labels
+                            .insert("kubernetes.io/service-name".to_string(), value.to_string()),
+                        None => labels.remove("kubernetes.io/service-name"),
+                    };
+                }
+            },
+        )
+    };
+    // **One field apart**, so what moves the row is the label and not the rename.
+    for (name, label, matches_nothing) in [
+        ("the label as captured", Some("broken-sts"), false),
+        ("the label taken off", None, true),
+        ("the label present and empty", Some(""), true),
+    ] {
+        let cluster = ClusterSnapshot {
+            endpoint_slices: Some(
+                captured_slices()
+                    .into_iter()
+                    .filter(|slice| slice.id.name != "broken-sts-jt74f")
+                    .chain([planted(label)])
+                    .collect(),
+            ),
+            ..waste_corpus()
+        };
+        let report = super::waste(&cluster, &[]);
+        println!("{name}\n{}", pane(&report));
+        assert_eq!(
+            selectable(&report)
+                .iter()
+                .any(|row| row.starts_with("default/broken-sts ")),
+            matches_nothing,
+            "{name} — the two endpoints are behind `broken-sts` only while the slice says so: {:?}",
+            selectable(&report)
+        );
+    }
+}
+
+#[test]
 fn services_present_with_the_slices_missing_is_not_every_service_matching_nothing() {
     // **Two fields and one row, so both must be `Some`**
     // ([`crate::rules::ClusterSnapshot::endpoint_slices`]). Reading a missing slice list as *no

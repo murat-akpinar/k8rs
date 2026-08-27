@@ -2689,7 +2689,7 @@ public release.
       is a startup error**, which § CONNECTING has never done; that claim and
       its twin in `REQUIREMENTS.md` are corrected
       ([D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27))
-- [ ] **`endpoints_behind` is a nested scan and the cost is quadratic in
+- [x] **`endpoints_behind` is a nested scan and the cost is quadratic in
       Services** — `analysis.rs` walks every EndpointSlice for every Service, and
       `MOST_ROWS_PER_SECTION` caps the rows drawn, not the objects visited.
       Timed on synthetic 200-node/5000-pod snapshots at Phase 4's close: 0
@@ -2709,7 +2709,20 @@ public release.
       re-taken and written down. `analysis.rs` is frozen by then, so this is a
       [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
       question — and the cheapest one it can be asked, since the output must not
-      change at all
+      change at all. Done: one pass into a `BTreeMap` keyed
+      `(namespace, kubernetes.io/service-name)`; output byte-identical over the
+      committed corpus, verified twice on independently rebuilt binaries, and
+      the growth rate re-taken
+      ([reports/2026-08-27](reports/2026-08-27-endpoints-behind-join-and-growth.md) —
+      ~4×/doubling before, linear after; the absolute figures are one machine's
+      and are **not** comparable to the 1355 ms, which was measured elsewhere).
+      **The corpus is provably not the gate**: a namespace-dropped mutant
+      produces zero divergences across all 59 fixtures, so the two new tests are
+      what earns the [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+      ruling. The key was checked against the **data plane**, not the docs: given
+      one labelled and one unlabelled slice on the same Service, kube-proxy
+      programs a route only for the labelled one, so excluding an unlabelled
+      slice is the correct semantics and not merely equivalent to the old code
 - [ ] **Posture opens with *"Nothing here is broken"* and sorts the one row an
       operator would act on last.** The pane sorts by pod count descending, and
       `left_by_rule_8` sends **any** read-only host mount here from **any**

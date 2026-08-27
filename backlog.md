@@ -1312,6 +1312,44 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   blocks in the first four seconds, measured. Correct per watch, unreadable as a
   screen. This is `views.rs`'s header and belongs to Phase 11; named here so it
   is boxed rather than discovered there.
+- **The Waste pane names a working `ExternalName` Service and tells the operator
+  to delete it** (2026-08-27). `analysis.rs:1798` selects on
+  `!service.selector.is_empty()` and nothing else. A `type: ExternalName` Service
+  with a leftover `spec.selector` is accepted by the API server, the
+  endpointslice controller creates **no slice at all** for it, and the row fires:
+  *"This Service points at nothing. Anything calling it gets a 503. → fix its
+  selector, or delete it"*. Measured on a live cluster through the built binary —
+  `spec.clusterIP` is **empty**, so there is no address for anything to get a 503
+  *from*, and deleting it breaks whatever resolves through the CNAME. This is
+  what a `type:` change from `ClusterIP` leaves behind, which is how it reaches a
+  real cluster. **Not a one-line fix**: `ServiceSnapshot` (`rules.rs:1583`)
+  carries `id` and `selector` only, so it needs `spec.type` on the snapshot plus
+  a prune-line change in **frozen** `rules.rs` — a
+  [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  question and a box of its own. Pre-existing: the filter is byte-identical
+  before and after the join was rewritten.
+- **The Waste join's speedup is not reachable through `--live` yet, so the number
+  that decides a budget has not been taken** (2026-08-27). `k8s.rs:1515` sets
+  `endpoint_slices: None`, so this row is `NotComputed` on a real cluster and all
+  three timing runs went through the file driver. The ordering is right — the
+  join is fixed before the fetch makes it hot — but the measurement worth
+  budgeting against is the one taken *after* the on-demand fetch lands, with
+  watch and prune cost in it
+  ([reports/2026-08-27](reports/2026-08-27-endpoints-behind-join-and-growth.md)).
+- **`endpoints_behind` counts endpoints, which is `pods × address families`**
+  (2026-08-27). Measured on a dual-stack cluster: one Deployment, one replica,
+  `ipFamilyPolicy: RequireDualStack` → two slices (IPv4 and IPv6), and the join
+  returns **2** for one pod. Correct as written and harmless while the only
+  reader is `== 0`, but every slice in `tests/fixtures/endpointslices.json` is
+  IPv4, so the corpus cannot hold the shape, and the first consumer that reads
+  this `usize` as *pods behind the Service* inherits
+  [PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended).
+- **`scripts/reports-guard.py` classes cluster DNS as a machine hostname**
+  (2026-08-27). It refused a report line containing `*.svc.cluster.local` under
+  "a hostname". A cluster-internal DNS name is never a machine identifier, and
+  any report describing DNS behaviour hits it. `tester`'s. Found by `k8s-admin`
+  writing up the join measurement.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

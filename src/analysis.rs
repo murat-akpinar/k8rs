@@ -1792,10 +1792,17 @@ fn services_reaching_nothing(snapshot: &ClusterSnapshot) -> Vec<Row> {
             ask_for: "Ask for permission to list services and endpointslices.".to_string(),
         }];
     };
+    let behind = endpoints_behind(slices);
     let mut orphans: Vec<&ServiceSnapshot> = services
         .iter()
         .filter(|service| !service.selector.is_empty())
-        .filter(|service| endpoints_behind(slices, &service.id) == 0)
+        .filter(|service| {
+            behind
+                .get(&(service.id.namespace.as_deref(), service.id.name.as_str()))
+                .copied()
+                .unwrap_or(0)
+                == 0
+        })
         .collect();
     // (namespace, name) — the order the reader's own `kubectl get -A` prints, and not
     // `ObjectId::group_key`, whose `ObjectKind` has no `Ord` and would order one kind by nothing.
@@ -1817,23 +1824,49 @@ fn services_reaching_nothing(snapshot: &ClusterSnapshot) -> Vec<Row> {
     )
 }
 
-/// **How many endpoints are behind one Service**, ready or not
+/// **How many endpoints are behind each Service**, ready or not
 /// ([`crate::rules::EndpointSliceSnapshot::endpoints`]): the row is *matches no pod*, so what it
 /// asks is whether anything is behind the Service at all. A pod that exists and is failing its
 /// readiness probe is Alerts' rule 7 and is already on the other screen.
 ///
-/// A slice carries its Service's **name** and lives in its namespace, so both halves are the
-/// join. A Service with no slice at all has nothing behind it, which is the same answer as a
-/// slice holding no endpoint.
-fn endpoints_behind(slices: &[EndpointSliceSnapshot], service: &ObjectId) -> usize {
-    slices
-        .iter()
-        .filter(|slice| {
-            slice.id.namespace == service.namespace
-                && slice.service.as_deref() == Some(service.name.as_str())
-        })
-        .map(|slice| slice.endpoints)
-        .sum()
+/// **Endpoints and not pods, and on a dual-stack Service the two differ.** One replica behind an
+/// `ipFamilyPolicy: RequireDualStack` Service is two slices, IPv4 and IPv6, each listing it once,
+/// so this sums to 2 for one pod. That is right for the only question asked of it here — the call
+/// site reads `== 0` — and wrong for any consumer that reads the number as *pods behind the
+/// Service*. Every slice in the corpus is IPv4, so no fixture can show it; the dual-stack shape
+/// is a plant (`analysis_tests/waste.rs`, NOTES § D40).
+///
+/// A slice carries its Service's **name** and lives in its namespace, so both halves are the key
+/// — a `payments/web` slice says nothing about `staging/web`, and a name-only key would answer
+/// *matches no pod* about whichever of the two the other one's slice did not cover. A Service
+/// absent from the map has no slice at all, which is the same answer as a slice holding no
+/// endpoint: both are `0` at the call site.
+///
+/// **One pass over the slices, and the whole join in it.** Asking the slice list once per Service
+/// is quadratic in a count nothing here bounds — [`MOST_ROWS_PER_SECTION`] caps the rows drawn,
+/// not the objects visited — and it is the one join on this screen with that shape; the others
+/// are measured and are not to be "optimised" with it
+/// (`reports/2026-08-22-phase-4-close-cross-family-review.md` § 3, where the figures are).
+///
+/// A slice carrying no Service name is hand-managed and says nothing about any Service
+/// ([`crate::rules::EndpointSliceSnapshot::service`]), so it is not in the map — the label is the
+/// only thing that puts a slice behind a Service, and the object's own name is not it.
+///
+/// **A label that is present and empty is a different shape and does land in the map**, under
+/// `(namespace, "")`: the API server accepts `kubernetes.io/service-name: ""` and the decode
+/// keeps it as `Some("")` (`rules.rs` § the snapshot types). Nothing the API server can return
+/// looks that key up, because a Service always has a name — and kube-proxy programs no route for
+/// such a slice either, so this pane and the data plane give the same answer.
+fn endpoints_behind(slices: &[EndpointSliceSnapshot]) -> BTreeMap<(Option<&str>, &str), usize> {
+    let mut behind = BTreeMap::new();
+    for slice in slices {
+        if let Some(service) = slice.service.as_deref() {
+            *behind
+                .entry((slice.id.namespace.as_deref(), service))
+                .or_insert(0) += slice.endpoints;
+        }
+    }
+    behind
 }
 
 /// **A disk that was reserved and nothing mounted** — [`crate::rules::ClaimSnapshot`] read from
