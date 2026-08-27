@@ -43,6 +43,7 @@
 - *(k8s)* Probe what else the cluster serves, from the discovery answer ([4825c57](https://github.com/murat-akpinar/k8rs/commit/4825c57a88f972597d0994be63cda33bf739b095)) — capabilities() reads the same run_aggregated() result the sidebar is built from and answers which of seven optional things the cluster serves — no round trip of its own.
 - *(k8s)* Give every watch its own failure, and notice one that ends ([1583f91](https://github.com/murat-akpinar/k8rs/commit/1583f915f79dbaac66dadd67de8a2391e1091c00))
 - *(k8s)* Connect to a cluster, and make a refused watch back off for real ([2290933](https://github.com/murat-akpinar/k8rs/commit/2290933eb6e01bf29f2b401fa5c790135e09357a)) — connect(context) builds the client, reads /version, runs aggregated discovery and the capability probe, and hands back five watch streams ready for drive(). It is a function and not startup code: a Session is a value, so the Phase 11 X switcher is this call made again beside the old one rather than a mutation of it (NOTES D16). Only what cannot be connected *with* is an error — /version and discovery each travel inside the session as a Result, so a kubeconfig that may not get /apis still watches pods.
+- *(k8s)* Tell a refused login from an expired one from a cluster that never answered ([df50815](https://github.com/murat-akpinar/k8rs/commit/df50815312d1112da94e71aa7ca3ac0c5f943940))
 
 ### 🐛 Bug Fixes
 
