@@ -2877,8 +2877,13 @@ public release.
 
 **🔒 Security gate:** TLS verification is never disabled by us; if the
 kubeconfig sets `insecure-skip-tls-verify` it is honoured *and surfaced*, not
-swallowed. The token never leaves the kube client — `Debug` is wrapped on
-anything that could hold it. Control characters are stripped at ingest, so no
+swallowed. The token never leaves the kube client — **nothing that can reach
+one derives `Debug`**, and the rule is the derive rather than a wrapper: an impl
+leaves `{:?}` compiling forever, no impl makes a stray one a compile error, and
+`scripts/security-guard.py` cannot tell whether a hand-written impl leaks. That
+half is mechanical; every `{}` / `{:?}` / `.to_string()` **call** on a kube error
+or a `Config` is hand-checked, and the guard prints that gap on every run
+([D164](NOTES.md#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27)). Control characters are stripped at ingest, so no
 downstream code has to remember — **and the field list is not "names and
 messages"**: `metadata.finalizers` reaches `evidence` verbatim through rule 12
 and is settable by anyone with `patch` on pods, which is the shape a generic
