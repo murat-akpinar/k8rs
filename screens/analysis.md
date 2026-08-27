@@ -1447,9 +1447,9 @@ to review, not an alarm to answer
 │   network          │  metrics agents are supposed to do this — the │
 │   storage          │  list says who can, not what to go and fix.   │
 │   config           │                                               │
-│   cluster          │  ○ /var/run/containerd/containerd.sock        │
-│ ANALYSIS           │      Read-only, mounted by 9 pods in          │
-│   capacity      1 ▲│      kube-system and monitoring.              │
+│   cluster          │  ○ /lib/modules                               │
+│ ANALYSIS           │      Read-only, mounted by 8 pods in          │
+│   capacity      1 ▲│      kube-system.                             │
 │   certificates  30d│  ○ /var/lib/kubelet                           │
 │   drain safety     │      Read-only, mounted by 3 pods in          │
 │▸  posture          │      kube-system.                             │
@@ -1479,13 +1479,34 @@ to review, not an alarm to answer
   names up to three namespaces, then `and N more`.** Which namespaces can read
   a path is the half of this an operator acts on; a list of every one of them
   is the half that makes the pane unreadable.
-- **Most widely mounted first, then the path — tied counts break on the path
-  itself.** The same order Capacity and Drain safety already use for the same
-  reason: how widely a path is exposed is the review this pane is for, and
+- **A row that has a pod outside `kube-system` sorts above every row that
+  does not; within each of the two groups the existing key is unchanged.**
+  The group boundary is the same shape Capacity's flagged-nodes-first and
+  Drain safety's worst-first already use — a priority group ahead of
+  everything else, tie-broken inside it — applied here for the first time
+  because until now every pod on every row already cleared the check. The
+  check itself is narrow: a mounting pod counts only if it runs in the
+  namespace `kube-system` as a DaemonSet or a mirror pod — the same test
+  `left_by_rule_8` already applies to decide whether a writable mount is
+  escalated, read here off every contributor to a row, read-only included.
+  Because the namespace half of the check is exact equality, a row naming
+  more than one namespace has already left this group — two namespaces are
+  only possible once at least one of them is not `kube-system`. **It is a
+  real check, not a verdict on the pod**
+  ([NOTES § D70](../NOTES.md#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)):
+  Rook in `rook-ceph`, Longhorn in `longhorn-system`, Cilium wherever it
+  installs, and the whole monitoring class — node-exporter, promtail,
+  fluent-bit — are real node agents that fail it too, because none of them
+  run in `kube-system`. Within a group, most widely mounted first, then the
+  path: how widely a path is exposed is the review this pane is for, and
   the alternative buries it below the fold on the cluster that has most of
-  it. A tie is not a coin flip: two paths mounted by the same number of pods
-  sort alphabetically, so a re-render of an unchanged cluster never reorders
-  them.
+  it. **A row leaves the `kube-system` group the moment one contributing pod
+  fails the check**, whatever else mounts the same path — not because that
+  pod is guilty of anything, but because it is the one thing on the row the
+  check cannot clear, and pod count must not bury it under paths the check
+  already did clear. A tie is not a coin flip within either group: two
+  paths mounted by the same number of pods sort alphabetically, so a
+  re-render of an unchanged cluster never reorders them.
 - **A row stands for a set of pods, so it records no destination** —
   `jump: None`, the same state Waste's counted rows are in and the same answer
   owed, below.
@@ -1511,6 +1532,142 @@ to review, not an alarm to answer
   rule 8 already took every other writable mount to Alerts; the *"Kubernetes
   runs its own node agents this way"* clause is what stops this row reading
   like the one rule 8 missed.
+- **A row does not "have a pod outside `kube-system`" because a mount
+  escalated** — that pod already has rule 8's card on Alerts and
+  contributes nothing here ([`left_by_rule_8`], above). It is this instead:
+  **at least one pod contributing to the row runs outside `kube-system`, or
+  inside it without being a DaemonSet or a mirror pod.** k8rs cannot say
+  more than that about the pod itself — it could be a plain workload
+  reading a path it has no real reason to, or it could be exactly the kind
+  of agent every other row on this pane is, just installed somewhere the
+  one check this pane runs does not look
+  ([NOTES § D70](../NOTES.md#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)).
+  `/var/log`, read by one pod in `default` on the combined
+  `tests/fixtures/healthy-hostpath.json` + `nodes.json` +
+  `kube-system-pods.json`, is the first shape: nothing rule 8 escalates,
+  nothing [D2](../NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later)
+  sends to Alerts, and — before this box — a row indistinguishable from
+  `/lib/modules` two lines above it. **Rule 8 is not touched by this box**:
+  `left_by_rule_8` still decides who reaches this pane at all; what changes
+  is only where a row it already computed lands, and what its sentence says.
+- **The opening paragraph stops asserting "nothing here is broken" when at
+  least one pod on the pane runs outside `kube-system`.**
+  [D2](../NOTES.md#d2--the-dividing-line-broken-now-vs-risky-later) still
+  keeps a plain read-only hostPath off Alerts — this is not a reversal of
+  that, and the row stays `○` / `Info`, [never a badge](#posture) — but a
+  pane that opens by saying nothing is broken while holding a row it cannot
+  actually vouch for is telling two stories at once. When every pod on the
+  pane clears the check, the paragraph is unchanged (wrapped as the mockup
+  at the top of this section already shows it):
+
+```
+Nothing here is broken. Network, storage and
+metrics agents are supposed to do this — the
+list says who can, not what to go and fix.
+```
+
+  When at least one pod does not, it opens with this instead:
+
+```
+Network, storage and metrics agents are
+supposed to do this. The top row has a pod
+outside kube-system, so k8rs cannot tell
+what it is. Nothing is marked broken; it
+still says who can, not what to go and fix.
+```
+
+  Both keep the pane's reason for existing — *"who can, not what to go and
+  fix"* — because this box does not turn Posture into a second Alerts; it
+  only stops one sentence from claiming a certainty the check cannot give
+  it. **The second wording is written to stay true whichever fraction of
+  the pane it is**, on purpose: it names no proportion, because a namespace
+  scope that is not `kube-system` will show it on almost every render — an
+  ordinary app namespace has no pods running in `kube-system` at all, so
+  nothing in it can clear the check, and a Posture pane scoped to `payments`
+  is routinely *every* row, not just the top one. The wording stays honest
+  about that render too, because it only ever claims *at least one*.
+
+  The frame is unchanged — 70 columns, 20 (sidebar) + 47 (content) plus the
+  borders, the [README](README.md#how-to-read-them) split for the 80×24
+  floor. Every content line in this file's mockups keeps at least one
+  trailing space before the border, so the real wrap budget is one column
+  short of the margin's arithmetic: **44** after the 2-space prose margin
+  (47 − 2 − 1), **40** after a row detail's 6-space indent (47 − 6 − 1) —
+  confirmed by counting every content line of both this and the frame above
+  and checking each is 47 wide and ends in a space:
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────┬───────────────────────────────────────────────┐
+│ ALERTS      3 ● 7 ▲│  Pods that can read the node's own filesystem │
+│ RESOURCES          │                                               │
+│   workloads        │  Network, storage and metrics agents are      │
+│   network          │  supposed to do this. The top row has a pod   │
+│   storage          │  outside kube-system, so k8rs cannot tell     │
+│   config           │  what it is. Nothing is marked broken; it     │
+│   cluster          │  still says who can, not what to go and fix.  │
+│ ANALYSIS           │                                               │
+│   capacity      1 ▲│  ○ /var/log                                   │
+│   certificates  30d│      Read-only, mounted by 1 pod in default — │
+│   drain safety     │      outside kube-system, so k8rs cannot tell │
+│▸  posture          │      what it is.                              │
+│   restarts         │  ○ /lib/modules                               │
+│   waste            │      Read-only, mounted by 8 pods in          │
+│   versions         │      kube-system.                             │
+├────────────────────┴───────────────────────────────────────────────┤
+│  $ kubectl get pods -A --watch                                     │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  esc back  ? all keys  q quit                      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+  `/var/log` is the committed fixture's own row, moved from last of
+  fourteen to first, next to the same `/lib/modules` line the unmodified
+  render already draws — the other twelve rows are unchanged and keep
+  scrolling below it exactly as the pane already does, below.
+
+- **The row's own sentence says which kind it is — the reorder alone is
+  not legible**, because "this row is near the top" means nothing to a
+  reader who does not already know the sort key. Read-only, one pod,
+  outside `kube-system`:
+
+  `Read-only, mounted by 1 pod in default — outside kube-system, so k8rs
+  cannot tell what it is.`
+
+  Read-only, several pods, at least one of them outside `kube-system`:
+
+  `Read-only, mounted by 3 pods in default and kube-system. At least one
+  of them is outside kube-system, so k8rs cannot tell what it is.`
+
+  The same clause holds when nothing mounting the path runs in
+  `kube-system` at all — `namespaces` can list only `default` and the
+  sentence is unchanged, because *"at least one"* is true whether one pod
+  of three fails the check or all three do, and the pane draws no third
+  sentence for the difference: the binary this box decided is *has a pod
+  outside `kube-system`* or *does not*, not *how many of them are*.
+
+  A writable row's reassurance clause no longer claims more than the code
+  checked. **Every writer on this pane runs in `kube-system` as a DaemonSet
+  or mirror pod** — [above](#posture), `left_by_rule_8` only lets a
+  writable mount through when `node_agent` already held, and rule 8 took
+  every other writable mount to Alerts — but the sentence cannot point at
+  *that one* the way a single-writer row does, because two DaemonSets can
+  write to the same path at once. It names the writers as a group instead,
+  then says plainly that the row holds more than them:
+
+  `Mounted by 6 pods in default and kube-system, and at least one of them
+  can write to it. The ones that write are in kube-system; not every pod
+  here is.`
+
+  **There is no writable, one-pod, outside-`kube-system` sentence, and
+  there cannot be one.** A lone writable pod that runs outside
+  `kube-system` — or inside it without being a DaemonSet or a mirror pod —
+  is escalated by rule 8 before this pane ever sees it, so a row with
+  exactly one contributing pod either is the pod the writable clause above
+  already describes, or it is on Alerts instead of here: `pods == 1`,
+  `writable`, and "has a pod outside `kube-system`" never hold of the same
+  row at once.
 - **This pane never caps, and it is not an oversight — it is the same rule
   Capacity's node list already follows.** A live cluster with four nodes
   already produces 14 rows for this pane, and a real one runs 30 to 60
@@ -1524,9 +1681,11 @@ to review, not an alarm to answer
   Capacity's node list already does:
 
 ```
-○ /var/run/containerd/containerd.sock
+○ /etc/ca-certificates
     Read-only, mounted by 41 pods in kube-system,
-    monitoring and 2 more.
+    monitoring and 2 more. At least one of them is
+    outside kube-system, so k8rs cannot tell what
+    it is.
 ○ /var/lib/kubelet
     Read-only, mounted by 38 pods in kube-system.
 ○ /etc/cni/net.d

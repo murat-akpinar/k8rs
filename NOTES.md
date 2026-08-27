@@ -189,6 +189,7 @@ its line moving with it.
 - [D165](#d165--the-two-cargotoml-lines-the-first-client-forced-and-the-one-that-was-a-panic-on-every-machine-2026-08-27) — the two `Cargo.toml` lines the first client forced, and the one that was a panic on every machine
 - [D166](#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27) — `connect()`: its shape, its fourteen choices, and the backoff kube's own default did not earn
 - [D167](#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27) — eight faults, not two, and the two the review had to produce
+- [D168](#d168--posture-sorts-the-row-it-cannot-vouch-for-first-and-says-the-check-instead-of-a-verdict-2026-08-28) — Posture sorts the row it cannot vouch for first, and says the check instead of a verdict
 
 ## Why it exists — where the gap is
 
@@ -14513,3 +14514,96 @@ The `env` block is never displayed at all — the security gate says so outright
 and the plugin's stdout is a credential
 ([docs/security.md § Token hygiene](docs/security.md#token-hygiene)), so tests
 assert variants and never text.
+
+### D168 — Posture sorts the row it cannot vouch for first, and says the check instead of a verdict (2026-08-28)
+
+The Posture pane opened with *"Nothing here is broken. Network, storage and metrics
+agents are supposed to do this"* and sorted by pod count descending. `left_by_rule_8`
+sends **any** read-only host mount here from **any** namespace, so the one row an
+operator would look at sorted last. Reproduced at HEAD on the committed corpus —
+`/var/log`, one pod in `default`, dead last of fourteen with thirteen `kube-system`
+rows above it.
+
+The box asked for three rulings, in order.
+
+**1 — `/etc/kubernetes/pki` does not become a fourth rule 8 escalator, and `rules.rs`
+is not touched.** [D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+bound 1 wants a defect proven on a *committed* capture; the originating measurement
+([reports/2026-08-22-phase-4-close-cross-family-review.md](reports/2026-08-22-phase-4-close-cross-family-review.md) § 4)
+used a synthetic pod written to a scratchpad, and no committed fixture shows rule 8
+drawing a wrong card.
+
+The substantive reason is stronger than the procedural one and is the one to cite.
+Rule 8's three escalators are properties of the **mount**, decidable with no
+knowledge of how the cluster was installed: the path *is* the machine, the path *is*
+the runtime, the mount is writable. *"This directory holds secrets"* is a property of
+the **install layout**, and its siblings are already rows on the committed corpus,
+each at least as bad as the PKI directory — `/var/lib/etcd` is every Secret in the
+cluster, `/etc/kubernetes/controller-manager.conf` is a cluster-admin kubeconfig, and
+`/var/lib/kubelet` is every Secret projected into every pod on that node. Escalating
+one of them is arbitrary; escalating all of them lights up every real cluster. The
+list is also blind on the distribution half the audience runs: k3s keeps its CA in
+`/var/lib/rancher/k3s/server/tls`, so the rule would ship silent there and confident
+elsewhere.
+
+**The box's own justifying claim was measured and is weaker than it read.** *"`ca.key`
+is in that directory"* is true of a control-plane node and false of a worker, and the
+synthetic pod was placed on `k8rs-worker`. On `kindest/node:v1.36.1` the control plane
+holds fifteen entries including `ca.key`; the worker holds one, `ca.crt`
+([reports/2026-08-27-posture-node-infrastructure-group.md](reports/2026-08-27-posture-node-infrastructure-group.md)).
+A second claim — that an ordinary pod cannot land on a control-plane node — is **not**
+a ground here and must not be recorded as one: kind untaints a single-node cluster, as
+do Docker Desktop and minikube, which is what a beginner runs.
+
+**2 — the sort key gains a group ahead of the existing one.** A row with a pod that
+fails the check sorts above every row without one; inside each group the old key is
+unchanged, pod count descending then path. The group must come first because the pod
+count is exactly what buries the row: a cleared pod mounts its paths on every node it
+runs on.
+
+**3 — the opening paragraph stops asserting *nothing here is broken*** when at least
+one pod on the pane fails the check.
+
+**The wording was wrong twice before it was right, and that is the entry.** Both
+drafts reported the check as a verdict — *"is not one of the node's own agents"*. The
+operator review moved the four kindnet pods to `calico-system` on the committed
+capture, one field and exactly how Calico installs under the Tigera operator, and ran
+the binary: the pane called a network agent *not one of the node's own agents*,
+directly under its own first sentence saying network agents are supposed to do this.
+[D70](#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)
+already records how ordinary that cluster is — Rook, Longhorn, Cilium, every CSI node
+plugin, node-exporter, promtail, fluent-bit. D70 was honest to leave rule 8
+wrong-and-**quiet**; the first two drafts made it wrong-and-**loud** on a second
+screen, which is worse than not doing the box.
+
+**So every string says the observable and then says k8rs cannot tell**: *"outside
+kube-system, so k8rs cannot tell what it is"*. The check is `kube-system` **and**
+(mirror ∨ DaemonSet); the pane now claims exactly that and no more. The field is named
+`outside_kube_system` for the same reason — `outsider` told the next reader a verdict
+had been reached. **A pane that fires on every cluster with a monitoring stack is worth
+less than one that fires on the cluster with a genuine stray**, and the difference is
+entirely in whether the sentence concludes or reports.
+
+Three consequences worth keeping:
+
+- **The paragraph's subject is the pod, not the row.** The flag is true when *any one*
+  contributor fails, so a top row of three pods can be two the check cleared and one it
+  did not.
+- **`node_agent` is now one spelling inside `analysis.rs`**, called by both
+  `left_by_rule_8` and `host_paths`, down from two in this file. Product code holds two
+  copies total, this and `rules.rs`'s, guarded by the partition test rather than by a
+  comment — `rules.rs` is frozen and exports no reader.
+- **The `(writable, outside, 1 pod)` arm is unreachable and still got its own true
+  sentence.** It is unreachable *because* of the `kube-system` clause D70 records as too
+  narrow, so whoever widens D70 makes it buildable; falling through to the arm above
+  would tell a reader that a pod in `longhorn-system` is one of the node's own agents,
+  in a release build where the `debug_assert` is compiled out. The assertion moved to
+  `host_paths`, where the claim actually lives, which also left `sentence()` a plain
+  formatter its tests can call for every arm.
+
+**This is a frozen-`analysis.rs` change and D124 governs it.** Bound 1's evidence is the
+committed `healthy-hostpath.json` + `kube-system-pods.json` render, **not** the synthetic
+pod — which is what makes ruling 1 right to refuse. Bound 2 holds: the box entered
+`todo.md` at `6ccb7db`, before Phase 5's first code commit. Bound 3 holds: no rule added,
+`Finding`/`ObjectId`/`analyze` untouched. **Bound 4 is owed — the whole-file mutation gate
+for `analysis.rs` re-runs at Phase 5's close**, not only `rules.rs`'s.

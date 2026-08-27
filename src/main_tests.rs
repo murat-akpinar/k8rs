@@ -277,7 +277,23 @@ fn nothing_unprintable_from_a_report_reaches_the_terminal() {
         "the path is a row's whole text, and it came back short: {printed:?}"
     );
     assert!(
-        printed.contains("in payments."),
+        // **The em dash is the delimiter the producer writes after the value, not decoration**,
+        // and what this proves is that the namespace arrived whole: a strip that returns it
+        // short fails here — measured, `in pay` when the strip truncates at the first control
+        // character, `in payents —` when it drops the character after one.
+        //
+        // **It does not prove the strip stopped at the value's end**, and that is the path
+        // assertion's half rather than a gap: the plant's two control characters are adjacent,
+        // so a strip that consumes one character past each eats the second control instead of a
+        // letter and hands this namespace back whole — measured, and it is the path above, whose
+        // crafted value has printable text between its controls, that comes back `/var2J/log`
+        // and fails.
+        //
+        // The full stop this looked for before does not occur in the output at all: Posture's
+        // read-only sentence carries a clause after the namespace when the mounting pod runs
+        // outside `kube-system`, and a crafted namespace never is it
+        // (`screens/analysis.md` § Posture).
+        printed.contains("in payments \u{2014}"),
         "the namespace enters a sentence and came back short: {printed:?}"
     );
     assert!(

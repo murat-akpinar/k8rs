@@ -1350,6 +1350,34 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   any report describing DNS behaviour hits it. `tester`'s. Found by `k8s-admin`
   writing up the join measurement.
 
+### From the Posture node-infrastructure box and its operator review (2026-08-27)
+
+- **The all-`kube-system` writable sentence still concludes where every other string
+  now reports.** *"Kubernetes runs its own node agents this way"* (`analysis.rs`,
+  `Mounters::sentence`) asserts what a pod *is* from the same narrow check
+  [D168](NOTES.md#d168--posture-sorts-the-row-it-cannot-vouch-for-first-and-says-the-check-instead-of-a-verdict-2026-08-28)
+  rewrote every other sentence to stop doing. It is not wrong today — `left_by_rule_8`
+  guarantees the writer cleared the check — and it is a reassurance rather than an
+  accusation, which is why it was left. Ruled: wrong-and-quiet in
+  [D70](NOTES.md#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)'s
+  sense, sweep it when D70 itself is widened. Raised by `tui-designer`.
+- **The densest Posture detail sentence is now 155 characters where it was 44**, which
+  is five lines at `screens/analysis.md` § Posture's 40-column detail budget, and the
+  section's mockups only draw the three-line case. Nothing wraps yet because `views.rs`
+  does not exist, so nothing is wrong today; it is whoever draws the pane who inherits
+  it. Raised by `tester`.
+- **Nothing in the sidebar points at a pane that now says something is worth a look.**
+  Posture badges nothing, deliberately and for a reason that has not changed
+  ([D127](NOTES.md#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)),
+  so the box's value only reaches someone already standing on the pane. Raised by
+  `k8s-admin` as a tension, not a finding — a badge is the obvious answer and is the
+  one D127 refused.
+- **D70 fires wrong-and-loud on Alerts too, and this box could not touch it.** With
+  kindnet in `calico-system`, its *writable* mounts (`/etc/cni/net.d`, `/var/run/nri`,
+  half of `/run/xtables.lock`) leave Posture and become rule 8 CRITICAL cards. That is
+  D70's recorded limit on the other screen; it needs `rules.rs`, which is frozen.
+  Measured by `dev-core` while proving the Calico render.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

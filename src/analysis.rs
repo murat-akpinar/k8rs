@@ -2167,20 +2167,60 @@ pub fn posture(snapshot: &ClusterSnapshot, _findings: &[Finding]) -> Report {
     }
 
     let mut paths: Vec<(&String, &Mounters)> = mounted.iter().collect();
-    // **Most widely mounted first, then the path** — Capacity's and Drain safety's order
+    // **A row with a pod the check does not clear sorts above every row without one**
+    // ([`Mounters::outside_kube_system`]), and inside each of the two groups the key is
+    // unchanged: most widely mounted first, then the path — Capacity's and Drain safety's order
     // (`screens/analysis.md` § Capacity, *Many nodes*) for the reason that applies here too: how
     // widely a path is exposed is the review this pane is for, and the alternative puts it below
-    // the fold on the cluster that has most of it.
-    paths.sort_by(|a, b| b.1.pods.cmp(&a.1.pods).then_with(|| a.0.cmp(b.0)));
+    // the fold on the cluster that has most of it. A tie is not a coin flip in either group, so a
+    // re-render of an unchanged cluster never reorders the pane.
+    //
+    // **The group has to come first, because the pod count is what buries the row worth
+    // looking at**: a pod the check clears mounts its paths on every node it runs on, so one
+    // pod reading one directory sorts last of fourteen behind them on the committed corpus
+    // (`screens/analysis.md` § Posture). A row leaves the cleared group the moment one
+    // contributing pod fails the check, whatever else mounts the same path — not because that
+    // pod is guilty of anything, but because it is the one thing on the row the check cannot
+    // clear (NOTES § D70).
+    paths.sort_by(|a, b| {
+        b.1.outside_kube_system
+            .cmp(&a.1.outside_kube_system)
+            .then_with(|| b.1.pods.cmp(&a.1.pods))
+            .then_with(|| a.0.cmp(b.0))
+    });
 
     // **The opening paragraph is part of the report**, not a caption `views.rs` adds. Without it
     // the pane reads as an accusation, and every row on it is something the cluster is supposed
     // to have (`screens/analysis.md` § Posture).
-    let mut rows = vec![Row::Prose(
+    //
+    // **It stops asserting *nothing here is broken* when at least one pod on the pane runs
+    // outside `kube-system`.** NOTES § D2 still keeps a plain read-only hostPath off Alerts —
+    // this is not a reversal of it, the row stays `○`/`Info` and the pane still badges nothing —
+    // but a pane that opens by saying nothing is broken while holding a row it cannot vouch for
+    // is telling two stories at once.
+    //
+    // **The subject is the pod and not the row**, which is the whole of what the check answers:
+    // the flag is true when *any one* contributor fails it, so a top row of three pods can be
+    // two the check cleared and one it did not, and a sentence about *the row* would be false of
+    // two thirds of it (`screens/analysis.md` § Posture).
+    //
+    // **Read off the top of the sorted list and not counted a second time**: the sort above has
+    // just put such a row there, so *"the top row"* is that same fact rather than a second answer
+    // to it. The wording names no proportion on purpose — an ordinary app namespace has no pods
+    // in `kube-system` at all, so a scoped view is routinely *every* row and the sentence has to
+    // stay true of that render too.
+    let opening = if paths
+        .first()
+        .is_some_and(|(_, who)| who.outside_kube_system)
+    {
+        "Network, storage and metrics agents are supposed to do this. The top row has a pod \
+         outside kube-system, so k8rs cannot tell what it is. Nothing is marked broken; it still \
+         says who can, not what to go and fix."
+    } else {
         "Nothing here is broken. Network, storage and metrics agents are supposed to do this — \
          the list says who can, not what to go and fix."
-            .to_string(),
-    )];
+    };
+    let mut rows = vec![Row::Prose(opening.to_string())];
     rows.extend(paths.into_iter().map(|(path, who)| Row::Answer {
         // **`Info` on every row, always.** The pane makes no judgement; a band that varied would
         // be one (`screens/analysis.md` § Posture).
@@ -2222,11 +2262,27 @@ struct Mounters {
     /// sentence would have said *Read-only* about a path that pod can write. That pod is on
     /// Alerts, with rule 8's card, and is not counted here at all.
     writable: bool,
+    /// Whether **any** pod behind this row fails [`node_agent`]'s check — runs outside
+    /// `kube-system`, or inside it without being a DaemonSet or a mirror pod.
+    ///
+    /// **Named for the observable and not for a verdict.** k8rs cannot say what such a pod is:
+    /// it could be a workload reading a path it has no reason to, or exactly the kind of agent
+    /// every other row here is, installed somewhere the one check this pane runs does not look —
+    /// Rook, Longhorn, Cilium and every CSI node plugin are that second case (NOTES § D70,
+    /// `screens/analysis.md` § Posture). Every string keyed on this field says so.
+    ///
+    /// **It is the row's group in the sort and the pane's opening paragraph**, and it is a
+    /// binary and not a proportion: the pane draws no third sentence for *how many* of a row's
+    /// pods failed, because *at least one* is what an operator acts on and all the check knows.
+    ///
+    /// **A pod rule 8 escalated is not one of these** — it contributes nothing to this row at
+    /// all, and a row does not change group because some other pod's mount went to Alerts.
+    outside_kube_system: bool,
 }
 
 impl Mounters {
-    /// **How many pods, in which namespaces, and whether any of them can write** — the sentence
-    /// under a Posture row.
+    /// **How many pods, in which namespaces, whether any of them can write and whether any runs
+    /// outside `kube-system`** — the sentence under a Posture row.
     ///
     /// **Up to three namespaces, then `and N more`** (`screens/analysis.md` § Posture): which
     /// namespaces can read a path is the half an operator acts on, and a list of every one of
@@ -2249,18 +2305,51 @@ impl Mounters {
         } else {
             format!(" in {}", and_list(&named, over))
         };
-        match (self.writable, self.pods) {
-            (false, _) => format!("Read-only, mounted by {pods}{places}."),
+        match (self.writable, self.outside_kube_system, self.pods) {
+            (false, false, _) => format!("Read-only, mounted by {pods}{places}."),
+            // **The reorder alone is not legible** — *near the top* means nothing to a reader
+            // who does not know the sort key — so the row's own sentence says what the check
+            // found, and never more than that (`screens/analysis.md` § Posture). The em dash is
+            // the whole reason this arm exists separately: a `which` clause would bind to the
+            // namespace beside it and say `default` is outside `kube-system`.
+            (false, true, 1) => format!(
+                "Read-only, mounted by {pods}{places} — outside kube-system, so k8rs cannot tell \
+                 what it is."
+            ),
+            // *At least one* is true whether one pod of three failed the check or all three did,
+            // and the pane draws no third sentence for the difference.
+            (false, true, _) => format!(
+                "Read-only, mounted by {pods}{places}. At least one of them is outside \
+                 kube-system, so k8rs cannot tell what it is."
+            ),
             // **Writable and still not an alarm**, which needs saying or the row reads as one
-            // rule 8 missed: the only writable mounts that reach this pane are the node's own
-            // agents, and that silence is rule 8's on purpose (NOTES § D70).
-            (true, 1) => format!(
+            // rule 8 missed: the only writable mounts that reach this pane are `kube-system`'s
+            // own, and that silence is rule 8's on purpose (NOTES § D70).
+            (true, false, 1) => format!(
                 "Mounted by {pods}{places}, which can write to it. Kubernetes runs its own node \
                  agents this way."
             ),
-            (true, _) => format!(
+            (true, false, _) => format!(
                 "Mounted by {pods}{places}, and at least one of them can write to it. Kubernetes \
                  runs its own node agents this way."
+            ),
+            // **Unreachable today, and it still gets a sentence that is true either way.** It is
+            // unreachable *because* of the `kube-system` clause NOTES § D70 records as too
+            // narrow: whoever widens that clause makes this row buildable, and an arm that fell
+            // through to the one above it would tell a reader that a pod in `longhorn-system` is
+            // one of the node's own agents — in a release build, where the assertion in
+            // [`host_paths`] is compiled out and nothing else would catch it.
+            (true, true, 1) => format!(
+                "Mounted by {pods}{places}, which can write to it. That pod is outside \
+                 kube-system, so k8rs cannot tell what it is."
+            ),
+            // **The reassurance clause, claiming only what the code checked.** Every writer here
+            // did clear the check, but the sentence cannot point at *that one* the way the
+            // single-pod row does — two DaemonSets can write to one path — so it names the
+            // writers as a group and then says plainly that the row holds more than them.
+            (true, true, _) => format!(
+                "Mounted by {pods}{places}, and at least one of them can write to it. The ones \
+                 that write are in kube-system; not every pod here is."
             ),
         }
     }
@@ -2332,11 +2421,26 @@ fn host_paths(snapshot: &ClusterSnapshot) -> BTreeMap<String, Mounters> {
             let who = paths.entry(path).or_default();
             who.pods += 1;
             who.writable |= writable;
+            // **Per contributing pod, so one is enough** — the pod the check cannot clear is
+            // the whole reason to look at the row (`screens/analysis.md` § Posture).
+            who.outside_kube_system |= !node_agent(pod);
             if let Some(namespace) = pod.id.namespace.as_deref() {
                 who.namespaces.insert(namespace.to_string());
             }
         }
     }
+    // **No row this pane builds is writable, single-pod and outside `kube-system` at once**: that
+    // pod is the row's only contributor and it wrote, so [`left_by_rule_8`] let a non-`read_only`
+    // mount through, which it does only when [`node_agent`] held. The claim is asserted where the
+    // row is built rather than where it is worded, which leaves [`Mounters::sentence`] a plain
+    // formatter its tests can call for every arm — including the one this forbids
+    // (`screens/analysis.md` § Posture).
+    debug_assert!(
+        !paths
+            .values()
+            .any(|who| who.writable && who.outside_kube_system && who.pods == 1),
+        "a lone writable pod outside kube-system is rule 8's card, not a row here"
+    );
     paths
 }
 
@@ -2345,19 +2449,36 @@ fn host_paths(snapshot: &ClusterSnapshot) -> BTreeMap<String, Mounters> {
 ///
 /// The two that are about *what* is mounted are [`crate::rules::mounted_path`]'s and
 /// [`crate::rules::is_runtime_socket`]'s, called rather than re-read. The third is rule 8's
-/// silence over node infrastructure — `kube-system`, and DaemonSet-owned **or** a mirror pod,
-/// since `etcd` and `kube-apiserver` are the latter — which is the one clause of it that has no
-/// exported reader, so it is spelled a second time here.
+/// silence over node infrastructure, which is the one clause of it that has no exported reader —
+/// so this file spells it, once, in [`node_agent`].
 ///
 /// **A second spelling of a predicate is what this project pays most for**, so the guard is not
 /// this comment: the test beside this asserts, over every captured mount, that rule 8's cards and
 /// this pane's rows partition the list with neither an overlap nor a gap. A clause that drifted
 /// apart from rule 8's shows up there rather than on a screen.
 fn left_by_rule_8(pod: &PodSnapshot, mount: &HostPathMount) -> bool {
-    let node_agent = pod.id.namespace.as_deref() == Some(NODE_NAMESPACE)
-        && (pod.mirror || pod.owner.kind == ObjectKind::DaemonSet);
     let path = mounted_path(mount);
-    path != "/" && !is_runtime_socket(&path) && (mount.read_only || node_agent)
+    path != "/" && !is_runtime_socket(&path) && (mount.read_only || node_agent(pod))
+}
+
+/// **Does this pod run in `kube-system` as a DaemonSet or a mirror pod?** — rule 8's third
+/// escalator, asked from this side. The mirror half is why `etcd` and `kube-apiserver` clear it
+/// ([`PodSnapshot::mirror`]).
+///
+/// **It is a check and not a verdict, and the name is rule 8's use of it rather than what it
+/// proves.** Rook, Longhorn, Cilium, node-exporter and every CSI node plugin are real node agents
+/// that fail it, because none of them install into `kube-system` (NOTES § D70). Nothing this file
+/// prints may claim more than the check itself — which is why every string keyed on
+/// [`Mounters::outside_kube_system`] names the namespace and then says k8rs cannot tell
+/// (`screens/analysis.md` § Posture).
+///
+/// **One spelling, read by both of this pane's questions**: which mounts rule 8 leaves here
+/// ([`left_by_rule_8`]) and which rows have a pod that fails it. Product code holds two copies of
+/// the clause, this one and `rules.rs`'s, which exports no reader for it; the third is in the
+/// test beside this, which spells the requirement out rather than calling the code it checks.
+fn node_agent(pod: &PodSnapshot) -> bool {
+    pod.id.namespace.as_deref() == Some(NODE_NAMESPACE)
+        && (pod.mirror || pod.owner.kind == ObjectKind::DaemonSet)
 }
 
 // --- THE POSTURE REPORT END ---

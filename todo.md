@@ -2723,7 +2723,7 @@ public release.
       one labelled and one unlabelled slice on the same Service, kube-proxy
       programs a route only for the labelled one, so excluding an unlabelled
       slice is the correct semantics and not merely equivalent to the old code
-- [ ] **Posture opens with *"Nothing here is broken"* and sorts the one row an
+- [x] **Posture opens with *"Nothing here is broken"* and sorts the one row an
       operator would act on last.** The pane sorts by pod count descending, and
       `left_by_rule_8` sends **any** read-only host mount here from **any**
       namespace — so a pod in `default` mounting `/etc/kubernetes/pki` read-only
@@ -2743,6 +2743,27 @@ public release.
       the sort key should be when one row is not a node agent, and whether the
       opening sentence may keep saying *nothing here is broken* while the pane
       can hold a row that is
+      Done, all three ruled in
+      [D168](NOTES.md#d168--posture-sorts-the-row-it-cannot-vouch-for-first-and-says-the-check-instead-of-a-verdict-2026-08-28).
+      **PKI does not escalate and `rules.rs` is untouched**: D124 bound 1 wants a
+      committed capture and the § 4 evidence is a synthetic pod, and rule 8's
+      escalators are properties of the *mount* while a sensitive-directory list is a
+      property of the install layout — `/var/lib/etcd`, `controller-manager.conf` and
+      `/var/lib/kubelet` are already rows here and each is at least as bad. The box's
+      *"`ca.key` is in that directory"* was **measured and is false of a worker** —
+      fifteen entries on the control plane, `ca.crt` alone on `k8rs-worker`, where the
+      synthetic pod sat
+      ([reports/2026-08-27](reports/2026-08-27-posture-node-infrastructure-group.md)).
+      **A row with a pod the check cannot clear now sorts first** and the opening
+      paragraph stops saying nothing is broken. **The wording was wrong twice before it
+      was right**: both drafts reported the check as a verdict, and the operator review
+      put kindnet in `calico-system` — one field, exactly how Calico installs — and got
+      the pane calling a network agent *not one of the node's own agents* under its own
+      sentence saying network agents are supposed to do this. Every string now says the
+      observable and stops: *"outside kube-system, so k8rs cannot tell what it is."*
+      `/var/log` moves from last of fourteen to first, the all-`kube-system` pane is
+      byte-identical to HEAD, and the Calico render is honest. **D124 bound 4 is owed:
+      the whole-file mutation gate for `analysis.rs` re-runs at this phase's close**
 - [ ] **Three of the seven reports have never drawn their principal shape
       through the binary.** The temporary driver hard-codes `server_version`,
       `context`, `client_certificate` and `metrics` to `None`, so the run every
