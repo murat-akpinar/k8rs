@@ -2652,12 +2652,24 @@ public release.
       `StandingBackoff` instead — 2985 → 89.6 requests per refused watch per hour,
       measured live — and the severed-socket recovery was then re-proved against
       the fixed policy at 87.5 s, unattended
-- [ ] 403 vs 401 vs no-connection distinguished (**three** variants, not two).
+- [x] 403 vs 401 vs no-connection distinguished (**three** variants, not two).
       `401` is a credential-plugin token that expired mid-session — the normal
       case on EKS/GKE/AKS — and it names the renewal command from the user's
       own kubeconfig `exec` block rather than guessing a cloud
-      ([NOTES § D19](NOTES.md#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program))
-- [ ] **A generic message may never stand in for an error we were handed** — the
+      ([NOTES § D19](NOTES.md#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program)).
+      Done: **eight**, not three — `k8s::Fault`, one classifier, no string on the
+      type, the words the caller's
+      ([D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27) ·
+      [reports/2026-08-27](reports/2026-08-27-fault-taxonomy-against-a-live-api-server.md)).
+      `Why`/`why()` were deleted rather than kept beside it. The renewal hint
+      names the `exec` `command` alone — never `args`, never `env` — stripped
+      and bounded like any other free text. **Two shapes only a live cluster
+      could settle**: a credential plugin dying mid-session does *not* arrive as
+      `kube::Error::Auth` and needed an `AuthError` downcast of its own, and a
+      `403` refusal now says what the **role needs** rather than what the
+      kubeconfig is *not allowed* to do, because a watch is two verbs and
+      nothing here can tell which was missing
+- [x] **A generic message may never stand in for an error we were handed** — the
       three variants above are worth little without it. Whatever failed, the
       screen names *what* failed and *why*; a fallback string is printed only for
       the case it actually describes. k9s tells these errors apart internally and
@@ -2669,7 +2681,14 @@ public release.
       the *wording* of what a user reads; this governs where it is allowed to
       come from. **It updates `docs/architecture.md § Error handling`**, which
       today covers the three startup errors and not the general rule
-      ([PRIOR-ART § C1](PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error))
+      ([PRIOR-ART § C1](PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error)).
+      Done: every site holding a typed error routes through one classifier, and
+      the one legitimate fallback — a watch that ended with no error attached —
+      is named rather than implied. `docs/architecture.md` § Error handling is
+      rewritten, and **the same pass found it claiming an unreachable API server
+      is a startup error**, which § CONNECTING has never done; that claim and
+      its twin in `REQUIREMENTS.md` are corrected
+      ([D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27))
 - [ ] **`endpoints_behind` is a nested scan and the cost is quadratic in
       Services** — `analysis.rs` walks every EndpointSlice for every Service, and
       `MOST_ROWS_PER_SECTION` caps the rows drawn, not the objects visited.

@@ -146,9 +146,12 @@
 - No kubeconfig / invalid context → clear message on stderr **before**
   entering the TUI + non-zero exit. Panicking inside the TUI is forbidden
   (raw mode corrupts the terminal).
-- API unreachable → clear error at startup; if the connection drops while
-  running, show "disconnected, retrying" in the header — never silently
-  freeze on stale state.
+- API unreachable → **not a startup error**: a banner that says so, retried
+  forever, never an exit. If the connection drops while running, show
+  "disconnected, retrying" in the header — never silently freeze on stale
+  state. This item said "clear error at startup" until 2026-08-27, when the
+  run against a dead port was measured and correctly did not end
+  ([NOTES § D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
 - Insufficient RBAC (403) → say which permission is missing; if the Events
   watch gets 403, only the affected rule (11) is disabled, the app
   keeps running.

@@ -188,6 +188,7 @@ its line moving with it.
 - [D164](#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27) — the token-hygiene guard learns three shapes it could not see, and says out loud what it still cannot
 - [D165](#d165--the-two-cargotoml-lines-the-first-client-forced-and-the-one-that-was-a-panic-on-every-machine-2026-08-27) — the two `Cargo.toml` lines the first client forced, and the one that was a panic on every machine
 - [D166](#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27) — `connect()`: its shape, its fourteen choices, and the backoff kube's own default did not earn
+- [D167](#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27) — eight faults, not two, and the two the review had to produce
 
 ## Why it exists — where the gap is
 
@@ -14358,3 +14359,157 @@ operator review, verified against the crate, and written into the doc comment �
 class the entry above confesses, caught twice in one box.
 
 Measurements: [reports/2026-08-27](reports/2026-08-27-connect-and-the-idle-proof.md).
+
+### D167 — eight faults, not two, and the two the review had to produce (2026-08-27)
+
+Two Phase 5 boxes landed together because they are one question asked twice:
+*what did the cluster actually say*, and *who is allowed to turn it into a
+sentence*. `REQUIREMENTS.md` had specified a "2-variant enum: 403 vs
+no-connection"; [D19](#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program)
+had already made that three. Writing it made it **six**, and the two extra ones
+were not invented — each is a shape the code had already been measured on.
+
+**`k8s::Fault`, eight unit variants, carrying no string.** `Kubeconfig` (the
+file) · `NoContext` · `BadEntry` (the file loaded and something it points at did
+not) · `NoCredential` · `Expired` (`401`) · `Refused` (`403`) · `Gone` (`404`) ·
+`Unanswered`. **It was six for one round**, and the operator review split the
+first one: `because(Kubeconfig, …)` printed one constant over `KubeconfigError`'s
+**fifteen** variants (`config/mod.rs:33-95`, counted off the enum — this entry
+said nineteen and the brief that ordered the fix said sixteen, neither read off
+it, which is this entry's own subject a fifth time). Two of the six causes
+measured were **false sentences**: a `client-certificate` path that moved and a
+cluster entry with no `server:` both printed *"the kubeconfig could not be
+read"*, when the file had read perfectly. Those are the 3am ones.
+`kubeconfig_fault` has no catch-all on purpose — `KubeconfigError` is not
+`#[non_exhaustive]`, so all fifteen are listed and a new upstream variant is a
+compile error rather than a fifteenth thing silently printing one of three
+sentences. `NoCredential` is the one the taxonomy would not have had: a
+kubeconfig that names a login program which produces nothing — not on the disk,
+exits non-zero, or prints something that is not an `ExecCredential`. **Nothing
+is sent to the cluster**, so it is neither *refused* nor *nothing answered*, and
+it is the only fault whose fix is on the reader's own machine. It was pinned by
+a test the `connect()` box wrote against its own doc comment's claim that no
+test could reach that arm.
+
+**`Why`/`why()` were deleted rather than kept beside it.** The old per-call-site
+classifier read a `401` as *k8rs could not ask* — C1 in miniature, and the
+two-functions-one-error class this repo has paid most for. `Unresolved::why` is
+now `Option<Fault>`, where `None` is the old `NotAsked`.
+
+**The order of the match is a decision, not a formatting choice.** `why()`
+matched `(404, _) | (_, NOT_FOUND)` before `(403, _) | (_, FORBIDDEN)`, so a
+`Status` carrying `code: 403, reason: "NotFound"` read as *gone*. Nesting
+removes the tie-break: the transport's number is asked first, the body's word
+only when there is no number.
+
+**Three claims in the first draft were reasoned and not measured, which is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+a second time in one file.**
+
+- *"Start k8rs afresh"* was printed on every `401`. kube re-runs the exec plugin
+  on every request inside its 60s window — **25 plugin executions against 22
+  requests** over a 10s run — so for the ordinary exec case the watch recovers
+  on its own and the restart instruction is D19's own failure mode wearing the
+  other face. The sentence is now *"renew it there"*, which is true of both
+  shapes — including the plugin whose token carries no `expirationTimestamp`,
+  becomes a plain bearer token and is never refreshed.
+- `answer()`'s doc said kube builds `.with_code(403)`. The source is
+  `.with_code(status.as_u16())` (`kube-client-4.2.0/src/client/mod.rs:556`) —
+  the real HTTP code, never a constant — and `Status::failure` *does* set a
+  reason, to kube's own placeholder (`kube-core-4.2.0/src/response.rs:79-88`).
+  The shape is a true number beside a word no server sent, which is the actual
+  reason the number is asked first.
+- The region claimed to handle the proxy shape it was written for and **misses
+  exactly that one**. Every field of `Status` is `#[serde(default)]`, so a `403`
+  whose body is a JSON object with **no field colliding with `Status`'s own
+  types** deserializes *successfully* into an all-default `Status` and never
+  reaches kube's `with_code` fallback. (`{"code":"nope"}` does fail the parse —
+  `code` is a `u16` — and does reach the fallback; the first draft of this entry
+  said *any* JSON object, which is this entry's own subject a fourth time.) Measured through the
+  binary: `{"error":"forbidden by policy"}` and `{}` both print *nothing usable
+  came back*, while the same `403` with a `text/plain` body prints *not
+  allowed*. oauth2-proxy, an auth-annotated ingress and an API gateway all
+  answer JSON. It is **unrecoverable from `kube::Error::Api`**, which carries
+  the parsed `Status` and no response, code or headers; the degenerate parse is
+  detectable but detecting it recovers no number. The only route is a
+  `ClientBuilder::with_layer` above the transport, which no box has claimed —
+  so the limitation is stated in the code and pinned by a test instead of being
+  claimed away, and the fix is [`backlog.md`](backlog.md)'s.
+
+**Two of the fix's own tests could not fail, and the author found both.** The
+`Gone` wording check asserted `line.ends_with("to {asked}")` — which the broken
+sentence *"there is nothing **to** `list` and `watch` pods"* also satisfies; no
+predicate over a string separates *wants a noun* from *wants a verb phrase*, so
+it became a 12-literal grid of three faults × four framings. The runtime-error
+fix could not be tested at all while the sentence was inline in `main`, because
+`tokio::runtime::Builder::build()` cannot be made to fail on demand — **which is
+why that arm had rotted**, and extracting `runtime_failure` is what made it
+testable.
+
+**The gates said nothing about the defect that mattered.** `just check` was
+green and `just mutants-diff` was 42 mutants, 0 missed, while `connect_with`
+computed the login program's name and threw it away on the next line's `?` — so
+the one fault whose fix is on the reader's own machine could never name the
+thing to fix. `--in-diff` cannot flag a line no test reaches, and **`live()` was
+called with exactly two inputs in the whole suite**, neither of them the arm
+that had changed. The test that claimed to pin the change asserted a string
+byte-identical to what the old code returned: green against the pre-change tree,
+which is [D26](#d26--a-green-build-that-proves-nothing-2026-08-12) surviving two
+gates that exist to catch it.
+
+**The operator review produced the two shapes nobody could, and one of them
+overturned a PM ruling.** `Fault::NoCredential`'s doc claimed — *"read off
+kube's source"* — that a credential plugin dying mid-session arrives there
+rather than as a transport error. Measured on a live API server with an `exec`
+script that answers once and then exits 1, it printed *"nothing usable came
+back"*: a network sentence for a failure on the reader's own machine, which is
+C1 surviving inside the box written to close it. The review's proposed fix, and
+the PM's ruling on it, was to **document the mid-session half as unreachable**,
+because `auth::Error` is *"not exported from the crate"* (`auth/mod.rs:177`).
+
+**That citation is attached to the wrong item and the ruling was wrong.** The
+comment at `:177` sits above `pub enum RefreshableToken` (`:180`); `Error` is
+declared at `:29`, and `client/mod.rs:47` reads `pub use auth::Error as
+AuthError;`. It is exported and nameable. `dev-core` declined the ruling, proved
+the downcast lands with a probe in `fault()` against the running binary, and
+shipped one guarded arm — `kube::Error::Service(boxed) if
+boxed.downcast_ref::<kube::client::AuthError>().is_some()`. No seventh variant,
+no dependency, and **no `Display` match**, which was the real content of the
+ruling: that chain interpolates `AuthExecRun { out: … }`, the plugin's stdout,
+which is the credential. `downcast_ref` asks *which type is this* and formats
+nothing — select, never format. It classifies `UnrefreshableTokenResponse` too,
+so the no-expiry plugin is covered by the same arm.
+
+**The lesson is the one CLAUDE.md already states and this is its most expensive
+instance yet:** *somebody else's finding stays an estimate until you have run
+it.* A reviewer's line citation, a PM's ruling built on it, and a backlog entry
+recording it were all wrong together, and the only thing that broke the chain
+was an agent unwilling to ship a sentence it had just measured as false.
+
+**The refusal no longer claims which verb is missing.** `because(Refused, …)`
+said *"this kubeconfig is not allowed to `list` and `watch` pods"*. Measured
+with a forwarder that passed everything through and refused only `?watch=true`:
+the LIST **succeeded**, 40 pods and 4 nodes printed, and the same output claimed
+the kubeconfig could not `list`. A `Role` granting `list` and omitting `watch` is
+ordinary. `Trouble::fault()` collapsing `InitialListFailed` and
+`WatchStartFailed` into one `Refused` is correct — that is what one classifier
+means — so the fix is the frame: *"the role this kubeconfig uses needs to `list`
+and `watch` pods"*, true whichever was refused, where *is not allowed to* is a
+claim about current state this code cannot make.
+
+**An unreachable API server is not a startup error, and two documents said it
+was.** `docs/architecture.md` § Error handling and `REQUIREMENTS.md` both
+promised *"clear error at startup"*; § CONNECTING implements the opposite, and
+`PRIOR-ART § B3`'s rule is that a connectivity failure is a banner, never a
+shutdown. Measured against a dead port: the run does not end. The documents were
+the bug, and they sat three lines above the PM's own new text in the section
+being rewritten.
+
+**The renewal hint names the `command` alone, never `args`.** `aws --region
+eu-west-1 eks get-token --cluster-name prod` mints a token for *k8rs* and renews
+nothing a human needs; printing it invites pasting a line that cannot fix the
+problem. The program names the system to sign in to, which is D19's actual ask.
+The `env` block is never displayed at all — the security gate says so outright,
+and the plugin's stdout is a credential
+([docs/security.md § Token hygiene](docs/security.md#token-hygiene)), so tests
+assert variants and never text.

@@ -47,8 +47,13 @@ use std::collections::BTreeMap;
 ///
 /// Every decision is in a function over values that is tested — [`run`] for what to report,
 /// [`live_context`] for which of the two this run is, [`live`] for what a cluster prints,
-/// [`stdout_failure`] for what a failed write costs — and what is left here is argv, the choice
-/// of stream, the runtime a cluster needs, and calling `exit`.
+/// [`stdout_failure`] for what a failed write costs, [`runtime_failure`] for what a runtime that
+/// would not start says — and what is left here is argv, the choice of stream, starting the
+/// runtime, and calling `exit`.
+///
+/// **`runtime_failure` joined that list on 2026-08-27** and the sentence above is why: its arm was
+/// spelled inline here, so nothing could reach it, and it was throwing an io error away with a
+/// `_` while the line beside it named one (`tester`).
 fn main() {
     use std::io::Write;
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -63,9 +68,7 @@ fn main() {
                 .build()
             {
                 Ok(runtime) => runtime.block_on(async { live(k8s::connect(context).await).await }),
-                Err(_) => {
-                    "k8rs: this machine would not start the runtime a cluster needs".to_string()
-                }
+                Err(failed) => runtime_failure(&failed),
             },
             None => match run(&args) {
                 // `writeln!`, never `println!`: Rust masks `SIGPIPE`, so `println!`
@@ -111,6 +114,25 @@ fn stdout_failure(error: &std::io::Error) -> Option<String> {
             sanitize(&error.to_string())
         )),
     }
+}
+
+/// **What a runtime that would not start says**, naming the reason the operating system gave.
+///
+/// **A function because it is a decision, which is the same reason [`stdout_failure`] is one**
+/// (`main`'s own doc): what is left in `main` is argv, the choice of stream, the runtime a cluster
+/// needs and calling `exit`. Inline, this arm was unreachable from any test — and it was throwing
+/// an identical `std::io::Error` away with a `_` while its neighbour named one
+/// (`tester`, 2026-08-27), which is the same *generic string over a typed error* the cluster path
+/// was just rid of.
+///
+/// **The reason is the standard library's string, so it is outside text like any other**
+/// ([`sanitize`]) — `EMFILE` here reads *too many open files*, which is a thing a reader can act
+/// on, where *would not start* alone is not.
+fn runtime_failure(error: &std::io::Error) -> String {
+    format!(
+        "k8rs: this machine would not start the runtime a cluster needs — {}",
+        sanitize(&error.to_string())
+    )
 }
 
 /// The three lines a run with no arguments gets. **Three, and `tests/binary.rs` counts them**:
@@ -656,6 +678,15 @@ const CONTEXT: &str = "--context";
 /// whose whole job is to point the reconnect proof at a cluster that is not the current one, is
 /// the worst available failure (`tester`, 2026-08-27).
 ///
+/// **`--context` with nothing after it at all is still the silent-wrong-cluster failure, and
+/// this is where it is written down** (`k8s-admin`, 2026-08-27). `mistyped` refuses a *flag* in
+/// the value position, so `k8rs --live --context --live` is caught — but `k8rs --live --context`
+/// with nothing following, which is what `--context $CTX` unquoted becomes when `CTX` is unset,
+/// falls through to `Some(None)` and watches the current cluster in silence. `--context ""` is
+/// refused because an empty string is a value that was meant and is not a context. **The class
+/// this function's guards close is a flag in the value position and not the class as a whole**;
+/// the rest is Phase 12's real flag parsing, where an option that requires a value can say so.
+///
 /// **A value that starts with `--` never becomes a context name here, and the sentence about it
 /// is [`mistyped`]'s.** `--context --live` used to mean *the context named `--live`*, and the
 /// truth arrived a moment later as a kubeconfig error about a context nobody typed. The `filter`
@@ -688,7 +719,9 @@ fn live_context(args: &[String]) -> Option<Option<&str>> {
         {
             return Some(Some(attached));
         }
-        // `--context NAME`, and `--context` with nothing usable after it is the current context.
+        // `--context NAME`. **`--context` with nothing usable after it is the current context,
+        // which is a hole and not a decision** — the doc above says which and why Phase 12 is
+        // where it closes.
         if arg == CONTEXT {
             return Some(
                 rest.next()
@@ -768,8 +801,18 @@ fn mistyped(args: &[String]) -> Option<String> {
 /// that goes quiet, which costs the proof this mode exists for.
 ///
 /// **The clock is the caller's** (invariant 5, NOTES § D18): one instant per pass, handed in.
-fn live_report(store: &k8s::Store, now: Time, last: &mut String) -> Option<String> {
-    let mut report = unreadable(&store.troubles());
+///
+/// **`renewal` travels with it for the same reason the clock does**: it is a fact about the
+/// reader's kubeconfig, read once at connect ([`k8s::Session::renewal`]), and this function has
+/// no session to reach it from. It is what a `401` on a watch — the ordinary EKS/GKE/AKS
+/// mid-session failure NOTES § D19 is about — is named beside.
+fn live_report(
+    store: &k8s::Store,
+    now: Time,
+    last: &mut String,
+    renewal: Option<&str>,
+) -> Option<String> {
+    let mut report = unreadable(&store.troubles(), renewal);
     match store.snapshot(now) {
         Some(snapshot) => {
             let findings = analyze(&snapshot);
@@ -802,6 +845,132 @@ fn live_report(store: &k8s::Store, now: Time, last: &mut String) -> Option<Strin
     Some(report)
 }
 
+/// **One plain clause: why a call did not work** — the caller supplies the subject, this
+/// supplies the reason (invariant 14, `PRIOR-ART § C1`).
+///
+/// **A generic sentence may never stand in for an error we were handed**, which is the whole of
+/// this function's reason to exist. k9s tells these apart internally and still shows
+/// `Ruroh? 'v1/pods' command not found` when a credential expires; every site on the cluster path
+/// — the connection, the version, the discovery answer, each watch — routes through here, so
+/// there is nowhere on it for a fallback to grow.
+///
+/// **The claim is *the cluster path* and not *this driver*, because two typed errors live outside
+/// it** and are named where they are: an io error from a failed stdout write ([`stdout_failure`])
+/// and one from a runtime that would not start ([`main`]). Both print the standard library's own
+/// reason through [`sanitize`]. The first draft of this line said *every site in this driver* and
+/// the runtime arm was throwing its error away with a `_` (`tester`, 2026-08-27) — an overclaim
+/// and a defect in one sentence, which is the second box read literally.
+///
+/// **`asked` is what k8rs was trying to do, already spelled the way it should read.** Only the
+/// caller knows, so `` `get /apis` ``, `` `list` and `watch` pods `` and *reach this cluster*
+/// arrive as display text carrying their own backticks. That is what makes a refusal name the
+/// missing verb and resource, which the security gate requires — and what lets the one refusal
+/// that has neither, a `nonResourceURL` on `/apis`, name a **path** instead: its measured
+/// `Status` carries an empty `details`, so a sentence built from `details.group`/`details.kind`
+/// would be empty (NOTES § D160).
+///
+/// **`renewal` is [`k8s::Session::renewal`]** — the program the reader's *own kubeconfig* names,
+/// already stripped and bounded by `k8s.rs`'s ingest guard. It is never the cluster's text and
+/// never the login program's output, which is a credential
+/// (`docs/security.md` § Token hygiene).
+///
+/// **Nothing here formats the error we were handed, and that is structural rather than a rule to
+/// keep**: [`k8s::Fault`] carries no string at all, so there is nothing in scope to interpolate.
+fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>) -> String {
+    // The program named, or not named, without changing the sentence around it.
+    let named = renewal.map_or(String::new(), |program| format!(" (`{program}`)"));
+    match fault {
+        // **Three sentences where there was one constant over all fifteen of
+        // `KubeconfigError`'s variants**
+        // (`k8s-admin`, 2026-08-27). *"…or names no such context"* was printed for a
+        // `client-certificate` path that had moved and for a cluster entry with no `server:`,
+        // and in both the file read fine and the context was there — a generic string standing
+        // in for a typed error, which is this box's whole subject, through a door it had not
+        // been looked at through.
+        k8s::Fault::Kubeconfig => {
+            "the kubeconfig itself could not be read — it is missing, unreadable, or not valid \
+             YAML"
+                .to_string()
+        }
+        k8s::Fault::NoContext => {
+            "this kubeconfig has no such context — check the `--context` you gave, or the \
+             `current-context` line in the file"
+                .to_string()
+        }
+        // **It does not say *which* entry, and that is the honest limit of a `Fault`.** The
+        // variant names the class and the words are the caller's; naming the field would mean
+        // carrying kubeconfig text on the type, which is the property that keeps every other
+        // sentence in this file free of anything a cluster wrote.
+        k8s::Fault::BadEntry => {
+            "this kubeconfig loaded, and something it points at did not — a certificate file it \
+             names, a `server:` line, or a cluster one of its contexts refers to"
+                .to_string()
+        }
+        k8s::Fault::NoCredential => format!(
+            "the program this kubeconfig logs in with{named} gave k8rs nothing to sign in with"
+        ),
+        // **The one place a renewal is worth naming** (NOTES § D19): a login minted by a helper
+        // ran out mid-session, and what the reader needs is which system to sign in to again —
+        // not a cloud guessed from the server URL.
+        //
+        // **It promises nothing about restarting, and that is measured** (`tester`, 2026-08-27).
+        // kube re-runs the `exec` plugin as its cached credential falls out of its own window —
+        // 25 plugin executions against 22 requests over a ten-second run — so for the ordinary
+        // exec kubeconfig the watch recovers on its own the moment the login is repaired, and
+        // *restart k8rs* would be D19's own failure wearing the other face: a true problem
+        // answered with the wrong errand.
+        //
+        // **One shape reaches this arm where *renew it there* is true but incomplete**, and it is
+        // narrower than *a plugin that fails mid-session* — that one has been produced since, and
+        // it lands in [`k8s::Fault::NoCredential`] rather than here (NOTES § D167). What is left
+        // is a plugin whose credential carries **no `expirationTimestamp` from the start**:
+        // `Auth::try_from` matches `(Some(token), None) => Ok(Self::Bearer(token))`
+        // (`auth/mod.rs:364-367`), so it is a static header with no `RefreshableToken` behind it.
+        // Nothing ever re-runs the plugin, no `AuthError` is ever raised, and the server simply
+        // answers `401` — so renewing the login where it comes from is necessary and not
+        // sufficient, because k8rs also has to be restarted to pick the new token up.
+        //
+        // **The sentence stays as it is**: it is true of both, and the shape that needs the extra
+        // half is the PM's to box rather than this arm's to guess at.
+        k8s::Fault::Expired => match renewal {
+            Some(program) => format!(
+                "this cluster no longer accepts this login — it comes from `{program}`, so \
+                 renew it there"
+            ),
+            None => "this cluster no longer accepts this login — this kubeconfig needs a new one"
+                .to_string(),
+        },
+        // **It names what the role needs, not what the kubeconfig is not allowed to do**
+        // (`k8s-admin`, 2026-08-27). A watch is two verbs and [`k8s::Trouble`] cannot say which
+        // of them was refused — measured through a forwarder that passed `list` and answered
+        // only `?watch=true` with a real `403`: the LIST **succeeded**, forty pods printed, and
+        // the line beside them said *not allowed to `list` and `watch` pods*. A `Role` granting
+        // `list` and omitting `watch` is an ordinary hand-written Role, and the operator adds a
+        // verb that was never missing.
+        //
+        // **Collapsing `InitialListFailed` and `WatchStartFailed` into one [`k8s::Fault`] is
+        // right** — that is what one classifier means — so the fix is the frame: *the role needs
+        // both of these* is true whichever was refused, where *is not allowed to* is a claim
+        // about current state this code cannot make. The security gate asks a refusal to name
+        // the missing verb and resource; this names the verbs and the resource without
+        // pretending to know which one is absent.
+        //
+        // **`needs to {asked}` and not `needs {asked}`**, so one verb phrase serves this arm and
+        // the two below it: the grid test reddened on *needs reach this cluster* the moment the
+        // frame changed, which is what twelve literals are for.
+        k8s::Fault::Refused => format!("the role this kubeconfig uses needs to {asked}"),
+        // **`when k8rs tries to …` and not `there is nothing to …`** (`tester`, 2026-08-27).
+        // The old frame wanted a noun where every caller supplies a verb phrase, so it read
+        // *there is nothing to `list` and `watch` pods* — and it was only ever fed the one
+        // framing where that passes, `` `get /apis` `` (NOTES § D29, in a function whose own doc
+        // is about framings). This frame takes all four.
+        k8s::Fault::Gone => {
+            format!("this server says there is no such thing when k8rs tries to {asked}")
+        }
+        k8s::Fault::Unanswered => format!("nothing usable came back when k8rs tried to {asked}"),
+    }
+}
+
 /// **What this tool is not being given, one plain line each** — empty when all five are
 /// delivering.
 ///
@@ -824,97 +993,96 @@ fn live_report(store: &k8s::Store, now: Time, last: &mut String) -> Option<Strin
 ///
 /// **The error itself is never printed, not even its text.** `Display` on a `kube` error
 /// interpolates its source down to an `exec` plugin's stdout (`docs/security.md` § Token
-/// hygiene), so what is read here is `is_some()` and a kind — the same *select, never format*
-/// rule [`k8s::Trouble::failure`] states, kept by selecting nothing at all.
+/// hygiene), so what is read here is [`k8s::Trouble::fault`] and a kind — the same *select, never
+/// format* rule [`k8s::Trouble::failure`] states, kept by never having the text in scope.
 ///
-/// **No jargon** (invariant 14): the word *watch* does not appear, because a reader who has to
-/// know what one is cannot use the sentence.
+/// **The sentence has to be true of a refusal as well as an outage, and until 2026-08-27 it could
+/// not tell them apart** (`k8s-admin`). The first draft read *"cannot read {kind} from this
+/// cluster right now — what is shown about them may be out of date"*, and under a 403 neither
+/// half held: it is not *right now*, it is until somebody edits RBAC, and nothing **is** shown
+/// about that kind — the list is empty, not stale. The frame that replaced it is true of both —
+/// *not getting* covers a refusal and an outage, *it keeps asking* is the retry said out loud,
+/// *nothing here about them can be trusted* is true of an empty list and of a stale one — and it
+/// is kept, because a `Fault` sharpens the frame rather than replacing it.
 ///
-/// **And the sentence has to be true of a refusal as well as an outage, which the first one was
-/// not** (`k8s-admin`, 2026-08-27). It read *"cannot read {kind} from this cluster right now —
-/// what is shown about them may be out of date"*. Under a 403 neither half holds: it is not
-/// *right now*, it is until somebody edits RBAC, and nothing **is** shown about that kind — the
-/// list is empty, not stale. At 3am that reads *the cluster is flaky* to a reader whose actual
-/// problem is *this kubeconfig is not allowed*. **Which of the two it is cannot be said here**:
-/// [`k8s::Trouble`] carries `Option<&watcher::Error>` and this file may select on it, never format
-/// it, so a sentence that is true of both is the honest one and the box that classifies a failure
-/// is where a sharper one comes from. *Not getting* covers a refusal and an outage; *it keeps
-/// asking* is true of both and is the retry said out loud; *nothing here about them can be
-/// trusted* is true of an empty list and of a stale one, which *out of date* was not.
+/// **What the classifier added is the middle clause** (todo.md § Phase 5): the refusal now names
+/// the verb and the resource the security gate asks for, the expired login names the program to
+/// sign in to again, and *nothing answered* stops wearing the same words as *you are not
+/// allowed*. That clause is [`because`]'s and the rest of the line is this function's.
+///
+/// **`list` and `watch` appear inside backticks and nowhere else** (invariant 14). They are RBAC
+/// verbs, not English, and the sentence around them is readable by someone who has never seen
+/// one: a reader who does not know what a watch is still learns that k8rs is not getting pods and
+/// that this kubeconfig is not allowed to have them. The plural is the API's own — `statefulsets`
+/// and not `StatefulSets` — because it is what a `Role` has to spell.
 ///
 /// **`ended` gets `●` and not `▲`.** It is the most severe thing this tool can say about itself —
 /// nothing about that kind will ever change again — and it was wearing the warning glyph while
 /// the merely-degraded line wore the same one. The reuse of the severity glyphs for a second axis
 /// is a real collision and is `tui-designer`'s to settle when `views.rs` lands (backlog); giving
 /// the terminal state the heavier of the two is free and correct either way.
-fn unreadable(troubles: &[k8s::Trouble<'_>]) -> Vec<String> {
+fn unreadable(troubles: &[k8s::Trouble<'_>], renewal: Option<&str>) -> Vec<String> {
     troubles
         .iter()
         .map(|trouble| {
-            let kind = match trouble.kind {
-                ObjectKind::Pod => "pods",
-                ObjectKind::Node => "nodes",
-                ObjectKind::Deployment => "Deployments",
-                ObjectKind::StatefulSet => "StatefulSets",
-                ObjectKind::DaemonSet => "DaemonSets",
+            // The word the reader scans, and the plural a `Role` spells. They differ for three of
+            // the five, which is why one match hands back both rather than two matches drifting.
+            let (kind, resource) = match trouble.kind {
+                ObjectKind::Pod => ("pods", "pods"),
+                ObjectKind::Node => ("nodes", "nodes"),
+                ObjectKind::Deployment => ("Deployments", "deployments"),
+                ObjectKind::StatefulSet => ("StatefulSets", "statefulsets"),
+                ObjectKind::DaemonSet => ("DaemonSets", "daemonsets"),
                 // Unreachable: `Store::troubles` answers for the five watched kinds and no
                 // others. A word rather than a panic, because a driver is not the place to
                 // discover that.
-                _ => "some objects",
+                _ => ("some objects", "them"),
+            };
+            let why = match trouble.fault() {
+                Some(fault) => because(fault, &format!("`list` and `watch` {resource}"), renewal),
+                // `ended` with no failure: the stream finished and never said why. The only
+                // honest clause, and the one thing a fallback string is allowed to describe.
+                None => "nothing was ever said about why".to_string(),
             };
             if trouble.ended {
                 format!(
-                    "● k8rs has stopped receiving {kind} from this cluster — what is shown about \
-                     them will not change again"
+                    "● k8rs has stopped receiving {kind} from this cluster: {why}. What is shown \
+                     about them will not change again"
                 )
             } else {
                 format!(
-                    "▲ k8rs is not getting {kind} from this cluster — it keeps asking, and until \
-                     that works nothing here about them can be trusted"
+                    "▲ k8rs is not getting {kind} from this cluster: {why}. It keeps asking, and \
+                     until that works nothing here about them can be trusted"
                 )
             }
         })
         .collect()
 }
 
-/// **Watch, and print the report every time it changes** — until the process is killed.
+/// **What one connection had to say for itself**, in the order a reader asks it — who this
+/// server is, how much of it k8rs can see, and what it has that the tool can use.
 ///
-/// **It takes what connecting produced rather than doing it**, so a test can hand it a session
-/// over a cluster that is not there: `k8s::connect` needs a kubeconfig and there is none in a
-/// test. `main` is left holding one call and no decision.
+/// **Two of the three are `Result`s that travel** (§ CONNECTING): a refusal on `/version` or
+/// `/apis` degrades that one feature and never the session, so each is a clause here rather than
+/// a reason to stop. Both are typed errors, so both name *what* failed and *why*
+/// (`PRIOR-ART § C1`); neither is ever a generic sentence.
 ///
-/// **It never returns happily and its return type says so**: the only two ways out are a
-/// kubeconfig that will not connect and every watch having stopped, and the second one is
-/// unreachable by construction — kube's `watcher()` cannot end (`k8s.rs` § THE DRIVER) and the
-/// backoff under it never gives up. A `main` that treated a return as an ordinary exit would be
-/// the failure `PRIOR-ART § B3` is about, so the sentence it comes back with is an error and the
-/// exit code is 2.
+/// **`get /apis` and not `list apis`.** That refusal is the `nonResourceURL` one NOTES § D160
+/// measured on a cluster without the default `system:discovery` binding, and its `Status` carries
+/// an **empty `details`** — no group and no kind — so the path is the only true subject a
+/// sentence about it can have.
 ///
-/// **Nothing about the connection failure is printed**, and that is not an oversight: telling
-/// `403` from `401` from *nothing answered* is the next box of Phase 5, and the one after it
-/// forbids a generic sentence standing in for a typed error. Formatting the error we were handed
-/// would also print a bearer token from an `exec` plugin's stdout (`docs/security.md` § Token
-/// hygiene), so this driver names the step that failed and nothing else, and
-/// [`k8s::NotConnected`] keeps the typed value for the box that will say it properly.
-async fn live(connected: Result<k8s::Session, k8s::NotConnected>) -> String {
-    use std::io::Write;
-    let session = match connected {
-        Ok(session) => session,
-        Err(k8s::NotConnected::Kubeconfig(_)) => {
-            return "k8rs: no cluster to watch — the kubeconfig could not be read, or names no \
-                    such context"
-                .to_string();
-        }
-        Err(k8s::NotConnected::Client(_)) => {
-            return "k8rs: no cluster to watch — the kubeconfig was read and no client could be \
-                    built from what is in it"
-                .to_string();
-        }
-    };
-    // Everything below is what one connection had to say for itself, on stderr, once.
+/// **A function so that both failures can be asserted.** `live` writes this to stderr and a test
+/// cannot read the process's own stream back, which is what left the two clauses unproven while
+/// they were inline (2026-08-27).
+fn greeting(session: &k8s::Session) -> Vec<String> {
+    let renewal = session.renewal.as_deref();
     let mut said = vec![match &session.version {
         Ok(version) => format!("server {}", sanitize(version)),
-        Err(_) => "the server would not say which version it is".to_string(),
+        Err(error) => format!(
+            "could not read the server version ({})",
+            because(k8s::fault(error), "`get /version`", renewal)
+        ),
     }];
     match &session.served {
         Ok(served) => {
@@ -930,10 +1098,67 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>) -> String {
                 None => "discovery named nothing at all".to_string(),
             });
         }
-        Err(_) => said.push("the cluster would not say which kinds it serves".to_string()),
+        Err(error) => said.push(format!(
+            "could not list what this cluster serves, so k8rs cannot show you what is in it or \
+             tell which add-ons it has ({})",
+            because(k8s::fault(error), "`get /apis`", renewal)
+        )),
     }
+    said
+}
+
+/// **Watch, and print the report every time it changes** — until the process is killed.
+///
+/// **It takes what connecting produced rather than doing it**, so a test can hand it a session
+/// over a cluster that is not there: `k8s::connect` needs a kubeconfig and there is none in a
+/// test. `main` is left holding one call and no decision.
+///
+/// **It never returns happily and its return type says so**: the only two ways out are a
+/// kubeconfig that will not connect and every watch having stopped, and the second one is
+/// unreachable by construction — kube's `watcher()` cannot end (`k8s.rs` § THE DRIVER) and the
+/// backoff under it never gives up. A `main` that treated a return as an ordinary exit would be
+/// the failure `PRIOR-ART § B3` is about, so the sentence it comes back with is an error and the
+/// exit code is 2.
+///
+/// **Every typed error this driver holds is turned into a sentence by [`because`], and there is
+/// no other source of one** (todo.md § Phase 5, `PRIOR-ART § C1`). Four sites hold one — the
+/// connection itself, the version, the discovery answer, and each watch that is in trouble — and
+/// all four name *what* failed and *why*. The error's own text never reaches a screen: `Display`
+/// on a `kube` error interpolates its source down to an `exec` plugin's stdout
+/// (`docs/security.md` § Token hygiene), so what travels is [`k8s::Fault`], which carries no
+/// string at all.
+///
+/// **A refusal on discovery is two features off and not a session that failed** (§ CONNECTING,
+/// NOTES § D160): the sentence says so, and the watches below it start anyway.
+async fn live(connected: Result<k8s::Session, k8s::NotConnected>) -> String {
+    use std::io::Write;
+    let session = match connected {
+        Ok(session) => session,
+        // **The renewal comes off the failure**, and getting that wrong is what shipped the
+        // first draft (`tester`, 2026-08-27): the commonest failure here is an `exec` block whose
+        // program is missing or broken, and it is the one fault in the taxonomy whose fix is on
+        // the reader's own machine. A sentence about it that cannot name the program has thrown
+        // away the only actionable thing it had. [`k8s::NotConnected::renewal`] answers `None`
+        // only for the arm where the file itself would not load.
+        //
+        // **Nothing has been sent to a cluster at this point**, so of the six only `Kubeconfig`,
+        // `NoCredential` and `Unanswered` (a proxy protocol kube will not speak, a TLS stack that
+        // would not build) are reachable. A `403` or a `404` here would read oddly against *reach
+        // this cluster*; neither can arrive, and a guard for a sentence nobody can produce is a
+        // second copy of the reasoning above.
+        Err(problem) => {
+            return format!(
+                "k8rs: no cluster to watch — {}",
+                because(problem.fault(), "reach this cluster", problem.renewal())
+            );
+        }
+    };
+    // Read out once, because `session.watches` is moved below and the borrow would not survive
+    // it.
+    let renewal = session.renewal.clone();
+    let renewal = renewal.as_deref();
     let mut err = std::io::stderr();
-    let _ = writeln!(err, "k8rs: watching — {}", said.join(" · "));
+    let _ = writeln!(err, "k8rs: watching — {}", greeting(&session).join(" · "));
     // The one line N4 has never had a server to say it about: a cluster outside the window this
     // build was checked against gets told, and still runs (NOTES § D149).
     if let Ok(version) = &session.version
@@ -947,7 +1172,7 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>) -> String {
         // A clock this driver cannot read is not a reason to stop watching; the next event asks
         // again. `wall_clock`'s own `Err` is a machine set before 1970.
         let Ok(now) = wall_clock() else { return };
-        if let Some(report) = live_report(store, now, &mut last) {
+        if let Some(report) = live_report(store, now, &mut last, renewal) {
             // The write is dropped if it fails, for the reason `main` drops a failed stderr
             // write: there is nowhere left to report it, and this loop has no exit to take.
             let _ = writeln!(std::io::stdout(), "{report}\n");

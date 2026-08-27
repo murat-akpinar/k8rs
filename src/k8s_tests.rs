@@ -3017,6 +3017,281 @@ fn the_version_these_types_were_built_for_is_the_pin() {
     );
 }
 
+// --- WHAT WENT WRONG ---
+//
+// **The classifier, over every shape its five call sites can hand it.** The `Status` half is
+// § RESOLVING AN OWNER's, where it has been since the ReplicaSet fetch needed it and where the
+// measurements against kube's own broken helpers already live; what is here is the half that
+// arrives wrapped — a `watcher::Error` from a watch, and the two arms of `NotConnected` — plus
+// the shapes that are not a `Status` at all.
+
+/// **Every `watcher::Error` a watch can report answers for itself, and one is not a failure at
+/// all.**
+///
+/// **Four of the five carry a `Status` and three of them wrap it** (§ WHAT A THROTTLE LOOKS
+/// LIKE). `WatchError` holds one **directly**, which is the arm a `403` arrives through when the
+/// initial LIST already succeeded and the watch verb alone is missing — a real RBAC shape, and
+/// the one an unwrapping match would silently read as *nothing answered*.
+///
+/// **`failure: None` is the negative**, and it is the one case a fallback string is allowed to
+/// describe: a stream that finished carrying no error. Nothing may invent a fault for it.
+#[test]
+fn every_watcher_error_answers_for_itself_and_none_of_them_is_a_fallback() {
+    let refused = kube::core::Status::failure("refused", "Forbidden").with_code(403);
+    let timeout = || {
+        kube::Error::Service(Box::new(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "timed out",
+        )))
+    };
+    let trouble = |failure| Trouble {
+        kind: ObjectKind::Pod,
+        failure,
+        ended: false,
+    };
+
+    // The initial LIST refused: the ordinary standing 403 on a kind.
+    let listed = watcher::Error::InitialListFailed(kube::Error::Api(refused.clone().boxed()));
+    assert_eq!(trouble(Some(&listed)).fault(), Some(Fault::Refused));
+
+    // The watch verb refused after the LIST succeeded — the `Status` is not behind `Error::Api`.
+    let watching = watcher::Error::WatchError(refused.boxed());
+    assert_eq!(
+        trouble(Some(&watching)).fault(),
+        Some(Fault::Refused),
+        "the one variant that carries a `Status` directly read as *nothing answered*, so a \
+         kubeconfig that may `list` but not `watch` is told its cluster is down"
+    );
+
+    // The credential ran out mid-watch: the case the whole box is about (NOTES § D19).
+    let expired = watcher::Error::WatchError(
+        kube::core::Status::failure("expired", "Unauthorized")
+            .with_code(401)
+            .boxed(),
+    );
+    assert_eq!(trouble(Some(&expired)).fault(), Some(Fault::Expired));
+
+    // The two transport arms, and the answer that was not usable.
+    let started = watcher::Error::WatchStartFailed(timeout());
+    let failed = watcher::Error::WatchFailed(timeout());
+    let versionless = watcher::Error::NoResourceVersion;
+    for error in [&started, &failed, &versionless] {
+        assert_eq!(trouble(Some(error)).fault(), Some(Fault::Unanswered));
+    }
+
+    // And the negative: a stream that ended and never said why has no fault to report.
+    assert_eq!(
+        trouble(None).fault(),
+        None,
+        "a watch that carried no error was given one anyway, which is a sentence with nothing \
+         behind it"
+    );
+}
+
+/// **The three things that can be wrong with a kubeconfig are three faults**, and two of them
+/// used to print a sentence that was measurably false.
+///
+/// **`k8s-admin` produced six causes against a live server and got one line back**
+/// (2026-08-27). Two of the six — a `client-certificate` path that is not on the disk, and a
+/// cluster entry with no `server:` — printed *"the kubeconfig could not be read, or names no such
+/// context"* while **the file read fine and the context was there**. That is the whole subject of
+/// this box arriving through a second door in the same turn: one constant standing in for all
+/// fifteen of `KubeconfigError`'s typed variants.
+///
+/// **The two that matter go through `connect_with`, on kubeconfigs this file writes**, because
+/// that is the path the binary takes and a hand-built `KubeconfigError` would prove only that the
+/// match arm exists. The file-level group cannot: `connect_with` is handed an already-parsed
+/// `Kubeconfig`, so `FindPath`, `ReadConfig` and `Parse` live above it and are checked on the
+/// error itself.
+#[tokio::test]
+async fn the_three_things_wrong_with_a_kubeconfig_are_three_different_faults() {
+    // **The context**: the file is perfect and does not name what was asked for.
+    let missing = connect_with(kubeconfig("k8rs-tests", "{}"), Some("k8rs-tests-nope")).await;
+    assert!(
+        matches!(
+            missing.as_ref().err().map(NotConnected::fault),
+            Some(Fault::NoContext)
+        ),
+        "a context that is not in a file that read fine is not `NoContext`"
+    );
+
+    // **An entry**: the context is there and names a client certificate that is not on the disk.
+    // The shape `k8s-admin` measured, and the one whose old sentence was false.
+    let certificate = "{client-certificate: /nonexistent/k8rs-tests/client.crt, \
+                       client-key: /nonexistent/k8rs-tests/client.key}";
+    let broken = connect_with(kubeconfig("k8rs-tests", certificate), None).await;
+    assert!(
+        matches!(
+            broken.as_ref().err().map(NotConnected::fault),
+            Some(Fault::BadEntry)
+        ),
+        "a certificate path that has moved is reported as an unreadable kubeconfig, so the \
+         reader is sent to `cat` a file that is fine (`k8s-admin`, 2026-08-27)"
+    );
+
+    // **A cluster entry with no `server:`** — the second measured shape, same class.
+    let no_server = Kubeconfig::from_yaml(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests\n\
+         clusters: [{name: k8rs-tests, cluster: {}}]\n\
+         contexts: [{name: k8rs-tests, context: {cluster: k8rs-tests, user: k8rs-tests}}]\n\
+         users: [{name: k8rs-tests, user: {}}]\n",
+    )
+    .expect("a kubeconfig this file wrote itself");
+    let headless = connect_with(no_server, None).await;
+    assert!(
+        matches!(
+            headless.as_ref().err().map(NotConnected::fault),
+            Some(Fault::BadEntry)
+        ),
+        "a cluster entry with no `server:` is reported as an unreadable kubeconfig"
+    );
+
+    // **The file**, on the error itself: the group `connect_with` sits below.
+    use kube::config::KubeconfigError as Bad;
+    for error in [Bad::FindPath, Bad::KindMismatch, Bad::ApiVersionMismatch] {
+        assert_eq!(
+            kubeconfig_fault(&error),
+            Fault::Kubeconfig,
+            "a file that could not be found, read or merged is not about the file"
+        );
+    }
+    // And the one variant worth arguing: the context was found and the cluster it names is not
+    // in the file, so the thing to fix is the entry and not which context was asked for.
+    assert_eq!(
+        kubeconfig_fault(&Bad::LoadClusterOfContext("prod-eu".to_string())),
+        Fault::BadEntry
+    );
+}
+
+/// **A `403` whose body is JSON that is not a `Status` loses its HTTP code inside kube**, and
+/// this pins the limitation rather than the behaviour anyone would want.
+///
+/// **Every field of `Status` is `#[serde(default)]` and nothing denies unknown fields**, so
+/// `{"error":"forbidden by policy"}` deserializes *successfully* into an all-default `Status`
+/// — `code: 0`, empty `reason`, and `status: None` where a real error `Status` always carries
+/// `Some(Failure)`. kube's `with_code` fallback only runs when the parse **fails**, so it never
+/// sees this body and the number is gone before `fault` is called
+/// (`kube-client-4.2.0/src/client/mod.rs:551-558`).
+///
+/// **This is the shape § WHAT WENT WRONG names as its example and is the one it misses**: an
+/// authorizing proxy is exactly the thing that answers JSON. Measured on the built binary against
+/// a listener answering `403` to everything — a plain-text body classifies as a refusal, a JSON
+/// one does not (2026-08-27, § WHAT WENT WRONG has the table).
+///
+/// **What is asserted is the parse, because that is the recoverable fact.** `Error::Api` carries
+/// the `Status` and nothing else, so a test cannot show a code that no longer exists; what it can
+/// show is that kube hands us one with nothing in it, which is the whole reason the answer is
+/// *nothing usable came back* rather than a refusal.
+#[test]
+fn a_json_body_that_is_not_a_status_loses_its_http_code_inside_kube() {
+    for body in [r#"{"error":"forbidden by policy"}"#, "{}"] {
+        let parsed: kube::core::Status =
+            serde_json::from_str(body).unwrap_or_else(|_| panic!("{body} stopped parsing"));
+        assert_eq!(
+            (parsed.code, parsed.reason.as_str(), parsed.status.is_none()),
+            (0, "", true),
+            "{body} no longer deserializes into an empty `Status` — if kube or k8s-openapi \
+             started refusing it, the `with_code` fallback runs and `fault` can see the refusal"
+        );
+        assert_eq!(
+            fault(&kube::Error::Api(parsed.boxed())),
+            Fault::Unanswered,
+            "a `Status` with no code and no reason was read as something the server actually \
+             said — it is a body kube could not make sense of, and *k8rs could not ask* is the \
+             only true answer left"
+        );
+    }
+
+    // And the body that is *not* JSON, which is the one shape kube's fallback does catch: the
+    // real HTTP code survives, so this one is a refusal.
+    let recovered =
+        kube::core::Status::failure("Forbidden", "Failed to parse error data").with_code(403);
+    assert_eq!(
+        fault(&kube::Error::Api(recovered.boxed())),
+        Fault::Refused,
+        "the one proxy shape whose code survives kube stopped being read as a refusal"
+    );
+}
+
+/// **A login program that dies mid-session is a credential failure and not a network one**, and
+/// nothing about the error's shape says so except its type.
+///
+/// **It was produced against a live API server and printed the wrong sentence** (`k8s-admin`,
+/// 2026-08-27): a kubeconfig whose `exec` script answers once and then exits 1 gave *"nothing
+/// usable came back when k8rs tried to `list` and `watch` pods"* — a network sentence for a
+/// failure on the reader's own machine. Reproduced here on the built binary with a listener and a
+/// two-run script, `kube::Error::Service` boxing a value that **does** downcast to
+/// `kube::client::AuthError`, which is the arm [`fault`] now has.
+///
+/// **The error is built rather than produced, and the built one is the measured one.** Producing
+/// it needs a program on the disk that succeeds then fails; what a test can hold is the shape it
+/// arrives in, and the probe that read it off the running binary said `Service` with a payload
+/// that downcasts. `UnrefreshableTokenResponse` is used because it is the other variant this arm
+/// exists for — a plugin that stops returning an expiry.
+///
+/// **The negative is the whole point of the arm.** A `Service` failure that is *not* an auth
+/// error is a socket, a proxy or a middleware, and it must stay [`Fault::Unanswered`]: an arm
+/// that answered `NoCredential` for every `Service` would send a reader with a dead network to go
+/// and log in again.
+#[test]
+fn a_login_program_that_dies_mid_session_is_a_credential_fault_and_not_a_network_one() {
+    assert_eq!(
+        fault(&kube::Error::Service(Box::new(
+            kube::client::AuthError::UnrefreshableTokenResponse
+        ))),
+        Fault::NoCredential,
+        "an auth failure inside the tower stack read as a dead cluster — the one fault whose \
+         fix is on the reader's own machine, told to go and check their network"
+    );
+    assert_eq!(
+        fault(&kube::Error::Service(Box::new(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "connection reset by peer",
+        )))),
+        Fault::Unanswered,
+        "a socket that died was read as a credential problem, so a reader with a dead network \
+         is sent to log in again"
+    );
+}
+
+/// **The shapes that are not a `Status`, and the one that must not be swallowed by the
+/// catch-all.**
+///
+/// `fault`'s last arm is `_ => Fault::Unanswered`, which is right for a socket, a TLS stack and a
+/// proxy protocol and **wrong** for the two that never left this machine: a login helper that
+/// produced nothing, and a kubeconfig kube read itself. This is the second of those; the first is
+/// proven on a real error rather than a built one, in
+/// `a_credential_plugin_that_never_answers_is_a_client_that_could_not_be_built`.
+///
+/// **The `418` is the negative for the whole `Status` half**: a code and a reason nothing here
+/// knows must fall to *k8rs could not ask*, not to a claim about permissions or credentials.
+#[test]
+fn the_failures_that_never_reached_the_cluster_are_not_nothing_answered() {
+    assert_eq!(
+        fault(&kube::Error::InferKubeconfig(
+            kube::config::KubeconfigError::CurrentContextNotSet
+        )),
+        Fault::NoContext,
+        "a kubeconfig kube read for itself came back as a cluster that did not answer"
+    );
+    assert_eq!(
+        fault(&kube::Error::TlsRequired),
+        Fault::Unanswered,
+        "a build failure with no cluster on the other side of it is still *k8rs could not ask*"
+    );
+    assert_eq!(
+        fault(&kube::Error::Api(
+            kube::core::Status::failure("teapot", "ImATeapot")
+                .with_code(418)
+                .boxed()
+        )),
+        Fault::Unanswered,
+        "a status nothing here knows became a permission or credential claim"
+    );
+}
+
 // --- RESOLVING AN OWNER ---
 //
 // **Every ReplicaSet below is a committed capture** (NOTES § D53) and the joins between them are
@@ -3096,7 +3371,10 @@ fn the_group_reads_the_deployment_and_the_uid_is_what_proves_it() {
 
     let want = store.unresolved_owners();
     assert_eq!(want.len(), 1);
-    assert_eq!(want[0].why, Why::NotAsked);
+    assert_eq!(
+        want[0].why, None,
+        "nothing has asked about this reference yet"
+    );
     store.owner_fetched(&want[0].id, Ok(set));
 
     let after = store.snapshot(now()).expect("every watch listed");
@@ -3151,23 +3429,30 @@ fn many_pods_of_one_replicaset_are_one_reference_and_one_group() {
     );
 }
 
-/// **A refusal, a deletion and a dead socket are three different facts**, and none of them may
-/// become *the group is called `broken-owned-7bdb7645c8`* with nothing said about why.
+/// **A refusal, an expiry, a deletion and a dead socket are four different facts**, and none of
+/// them may become *the group is called `broken-owned-7bdb7645c8`* with nothing said about why.
 ///
 /// The owner is checked in every arm as well as the fact: a failed fetch must leave the pod's
 /// true controller in place, never a guess at the name above it.
+///
+/// **The `401` row is what the second classifier could not answer.** Until 2026-08-27 this call
+/// site had a `why()` of its own whose *timeout, socket, 500* arm swallowed an expired credential
+/// — `PRIOR-ART § C1` in miniature, one function away from the one that got it right. It now
+/// reads § WHAT WENT WRONG like every other site, and this row is what fails if a second one ever
+/// grows back.
 #[test]
-fn a_refusal_a_deletion_and_a_dead_socket_are_three_different_facts() {
+fn a_refusal_an_expiry_a_deletion_and_a_dead_socket_are_four_different_facts() {
     for (answer, expected) in [
-        (api_error(403, "Forbidden"), Why::Refused),
-        (api_error(404, "NotFound"), Why::Gone),
-        (api_error(500, "InternalError"), Why::Failed),
+        (api_error(403, "Forbidden"), Fault::Refused),
+        (api_error(401, "Unauthorized"), Fault::Expired),
+        (api_error(404, "NotFound"), Fault::Gone),
+        (api_error(500, "InternalError"), Fault::Unanswered),
         (
             kube::Error::Service(Box::new(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "timed out",
             ))),
-            Why::Failed,
+            Fault::Unanswered,
         ),
     ] {
         let mut store = store_with_pods("owned-pods");
@@ -3180,7 +3465,7 @@ fn a_refusal_a_deletion_and_a_dead_socket_are_three_different_facts() {
             1,
             "a failed fetch must stay reportable, not vanish"
         );
-        assert_eq!(outstanding[0].why, expected);
+        assert_eq!(outstanding[0].why, Some(expected));
         assert_eq!(
             outstanding[0].id, want[0].id,
             "the reference reported back is the one that was asked about"
@@ -3204,8 +3489,13 @@ fn a_refusal_a_deletion_and_a_dead_socket_are_three_different_facts() {
     }
 }
 
-/// **kube's own `is_forbidden` and `is_not_found` cannot decide this**, which is why `why` reads
-/// `code` as well as `reason`. Measured against the crate rather than read off its doc.
+/// **kube's own `is_forbidden` and `is_not_found` cannot decide this**, which is why `fault`
+/// reads `code` as well as `reason`. Measured against the crate rather than read off its doc.
+///
+/// **Both halves are fed, because a `Status` carrying both proves neither.** Every other test
+/// here builds one with a code *and* a matching reason, which is what a real API server sends —
+/// and against that input the code arm and the reason arm are indistinguishable. The shapes below
+/// are the ones where only one of the two is there.
 ///
 /// `Status::reason_or_code` is `self.reason == reason || (!is_known(reason) && self.code ==
 /// code)`, and the `reason` handed to `is_known` is the **constant** the helper was called with
@@ -3219,19 +3509,37 @@ fn a_refusal_that_carries_only_a_status_code_is_still_a_refusal() {
     let proxy = kube::core::Status::failure("", "Failed to parse error data").with_code(403);
     assert!(
         !proxy.is_forbidden(),
-        "kube's helper started answering this, so `why` can be simplified to use it"
+        "kube's helper started answering this, so `fault` can be simplified to use it"
     );
-    assert_eq!(why(&kube::Error::Api(proxy.boxed())), Why::Refused);
+    assert_eq!(fault(&kube::Error::Api(proxy.boxed())), Fault::Refused);
 
     let deleted = kube::core::Status::failure("", "Failed to parse error data").with_code(404);
     assert!(!deleted.is_not_found());
-    assert_eq!(why(&kube::Error::Api(deleted.boxed())), Why::Gone);
+    assert_eq!(fault(&kube::Error::Api(deleted.boxed())), Fault::Gone);
+
+    // **And the same shape at `401`, which is the row the first draft of this test did not
+    // have** (2026-08-27). Every expired-credential case here carried `code: 401` *and*
+    // `reason: Unauthorized`, so deleting the `401` arm from `fault` left the whole suite green:
+    // the reason fallback caught every one of them. A refusal that does not parse as a `Status`
+    // has only the number — an authorizing proxy in front of the API server is exactly that —
+    // and this is the row that fails when the number stops being read (NOTES § D29).
+    let timed_out = kube::core::Status::failure("", "Failed to parse error data").with_code(401);
+    assert_eq!(
+        fault(&kube::Error::Api(timed_out.boxed())),
+        Fault::Expired,
+        "a `401` carrying no reason read as something else, so an expired login behind a proxy \
+         is reported as a dead cluster"
+    );
 
     // And the other way round: the reason with no code, which is what the API server's own
     // `Status` body carries when `code` is absent.
-    for (reason, expected) in [("Forbidden", Why::Refused), ("NotFound", Why::Gone)] {
+    for (reason, expected) in [
+        ("Forbidden", Fault::Refused),
+        ("Unauthorized", Fault::Expired),
+        ("NotFound", Fault::Gone),
+    ] {
         assert_eq!(
-            why(&kube::Error::Api(
+            fault(&kube::Error::Api(
                 kube::core::Status::failure("refused", reason).boxed()
             )),
             expected,
@@ -3258,7 +3566,7 @@ fn an_object_that_comes_back_under_another_uid_is_not_the_one_that_was_asked_abo
 
     assert_eq!(
         store.unresolved_owners()[0].why,
-        Why::Gone,
+        Some(Fault::Gone),
         "a different object under the same question is not an answer"
     );
     let snapshot = store.snapshot(now()).expect("every watch listed");
@@ -5359,7 +5667,13 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
         version,
         served,
         watches,
+        renewal,
     } = session(offline()).await;
+
+    assert_eq!(
+        renewal, None,
+        "a client is not a file: `session` has no kubeconfig to read a login program out of"
+    );
 
     assert!(
         version.is_err(),
@@ -5457,13 +5771,26 @@ fn kubeconfig(context: &str, user: &str) -> Kubeconfig {
 #[tokio::test]
 async fn a_context_the_kubeconfig_does_not_name_comes_back_as_the_kubeconfigs_own_error() {
     let asked_for = "k8rs-tests-no-such-context";
-    let Err(NotConnected::Kubeconfig(failure)) =
-        connect_with(kubeconfig("k8rs-tests", "{}"), Some(asked_for)).await
-    else {
+    let Err(problem) = connect_with(kubeconfig("k8rs-tests", "{}"), Some(asked_for)).await else {
         panic!(
-            "connecting to a context this kubeconfig does not name did not fail as a kubeconfig \
-             error — the only context in it is `k8rs-tests`, so the name asked for was ignored"
+            "connecting to a context this kubeconfig does not name did not fail as an error — \
+             the only context in it is `k8rs-tests`, so the name asked for was ignored"
         );
+    };
+    assert_eq!(
+        problem.fault(),
+        Fault::NoContext,
+        "a context that is not in the file was classified as the file being unreadable — it \
+         read perfectly, and the reader would be sent to `cat` it (`k8s-admin`, 2026-08-27)"
+    );
+    assert_eq!(
+        problem.renewal(),
+        None,
+        "a kubeconfig that would not load named a login program anyway — there was no `exec` \
+         block to read one out of"
+    );
+    let NotConnected::Kubeconfig(failure) = problem else {
+        panic!("the kubeconfig's own error arrived in the client arm");
     };
     assert!(
         matches!(failure, kube::config::KubeconfigError::LoadContext(named) if named == asked_for),
@@ -5602,11 +5929,12 @@ fn a_reset_cannot_undo_the_climb_and_the_ramp_is_still_kubes_own() {
 /// one that runs and exits non-zero — both measured, and `/bin/false` is left out of the test
 /// because a path that does not exist spawns nothing at all.
 ///
-/// **What it pins for the box that classifies a connection failure**, which is the next one: the
+/// **What it pins for the classifier, which was written against it** (§ WHAT WENT WRONG): the
 /// payload is `kube::Error::Auth`, not `Api(Status)` and not a transport error, and **nothing has
 /// been sent to the cluster** — the server here cannot even resolve. *This kubeconfig's login
 /// helper did not answer* is a different sentence from *the cluster refused you* and from *the
-/// cluster is not there*, and only the typed value tells them apart.
+/// cluster is not there*, and only the typed value tells them apart, which is the assertion on
+/// [`Fault::NoCredential`] below.
 ///
 /// **Nothing here formats the error.** `Display` on a `kube` error interpolates its source down to
 /// an `exec` plugin's stdout (`docs/security.md` § Token hygiene) — which for this shape is the
@@ -5615,19 +5943,157 @@ fn a_reset_cannot_undo_the_climb_and_the_ramp_is_still_kubes_own() {
 async fn a_credential_plugin_that_never_answers_is_a_client_that_could_not_be_built() {
     let user = "{exec: {apiVersion: client.authentication.k8s.io/v1beta1, \
                 command: /nonexistent/k8rs-tests-no-such-credential-plugin}}";
-    let Err(NotConnected::Client(failure)) =
-        connect_with(kubeconfig("k8rs-tests", user), None).await
-    else {
+    let Err(problem) = connect_with(kubeconfig("k8rs-tests", user), None).await else {
         panic!(
-            "a kubeconfig whose credential plugin is not on the disk did not come back as \
-             `NotConnected::Client` — either a session was built with no credential, or the \
-             failure was flattened into the kubeconfig arm"
+            "a kubeconfig whose credential plugin is not on the disk built a session — either \
+             one was built with no credential, or the failure was swallowed"
+        );
+    };
+    assert_eq!(
+        problem.fault(),
+        Fault::NoCredential,
+        "a login helper that answered nothing was classified as a cluster that refused, or as \
+         one that is not there — the three sentences send a reader to three different places"
+    );
+    assert_eq!(
+        problem.renewal(),
+        Some("/nonexistent/k8rs-tests-no-such-credential-plugin"),
+        "the login program did not survive the failure, so the one fault whose fix is on the \
+         reader's own machine cannot name the thing to fix (`tester`, 2026-08-27)"
+    );
+    let NotConnected::Client { failure, .. } = problem else {
+        panic!(
+            "the failure was flattened into the kubeconfig arm — nothing is wrong with the file"
         );
     };
     assert!(
         matches!(failure, kube::Error::Auth(_)),
-        "the failure is not `kube::Error::Auth` — the next box tells a login helper that did not \
-         answer from a cluster that refused, and only the typed value carries that"
+        "the failure is not `kube::Error::Auth`, and only the typed value tells a login helper \
+         that did not answer from a cluster that refused"
+    );
+}
+
+/// **The program a kubeconfig logs in with reaches the session, and nothing else from that block
+/// does** (NOTES § D19).
+///
+/// **The whole path, not the extractor**: a kubeconfig this file wrote, through
+/// `Config::from_custom_kubeconfig`, through a credential plugin that actually runs, to a
+/// [`Session`] a screen could read. That is what fails if the field is filled in from the wrong
+/// place — or, as it was for one draft, from a `Client`, which is not a file and has no
+/// kubeconfig left in it.
+///
+/// **The plugin is `/bin/echo` printing an `ExecCredential`**, which is the smallest program that
+/// answers the way `aws eks get-token` answers. The token in it is a literal this file wrote and
+/// is sent nowhere: the server in this kubeconfig is `.invalid`, which RFC 6761 guarantees can
+/// never resolve.
+///
+/// **`env`, `args` and the plugin's stdout are the three things that must not travel**, and the
+/// last of those is a credential (`docs/security.md` § Token hygiene). The `args` here carry the
+/// token itself, so a `renewal` that had picked up `command` + `args` would have put a bearer
+/// token in a field a screen prints — which is why the assertion is `==` on the command alone and
+/// not `contains`.
+#[tokio::test]
+async fn the_login_program_reaches_the_session_and_nothing_else_from_that_block_does() {
+    let plugin = "/bin/echo";
+    assert!(
+        std::path::Path::new(plugin).exists(),
+        "{plugin} is not on this machine, so this test has no credential plugin to run — it is \
+         not that the code is wrong"
+    );
+    let token = "k8rs-tests-fake-token-never-sent-anywhere";
+    // A YAML single-quoted scalar, so the JSON keeps its own double quotes and this string
+    // stays readable.
+    let credential = format!(
+        "{{\"apiVersion\": \"client.authentication.k8s.io/v1beta1\", \"kind\": \
+         \"ExecCredential\", \"status\": {{\"token\": \"{token}\"}}}}"
+    );
+    let user = format!(
+        "{{exec: {{apiVersion: client.authentication.k8s.io/v1beta1, command: {plugin}, \
+         args: ['{credential}']}}}}"
+    );
+    let session = connect_with(kubeconfig("k8rs-tests", &user), None)
+        .await
+        .unwrap_or_else(|_| {
+            panic!("{plugin} printed an ExecCredential and no client was built from it")
+        });
+
+    assert_eq!(
+        session.renewal.as_deref(),
+        Some(plugin),
+        "the program this kubeconfig logs in with did not reach the session, so a `401` has \
+         nothing to name and the reader is told to guess which cloud they are on"
+    );
+
+    // The negative, through the same call: a kubeconfig that carries no login program at all
+    // leaves the field empty rather than inventing one.
+    let plain = connect_with(
+        kubeconfig("k8rs-tests", "{token: k8rs-tests-fake-static-token}"),
+        None,
+    )
+    .await
+    .unwrap_or_else(|_| panic!("a kubeconfig with a static token built no client"));
+    assert_eq!(
+        plain.renewal, None,
+        "a kubeconfig with no `exec` block was given a login program to name"
+    );
+}
+
+/// **What is taken out of an `exec` block, and what is refused** — the field-level half of
+/// [`renewal`], which the whole-path test above cannot reach.
+///
+/// **A command that is not on the disk cannot build a client**, so the strip and the bound have
+/// no successful connect to travel through: `/bin/echo` exists and `/bin/echo\u{{202e}}` does not.
+/// They are proven here instead, on the one input the product path also takes.
+///
+/// **The strip is owed even though a kubeconfig is not the API server** (invariant 9, NOTES
+/// § D154). It is a file written by tooling as often as by hand, and a bidi override in a
+/// `command` would reverse the sentence it is printed in — the same Trojan Source shape
+/// `unprintable` exists for, arriving through the reader's own disk instead of the wire.
+#[test]
+fn a_login_program_is_stripped_bounded_and_never_invented() {
+    let with = |exec: Option<kube::config::ExecConfig>| AuthInfo {
+        exec,
+        ..AuthInfo::default()
+    };
+    let block = |command: Option<&str>| {
+        Some(kube::config::ExecConfig {
+            command: command.map(str::to_string),
+            args: Some(vec!["--cluster-name".to_string(), "prod".to_string()]),
+            ..kube::config::ExecConfig::default()
+        })
+    };
+
+    assert_eq!(
+        renewal(&with(block(Some("aws")))).as_deref(),
+        Some("aws"),
+        "the command was not read, or the args came with it — `aws --cluster-name prod` mints a \
+         token for k8rs and renews nothing a human needs"
+    );
+    assert_eq!(
+        renewal(&with(None)),
+        None,
+        "a kubeconfig with no `exec` block was given a login program"
+    );
+    assert_eq!(
+        renewal(&with(block(None))),
+        None,
+        "an `exec` block with no command at all produced a program to name"
+    );
+    assert_eq!(
+        renewal(&with(block(Some("")))),
+        None,
+        "an empty command became an empty pair of backticks in a sentence"
+    );
+    assert_eq!(
+        renewal(&with(block(Some("aws\u{202e}sso")))).as_deref(),
+        Some("awssso"),
+        "a bidi override survived into a string a screen prints (invariant 9)"
+    );
+    let long = "a".repeat(IDENTIFIER + 64);
+    let bounded = renewal(&with(block(Some(&long)))).expect("a long command is still a command");
+    assert!(
+        bounded.len() < long.len() && bounded.ends_with(SHORTENED),
+        "a command longer than an identifier was neither bounded nor marked as cut"
     );
 }
 

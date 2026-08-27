@@ -988,7 +988,7 @@ fn a_failure_names_k8rs_and_the_file_that_stopped_it() {
 // is only this file's half: when a report is printed at all, and when the same cluster is not
 // printed twice.
 
-use kube::runtime::watcher::Event;
+use kube::runtime::watcher::{self, Event};
 
 /// Every object of a committed `kind: List` capture, decoded.
 fn objects<T: DeserializeOwned>(name: &str) -> Vec<T> {
@@ -1038,12 +1038,15 @@ fn the_other_four(store: &mut k8s::Store) {
 #[test]
 fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     let mut last = String::new();
-    assert_eq!(live_report(&k8s::Store::default(), now(), &mut last), None);
+    assert_eq!(
+        live_report(&k8s::Store::default(), now(), &mut last, None),
+        None
+    );
 
     // Four of the five landed and the fifth never opened: still not a cluster anyone may read.
     let mut store = k8s::Store::default();
     the_other_four(&mut store);
-    assert_eq!(live_report(&store, now(), &mut last), None);
+    assert_eq!(live_report(&store, now(), &mut last, None), None);
     assert!(
         last.is_empty(),
         "something was recorded as printed while the bootstrap was still running"
@@ -1053,12 +1056,12 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     // most recently, so a silent bootstrap has to stay silent *against a non-empty last* too —
     // an empty report is not a report, and printing one would put a blank block on stdout every
     // time a watch re-listed.
-    let printed = live_report(&listed(Vec::new()), now(), &mut last).expect("a listed store");
+    let printed = live_report(&listed(Vec::new()), now(), &mut last, None).expect("a listed store");
     assert!(!printed.is_empty(), "the report is empty: {printed:?}");
     // `None` and not merely *empty*: `Some(String::new())` is a blank block on stdout, which is
     // what the driver would print every time a watch re-listed.
     assert_eq!(
-        live_report(&store, now(), &mut last),
+        live_report(&store, now(), &mut last, None),
         None,
         "a bootstrap with nothing wrong printed something after an earlier report"
     );
@@ -1076,14 +1079,14 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     let mut store = listed(objects::<Pod>("kube-system-pods.json"));
     let mut last = String::new();
 
-    let first = live_report(&store, now(), &mut last).expect("every initial LIST landed");
+    let first = live_report(&store, now(), &mut last, None).expect("every initial LIST landed");
     println!("{first}");
     assert!(
         first.contains(" pods · "),
         "the live report is not the report `render` draws"
     );
     assert_eq!(
-        live_report(&store, now(), &mut last),
+        live_report(&store, now(), &mut last, None),
         None,
         "the same cluster printed twice"
     );
@@ -1093,7 +1096,8 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     )
     .expect("the capture decodes");
     store.pod(&now(), Event::Apply(crashloop));
-    let second = live_report(&store, now(), &mut last).expect("a pod arrived, so the report moved");
+    let second =
+        live_report(&store, now(), &mut last, None).expect("a pod arrived, so the report moved");
     println!("{second}");
     assert!(
         second.contains("broken-crashloop"),
@@ -1237,6 +1241,41 @@ fn a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error() {
     assert!(run(&[ANALYSIS.to_string(), fixture("healthy.json")]).is_ok());
 }
 
+/// **A runtime that would not start names the reason the operating system gave**, exactly as a
+/// failed write does.
+///
+/// **The arm had no test because the sentence was inline in `main`** (`tester`, 2026-08-27) —
+/// `tokio::runtime::Builder::build` cannot be made to fail on demand, so nothing could reach it
+/// and it was quietly throwing its `std::io::Error` away with a `_`. Moved into a function over a
+/// value, it is assertable like every other decision `main` makes.
+///
+/// **The io error is untrusted text like any other** ([`sanitize`]): a reason carrying a control
+/// character must not reach the terminal, which is the same guard `stdout_failure` is under.
+#[test]
+fn a_runtime_that_would_not_start_says_what_the_machine_said() {
+    let real = runtime_failure(&std::io::Error::from(std::io::ErrorKind::OutOfMemory));
+    println!("{real}");
+    assert!(
+        real.starts_with("k8rs: this machine would not start the runtime a cluster needs — ")
+            && real.len()
+                > "k8rs: this machine would not start the runtime a cluster needs — ".len(),
+        "the reason the machine gave was dropped, which is the generic string this box is \
+         about: {real:?}"
+    );
+
+    let crafted = runtime_failure(&std::io::Error::other("too many\u{1b}[2Jopen files"));
+    println!("{crafted:?}");
+    assert!(
+        crafted.contains("too many[2Jopen files"),
+        "the reason was not carried through: {crafted:?}"
+    );
+    assert!(
+        !crafted.contains('\u{1b}'),
+        "an escape sequence in an io error's own text reached the terminal (invariant 9): \
+         {crafted:?}"
+    );
+}
+
 /// A client pointed at a name RFC 6761 reserves so that it can never resolve — the same double
 /// `k8s_tests.rs` § CONNECTING builds, written twice because a test helper cannot cross from one
 /// `*_tests` module to another (invariant 11 keeps `mod tests` private to its own product file).
@@ -1273,7 +1312,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     k8s::drive_watching(watches, &mut store, |_| {}).await;
 
     let mut last = String::new();
-    let failing = live_report(&store, now(), &mut last).expect("five watches are failing");
+    let failing = live_report(&store, now(), &mut last, None).expect("five watches are failing");
     println!("{failing}");
     for kind in ["pods", "nodes", "Deployments", "StatefulSets", "DaemonSets"] {
         assert!(
@@ -1281,21 +1320,28 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
             "a cluster that answers nothing said nothing about {kind}: {failing}"
         );
     }
+    // **Jargon only inside backticks**, which is a narrowing of this assertion and not a
+    // weakening of it (2026-08-27). It read `!failing.contains("watch")`, and the classifier box
+    // made that unpassable: the security gate requires a refusal to name the missing verb, and
+    // `watch` *is* the verb — quoted, because it is something to type into a `Role` rather than
+    // English. What invariant 14 actually owes is that the sentence a reader has to understand
+    // never needs it, and that is what is checked now: everything outside backticks.
+    let english = prose(&failing);
     assert!(
-        !failing.contains("watch"),
-        "the line a reader sees uses the word `watch`, which is the jargon invariant 14 is \
-         about: {failing}"
+        !english.contains("watch"),
+        "the sentence a reader has to understand uses the word `watch` outside a quoted verb: \
+         {english}"
     );
 
     // The same store again is not news…
-    assert_eq!(live_report(&store, now(), &mut last), None);
+    assert_eq!(live_report(&store, now(), &mut last, None), None);
 
     // …and then every watch delivers a complete answer, which is what a reconnect looks like
     // from in here: the failure clears itself and the report says so without being asked.
     store.pod(&now(), Event::Init);
     store.pod(&now(), Event::InitDone);
     the_other_four(&mut store);
-    let recovered = live_report(&store, now(), &mut last).expect("the cluster came back");
+    let recovered = live_report(&store, now(), &mut last, None).expect("the cluster came back");
     println!("{recovered}");
     assert!(
         !recovered.contains("not getting"),
@@ -1317,7 +1363,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         .map(|watch| watch.take(2).boxed())
         .collect();
     k8s::drive_watching(watches, &mut store, |_| {}).await;
-    let stale = live_report(&store, now(), &mut last).expect("an outage is news");
+    let stale = live_report(&store, now(), &mut last, None).expect("an outage is news");
     println!("{stale}");
     let (unreadable, cards) = stale
         .split_once("\n\n")
@@ -1344,20 +1390,134 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     );
 }
 
+/// A `Status` the API server would send, wrapped exactly as kube wraps one — the same double
+/// `k8s_tests.rs` § RESOLVING AN OWNER builds, written twice because a test helper cannot cross
+/// from one `*_tests` module to another (invariant 11).
+/// **The English of a line, with everything inside backticks taken out** — what invariant 14
+/// is owed, once the security gate's *name the verb and the resource* has put RBAC verbs on the
+/// screen.
+///
+/// **It asserts the backticks are balanced, because otherwise it degrades in silence**
+/// (`tester`, 2026-08-27, CLAUDE.md § *a derived list asserts it found something*). With an odd
+/// count `step_by(2)` keeps the wrong halves, so prose slides into the discarded side and the
+/// assertion passes over a line nobody checked.
+fn prose(line: &str) -> String {
+    let parts: Vec<&str> = line.split('`').collect();
+    assert!(
+        parts.len() % 2 == 1,
+        "the line has an odd number of backticks, so splitting on them keeps the wrong halves \
+         and any assertion over the result is meaningless: {line:?}"
+    );
+    parts.into_iter().step_by(2).collect()
+}
+
+fn api_error(code: u16, reason: &str) -> kube::Error {
+    kube::Error::Api(
+        kube::core::Status::failure("refused", reason)
+            .with_code(code)
+            .boxed(),
+    )
+}
+
+/// **The three things a watch can be failing of, said apart** — the box's own clause, and the
+/// defect `PRIOR-ART § C1` catalogues if any two of them come out as one sentence.
+///
+/// **The line was true of all three before this and said nothing about which** (`k8s-admin`,
+/// 2026-08-27): `unreadable` read `failure.is_some()` and stopped there, so a reader whose
+/// kubeconfig is not allowed to see pods and a reader whose cluster is down got the same words.
+/// Both halves of the frame around the clause still have to hold for every one of them, which is
+/// what the `right now` / `out of date` assertions carry forward.
+///
+/// **The `403` names a verb and a resource because the security gate requires it**, and the
+/// resource is the plural a `Role` spells: `statefulsets`, not `StatefulSets`.
+#[test]
+fn a_refusal_an_expired_login_and_a_dead_cluster_are_three_different_lines() {
+    let refused = watcher::Error::InitialListFailed(api_error(403, "Forbidden"));
+    let expired = watcher::Error::WatchError(
+        kube::core::Status::failure("expired", "Unauthorized")
+            .with_code(401)
+            .boxed(),
+    );
+    let dead = watcher::Error::WatchFailed(kube::Error::Service(Box::new(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "timed out",
+    ))));
+    let line = |failure, kind, renewal| {
+        let lines = unreadable(
+            &[k8s::Trouble {
+                kind,
+                failure: Some(failure),
+                ended: false,
+            }],
+            renewal,
+        );
+        let [line] = lines.as_slice() else {
+            panic!("one trouble did not make one line: {lines:?}")
+        };
+        println!("{line}");
+        line.clone()
+    };
+
+    let refusal = line(&refused, ObjectKind::StatefulSet, None);
+    assert!(
+        refusal.contains("the role this kubeconfig uses needs to `list` and `watch` statefulsets"),
+        "a refusal does not name the verb and the resource the security gate asks for: \
+         {refusal:?}"
+    );
+
+    let timeout = line(&expired, ObjectKind::Pod, Some("aws"));
+    assert!(
+        timeout.contains("no longer accepts this login") && timeout.contains("`aws`"),
+        "an expired login is not told apart from a refusal, or does not name the program this \
+         kubeconfig logs in with (NOTES § D19): {timeout:?}"
+    );
+    assert!(
+        !timeout.contains("the role"),
+        "an expired login reads as a missing permission, which sends a beginner to their \
+         platform team over a timeout: {timeout:?}"
+    );
+
+    let outage = line(&dead, ObjectKind::Node, Some("aws"));
+    assert!(
+        outage.contains("nothing usable came back"),
+        "a dead cluster does not say so: {outage:?}"
+    );
+    assert!(
+        !outage.contains("the role") && !outage.contains("login"),
+        "a cluster that is down is reported as a permission or credential problem: {outage:?}"
+    );
+
+    // The three are three, not two that happen to differ from a third.
+    assert_ne!(refusal, timeout);
+    assert_ne!(timeout, outage);
+    assert_ne!(refusal, outage);
+
+    // And every one of them keeps the frame that has to be true of all three.
+    for line in [&refusal, &timeout, &outage] {
+        assert!(
+            !line.contains("right now") && !line.contains("out of date"),
+            "the line claims something a standing refusal makes false: {line:?}"
+        );
+    }
+}
+
 /// **The two things this tool says about itself, and neither may be false on the shape it does
 /// not name.**
 ///
 /// **`right now` and `out of date` were both lies under a 403** (`k8s-admin`, 2026-08-27): a
 /// refusal is not *right now*, it is until somebody edits RBAC, and nothing **is** shown about
-/// that kind — the list is empty, not stale. `unreadable` cannot tell a refusal from an outage
-/// ([`k8s::Trouble`] carries the error and this file may only select on it), so the one sentence
-/// has to be true of both.
+/// that kind — the list is empty, not stale. The clause the classifier added is now what tells
+/// them apart; this frame still has to be true of both.
 ///
 /// **`ended` gets the heavier glyph.** *Will not change again* is the most severe thing this tool
 /// can say about itself and it was wearing `▲`, the same mark as the merely-degraded line. This
-/// branch had no test at all before this one: no stream a test can build ends, because kube's
-/// `watcher()` cannot, and `Watch::ended` is private to `k8s.rs` — which is why `unreadable`
-/// takes the troubles rather than the store.
+/// branch had no test at all before: no stream a test can build ends, because kube's `watcher()`
+/// cannot, and `Watch::ended` is private to `k8s.rs` — which is why `unreadable` takes the
+/// troubles rather than the store.
+///
+/// **The `failure: None` shape is the one place a fallback string is allowed**, which is the
+/// second box's own rule read the right way round: *nothing was ever said about why* is printed
+/// only for the case it actually describes — a stream that finished carrying no error at all.
 #[test]
 fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
     let trouble = |kind, ended| k8s::Trouble {
@@ -1365,7 +1525,7 @@ fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
         failure: None,
         ended,
     };
-    let degraded = unreadable(&[trouble(ObjectKind::Node, false)]);
+    let degraded = unreadable(&[trouble(ObjectKind::Node, false)], None);
     let [degraded] = degraded.as_slice() else {
         panic!("one trouble did not make one line: {degraded:?}")
     };
@@ -1379,7 +1539,7 @@ fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
         "the degraded line claims something a standing refusal makes false: {degraded:?}"
     );
 
-    let stopped = unreadable(&[trouble(ObjectKind::Pod, true)]);
+    let stopped = unreadable(&[trouble(ObjectKind::Pod, true)], None);
     let [stopped] = stopped.as_slice() else {
         panic!("one trouble did not make one line: {stopped:?}")
     };
@@ -1389,9 +1549,418 @@ fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
         "a watch that will never deliver again wears the warning glyph, not the severe one: \
          {stopped:?}"
     );
+    for line in [degraded, stopped] {
+        assert!(
+            line.contains("nothing was ever said about why"),
+            "a stream that carried no error got a sentence about something else: {line:?}"
+        );
+        // **Jargon only inside backticks** (invariant 14). `list` and `watch` are RBAC verbs a
+        // reader has to type into a `Role`, so a refusal names them literally — but the English
+        // around them may never need them, and this is what fails if the frame borrows one.
+        let english = prose(line);
+        assert!(
+            !english.contains("watch"),
+            "the sentence a reader has to understand uses the word `watch` outside a quoted \
+             verb: {english:?}"
+        );
+    }
+}
 
-    // Neither sentence may need the word `watch` to be understood (invariant 14).
-    assert!(!degraded.contains("watch") && !stopped.contains("watch"));
+/// **Six faults, six sentences, and no two of them the same** — the second box's whole claim
+/// (`PRIOR-ART § C1`), checked as a set rather than one at a time.
+///
+/// **A generic message may never stand in for an error we were handed.** The failure that rule
+/// exists for is not a badly worded sentence; it is *one* sentence covering several errors, which
+/// looks fine in every review and sends a reader to the wrong place at 3am. Two faults collapsing
+/// into one string is what fails here, whichever two.
+///
+/// **Only two of the six use `asked`, and that is deliberate.** A kubeconfig that would not load
+/// and a login helper that answered nothing happened before anything was asked of any cluster, so
+/// a sentence naming a verb and a resource there would be inventing one.
+#[test]
+fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
+    use k8s::Fault::{Expired, Gone, Kubeconfig, NoCredential, Refused, Unanswered};
+    let all = [Kubeconfig, NoCredential, Expired, Refused, Gone, Unanswered];
+
+    // **Every framing a caller can hand `asked`, and not only the one that reads well**
+    // (`tester`, 2026-08-27, NOTES § D29). The `Gone` arm was `there is nothing to {asked}`,
+    // which wants a noun, and it was fed `` `get /apis` `` alone — the single framing where that
+    // passes. Three of the four callers supply a verb phrase, and every one of them is here.
+    let framings = [
+        "`get /version`",
+        "`get /apis`",
+        "`list` and `watch` pods",
+        "reach this cluster",
+    ];
+    for renewal in [None, Some("aws")] {
+        for asked in framings {
+            let said: Vec<String> = all
+                .iter()
+                .map(|fault| because(*fault, asked, renewal))
+                .collect();
+            for line in &said {
+                println!("{renewal:?}  {line}");
+            }
+            let distinct: std::collections::BTreeSet<&String> = said.iter().collect();
+            assert_eq!(
+                distinct.len(),
+                all.len(),
+                "two faults print the same sentence, which is the generic handler growing back: \
+                 {said:#?}"
+            );
+            for line in &said {
+                assert!(
+                    !line.is_empty() && !line.contains("``"),
+                    "a sentence is empty or carries an empty pair of backticks: {line:?}"
+                );
+            }
+            // The three arms that read `asked` must actually contain it, whichever framing
+            // arrives. That is the cheap half; the grid below is the half that catches a frame
+            // that reads wrongly.
+            for fault in [Refused, Gone, Unanswered] {
+                let line = because(fault, asked, renewal);
+                assert!(
+                    line.contains(asked),
+                    "`{fault:?}` dropped what k8rs was trying to do: {line:?}"
+                );
+            }
+        }
+    }
+
+    // **The refusal names the verb and the resource** — the security gate's own words — and for
+    // a `nonResourceURL` that means a path, because its `Status` carries no group and no kind
+    // (NOTES § D160).
+    assert_eq!(
+        because(Refused, "`get /apis`", None),
+        "the role this kubeconfig uses needs to `get /apis`"
+    );
+    // **And it never claims which verb is missing.** A watch is two verbs, and a `Role` granting
+    // `list` without `watch` is ordinary — measured as printing *not allowed to `list` and
+    // `watch` pods* while the LIST had just succeeded (`k8s-admin`, 2026-08-27).
+    for asked in ["`get /apis`", "`list` and `watch` pods"] {
+        let line = because(Refused, asked, None);
+        assert!(
+            !line.contains("not allowed"),
+            "the refusal claims a state this code cannot know — which of two verbs was \
+             refused: {line:?}"
+        );
+    }
+    // **And the expiry is not a refusal.** Telling a beginner *you are not allowed* when their
+    // login timed out sends them to their platform team for nothing (NOTES § D19).
+    let expired = because(Expired, "`get /apis`", Some("aws"));
+    assert!(
+        !expired.contains("needs") && expired.contains("`aws`"),
+        "{expired:?}"
+    );
+    // **And it promises nothing about restarting** (`tester`, 2026-08-27). kube re-runs the
+    // `exec` plugin as its cached credential ages out — 25 executions against 22 requests over a
+    // ten-second run — so the ordinary exec kubeconfig recovers on its own once the login is
+    // repaired, and *restart k8rs* is a true problem answered with the wrong errand. The other
+    // shape, a token with no `expirationTimestamp`, genuinely does need one; the sentence has to
+    // be true of both, so it names neither.
+    for renewal in [None, Some("aws")] {
+        let line = because(Expired, "`get /apis`", renewal);
+        assert!(
+            !line.contains("afresh") && !line.contains("restart") && !line.contains("start k8rs"),
+            "the expired-login sentence tells the reader to restart, which is false for the \
+             exec kubeconfig it was written for: {line:?}"
+        );
+    }
+    assert!(
+        !because(Expired, "`get /apis`", None).contains('`'),
+        "a kubeconfig with no login program to name printed backticks around nothing"
+    );
+    // **The program is named where there is one and the sentence still works where there is
+    // not.** Both shapes are ordinary: a static token in the file has no program behind it.
+    assert!(because(NoCredential, "", Some("aws")).contains("(`aws`)"));
+    assert!(!because(NoCredential, "", None).contains('`'));
+}
+
+/// **The three sentences that carry `asked`, in all four framings a caller can supply, written
+/// out** — twelve literals, because nothing weaker can fail.
+///
+/// **A suffix check does not catch this, and that is measured** (2026-08-27). The broken `Gone`
+/// frame was *there is nothing to {asked}* and the fixed one is *when k8rs tries to {asked}*;
+/// both end in `` to {asked} ``, so an `ends_with` assertion over the grid stayed **green**
+/// against the defect it was written for. What separates them is that the first wants a noun
+/// where every caller but one supplies a verb phrase — *there is nothing to `list` and `watch`
+/// pods* — and no predicate over a string can see that.
+///
+/// **So the sentences are literals and a reworded frame reddens this test**, which forces the one
+/// thing that does work: somebody reads the four framings side by side. It is the shape
+/// `tests/binary.rs` already uses for the whole report, for the same reason.
+///
+/// **The four framings are the four callers**, not an invented set: `` `get /version` `` and
+/// `` `get /apis` `` from [`greeting`], `` `list` and `watch` <resource> `` from [`unreadable`],
+/// and *reach this cluster* from [`live`].
+#[test]
+fn the_three_sentences_that_name_what_was_asked_read_in_all_four_framings() {
+    use k8s::Fault::{Gone, Refused, Unanswered};
+    let grid = [
+        (
+            Refused,
+            "`get /version`",
+            "the role this kubeconfig uses needs to `get /version`",
+        ),
+        (
+            Refused,
+            "`get /apis`",
+            "the role this kubeconfig uses needs to `get /apis`",
+        ),
+        (
+            Refused,
+            "`list` and `watch` pods",
+            "the role this kubeconfig uses needs to `list` and `watch` pods",
+        ),
+        (
+            Refused,
+            "reach this cluster",
+            "the role this kubeconfig uses needs to reach this cluster",
+        ),
+        (
+            Gone,
+            "`get /version`",
+            "this server says there is no such thing when k8rs tries to `get /version`",
+        ),
+        (
+            Gone,
+            "`get /apis`",
+            "this server says there is no such thing when k8rs tries to `get /apis`",
+        ),
+        (
+            Gone,
+            "`list` and `watch` pods",
+            "this server says there is no such thing when k8rs tries to `list` and `watch` pods",
+        ),
+        (
+            Gone,
+            "reach this cluster",
+            "this server says there is no such thing when k8rs tries to reach this cluster",
+        ),
+        (
+            Unanswered,
+            "`get /version`",
+            "nothing usable came back when k8rs tried to `get /version`",
+        ),
+        (
+            Unanswered,
+            "`get /apis`",
+            "nothing usable came back when k8rs tried to `get /apis`",
+        ),
+        (
+            Unanswered,
+            "`list` and `watch` pods",
+            "nothing usable came back when k8rs tried to `list` and `watch` pods",
+        ),
+        (
+            Unanswered,
+            "reach this cluster",
+            "nothing usable came back when k8rs tried to reach this cluster",
+        ),
+    ];
+    for (fault, asked, expected) in grid {
+        let line = because(fault, asked, None);
+        println!("{line}");
+        assert_eq!(
+            line, expected,
+            "`{fault:?}` has been reworded — read all four framings of it above before updating \
+             this literal, because three of the four callers supply a verb phrase and one \
+             supplies a path"
+        );
+    }
+}
+
+/// A session assembled by hand, because the two failures that matter here need a server that
+/// answers `403` and there is none in this repo's tests.
+///
+/// Every field is `pub(crate)` and this is the crate, which is the same seam `k8s_tests.rs`
+/// § CONNECTING uses from the other side.
+fn saying(
+    version: Result<String, kube::Error>,
+    served: Result<k8s::Served, kube::Error>,
+    renewal: Option<&str>,
+) -> k8s::Session {
+    k8s::Session {
+        client: offline(),
+        version,
+        served,
+        watches: Vec::new(),
+        renewal: renewal.map(str::to_string),
+    }
+}
+
+/// **The startup line names what it could not read and why**, per question, and the session
+/// starts anyway.
+///
+/// **Both of these are `Result`s that travel** (`k8s.rs` § CONNECTING): a kubeconfig that may not
+/// `get /apis` still watches pods, so the refusal is a clause and never an exit. Until 2026-08-27
+/// both clauses were fixed strings — *"the server would not say which version it is"* — which is
+/// true of a refusal, an expiry and a dead socket alike and useful for none of them.
+///
+/// **`get /version` and `get /apis` are `nonResourceURL`s.** NOTES § D160 measured the `Status`
+/// for one: an empty `details`, so there is no group and no kind a sentence could name, and the
+/// path is the only true subject. That is also the grant a `ClusterRole` has to spell, which is
+/// the one our own documented read-only role was missing.
+///
+/// **It runs on a tokio runtime for the client alone**: [`saying`] builds one, and a
+/// `kube::Client` is a `tower::buffer::Buffer` whose clone needs a spawned worker. Nothing under
+/// test here is asynchronous.
+#[tokio::test]
+async fn the_startup_line_says_which_question_failed_and_why() {
+    let refused = || api_error(403, "Forbidden");
+    let expired = || api_error(401, "Unauthorized");
+
+    let both = greeting(&saying(Err(refused()), Err(refused()), None));
+    for clause in &both {
+        println!("{clause}");
+    }
+    let both = both.join(" · ");
+    assert!(
+        both.contains(
+            "could not read the server version (the role this kubeconfig uses needs to \
+                       `get /version`)"
+        ),
+        "{both:?}"
+    );
+    assert!(
+        both.contains("the role this kubeconfig uses needs to `get /apis`"),
+        "the discovery refusal does not name the path, which is the only thing its `Status` \
+         gives it (NOTES § D160): {both:?}"
+    );
+    assert!(
+        both.contains("cannot show you what is in it or tell which add-ons it has"),
+        "the reader is not told what a refused `/apis` costs them, in words that need no \
+         glossary (invariant 14): {both:?}"
+    );
+
+    // **An expired login is a different startup line**, and it names the program to sign in to.
+    let stale = greeting(&saying(Err(expired()), Err(expired()), Some("aws"))).join(" · ");
+    println!("{stale}");
+    assert!(
+        stale.contains("no longer accepts this login") && stale.contains("`aws`"),
+        "{stale:?}"
+    );
+    assert_ne!(
+        stale, both,
+        "an expired login and a refusal print the same startup line"
+    );
+
+    // **A cluster that answers nothing is a third**, and the shape a test can reach for real.
+    let dead = greeting(&saying(
+        Err(kube::Error::Service(Box::new(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "timed out",
+        )))),
+        Err(api_error(500, "InternalError")),
+        None,
+    ))
+    .join(" · ");
+    println!("{dead}");
+    assert!(dead.contains("nothing usable came back"), "{dead:?}");
+    assert!(
+        !dead.contains("the role") && !dead.contains("login"),
+        "a cluster that is down is reported as a permission or credential problem: {dead:?}"
+    );
+
+    // And the healthy line is still the healthy line: the failure clauses are additions, not a
+    // rewrite of what a working connection says.
+    let well = greeting(&saying(
+        Ok("v1.34.0".to_string()),
+        Ok(k8s::Served {
+            kinds: Vec::new(),
+            capabilities: None,
+        }),
+        None,
+    ));
+    println!("{}", well.join(" · "));
+    assert_eq!(
+        well,
+        vec![
+            "server v1.34.0".to_string(),
+            "0 kinds".to_string(),
+            "discovery named nothing at all".to_string(),
+        ]
+    );
+}
+
+/// **A connection that never happened says which of the two ways it failed**, and the one that
+/// can name the login program does — the sentence `main` turns into exit 2.
+///
+/// **The `Client` arm had no test at all through `live` and that is why F1 shipped**
+/// (`tester`, 2026-08-27). `k8s_tests.rs` proved `problem.fault() == NoCredential` and this file
+/// only ever called `live` with a kubeconfig error and an `Ok(session)`, so the arm whose
+/// sentence actually changed was reached by nothing — and `--in-diff` cannot flag a line no test
+/// runs. `connect_with` computed the login program and dropped it on a `?`, `live` passed `None`,
+/// and the `{named}` slot in [`because`]'s `NoCredential` arm could never be filled.
+///
+/// **The kubeconfig arm's assertion is not the old one either.** Its sentence is byte-identical
+/// to what `live` returned before this change, so on its own it was green against the pre-change
+/// code — a test that cannot fail (NOTES § D26). What pins the change is the pair: two arms, two
+/// different sentences, and the second naming a program the first has no way to know.
+#[tokio::test]
+async fn a_connection_that_never_happened_says_which_way_it_failed() {
+    let yaml = |user: &str| {
+        kube::config::Kubeconfig::from_yaml(&format!(
+            "apiVersion: v1\n\
+             kind: Config\n\
+             current-context: demo\n\
+             clusters: [{{name: demo, cluster: {{server: 'https://k8rs-tests.invalid:6443'}}}}]\n\
+             contexts: [{{name: demo, context: {{cluster: demo, user: demo}}}}]\n\
+             users: [{{name: demo, user: {user}}}]\n"
+        ))
+        .expect("a kubeconfig this file wrote itself")
+    };
+
+    // **The context**: the file read perfectly and does not name what was asked for.
+    let unloadable = live(k8s::connect_with(yaml("{}"), Some("k8rs-tests-no-such-context")).await);
+    let unloadable = unloadable.await;
+    println!("{unloadable}");
+    assert_eq!(
+        unloadable,
+        "k8rs: no cluster to watch — this kubeconfig has no such context — check the \
+         `--context` you gave, or the `current-context` line in the file"
+    );
+
+    // **An entry**: file fine, context fine, and the certificate it names is not on the disk.
+    // Measured against a live server as printing *the kubeconfig could not be read* — a sentence
+    // that sends the reader to `cat` a file with nothing wrong with it (`k8s-admin`,
+    // 2026-08-27).
+    let moved = "{client-certificate: /nonexistent/k8rs-tests/client.crt, \
+                 client-key: /nonexistent/k8rs-tests/client.key}";
+    let entry = live(k8s::connect_with(yaml(moved), None).await).await;
+    println!("{entry}");
+    assert!(
+        entry.contains("this kubeconfig loaded, and something it points at did not"),
+        "a certificate path that moved still reads as an unreadable kubeconfig: {entry:?}"
+    );
+    assert_ne!(
+        entry, unloadable,
+        "a broken entry and a missing context print the same sentence, and they are two \
+         different things to go and fix"
+    );
+
+    // **The login program**: the file loaded, and the program it names is not on the disk. The
+    // whole point of the arm, and the whole point of naming it.
+    let helper = "/nonexistent/k8rs-tests-no-such-credential-plugin";
+    let user = format!(
+        "{{exec: {{apiVersion: client.authentication.k8s.io/v1beta1, command: {helper}}}}}"
+    );
+    let broken = live(k8s::connect_with(yaml(&user), None).await).await;
+    println!("{broken}");
+    assert!(
+        broken.contains(&format!("(`{helper}`)")),
+        "the sentence does not name the login program, so the one fault whose fix is on the \
+         reader's own machine says nothing about what to fix: {broken:?}"
+    );
+    assert!(
+        broken.starts_with("k8rs: no cluster to watch — the program this kubeconfig logs in with"),
+        "{broken:?}"
+    );
+    assert_ne!(
+        broken, unloadable,
+        "a broken login program and a kubeconfig that would not load print the same sentence, \
+         and they are fixed in two entirely different places"
+    );
 }
 
 /// **A cluster that never answers still starts the driver, and the driver says why it stopped.**

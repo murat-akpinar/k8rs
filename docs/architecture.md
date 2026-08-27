@@ -277,10 +277,57 @@ it the first paint reports what it is waiting for
 
 ## Error handling
 
-- Startup errors (no kubeconfig, unreachable API, bad context) are reported
-  on stderr **before** the TUI starts; non-zero exit. `anyhow` is enough.
-- One distinction matters to the user and gets its own enum: *permission
-  denied (403)* vs *no connection* — the messages differ.
+- **Startup errors are the ones with nothing to connect *with*** — no
+  kubeconfig, a file that will not load, a context the file does not name, a
+  login program that produced no credential. Those reach stderr **before** the
+  TUI starts, with a non-zero exit.
+- **An unreachable API server is not one of them.** A cluster that is down at
+  connect is a screen full of *this is failing*, retried forever, never a tool
+  that would not start — `PRIOR-ART § B3`'s rule is that a connectivity failure
+  is a banner, not a shutdown, and `k8s.rs` § CONNECTING implements it that way.
+  This bullet said the opposite until 2026-08-27, when a run against a dead port
+  was measured and did not exit
+  ([NOTES § D167](../NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
+- **Eight distinctions matter to the user, not two, and they get one enum:
+  `k8s::Fault`.** *Permission denied vs no connection* was the original pair
+  and it was never enough — `Kubeconfig` (the file itself: missing, unreadable,
+  not valid YAML) · `NoContext` (the file loaded and names no such context) ·
+  `BadEntry` (the file loaded and something it points at did not — a certificate
+  it names, a `server:` line, a cluster a context refers to) · `NoCredential`
+  (the kubeconfig names a login program and that program produced nothing —
+  still nothing sent, and the fix is on the reader's own machine; reachable at
+  connect **and** mid-session) · `Expired` (`401`, the ordinary managed-cluster case, and it names
+  the login program from the user's own `exec` block rather than guessing a
+  cloud, [NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program))
+  · `Refused` (`403` — the sentence says the **role needs** the verb, never that
+  the kubeconfig *is not allowed*: k8rs needs both `list` and `watch` to watch a
+  kind and cannot tell from a refusal which one was missing) · `Gone` (`404`) ·
+  `Unanswered` (everything that did not come back usably — one variant on
+  purpose, because from the reader's side they are one fact).
+- **A fallback string is printed only for the case it actually describes**, and
+  every site holding a typed error routes through the one classifier. This is
+  stronger than invariant 14 and sits beside it: invariant 14 governs the
+  *wording* a user reads, this governs where it is allowed to come from. k9s
+  tells these errors apart internally and still prints
+  `Ruroh? 'v1/pods' command not found` when a credential expires, because a
+  generic handler between the call and the screen swallowed the typed error
+  ([PRIOR-ART § C1](../PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error)).
+  One fallback remains legitimate and is named rather than implied: a watch
+  that ended with no error attached says *nothing was ever said about why*.
+- **The words are the caller's, and so is what was asked.** `Fault` carries no
+  string at all; the sentence is written where the call site is, because that
+  is what knows the verb and the resource the security gate requires a `403`
+  to name — and a `nonResourceURL` refusal has neither, so the only true
+  sentence names the path
+  ([NOTES § D160](../NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+- **One refusal the classifier cannot see, stated because the code claimed the
+  opposite until it was measured**: every field of `Status` is
+  `#[serde(default)]`, so a proxy answering `403` with a JSON body that is not
+  a `Status` deserializes *successfully* into an all-default one — `code: 0`,
+  no reason — and kube's own `with_code` fallback never runs. The HTTP status
+  is then unrecoverable from `kube::Error::Api`, and such a refusal reads as
+  *nothing usable came back*
+  ([NOTES § D167](../NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
 - Watch drops / `410 Gone`: kube-rs watcher reconnects with backoff; the UI
   must show "disconnected, retrying" — silently stale data is forbidden.
 - Partial RBAC: a 403 on a secondary stream disables only the rules that

@@ -1277,6 +1277,41 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   so would a real listener. `tester`'s. Found while proving that stub was
   allowed to exist.
 
+- **A `403` from a proxy that answers JSON reads as *nothing usable came back***
+  (2026-08-27). Every field of `Status` is `#[serde(default)]`, so any JSON
+  object body deserializes successfully into an all-default `Status` and kube's
+  `with_code` fallback never runs; the HTTP status is then unrecoverable from
+  `kube::Error::Api`, which carries the parsed `Status` and nothing else.
+  Measured through the binary — the same `403` with a `text/plain` body
+  classifies correctly. oauth2-proxy, an auth-annotated ingress and an API
+  gateway all answer JSON. **The only route is a `ClientBuilder::with_layer`
+  above the transport** that rewrites such a response before kube parses it,
+  which no box has claimed and which is machinery, not a fix. Stated in
+  `answer()`'s doc and pinned by a test rather than claimed away
+  ([NOTES § D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
+- **`cargo doc` has three broken intra-doc links and nothing runs it**
+  (2026-08-27). `cargo doc --document-private-items` reports
+  `src/analysis.rs:3028` (`crate::analysis::capped`), `src/rules.rs:973`
+  (`crate::rules::in_days`) and `src/rules.rs:1812` (`Row::NotComputed`). All
+  three are in **frozen** files and all three are pre-existing; `just check` does
+  not run `cargo doc`, which is why they survived. Adding the step is `tester`'s
+  and fixing the links is a [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  question, so the two do not land together. Found by `dev-core` while checking
+  its own new doc links.
+- **A routine `410` watch desync prints *"nothing usable came back"* for a
+  second** (2026-08-27). `watcher.rs:610-622` emits `Err(WatchError(status))` for
+  a stale `resourceVersion` and then re-lists; that `Status` carries
+  `reason: "Expired"` (`kube-core/src/response.rs:390`), which `answer()` matches
+  on neither its code arms nor its reason arms. It clears on the next `InitDone`,
+  so it is a wrong sentence and not a wrong state. Read off the two match arms —
+  producing it needs etcd compaction or watch-cache eviction on demand, which
+  `k8s-admin` could not do.
+- **One credential fault is reported seven times** (2026-08-27). Under a
+  mid-session 401 an operator gets two greeting clauses plus one line per watch,
+  all saying the same thing, and the whole report reprints as each lands — five
+  blocks in the first four seconds, measured. Correct per watch, unreadable as a
+  screen. This is `views.rs`'s header and belongs to Phase 11; named here so it
+  is boxed rather than discovered there.
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
