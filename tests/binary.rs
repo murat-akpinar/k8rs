@@ -26,6 +26,23 @@ fn k8rs(args: &[&str]) -> Output {
         .expect("the built binary runs")
 }
 
+/// The same, with `KUBECONFIG` pointed at a path that cannot be a kubeconfig.
+///
+/// **The override is load-bearing, not tidiness.** Inherited, `--live` connects to whatever
+/// cluster the developer's `KUBECONFIG` names and watches it until the harness gives up — the
+/// watch never ends by design (`src/k8s.rs` § THE DRIVER), so the test would not fail, it would
+/// hang. Nothing here reaches a network: the path does not exist, so no client is ever built.
+fn k8rs_with_no_kubeconfig(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_k8rs"))
+        .args(args)
+        .env(
+            "KUBECONFIG",
+            "/nonexistent/k8rs-tests/there-is-no-kubeconfig-here",
+        )
+        .output()
+        .expect("the built binary runs")
+}
+
 fn fixture(name: &str) -> String {
     format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
 }
@@ -51,6 +68,40 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
     assert_eq!(stderr.lines().count(), 3, "{stderr:?}");
     assert!(stderr.starts_with("usage: k8rs "), "{stderr:?}");
     assert!(stderr.contains("cannot reach a cluster"), "{stderr:?}");
+    // **Counting the lines does not read them.** The synopsis is the only place a reader
+    // learns which modes this build has, and the whole `--live` form was removable from it
+    // with all seven of these green until this loop existed. It is asserted against the
+    // first line and not the whole text because the prose below still says `--live` while
+    // the synopsis offers no way to reach it.
+    let synopsis = stderr.lines().next().expect("the usage has a first line");
+    for named in ["--analysis", "--live", "--context"] {
+        assert!(
+            synopsis.contains(named),
+            "the synopsis does not offer {named}, so nothing tells a reader how to reach \
+             it: {synopsis:?}"
+        );
+    }
+}
+
+/// **`--live` with nothing to connect to: exit 2, stderr, and an empty stdout.**
+///
+/// The unit test over `live` can assert only the sentence it returns — "stdout belongs to the
+/// process and a test cannot read it back" (`src/main_tests.rs` § WATCHING A CLUSTER). This is
+/// that half, and it is the half `screens/once.md` § stdout and stderr are split is about:
+/// `k8rs --live > findings.txt` against a kubeconfig that is not there leaves an **empty** file,
+/// not a diagnostic sitting where a report should be.
+///
+/// **The wording is deliberately not pinned.** Telling `403` from `401` from *nothing answered*
+/// is the next box of Phase 5 and it will rewrite this sentence; what may not change is the
+/// stream, the exit code and the empty stdout.
+#[test]
+fn live_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty() {
+    let out = k8rs_with_no_kubeconfig(&["--live"]);
+
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(out.stdout.is_empty(), "{:?}", text(out.stdout.clone()));
+    let stderr = text(out.stderr);
+    assert!(stderr.starts_with("k8rs: "), "{stderr:?}");
 }
 
 /// **A committed capture: exit 0, the report on stdout, and stderr empty.**

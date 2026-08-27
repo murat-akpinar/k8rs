@@ -2612,7 +2612,7 @@ public release.
       nothing in this build constructs a `Client`. The guard is what enforces it
       when the next box lands, which is what the box asked for
       ([D164](NOTES.md#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27))
-- [ ] **Connecting is a function, not a step in `main`** — `connect(context)`
+- [x] **Connecting is a function, not a step in `main`** — `connect(context)`
       builds the client, runs discovery and the capability probe and starts the
       watches, and can be called again after everything from the previous
       context has been dropped. The `X` switcher in Phase 11 is that call;
@@ -2642,7 +2642,16 @@ public release.
       stream whose backoff returns `None`** (`utils/stream_backoff.rs:9-14`),
       which is k9s's `BailOut` inside kube's own utility, so whatever is wired
       here keeps one `updates()` stream per `Watch<T>` and resubscribes below
-      `drive` ([D162](NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26))
+      `drive` ([D162](NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26)).
+      Done: [D165](NOTES.md#d165--the-two-cargotoml-lines-the-first-client-forced-and-the-one-that-was-a-panic-on-every-machine-2026-08-27) ·
+      [D166](NOTES.md#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27) ·
+      [reports/2026-08-27](reports/2026-08-27-connect-and-the-idle-proof.md).
+      **The idle proof passed and `.default_backoff()` did not**: a refused watch
+      retried every 1.2 s forever because `StreamBackoff` resets on the
+      `Ok(Event::Init)` kube emits before every list, so the box landed
+      `StandingBackoff` instead — 2985 → 89.6 requests per refused watch per hour,
+      measured live — and the severed-socket recovery was then re-proved against
+      the fixed policy at 87.5 s, unattended
 - [ ] 403 vs 401 vs no-connection distinguished (**three** variants, not two).
       `401` is a credential-plugin token that expired mid-session — the normal
       case on EKS/GKE/AKS — and it names the renewal command from the user's

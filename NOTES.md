@@ -186,6 +186,8 @@ its line moving with it.
 - [D162](#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26) — per-watch identity, and the six choices the reconnect box had to make
 - [D163](#d163--the-operator-review-of-the-reconnect-box-eleven-findings-and-the-one-that-is-older-than-the-box-2026-08-26) — the operator review of the reconnect box: eleven findings, and the one that is older than the box
 - [D164](#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27) — the token-hygiene guard learns three shapes it could not see, and says out loud what it still cannot
+- [D165](#d165--the-two-cargotoml-lines-the-first-client-forced-and-the-one-that-was-a-panic-on-every-machine-2026-08-27) — the two `Cargo.toml` lines the first client forced, and the one that was a panic on every machine
+- [D166](#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27) — `connect()`: its shape, its fourteen choices, and the backoff kube's own default did not earn
 
 ## Why it exists — where the gap is
 
@@ -14211,3 +14213,148 @@ One structural fact worth keeping: `kube::Client`, `kube::Api` and `ClientBuilde
 derive only `Clone`, so `#[derive(Debug)]` over a *direct* holder does not compile. The
 `Client` entries can only ever fire transitively, through a type with a hand-written
 `Debug`. The entries that fire directly are `Config` and the kube error family.
+
+### D165 — the two `Cargo.toml` lines the first client forced, and the one that was a panic on every machine (2026-08-27)
+
+`connect()` is the first code in this repo that builds a `kube::Client`, and building
+one immediately found a defect that had been in the manifest since
+[D140](#d140--phase-5s-two-dependencies-the-version-that-pairs-with-the-pin-and-rustls-because-the-release-targets-decide-it-2026-08-22)
+wrote it.
+
+**`rustls-tls` alone is not a working TLS client.** kube's own `default` is
+`["client", "rustls-tls", "ring"]`; ours took `default-features = false` and named
+three of those four. rustls 0.23 ships no crypto of its own, so `Client::try_from`
+**panics** — *"Could not automatically determine the process-level CryptoProvider from
+Rustls crate features"* — before any line of ours runs. Not a test artefact: every
+`k8rs --live` on every machine.
+
+**D140's reasoning was right and its list was wrong, and the distinction matters.**
+That entry kept "a second TLS backend" out of a binary whose whole trust model is one
+kubeconfig and one API server, and that is still the rule. `ring` is not a second
+backend; it is the first one's arithmetic. **`ring` and not `aws-lc-rs`** because it is
+kube's own default and needs no cmake or NASM, which `just cross`'s four targets do not
+have. Measured before landing: `Cargo.lock` gained **one line** — `ring` under
+`rustls`'s dependency list — and no new `[[package]]`, because `ring` was already
+resolved and only feature-gated out of the build. It does now compile, which
+[D143](#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)'s
+`futures-util` did not; that is the honest difference between the two and it is not a
+reason to refuse this one, because the alternative is a binary that cannot connect.
+
+**`just check` was green for a month over a build whose client panics on
+construction.** Nothing in the tree had ever built one. What closes it now is three
+tests that call `Client::try_from` — removing the feature fails exactly those three and
+nothing else, measured — and **`tests/binary.rs` stays blind to it**, because every
+path there fails before a client exists.
+
+**The second line is `tokio`'s `net` + `io-util`, under `[dev-dependencies]`, and the
+comment on it was corrected before it landed.** The first draft claimed the section
+kept them out of the release binary. Measured with `cargo tree -e features -i tokio`:
+they are **already on in every build**, release included, because `hyper-util` turns
+them on under `kube-client`. So the line adds no compiled code. What it buys is the
+right to write `tokio::net` in our own file rather than silently inheriting a
+transitive crate's feature choice, which can change under us in a patch release — the
+shape D143 argued, applied to a feature instead of a crate. It sits in
+`[dev-dependencies]` because **k8rs itself never binds a socket**: the one user is the
+stub API server that exercises the legacy discovery fallback. A first draft of this
+paragraph was a claim reasoned from the resolver's rules instead of read off the tree,
+which is [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
+class committed by the PM, in the same turn as an entry about not doing that.
+
+**`tokio/test-util` was asked for and refused.** It would make
+`ResetTimerBackoff`'s 120-second recovery unit-testable with `tokio::time::pause`. It
+is not needed: kube's own tests cover that timer, D166's newtype is asserted to still
+delegate to it, and the operator review then **observed it firing on a live cluster** —
+twelve minutes after the plateau, a fresh outage restarted at the bottom of the ladder.
+The gap is in [`backlog.md`](backlog.md) with that observation beside it.
+
+### D166 — `connect()`: its shape, its fourteen choices, and the backoff kube's own default did not earn (2026-08-27)
+
+Phase 5's `connect()` box ([D16](#d16--the-context-switcher) is why it is a function).
+The brief decided the discovery path, the `filter()` refusal and the error boundary;
+everything below was made in flight and is ruled as made.
+
+**The shape.** `connect(Option<&str>) -> Result<Session, NotConnected>`, and a `Session`
+is a value — dropping it drops the client, the discovery answer and the five watch
+streams together, so the Phase 11 `X` switcher is this call made a second time beside
+the old one rather than a mutation of it. That is what lets a failed switch leave the
+old session running, which D16 requires and no one-shot startup path could offer.
+
+**Only what cannot be connected *with* is an error.** Reading the kubeconfig and
+building the client are the two steps with no cluster behind them; `/version` and
+discovery each travel **inside** the session as a `Result`. So a kubeconfig that may not
+`get /apis` — the `nonResourceURLs` grant [D160](#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)
+found missing from our own role — still watches pods. That is the security gate's *a 403
+degrades that one feature* made structural rather than promised.
+
+**`connect` splits into `connect` + `connect_with(Kubeconfig, Option<&str>)`,** because
+the context test could not otherwise fail: it passed on any machine with no kubeconfig,
+including CI, and went red only on the developer's ambient one. The mutation gate
+reported it `caught` for the same borrowed reason. The split is exact rather than a
+reimplementation — `Config::from_kubeconfig` is `Kubeconfig::read()` plus
+`ConfigLoader::load` (`config/mod.rs:293-296`) — so every `KubeconfigError` still
+happens where it did, one line up.
+
+**The rest, briefly.** `/version` is asked for so [`version_note`] finally has an input,
+and its string is stripped at that call site — the first text in `k8s.rs` not arriving
+through `ingest`. `capabilities()` reads the raw pairs *before* `browsable` rewrites
+them, which is D160's rule and not an accident of ordering. Freshness is **not** read:
+a `Stale` group stays absent, so `Metrics::Silent` stays the metrics box's to
+distinguish — and the module doc that claimed `connect()` already owned that
+distinction was false and is corrected, because the next box would have believed it and
+told a cluster that *has* metrics-server to install it. `drive` was not re-signed; it
+delegates to `drive_watching`, so all 25 existing call sites exercise the new pump.
+`group_names` de-duplicates and prepends the core group, and **deliberately strips
+nothing**: a name from `/apis` goes into a URL, so a strip would ask about a spelling the
+server never served, and both exits are guarded elsewhere. `--context` is first-wins
+(kubectl is last-wins; the real flag in Phase 12 should follow kubectl, not this
+scaffolding), `--context=NAME` is accepted, and a flag-shaped value is refused rather
+than swallowed — three defects in one function, all of them the same silent-wrong-cluster
+failure through different doors.
+
+**The blocker: `.default_backoff()` does not earn *never retries in a loop*, and the
+reason is a sentence this file already contained.**
+[D162](#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26)
+established that `Event::Init` is returned from `State::Empty` **before the request is
+made** (`watcher.rs:521-527`) and used it to rule that `Init` must not clear a watch's
+failure. The same fact defeats the backoff: `StreamBackoff` **resets the policy on any
+`Ok` value** (`utils/stream_backoff.rs:9-14`), and a failed initial list returns
+straight to `State::Empty` (`:584`). So a permanently refused watch emits
+`Ok(Init), Err, Ok(Init), Err, …` and **every `Err` is paid at the policy's first
+step, forever.** `ResetTimerBackoff`'s 120-second window never enters it, because its
+`reset()` delegates unconditionally and the timer lives in `next()`
+(`utils/backoff_reset_timer.rs:51-55`).
+
+Measured on a live cluster off `authorization_attempts_total`, not derived: **one
+request every 1.2 s, 2985 per refused watch per hour, 0.95% of a core continuously** —
+15,320/hour across the five, ~122,000 failed authentications for a kubeconfig left open
+overnight. The doc comment shipped with *83 requests in the first hour*, off by 36×.
+**Neither test could fail for it**: one drove `DefaultBackoff::next()` with no `reset()`
+at all, the other took four items — `Init, Err, Init, Err` — and asserted the one
+interval that is correct. No mutant reaches a defect that lives in a crate we do not
+mutate.
+
+**`StandingBackoff` is that reset silenced and nothing else** — `next()` delegates to
+`DefaultBackoff`, `reset()` is a no-op, so the 120-second timer inside `next()` becomes
+the only thing that resets the policy, which is what its own name promises. Both
+k9s-shaped hazards survive the change: it never returns `None` (`StreamBackoff` *closes*
+a stream whose backoff gives up), and it never stops retrying. Measured after:
+**89.6 requests/watch/hour and 0.18 s of CPU over 425 s** against the same live cluster —
+33× fewer requests, ~20× less CPU.
+
+**And the recovery got *faster*, which needed a control run to state.** Re-proving the
+idle recovery on kind: 87.5 s to bring every card back after a **5m43s** outage at the
+ceiling, against 101 s for the old flat policy after a **shorter** 3m42s one. A
+15-second control outage, ramp near the bottom, took 75.7 s — so ~76 s of it is the kind
+control plane's own warm-up and the backoff adds ~12 s to the last card. The operator's
+sign-off is on record and its reasons are the right ones: the worst case is bounded at
+one interval, the window it lengthens is exactly when hammering a recovering API server
+is most harmful, and the reader is never lied to during the wait.
+
+**One number in the fix was itself a constant read for a behaviour.** `max_delay(30s)`
+is not the ceiling: `backon` applies jitter as a **multiplier** after the cap
+(`backon-1.6.0/src/backoff/exponential.rs:216-235`), so the plateau is **30–60 s**, and
+a recovered watch restarts at **0.8–1.6 s**, not at the bare `min_delay`. Found by the
+operator review, verified against the crate, and written into the doc comment — the same
+class the entry above confesses, caught twice in one box.
+
+Measurements: [reports/2026-08-27](reports/2026-08-27-connect-and-the-idle-proof.md).

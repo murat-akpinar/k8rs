@@ -51,7 +51,7 @@ and four of the ten have not arrived yet:
 |---|---|---|---|
 | `k8s-openapi` | `0.28.0` | Phase 3 | `v1_36` |
 | `x509-parser` | `0.18.1` | Phase 3 | — |
-| `kube` | `4.2.0` | Phase 5 | `client`, `runtime`, `rustls-tls`, no defaults |
+| `kube` | `4.2.0` | Phase 5 | `client`, `runtime`, `rustls-tls`, `ring`, no defaults |
 | `tokio` | `1.53.1` | Phase 5 | `rt-multi-thread`, `macros`, no defaults |
 | `futures-util` | `0.3.34` | Phase 5 | `std`, no defaults — the narrow crate, not the `futures` facade |
 | `serde_json` | `1` | Phase 3, as a **dev**-dependency | — |
@@ -63,6 +63,14 @@ wants a system OpenSSL and a C toolchain for each of the four cross-compiled
 targets. The cost is that rustls parses certificates more strictly than OpenSSL,
 so a CA that `kubectl` accepts can be one k8rs rejects
 ([NOTES § D140](../NOTES.md#d140--phase-5s-two-dependencies-the-version-that-pairs-with-the-pin-and-rustls-because-the-release-targets-decide-it-2026-08-22)).
+
+**`ring` is not a fourth choice, it is `rustls-tls`'s arithmetic.** rustls 0.23
+ships no crypto of its own and panics at `Client::try_from` unless exactly one of
+`ring` / `aws-lc-rs` is compiled in, so the feature list above was a client that
+could not connect until 2026-08-27 — nothing in the tree had ever built one.
+`ring` over `aws-lc-rs` because it is kube's own default and needs neither cmake
+nor NASM, which `just cross`'s four targets do not have
+([NOTES § D165](../NOTES.md#d165--the-two-cargotoml-lines-the-first-client-forced-and-the-one-that-was-a-panic-on-every-machine-2026-08-27)).
 `openssl-probe` appears in `Cargo.lock` and links no OpenSSL — it locates the
 system trust store on disk.
 

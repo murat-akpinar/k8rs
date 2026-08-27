@@ -38,7 +38,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use k8s_openapi::jiff::Timestamp;
 use k8s_openapi::serde::de::DeserializeOwned;
 use k8s_openapi::serde_json::{self, Value};
-use rules::{ClusterSnapshot, Finding, ObjectId, Severity, analyze};
+use rules::{ClusterSnapshot, Finding, ObjectId, ObjectKind, Severity, analyze};
 use std::collections::BTreeMap;
 
 /// **stdout is the findings, stderr is everything else** (`screens/once.md` § stdout and
@@ -46,24 +46,45 @@ use std::collections::BTreeMap;
 /// reserved so a future `--exit-code` has somewhere to go (NOTES § D17).
 ///
 /// Every decision is in a function over values that is tested — [`run`] for what to report,
+/// [`live_context`] for which of the two this run is, [`live`] for what a cluster prints,
 /// [`stdout_failure`] for what a failed write costs — and what is left here is argv, the choice
-/// of stream, and calling `exit`.
+/// of stream, the runtime a cluster needs, and calling `exit`.
 fn main() {
     use std::io::Write;
-    let problem = match run(&std::env::args().skip(1).collect::<Vec<String>>()) {
-        // `writeln!`, never `println!`: Rust masks `SIGPIPE`, so `println!` *panics* when the
-        // write fails, and a reader that closed the pipe is `head` doing its job. That printed a
-        // backtrace and exited 101 — a code D17's table does not have ([`stdout_failure`]).
-        Ok(report) => match writeln!(std::io::stdout(), "{report}") {
-            Ok(()) => return,
-            Err(failed) => match stdout_failure(&failed) {
-                Some(sentence) => sentence,
-                None => return,
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // **Before the mode is chosen, because a mistyped flag is wrong in both of them.**
+    let problem = match mistyped(&args) {
+        Some(sentence) => sentence,
+        None => match live_context(&args) {
+            // **The live run has no happy ending to return**: it prints as it goes and comes back
+            // only with the sentence that says why it stopped (§ WATCHING A CLUSTER).
+            Some(context) => match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime.block_on(async { live(k8s::connect(context).await).await }),
+                Err(_) => {
+                    "k8rs: this machine would not start the runtime a cluster needs".to_string()
+                }
+            },
+            None => match run(&args) {
+                // `writeln!`, never `println!`: Rust masks `SIGPIPE`, so `println!`
+                // *panics* when the write fails, and a reader that closed the pipe is
+                // `head` doing its job. That printed a backtrace and exited 101 — a code
+                // D17's table does not have ([`stdout_failure`]).
+                Ok(report) => match writeln!(std::io::stdout(), "{report}") {
+                    Ok(()) => return,
+                    Err(failed) => match stdout_failure(&failed) {
+                        Some(sentence) => sentence,
+                        None => return,
+                    },
+                },
+                // Printed as it was handed over. Everything in it that came from outside was
+                // stripped where it entered the sentence, and everything else is ours
+                // ([`sanitize`]).
+                Err(problem) => problem,
             },
         },
-        // Printed as it was handed over. Everything in it that came from outside was
-        // stripped where it entered the sentence, and everything else is ours ([`sanitize`]).
-        Err(problem) => problem,
     };
     // **A write to stderr that fails is dropped, here and nowhere else**: there is no third
     // stream to report it on, and a program that panics while saying why it is unhappy has
@@ -92,11 +113,12 @@ fn stdout_failure(error: &std::io::Error) -> Option<String> {
     }
 }
 
-/// The three lines a run with no arguments gets. It says what this build cannot do, because
-/// the name on the tin promises a cluster and this one reads files.
-const USAGE: &str = "usage: k8rs [--analysis] <file.json>...\n\
+/// The three lines a run with no arguments gets. **Three, and `tests/binary.rs` counts them**:
+/// the file-driven form, the live one, and what the first of them still cannot do — a usage that
+/// named only half the binary would be the driver lying about itself.
+const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   k8rs --live [--context <name>]\n\
     Each file holds Kubernetes objects as JSON: one object, or a list of them.\n\
-    This build reads files only — it cannot reach a cluster yet.";
+    Without --live this build reads files only — it cannot reach a cluster.";
 
 /// **The one flag this driver has**, and it is scaffolding like the driver itself: `analysis.rs`'s
 /// seven reports are whole-cluster answers rather than per-object cards, so they are a second
@@ -111,9 +133,9 @@ const ANALYSIS: &str = "--analysis";
 /// The report, or the sentence that goes to stderr instead. `Err` is the whole of exit 2.
 fn run(args: &[String]) -> Result<String, String> {
     let wanted = args.iter().any(|arg| arg == ANALYSIS);
-    // Everything that is not the flag is a path — there is no second flag for one of them to be
-    // mistaken for, and a file really named `--analysis` is not a shape this scaffolding owes an
-    // escape hatch to.
+    // Everything that is not a flag is a path. A word that *looks* like a flag and is not one
+    // never gets here — [`mistyped`] refuses it for both modes at once — and a file really named
+    // `--analysis` is not a shape this scaffolding owes an escape hatch to.
     let paths: Vec<String> = args
         .iter()
         .filter(|arg| *arg != ANALYSIS)
@@ -593,3 +615,346 @@ fn pane(name: &str, report: &analysis::Report) -> String {
 }
 
 // --- THE ANALYSIS REPORTS END ---
+
+// --- WATCHING A CLUSTER START ---
+//
+// **The other half of this temporary driver: the same report, off a cluster instead of a file**
+// (NOTES § D34). It exists so `k8s.rs`'s `connect()` can be *run* — a watch that reconnects on
+// its own is provable no other way, and the proof is a binary somebody leaves running while the
+// node it is watching goes away and comes back (NOTES § D161).
+//
+// **It is not `--once` and it is not a TUI.** `--once` is a later box with an exit code and a
+// format `screens/once.md` fixes; this prints the same card `render` already draws, again,
+// whenever the answer changes. Nothing here draws, nothing here reads a key, and all of it goes
+// away with the rest of the temporary `main` at Phase 12.
+//
+// **stdout is the findings and stderr is everything else**, which is the split the file-driven
+// path already keeps (`screens/once.md`). So `k8rs --live > findings.txt` collects reports and
+// the connection's own story stays on the terminal.
+
+/// What every flag on this line starts with, and the whole test for *is this a path?*
+const FLAG: &str = "--";
+
+/// The `--live` flag.
+const LIVE: &str = "--live";
+
+/// The context `--live` connects to, when the run names one. **The real `--context` flag is
+/// Phase 12's** — this is the same spelling so the muscle memory transfers, and it is here at
+/// all because the machine that runs the reconnect proof does not have to be the machine whose
+/// current context is the test cluster.
+const CONTEXT: &str = "--context";
+
+/// **Which cluster this run watches, or `None` when it reads files.**
+///
+/// Three answers in one: `None` is the file-driven path this driver had before, `Some(None)` is
+/// `--live` on the kubeconfig's own current context, and `Some(Some(name))` is `--context name`.
+/// The nesting is the same shape [`k8s::connect`] takes, so nothing translates between them.
+///
+/// **Both spellings, because the wrong one silently watched the wrong cluster.** `--context=NAME`
+/// is what GNU getopt and `kubectl` accept, and matching only `--context NAME` let the other form
+/// fall through to the kubeconfig's *current* context with no message at all — which, for a flag
+/// whose whole job is to point the reconnect proof at a cluster that is not the current one, is
+/// the worst available failure (`tester`, 2026-08-27).
+///
+/// **A value that starts with `--` never becomes a context name here, and the sentence about it
+/// is [`mistyped`]'s.** `--context --live` used to mean *the context named `--live`*, and the
+/// truth arrived a moment later as a kubeconfig error about a context nobody typed. The `filter`
+/// below stopped that and then swallowed it instead — `k8rs --live --context --live` connected to
+/// the current context and said nothing, which is the same silent-wrong-cluster failure through
+/// the other door (`k8s-admin`, 2026-08-27) — so the refusal is `mistyped`'s, which runs first and
+/// has somewhere to print. The `filter` stays as the second line: this function alone must not be
+/// able to answer *the context named `--live`*. `--context=--live` is not refused: an `=` says the
+/// value was meant.
+///
+/// **A repeated `--context` is first-wins.** `kubectl` is last-wins and the real `--context` flag
+/// — Phase 12's, not this scaffolding's — should follow `kubectl` rather than this. It is stated
+/// here because it was stated nowhere, and an unwritten tie-break is the one that changes by
+/// accident.
+///
+/// **`--live` wins over anything else on the line.** A path beside it is ignored rather than
+/// read: the two inputs are a cluster and a file, and a run that silently merged them would
+/// print a report about neither.
+fn live_context(args: &[String]) -> Option<Option<&str>> {
+    if args.iter().all(|arg| arg != LIVE) {
+        return None;
+    }
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        // `--context=NAME`. Written as two strips rather than one `"--context="` literal, so the
+        // flag is spelled once in this file.
+        if let Some(attached) = arg
+            .strip_prefix(CONTEXT)
+            .and_then(|rest| rest.strip_prefix('='))
+        {
+            return Some(Some(attached));
+        }
+        // `--context NAME`, and `--context` with nothing usable after it is the current context.
+        if arg == CONTEXT {
+            return Some(
+                rest.next()
+                    .map(String::as_str)
+                    .filter(|value| !value.starts_with(FLAG)),
+            );
+        }
+    }
+    Some(None)
+}
+
+/// **The sentence a word that looks like a flag and is not one gets**, or `None` when every
+/// flag on the line is one this build has.
+///
+/// **It runs before the mode is chosen, and that is the whole point.** Put inside the
+/// file-reading path — where it was first written — it never ran for a live run, so
+/// `k8rs --live --contxt=prod` connected to the kubeconfig's *current* context and said nothing
+/// about the typo: the same silent-wrong-cluster failure [`live_context`] accepts `--context=`
+/// to avoid, arriving through the other door. Found by running the binary, not by a test.
+///
+/// **A `--` word is never a path.** `k8rs --live=true` used to be read as one and came back
+/// `--live=true: No such file or directory (os error 2)` — errno jargon about a file nobody
+/// named (invariant 14). The cost is that a file genuinely called `--x` cannot be read, which is
+/// an escape hatch this scaffolding already declined to owe anybody.
+///
+/// **A flag that is real but useless in this mode is *not* refused** — `--analysis` beside
+/// `--live`, `--context` without it. Neither can point the run at something the reader did not
+/// name, which is the failure this guard is for, and Phase 12's real flag parsing is where a
+/// tighter answer belongs.
+///
+/// **A flag where `--context`'s value should be *is* refused**, and this is where that sentence
+/// lives because [`live_context`] has nowhere to print one. The realistic form is
+/// `k8rs --live --context "$CTX"` with `CTX` unset, and swallowing it watches the current cluster
+/// in silence (`k8s-admin`, 2026-08-27). Both words are known flags, so it takes the pair rather
+/// than the word: no single-argument check can see it.
+fn mistyped(args: &[String]) -> Option<String> {
+    if let Some(pair) = args
+        .windows(2)
+        .find(|pair| pair[0] == CONTEXT && pair[1].starts_with(FLAG))
+    {
+        return Some(format!(
+            "k8rs: {CONTEXT} needs the name of a context, and {} is a flag\n{USAGE}",
+            sanitize(&pair[1])
+        ));
+    }
+    let known = |arg: &String| {
+        arg == ANALYSIS
+            || arg == LIVE
+            || arg == CONTEXT
+            || arg
+                .strip_prefix(CONTEXT)
+                .is_some_and(|rest| rest.starts_with('='))
+    };
+    args.iter()
+        .find(|arg| arg.starts_with(FLAG) && !known(arg))
+        .map(|mistyped| {
+            format!(
+                "k8rs: {} is not a flag k8rs has\n{USAGE}",
+                sanitize(mistyped)
+            )
+        })
+}
+
+/// **The report to print now, or `None` when there is nothing new to say.**
+///
+/// **Two silences and they are different facts.** Before every initial LIST has landed
+/// [`k8s::Store::snapshot`] answers `None` and so does this — a rule cannot tell a short list
+/// from a small cluster (NOTES § D28), so nothing is printed rather than something wrong. After
+/// that, `None` means the report is the same text it was last time: a watch delivers an event
+/// per object per change and almost none of them move a finding, so printing every time would
+/// bury the one that did.
+///
+/// **Comparing the rendered text is the whole of the change detection**, and it is deliberately
+/// the cheapest thing that works: the age line moves with the clock, so a card that says nothing
+/// new can still reprint when it crosses a rung of the ladder. That is a driver being noisy,
+/// which costs a line; the alternative — comparing findings and ignoring the clock — is a driver
+/// that goes quiet, which costs the proof this mode exists for.
+///
+/// **The clock is the caller's** (invariant 5, NOTES § D18): one instant per pass, handed in.
+fn live_report(store: &k8s::Store, now: Time, last: &mut String) -> Option<String> {
+    let mut report = unreadable(&store.troubles());
+    match store.snapshot(now) {
+        Some(snapshot) => {
+            let findings = analyze(&snapshot);
+            if !report.is_empty() {
+                report.push(String::new());
+            }
+            report.push(render(
+                &findings,
+                &Input {
+                    snapshot,
+                    // Nothing was read that no rule reads: a watch carries the five kinds
+                    // `k8s.rs` watches and nothing else, so the header's second half has nothing
+                    // to say.
+                    skipped: BTreeMap::new(),
+                },
+            ));
+        }
+        // Still bootstrapping and nothing wrong with it: the silence is the answer.
+        None if report.is_empty() => return None,
+        // Bootstrapping and failing. The lines above are all there is to say, and saying them is
+        // the whole point — a driver that prints nothing here is indistinguishable from one that
+        // is merely slow.
+        None => {}
+    }
+    let report = report.join("\n");
+    if report == *last {
+        return None;
+    }
+    *last = report.clone();
+    Some(report)
+}
+
+/// **What this tool is not being given, one plain line each** — empty when all five are
+/// delivering.
+///
+/// **The reconnect proof reads off this and not off silence** (NOTES § D161). A watch that dies
+/// and comes back leaves the cluster exactly as it was, so the rendered report is the same text
+/// and the driver would print *nothing* for the whole outage and nothing again on recovery —
+/// which is also what a permanently dead watch prints. With these lines the outage is a change
+/// and the recovery is a change back, and the proof is two printed blocks rather than an absence.
+///
+/// **It takes the troubles and not the store**, so both branches are reachable: `Watch::ended` is
+/// private to `k8s.rs` and no stream a test can build sets it, but [`k8s::Trouble`] is `pub` with
+/// `pub` fields and is the only thing this function reads.
+///
+/// **The store keeps answering while a watch is down, and that is deliberate** (NOTES § D162):
+/// what it holds is the last complete answer, so the cards below these lines are still a real
+/// answer to a question asked earlier. **The line above them stopped promising that on
+/// 2026-08-27** — the paragraph below has why — and the difference these lines exist for is
+/// unchanged: *something is wrong and it says so* rather than *something is wrong and it does
+/// not*.
+///
+/// **The error itself is never printed, not even its text.** `Display` on a `kube` error
+/// interpolates its source down to an `exec` plugin's stdout (`docs/security.md` § Token
+/// hygiene), so what is read here is `is_some()` and a kind — the same *select, never format*
+/// rule [`k8s::Trouble::failure`] states, kept by selecting nothing at all.
+///
+/// **No jargon** (invariant 14): the word *watch* does not appear, because a reader who has to
+/// know what one is cannot use the sentence.
+///
+/// **And the sentence has to be true of a refusal as well as an outage, which the first one was
+/// not** (`k8s-admin`, 2026-08-27). It read *"cannot read {kind} from this cluster right now —
+/// what is shown about them may be out of date"*. Under a 403 neither half holds: it is not
+/// *right now*, it is until somebody edits RBAC, and nothing **is** shown about that kind — the
+/// list is empty, not stale. At 3am that reads *the cluster is flaky* to a reader whose actual
+/// problem is *this kubeconfig is not allowed*. **Which of the two it is cannot be said here**:
+/// [`k8s::Trouble`] carries `Option<&watcher::Error>` and this file may select on it, never format
+/// it, so a sentence that is true of both is the honest one and the box that classifies a failure
+/// is where a sharper one comes from. *Not getting* covers a refusal and an outage; *it keeps
+/// asking* is true of both and is the retry said out loud; *nothing here about them can be
+/// trusted* is true of an empty list and of a stale one, which *out of date* was not.
+///
+/// **`ended` gets `●` and not `▲`.** It is the most severe thing this tool can say about itself —
+/// nothing about that kind will ever change again — and it was wearing the warning glyph while
+/// the merely-degraded line wore the same one. The reuse of the severity glyphs for a second axis
+/// is a real collision and is `tui-designer`'s to settle when `views.rs` lands (backlog); giving
+/// the terminal state the heavier of the two is free and correct either way.
+fn unreadable(troubles: &[k8s::Trouble<'_>]) -> Vec<String> {
+    troubles
+        .iter()
+        .map(|trouble| {
+            let kind = match trouble.kind {
+                ObjectKind::Pod => "pods",
+                ObjectKind::Node => "nodes",
+                ObjectKind::Deployment => "Deployments",
+                ObjectKind::StatefulSet => "StatefulSets",
+                ObjectKind::DaemonSet => "DaemonSets",
+                // Unreachable: `Store::troubles` answers for the five watched kinds and no
+                // others. A word rather than a panic, because a driver is not the place to
+                // discover that.
+                _ => "some objects",
+            };
+            if trouble.ended {
+                format!(
+                    "● k8rs has stopped receiving {kind} from this cluster — what is shown about \
+                     them will not change again"
+                )
+            } else {
+                format!(
+                    "▲ k8rs is not getting {kind} from this cluster — it keeps asking, and until \
+                     that works nothing here about them can be trusted"
+                )
+            }
+        })
+        .collect()
+}
+
+/// **Watch, and print the report every time it changes** — until the process is killed.
+///
+/// **It takes what connecting produced rather than doing it**, so a test can hand it a session
+/// over a cluster that is not there: `k8s::connect` needs a kubeconfig and there is none in a
+/// test. `main` is left holding one call and no decision.
+///
+/// **It never returns happily and its return type says so**: the only two ways out are a
+/// kubeconfig that will not connect and every watch having stopped, and the second one is
+/// unreachable by construction — kube's `watcher()` cannot end (`k8s.rs` § THE DRIVER) and the
+/// backoff under it never gives up. A `main` that treated a return as an ordinary exit would be
+/// the failure `PRIOR-ART § B3` is about, so the sentence it comes back with is an error and the
+/// exit code is 2.
+///
+/// **Nothing about the connection failure is printed**, and that is not an oversight: telling
+/// `403` from `401` from *nothing answered* is the next box of Phase 5, and the one after it
+/// forbids a generic sentence standing in for a typed error. Formatting the error we were handed
+/// would also print a bearer token from an `exec` plugin's stdout (`docs/security.md` § Token
+/// hygiene), so this driver names the step that failed and nothing else, and
+/// [`k8s::NotConnected`] keeps the typed value for the box that will say it properly.
+async fn live(connected: Result<k8s::Session, k8s::NotConnected>) -> String {
+    use std::io::Write;
+    let session = match connected {
+        Ok(session) => session,
+        Err(k8s::NotConnected::Kubeconfig(_)) => {
+            return "k8rs: no cluster to watch — the kubeconfig could not be read, or names no \
+                    such context"
+                .to_string();
+        }
+        Err(k8s::NotConnected::Client(_)) => {
+            return "k8rs: no cluster to watch — the kubeconfig was read and no client could be \
+                    built from what is in it"
+                .to_string();
+        }
+    };
+    // Everything below is what one connection had to say for itself, on stderr, once.
+    let mut said = vec![match &session.version {
+        Ok(version) => format!("server {}", sanitize(version)),
+        Err(_) => "the server would not say which version it is".to_string(),
+    }];
+    match &session.served {
+        Ok(served) => {
+            said.push(format!("{} kinds", served.kinds.len()));
+            said.push(match &served.capabilities {
+                // The `Debug` of an enum that carries nothing at all — no address, no name, no
+                // string the cluster wrote ([`k8s::Capability`]). Saying each one in plain
+                // language is `views.rs`'s job and belongs beside the feature it turns on;
+                // spelling them here would be the second copy that goes stale.
+                Some(present) => format!("{present:?}"),
+                // `None` is *the discovery answer named nothing*, which is not *this cluster has
+                // none of them* — the distinction `capabilities` exists to keep.
+                None => "discovery named nothing at all".to_string(),
+            });
+        }
+        Err(_) => said.push("the cluster would not say which kinds it serves".to_string()),
+    }
+    let mut err = std::io::stderr();
+    let _ = writeln!(err, "k8rs: watching — {}", said.join(" · "));
+    // The one line N4 has never had a server to say it about: a cluster outside the window this
+    // build was checked against gets told, and still runs (NOTES § D149).
+    if let Ok(version) = &session.version
+        && let Some(note) = k8s::version_note(version)
+    {
+        let _ = writeln!(err, "k8rs: {note}");
+    }
+    let mut store = k8s::Store::default();
+    let mut last = String::new();
+    k8s::drive_watching(session.watches, &mut store, |store| {
+        // A clock this driver cannot read is not a reason to stop watching; the next event asks
+        // again. `wall_clock`'s own `Err` is a machine set before 1970.
+        let Ok(now) = wall_clock() else { return };
+        if let Some(report) = live_report(store, now, &mut last) {
+            // The write is dropped if it fails, for the reason `main` drops a failed stderr
+            // write: there is nowhere left to report it, and this loop has no exit to take.
+            let _ = writeln!(std::io::stdout(), "{report}\n");
+        }
+    })
+    .await;
+    "k8rs: every watch has stopped, so nothing is being read any more".to_string()
+}
+
+// --- WATCHING A CLUSTER END ---

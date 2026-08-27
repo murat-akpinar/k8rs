@@ -89,9 +89,13 @@
 //! flag clears when a fetch is issued rather than when it returns, and one fetch is on the wire at
 //! a time — the two halves of `PRIOR-ART § A5` (NOTES § D154).
 //!
-//! **What is still missing is the `Client`**, and with it the five `Api<K>`s [`drive`] would be
-//! handed: that is the `connect()` box further down Phase 5. Nothing here has met an API
-//! server.
+//! **[`connect`] is the one place that meets an API server** (§ CONNECTING, NOTES § D16). It is a
+//! function and not a step in `main` because the Phase 11 context switcher is the same call made
+//! again over a dropped [`Session`]; it builds the client from the kubeconfig and nowhere else,
+//! reads one discovery answer for both the sidebar and [`capabilities`], and hands back the five
+//! watch streams with the backoff `PRIOR-ART § B3` asks for already on them. Only what cannot be
+//! connected *with* is an error there: a question the server refuses travels as a `Result` inside
+//! the session, because a kubeconfig that may not `get /apis` still watches pods.
 
 // `expect` rather than `allow` because it expires by itself, and `not(test)` because this file's
 // own tests construct and read every item — under `cargo test` the expectation would be
@@ -117,18 +121,21 @@ use crate::rules::{
 use futures_util::stream::{self, BoxStream, Stream, StreamExt, select_all};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{Node, Pod};
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{APIGroupList, Time};
 use k8s_openapi::jiff::{SignedDuration, Timestamp};
 // `serde` and `serde_json` are reached through `k8s-openapi`'s own re-exports rather than named a
 // second time in `Cargo.toml` — the same door `jiff` already comes through above, and invariant
 // 10's narrowest possible answer: a crate already in the build, not even needing to be named.
 use k8s_openapi::serde::Deserialize;
 use k8s_openapi::serde_json::Value;
-use kube::Resource;
+use kube::config::{Config, KubeConfigOptions, Kubeconfig};
 use kube::core::response::reason;
 use kube::core::{DynamicObject, gvk::GroupVersionKind};
-use kube::discovery::{ApiCapabilities, ApiResource, Scope, verbs};
-use kube::runtime::watcher::{self, Event};
+use kube::discovery::{ApiCapabilities, ApiGroup, ApiResource, Discovery, Scope, verbs};
+use kube::runtime::WatchStreamExt;
+use kube::runtime::utils::Backoff;
+use kube::runtime::watcher::{self, Event, watcher};
+use kube::{Api, Client, Resource};
 use std::collections::{BTreeMap, BTreeSet};
 
 // --- THE INGEST GUARD START ---
@@ -1765,7 +1772,7 @@ pub(crate) fn version_note(server_version: &str) -> Option<String> {
 
 /// One watch event with its kind already decided: the only thing five streams of three
 /// different API types have in common, so [`drive`] itself names none of them.
-type Update = Box<dyn FnOnce(&mut Store) + Send>;
+pub(crate) type Update = Box<dyn FnOnce(&mut Store) + Send>;
 
 /// One `watcher()` stream, ready for [`drive`].
 ///
@@ -1802,7 +1809,8 @@ type Update = Box<dyn FnOnce(&mut Store) + Send>;
 /// [`drive`] asks the caller for is `StreamBackoff`, whose doc reads: *"If
 /// `Backoff::next_backoff` returns `None` then the backing stream is given up on, and closed"*
 /// (`utils/stream_backoff.rs:9-14`) — k9s's `BailOut` inside kube's own utility. That is what
-/// `ended` is a defence against, and `default_backoff` is the policy that never returns `None`.
+/// `ended` is a defence against, and [`StandingBackoff`] is the policy that never returns
+/// `None`.
 ///
 /// **The one clock read in this file, and it is here because this is the only place that knows
 /// when an event arrived** (NOTES § D150). [`Store`] never calls one: [`Store::snapshot`] is
@@ -1857,10 +1865,11 @@ where
 /// something you wrap it in (`:777-779`) — so a watch the cluster refuses runs
 /// `Err → Init → list() → 403` bounded only by round-trip time, which is § WHAT A THROTTLE
 /// LOOKS LIKE's own warning pointed back at us. **This function cannot fix it**: it takes an
-/// `impl Stream` and never builds a `watcher()`, so **the caller owes `.default_backoff()`** and
-/// `connect()`'s box carries it. That default is safe to hand a permanent failure —
-/// `ExponentialBackoff::new` calls `.without_max_times()` (`:930`), so it slows down forever and
-/// never gives up.
+/// `impl Stream` and never builds a `watcher()`, so **the caller owes a [`Backoff`]** and
+/// `connect()`'s box carries it. Not `.default_backoff()`, which a refused watch resets on every
+/// `Ok(Init)` and so never slows down at all — [`StandingBackoff`] is that reset silenced, and
+/// § CONNECTING has the measurement. It slows down forever and never gives up:
+/// `ExponentialBackoff::new` calls `.without_max_times()` (`:930`).
 ///
 /// **And if it returns anyway, the caller does not exit.** Every stream ending is not a reason to
 /// stop: `drive` returning `()` means nothing is being watched any more, which is a state to
@@ -1880,10 +1889,38 @@ where
 /// the next poll rather than finishing, which is read off its doc and not off a cluster; that a
 /// **real** severed socket comes back with nobody touching the keyboard is the `connect()`
 /// box's proof and not this function's (NOTES § D161).
+///
+/// **It is [`drive_watching`] with nobody watching**, so every test of the pump below is a test
+/// of that one too — Rust has no default arguments and this is the shape that costs no call site.
 async fn drive(watches: Vec<BoxStream<'static, Update>>, store: &mut Store) {
+    drive_watching(watches, store, |_| {}).await;
+}
+
+/// **[`drive`], with the store handed to somebody after every update** — the same pump, and the
+/// only difference is that a caller can see what changed.
+///
+/// **`watching` is told *after* the update lands and is given the store whole**, because what an
+/// event meant is a question only the store can answer: one `Apply` can add a finding, remove
+/// three, or change nothing at all. It takes `&Store` rather than a snapshot so the gate is still
+/// the caller's to ask about — [`Store::snapshot`] answers `None` all the way through a bootstrap
+/// (NOTES § D28) and [`Store::still_listing`] is what there is to say meanwhile.
+///
+/// **It cannot end the loop.** The closure returns `()`: there is no `Result` for a `?` to sit
+/// on and no `bool` for it to stop on, so the failure this file exists to prevent cannot be
+/// reintroduced through the observer either.
+///
+/// **No clock and no timer** (invariant 7): this fires once per update, and coalescing storms is
+/// the caller's, where the frame is. The temporary driver in `main.rs` prints only when the
+/// report it renders differs from the last one, which is the cheapest form of it.
+pub(crate) async fn drive_watching(
+    watches: Vec<BoxStream<'static, Update>>,
+    store: &mut Store,
+    mut watching: impl FnMut(&Store),
+) {
     let mut merged = select_all(watches);
     while let Some(update) = merged.next().await {
         update(store);
+        watching(store);
     }
 }
 
@@ -2220,9 +2257,18 @@ pub fn browsable(
 // [`crate::rules::Metrics::Silent`] is written for the cluster this produces — installed, and not
 // answering — so a caller that routes on this set alone sends that reader to `NotInstalled` and
 // tells them to install what they already have, which is invariant 14 broken in failure 1's
-// direction. **`connect()` owns the distinction**, out of the direct
-// `list_api_groups_aggregated()` call that failure 3 already names, and is told so here rather
-// than left to rediscover it.
+// direction.
+//
+// **Nothing in this file draws that distinction, and no version of it has.** An earlier draft of
+// this paragraph said `connect()` owned it "out of the direct `list_api_groups_aggregated()`
+// call": there is no such call — [`served`] goes through `Discovery::new(..).run_aggregated()`,
+// which is where `freshness` is discarded — and a reader who believed the sentence would have
+// routed a cluster that *has* metrics-server to `NotInstalled` on the strength of it
+// (`k8s-admin`, 2026-08-27). Measured: a `v1beta1.metrics.k8s.io` APIService whose Service does
+// not exist produces a banner byte-identical to a cluster with no metrics-server at all. **The
+// distinction is owed by the box that first routes on [`Served::capabilities`]** — the freshness
+// field is one direct `/apis` call away and this file does not make it — and until that box lands
+// the only honest reading of a missing row is the floor above.
 //
 // **A trimmed discovery answer is the same shape and is `connect()`'s to not build.**
 // `Discovery::filter`/`exclude` set a mode every group is gated on before it is kept
@@ -3137,3 +3183,440 @@ impl Browsing {
 }
 
 // --- KEEPING A BROWSER VIEW FRESH END ---
+
+// --- CONNECTING START ---
+//
+// **Connecting is a function and not a step in `main`** (NOTES § D16). The Phase 11 `X` switcher
+// is this call made a second time after everything from the previous context has been dropped,
+// so nothing here is global, `static` or initialised once: a [`Session`] is a value, and
+// dropping it drops the client, the discovery answer and the five watch streams together. A
+// second [`connect`] beside a live one is two sessions, not a mutated one — which is what makes
+// a failed switch able to leave the old session running rather than falling back to nothing.
+//
+// **Three round trips before the first watch and no fourth.** `/version` for [`version_note`],
+// then the aggregated discovery pair `/apis` and `/api` that § EVERY KIND THE CLUSTER SERVES
+// prices at two — one answer read twice, for the sidebar and for the capability probe
+// (§ WHAT ELSE THE CLUSTER SERVES). The watches' own initial LISTs are the fourth onwards and
+// they are not waited for: [`Store::snapshot`] is shut until they land (NOTES § D28) and
+// [`Store::still_listing`] is what a screen draws meanwhile.
+//
+// **Only what cannot be connected *with* is an error.** Reading the kubeconfig and building the
+// client are the two steps with no cluster on the other side of them; everything after has a
+// server that can refuse, and a refusal there is one feature degraded and not a session that
+// failed. That is the security gate's *a 403 degrades that one feature* read structurally: a
+// kubeconfig that may not `get /apis` — the `nonResourceURLs` grant NOTES § D160 found missing
+// from our own documented role — still watches pods, and the reader still gets the Alerts view
+// they came for. So [`Session::version`] and [`Session::served`] are each a `Result` that
+// travels, and neither can take the session down.
+//
+// **Nothing here classifies what failed, and that is the next box** (todo.md § Phase 5). The
+// `kube` error is handed back exactly as it was received — not flattened into a `String`, not
+// wrapped in a message, not matched on. A generic sentence standing in for a typed error is
+// `PRIOR-ART § C1`, and the only way to keep that box's options open is to lose nothing here.
+//
+// **The backoff is applied here because nothing below can apply it** (NOTES § D162,
+// `PRIOR-ART § B3`). [`drive`] takes an `impl Stream` and never builds a `watcher()`, so the
+// caller owes the policy kube's own doc asks for: *"To avoid constantly looping errors, make
+// sure backoff is applied"* (`watcher.rs:26`). Without it a watch the cluster refuses runs
+// `Err → Init → list() → 403` at socket speed, which is the security gate's *never retries in a
+// loop* broken by omission.
+//
+// **And `.default_backoff()` does not earn that row either, which is what the first draft of
+// this file got wrong** (`k8s-admin`, 2026-08-27). `StreamBackoff` resets the policy on every
+// non-error item (`utils/stream_backoff.rs:9-14`, `:88-91`) and a refused `watcher()` emits
+// `Ok(Event::Init)` before *every* failure — `State::Empty` returns it with no `.await` in front
+// of it and only then makes the request (`watcher.rs:521-527`), whose failure returns straight
+// back to `State::Empty` (`:584`). So every `Err` was paid at the policy's **first** step and the
+// 30-second ceiling was never approached. Measured on a live cluster off
+// `apiserver_request_total`: **one request every 1.2 seconds, 2985 per refused watch per hour**,
+// at 0.95% of a core, continuously — 15,320 an hour across the five, and ~122,000 failed
+// authentications for a kubeconfig left open overnight. This is NOTES § D162's own sentence about
+// `Init` arriving before the request, read correctly and concluded from wrongly.
+//
+// **[`StandingBackoff`] is that reset silenced and nothing else**, and its own doc has the
+// mechanism. What it costs is measured rather than derived, twice.
+// `a_refused_watch_asks_less_and_less_often_and_costs_under_130_requests_an_hour` performs the
+// exact `reset, next, reset, next, …` sequence `StreamBackoff` performs: **83, 86 and 87 waits
+// in the first hour** across three runs, against **3004** for the same test with the reset
+// honoured — one percent off the live measurement above, which is the cross-check that the
+// simulated sequence is the real one. And the built binary against a local listener that answers
+// `403` to everything, which is the whole path with nothing simulated (2026-08-27):
+//
+// ```text
+// reset honoured   /api/v1/pods   48 requests in 60s   gaps 0.80-1.60s, never growing
+// reset silenced   /api/v1/pods    8 requests in 130s  gaps 1.34 1.86 6.14 8.49 22.88 39.25 43.75
+// ```
+//
+// `a_refused_watch_of_every_kind_waits_before_it_asks_again` is what fails if the policy is
+// dropped from one of the five below — a green suite proved the Pod watch alone until
+// 2026-08-27 — though **it cannot tell this policy from `.default_backoff()`**: one delay is the
+// most it can afford in wall clock and the two agree on the first one.
+//
+// **It never gives up, and that is the load-bearing half**: `StreamBackoff` *closes* a stream
+// whose backoff returns `None` (`:9-14`), which is k9s's `BailOut` living inside kube's own
+// utility. `next` is [`DefaultBackoff`]'s untouched and `ExponentialBackoff::new` builds it
+// `.without_max_times()` (`watcher.rs:930`).
+//
+// **What the ceiling actually is, and the one reset left under it — none of which kube documents
+// in one place.** `DefaultBackoff` is `ResetTimerBackoff<ExponentialBackoff>`
+// (`watcher.rs:981-988`): 800ms doubling to a `max_delay` of 30s, with jitter that *adds* —
+// backon's `with_jitter` is "a random jitter within (0, current_delay)" — so the steady-state
+// wait is **30 to 60 seconds**, and an hour measures in the mid-80s of requests rather than the
+// 120 the cap alone would allow.
+//
+// **The reset that is left is a 120-second wall clock, and it is now the recovery path rather
+// than a curiosity.** `ResetTimerBackoff` resets the ramp from *inside* `next()`, when more than
+// its `reset_duration` has passed since the last delay was handed out
+// (`utils/backoff_reset_timer.rs:37-49`), and `DefaultBackoff` sets that to 120s
+// (`watcher.rs:983`). A watch that is failing continuously always asks again inside that window,
+// so the ceiling stays a ceiling; a watch that came back and stayed up is not calling `next()` at
+// all, so the clock runs out and its next trouble starts at 800ms. A watch that flaps faster than
+// two minutes keeps its ramp, which is the right answer for one.
+//
+// **One `updates()` stream per [`Watch`], for the life of the session** (NOTES § D162). The five
+// below are the only five; a reconnect happens *inside* one of them, because `ended` is never
+// cleared and a second stream feeding the same watch would leave a permanent *stopped* banner
+// over a live kind.
+
+/// **One cluster, connected** — everything a session is built from, and nothing that outlives
+/// it.
+///
+/// **No `Debug`, and this is the type the rule is written for** (`docs/security.md` § Token
+/// hygiene, NOTES § D164): [`client`](Session::client) holds a `kube::Config`, whose
+/// `auth_provider.config` map is a plain `HashMap<String, String>` with a derived `Debug` — that
+/// is where the oidc and gcp providers keep their tokens. [`version`](Session::version) and
+/// [`served`](Session::served) hold a `kube::Error`, whose `Display` interpolates its source at
+/// every hop down to an `exec` plugin's stdout. Both halves of `{:?}` on this type print a
+/// credential, so the derive is absent rather than hand-written: with no `Debug` at all, a stray
+/// `{:?}` is a compile error instead of a leak.
+pub(crate) struct Session {
+    /// **The client the rest of the phase fetches with** — the owner ReplicaSets
+    /// (§ RESOLVING AN OWNER), the browser's tables (§ THE BROWSER'S ROWS), the metrics poll.
+    /// **Cloning it is cheap and every clone is the same service**, which is why the five watches
+    /// each took one rather than needing a client of their own: the inner value is a
+    /// `tower::buffer::Buffer` whose clone shares one worker — kube's own comment on the field
+    /// reads *"`Buffer` for cheap clone"* (`client/mod.rs:88`).
+    pub(crate) client: Client,
+    /// **What the API server calls itself**, stripped and bounded like any other free text
+    /// (invariant 9) — [`version_note`] is what turns it into a sentence, and
+    /// [`crate::rules::ClusterSnapshot::server_version`] is where a later box puts it.
+    ///
+    /// `Err` is *the server did not answer that question*, which on a cluster that is up is a
+    /// `nonResourceURL` refusal on `/version` and not a fact about the version.
+    pub(crate) version: Result<String, kube::Error>,
+    /// **The discovery answer, read for both of the things it says** — or the one error that
+    /// cost us both. A 403 on `/apis` is *no sidebar and no capability probe*, and it is not a
+    /// reason to stop watching pods.
+    pub(crate) served: Result<Served, kube::Error>,
+    /// **The five permanent watches, ready for [`drive`]** (invariant 6) — one per [`Watch`],
+    /// with the backoff already on them.
+    pub(crate) watches: Vec<BoxStream<'static, Update>>,
+}
+
+/// **What one discovery answer says**, read twice at connect so nothing asks again
+/// (§ EVERY KIND THE CLUSTER SERVES, § WHAT ELSE THE CLUSTER SERVES).
+///
+/// The two are one struct because they come from one call and share its failure: a screen that
+/// has kinds always has a capability answer, and one that has neither knows why.
+pub(crate) struct Served {
+    /// Every kind the browser may offer, in one order — [`browsable`]'s answer, so already
+    /// stripped and bounded.
+    pub(crate) kinds: Vec<Browsable>,
+    /// [`capabilities`]'s answer over the **raw** pairs, taken before [`browsable`] rewrote a
+    /// single byte of them (NOTES § D160): a zero-width character removed by [`text`] would
+    /// otherwise turn `metrics.k8s\u{200b}.io` into a metrics-server that is not there.
+    pub(crate) capabilities: Option<BTreeSet<Capability>>,
+}
+
+/// **The two ways there is nothing to connect *with***, each carrying the error it was handed.
+///
+/// **Neither is interpreted here** and neither is flattened into a `String`: telling `403` from
+/// `401` from *nothing answered* is the next box, and a message that stands in for a typed error
+/// is the failure `PRIOR-ART § C1` catalogues. What this type promises is that the typed value
+/// survived the trip.
+///
+/// **No `Debug`** — both payloads reach a credential through `Display`, [`Session`]'s doc has
+/// the chain (`docs/security.md` § Token hygiene).
+pub(crate) enum NotConnected {
+    /// The kubeconfig could not be read, or names no such context. `PRIOR-ART § B1`'s six shapes
+    /// all arrive here.
+    Kubeconfig(kube::config::KubeconfigError),
+    /// The kubeconfig parsed and no client could be built from it — a certificate that will not
+    /// load, a proxy URL that will not parse. **Not** a cluster that is down: nothing here has
+    /// sent a request yet.
+    ///
+    /// **The first reader is the box below this one**, which tells `403` from `401` from *nothing
+    /// answered*; the module's own `cfg_attr(not(test), expect(dead_code))` is what carries the
+    /// payload until then.
+    ///
+    /// **An earlier draft said no test could reach this arm without broken TLS material, and that
+    /// was wrong** (`k8s-admin`, 2026-08-27). A `user.exec` block whose `command` is missing from
+    /// the disk — or present and exiting non-zero — reaches it with no TLS material anywhere, as
+    /// `kube::Error::Auth`, before a byte has been sent to the cluster.
+    /// `a_credential_plugin_that_never_answers_is_a_client_that_could_not_be_built` is that shape,
+    /// and it is a **sixth** for the classification box: *this kubeconfig's login helper did not
+    /// answer* is neither *refused* nor *not there*.
+    Client(kube::Error),
+}
+
+/// **Connect to one context and hand back everything a session needs**, built fresh
+/// (NOTES § D16).
+///
+/// `None` is the kubeconfig's own current context — the case `k8rs` with no flag is — and
+/// `Some(name)` is `--context`, or the Phase 11 picker. Nothing is remembered between calls:
+/// call it again for another context and drop the first [`Session`], in that order or the other,
+/// and no state of the old cluster's can reach the new one because none of it is anywhere but
+/// in the value.
+///
+/// **The kubeconfig is the only door** (invariant 3, the security gate's *identity and
+/// transport*). `Kubeconfig::read` reads `KUBECONFIG` — every path in it, merged by kube's own
+/// rules — or `~/.kube/config`, and nothing else. `Config::infer` and `Client::try_default` are
+/// what open the in-cluster ServiceAccount path, and both are banned by name in
+/// `scripts/security-guard.py`. TLS verification is never
+/// disabled here — a kubeconfig that sets `insecure-skip-tls-verify` is honoured, because it is
+/// the user's own file, and saying so in the header is `views.rs`'s.
+pub(crate) async fn connect(context: Option<&str>) -> Result<Session, NotConnected> {
+    connect_with(
+        Kubeconfig::read().map_err(NotConnected::Kubeconfig)?,
+        context,
+    )
+    .await
+}
+
+/// **[`connect`] over a kubeconfig that is already in hand**, which is the same call with the
+/// file read taken out of it.
+///
+/// **The split is exact and not a reimplementation.** `Config::from_kubeconfig` is
+/// `Kubeconfig::read()` followed by `ConfigLoader::load(config, context, cluster, user)`
+/// (`config/mod.rs:293-296`), and `Config::from_custom_kubeconfig` is that same `load` with the
+/// value handed in (`:301-307`) — so `KUBECONFIG`'s multi-path merge, `~/.kube/config`, and every
+/// `KubeconfigError` above still happen exactly where they did, one line up.
+///
+/// **It exists because the test that pins the context argument could not otherwise fail.** Asking
+/// [`connect`] for a context no file names is an error on a machine that *has* a kubeconfig and
+/// an error on one that does not — for different reasons — so a test written against the
+/// ambient file passes on a runner even when the argument is ignored entirely, which is a test
+/// that cannot fail (NOTES § D26). Handed a kubeconfig it wrote itself, the same test has a
+/// current context to be wrongly loaded, and ignoring the argument turns it green.
+pub(crate) async fn connect_with(
+    kubeconfig: Kubeconfig,
+    context: Option<&str>,
+) -> Result<Session, NotConnected> {
+    let config = Config::from_custom_kubeconfig(
+        kubeconfig,
+        &KubeConfigOptions {
+            context: context.map(str::to_string),
+            ..KubeConfigOptions::default()
+        },
+    )
+    .await
+    .map_err(NotConnected::Kubeconfig)?;
+    Ok(session(Client::try_from(config).map_err(NotConnected::Client)?).await)
+}
+
+/// **Everything [`connect`] does once it has a client** — split off so it can be proven against
+/// a client that points at nothing.
+///
+/// A session is built even when the cluster answers none of these questions: the watches are
+/// live either way and their failures are per-watch (NOTES § D162), so a cluster that is down at
+/// connect is a screen full of *this is failing* rather than a tool that would not start.
+///
+/// **Crate-visible for that reason and no other.** [`connect`] needs a kubeconfig and a test may
+/// not have one, so this is the seam `main.rs`'s live driver is tested through — a session over
+/// a client pointed at a name that cannot resolve is the *cluster is not there* case, whole.
+pub(crate) async fn session(client: Client) -> Session {
+    let version = client.apiserver_version().await.map(|info| {
+        // The API server's own text, and the first string in this file that did not arrive
+        // through [`ingest`] — the module doc's own note about `server_version` (invariant 9).
+        let mut version = info.git_version;
+        text(&mut version, IDENTIFIER);
+        version
+    });
+    let served = served(&client).await.map(|pairs| Served {
+        // Before [`browsable`], which consumes the pairs and rewrites their strings on the way
+        // through (NOTES § D160).
+        capabilities: capabilities(&pairs),
+        kinds: browsable(pairs),
+    });
+    let watches = watches(&client);
+    Session {
+        client,
+        version,
+        served,
+        watches,
+    }
+}
+
+/// **Every `(ApiResource, ApiCapabilities)` pair the cluster serves**, by the two-round-trip
+/// path, with the legacy one underneath it (§ EVERY KIND THE CLUSTER SERVES).
+///
+/// **The aggregated answer wins, and `Discovery::run()` is never called.** Measured on a cluster
+/// whose metrics-server was down, the two paths disagree: aggregated names `metrics.k8s.io` with
+/// `freshness: Stale` and **zero resources**, so kube's `from_v2` drops it and the group reads
+/// absent — while the legacy path names the group and then answers **503** for its resources,
+/// which `run()`'s in-loop `?` turns into no sidebar at all
+/// (`reports/2026-08-26-capability-probe-group-strings.md` § 3). One APIService whose backing pod
+/// is crashlooping costing the reader every kind in the cluster is the failure this box was
+/// briefed to avoid; a group that reads absent costs them one row.
+///
+/// **The fallback is for an answer that named *nothing*, never for a group that read stale.** A
+/// server below 1.27 answers the aggregated call `Ok` with an empty list rather than an error
+/// (failure 1 in the region above), and that is indistinguishable from a cluster with no kinds —
+/// so it is the one case worth a second, more expensive question. `discovery::group` per name is
+/// `1 + V(g)` round trips each and repeats `/apis` (the region's table), which is more than
+/// `run()` would cost; what it buys is the thing `run()` cannot express — **a group that fails
+/// answers for itself alone** and the rest of the sidebar survives it.
+///
+/// **`filter()` is not used, here or anywhere** (NOTES § D160). It sets `DiscoveryMode::Allow`
+/// and `CORE_GROUP` is `""`, so a filtered answer silently drops the core group — and with it
+/// the *a working server always serves `v1`* premise that [`capabilities`]'s emptiness guard
+/// rests on. Narrowing, if it is ever wanted, happens over the pairs after this returns.
+async fn served(client: &Client) -> Result<Vec<(ApiResource, ApiCapabilities)>, kube::Error> {
+    let aggregated = Discovery::new(client.clone()).run_aggregated().await?;
+    let pairs: Vec<(ApiResource, ApiCapabilities)> = aggregated
+        .groups()
+        .flat_map(ApiGroup::resources_by_stability)
+        .collect();
+    if pairs.is_empty() {
+        let mut legacy = Vec::new();
+        for name in group_names(client.list_api_groups().await?) {
+            // **The error is kept per group and the group is what is lost.** This is the whole
+            // difference from `Discovery::run()`, whose `?` is inside the same loop.
+            if let Ok(group) = kube::discovery::group(client, &name).await {
+                legacy.extend(group.resources_by_stability());
+            }
+        }
+        return Ok(legacy);
+    }
+    Ok(pairs)
+}
+
+/// **Every group to ask about on the legacy path, the core group first and each one once.**
+///
+/// **`/apis` does not name the core group** — it is served by `/api` and `kube::discovery::group`
+/// takes `""` for it (`ApiGroup::CORE_GROUP`, `apigroup.rs:207`). Leaving it out would drop
+/// `v1` — every pod, service and node kind in the sidebar — *and* silently take
+/// [`capabilities`]'s emptiness guard with it, because that guard's premise is that a working
+/// server always serves `v1`. The stub-server test below proves it is load-bearing rather than
+/// defensive: `Pod` arrives through `""` and through nothing else.
+///
+/// **A name is asked about once.** A conformant `/apis` never repeats a group and never names the
+/// core one, so both duplicates come from a server or a proxy that is not conformant — and the
+/// cost is not one wasted round trip but a doubled row in the sidebar, because [`browsable`]
+/// sorts and deliberately does not de-duplicate (§ EVERY KIND THE CLUSTER SERVES: the same plural
+/// under two groups is two real resources). The scan is linear per name against a list the size
+/// of a cluster's group count — tens — so nothing here needs a set.
+///
+/// **Nothing is stripped and nothing may be.** A group name from `/apis` is free text from the
+/// API (invariant 9), and it goes straight into a URL — so `text` would be the *wrong* guard
+/// here: a name the strip shortened or altered would be asked about under a spelling the server
+/// never served. The two places it can go are both closed already: as a URL it is refused by
+/// `http`'s own parser and the group is skipped by the loop in [`served`] — `tester` measured all
+/// six NOTES § D160 spellings plus `../../../apis/secrets` and a CRLF header injection coming
+/// back `Err` on 2026-08-27 — and toward a screen it goes through [`browsable`], which strips and
+/// bounds. Do not "fix" this by stripping.
+fn group_names(listed: APIGroupList) -> Vec<String> {
+    let mut names = vec![ApiGroup::CORE_GROUP.to_string()];
+    for group in listed.groups {
+        if !names.contains(&group.name) {
+            names.push(group.name);
+        }
+    }
+    names
+}
+
+/// **kube's own backoff with its one reachable reset taken out**, because with that reset in
+/// place the delay never grows and a refused watch retries at a flat ~1.2s forever
+/// (§ CONNECTING has the measurement).
+///
+/// **The mechanism, in four lines of somebody else's crate.** `StreamBackoff` resets the policy
+/// on every non-error item (`utils/stream_backoff.rs:88-91`, and its own doc says so at `:9-14`).
+/// A refused `watcher()` emits one before every failure: `State::Empty` returns `Ok(Event::Init)`
+/// with no `.await` in front of it and *then* makes the request (`watcher.rs:521-527`), and the
+/// failed initial LIST returns straight back to `State::Empty` (`:584`). So the stream is
+/// `Ok(Init), Err, Ok(Init), Err, …` and every `Err` is paid at `ExponentialBackoff`'s **first**
+/// step. This is NOTES § D162's own sentence about `Init` arriving before the request, used for
+/// the opposite purpose.
+///
+/// **Making [`Backoff::reset`] do nothing leaves exactly one reset, and it is the one whose name
+/// promises it.** `ResetTimerBackoff` also resets the ramp from *inside* `next()`, when more than
+/// its 120 seconds of wall clock have passed since the last delay was handed out
+/// (`utils/backoff_reset_timer.rs:37-49`) — that path calls the *inner* policy's `reset` and
+/// never this one, so a watch that genuinely recovers and stays up for two minutes still starts
+/// its next trouble at the bottom of the ramp — 0.8-1.6s, by the same jitter — rather than at
+/// the plateau. **What has to clear that 120-second window is the 60-second edge of the band
+/// below, not `max_delay`**: a watch that is still
+/// failing always asks again inside it, so the timer never fires under a standing refusal — a 2×
+/// margin, not the 4× the constant alone suggests.
+///
+/// **And the plateau is 30-60 seconds, not 30.** `max_delay` caps the *ramp*, and `backon`
+/// applies jitter after the cap as a multiplier — `if cur > max_delay { cur = max_delay }` and
+/// then `tmp_cur.saturating_add(tmp_cur.mul_f32(self.rng.f32()))`, which is `× (1 + U(0,1))`
+/// (`backon-1.6.0/src/backoff/exponential.rs:216-235`). A reader who takes the constant for the
+/// behaviour is wrong by 2×, and every latency this comment claims is read off the band. A live
+/// cluster's generation gaps sat at 49-54s and this file's own runs top out at 43.75s: inside
+/// the band, nearer its mean than its ceiling.
+///
+/// **It never returns `None`**, which is the half that is not about politeness: `StreamBackoff`
+/// *closes* a stream whose backoff gives up (`utils/stream_backoff.rs:9-14`) — k9s's `BailOut`
+/// living inside kube's own utility — and `next` here is `DefaultBackoff`'s, built
+/// `.without_max_times()` (`watcher.rs:930`).
+#[derive(Default)]
+struct StandingBackoff(watcher::DefaultBackoff);
+
+impl Iterator for StandingBackoff {
+    type Item = std::time::Duration;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+impl Backoff for StandingBackoff {
+    /// Deliberately nothing. The type's doc is the whole reason.
+    fn reset(&mut self) {}
+}
+
+/// **The five permanent watches** (invariant 6), each with the backoff [`drive`] asks the caller
+/// for and each feeding exactly one [`Watch`] (NOTES § D162).
+///
+/// **The config is [`INITIAL_LIST_PAGE`] and kube's defaults for everything else**, which
+/// § THE INITIAL LIST argues one field at a time: the quorum read rather than the watch cache,
+/// `ListWatch` rather than the `StreamingList` a 1.33 server answers `403` to, no selectors, and
+/// **no `Config::timeout`** — it is one field for both calls, so a timeout short enough to bound
+/// the initial LIST would also cap the watch and re-LIST the whole cluster on that period.
+///
+/// **Cloning the client per watch is cloning a handle**, not opening five connections —
+/// [`Session::client`] carries the mechanism and kube's own word for it.
+fn watches(client: &Client) -> Vec<BoxStream<'static, Update>> {
+    let config = watcher::Config::default().page_size(INITIAL_LIST_PAGE);
+    vec![
+        updates(
+            watcher(Api::<Pod>::all(client.clone()), config.clone())
+                .backoff(StandingBackoff::default()),
+            |store| &mut store.pods,
+        ),
+        updates(
+            watcher(Api::<Node>::all(client.clone()), config.clone())
+                .backoff(StandingBackoff::default()),
+            |store| &mut store.nodes,
+        ),
+        updates(
+            watcher(Api::<Deployment>::all(client.clone()), config.clone())
+                .backoff(StandingBackoff::default()),
+            |store| &mut store.deployments,
+        ),
+        updates(
+            watcher(Api::<StatefulSet>::all(client.clone()), config.clone())
+                .backoff(StandingBackoff::default()),
+            |store| &mut store.stateful_sets,
+        ),
+        updates(
+            watcher(Api::<DaemonSet>::all(client.clone()), config)
+                .backoff(StandingBackoff::default()),
+            |store| &mut store.daemon_sets,
+        ),
+    ]
+}
+
+// --- CONNECTING END ---

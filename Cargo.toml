@@ -44,6 +44,17 @@ kube = { version = "4.2.0", default-features = false, features = [
     "client",
     "runtime",
     "rustls-tls",
+    # **`rustls-tls` alone does not make a working TLS client, and dropping this
+    # is what D140's feature list got wrong** ([NOTES § D165](NOTES.md)).
+    # rustls 0.23 has no built-in crypto and panics at `Client::try_from` —
+    # *"Could not automatically determine the process-level CryptoProvider"* —
+    # unless exactly one of `ring` / `aws-lc-rs` is compiled in. It is not a
+    # second TLS backend, which is what D140 meant to keep out; it is the first
+    # one's arithmetic. `ring` and not `aws-lc-rs` because it is kube's own
+    # default and needs no cmake or NASM, which `just cross`'s four targets do
+    # not have. It adds no `[[package]]` to `Cargo.lock`: `ring` was already
+    # resolved there, feature-gated out of the build.
+    "ring",
 ] }
 
 # Required by kube-rs, and later the single `select!` loop. Two features now —
@@ -65,6 +76,19 @@ futures-util = { version = "0.3.34", default-features = false, features = [
 ] }
 
 [dev-dependencies]
+# **Named because our test code uses them, not because the build lacked them**
+# ([NOTES § D165](NOTES.md)) — the shape D143 argued for `futures-util`. Measured
+# with `cargo tree -e features -i tokio`: `net` and `io-util` are **already on in
+# every build**, release included, because `hyper-util` turns them on under
+# `kube-client`. So this line adds no compiled code; what it adds is the right to
+# write `tokio::net` in our own file instead of silently inheriting a transitive
+# crate's feature choice, which is a thing that can change under us in a patch
+# release. It sits in `[dev-dependencies]` because k8rs itself never binds a
+# socket: the one user is the stub API server that exercises § EVERY KIND THE
+# CLUSTER SERVES' legacy fallback, the branch a supported-with-a-note pre-1.27
+# cluster reaches and no other test can (D149, D152 failure 1).
+tokio = { version = "1.53.1", features = ["net", "io-util"] }
+
 # Only the fixture tests parse JSON in Phase 3 — the decode they exercise is
 # `serde` into `k8s_openapi::api::core::v1::Pod`. It moves up to a real
 # dependency in Phase 5, where `k8s.rs` builds the browser's Table request by

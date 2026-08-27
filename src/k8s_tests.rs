@@ -3561,7 +3561,11 @@ fn the_finding_a_pod_draws_files_under_the_deployment_once_the_owner_resolves() 
 /// One resource as discovery would describe it. `verbs` is the resource's own list — never the
 /// reader's permissions, which is the distinction `k8s.rs` § EVERY KIND THE CLUSTER SERVES is
 /// about.
-fn served(
+///
+/// **Not `served`, which is what this was called until it shadowed the product function of that
+/// name** — `k8s.rs`'s `served(&Client)` was un-callable by its own name from inside its own
+/// tests, which is a thing a test module can do to a whole file silently.
+fn described(
     group: &str,
     version: &str,
     kind: &str,
@@ -3582,7 +3586,7 @@ fn served(
 
 /// A listable, namespaced CRD — the ordinary entry, for a test that is about something else.
 fn listable(group: &str, kind: &str, plural: &str) -> (ApiResource, ApiCapabilities) {
-    served(
+    described(
         group,
         "v1",
         kind,
@@ -3603,7 +3607,7 @@ fn listable(group: &str, kind: &str, plural: &str) -> (ApiResource, ApiCapabilit
 fn a_kind_that_cannot_be_listed_is_never_offered_and_the_scope_decides_the_namespace_label() {
     let answer = browsable(vec![
         listable("example.com", "Widget", "widgets"),
-        served(
+        described(
             "example.com",
             "v1",
             "Sprocket",
@@ -3612,7 +3616,7 @@ fn a_kind_that_cannot_be_listed_is_never_offered_and_the_scope_decides_the_names
             &["get", "list"],
         ),
         // The access-review shape: performed, never listed.
-        served(
+        described(
             "example.com",
             "v1",
             "Review",
@@ -3621,7 +3625,7 @@ fn a_kind_that_cannot_be_listed_is_never_offered_and_the_scope_decides_the_names
             &["create"],
         ),
         // Readable one at a time and not enumerable — the same refusal for a different reason.
-        served(
+        described(
             "example.com",
             "v1",
             "Ledger",
@@ -3672,7 +3676,7 @@ fn the_order_is_ours_and_one_plural_two_groups_serve_lands_together() {
     let answer = browsable(vec![
         listable("z.example.com", "Widget", "widgets"),
         listable("example.com", "Sprocket", "sprockets"),
-        served(
+        described(
             "a.example.com",
             "v2",
             "Widget",
@@ -3680,7 +3684,7 @@ fn the_order_is_ours_and_one_plural_two_groups_serve_lands_together() {
             Scope::Namespaced,
             &["list"],
         ),
-        served(
+        described(
             "a.example.com",
             "v1",
             "Widget",
@@ -3733,7 +3737,7 @@ fn a_crd_that_names_itself_with_control_characters_cannot_rewrite_a_terminal() {
         ),
         (
             "version",
-            browsable(vec![served(
+            browsable(vec![described(
                 "example.com",
                 evil,
                 "Widget",
@@ -3744,7 +3748,7 @@ fn a_crd_that_names_itself_with_control_characters_cannot_rewrite_a_terminal() {
         ),
         (
             "verbs",
-            browsable(vec![served(
+            browsable(vec![described(
                 "example.com",
                 "v1",
                 "Widget",
@@ -3788,7 +3792,7 @@ fn a_crd_that_names_itself_with_control_characters_cannot_rewrite_a_terminal() {
 #[test]
 fn a_discovery_field_over_the_bound_is_shortened_and_says_so() {
     let long = "w".repeat(IDENTIFIER * 2);
-    let answer = browsable(vec![served(
+    let answer = browsable(vec![described(
         "example.com",
         "v1",
         "Widget",
@@ -3909,7 +3913,7 @@ fn a_server_too_old_for_aggregated_discovery_decodes_to_no_groups_and_no_error()
 // CRDs are still here — they are the **negative**: `widgets` and `sprockets` are what a cluster
 // with none of these on it serves, and every row has to stay absent for them.
 //
-// Every input is built with `served()` above, so what is synthesised is the discovery answer and
+// Every input is built with `described()` above, so what is synthesised is the discovery answer and
 // not a cluster, exactly as it is for the sidebar.
 
 /// One resource in the core group — what *every* working API server serves, so a fixture built
@@ -3920,7 +3924,7 @@ fn a_server_too_old_for_aggregated_discovery_decodes_to_no_groups_and_no_error()
 /// here because the inputs should look like the wire, and because it is what makes the
 /// *nothing installed* case a non-empty answer rather than the *nothing discovered* one.
 fn core_group() -> (ApiResource, ApiCapabilities) {
-    served(
+    described(
         "",
         "v1",
         "Pod",
@@ -4050,7 +4054,7 @@ fn each_capability_turns_on_for_its_own_group_and_switches_on_nothing_else() {
         let answer = capabilities(&[
             core_group(),
             listable("example.com", "Widget", "widgets"),
-            served(
+            described(
                 group,
                 "v1",
                 kind,
@@ -4078,7 +4082,7 @@ fn each_capability_turns_on_for_its_own_group_and_switches_on_nothing_else() {
 fn a_group_that_serves_more_than_one_kind_is_still_one_capability() {
     let answer = capabilities(&[
         core_group(),
-        served(
+        described(
             "metrics.k8s.io",
             "v1beta1",
             "NodeMetrics",
@@ -4086,7 +4090,7 @@ fn a_group_that_serves_more_than_one_kind_is_still_one_capability() {
             Scope::Cluster,
             &["get", "list"],
         ),
-        served(
+        described(
             "metrics.k8s.io",
             "v1beta1",
             "PodMetrics",
@@ -4183,7 +4187,7 @@ fn nothing_installed_answers_none_of_them_and_a_near_miss_is_not_a_hit() {
 fn policy_without_the_disruption_budget_kind_is_not_drain_safety() {
     let answer = capabilities(&[
         core_group(),
-        served(
+        described(
             "policy",
             "v1beta1",
             "PodSecurityPolicy",
@@ -4262,7 +4266,7 @@ fn a_lookalike_group_is_refused_because_the_probe_never_sees_the_stripped_spelli
     ] {
         let served_by_the_cluster = vec![
             core_group(),
-            served(
+            described(
                 lookalike,
                 "v1",
                 "NodeMetrics",
@@ -4301,7 +4305,7 @@ fn a_lookalike_group_is_refused_because_the_probe_never_sees_the_stripped_spelli
 fn a_capability_whose_kind_cannot_be_listed_is_still_installed() {
     let unlistable = vec![
         core_group(),
-        served(
+        described(
             "metrics.k8s.io",
             "v1beta1",
             "NodeMetrics",
@@ -4392,9 +4396,16 @@ fn drawn(table: &Table) -> String {
 
 /// One kind, as discovery would have described it and [`browsable`] would have kept it.
 fn browsed(group: &str, version: &str, kind: &str, plural: &str, scope: Scope) -> Browsable {
-    browsable(vec![served(group, version, kind, plural, scope, &["list"])])
-        .pop()
-        .expect("a listable kind survives browsable()")
+    browsable(vec![described(
+        group,
+        version,
+        kind,
+        plural,
+        scope,
+        &["list"],
+    )])
+    .pop()
+    .expect("a listable kind survives browsable()")
 }
 
 /// A `Table` response built here, for a shape no healthy server sends.
@@ -5301,4 +5312,607 @@ fn only_the_alerts_views_inputs_are_watched_permanently() {
              dies when the view is dropped"
         );
     }
+}
+
+// --- CONNECTING ---
+//
+// **The one client here points at a name that cannot resolve**, which is the only cluster a test
+// may have — there is no cluster in this turn, exactly as § THE CAPTURES says of the streams
+// above. That is not a weak substitute: *the API server is not there* is a state the tool has to
+// survive, and it is what every assertion in this section is about — five watches that fail on
+// their own kinds, a gate that stays shut, and a session that exists anyway.
+//
+// **What no test here can reach is a server that answers.** The legacy discovery fallback, the
+// aggregated answer, `version_note`'s input and every `Ok` arm of `connect` are the kind
+// cluster's to prove, and the box's own idle proof is what proves the reconnect
+// (NOTES § D161).
+
+/// A client pointed at a name that cannot resolve. **`.invalid` is reserved by RFC 6761 for
+/// exactly this** — it can never name a real host, which is why `scripts/security-guard.py`
+/// takes it for a test double rather than a second outbound path. A loopback port nothing
+/// listens on would fail the same way and that guard refuses it by name: a hardcoded loopback
+/// URL is usually a dev leftover, and the guard cannot tell this one from that one.
+///
+/// Plain `http`, so nothing is read off this machine — no kubeconfig, no certificate, no
+/// credential of any kind is anywhere near it.
+fn offline() -> Client {
+    Client::try_from(Config::new(
+        "http://k8rs.invalid"
+            .parse()
+            .expect("a URL this file wrote itself"),
+    ))
+    .expect("a client over plain http asks the machine for nothing")
+}
+
+/// **A cluster that answers nothing is five failing watches, not a session that failed**
+/// (§ CONNECTING).
+///
+/// Everything a server could refuse travels as a `Result` inside the session, so a reader whose
+/// kubeconfig may not `get /apis` — or whose cluster is simply down — still gets a tool that
+/// starts, watches, and says what is wrong. The gate stays shut while it does (NOTES § D28):
+/// no initial LIST landed, so there is no snapshot to publish and a rule is never asked about a
+/// cluster nobody could read.
+#[tokio::test]
+async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snapshot() {
+    let Session {
+        client,
+        version,
+        served,
+        watches,
+    } = session(offline()).await;
+
+    assert!(
+        version.is_err(),
+        "a server that is not there answered the version question"
+    );
+    assert!(
+        served.is_err(),
+        "a server that is not there answered discovery — an empty answer is not an error and \
+         must not be reported as one"
+    );
+    assert_eq!(
+        watches.len(),
+        5,
+        "one stream per Watch and no second stream for any of them (NOTES § D162)"
+    );
+
+    let mut store = Store::default();
+    // **Two items each and the stream is cut there.** kube emits `Init` before it lists
+    // (`watcher.rs:519-523`) and the failed LIST is the second item, so two is the whole of what
+    // a refused watch produces before `StreamBackoff` sleeps — and cutting it here is what keeps
+    // the backoff's own 800ms out of this test rather than waiting through it.
+    drive(
+        watches
+            .into_iter()
+            .map(|watch| watch.take(2).boxed())
+            .collect(),
+        &mut store,
+    )
+    .await;
+
+    assert_eq!(
+        failing_kinds(&store),
+        vec![
+            ObjectKind::Pod,
+            ObjectKind::Node,
+            ObjectKind::Deployment,
+            ObjectKind::StatefulSet,
+            ObjectKind::DaemonSet
+        ],
+        "a watch's failure reached the wrong kind, or a kind was wired to somebody else's watch"
+    );
+    assert!(
+        store.snapshot(now()).is_none(),
+        "a store whose five LISTs all failed published a snapshot (NOTES § D28)"
+    );
+    // The client comes back with the session for the boxes that fetch with it — the owner
+    // ReplicaSets, the browser's tables, the metrics poll.
+    drop(client);
+}
+
+/// A kubeconfig this file wrote, naming one context, a server that cannot resolve, and whatever
+/// `user` block the caller needs — `{}` for no credential at all.
+///
+/// **Hand-written, and that is not the rule fixtures live under.** NOTES § D53 is about captures
+/// of cluster *objects*, which are never edited to make a test pass; a kubeconfig is the file on
+/// the reader's own laptop, and `PRIOR-ART § B1`'s six shapes are six such files. Writing one is
+/// the only way a test can own the thing it asserts about.
+fn kubeconfig(context: &str, user: &str) -> Kubeconfig {
+    Kubeconfig::from_yaml(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: {context}\n\
+         clusters:\n\
+         - name: {context}\n\
+         \x20 cluster:\n\
+         \x20   server: https://k8rs-tests.invalid:6443\n\
+         contexts:\n\
+         - name: {context}\n\
+         \x20 context:\n\
+         \x20   cluster: {context}\n\
+         \x20   user: {context}\n\
+         users:\n\
+         - name: {context}\n\
+         \x20 user: {user}\n"
+    ))
+    .expect("a kubeconfig this file wrote itself")
+}
+
+/// **The context argument is used, and what comes back is the kubeconfig's own typed error.**
+///
+/// **The kubeconfig is this test's, because the machine's cannot fail the test.** Handed the
+/// ambient file, this assertion is green on a runner with no kubeconfig whatever `connect` does
+/// with the argument — the call fails either way, for two different reasons — and it was: the
+/// original was proven red only by this developer's own `KUBECONFIG` being set (`tester`,
+/// 2026-08-27). With a file that *does* name a current context, ignoring the argument connects to
+/// that context happily and the `else` below fires.
+///
+/// **What the typed error carries is the name we asked for**, which is the whole of what the next
+/// box needs: a `String` in its place would have said the same sentence about a file that named
+/// no context at all.
+///
+/// **Nothing here formats the error.** `Display` on a `kube` error interpolates its source down to
+/// an `exec` plugin's stdout (`docs/security.md` § Token hygiene), so the panic messages name what
+/// was expected and never what arrived.
+#[tokio::test]
+async fn a_context_the_kubeconfig_does_not_name_comes_back_as_the_kubeconfigs_own_error() {
+    let asked_for = "k8rs-tests-no-such-context";
+    let Err(NotConnected::Kubeconfig(failure)) =
+        connect_with(kubeconfig("k8rs-tests", "{}"), Some(asked_for)).await
+    else {
+        panic!(
+            "connecting to a context this kubeconfig does not name did not fail as a kubeconfig \
+             error — the only context in it is `k8rs-tests`, so the name asked for was ignored"
+        );
+    };
+    assert!(
+        matches!(failure, kube::config::KubeconfigError::LoadContext(named) if named == asked_for),
+        "the failure is not `no such context: {asked_for}` — either the name was ignored or the \
+         typed error was replaced on the way back"
+    );
+}
+
+/// **What a standing refusal actually costs, over the exact call sequence a refused watch makes**
+/// — and the defect that measurement exists to catch.
+///
+/// **The version this replaces drove [`watcher::DefaultBackoff`] in a loop and never called
+/// `reset`, so it could not fail for the thing that was wrong** (`k8s-admin`, 2026-08-27).
+/// `StreamBackoff` calls `reset` on every non-error item and `next` on every error — its whole
+/// `poll_next` is those two arms (`utils/stream_backoff.rs:66-91`) — and a refused `watcher()`
+/// emits `Ok(Event::Init)` before every failure, so the sequence it performs is
+/// `reset, next, reset, next, …` and not `next, next, next`. [`StandingBackoff`] carries the
+/// four crate lines. Measured on a live cluster off `apiserver_request_total`, the old wiring
+/// cost **one request every 1.2 seconds, 2985 per refused watch per hour**, at 0.95% of a core,
+/// forever; the 30-second ceiling was never approached.
+///
+/// **The sequence is performed here rather than driven through a `StreamBackoff`, because the
+/// sleeps are real.** `tokio::time::pause` is behind the `test-util` feature and `Cargo.toml` is
+/// not this file's to edit (reported 2026-08-27), so an hour of virtual time is not available and
+/// an hour of real time is not a test. What is under test is the policy's answer to that exact
+/// sequence, which is the whole of what `StreamBackoff` asks of it;
+/// [`a_refused_watch_of_every_kind_waits_before_it_asks_again`] is what proves the five watches
+/// are wired to this policy at all.
+///
+/// **The count is measured here and quoted in § CONNECTING** rather than derived from the cap:
+/// backon's jitter *adds* after the cap, so the arithmetic ceiling of 120 an hour is not what a
+/// run does.
+#[test]
+fn a_refused_watch_asks_less_and_less_often_and_costs_under_130_requests_an_hour() {
+    use std::time::Duration;
+    let mut policy = StandingBackoff::default();
+    let mut spent = Duration::ZERO;
+    let mut delays: Vec<Duration> = Vec::new();
+    while spent < Duration::from_secs(3600) {
+        // What `StreamBackoff` does with the `Ok(Event::Init)` that precedes every failure.
+        policy.reset();
+        // And with the `Err` the failed initial LIST returns a moment later.
+        let delay = policy
+            .next()
+            .expect("the backoff gave up, so StreamBackoff would close the watch for good");
+        spent += delay;
+        delays.push(delay);
+    }
+
+    println!(
+        "a standing refusal waits {} times in the first hour; the first seven waits were {:?}",
+        delays.len(),
+        &delays[..7.min(delays.len())]
+    );
+    assert!(
+        (7..=130).contains(&delays.len()),
+        "a refused watch waits {} times an hour — over 130 is no longer a backoff, and under \
+         seven leaves the climb below unindexable",
+        delays.len()
+    );
+    // Jitter can double any single step, so what is asserted is the climb across five of them
+    // and not step-over-step order.
+    assert!(
+        delays[6] > delays[1] * 4,
+        "the seventh wait ({:?}) is not four times the second ({:?}), so the delay is not growing \
+         and a watch the server refuses hammers it at a fixed interval",
+        delays[6],
+        delays[1]
+    );
+    assert!(
+        (0..10_000).all(|_| policy.next().is_some()),
+        "the backoff ran out after an hour of failures, and a stream whose backoff returns `None` \
+         is closed for good"
+    );
+}
+
+/// **A reset must not undo the climb, and [`StandingBackoff::next`] must still be the inner
+/// policy's** — the two halves of the fix, one assertion each.
+///
+/// **`reset` is where the defect was.** `ResetTimerBackoff::reset` honours it *unconditionally*
+/// — the 120-second timer lives in `next()` and is not consulted
+/// (`utils/backoff_reset_timer.rs:51-55`) — so wrapping kube's policy changes nothing on its own
+/// and this type overrides the method instead.
+///
+/// **The recovery half is kube's own and is why `next` is delegated untouched.** With `reset`
+/// silenced, the only thing left that puts a recovered watch back on the floor is
+/// `ResetTimerBackoff::next`'s wall clock (`:37-49`), which fires when more than 120 seconds have
+/// passed since the last delay was handed out — a watch that came back and stayed up is not
+/// calling `next`, so the clock runs. **That branch is not exercised here**: it needs
+/// `tokio::time::advance` and the `test-util` feature (reported 2026-08-27), and kube pins it
+/// itself in `should_reset_when_timer_expires`. What is asserted instead is the premise that
+/// makes kube's test apply — that the delays coming out of this type are `DefaultBackoff`'s own
+/// ramp, floor and ceiling, so the timer is still underneath them.
+#[test]
+fn a_reset_cannot_undo_the_climb_and_the_ramp_is_still_kubes_own() {
+    use std::time::Duration;
+    let mut policy = StandingBackoff::default();
+
+    let floor = policy.next().expect("a first delay");
+    assert!(
+        (Duration::from_millis(800)..=Duration::from_millis(1600)).contains(&floor),
+        "the first wait is {floor:?}, not `DefaultBackoff`'s 800ms plus a jitter that only adds \
+         (`watcher.rs:983`) — `next` is no longer the inner policy's and the 120-second recovery \
+         timer went with it"
+    );
+
+    // A `for` loop and not `(0..8).map(..).last()`: the delays are wanted for their side effect
+    // on the policy, and a lazy adaptor asked only for its final element runs the closure once.
+    let mut climbed = floor;
+    for _ in 0..8 {
+        climbed = policy.next().expect("a delay while climbing");
+    }
+    assert!(
+        (Duration::from_secs(30)..=Duration::from_secs(60)).contains(&climbed),
+        "eight failures reached {climbed:?}, not `DefaultBackoff`'s 30-second cap plus its jitter \
+         — the ramp is not kube's"
+    );
+
+    policy.reset();
+    let after_reset = policy.next().expect("a delay after the reset");
+    assert!(
+        after_reset >= Duration::from_secs(30),
+        "a reset dropped the wait to {after_reset:?} from {climbed:?} — `StreamBackoff` performs \
+         one of these on every `Ok(Init)`, so this is a refused watch retrying at {floor:?} \
+         forever"
+    );
+}
+
+/// **A credential plugin that does not answer is the sixth connection-failure shape, and it lands
+/// in [`NotConnected::Client`]** — the arm whose doc said no test could reach it.
+///
+/// **That claim was false and cost nothing only because nobody relied on it.** It read *"no test
+/// can reach this arm without a kubeconfig whose TLS material is broken, which is a file no
+/// machine running these tests has"* (`k8s-admin`, 2026-08-27). An `exec` block needs no TLS
+/// material and no fixture: a `command` that is not on the disk reaches the same arm, and so does
+/// one that runs and exits non-zero — both measured, and `/bin/false` is left out of the test
+/// because a path that does not exist spawns nothing at all.
+///
+/// **What it pins for the box that classifies a connection failure**, which is the next one: the
+/// payload is `kube::Error::Auth`, not `Api(Status)` and not a transport error, and **nothing has
+/// been sent to the cluster** — the server here cannot even resolve. *This kubeconfig's login
+/// helper did not answer* is a different sentence from *the cluster refused you* and from *the
+/// cluster is not there*, and only the typed value tells them apart.
+///
+/// **Nothing here formats the error.** `Display` on a `kube` error interpolates its source down to
+/// an `exec` plugin's stdout (`docs/security.md` § Token hygiene) — which for this shape is the
+/// plugin's own output — so what is asserted is the variant and never its text.
+#[tokio::test]
+async fn a_credential_plugin_that_never_answers_is_a_client_that_could_not_be_built() {
+    let user = "{exec: {apiVersion: client.authentication.k8s.io/v1beta1, \
+                command: /nonexistent/k8rs-tests-no-such-credential-plugin}}";
+    let Err(NotConnected::Client(failure)) =
+        connect_with(kubeconfig("k8rs-tests", user), None).await
+    else {
+        panic!(
+            "a kubeconfig whose credential plugin is not on the disk did not come back as \
+             `NotConnected::Client` — either a session was built with no credential, or the \
+             failure was flattened into the kubeconfig arm"
+        );
+    };
+    assert!(
+        matches!(failure, kube::Error::Auth(_)),
+        "the failure is not `kube::Error::Auth` — the next box tells a login helper that did not \
+         answer from a cluster that refused, and only the typed value carries that"
+    );
+}
+
+/// **The core group is asked for by name on the legacy path, because `/apis` never names it.**
+///
+/// Leaving it out drops `v1` — every pod, node and service kind in the sidebar — and takes
+/// [`capabilities`]'s emptiness guard with it, whose premise is that a working server always
+/// serves `v1` (§ WHAT ELSE THE CLUSTER SERVES).
+///
+/// **The input is synthesised and that is the same choice § EVERY KIND THE CLUSTER SERVES made**:
+/// there is no cluster here, so the *answer* is built from the API's own types while the objects
+/// in the repo's fixtures stay untouched captures.
+#[test]
+fn the_legacy_fallback_asks_for_the_core_group_that_apis_never_names() {
+    let listed = APIGroupList {
+        groups: ["apps", "example.com"]
+            .iter()
+            .map(
+                |name| k8s_openapi::apimachinery::pkg::apis::meta::v1::APIGroup {
+                    name: (*name).to_string(),
+                    versions: Vec::new(),
+                    preferred_version: None,
+                    server_address_by_client_cidrs: None,
+                },
+            )
+            .collect(),
+    };
+    assert_eq!(group_names(listed), vec!["", "apps", "example.com"]);
+}
+
+/// **The shapes a conformant `/apis` never sends, and what each costs if one arrives.**
+///
+/// A server that names the core group, or names one twice, is out of spec — but it is a proxy
+/// away, and the cost lands on the reader as a duplicated sidebar row rather than as a wasted
+/// round trip ([`browsable`] does not de-duplicate, and is right not to). An empty answer is the
+/// ordinary shape of NOTES § D152's failure 1 and must still ask about `v1`.
+///
+/// **The hostile names are here for the panic, not for the strip.** Nothing in this function may
+/// alter a name — § EVERY KIND THE CLUSTER SERVES says where the two paths out of it are guarded
+/// — so what is asserted is that a name arrives whole and that nothing here breaks on one.
+#[test]
+fn a_group_list_no_conformant_server_sends_costs_one_round_trip_and_no_panic() {
+    let listed = |names: &[&str]| APIGroupList {
+        groups: names
+            .iter()
+            .map(
+                |name| k8s_openapi::apimachinery::pkg::apis::meta::v1::APIGroup {
+                    name: (*name).to_string(),
+                    versions: Vec::new(),
+                    preferred_version: None,
+                    server_address_by_client_cidrs: None,
+                },
+            )
+            .collect(),
+    };
+
+    // Failure 1's own shape: nothing but the core group, which is the one that must be asked for.
+    assert_eq!(group_names(listed(&[])), vec![""]);
+    // The core group named by `/apis` as well — asked about once, not twice.
+    assert_eq!(group_names(listed(&[""])), vec![""]);
+    assert_eq!(group_names(listed(&["apps", "apps"])), vec!["", "apps"]);
+    assert_eq!(
+        group_names(listed(&["apps", "example.com", "apps"])),
+        vec!["", "apps", "example.com"]
+    );
+
+    // Whole, unaltered, one entry each — the guard for these is one layer out in both directions.
+    let hostile = [
+        "../../../apis/secrets",
+        "apps\r\nX-Injected: 1",
+        "metrics.k8s\u{200b}.io",
+    ];
+    assert_eq!(
+        group_names(listed(&hostile)),
+        [""].iter()
+            .chain(hostile.iter())
+            .copied()
+            .collect::<Vec<_>>()
+    );
+}
+
+/// **Every one of the five watches waits before it asks the same question again** — the test
+/// that fails if somebody drops the backoff from *any* of them (§ CONNECTING, the security
+/// gate's *never retries in a loop*).
+///
+/// **What it cannot tell is [`StandingBackoff`] from `.default_backoff()`**, and that gap is
+/// deliberate rather than unnoticed. The two agree on the first delay and only diverge from the
+/// second, so separating them here means three delays — six seconds of wall clock on every
+/// `just check` — for a regression nobody reaches by accident: [`StandingBackoff`] is spelled out
+/// on all five lines of `watches`. What the policy *is* belongs to
+/// [`a_refused_watch_asks_less_and_less_often_and_costs_under_130_requests_an_hour`], which pays
+/// none of that.
+///
+/// **Five and not one, because the property is per watch.** Taking `.next()` off the vec proved
+/// it for Pods alone: `tester` removed the backoff from the DaemonSet watch and 545 tests stayed
+/// green (2026-08-27). No mutant can close that gap either — every mutant of `watches` replaces
+/// the whole `Vec`, which `watches.len() == 5` already catches.
+///
+/// **The only observable difference is time.** A `watcher()` with no backoff answers
+/// `Err → Init → list() → Err` as fast as the resolver says no — measured at **333µs** for all
+/// four against a name that cannot resolve — and the same four with a backoff on them cost its
+/// first delay, 800ms plus a jitter that only ever adds, measured at **1.0s** then (and
+/// 0.95-1.33s across the five after the policy changed). The floor asserted here is well under
+/// the smallest delay the policy can produce and three orders of magnitude over the unbacked
+/// stream, so nothing about it is a timing race.
+///
+/// **The five run at once**, so the test costs one delay rather than five: each future times its
+/// own stream, and a backoff missing from any one of them names that one.
+#[tokio::test]
+async fn a_refused_watch_of_every_kind_waits_before_it_asks_again() {
+    let waited = futures_util::future::join_all(session(offline()).await.watches.into_iter().map(
+        |watch| async move {
+            let started = std::time::Instant::now();
+            // `Init`, the failed LIST, `Init` again, the failed LIST again — the second
+            // attempt is what the backoff sits in front of (`watcher.rs:519-523`, `:584`).
+            let asked: Vec<Update> = watch.take(4).collect().await;
+            (asked.len(), started.elapsed())
+        },
+    ))
+    .await;
+
+    // The order is `watches`' own — pods, nodes, deployments, statefulsets, daemonsets.
+    println!("four items off each refused watch took {waited:?}");
+    assert_eq!(waited.len(), 5, "a watch went missing before it was timed");
+    for (kind, (asked, waited)) in waited.into_iter().enumerate() {
+        assert_eq!(asked, 4, "watch {kind} stopped producing items");
+        assert!(
+            waited >= std::time::Duration::from_millis(500),
+            "watch {kind} of the five asked again after {waited:?}, so nothing is backing that \
+             one off and a standing 403 on it is a request per round trip"
+        );
+    }
+}
+
+// --- THE LEGACY DISCOVERY FALLBACK, AGAINST A SERVER ---
+//
+// **The one branch in this file that a `.invalid` client cannot reach**, and the one that
+// matters most for the clusters D149 deliberately keeps running: aggregated discovery is beta
+// and on only from **1.27**, the floor is 1.29 with a note rather than a refusal, so a server
+// below 1.27 answers the aggregated call `Ok` with nothing in it (NOTES § D152, failure 1) and
+// the fallback *is* the live path there. Untested, the whole per-group partial-failure defence
+// would go unexercised on exactly the clusters it was written for.
+//
+// **So there is a server.** Forty lines of `tokio::net` and hand-written HTTP, answering the six
+// discovery paths and recording what it was asked, in order. It is not a Kubernetes double and
+// never will be: it knows nothing but those paths, and the moment a test here wants an object it
+// is the wrong tool.
+
+/// A stub API server on a loopback port the kernel picks, and the log of what it was asked.
+///
+/// **The address is built rather than written**, which is not a trick played on
+/// `scripts/security-guard.py`: the guard refuses a hardcoded loopback *URL* because in product
+/// code it is a second outbound path and usually a dev leftover, and there is no such URL here —
+/// the port is whatever `:0` gave us and the string does not exist until the test runs.
+async fn stub_apiserver() -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    let log = std::sync::Arc::clone(&asked);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let log = std::sync::Arc::clone(&log);
+            tokio::spawn(async move {
+                // One connection carries several requests: hyper keeps it alive, so this reads
+                // until the socket closes rather than answering once and giving up.
+                let mut pending = String::new();
+                loop {
+                    let mut chunk = [0_u8; 2048];
+                    match socket.read(&mut chunk).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => pending.push_str(&String::from_utf8_lossy(&chunk[..read])),
+                    }
+                    // A discovery GET has no body, so a request ends at the blank line.
+                    while let Some(end) = pending.find("\r\n\r\n") {
+                        let request: String = pending.drain(..end + 4).collect();
+                        let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
+                        // kube asks for aggregated discovery with an Accept header naming the
+                        // `apidiscovery.k8s.io` type; the ordinary call has no such word in it.
+                        let aggregated = if request.contains("apidiscovery") {
+                            " [aggregated]"
+                        } else {
+                            ""
+                        };
+                        log.lock()
+                            .expect("the log is never poisoned")
+                            .push(format!("{path}{aggregated}"));
+                        let body = discovery_answer(&path);
+                        let answer = format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                             content-length: {}\r\n\r\n{body}",
+                            body.len()
+                        );
+                        if socket.write_all(answer.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+
+    let client = Client::try_from(Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing");
+    (client, asked)
+}
+
+/// What the stub says to each discovery path. **One body per path, whatever the Accept header
+/// asks for** — which is not a shortcut, it is NOTES § D152's failure 1 exactly: a server too old
+/// for aggregated discovery answers the aggregated `Accept` with the ordinary type, kube
+/// deserialises it into `APIGroupDiscoveryList` anyway, every field defaults, and the run comes
+/// back `Ok` with zero groups.
+fn discovery_answer(path: &str) -> String {
+    let resource = |plural: &str, kind: &str| {
+        format!(
+            r#"{{"name":"{plural}","singularName":"{kind}","namespaced":true,"kind":"{kind}",
+                 "verbs":["get","list","watch"]}}"#
+        )
+    };
+    match path {
+        "/apis" => r#"{"groups":[{"name":"apps","versions":[{"groupVersion":"apps/v1",
+                      "version":"v1"}],"preferredVersion":{"groupVersion":"apps/v1",
+                      "version":"v1"}}]}"#
+            .to_string(),
+        "/api" => r#"{"versions":["v1"],"serverAddressByClientCIDRs":[]}"#.to_string(),
+        "/api/v1" => format!(
+            r#"{{"groupVersion":"v1","resources":[{}]}}"#,
+            resource("pods", "Pod")
+        ),
+        "/apis/apps/v1" => format!(
+            r#"{{"groupVersion":"apps/v1","resources":[{}]}}"#,
+            resource("deployments", "Deployment")
+        ),
+        _ => "{}".to_string(),
+    }
+}
+
+/// **A server too old for aggregated discovery still gets a sidebar, and the core group is what
+/// makes it whole** (§ EVERY KIND THE CLUSTER SERVES, NOTES § D152).
+///
+/// Three things at once, and only a server can show any of them: the empty aggregated answer is
+/// not mistaken for a cluster with no kinds; the fallback under it asks `/api` as well as `/apis`,
+/// so `Pod` — which `/apis` cannot name — arrives; and the price is the one the region's table
+/// claims, paid in round trips this test can count.
+#[tokio::test]
+async fn a_server_with_no_aggregated_discovery_falls_back_and_keeps_the_core_group() {
+    let (client, asked) = stub_apiserver().await;
+    let pairs = served(&client).await.expect("the stub answered every path");
+
+    let mut kinds: Vec<String> = pairs
+        .iter()
+        .map(|(resource, _)| format!("{}/{}", resource.api_version, resource.kind))
+        .collect();
+    kinds.sort();
+    assert_eq!(
+        kinds,
+        vec!["apps/v1/Deployment", "v1/Pod"],
+        "the fallback lost a group — `Pod` can only arrive through the core group, which `/apis` \
+         never names"
+    );
+
+    let asked = asked.lock().expect("the log is never poisoned").clone();
+    assert_eq!(
+        asked,
+        vec![
+            // Two calls, and both come back empty rather than failing (failure 1).
+            "/apis [aggregated]",
+            "/api [aggregated]",
+            // Then the fallback: the group list, then the core group, then `apps`. `/apis` is
+            // fetched again per group because `discovery::group` is a one-shot — the region's
+            // `1 + V(g)` per group, and the reason it is only worth paying when the cheap answer
+            // was empty.
+            "/apis",
+            "/api",
+            "/api/v1",
+            "/apis",
+            "/apis/apps/v1",
+        ],
+        "the fallback no longer costs what § EVERY KIND THE CLUSTER SERVES says it costs"
+    );
 }

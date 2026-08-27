@@ -217,8 +217,12 @@ resource.
   whoever adds the next field. `Trouble` lost its derive on 2026-08-27 for
   exactly that reason
   ([NOTES § D164](../NOTES.md#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27)).
-  Nothing in `src/` holds a `kube::Config` yet; that sentence is the obligation
-  `connect()` inherits, not a description of code that exists.
+  **`Session` is the first type in `src/` that holds one** — through
+  `kube::Client`, whose `Config` keeps the oidc and gcp providers' tokens in a
+  plain `HashMap<String, String>` with a derived `Debug`. It carries no `Debug`
+  of its own, so a stray `{session:?}` is a compile error rather than a leak,
+  and `scripts/security-guard.py` refuses the derive if anyone adds it back
+  ([NOTES § D166](../NOTES.md#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27)).
 - This includes the panic path: a backtrace dumped to stderr must not
   contain credentials.
 - **A `kube` error is never formatted whole — not with `{}`, not with `{:?}`.**

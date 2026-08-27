@@ -979,3 +979,450 @@ fn a_failure_names_k8rs_and_the_file_that_stopped_it() {
         "{problem}"
     );
 }
+
+// --- WATCHING A CLUSTER ---
+//
+// **The cluster is the one thing not synthesised here, because there is none.** What these feed
+// [`live_report`] is a [`k8s::Store`] driven by hand through the same events a watch delivers —
+// the shape `k8s_tests.rs` § THE DRIVER already proves the store lands — so what is tested here
+// is only this file's half: when a report is printed at all, and when the same cluster is not
+// printed twice.
+
+use kube::runtime::watcher::Event;
+
+/// Every object of a committed `kind: List` capture, decoded.
+fn objects<T: DeserializeOwned>(name: &str) -> Vec<T> {
+    let text = std::fs::read_to_string(fixture(name)).expect("the fixture reads");
+    let doc: Value = serde_json::from_str(&text).expect("the fixture is JSON");
+    doc["items"]
+        .as_array()
+        .expect("the fixture is a List")
+        .iter()
+        .map(|item| serde_json::from_value(item.clone()).expect("the capture decodes"))
+        .collect()
+}
+
+/// **A store whose five initial LISTs have all landed**, with the capture's pods on the pod
+/// watch and nothing on the other four — an empty cluster is a real answer and the gate
+/// (NOTES § D28) opens on `InitDone`, not on objects.
+fn listed(pods: Vec<Pod>) -> k8s::Store {
+    let mut store = k8s::Store::default();
+    store.pod(&now(), Event::Init);
+    for pod in pods {
+        store.pod(&now(), Event::InitApply(pod));
+    }
+    store.pod(&now(), Event::InitDone);
+    the_other_four(&mut store);
+    store
+}
+
+/// The four watches these tests carry no objects on, each opened and closed. Written out rather
+/// than looped: one `Store` method per API type is four different `fn` items, and that is
+/// exactly the per-watch identity NOTES § D162 bought.
+fn the_other_four(store: &mut k8s::Store) {
+    store.node(&now(), Event::Init);
+    store.node(&now(), Event::InitDone);
+    store.deployment(&now(), Event::Init);
+    store.deployment(&now(), Event::InitDone);
+    store.stateful_set(&now(), Event::Init);
+    store.stateful_set(&now(), Event::InitDone);
+    store.daemon_set(&now(), Event::Init);
+    store.daemon_set(&now(), Event::InitDone);
+}
+
+/// **Nothing is printed until every initial LIST has landed** (NOTES § D28).
+///
+/// A rule cannot tell a short list from a small cluster, so a report drawn mid-bootstrap says
+/// *none of the 3 nodes have that label* about a 200-node cluster. The driver's answer is
+/// silence, and the screen that replaces it draws [`k8s::Store::still_listing`] instead.
+#[test]
+fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
+    let mut last = String::new();
+    assert_eq!(live_report(&k8s::Store::default(), now(), &mut last), None);
+
+    // Four of the five landed and the fifth never opened: still not a cluster anyone may read.
+    let mut store = k8s::Store::default();
+    the_other_four(&mut store);
+    assert_eq!(live_report(&store, now(), &mut last), None);
+    assert!(
+        last.is_empty(),
+        "something was recorded as printed while the bootstrap was still running"
+    );
+
+    // **And still nothing after something else has been printed.** `last` is what the driver said
+    // most recently, so a silent bootstrap has to stay silent *against a non-empty last* too —
+    // an empty report is not a report, and printing one would put a blank block on stdout every
+    // time a watch re-listed.
+    let printed = live_report(&listed(Vec::new()), now(), &mut last).expect("a listed store");
+    assert!(!printed.is_empty(), "the report is empty: {printed:?}");
+    // `None` and not merely *empty*: `Some(String::new())` is a blank block on stdout, which is
+    // what the driver would print every time a watch re-listed.
+    assert_eq!(
+        live_report(&store, now(), &mut last),
+        None,
+        "a bootstrap with nothing wrong printed something after an earlier report"
+    );
+}
+
+/// **The first complete answer prints, the same one again does not, and a change prints again.**
+///
+/// The middle claim is the whole of why this function exists: a watch delivers an event per
+/// object per change and almost none of them move a finding, so a driver that printed on every
+/// event would bury the one that did. The third is what the reconnect proof reads
+/// (NOTES § D161) — a cluster that comes back is a report that appears with nobody touching the
+/// keyboard.
+#[test]
+fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
+    let mut store = listed(objects::<Pod>("kube-system-pods.json"));
+    let mut last = String::new();
+
+    let first = live_report(&store, now(), &mut last).expect("every initial LIST landed");
+    println!("{first}");
+    assert!(
+        first.contains(" pods · "),
+        "the live report is not the report `render` draws"
+    );
+    assert_eq!(
+        live_report(&store, now(), &mut last),
+        None,
+        "the same cluster printed twice"
+    );
+
+    let crashloop: Pod = serde_json::from_str(
+        &std::fs::read_to_string(fixture("crashloop.json")).expect("the fixture reads"),
+    )
+    .expect("the capture decodes");
+    store.pod(&now(), Event::Apply(crashloop));
+    let second = live_report(&store, now(), &mut last).expect("a pod arrived, so the report moved");
+    println!("{second}");
+    assert!(
+        second.contains("broken-crashloop"),
+        "a pod that arrived after the bootstrap never reached the report"
+    );
+}
+
+/// **Which cluster a run watches, or that it watches none.**
+///
+/// `--live` is what turns this driver into a cluster reader at all, and `--context` beside it is
+/// how the machine running the reconnect proof names a cluster that is not its current one.
+#[test]
+fn live_is_the_flag_that_names_a_cluster_and_context_names_which_one() {
+    let args = |line: &[&str]| -> Vec<String> { line.iter().map(|a| (*a).to_string()).collect() };
+
+    assert_eq!(live_context(&args(&["pod.json"])), None);
+    assert_eq!(live_context(&args(&["--analysis", "pod.json"])), None);
+    assert_eq!(live_context(&args(&[])), None);
+    // `--context` without `--live` is not a live run: the file path is what this driver reads.
+    assert_eq!(live_context(&args(&["--context", "kind-k8rs"])), None);
+
+    assert_eq!(live_context(&args(&["--live"])), Some(None));
+    assert_eq!(
+        live_context(&args(&["--live", "--context", "kind-k8rs"])),
+        Some(Some("kind-k8rs"))
+    );
+    // **The spelling `kubectl` and every GNU tool accept.** Matching only the separated form let
+    // this fall through to the kubeconfig's current context in silence, which for this flag is
+    // watching a different cluster than the one the reader named (`tester`, 2026-08-27).
+    assert_eq!(
+        live_context(&args(&["--live", "--context=kind-k8rs"])),
+        Some(Some("kind-k8rs"))
+    );
+    // A `--context` with nothing after it is the current context, not a crash.
+    assert_eq!(live_context(&args(&["--live", "--context"])), Some(None));
+    // **A flag is never a context name.** Both of these used to come back as the context called
+    // `--live` / `--analysis`, and the truth arrived later as a kubeconfig error about a name
+    // nobody typed.
+    assert_eq!(live_context(&args(&["--context", "--live"])), Some(None));
+    assert_eq!(
+        live_context(&args(&["--live", "--context", "--analysis", "pod.json"])),
+        Some(None)
+    );
+    // An `=` says the value was meant, so a flag-shaped one after it is kept.
+    assert_eq!(
+        live_context(&args(&["--live", "--context=--analysis"])),
+        Some(Some("--analysis"))
+    );
+    // First-wins, which is the opposite of `kubectl`'s last-wins — stated because it was stated
+    // nowhere, and the real flag box (Phase 12) should follow `kubectl` rather than this.
+    assert_eq!(
+        live_context(&args(&["--live", "--context", "a", "--context", "b"])),
+        Some(Some("a"))
+    );
+    // A longer flag that merely starts the same way is not this one.
+    assert_eq!(
+        live_context(&args(&["--live", "--contextual", "x"])),
+        Some(None)
+    );
+    // `--context=` with nothing after the `=` is passed through empty rather than quietly
+    // becoming the current context: the connect below it answers *no such context*, which is the
+    // loud version of the same mistake.
+    assert_eq!(
+        live_context(&args(&["--live", "--context="])),
+        Some(Some(""))
+    );
+}
+
+/// **A mistyped flag is a usage error, not a missing file.**
+///
+/// `k8rs --live=true` used to be read as a path and came back
+/// `--live=true: No such file or directory (os error 2)` — errno jargon about a file nobody
+/// named, for a flag the usage line advertises (invariant 14). The wording of a *real* file
+/// error is not this box's; the wording of *this* one is, because this box is what made the
+/// typo plausible.
+#[test]
+fn a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    for typo in ["--live=true", "--LIVE", "--analyse", "--contxt=prod"] {
+        let problem = mistyped(&line(&[typo])).unwrap_or_else(|| {
+            panic!("{typo} was read as a path, so its error will name a file nobody typed")
+        });
+        assert!(
+            problem.starts_with(&format!("k8rs: {typo} is not a flag k8rs has")),
+            "{problem}"
+        );
+        assert!(
+            problem.contains("usage: k8rs "),
+            "the sentence names the mistake and then does not say what the flags are: {problem}"
+        );
+    }
+
+    // **The live line is checked too**, which is the half that was missing: the guard lived
+    // inside the file-reading path, so `--live --contxt=prod` watched the current context and
+    // said nothing at all about the typo.
+    assert!(mistyped(&line(&["--live", "--contxt=prod"])).is_some());
+
+    // **A flag where the context name should be is refused, not swallowed** (`k8s-admin`,
+    // 2026-08-27). `live_context` turned it into `None` = the current context and the run watched
+    // the wrong cluster in silence — measured as `k8rs --live --context --live` connecting to
+    // `kind-review` with a normal banner. The realistic form is `--context "$CTX"` with `CTX`
+    // unset. Both words are known flags, so this can only be seen as a pair.
+    for swallowed in [
+        vec!["--live", "--context", "--live"],
+        vec!["--live", "--context", "--analysis", "pod.json"],
+        vec!["--context", "--live"],
+    ] {
+        let problem = mistyped(&line(&swallowed)).unwrap_or_else(|| {
+            panic!("{swallowed:?} was accepted, so the run watches a cluster nobody named")
+        });
+        assert!(
+            problem.starts_with("k8rs: --context needs the name of a context, and --")
+                && problem.contains("usage: k8rs "),
+            "{problem}"
+        );
+    }
+    // An `=` says the value was meant, and `--context` with nothing after it is the current
+    // context on purpose — neither is this mistake.
+    assert_eq!(mistyped(&line(&["--live", "--context=--analysis"])), None);
+    assert_eq!(mistyped(&line(&["--live", "--context"])), None);
+
+    // Every flag this build has, in both modes, and in both spellings — none of them is a typo.
+    for good in [
+        vec!["--analysis", "pod.json"],
+        vec!["--live"],
+        vec!["--live", "--context", "kind-k8rs"],
+        vec!["--live", "--context=kind-k8rs"],
+        // One dash is not the shape this refuses: it is a path like any other, and *no such
+        // file* is the true thing to say about it.
+        vec!["-live"],
+        vec!["pod.json"],
+    ] {
+        assert_eq!(mistyped(&line(&good)), None, "{good:?}");
+    }
+    assert!(
+        run(&line(&["-live"])).is_err_and(|problem| problem.contains("No such file")),
+        "a one-dash word stopped being read as a path"
+    );
+    // The flag this build does have still works, and a file beside it is still read.
+    assert!(run(&[ANALYSIS.to_string(), fixture("healthy.json")]).is_ok());
+}
+
+/// A client pointed at a name RFC 6761 reserves so that it can never resolve — the same double
+/// `k8s_tests.rs` § CONNECTING builds, written twice because a test helper cannot cross from one
+/// `*_tests` module to another (invariant 11 keeps `mod tests` private to its own product file).
+fn offline() -> kube::Client {
+    kube::Client::try_from(kube::config::Config::new(
+        "http://k8rs.invalid"
+            .parse()
+            .expect("a URL this file wrote itself"),
+    ))
+    .expect("a client over plain http asks the machine for nothing")
+}
+
+/// **An outage is a printed line and so is the recovery** — the pair the reconnect proof reads
+/// (NOTES § D161).
+///
+/// **Silence cannot carry it.** A watch that dies and comes back leaves the cluster exactly as it
+/// was, so the rendered cards are the same text and a driver that only printed those would print
+/// nothing for the outage and nothing again on the recovery — the same output a permanently dead
+/// watch gives. What is asserted here is the two changes: the failure appears, and it goes away
+/// on its own when the watch delivers again.
+///
+/// **The failures are real ones from a real client**, not a store poked into shape: five watches
+/// against a name that cannot resolve, driven through the same `drive` the binary runs.
+#[tokio::test]
+async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_recovery() {
+    use futures_util::stream::StreamExt;
+    let watches = k8s::session(offline())
+        .await
+        .watches
+        .into_iter()
+        .map(|watch| watch.take(2).boxed())
+        .collect();
+    let mut store = k8s::Store::default();
+    k8s::drive_watching(watches, &mut store, |_| {}).await;
+
+    let mut last = String::new();
+    let failing = live_report(&store, now(), &mut last).expect("five watches are failing");
+    println!("{failing}");
+    for kind in ["pods", "nodes", "Deployments", "StatefulSets", "DaemonSets"] {
+        assert!(
+            failing.contains(&format!("not getting {kind} from this cluster")),
+            "a cluster that answers nothing said nothing about {kind}: {failing}"
+        );
+    }
+    assert!(
+        !failing.contains("watch"),
+        "the line a reader sees uses the word `watch`, which is the jargon invariant 14 is \
+         about: {failing}"
+    );
+
+    // The same store again is not news…
+    assert_eq!(live_report(&store, now(), &mut last), None);
+
+    // …and then every watch delivers a complete answer, which is what a reconnect looks like
+    // from in here: the failure clears itself and the report says so without being asked.
+    store.pod(&now(), Event::Init);
+    store.pod(&now(), Event::InitDone);
+    the_other_four(&mut store);
+    let recovered = live_report(&store, now(), &mut last).expect("the cluster came back");
+    println!("{recovered}");
+    assert!(
+        !recovered.contains("not getting"),
+        "the driver still says the cluster is unreadable after every watch delivered: {recovered}"
+    );
+    assert!(
+        recovered.starts_with("0 pods · 0 nodes"),
+        "a healthy report starts with something other than the report: {recovered:?}"
+    );
+
+    // **And the outage the proof actually watches: one that arrives *after* a good bootstrap.**
+    // The store keeps its last complete answer while a watch is down (NOTES § D162), so this is
+    // the only shape where both halves are printed at once — the lines on top, the cards they
+    // are a warning about underneath, one blank line between.
+    let watches = k8s::session(offline())
+        .await
+        .watches
+        .into_iter()
+        .map(|watch| watch.take(2).boxed())
+        .collect();
+    k8s::drive_watching(watches, &mut store, |_| {}).await;
+    let stale = live_report(&store, now(), &mut last).expect("an outage is news");
+    println!("{stale}");
+    let (unreadable, cards) = stale
+        .split_once("\n\n")
+        .unwrap_or_else(|| panic!("the two halves are not separated by a blank line: {stale:?}"));
+    assert_eq!(
+        unreadable.lines().count(),
+        5,
+        "the top half is not five lines, so the halves ran together: {stale:?}"
+    );
+    assert!(
+        unreadable.lines().all(|line| line.starts_with("▲ k8rs")),
+        "{stale:?}"
+    );
+    // **Neither half of the line may be false under a 403** (`k8s-admin`, 2026-08-27), and a
+    // refusal is indistinguishable from an outage from in here. `right now` is a lie about a
+    // permission problem and `out of date` is a lie about a list that is empty rather than stale.
+    assert!(
+        !unreadable.contains("right now") && !unreadable.contains("out of date"),
+        "the degraded line makes a claim that is false for a standing refusal: {unreadable:?}"
+    );
+    assert!(
+        cards.starts_with("0 pods · 0 nodes"),
+        "the cards under the warning are not the report: {cards:?}"
+    );
+}
+
+/// **The two things this tool says about itself, and neither may be false on the shape it does
+/// not name.**
+///
+/// **`right now` and `out of date` were both lies under a 403** (`k8s-admin`, 2026-08-27): a
+/// refusal is not *right now*, it is until somebody edits RBAC, and nothing **is** shown about
+/// that kind — the list is empty, not stale. `unreadable` cannot tell a refusal from an outage
+/// ([`k8s::Trouble`] carries the error and this file may only select on it), so the one sentence
+/// has to be true of both.
+///
+/// **`ended` gets the heavier glyph.** *Will not change again* is the most severe thing this tool
+/// can say about itself and it was wearing `▲`, the same mark as the merely-degraded line. This
+/// branch had no test at all before this one: no stream a test can build ends, because kube's
+/// `watcher()` cannot, and `Watch::ended` is private to `k8s.rs` — which is why `unreadable`
+/// takes the troubles rather than the store.
+#[test]
+fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
+    let trouble = |kind, ended| k8s::Trouble {
+        kind,
+        failure: None,
+        ended,
+    };
+    let degraded = unreadable(&[trouble(ObjectKind::Node, false)]);
+    let [degraded] = degraded.as_slice() else {
+        panic!("one trouble did not make one line: {degraded:?}")
+    };
+    println!("{degraded}");
+    assert!(
+        degraded.starts_with("▲ k8rs is not getting nodes from this cluster"),
+        "{degraded:?}"
+    );
+    assert!(
+        !degraded.contains("right now") && !degraded.contains("out of date"),
+        "the degraded line claims something a standing refusal makes false: {degraded:?}"
+    );
+
+    let stopped = unreadable(&[trouble(ObjectKind::Pod, true)]);
+    let [stopped] = stopped.as_slice() else {
+        panic!("one trouble did not make one line: {stopped:?}")
+    };
+    println!("{stopped}");
+    assert!(
+        stopped.starts_with("● k8rs has stopped receiving pods from this cluster"),
+        "a watch that will never deliver again wears the warning glyph, not the severe one: \
+         {stopped:?}"
+    );
+
+    // Neither sentence may need the word `watch` to be understood (invariant 14).
+    assert!(!degraded.contains("watch") && !stopped.contains("watch"));
+}
+
+/// **A cluster that never answers still starts the driver, and the driver says why it stopped.**
+///
+/// Every initial LIST failed here, so nothing was ever printed — but *what is asserted* is the
+/// ending, because stdout belongs to the process and a test cannot read it back. That the report
+/// is withheld while a bootstrap is unfinished is
+/// [`a_bootstrap_that_has_not_finished_prints_nothing_at_all`]'s, one layer down, where it is a
+/// value and not a stream.
+///
+/// **What this one pins is that `live` comes back with a sentence** rather than falling off the
+/// end quietly — `main` turns that into exit 2, and a driver that returned silently would look
+/// exactly like a clean shutdown of a tool that is supposed to keep watching.
+///
+/// **The streams are cut after two items each** because a real one never ends: kube's `watcher()`
+/// cannot finish (`k8s.rs` § THE DRIVER) and the backoff under it never gives up, so a live
+/// `drive` in a test would hang for as long as the test harness let it.
+#[tokio::test]
+async fn a_cluster_that_never_answers_prints_nothing_and_says_why_it_stopped() {
+    use futures_util::stream::StreamExt;
+    let mut session = k8s::session(offline()).await;
+    session.watches = session
+        .watches
+        .into_iter()
+        .map(|watch| watch.take(2).boxed())
+        .collect();
+
+    let stopped = live(Ok(session)).await;
+
+    assert!(
+        stopped.contains("every watch has stopped"),
+        "a driver whose watches all ended returned {stopped:?} instead of saying so"
+    );
+}

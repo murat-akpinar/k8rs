@@ -1248,6 +1248,34 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   Verified clean, and the fixture cluster was untouched — but a measurement
   brief should say which teardown path is expected rather than leaving the
   agent to find one under time pressure.
+- **`▲` is `Severity::Warn`'s glyph and the watch-health lines reuse it for a
+  second axis** (2026-08-27). `screens/resources.md:10` draws `ALERTS 3 ● 7 ▲`
+  counting *findings*; the temporary driver's health lines print `▲`/`●` for
+  *tool* health. When `views.rs` lands, either those lines inflate the finding
+  count or one glyph means two things on one screen
+  ([screens/README.md](screens/README.md)). `tui-designer`'s to settle before
+  Phase 11 draws the Alerts header. The terminal `ended` line already took `●`
+  by a PM ruling, which is the severity right but not the axis. Found by the
+  operator review of `connect()`, which also noted the case any reordering must
+  not break: the health lines print *above* the counts and the verdict, and that
+  ordering is what makes `○ nothing is broken` read as qualified rather than
+  asserted while five watches are down.
+- **`ResetTimerBackoff`'s 120-second recovery is not unit-tested** (2026-08-27).
+  `tokio::time::pause`/`advance` need tokio's `test-util` feature, which is not
+  enabled, so `StandingBackoff`'s recovery half rests on kube's own tests plus an
+  assertion that we still delegate to them
+  ([NOTES § D165](NOTES.md#d165--the-two-cargotoml-lines-the-first-client-forced-and-the-one-that-was-a-panic-on-every-machine-2026-08-27)).
+  Refused for now because the operator review **observed the timer firing on a
+  live cluster** — twelve minutes after the plateau, a fresh outage restarted at
+  the bottom of the ladder — so the property is measured even though it is not
+  pinned. One word on the existing `[dev-dependencies] tokio` line if it is ever
+  worth pinning.
+- **`scripts/security-guard.py` has no rule against `src/` binding a socket**
+  (2026-08-27). Nothing in k8rs should ever listen; the existing outbound rule
+  only matches literal hostnames, so the discovery fallback's stub server —
+  `TcpListener::bind("127.0.0.1:0")` with a `format!`-built URL — passes it, and
+  so would a real listener. `tester`'s. Found while proving that stub was
+  allowed to exist.
 
 ## Ruled out
 
