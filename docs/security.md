@@ -211,14 +211,29 @@ resource.
 ## Token hygiene
 
 - The kubeconfig token is never logged, never rendered on screen, never
-  embedded in an error message. The config type's `Debug` output is wrapped.
+  embedded in an error message. **No type of ours that can reach a token
+  derives `Debug`** — the rule is the derive, not a wrapper, because a
+  hand-written `Debug` still lets `{:?}` compile and has to be kept correct by
+  whoever adds the next field. `Trouble` lost its derive on 2026-08-27 for
+  exactly that reason
+  ([NOTES § D164](../NOTES.md#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27)).
+  Nothing in `src/` holds a `kube::Config` yet; that sentence is the obligation
+  `connect()` inherits, not a description of code that exists.
 - This includes the panic path: a backtrace dumped to stderr must not
   contain credentials.
 - **A `kube` error is never formatted whole — not with `{}`, not with `{:?}`.**
-  A renderer selects fields off the typed error: the variant, and
-  `Status.code` / `Status.reason` where there is one. Measured against the
+  A renderer selects fields off the typed error: the variant, and the `Status`
+  where there is one. **Read
+  [`k8s.rs` § WHAT A THROTTLE LOOKS LIKE](../src/k8s.rs) before writing that
+  renderer** — *four* `watcher::Error` variants carry a `Status` and only
+  *three* wrap it in `Error::Api`. `WatchError(Box<Status>)` holds it directly
+  and is the one a busy cluster produces most (the 410 desync, an in-band 403),
+  so a formatter written from the three-variant list unwraps, finds nothing,
+  and prints a generic message for the commonest watch failure there is —
+  `PRIOR-ART § C1` exactly. Key on `Status.code`: it survives both parse
+  branches and `reason` survives only one. Measured against the
   crates on 2026-08-26, `Display` interpolates the source at every hop —
-  `watcher::Error::InitialListFailed` is `"…: {0}"` (`watcher.rs:29`),
+  `watcher::Error::InitialListFailed` is `"…: {0}"` (`watcher.rs:30`),
   `kube_client::Error::Auth` is `"auth error: {0}"` (`error.rs:104`), and
   `AuthError::AuthExecRun` is
   `"auth exec command '{cmd}' failed with status {status}: {out:?}"`
@@ -227,10 +242,17 @@ resource.
   `{"kind":"ExecCredential","status":{"token":"…"}}` to **stdout**, so one
   `format!("{}", err)` on an expired EKS/GKE/AKS session prints a bearer token.
   Turning `oauth` and `oidc` off removes two variants and not this one.
-  `scripts/security-guard.py` cannot see it — its taint follows a field type
-  spelled `Client` — so this rule is checked by hand until the box that teaches
-  the guard foreign types closes
-  ([NOTES § D162](../NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26)).
+  **This bullet is half mechanical and half yours, and the split is the thing
+  to remember.** `scripts/security-guard.py` refuses a *derived* `Debug` on any
+  declaration it parses that can reach a `Config`, a `Client` or a qualified
+  `kube` error type — that half is enforced, and it is what took the derive off
+  `Trouble`. It sees **no format call at all**: a `{}`, a `{:?}` or a
+  `.to_string()` on a kube error, a hand-written `Debug` that formats one
+  whole, an `anyhow` chain printed after a `?`. The guard prints that list in
+  its own summary on every run rather than leaving the gap to be inferred, and
+  those are checked by hand against this section
+  ([NOTES § D162](../NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26),
+  [§ D164](../NOTES.md#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27)).
 - **One thing off the kubeconfig does enter our own structs, and it is the
   public half only.** Certificate rule C1 warns when the client certificate is
   about to expire, so `ClusterSnapshot` carries the **certificate** bytes and

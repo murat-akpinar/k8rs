@@ -832,11 +832,10 @@ pub struct Listing {
 /// second meaning for the one clock read § THE DRIVER owns (NOTES § D150), and no screen has
 /// asked for one.
 ///
-/// **It derives `Debug` where [`Store`] deliberately does not**, for [`Listing`]'s reason and one
-/// more: the borrow it holds is kube's `watcher::Error`, which derives `Debug` in kube already,
-/// so nothing here widens what a `{:?}` can reach. **That is not the obligation this type owes**
-/// — read [`failure`](Trouble::failure) for the one that is.
-#[derive(Debug)]
+/// **No `Debug`, and for a harder reason than [`Store`]'s** (NOTES § D162): the borrow at
+/// [`failure`](Trouble::failure) reaches an `exec` plugin's stdout, so a `{:?}` on this type
+/// prints a bearer token. Nothing formats a `Trouble`; without the derive, nothing can begin to
+/// by accident — a renderer selects fields, and [`failure`](Trouble::failure) says which.
 pub struct Trouble<'a> {
     /// Which watch.
     pub kind: ObjectKind,
@@ -872,10 +871,10 @@ pub struct Trouble<'a> {
     ///
     /// **This is not the rule beside it.** Invariant 9 — strip control characters — is owed
     /// *as well*, on whatever text is selected, because it is the API server's. Stripping does
-    /// nothing about a token: a token prints as itself. **`scripts/security-guard.py` cannot see
-    /// this either** — its taint follows a field whose type is spelled `Client` — so the guard
-    /// belongs with the `{:?}`-on-`kube::Config` box below in this phase, which is already about
-    /// foreign types the guard cannot reach.
+    /// nothing about a token: a token prints as itself. **`scripts/security-guard.py` refuses a
+    /// *derived* `Debug` on a declaration it parses** — that is what took one off [`Trouble`] —
+    /// **and it sees no format call at all** (NOTES § D164). So *select, never format* is owed by
+    /// whoever writes the screen, and no script will catch them getting it wrong.
     pub failure: Option<&'a watcher::Error>,
     /// **This watch's stream finished**, so what its kind holds is the last thing it ever held.
     /// kube documents a `watcher()` stream as recovering rather than finishing — read off its

@@ -2537,7 +2537,7 @@ public release.
       went to the `--namespace` box, which is why the security gate's
       Authorization row is **owed rather than ticked**
       ([D163](NOTES.md#d163--the-operator-review-of-the-reconnect-box-eleven-findings-and-the-one-that-is-older-than-the-box-2026-08-26))
-- [ ] **The token-hygiene scan reads `struct` and not `enum`, and `connect()` is
+- [x] **The token-hygiene scan reads `struct` and not `enum`, and `connect()` is
       about to write the enum it cannot see.** **The first one is already in the
       tree**: `k8s.rs`'s `Capability` landed on 2026-08-26 and the scan's count
       did not move — still *43 structs, 0 can hold a token* — because the diff
@@ -2562,8 +2562,16 @@ public release.
       lands before `connect()`, not after** — a guard that goes vacuous exactly
       when the credential arrives is the shape
       [D141](NOTES.md#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
-      already cost this project once
-- [ ] **`{:?}` on a `kube::Config` prints a bearer token, and our own guard
+      already cost this project once.
+      **Closed 2026-08-27**: enums and their variants' payloads, aliases as
+      propagation nodes (closed, not named), and `ClientBuilder`. Two defects
+      older than the box came out with it — an `attrs` pattern that backtracked
+      forward and had been swallowing **five** declarations including `Watch`,
+      the one holding a `watcher::Error`, and a name-keyed dict that dropped a
+      colliding declaration whole. The count went 44 → 49, and it now carries a
+      denominator: `62 of 62 declarations parsed`
+      ([D164](NOTES.md#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27))
+- [x] **`{:?}` on a `kube::Config` prints a bearer token, and our own guard
       structurally cannot see it.** `kube::Config` derives `Debug`
       (`config/mod.rs:126`). Its `password`, `token` and `client_key_data` are
       `SecretString` and redact — but `AuthInfo.auth_provider` is an
@@ -2575,7 +2583,7 @@ public release.
       from the reconnect box's operator review: `watcher::Error`.** Its `Display`
       interpolates its source at every hop down to
       `AuthError::AuthExecRun`'s `{out:?}` over a `std::process::Output`
-      (`watcher.rs:29` → `error.rs:104` → `client/auth/mod.rs:55`), so one
+      (`watcher.rs:30` → `error.rs:104` → `client/auth/mod.rs:55`), so one
       `format!("{}", err)` on an expired `exec` credential prints the plugin's
       stdout — which is the ExecCredential JSON, token included. The **contract**
       is already written (`docs/security.md § Token hygiene`: a `kube` error is
@@ -2592,7 +2600,18 @@ public release.
       [D141](NOTES.md#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
       already cost this project once, and this is the second instance in one
       phase. `tester`'s for the guard, `dev-core`'s for the call site
-      ([D148](NOTES.md#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22))
+      ([D148](NOTES.md#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22)).
+      **Closed 2026-08-27**: the guard is taught the qualified `kube` error
+      spellings, and it printed a FAIL on a real type — `Trouble` derived
+      `Debug` over `Option<&watcher::Error>`, so the derive is gone rather than
+      hand-written, which is the stronger answer because no impl makes a stray
+      `{:?}` a compile error. What a regex cannot reach is named in the summary
+      line on every run instead of inferred, and `Display` — the half
+      `docs/security.md` calls the measured leak — is first on that list. The
+      `connect()` half of this box's done-when is not discharged and cannot be:
+      nothing in this build constructs a `Client`. The guard is what enforces it
+      when the next box lands, which is what the box asked for
+      ([D164](NOTES.md#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27))
 - [ ] **Connecting is a function, not a step in `main`** — `connect(context)`
       builds the client, runs discovery and the capability probe and starts the
       watches, and can be called again after everything from the previous

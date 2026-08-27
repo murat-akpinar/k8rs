@@ -185,6 +185,7 @@ its line moving with it.
 - [D161](#d161--the-reconnect-boxs-code-lands-before-connect-and-its-proof-can-only-run-after-it-2026-08-26) — the reconnect box's code lands before `connect()` and its proof can only run after it
 - [D162](#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26) — per-watch identity, and the six choices the reconnect box had to make
 - [D163](#d163--the-operator-review-of-the-reconnect-box-eleven-findings-and-the-one-that-is-older-than-the-box-2026-08-26) — the operator review of the reconnect box: eleven findings, and the one that is older than the box
+- [D164](#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27) — the token-hygiene guard learns three shapes it could not see, and says out loud what it still cannot
 
 ## Why it exists — where the gap is
 
@@ -14138,3 +14139,75 @@ was wrong twice over, and a line citation had drifted onto an unrelated statemen
 That is the reason step 7's pass reads the PM's edits with the agents': nobody else
 reviews them.
 
+
+### D164 — the token-hygiene guard learns three shapes it could not see, and says out loud what it still cannot (2026-08-27)
+
+Two Phase 5 boxes, landed as one family because they are the same rule in the same
+function: `scripts/security-guard.py`'s token-hygiene check read `struct` and not
+`enum`, and it could not name a foreign type at all. Both said in their own text that
+they land **before** `connect()` — a guard that goes vacuous exactly when the
+credential arrives is the shape
+[D141](#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
+already cost this project once, and this was the second instance in one phase.
+
+**What the check now reads.** Enums and their variants' payloads, tuple and struct
+variants alike, with variant *names* excluded. Type aliases as propagation nodes, so
+`type Handle = kube::Client;` taints every holder of a `Handle` — the alias case is
+closed, not named. `TOKEN_TYPES` became regex fragments with per-entry right
+boundaries: bare `Client`, so `ClientBuilder` is caught, but `(?<!watcher::)Config\b`,
+because `ConfigMap` is a live browser kind and `watcher::Config` carries no credential
+at all. And the foreign types, **qualified only** — `kube::Error`,
+`kube_client::Error`, `kube_runtime::…::Error`, `watcher::Error`, `AuthError`,
+`KubeError`. Bare `Error` was refused: it would match every `anyhow::Error` and
+`serde_json::Error` in the tree, and a guard that cries wolf gets a `# noqa` next year.
+
+**Two defects in the guard were older than the box, and one of them was hiding the
+type this box exists for.** The `attrs` pattern `#\[.*?\]` under `re.S` backtracked
+forward through the file hunting a `]`, swallowing everything it crossed: **five
+declarations were invisible**, including `Watch` at `k8s.rs:585`, the one that holds a
+`watcher::Error`. The count went 44 → 49. Separately, `decls` was keyed by name and an
+assignment dropped a colliding declaration whole — `enum Row` in `analysis.rs` and
+`struct Row` in `k8s.rs` collide in this tree today.
+
+**The operator review returned seven findings and two were blocking, both inside the
+boxes' own done-when.** The first is the one worth keeping: `DECL` required the
+generics group to be followed immediately by the body, so a `where` clause made the
+declaration invisible — **and `just check` runs `cargo fmt --all -- --check`, and
+rustfmt canonicalises an inline `where` into exactly that unparsed form.** The gate
+installed its own blind spot. The second: `DERIVES_DEBUG` matched `#[derive(` and not
+`#[cfg_attr(test, derive(Debug))]`, which is the most likely way a connection-state
+type in *this* repo gets `Debug` — and the tainted count went up while no `FAIL` was
+printed, which is a positive signal with silence beside it, worse than a miss.
+
+**The honest denominator is two tripwires, not one, because the fix created the second
+one.** `49 structs, 13 enums` reads as coverage and was derived from the thing being
+checked. A keyword-only count now catches a `DECL` that stops *matching*; a separate
+`lost` list catches one that matches but whose body cannot be followed — without that
+split, an unfollowable body reads as a type with no fields, which is a clean type, and
+the keyword count agrees with it perfectly. `PRIOR-ART § F2` is the class.
+
+**`Trouble` lost its `Debug`, and deleting beat hand-writing.** The taught guard went
+red on a real type: `pub struct Trouble<'a>` derived `Debug` over
+`Option<&'a watcher::Error>`, whose `Display`/`Debug` chain reaches `AuthExecRun`'s
+`{out:?}` over a `std::process::Output` — an expired `exec` plugin's stdout is the
+ExecCredential JSON. Nothing formats a `Trouble`, so a hand-written impl would have
+been speculative code for a caller that does not exist, and it is the *weaker* answer:
+an impl leaves `{:?}` compiling forever, while no impl makes a stray `{:?}` a compile
+error. The renderer contract that replaces it lives in `Trouble::failure`'s own field
+docs, not in `docs/security.md` — which carried the *three*-variant reading of the
+`Status` question that `k8s.rs` § WHAT A THROTTLE LOOKS LIKE already warns produces
+`PRIOR-ART § C1`, and now points at it.
+
+**What the guard still cannot see, printed on every run rather than inferred.** No
+format call of any kind: `{}`, `{:?}`, `.to_string()` on a kube error or a `Config`, a
+hand-written `Debug` that formats one whole — which the `FAIL` text itself recommends
+and never verifies — an `anyhow` chain printed after a `?`, a `use kube::Client as Kc`
+rename, a generic default, a generic never named in a field, an unqualified `Error`
+import. Naming them is the boxes' own permitted answer; the point is that the summary
+line stopped reading as a completeness claim. `Display` is the half `docs/security.md`
+calls the measured leak, and it was the half the first draft's disclaimer omitted.
+
+One structural fact worth keeping: `kube::Client`, `kube::Api` and `ClientBuilder`
+derive only `Clone`, so `#[derive(Debug)]` over a *direct* holder does not compile. The
+`Client` entries can only ever fire transitively, through a type with a hand-written
+`Debug`. The entries that fire directly are `Config` and the kube error family.
