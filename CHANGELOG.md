@@ -45,6 +45,7 @@
 - *(k8s)* Connect to a cluster, and make a refused watch back off for real ([2290933](https://github.com/murat-akpinar/k8rs/commit/2290933eb6e01bf29f2b401fa5c790135e09357a)) — connect(context) builds the client, reads /version, runs aggregated discovery and the capability probe, and hands back five watch streams ready for drive(). It is a function and not startup code: a Session is a value, so the Phase 11 X switcher is this call made again beside the old one rather than a mutation of it (NOTES D16). Only what cannot be connected *with* is an error — /version and discovery each travel inside the session as a Result, so a kubeconfig that may not get /apis still watches pods.
 - *(k8s)* Tell a refused login from an expired one from a cluster that never answered ([df50815](https://github.com/murat-akpinar/k8rs/commit/df50815312d1112da94e71aa7ca3ac0c5f943940))
 - *(k8s)* Read the cluster's own version, context and certificate off a live session ([e4e8861](https://github.com/murat-akpinar/k8rs/commit/e4e8861d394d87e1c2dcd1a0e0ab383be6fe8b21))
+- *(k8s)* Read every context the kubeconfig names, with the six broken shapes ([bdd858f](https://github.com/murat-akpinar/k8rs/commit/bdd858fb96a25da0223f273fa7150b39c3b4673d)) — The picker Phase 11 draws needs the list before it connects, and k8s.rs freezes after Phase 6, so contexts() lands here: name, address, TLS flag, namespace and a tag, plus kubeconfig() so nothing above this layer reads the credential boundary itself.
 
 ### 🐛 Bug Fixes
 
@@ -151,6 +152,7 @@
 - *(docs)* Give the token-hygiene box the enum that already landed ([ec146f7](https://github.com/murat-akpinar/k8rs/commit/ec146f73eb8204e1a2842f7783ed0a508e89ccd1))
 - *(docs)* Correct the phase 5 gate row the token-hygiene box overturned ([4f52616](https://github.com/murat-akpinar/k8rs/commit/4f526163250bb88177a50fe3378dea12c684e653)) — The gate still read "Debug is wrapped on anything that could hold it", which is the rule D164 replaced: the ban is on the derive, because a hand-written impl leaves {:?} compiling forever and the guard cannot tell whether one leaks. It is the row somebody ticks at phase close, so a stale copy here is worse than a stale sentence in prose - it also names the mechanical half and the hand-checked half, which the old wording ran together.
 - *(k8s)* Measure the resident set at four cluster sizes, up to 10 000 pods ([2df6d3c](https://github.com/murat-akpinar/k8rs/commit/2df6d3c93a682dadfc265ef9117f7e7a9b3ba2a9)) — The Phase 5 box D25 sent forward. Four readings of the release binary under --live against a throwaway kind cluster: 11 244 KiB on a bare cluster, 58 752 KiB at 1 011 pods, 125 704 KiB steady at 10 011 with 1 234 workload objects.
+- *(k8s)* Close the startup-errors box on the run that shows it already holds ([fb6eb23](https://github.com/murat-akpinar/k8rs/commit/fb6eb23473dc38d8d406c3a83c287fad0e8030db)) — The box predates the fault taxonomy and connect(), which landed both of its halves on the way past. Measured rather than reasoned: a missing kubeconfig and an unknown context each print one plain-language sentence on stderr, leave stdout empty and exit 2.
 
 ### ⚡ Performance
 
