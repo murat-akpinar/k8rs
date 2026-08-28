@@ -46,6 +46,7 @@
 - *(k8s)* Tell a refused login from an expired one from a cluster that never answered ([df50815](https://github.com/murat-akpinar/k8rs/commit/df50815312d1112da94e71aa7ca3ac0c5f943940))
 - *(k8s)* Read the cluster's own version, context and certificate off a live session ([e4e8861](https://github.com/murat-akpinar/k8rs/commit/e4e8861d394d87e1c2dcd1a0e0ab383be6fe8b21))
 - *(k8s)* Read every context the kubeconfig names, with the six broken shapes ([bdd858f](https://github.com/murat-akpinar/k8rs/commit/bdd858fb96a25da0223f273fa7150b39c3b4673d)) — The picker Phase 11 draws needs the list before it connects, and k8s.rs freezes after Phase 6, so contexts() lands here: name, address, TLS flag, namespace and a tag, plus kubeconfig() so nothing above this layer reads the credential boundary itself.
+- *(k8s)* Read the clock the cluster keeps, and say what a gap does to the times ([e9efc86](https://github.com/murat-akpinar/k8rs/commit/e9efc863b22e7df70cb17474589df77696d6989a)) — The API server's own Date response header is the only honest source for a skew no object timestamp reveals. Session::skew carries the signed gap past five minutes, the same five rules::age blanks at, and a new guard fails the build if those two constants ever drift apart.
 
 ### 🐛 Bug Fixes
 
@@ -154,6 +155,7 @@
 - *(k8s)* Measure the resident set at four cluster sizes, up to 10 000 pods ([2df6d3c](https://github.com/murat-akpinar/k8rs/commit/2df6d3c93a682dadfc265ef9117f7e7a9b3ba2a9)) — The Phase 5 box D25 sent forward. Four readings of the release binary under --live against a throwaway kind cluster: 11 244 KiB on a bare cluster, 58 752 KiB at 1 011 pods, 125 704 KiB steady at 10 011 with 1 234 workload objects.
 - *(k8s)* Close the startup-errors box on the run that shows it already holds ([fb6eb23](https://github.com/murat-akpinar/k8rs/commit/fb6eb23473dc38d8d406c3a83c287fad0e8030db)) — The box predates the fault taxonomy and connect(), which landed both of its halves on the way past. Measured rather than reasoned: a missing kubeconfig and an unknown context each print one plain-language sentence on stderr, leave stdout empty and exit 2.
 - *(ui)* Draw the clock-skew states, and split the sentence the two halves cannot share ([e718aa0](https://github.com/murat-akpinar/k8rs/commit/e718aa03bdac6f7c7279f8d3e9b3f72330692d2b)) — The header row is one line and the sentence is 97 characters, so it carries a pointer and the banner carries the sentence. Behind the cluster age blanks and ahead of it age lies, so they get two sentences rather than one hedge; D55's wording was the ahead half's and is corrected in place.
+- Retract half a ruling the code had already answered ([63c9287](https://github.com/murat-akpinar/k8rs/commit/63c92875085c4b4bf553745f53302020405190e1)) — `tally()` has emitted only the non-empty severity bands since Phase 4, so the `1 critical` the clock-skew mockups drew was backed all along. The ruling that called it unbacked read `screens/` and not `main.rs`. The sidebar badge stays open — that renderer does not exist yet.
 
 ### ⚡ Performance
 
