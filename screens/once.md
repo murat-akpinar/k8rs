@@ -162,14 +162,15 @@ prod-eu · 84 pods · 3 nodes
   limit 256Mi · exit 137 · 47 restarts
   → raise limits.memory, or find the leak
 
-▲ shop/api · 2 of 6 pods
+▲ shop/api · 2 of 6 pods · 1 min ago
   Running, but not receiving traffic — the readiness check is failing
   → check the app's /healthz endpoint
 
 1 critical, 1 warning
 
-Your computer's clock is 11 minutes behind the cluster's, so times
-are blank rather than guessed.
+This computer and the cluster disagree about the time by 11 minutes
+(this one is behind), so recent times are missing and older ones can
+read smaller than they really are.
 ```
 
 ```
@@ -188,15 +189,21 @@ prod-eu · 84 pods · 3 nodes
 
 1 critical, 1 warning
 
-Your computer's clock is 9 minutes ahead of the cluster's, so times
-may be wrong.
+This computer and the cluster disagree about the time by 9 minutes
+(this one is ahead), so times can read larger than they really are.
 ```
 
-The title-line suffix is missing from the first report's card and present on
-the second's, for the same reason a card's age is ever missing here: "it is
-present only when a field says when the event happened," stated above
-([§ What it prints](#what-it-prints)) and unchanged by this box — clock skew
-does not add a rule, it changes how often the existing one fires.
+The two reports show the same two findings at two different clocks. In the
+first, `payments/web` — the younger of the two — loses its age exactly as
+before: "it is present only when a field says when the event happened,"
+stated above ([§ What it prints](#what-it-prints)) and still true, because a
+blanked event is one `age` refused to guess at. `shop/api` is old enough that
+it does not blank; it prints `1 min ago` instead of its true `12 min ago`
+([§ What it prints](#what-it-prints)) — present, not flagged, and wrong by
+most of the gap
+([D177](../NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28)).
+In the second report neither card blanks; both read a plausible amount
+older than they are, and nothing on either line says so.
 
 **No `⚠`.** This file's own vocabulary is `● ▲ ○` and nothing else
 ([§ Colour and symbols](#colour-and-symbols)); the console's pointer borrows a
@@ -229,8 +236,9 @@ prod-eu · ns: payments · 12 pods · 3 nodes
 
 ○ nothing is broken
 
-Your computer's clock is 11 minutes behind the cluster's, so times
-are blank rather than guessed.
+This computer and the cluster disagree about the time by 11 minutes
+(this one is behind), so recent times are missing and older ones can
+read smaller than they really are.
 
 One node check is off: spotting a node someone started emptying and
 did not finish needs every pod in the cluster.

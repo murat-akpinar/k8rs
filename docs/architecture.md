@@ -171,12 +171,26 @@ and `--once` make — two renderers spelling the same finding differently is one
 of them lying. It answers `None` in two cases that draw the same blank: no
 field records when the event happened, so the right edge stays empty rather
 than borrowing a nearby timestamp that answers a different question; or the
-moment is *ahead* of `now` by more than five minutes, which is not a clock the
-tool can absorb but a rule that filled the wrong field, and a plausible phrase
-would hide it. Inside that five-minute window a future moment is the user's
-clock running behind the API server's and draws `just now`
+moment is *ahead* of `now` by more than five minutes, which is either a rule
+that filled the wrong field or a machine whose clock is behind the cluster's,
+and a plausible phrase would hide both. Inside that five-minute window a future
+moment draws `just now`
 ([NOTES § D18](../NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact) ·
 [§ D68](../NOTES.md#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13)).
+
+**That blank is only half of what a wrong clock does, and `k8s.rs` says the
+other half out loud.** With this machine behind the cluster by `S`, an event of
+age `A` is blanked only while `A < S − 5min`; everything older prints a number
+short by the whole `S`, so the same screen both hides recent times and
+under-reports old ones. Ahead of the cluster nothing blanks and every age
+inflates. Neither is visible from inside `rules.rs`, whose only input is the
+snapshot, so the measurement is `k8s.rs`'s: it reads the API server's own `Date`
+response header — refusing a non-2xx, because a refusal's clock may be a
+middlebox's — and `Session::skew` carries the signed gap past the same five
+minutes. The renderer states the gap and the direction and never whose clock is
+wrong, which is not something the header can tell
+([NOTES § D55](../NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) ·
+[§ D177](../NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28)).
 
 ### Rules are pure functions
 

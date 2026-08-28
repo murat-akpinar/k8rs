@@ -2915,7 +2915,7 @@ public release.
       ruled that last one wrong once** — the fix it ordered fabricated a hostname
       out of a conformant path — and D175 is the parse that is safe in both
       directions. 608 tests, 68 mutants, 1 authorized MISSED
-- [ ] **The clock-skew line in the header, which D55 declared binding on later
+- [x] **The clock-skew line in the header, which D55 declared binding on later
       boxes and nobody owned.** *"Your computer's clock is 11 minutes behind
       the cluster — the times on this screen are wrong"*, in plain language,
       from the API server's own `Date` response header — the only honest source
@@ -2931,14 +2931,25 @@ public release.
       owners is where "someone will do it" means nobody does
       ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) ·
       [§ D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
-      **Turn one is landed** — the states are drawn in
-      [screens/states.md § Your computer's clock is off](screens/states.md#your-computers-clock-is-off)
-      and [screens/once.md § When your clock and the cluster's disagree](screens/once.md#when-your-clock-and-the-clusters-disagree),
-      and **the sentence quoted above is the *ahead* half's**: the header holds a
-      pointer and the banner holds the sentence, the two halves do not share one,
-      and behind the cluster `age` blanks rather than lies. Take the strings from
-      the screens, not from this box
-      ([D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28))
+      **The sentence quoted above is not what shipped, and neither is D55's.**
+      The header holds a pointer and a banner holds the sentence — 97 characters
+      do not fit one line — and the two directions do not share a sentence
+      ([D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)).
+      Then an operator review took the *behind* wording away too: `age` blanks
+      only what is younger than *skew − 5 min* and prints everything older short
+      by the whole gap, so that half **under-reports as well as blanking** — 16 of
+      32 cards carried an age under a report claiming times were blank. Both
+      sentences also named a culprit nothing measured, and a middlebox 30 minutes
+      fast made k8rs blame a laptop that was correct. Second blocker: `Client::send`
+      returns `Ok` for a 403, so a refusal's `Date` was being read as the cluster's
+      clock — a `kubectl proxy` with a dead upstream manufactures one from its own
+      ([D177](NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28) ·
+      [reports/2026-08-28-clock-skew-date-header.md](reports/2026-08-28-clock-skew-date-header.md)).
+      Shipped: `Session::skew` off the `Date` header, non-2xx refused, rounded to
+      nearest, and the two drawn sentences byte-identical in both renderers. The
+      TUI pointer and banner are Phase 9's — `views.rs` does not exist. The two
+      `SKEW_ALLOWANCE` copies could drift silently and now cannot
+      (`scripts/skew-guard.py`, in `just check`). 617 tests, 0 missed mutants
 - [ ] Certificate rules that need the wire: C2 (API server serving cert) and
       C3 (pending CSRs)
 - [ ] **The typed lists `analysis.rs` needs**, fetched on demand when a report
@@ -3020,7 +3031,17 @@ public release.
       [D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)
       does not yet carry. Found by the operator review of the reconnect box, which
       is also what makes the Authorization row of the security gate **not
-      tickable until this box closes** — that row is this box's to earn
+      tickable until this box closes** — that row is this box's to earn.
+      **And it owns the placement of the *"One node check is off"* line**, which
+      is drawn but not built: `Input::skipped` is `BTreeMap::new()` on the live
+      path, so the string lives in `screens/` and nowhere in `src/`. It goes
+      **below** the clock-skew sentence, not above it
+      ([screens/once.md § Stacked with a check that could not run](screens/once.md#stacked-with-a-check-that-could-not-run) ·
+      [D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)).
+      **The `▲ k8rs is not getting …` watch-trouble line is a third thing and is
+      not this one** — per-watch, in the report's own severity vocabulary, in no
+      `screens/` file — and the clock box's tests briefly cited it as if it were.
+      Found by `tester`, 2026-08-28
 - [ ] Wire into the same print loop; verify against kind while breaking pods
 - [ ] The **read-only `ClusterRole`** written out in `docs/security.md`, and
       verified by running v0.0.1 against kind under exactly that role and

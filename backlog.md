@@ -1429,6 +1429,39 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   > actually happen* names as *a claim reasoned from a definition instead of measured against
   > the object*. Both drawn forms are correct; only the badge is open.
 
+### From the clock-skew operator review (2026-08-28)
+
+- **The skew is measured once at connect and never refreshed.** Disclosed in `Session::skew`'s
+  own doc, so it is a known ceiling rather than a surprise, but it cuts both ways: a laptop that
+  starts k8rs in the seconds after resume — before chrony steps the clock — carries a false
+  sentence for the life of the process, and a clock that goes wrong mid-session is never
+  reported. The watches already reconnect, so re-measuring on a reconnect is close to free.
+  It also lands the other half of `screens/states.md § While disconnected`, which requires the
+  pointer and banner to vanish when k8rs is not completing requests — a session-level state that
+  does not exist today, which `dev-core` recorded on the field rather than inventing. A
+  `views.rs` question as much as a `k8s.rs` one, so it waits for the phase that has both.
+  Found by `k8s-admin`
+  ([reports/2026-08-28-clock-skew-date-header.md](reports/2026-08-28-clock-skew-date-header.md) § 5).
+- **`/version` is fetched twice at connect and the two calls can be answered by two different
+  API servers.** Measured on the wire: two requests 7 ms apart, then never again — no polling, so
+  nothing here scales with cluster size. Behind an HA control plane or a round-robin load
+  balancer, though, the version comes from one machine and the clock from another. Ruled
+  2026-08-28: **the second call stays.** Collapsing them means deserialising `Info` here and
+  re-implementing kube's status classification, which is private — and the same review proved
+  that classification load-bearing, since reading a response without it is what let a refusal's
+  `Date` become a clock claim
+  ([D177](NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28)).
+  Reopen if a cluster is ever seen where the two disagree by more than NTP tolerance. Found by
+  `k8s-admin`.
+- **Whether a real TLS-terminating middlebox rewrites `Date` on a 200 is unproven in both
+  directions.** `kubectl proxy` was measured and *copies* the upstream `Date` byte for byte, so
+  a bastion hop does not make the reading a lie, and an SSH tunnel cannot touch it — TLS is end
+  to end. But no nginx/envoy/F5 was available on the review host, and the status check that
+  closes the refusal case does not cover a middlebox rewriting `Date` on a success. What limits
+  the damage is the wording: the sentence names a measured gap and a direction and never a
+  culprit, which stays true whichever clock the header came from. Measure it if one is ever to
+  hand. Found by `k8s-admin`, who named it unproven rather than inferring it.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

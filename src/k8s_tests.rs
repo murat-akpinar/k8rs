@@ -2,6 +2,7 @@ use super::*;
 
 use crate::rules::ObjectKind;
 use k8s_openapi::jiff::SignedDuration;
+use k8s_openapi::jiff::fmt::rfc2822::DateTimePrinter;
 use k8s_openapi::serde::de::DeserializeOwned;
 use std::collections::BTreeSet;
 
@@ -5789,7 +5790,15 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
         context,
         namespace,
         client_certificate,
+        skew,
     } = session(offline()).await;
+
+    assert_eq!(
+        skew, None,
+        "a cluster that answered nothing sent no `Date` header, so there is no reading to \
+         report — and a clock this file guessed at would be the *blank rather than guessed* rule \
+         broken by the one field written to keep it"
+    );
 
     assert_eq!(
         renewal, None,
@@ -6591,6 +6600,7 @@ async fn a_session_hands_the_store_what_it_learned_and_a_question_that_failed_is
         context: Some("kind-k8rs".to_string()),
         namespace: None,
         client_certificate: Some(certificate.clone()),
+        skew: None,
     };
     let identity = Identity::of(&session);
     assert_eq!(
@@ -8172,7 +8182,20 @@ async fn every_string_the_picker_draws_is_stripped_and_bounded() {
 /// `scripts/security-guard.py`: the guard refuses a hardcoded loopback *URL* because in product
 /// code it is a second outbound path and usually a dev leftover, and there is no such URL here —
 /// the port is whatever `:0` gave us and the string does not exist until the test runs.
-async fn stub_apiserver() -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+///
+/// **`date` is the whole header line, name and all**, because the *name*'s spelling is one of the
+/// things a test here has to vary: a real API server sends `date:` over HTTP/2 and `Date:` over
+/// HTTP/1.1 (`reports/2026-08-28-clock-skew-date-header.md` § 1). `None` is a proxy that strips
+/// it — a real shape, and one that has to stay silent.
+///
+/// **`status` is the status line every answer carries**, and it exists because `Client::send`
+/// returns `Ok` for a refusal: a `403` with a perfectly good `Date` on it is the shape that made
+/// a middlebox's clock read as the cluster's (NOTES § D177), and it was unreachable while this
+/// stub could only answer `200`.
+async fn stub_apiserver(
+    status: &str,
+    date: Option<&str>,
+) -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -8181,9 +8204,13 @@ async fn stub_apiserver() -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String
     let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
 
     let log = std::sync::Arc::clone(&asked);
+    let date = date.map_or(String::new(), |line| format!("{line}\r\n"));
+    let status = status.to_string();
     tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
             let log = std::sync::Arc::clone(&log);
+            let date = date.clone();
+            let status = status.clone();
             tokio::spawn(async move {
                 // One connection carries several requests: hyper keeps it alive, so this reads
                 // until the socket closes rather than answering once and giving up.
@@ -8210,7 +8237,7 @@ async fn stub_apiserver() -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String
                             .push(format!("{path}{aggregated}"));
                         let body = discovery_answer(&path);
                         let answer = format!(
-                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n{date}\
                              content-length: {}\r\n\r\n{body}",
                             body.len()
                         );
@@ -8271,7 +8298,7 @@ fn discovery_answer(path: &str) -> String {
 /// claims, paid in round trips this test can count.
 #[tokio::test]
 async fn a_server_with_no_aggregated_discovery_falls_back_and_keeps_the_core_group() {
-    let (client, asked) = stub_apiserver().await;
+    let (client, asked) = stub_apiserver("200 OK", None).await;
     let pairs = served(&client).await.expect("the stub answered every path");
 
     let mut kinds: Vec<String> = pairs
@@ -8305,4 +8332,402 @@ async fn a_server_with_no_aggregated_discovery_falls_back_and_keeps_the_core_gro
         ],
         "the fallback no longer costs what § EVERY KIND THE CLUSTER SERVES says it costs"
     );
+}
+
+// --- WHAT THE `DATE` HEADER SAYS ABOUT THIS MACHINE'S CLOCK ---
+//
+// **The pure half is fed by hand and the wire half is fed by a server**, which is the split
+// [`measure`] exists for: every shape a proxy can put in a `Date` is a string, and only the
+// question *did the header come off the response at all* needs a socket.
+//
+// **The parser's answers are measured here rather than read off jiff's documentation**
+// (NOTES § D136). HTTP's `Date` is IMF-fixdate — `Fri, 28 Aug 2026 12:00:00 GMT` — and RFC 2822
+// calls `GMT` an *obsolete* zone, so that the crate accepts it is a fact about the crate and not
+// about the RFC. Run against jiff 0.2.35 on 2026-08-28: `GMT`, `+0000` and `UT` all parse to the
+// same instant; a weekday that disagrees with the date, a value with no zone at all, and an empty
+// string all do not.
+
+/// A fixed instant to measure against, and the one every `Date` below is written around.
+/// `k8s.rs` reads the real clock (`local_clock`); a test may not, or the answer moves under it
+/// (invariant 5, NOTES § D18).
+fn machine_clock() -> Timestamp {
+    "2026-08-28T12:00:00Z"
+        .parse()
+        .expect("a fixed timestamp this file wrote itself")
+}
+
+/// **The instant this machine is actually at, read through `std` and deliberately not through
+/// [`local_clock`]** — the one place in this file that needs the real clock rather than
+/// [`machine_clock`]'s fixed one.
+///
+/// **A test that builds its expectation with the function under test passes however that function
+/// lies** (NOTES § D26), and this is not a hypothetical: the first draft of
+/// [`a_session_measures_its_skew_off_the_date_the_server_sent`] wrote its `Date` from
+/// `local_clock`, so `local_clock` returning the Unix epoch — which is `Timestamp::default()` —
+/// moved the header and the reading together and the assertion still held. The mutation gate
+/// reported it MISSED, and this function is the fix (2026-08-28).
+fn this_machine_now() -> Timestamp {
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("this machine's clock is set after 1970");
+    Timestamp::new(
+        since_epoch.as_secs() as i64,
+        since_epoch.subsec_nanos() as i32,
+    )
+    .expect("this machine's clock is a moment jiff can hold")
+}
+
+/// The `Date` a server whose clock sits `offset` from [`machine_clock`] would send, printed by
+/// jiff's own RFC 9110 printer — which is the format HTTP names and the one a real API server
+/// puts on the wire.
+fn date_header(offset: SignedDuration) -> String {
+    let served = machine_clock()
+        .checked_add(offset)
+        .expect("an offset this file chose is in range");
+    DateTimePrinter::new()
+        .timestamp_to_rfc9110_string(&served)
+        .expect("a timestamp inside jiff's range prints")
+}
+
+/// **The same `Date`, widened to `bytes` the one way a wire can carry it there.**
+///
+/// RFC 2822 allows folding whitespace *between* the fields, and `http` strips only the leading and
+/// trailing kind — so spaces after the comma arrive intact and still parse, while padding on
+/// either end is eaten as OWS before this crate sees it. That is the difference between proving
+/// [`DATE_BYTES`] against a shape a server can send and proving it against one it cannot.
+fn widened(date: &str, bytes: usize) -> String {
+    let (weekday, rest) = date
+        .split_once(' ')
+        .expect("an RFC 9110 date has a space after the comma");
+    format!("{weekday}{}{rest}", " ".repeat(bytes - date.len() + 1))
+}
+
+/// **A cluster whose stamps sit in our future is a machine that is behind**, and the sign says so.
+///
+/// This is the half [`crate::rules::age`] already reads: past the allowance it draws no time at
+/// all rather than a negative one, so a card goes quietly blank and this is the only field that
+/// can say why (NOTES § D55, § D69).
+#[test]
+fn a_server_ahead_of_this_machine_reads_as_a_clock_that_is_behind() {
+    let skew = measure(
+        machine_clock(),
+        date_header(SignedDuration::from_mins(11)).as_bytes(),
+    )
+    .expect("eleven minutes is past the allowance");
+    assert_eq!(
+        skew.as_mins(),
+        -11,
+        "a server eleven minutes ahead of us is this machine eleven minutes behind it; a positive \
+         reading here would have the renderer print the opposite sentence to the one that is true"
+    );
+}
+
+/// **A cluster whose stamps sit in our past is a machine that is ahead** — the half that blanks
+/// nothing and inflates everything, and the one D55 calls manufacturing findings on a healthy
+/// cluster.
+#[test]
+fn a_server_behind_this_machine_reads_as_a_clock_that_is_ahead() {
+    let skew = measure(
+        machine_clock(),
+        date_header(SignedDuration::from_mins(-9)).as_bytes(),
+    )
+    .expect("nine minutes is past the allowance");
+    assert_eq!(
+        skew.as_mins(),
+        9,
+        "a server nine minutes behind us is this machine nine minutes ahead of it"
+    );
+}
+
+/// **Inside five minutes there is nothing to say, and the boundary itself is inside**
+/// (`screens/states.md` § The threshold). `age` blanks at `< -SKEW_ALLOWANCE`, so at exactly five
+/// minutes nothing on any screen is different — and a sentence with nothing to point at is the
+/// warning that file refuses.
+#[test]
+fn a_skew_inside_the_allowance_is_nothing_to_say() {
+    for seconds in [-300, -299, -1, 0, 1, 299, 300] {
+        assert_eq!(
+            measure(
+                machine_clock(),
+                date_header(SignedDuration::from_secs(seconds)).as_bytes()
+            ),
+            None,
+            "a server {seconds}s away is inside the five-minute allowance, and drawing a sentence \
+             there points at a screen that looks exactly the same"
+        );
+    }
+}
+
+/// **One second past it is said, in both directions** — the other side of the boundary above, so
+/// the two together pin it rather than describing it.
+#[test]
+fn one_second_past_the_allowance_is_said_in_both_directions() {
+    for seconds in [-301, 301] {
+        let skew = measure(
+            machine_clock(),
+            date_header(SignedDuration::from_secs(seconds)).as_bytes(),
+        )
+        .expect("301 seconds is past the allowance");
+        assert_eq!(
+            skew.as_secs(),
+            -seconds,
+            "past the allowance the reading is the measurement itself, sign and all"
+        );
+    }
+}
+
+/// **Every `Date` this parser cannot read is silence, never a guess and never a panic**
+/// (`screens/states.md` § When there is nothing to say).
+///
+/// **The four shapes were measured, not imagined**: an empty value, prose, a value with no zone,
+/// and — the one that would not have been guessed — a weekday that disagrees with its own date,
+/// which jiff refuses by default because RFC 2822 conformance requires the two to agree.
+#[test]
+fn a_date_this_parser_cannot_read_is_nothing_to_say() {
+    for value in [
+        "",
+        "not a date",
+        "Fri, 28 Aug 2026 12:20:00",
+        "Mon, 28 Aug 2026 12:20:00 GMT",
+        "Fri, 32 Aug 2026 12:20:00 GMT",
+    ] {
+        assert_eq!(
+            measure(machine_clock(), value.as_bytes()),
+            None,
+            "{value:?} is not a time, and a header we cannot read is no evidence about the clock \
+             in either direction"
+        );
+    }
+}
+
+/// **A `Date` longer than a `Date` can be is not read at all** — the security gate's *sizes are
+/// bounded*, applied to the one header this file reads off a response head.
+///
+/// **Both sides of [`DATE_BYTES`], so the bound is load-bearing rather than decorative**, and
+/// padded the way [`widened`] is rather than at the ends: a trailing-space value proves the bound
+/// for a framing `http` strips before this file ever sees it (D29, D31 — the framing and not just
+/// the object).
+#[test]
+fn a_date_longer_than_a_date_can_be_is_not_read() {
+    let value = date_header(SignedDuration::from_mins(11));
+    assert_eq!(
+        widened(&value, DATE_BYTES).len(),
+        DATE_BYTES,
+        "the padding is counted in bytes"
+    );
+    assert!(
+        measure(machine_clock(), widened(&value, DATE_BYTES).as_bytes()).is_some(),
+        "a value exactly at the cap is still read — a bound that also refuses what it allows \
+         cannot be told from one that refuses everything"
+    );
+    assert_eq!(
+        measure(machine_clock(), widened(&value, DATE_BYTES + 1).as_bytes()),
+        None,
+        "one byte past the cap is not read, and the same bytes one shorter are — so the length is \
+         what decided, not the content"
+    );
+}
+
+/// **The far future is a very large number, and past the parser's range it is silence** — two
+/// answers, not one, and the first draft of this test knew only the first.
+///
+/// **`Timestamp::duration_since` cannot overflow because `parse_timestamp` will not hand it
+/// anything out of range** (NOTES § D54 for the arithmetic). The range is
+/// `-377705023201..=253402207200` seconds, read off the error jiff raises rather than off the
+/// type's documentation — so `Wed, 01 Jan 5000` measures and `Fri, 31 Dec 9999 23:59:59` does not
+/// parse at all. *The year 9999* is therefore not one answer, and a claim that it was had never
+/// been fed one (`reports/2026-08-28-clock-skew-date-header.md` § 10).
+///
+/// **What the reachable half prints is pinned because it is ugly and someone will meet it.** No
+/// API server sends it; a broken proxy might, and the sentence stays grammatical and true — the
+/// two clocks really are that far apart — rather than becoming a panic or a blank.
+#[test]
+fn the_far_future_is_a_very_large_number_until_it_is_past_the_parser() {
+    let skew = measure(machine_clock(), b"Wed, 01 Jan 5000 00:00:00 GMT")
+        .expect("the year 5000 is past the allowance and inside the parser's range");
+    assert_eq!(
+        skew.as_mins(),
+        -1_563_827_760,
+        "the far future is a number the renderer can spell, not an overflow and not a panic"
+    );
+    for past_the_range in [
+        &b"Fri, 31 Dec 9999 23:59:59 GMT"[..],
+        &b"Fri, 31 Dec 9999 12:00:00 GMT"[..],
+    ] {
+        assert_eq!(
+            measure(machine_clock(), past_the_range),
+            None,
+            "a moment jiff cannot hold is a `Date` that did not parse, which is silence and not \
+             a saturated reading"
+        );
+    }
+}
+
+/// **The three zone spellings HTTP can put in a `Date` all measure the same**, and this is the
+/// test that had to be run rather than reasoned about (NOTES § D136): `GMT` is *obsolete* in
+/// RFC 2822's own words and is what HTTP requires, so jiff accepting it is a fact about jiff.
+#[test]
+fn the_zone_spellings_a_server_can_send_all_measure_the_same() {
+    let readings: Vec<Option<SignedDuration>> = [
+        "Fri, 28 Aug 2026 12:11:00 GMT",
+        "Fri, 28 Aug 2026 12:11:00 +0000",
+        "Fri, 28 Aug 2026 12:11:00 UT",
+    ]
+    .iter()
+    .map(|value| measure(machine_clock(), value.as_bytes()))
+    .collect();
+    assert_eq!(
+        readings,
+        vec![Some(SignedDuration::from_mins(-11)); 3],
+        "one instant written three legal ways has to be one reading, or which proxy is in front \
+         of the cluster decides whether the reader is warned"
+    );
+}
+
+/// **The header is read off a real response, by a request built the way invariant 1 allows.**
+///
+/// Three things at once, and only a server can show any of them: the `Date` a response carries
+/// reaches [`Session::skew`] at all; the probe goes out as a `GET /version` — the same path and
+/// the same spelling `Client::apiserver_version` sends, which is why the log holds that path
+/// twice and no variant of it beside; and it is a *second* call rather than a replacement, so
+/// `apiserver_version` still owns the decode and the refusal (§ CONNECTING).
+///
+/// **Both spellings of the header name, because a real API server sends both** — `date:` over
+/// HTTP/2 and `Date:` over HTTP/1.1, measured against kind
+/// (`reports/2026-08-28-clock-skew-date-header.md` § 1). `HeaderMap` is case-insensitive; that is
+/// now fed rather than recalled, which is what the comment in `k8s.rs` claimed before this loop
+/// existed.
+///
+/// **That the request was built through an allowlisted reader is not asserted here and cannot
+/// be**: `Request::get` and a hand-rolled `http::Request::get` put identical bytes on the wire.
+/// `clippy.toml` and `scripts/write-guard.py` are what hold invariant 1 over this call, which is
+/// the mechanical check NOTES § D141 exists to keep mechanical.
+///
+/// **The `Date` is written from this machine's own clock plus 11m30s**, not from a fixed instant:
+/// the reading is against the real clock `local_clock` reads a moment later, and the extra 30
+/// seconds is what keeps the rounding to whole minutes off the boundary however long the test
+/// takes to get there. **It is read through [`this_machine_now`] and not through `local_clock`**,
+/// for the reason that function's own doc gives.
+#[tokio::test]
+async fn a_session_measures_its_skew_off_the_date_the_server_sent() {
+    for name in ["date", "Date"] {
+        let served = this_machine_now()
+            .checked_add(SignedDuration::from_secs(11 * 60 + 30))
+            .expect("in range");
+        let date = DateTimePrinter::new()
+            .timestamp_to_rfc9110_string(&served)
+            .expect("a timestamp prints");
+        let (client, asked) = stub_apiserver("200 OK", Some(&format!("{name}: {date}"))).await;
+
+        let skew = session(client)
+            .await
+            .skew
+            .unwrap_or_else(|| panic!("the stub sent `{name}:` eleven and a half minutes ahead"));
+        assert_eq!(
+            skew.as_mins(),
+            -11,
+            "the `Date` the server sent under `{name}:` did not reach the session, or reached it \
+             with the sign inverted"
+        );
+
+        let asked = asked.lock().expect("the log is never poisoned").clone();
+        assert_eq!(
+            asked
+                .iter()
+                .filter(|path| path.starts_with("/version"))
+                .count(),
+            2,
+            "the version read and the clock read are two calls to one path (§ CONNECTING), and a \
+             count of one means the probe never went out. Asked: {asked:?}"
+        );
+        assert!(
+            !asked.contains(&"/version?".to_string()),
+            "the probe asked for a spelling of the path no live cluster has answered — \
+             `/version` is what `apiserver_version` sends and what the documented role grants. \
+             Asked: {asked:?}"
+        );
+    }
+}
+
+/// **A refusal's `Date` is not the cluster's clock** — NOTES § D177's second blocker, whole.
+///
+/// **`Client::send` returns `Ok` for a `403`**, because the status classification that would make
+/// one an error is kube's private `handle_api_errors` and only `request_text` reaches it. So the
+/// response head of a refusal arrives here looking exactly like an answer, and the `Date` on it
+/// belongs to whoever refused: measured, a `kubectl proxy` whose upstream is unreachable
+/// manufactures a `500` from its own clock, and k8rs printed that clock as the cluster's while
+/// saying on stderr that it had been refused.
+///
+/// **The `Date` here is deliberately a good one** — this machine's clock plus eleven and a half
+/// minutes, the same value the test above measures successfully off a `200`. So the only thing
+/// that differs between a reading and silence is the status, which is what makes this fail if the
+/// guard is dropped rather than passing for some second reason.
+#[tokio::test]
+async fn a_refusals_date_is_not_the_clusters_clock() {
+    let served = this_machine_now()
+        .checked_add(SignedDuration::from_secs(11 * 60 + 30))
+        .expect("in range");
+    let date = DateTimePrinter::new()
+        .timestamp_to_rfc9110_string(&served)
+        .expect("a timestamp prints");
+
+    for status in ["403 Forbidden", "500 Internal Server Error"] {
+        let (client, _) = stub_apiserver(status, Some(&format!("date: {date}"))).await;
+        assert_eq!(
+            session(client).await.skew,
+            None,
+            "a `{status}` carried a clock reading into the session — the body was not the \
+             cluster answering, and the `Date` on it is whoever refused"
+        );
+    }
+}
+
+/// **The shapes a server really can deliver where the answer is silence** — each one fed through
+/// a socket rather than into [`measure`], because what is under test is that they survive the
+/// wire looking the way they do (D29: the shapes the pipeline hands it, not the ones that are
+/// convenient).
+///
+/// - **No `Date` at all.** Some proxies strip it.
+/// - **A weekday that contradicts its date.** `Sun, 28 Aug 2026` — that day is a Friday. RFC 2822
+///   conformance requires the two to agree and jiff refuses by default; appliances and
+///   hand-rolled middleboxes get it wrong, and the answer is silence rather than a guess at which
+///   of the two fields to believe.
+/// - **A value past [`DATE_BYTES`], padded where the wire cannot strip it.** RFC 2822 allows
+///   folding whitespace *between* the fields and `http` strips only the leading and trailing kind,
+///   so 40 spaces after the comma arrive intact and parse — 68 bytes of a value that is otherwise
+///   perfectly good. Trailing padding would have proved nothing: `http` eats it as OWS before this
+///   file sees it.
+#[tokio::test]
+async fn the_shapes_a_server_can_send_that_must_not_become_a_reading() {
+    // **Live clock plus eleven and a half minutes, and not [`machine_clock`]'s fixed instant.**
+    // Every row here has to fail for its own reason: a fixed 2026 date would measure as *nothing
+    // to say* against a machine running in 2026 whatever the cap did, so the over-long row would
+    // stay green with [`DATE_BYTES`] deleted. Built this way it reads -11 minutes the moment the
+    // bound stops refusing it.
+    let reading = DateTimePrinter::new()
+        .timestamp_to_rfc9110_string(
+            &this_machine_now()
+                .checked_add(SignedDuration::from_secs(11 * 60 + 30))
+                .expect("in range"),
+        )
+        .expect("a timestamp prints");
+    for (header, why) in [
+        (None, "there is no header to read, so there is no reading"),
+        (
+            Some("date: Sun, 28 Aug 2026 12:55:00 GMT".to_string()),
+            "28 Aug 2026 is a Friday, so this is two claims that cannot both be true",
+        ),
+        (
+            Some(format!("date: {}", widened(&reading, 68))),
+            "68 bytes is past the cap, and internal folding whitespace is what carries it there \
+             through a wire that strips the other kind",
+        ),
+    ] {
+        let (client, _) = stub_apiserver("200 OK", header.as_deref()).await;
+        assert_eq!(
+            session(client).await.skew,
+            None,
+            "a reading was taken where there was no evidence for one: {why}"
+        );
+    }
 }

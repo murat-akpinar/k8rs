@@ -122,15 +122,18 @@ use futures_util::stream::{self, BoxStream, Stream, StreamExt, select_all};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{APIGroupList, Time};
+use k8s_openapi::jiff::fmt::rfc2822::DateTimeParser;
 use k8s_openapi::jiff::{SignedDuration, Timestamp};
 // `serde` and `serde_json` are reached through `k8s-openapi`'s own re-exports rather than named a
 // second time in `Cargo.toml` — the same door `jiff` already comes through above, and invariant
 // 10's narrowest possible answer: a crate already in the build, not even needing to be named.
 use k8s_openapi::serde::Deserialize;
 use k8s_openapi::serde_json::Value;
+use kube::client::Body;
 use kube::config::{AuthInfo, Config, KubeConfigOptions, Kubeconfig};
+use kube::core::params::GetParams;
 use kube::core::response::reason;
-use kube::core::{DynamicObject, Status, gvk::GroupVersionKind};
+use kube::core::{DynamicObject, Request, Status, gvk::GroupVersionKind};
 use kube::discovery::{ApiCapabilities, ApiGroup, ApiResource, Discovery, Scope, verbs};
 use kube::runtime::WatchStreamExt;
 use kube::runtime::utils::Backoff;
@@ -3601,12 +3604,23 @@ impl Browsing {
 // second [`connect`] beside a live one is two sessions, not a mutated one — which is what makes
 // a failed switch able to leave the old session running rather than falling back to nothing.
 //
-// **Three round trips before the first watch and no fourth.** `/version` for [`version_note`],
-// then the aggregated discovery pair `/apis` and `/api` that § EVERY KIND THE CLUSTER SERVES
-// prices at two — one answer read twice, for the sidebar and for the capability probe
-// (§ WHAT ELSE THE CLUSTER SERVES). The watches' own initial LISTs are the fourth onwards and
-// they are not waited for: [`Store::snapshot`] is shut until they land (NOTES § D28) and
-// [`Store::still_listing`] is what a screen draws meanwhile.
+// **Four round trips before the first watch and no fifth.** `/version` for [`version_note`], the
+// same path a second time for the `Date` header alone ([`skew`]), then the aggregated discovery
+// pair `/apis` and `/api` that § EVERY KIND THE CLUSTER SERVES prices at two — one answer read
+// twice, for the sidebar and for the capability probe (§ WHAT ELSE THE CLUSTER SERVES). The
+// watches' own initial LISTs are the fifth onwards and they are not waited for:
+// [`Store::snapshot`] is shut until they land (NOTES § D28) and [`Store::still_listing`] is what
+// a screen draws meanwhile.
+//
+// **The second `/version` is what not growing a second classifier costs**, and it is the choice
+// this box had to make (2026-08-28). `Client::apiserver_version` is the only call that decodes
+// `Info` *and* turns a refusal into `kube::Error::Api` — kube's `handle_api_errors` is private to
+// `client/mod.rs` — while `Client::send` is the only one that hands back the response head a
+// `Date` sits in. Reading both off one call means writing that status-to-error mapping again
+// here, which is the thing § WHAT WENT WRONG forbids by name: it is the one place a failed call
+// is classified, and a second one is how two sentences about the same refusal come to disagree.
+// So the header is read by a second GET whose only failure mode is *no measurement at all*, and
+// [`Session::version`]'s `Err` stays exactly the value kube handed back.
 //
 // **Only what cannot be connected *with* is an error.** Reading the kubeconfig and building the
 // client are the two steps with no cluster on the other side of them; everything after has a
@@ -3759,6 +3773,39 @@ pub(crate) struct Session {
     /// from a backtrace (invariant 8, NOTES § D51) — which is also why [`Session`] has no
     /// `Debug` at all.
     pub(crate) client_certificate: Option<Vec<u8>>,
+    /// **How far this machine's clock is from the cluster's, when that is worth saying at all** —
+    /// signed, and `None` for everything else. Negative is a laptop *behind* the cluster;
+    /// positive is one *ahead* of it.
+    ///
+    /// **The sign is the one [`crate::rules::age`] already reads.** `age` draws no time at all
+    /// when a stamp sits more than five minutes in our own future, which is the laptop that is
+    /// behind — so the negative half here is exactly the half that blanks a card, and one
+    /// direction means one thing in both files (NOTES § D55, § D69).
+    ///
+    /// **`None` is four different silences and they are deliberately one field**
+    /// (`screens/states.md` § When there is nothing to say): a call that was refused rather than
+    /// answered, no `Date` header on the answer, a `Date` that will not parse, and a real skew
+    /// inside [`SKEW_ALLOWANCE`]. All four mean *nothing on any screen is different*, and a field
+    /// that told them apart would be offering a distinction no renderer is allowed to draw. The
+    /// first of them is NOTES § D177's second blocker and was a *reading* until 2026-08-28.
+    ///
+    /// **It is a number and a direction, never a sentence** — the same split invariant 5 already
+    /// makes, where a [`crate::rules::Finding`] carries timestamps and the renderer says
+    /// "4 min ago". The two sentences are drawn in `screens/once.md` § When your clock and the
+    /// cluster's disagree, and `main.rs` is what spells them.
+    ///
+    /// **Read once, at connect, and never refreshed** — the ceiling [`Identity`] states for the
+    /// three facts beside it. A machine whose clock is fixed while k8rs is open keeps saying so
+    /// until the next [`connect`].
+    ///
+    /// **So a renderer that has a live/disconnected state must drop the line while disconnected,
+    /// and this field cannot do it for them** (`screens/states.md` § While disconnected, or while
+    /// the login has expired): the reading needs a *live* answer's `Date` to stay honest, and this
+    /// one is from the last successful request by construction. Nothing here is that state — the
+    /// report `main.rs` prints has per-watch trouble lines and no session-level *disconnected* —
+    /// so the suppression is the drawing's, at Phase 9, and it is written here because this field
+    /// is what that drawing will read.
+    pub(crate) skew: Option<SignedDuration>,
 }
 
 /// **What one discovery answer says**, read twice at connect so nothing asks again
@@ -4666,6 +4713,9 @@ pub(crate) async fn session(client: Client) -> Session {
         text(&mut version, IDENTIFIER);
         version
     });
+    // **Straight after the version and for the header the version call threw away** — the region
+    // head prices the second round trip and says why it is not one call.
+    let skew = skew(&client).await;
     let served = served(&client).await.map(|pairs| Served {
         // Before [`browsable`], which consumes the pairs and rewrites their strings on the way
         // through (NOTES § D160).
@@ -4678,6 +4728,7 @@ pub(crate) async fn session(client: Client) -> Session {
         version,
         served,
         watches,
+        skew,
         // **`None` here and filled in by [`connect_with`]**, which is the only caller that has a
         // kubeconfig to read them from. A client is not a file: it carries no context name and no
         // certificate that could be read back off it.
@@ -4686,6 +4737,163 @@ pub(crate) async fn session(client: Client) -> Session {
         namespace: None,
         client_certificate: None,
     }
+}
+
+/// **What the API server's own `Date` header says about this machine's clock** —
+/// [`Session::skew`], measured rather than guessed.
+///
+/// **`/version`, because it is the one path already known to be granted.** It is what
+/// `Client::apiserver_version` asks for one line above, so a kubeconfig that reaches this call at
+/// all reaches this one — and `docs/security.md`'s read-only Role names it outright, in the same
+/// `nonResourceURLs` rule NOTES § D160 had to add `/apis` to. This box needs no grant that role
+/// did not already carry, which was read off the file rather than assumed.
+///
+/// **The request is built through an invariant-1 reader**, which is § THE BROWSER'S ROWS' own
+/// pattern ([`Fetch`]) with the one builder that fits a single object: `get` is on the allowlist,
+/// and it is what supplies the `GET`. A hand-rolled `http::Request` with a verb of our own
+/// choosing is what NOTES § D142 caught — a complete DELETE that raised nothing — and
+/// `Client::send` is verb-agnostic, which is exactly why `clippy.toml` leaves `Client` off its
+/// list and says so.
+///
+/// **`get` and not `list`, because `list` would send a path no cluster here has answered.**
+/// `Request::list` serialises a query string whatever is in it, so `/version` comes out as
+/// `/version?`; `Request::get` with no `resourceVersion` is a plain `format!("{url_path}/{name}")`
+/// (`request.rs:82-95`), so an empty base and the name `version` produce **`/version`** — byte for
+/// byte the path `Client::apiserver_version` builds one line above, and the only spelling of it
+/// any live cluster has answered. The trailing `?` would very probably be ignored by a Go mux
+/// that routes on `URL.Path` alone; *very probably* is reasoning about the object instead of
+/// measuring it, and there is no cluster in this turn to measure against (NOTES § D136).
+///
+/// **Every failure is the same answer: no measurement.** A refused call, a proxy that strips the
+/// header, a machine whose own clock will not read — none of them is an error this file
+/// classifies, and § WHAT WENT WRONG stays the one place that classifies anything. That is the
+/// whole reason this is an `Option` and not a `Result`: it owes no sentence, so it needs no
+/// taxonomy.
+///
+/// **And *refused* has to be checked for, because `Client::send` does not** (NOTES § D177). It
+/// hands back `Ok(Response)` for a `403` or a `500` — the status classification that would have
+/// turned one into an error is `handle_api_errors`, which is private and which only
+/// `request_text` and its callers reach. Without the line below the sentence above was false:
+/// measured, a `kubectl proxy` whose upstream is unreachable manufactures a whole `500` **from
+/// its own clock**, and k8rs printed *I could not read the server version* on stderr and the
+/// middlebox's clock as the cluster's on stdout, with the reader's own clock correct. **A body
+/// this file did not ask for is not the cluster answering**, and reading its `Date` is the one
+/// way this probe can state something false rather than nothing.
+///
+/// **Nothing off this call reaches a screen, so nothing here is stripped** (invariant 9). What
+/// travels out is a duration this file computed; the header's own bytes are parsed and dropped,
+/// and they are bounded on the way in by [`DATE_BYTES`].
+async fn skew(client: &Client) -> Option<SignedDuration> {
+    let asked = Request::new("")
+        .get(VERSION_NAME, &GetParams::default())
+        .ok()?;
+    let answered = client.send(asked.map(Body::from)).await.ok()?;
+    // The whole of NOTES § D177's second blocker: anything but a 2xx is somebody refusing, and a
+    // refusal's clock is not the cluster's.
+    if !answered.status().is_success() {
+        return None;
+    }
+    // **The local instant is taken after the answer landed**, so the two clocks are read as close
+    // together as the wire allows. What is left between them is one network return trip, which is
+    // milliseconds against a threshold of five minutes.
+    let local = local_clock()?;
+    // `HeaderMap` matches a name without regard to case, and both spellings a real API server
+    // sends are fed to it rather than recalled: kind's answers `date:` over HTTP/2 and `Date:`
+    // over HTTP/1.1, measured on the wire, and `k8s_tests.rs` sends each one through
+    // (`reports/2026-08-28-clock-skew-date-header.md` § 1).
+    measure(local, answered.headers().get("date")?.as_bytes())
+}
+
+/// The one path [`skew`] reads its header off, spelled as the *name* under an empty base because
+/// that is what makes `Request::get` produce `/version` and nothing else. It is
+/// `Client::apiserver_version`'s own path (`client/mod.rs:415`), written here because this file
+/// asks for it too.
+const VERSION_NAME: &str = "version";
+
+/// **The pure half of [`skew`]: one local instant and one `Date` header, subtracted** — no
+/// network, so every shape a server can send is a test rather than a cluster.
+///
+/// **The arithmetic is `Timestamp::duration_since` and never `-`** (NOTES § D54), which is the
+/// rule `rules.rs` already keeps for the same subtraction.
+///
+/// **What makes it total is the parser, not the subtraction**, and the first draft of this comment
+/// argued it the wrong way round — off `Timestamp::MAX - MIN` rather than off the path.
+/// `parse_timestamp` refuses anything outside `-377705023201..=253402207200` seconds, so the
+/// widest gap it can hand over is 6.31×10^11 seconds against an `i64::MAX` of 9.22×10^18. Both
+/// halves of that were run: `Wed, 01 Jan 5000` measures and prints a very large number, while
+/// `Fri, 31 Dec 9999 23:59:59` is **past the range and comes back silence** — so *the year 9999*
+/// is not one answer, and a comment claiming it was had never been fed one
+/// (`reports/2026-08-28-clock-skew-date-header.md` § 10).
+///
+/// **The threshold lives here and in no renderer** (`screens/states.md` § The threshold: five
+/// minutes, the same five, both directions). Two renderers are drawn against this field — the
+/// report `main.rs` prints today, which `--once` inherits when that flag lands, and the header
+/// pointer and banner at Phase 9 — and a threshold each of them remembered separately is the
+/// second copy that goes stale.
+fn measure(local: Timestamp, date: &[u8]) -> Option<SignedDuration> {
+    if date.len() > DATE_BYTES {
+        return None;
+    }
+    let served = DateTimeParser::new().parse_timestamp(date).ok()?;
+    let skew = local.duration_since(served);
+    // Written as two comparisons rather than `abs()`, which panics on a `SignedDuration` of
+    // `i64::MIN` seconds. Unreachable here by the range argument above — and unreachable is not a
+    // reason to write the spelling that has a panic in it at all.
+    (skew > SKEW_ALLOWANCE || skew < -SKEW_ALLOWANCE).then_some(skew)
+}
+
+/// **How far the two clocks may be apart before anything is said** — five minutes, in both
+/// directions.
+///
+/// **The same five `rules::age` blanks a card at, and a second copy only because that one is
+/// private to a frozen file.** `rules.rs` freezes at the end of Phase 3, its `SKEW_ALLOWANCE` is
+/// not `pub`, and this box may not reach back to make it so (CLAUDE.md § forward-only). The
+/// number is not re-argued here: `screens/states.md` § The threshold reuses it deliberately, in
+/// both directions, rather than inventing a second one, and NOTES § D69 is where it was chosen.
+///
+/// **Strictly past it, which is `age`'s own boundary.** `age` blanks when the elapsed time is
+/// `< -SKEW_ALLOWANCE`, so a skew of exactly five minutes changes nothing on screen — and a
+/// sentence pointing at a screen that looks the same is the warning `screens/states.md` refuses.
+const SKEW_ALLOWANCE: SignedDuration = SignedDuration::from_mins(5);
+
+/// **The most a `Date` header may be before it is not read at all** — 64 bytes.
+///
+/// **It bounds what reaches the parser and not what is allocated, which is a narrower claim than
+/// the first draft made** (2026-08-28). By the time [`measure`] sees the value, hyper has already
+/// read and allocated it: a 100 000-byte `Date` was accepted off the wire and refused here, so
+/// the memory was spent either way and the security gate's *sizes are bounded* is held for this
+/// header by hyper's own header limits, not by this constant. What this one buys is that no
+/// unbounded value is ever handed to a date parser.
+///
+/// **Measured against the format rather than picked.** HTTP's own preferred form is IMF-fixdate,
+/// `Sun, 06 Nov 1994 08:49:37 GMT`, which is **29** bytes; RFC 2822 with a numeric offset is 31.
+/// So this is room for twice the longest legal value. It is not decorative: RFC 2822 allows
+/// folding whitespace *between* the fields and `http` strips only the leading and trailing kind,
+/// so a 68-byte value with 40 spaces after the comma both survives the wire and parses — which is
+/// the shape the test feeds. Past the cap there is no sentence and no error
+/// (`screens/states.md` § When there is nothing to say).
+const DATE_BYTES: usize = 64;
+
+/// **This machine's clock as an instant**, or `None` when it cannot be read as one.
+///
+/// **Not `main.rs`'s `wall_clock`, and the two are not a copy of each other**: they share two
+/// library calls and disagree on everything after. That one owes the reader a plain-language
+/// sentence per failure — *this machine's clock is set before 1970* is a thing someone can act on
+/// (invariant 14) — while this one owes nobody anything, because a clock that will not read is
+/// simply a skew that was not measured. Collapsing them would cost `main.rs` the sentence.
+///
+/// **`Timestamp::now` does not exist here**: `jiff` arrives through `k8s-openapi` with
+/// `default-features = false`, so the seconds come off `SystemTime`. No new dependency, and none
+/// is wanted for a subtraction (invariant 10).
+fn local_clock() -> Option<Timestamp> {
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Timestamp::new(
+        since_epoch.as_secs() as i64,
+        since_epoch.subsec_nanos() as i32,
+    )
+    .ok()
 }
 
 /// **Every `(ApiResource, ApiCapabilities)` pair the cluster serves**, by the two-round-trip

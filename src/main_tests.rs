@@ -1098,14 +1098,17 @@ fn the_other_four(store: &mut k8s::Store) {
 fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     let mut last = String::new();
     assert_eq!(
-        live_report(&k8s::Store::default(), now(), &mut last, None, false),
+        live_report(&k8s::Store::default(), now(), &mut last, None, false, None),
         None
     );
 
     // Four of the five landed and the fifth never opened: still not a cluster anyone may read.
     let mut store = k8s::Store::default();
     the_other_four(&mut store);
-    assert_eq!(live_report(&store, now(), &mut last, None, false), None);
+    assert_eq!(
+        live_report(&store, now(), &mut last, None, false, None),
+        None
+    );
     assert!(
         last.is_empty(),
         "something was recorded as printed while the bootstrap was still running"
@@ -1115,13 +1118,13 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     // most recently, so a silent bootstrap has to stay silent *against a non-empty last* too —
     // an empty report is not a report, and printing one would put a blank block on stdout every
     // time a watch re-listed.
-    let printed =
-        live_report(&listed(Vec::new()), now(), &mut last, None, false).expect("a listed store");
+    let printed = live_report(&listed(Vec::new()), now(), &mut last, None, false, None)
+        .expect("a listed store");
     assert!(!printed.is_empty(), "the report is empty: {printed:?}");
     // `None` and not merely *empty*: `Some(String::new())` is a blank block on stdout, which is
     // what the driver would print every time a watch re-listed.
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false),
+        live_report(&store, now(), &mut last, None, false, None),
         None,
         "a bootstrap with nothing wrong printed something after an earlier report"
     );
@@ -1139,15 +1142,15 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     let mut store = listed(objects::<Pod>("kube-system-pods.json"));
     let mut last = String::new();
 
-    let first =
-        live_report(&store, now(), &mut last, None, false).expect("every initial LIST landed");
+    let first = live_report(&store, now(), &mut last, None, false, None)
+        .expect("every initial LIST landed");
     println!("{first}");
     assert!(
         first.contains(" pods · "),
         "the live report is not the report `render` draws"
     );
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false),
+        live_report(&store, now(), &mut last, None, false, None),
         None,
         "the same cluster printed twice"
     );
@@ -1157,7 +1160,7 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     )
     .expect("the capture decodes");
     store.pod(&now(), Event::Apply(crashloop));
-    let second = live_report(&store, now(), &mut last, None, false)
+    let second = live_report(&store, now(), &mut last, None, false, None)
         .expect("a pod arrived, so the report moved");
     println!("{second}");
     assert!(
@@ -1219,7 +1222,8 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
     );
 
     let mut last = String::new();
-    let plain = live_report(&store, now(), &mut last, None, false).expect("every LIST landed");
+    let plain =
+        live_report(&store, now(), &mut last, None, false, None).expect("every LIST landed");
     for pane in PANES {
         assert!(
             !plain.contains(pane),
@@ -1228,7 +1232,7 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
     }
 
     let mut last = String::new();
-    let panes = live_report(&store, now(), &mut last, None, true).expect("every LIST landed");
+    let panes = live_report(&store, now(), &mut last, None, true, None).expect("every LIST landed");
     for pane in PANES {
         assert!(
             panes.contains(pane),
@@ -1261,7 +1265,8 @@ fn versions_draws_the_control_plane_line_and_the_machines_behind_it() {
     let pane_of = |identity| {
         let store = identified(Vec::new(), nodes(), identity);
         let mut last = String::new();
-        let printed = live_report(&store, now(), &mut last, None, true).expect("every LIST landed");
+        let printed =
+            live_report(&store, now(), &mut last, None, true, None).expect("every LIST landed");
         let at = printed.find("[versions]").expect("the pane is drawn");
         printed[at..].to_string()
     };
@@ -1323,7 +1328,8 @@ fn certificates_draws_c1s_row_and_the_sidebar_badge() {
     let printed = |identity| {
         let store = identified(Vec::new(), Vec::new(), identity);
         let mut last = String::new();
-        let printed = live_report(&store, now(), &mut last, None, true).expect("every LIST landed");
+        let printed =
+            live_report(&store, now(), &mut last, None, true, None).expect("every LIST landed");
         let at = printed.find("[certificates]").expect("the pane is drawn");
         let end = printed[at..].find("[drain safety]").expect("the next pane");
         printed[at..at + end].to_string()
@@ -1574,7 +1580,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
 
     let mut last = String::new();
     let failing =
-        live_report(&store, now(), &mut last, None, false).expect("five watches are failing");
+        live_report(&store, now(), &mut last, None, false, None).expect("five watches are failing");
     println!("{failing}");
     for kind in ["pods", "nodes", "Deployments", "StatefulSets", "DaemonSets"] {
         assert!(
@@ -1596,7 +1602,10 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     );
 
     // The same store again is not news…
-    assert_eq!(live_report(&store, now(), &mut last, None, false), None);
+    assert_eq!(
+        live_report(&store, now(), &mut last, None, false, None),
+        None
+    );
 
     // …and then every watch delivers a complete answer, which is what a reconnect looks like
     // from in here: the failure clears itself and the report says so without being asked.
@@ -1604,7 +1613,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     store.pod(&now(), Event::InitDone);
     the_other_four(&mut store);
     let recovered =
-        live_report(&store, now(), &mut last, None, false).expect("the cluster came back");
+        live_report(&store, now(), &mut last, None, false, None).expect("the cluster came back");
     println!("{recovered}");
     assert!(
         !recovered.contains("not getting"),
@@ -1626,7 +1635,8 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         .map(|watch| watch.take(2).boxed())
         .collect();
     k8s::drive_watching(watches, &mut store, |_| {}).await;
-    let stale = live_report(&store, now(), &mut last, None, false).expect("an outage is news");
+    let stale =
+        live_report(&store, now(), &mut last, None, false, None).expect("an outage is news");
     println!("{stale}");
     let (unreadable, cards) = stale
         .split_once("\n\n")
@@ -2054,6 +2064,10 @@ fn saying(
         context: None,
         namespace: None,
         client_certificate: None,
+        // The clock line is stdout's, beside the findings, and this function builds the session
+        // the *startup* line is read off — `screens/once.md` § When your clock and the cluster's
+        // disagree keeps the two streams apart.
+        skew: None,
     }
 }
 
@@ -2264,5 +2278,235 @@ async fn a_cluster_that_never_answers_prints_nothing_and_says_why_it_stopped() {
     assert!(
         stopped.contains("every watch has stopped"),
         "a driver whose watches all ended returned {stopped:?} instead of saying so"
+    );
+}
+
+// --- THE CLOCK LINE ---
+//
+// **Both sentences are `screens/once.md` § When your clock and the cluster's disagree verbatim**,
+// and they are written out here as literals rather than built from the same `format!` the product
+// uses: a test that composes the string the way the code does passes for any wording, including
+// the wrong one. What is asserted is the sentence a reader sees.
+//
+// **The threshold is not tested here and cannot be.** `Some` already means *past five minutes* —
+// `k8s.rs`'s `measure` is where that is decided and `src/k8s_tests.rs` § WHAT THE `DATE` HEADER
+// SAYS ABOUT THIS MACHINE'S CLOCK is where it is pinned, on both sides of the boundary.
+
+/// The sentence an eleven-minute gap with this machine behind gets, as `screens/once.md` draws it.
+const BEHIND: &str = "This computer and the cluster disagree about the time by 11 minutes (this \
+                      one is behind), so recent times are missing and older ones can read smaller \
+                      than they really are.";
+
+/// The sentence a nine-minute gap with this machine ahead gets, as `screens/once.md` draws it.
+const AHEAD: &str = "This computer and the cluster disagree about the time by 9 minutes (this one \
+                     is ahead), so times can read larger than they really are.";
+
+/// **Two directions, two sentences, and neither hedges** (`screens/states.md` § Two directions,
+/// two sentences, because they break differently).
+///
+/// **The asymmetry is the point and is easy to lose.** Behind, `rules::age` does *two* things —
+/// blanks what is younger than the gap, prints everything older short by it — so the sentence
+/// names both; ahead it does one, and the sentence names one. A behind sentence that promised
+/// only a blank is what NOTES § D177 reversed, and it was wrong in the direction that matters: 16
+/// of 32 cards printed an age underneath it.
+///
+/// **Neither assigns fault**, which the pair before them did. k8rs measures a gap between two
+/// clocks; with a middlebox thirty minutes fast between a laptop and an API server that agreed to
+/// the second, *"your computer's clock is 29 minutes behind"* sent the reader to fix a machine
+/// that was right (D177).
+#[test]
+fn the_two_directions_get_the_two_sentences_they_were_drawn_with() {
+    assert_eq!(
+        clock(Some(SignedDuration::from_mins(-11))).as_deref(),
+        Some(BEHIND),
+        "the behind sentence is not the one `screens/once.md` draws"
+    );
+    assert_eq!(
+        clock(Some(SignedDuration::from_mins(9))).as_deref(),
+        Some(AHEAD),
+        "the ahead sentence is not the one `screens/once.md` draws"
+    );
+}
+
+/// **Nothing measured is nothing printed** — the four silences [`k8s::Session::skew`] collapses
+/// into one `None` (a refusal, no header, a header that will not parse, a gap inside the
+/// allowance) arrive here as that one `None`, and this end of the pipe cannot tell them apart
+/// because no renderer is allowed to (`screens/once.md` § The two cases that print nothing).
+#[test]
+fn a_clock_nothing_measured_prints_nothing() {
+    assert_eq!(clock(None), None);
+    assert_eq!(
+        render(&[], &nothing_read()),
+        "0 pods · 0 nodes\n\n○ nothing is broken",
+        "the file-driven path has no cluster to have answered, so the report is byte-for-byte \
+         the one it printed before this box"
+    );
+}
+
+/// **Whole minutes, rounded to the nearest, and the floor stays out of reach of the singular.**
+///
+/// **The rounding is not decoration.** A `Date` has one-second resolution and is stamped before
+/// the response is read, so a true offset of exactly 1800 s reaches this function as 1799-and-a-
+/// bit — floored, the built binary printed **29 minutes** while `chronyc tracking` said 30.0
+/// (`reports/2026-08-28-clock-skew-date-header.md` § 4), and two numbers disagreeing at 3am is the
+/// doubt this line removes. `rules::age`'s floor is right for elapsed time, which genuinely
+/// floors; a gap between two clocks does not.
+///
+/// **The floor is 5 and `1 minute` is unreachable**, which is what lets [`clock`] call [`plural`]
+/// without ever drawing its singular: `Some` starts strictly past five minutes, so the smallest
+/// input is 301 s and the smallest count is 5.
+///
+/// It is the *renderer* that rounds. The measurement stays whole in [`k8s::Session::skew`] for the
+/// header pointer Phase 9 draws off the same field.
+#[test]
+fn the_magnitude_rounds_to_the_nearest_minute_and_never_reads_one() {
+    let count = |seconds: i64| {
+        let sentence = clock(Some(SignedDuration::from_secs(seconds))).expect("past the allowance");
+        sentence
+            .split(" minute")
+            .next()
+            .and_then(|head| head.rsplit(' ').next())
+            .expect("the sentence names a count")
+            .to_string()
+    };
+
+    // The two the middlebox actually served, floored to 29 and 14 before this was rounding.
+    assert_eq!(count(-1799), "30", "1799s is thirty minutes to any reader");
+    assert_eq!(count(-899), "15", "899s is fifteen minutes to any reader");
+    // Half a minute rounds away from zero, and the second below it does not.
+    assert_eq!(count(-330), "6");
+    assert_eq!(count(-329), "5");
+    // Both directions round the same way — `signum` is what carries that.
+    assert_eq!(count(1799), "30");
+    assert_eq!(count(329), "5");
+    // The floor: one second past the allowance is the smallest reading there is, and it is 5.
+    for seconds in [-301, 301] {
+        assert_eq!(
+            count(seconds),
+            "5",
+            "the smallest reading past the threshold is five minutes, so `plural` can never be \
+             asked for `1 minute` — {seconds}s"
+        );
+    }
+}
+
+/// **A clock far enough out to be nonsense still gets a true sentence, never a panic** — the
+/// year-9999 `Date` `src/k8s_tests.rs` measures, carried all the way to the line a reader sees.
+///
+/// **The number is ugly and is deliberately not dressed up here.** `screens/once.md` draws
+/// minutes and nothing else, and inventing a second unit — *2 days*, *8 years* — would be this
+/// file writing wording that belongs to `screens/`. NOTES § D177 upheld it: once a refusal can no
+/// longer feed the measurement, a number this size can only come from an API server whose clock
+/// really is unset, and it says so better than any cap. What matters is that the sentence stays
+/// grammatical and stays true — the two clocks really are that far apart.
+#[test]
+fn an_absurd_clock_is_still_one_true_sentence() {
+    assert_eq!(
+        // The same reading `k8s_tests.rs`'s far-future test measures off `Wed, 01 Jan 5000`,
+        // carried through to the line it becomes.
+        clock(Some(SignedDuration::from_mins(-1_563_827_760))).as_deref(),
+        Some(
+            "This computer and the cluster disagree about the time by 1563827760 minutes (this \
+             one is behind), so recent times are missing and older ones can read smaller than \
+             they really are."
+        )
+    );
+}
+
+/// **Last, after the findings, on both paths through the report** (`screens/once.md` § When your
+/// clock and the cluster's disagree).
+///
+/// The two paths are the reason this is not one assertion: a report with cards ends at the tally
+/// and one without ends at `○ nothing is broken`, and the early return the second used to take is
+/// exactly how a line added to the first goes missing from the second — which is the report a
+/// reader on a healthy cluster sees, and the one where a blank time is most confusing.
+#[test]
+fn the_clock_line_comes_last_whether_or_not_anything_is_broken() {
+    let mut input = read(&["oom.json"]);
+    input.skew = Some(SignedDuration::from_mins(-11));
+
+    assert_eq!(
+        render(&[], &input),
+        format!("1 pod · 0 nodes\n\n○ nothing is broken\n\n{BEHIND}")
+    );
+    assert_eq!(
+        render(
+            &[finding(Severity::Critical, pod_id("payments", "web-0"))],
+            &input
+        ),
+        format!(
+            "1 pod · 0 nodes\n\n● payments/web-0\n  Something happened\n  the numbers that prove \
+             it\n  → do this about it\n\n1 critical\n\n{BEHIND}"
+        )
+    );
+}
+
+/// **What a session measured reaches the report the session prints**, which is the whole of what
+/// this driver owes the box: `k8s.rs` reads the header, [`live_report`] carries the number,
+/// [`clock`] spells it.
+///
+/// **And it lands under the watch-trouble lines, which is this driver's own layout and not a
+/// `screens/` rule** (the PM's ruling, 2026-08-28). Three different lines are easy to conflate
+/// here and only two of them exist today:
+///
+/// - the **watch-trouble** line, `▲ k8rs is not getting …` — per watch, in the report's own `● ▲`
+///   vocabulary, written by [`unreadable`], drawn in no `screens/` file, and placed *above* the
+///   block since before this box;
+/// - the **clock** line, which this box adds at the end of the block;
+/// - the **completeness notice**, `One node check is off: …`, which rides on [`Input::skipped`],
+///   is empty on every live path, and arrives with the namespace-scoping box. `screens/once.md`
+///   § Stacked with a check that could not run puts the clock line *above* that one — a rule about
+///   a line this file cannot yet produce, so citing it for the order below would be borrowing a
+///   sentence that governs something else.
+///
+/// So what is asserted is the layout as it actually is: trouble lines, cards, clock line last. It
+/// is pinned because the clock line is the new thing in it and the pre-existing order is what it
+/// must not disturb.
+///
+/// **The store is bootstrapped and *then* broken**, because that is the one shape where both are
+/// printed at once: five failing watches publish no snapshot at all, so there would be no report
+/// for a clock line to sit under.
+#[tokio::test]
+async fn a_measured_clock_reaches_the_live_report_and_sits_under_what_it_qualifies() {
+    use futures_util::stream::StreamExt;
+    let mut store = listed(Vec::new());
+    let watches = k8s::session(offline())
+        .await
+        .watches
+        .into_iter()
+        .map(|watch| watch.take(2).boxed())
+        .collect();
+    k8s::drive_watching(watches, &mut store, |_| {}).await;
+
+    let mut last = String::new();
+    let report = live_report(
+        &store,
+        now(),
+        &mut last,
+        None,
+        false,
+        Some(SignedDuration::from_mins(9)),
+    )
+    .expect("a bootstrapped store with a watch in trouble is news");
+    println!("{report}");
+
+    assert!(
+        report.ends_with(AHEAD),
+        "the clock line is last, after the findings — got:\n{report}"
+    );
+    assert!(
+        report.contains("not getting"),
+        "this shape is meant to carry a watch-trouble line as well, and it has none — got:\n\
+         {report}"
+    );
+    assert!(
+        report.find("not getting") < report.find(AHEAD),
+        "a watch-trouble line fell below the clock line — [`unreadable`] puts them above the \
+         block and this box may not have moved them — got:\n{report}"
+    );
+    assert_eq!(
+        report.matches("disagree about the time").count(),
+        1,
+        "one measurement is one sentence — got:\n{report}"
     );
 }

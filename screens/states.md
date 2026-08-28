@@ -148,8 +148,9 @@ that a number on them can be believed.
 
 ### It does not fit in the header, so it does not go there whole
 
-*"Your computer's clock is 11 minutes behind the cluster's, so times are
-blank rather than guessed."* is 97 characters. The header row is one line
+*"This computer and the cluster disagree about the time by 11 minutes (this
+one is behind), so recent times are missing and older ones can read smaller
+than they really are."* is 171 characters. The header row is one line
 ([widgets.md § 1a](widgets.md#1a-the-header-row)), already carrying `nodes
 3/3` on the left and up to four `·`-separated facts on the right, and the
 context is never truncated. There is no wrapping, no abbreviation and no
@@ -184,33 +185,35 @@ spare at 80.
 
 ### Two directions, two sentences, because they break differently
 
-D55 is explicit the two halves are not the same bug: behind the cluster,
-`age` returns `None` and the screen goes **quietly blank** where a time used
-to be; ahead of it, `age` returns a **plausible-looking, too-large** number,
-because a fast clock inflates every elapsed duration and nothing about the
-result looks wrong — this is the half D55 calls out as *manufacturing
-findings on a healthy cluster*. One sentence covering both would have to
+Behind the cluster, `age` does not fail one clean way: an event young enough
+still returns `None` and blanks, but everything older prints a number that is
+the whole gap too small — a crash long past can read as a minute old
+([D177](../NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28)).
+Ahead of the cluster only does the second thing: every age inflates by the
+gap and nothing blanks. One sentence covering both directions would have to
 hedge ("may be blank or wrong"), and a beginner reading a hedge does not know
-which card in front of them to distrust. So there are two:
+which card in front of them to distrust — so each sentence names every effect
+its own direction actually has, and neither assigns fault: k8rs measures a
+*gap* between two clocks, not which one is wrong, and a middlebox or a
+control-plane VM with a stopped clock can produce the identical reading an
+unsynced laptop does (D177's second finding). So there are two:
 
 | Direction | What actually happens | The sentence |
 |---|---|---|
-| **behind** the cluster | ages blank past 5 minutes ([D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)) | *"Your computer's clock is 11 minutes behind the cluster's, so times are blank rather than guessed."* |
-| **ahead** of the cluster | ages inflate; nothing blanks; findings can be manufactured on a healthy cluster (D55) | *"Your computer's clock is 9 minutes ahead of the cluster's, so times may be wrong."* |
+| **behind** the cluster | recent events blank; older ones print a number too small by the size of the gap ([D177](../NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28)) | *"This computer and the cluster disagree about the time by 11 minutes (this one is behind), so recent times are missing and older ones can read smaller than they really are."* |
+| **ahead** of the cluster | every age inflates by the size of the gap; nothing blanks | *"This computer and the cluster disagree about the time by 9 minutes (this one is ahead), so times can read larger than they really are."* |
 
 Both sentences are written for **any renderer that can hold one line**,
 deliberately not tied to the word "screen" — [`--once` carries the identical
 strings](once.md#when-your-clock-and-the-clusters-disagree), re-wrapped, the
 same rule every shared string in this product already follows.
 
-Neither is the box's original two-clause wording verbatim. That wording
-(*"...the times on this screen are wrong"*) is the **behind** case's *old*,
-pre-D69 belief — D69 changed what `age` does on that side from "wrong number"
-to "no number," so this file corrects it in place rather than shipping a
-sentence the code has already stopped being true of, the same way D55
-corrected D18 in place instead of leaving the old claim standing next to the
-fix. The box's original wording describes the **ahead** case almost exactly,
-and is kept there.
+These replace the pair this file shipped hours earlier the same day, which
+under-drew *behind* to blanking alone and named a culprit neither direction
+had actually measured — both mistakes, and the evidence that caught them, are
+[NOTES § D176](../NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)
+and [§ D177](../NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28),
+not re-argued here.
 
 ### The threshold: five minutes, the same five, both directions
 
@@ -238,18 +241,18 @@ than inventing a second constant:
 ```
  nodes 3/3       ctx: prod-eu · live · admin · ⚠ your clock is behind
 ┌────────────────────┬───────────────────────────────────────────────┐
-│▸ ALERTS     3 ● 7 ▲│  ⚠ Your computer's clock is 11 minutes behind │
-│ RESOURCES          │    the cluster's, so times are blank rather   │
-│   workloads        │    than guessed.                              │
-│   network          │                                               │
-│   storage          │  ● payments/web  ·  3 of 5 pods               │
-│   config           │    Containers exceeded their memory limit     │
-│   cluster          │    and were killed by the kernel (OOMKilled)  │
-│ ANALYSIS           │    limit 256Mi · exit 137 · 47 restarts       │
-│   capacity      1 ▲│    → raise limits.memory, or find the leak    │
-│   certificates  30d│                                               │
-│   drain safety     │                                               │
-│   posture          │                                               │
+│▸ ALERTS     3 ● 7 ▲│  ⚠ This computer and the cluster disagree     │
+│ RESOURCES          │    about the time by 11 minutes (this one is  │
+│   workloads        │    behind), so recent times are missing and   │
+│   network          │    older ones can read smaller than they      │
+│   storage          │    really are.                                │
+│   config           │                                               │
+│   cluster          │  ● payments/web  ·  3 of 5 pods               │
+│ ANALYSIS           │    Containers exceeded their memory limit     │
+│   capacity      1 ▲│                                               │
+│   certificates  30d│  ▲ shop/api  ·  2 of 6 pods  ·  1 min ago     │
+│   drain safety     │    Running, but not receiving traffic — the   │
+│   posture          │    readiness check is failing                 │
 │   restarts         │                                               │
 │   waste            │                                               │
 │   versions         │                                               │
@@ -260,33 +263,38 @@ than inventing a second constant:
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-The card's right edge — normally `4 min ago` on this exact finding
-([the connection dropped](#the-connection-dropped)) — is simply absent. That
-is not a new rendering rule: it is *No number we cannot produce*
+Two cards, two effects, and neither hides which one it is showing. On
+`payments/web` the right edge — normally `4 min ago` on this exact finding
+([the connection dropped](#the-connection-dropped)) — is simply absent: *No
+number we cannot produce*
 ([alerts.md](alerts.md#the-rules-this-screen-obeys)), the same mechanism the
 cordon card already uses for a taint stamped by hand
-([alerts.md § the cordon card](alerts.md#the-cordon-card-with-and-without-its-clock)).
-What is new here is the **scale**: normally one rare card in the whole list
-goes ageless and explains itself by being the only one; under this state
-*every* card that would ordinarily carry a time loses it at once, which is
-exactly the situation that turns a self-explaining absence into one that
-needs the banner above it.
+([alerts.md § the cordon card](alerts.md#the-cordon-card-with-and-without-its-clock)),
+now firing on every recent card at once instead of one rare one — the scale
+that turns a self-explaining absence into one that needs the banner above it.
+On `shop/api`, `1 min ago` is not absent and is not flagged: it is the same
+finding [§ What it prints](once.md#what-it-prints) shows at its true age,
+`12 min ago` — computed against the wrong `now`, it reads as fresher than it
+is, and a stale problem that reads as fresh is exactly what someone acts on
+first — the failure
+[D177](../NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28)
+found this box's first draft missed entirely.
 
 ### Ahead of the cluster
 
 ```
  nodes 3/3        ctx: prod-eu · live · admin · ⚠ your clock is ahead
 ┌────────────────────┬───────────────────────────────────────────────┐
-│▸ ALERTS     3 ● 7 ▲│  ⚠ Your computer's clock is 9 minutes ahead of│
-│ RESOURCES          │    the cluster's, so times may be wrong.      │
-│   workloads        │                                               │
-│   network          │  ● payments/web  ·  3 of 5 pods    4 min ago  │
-│   storage          │    Containers exceeded their memory limit     │
-│   config           │    and were killed by the kernel (OOMKilled)  │
-│   cluster          │    limit 256Mi · exit 137 · 47 restarts       │
-│ ANALYSIS           │    → raise limits.memory, or find the leak    │
-│   capacity      1 ▲│                                               │
-│   certificates  30d│                                               │
+│▸ ALERTS     3 ● 7 ▲│  ⚠ This computer and the cluster disagree     │
+│ RESOURCES          │    about the time by 9 minutes (this one is   │
+│   workloads        │    ahead), so times can read larger than they │
+│   network          │    really are.                                │
+│   storage          │                                               │
+│   config           │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   cluster          │    Containers exceeded their memory limit     │
+│ ANALYSIS           │    and were killed by the kernel (OOMKilled)  │
+│   capacity      1 ▲│    limit 256Mi · exit 137 · 47 restarts       │
+│   certificates  30d│    → raise limits.memory, or find the leak    │
 │   drain safety     │                                               │
 │   posture          │                                               │
 │   restarts         │                                               │
@@ -301,10 +309,11 @@ needs the banner above it.
 
 This card is **byte-for-byte identical** to one on a correctly-clocked
 cluster. `4 min ago` is not flagged, not asterisked, not dimmed differently —
-there is nothing on the card itself that can carry the doubt, which is
-exactly D55's point about this direction: it does not blank, it lies quietly.
-The banner above is the *only* signal on the whole screen, which is why it
-gets a whole sentence rather than a symbol.
+there is nothing on the card itself that can carry the doubt. Unlike the
+behind direction, that is *always* true here — every card on an ahead-skewed
+screen looks like this one, never blank — so the banner above is the *only*
+signal on the whole screen, which is why it gets a whole sentence rather than
+a symbol.
 
 ### Nothing is broken, and the clock is still off
 
@@ -321,11 +330,11 @@ has simply never synced deserves to be told before anything else goes wrong:
 │   network          │        84 pods and 3 nodes checked, none of   │
 │   storage          │        them is in trouble right now.          │
 │   config           │                                               │
-│   cluster          │        Your computer's clock is 11 minutes    │
-│ ANALYSIS           │        behind the cluster's, so times are     │
-│   capacity      1 ▲│        blank rather than guessed.             │
-│   certificates  30d│                                               │
-│   drain safety     │                                               │
+│   cluster          │        This computer and the cluster disagree │
+│ ANALYSIS           │        about the time by 11 minutes (this one │
+│   capacity      1 ▲│        is behind), so recent times are missing│
+│   certificates  30d│        and older ones can read smaller than   │
+│   drain safety     │        they really are.                       │
 │   posture          │                                               │
 │   restarts         │                                               │
 │   waste            │                                               │
@@ -349,8 +358,8 @@ The `Worth a look anyway → capacity` line from the [plain nothing-is-broken
 state](#nothing-is-broken) is left off this mockup for room, not for a rule:
 unlike the namespace-scoped variant, clock skew does not switch the Capacity
 check off, so that line is free to stay in the real screen. It is only absent
-here because this file has fourteen rows to draw in and the clock paragraph
-already uses three of them.
+here because this file has fifteen rows to draw in and the longer, two-effect
+sentence now uses five of them.
 
 ### Your clock and a scoped namespace together
 
@@ -363,21 +372,21 @@ trust *any* time on the page should be told that before being told which
 ```
  nodes 3/3     ctx: prod-eu · ns: payments · read-only · ⚠ your clock is behind
 ┌────────────────────┬─────────────────────────────────────────────────────────┐
-│▸ ALERTS     3 ● 7 ▲│  ⚠ Your computer's clock is 11 minutes behind the       │
-│ RESOURCES          │    cluster's, so times are blank rather than guessed.   │
-│   workloads        │                                                         │
-│   network          │  You can't list pods across the whole cluster, so k8rs  │
-│   storage          │  is showing the namespace your kubeconfig points at:    │
-│   config           │  payments. Use --namespace <name> for a different one,  │
-│   cluster          │  or ask for cluster-wide read access.                   │
-│ ANALYSIS           │                                                         │
-│   capacity         │  One node check is off: spotting a node someone started │
-│   certificates  30d│  emptying and did not finish needs every pod in the     │
-│   drain safety     │  cluster.                                               │
-│   posture          │                                                         │
-│   restarts         │  ● payments/web  ·  3 of 5 pods                         │
-│   waste            │    Containers exceeded their memory limit               │
-│   versions         │                                                         │
+│▸ ALERTS     3 ● 7 ▲│  ⚠ This computer and the cluster disagree about the time│
+│ RESOURCES          │    by 11 minutes (this one is behind), so recent times  │
+│   workloads        │    are missing and older ones can read smaller than they│
+│   network          │    really are.                                          │
+│   storage          │                                                         │
+│   config           │  You can't list pods across the whole cluster, so k8rs  │
+│   cluster          │  is showing the namespace your kubeconfig points at:    │
+│ ANALYSIS           │  payments. Use --namespace <name> for a different one,  │
+│   capacity         │  or ask for cluster-wide read access.                   │
+│   certificates  30d│                                                         │
+│   drain safety     │  One node check is off: spotting a node someone started │
+│   posture          │  emptying and did not finish needs every pod in the     │
+│   restarts         │  cluster.                                               │
+│   waste            │                                                         │
+│   versions         │  ● payments/web  ·  3 of 5 pods                         │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
 │ $ kubectl get pods -n payments --watch                                       │
 ├──────────────────────────────────────────────────────────────────────────────┤
@@ -393,7 +402,9 @@ fits with 6 columns of gap to spare; a context name one character longer
 than `prod-eu`, or a fourth badge (a TLS warning), is what the sacrifice
 order in the section above exists for — the clock pointer is the first of
 the three to go, and the banner underneath still carries the full sentence
-on its own.
+on its own. The longer, two-effect sentence costs this mockup the card's evidence
+line: it is trimmed to its title, same rule as every other truncated card
+here — the full text is one `⏎` away.
 
 ### While disconnected, or while the login has expired
 

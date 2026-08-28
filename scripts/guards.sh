@@ -98,6 +98,11 @@ bash scripts/cluster.sh --self-test
 # front of it (NOTES § D108). This is that filter, for prose rather than JSON.
 python3 scripts/reports-guard.py --self-test
 python3 scripts/reports-guard.py
+# `rules::age` blanks a time past five minutes and `k8s::measure` says why past
+# the same five, from two private constants in two files. Each file's tests pin
+# only its own copy, so a re-tune of one is green with the two out of step.
+python3 scripts/skew-guard.py --self-test
+python3 scripts/skew-guard.py
 # `cargo fmt` reflows code and leaves comments alone, so the 100-column rule was
 # a convention until this ran. rustfmt's own options for it are nightly-only.
 python3 scripts/width-guard.py --self-test

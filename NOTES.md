@@ -198,6 +198,7 @@ its line moving with it.
 - [D174](#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28) — the operator review of the kubeconfig family: ten fixed, one refused, and the two reversals it forced
 - [D175](#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28) — the ruling in D174 was wrong about RFC 3986, and the parse that is safe in both directions
 - [D176](#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28) — the clock-skew line does not fit in the header, and the two halves do not share a sentence
+- [D177](#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28) — the behind half does not only blank, it also under-reports, and a refusal's `Date` is not the cluster's clock
 
 ## Why it exists — where the gap is
 
@@ -15248,6 +15249,17 @@ tell which card in front of them to distrust:
 | **behind** | ages blank past five minutes | *"Your computer's clock is 11 minutes behind the cluster's, so times are blank rather than guessed."* |
 | **ahead** | ages inflate; nothing blanks | *"Your computer's clock is 9 minutes ahead of the cluster's, so times may be wrong."* |
 
+> **This table's *behind* row is wrong and both sentences were replaced on the
+> same day, 2026-08-28** — see
+> [D177](#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28),
+> which an operator review returned with the measurement. Behind the cluster,
+> `age` blanks only events younger than *skew − 5 min*; everything older prints
+> a number that is the whole skew too small, so that direction under-reports
+> *as well as* blanking. The sentences also named a culprit — whose clock is
+> wrong — that nothing here measured. The rows are left standing because the
+> rest of this entry cites them, and because a decision that was wrong is more
+> useful next to its correction than deleted.
+
 The second is D55's sentence carrying the direction it was actually true of;
 the first replaces it, and D55 is corrected in place to say so. Neither says *"on this screen"*: `--once` draws the
 identical strings re-wrapped, and a word that does not survive being piped to a
@@ -15289,3 +15301,83 @@ The badge half stands and is in [backlog.md](backlog.md): it is `views.rs`, whic
 does not exist yet, and a box about clock skew is not where the severity counter
 is settled in passing
 ([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+
+### D177 — the behind half does not only blank, it also under-reports, and a refusal's `Date` is not the cluster's clock (2026-08-28)
+
+The operator review of the clock-skew box returned two blockers. The first
+reverses [D176](#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)'s
+own table, written hours earlier in this same phase, and it is recorded here
+before it is acted on.
+
+**`age` blanks the young and under-reports the old, and D176 saw only the first
+half.** With the laptop behind by `S`, an event of true age `A` yields
+`elapsed = A − S`, so [`rules::age`] returns `None` only while `A < S − 5min`.
+Everything older than that prints a number that is `S` too small. Measured on the
+built binary against a skewed cluster: **16 of 32 cards carried an age** under a
+report ending *"times are blank rather than guessed"*, and a crash twenty minutes
+old printed `9 min ago`
+([reports/2026-08-28-clock-skew-date-header.md](reports/2026-08-28-clock-skew-date-header.md)).
+
+So the *behind* direction produces both failures — the blank D69 introduced **and**
+the plausible-looking wrong number D55 attributes to the *ahead* direction alone —
+and it is arguably the worse of the two, because a stale crash that reads fresh is
+what a reader acts on at 3am. D55's original *"the one that under-reports and harms
+nobody"* was closer to the object than D176's replacement: the correction
+over-corrected, dropping the under-report instead of adding the blank beside it.
+**Neither of the three tables that state this is code** — D176's, `screens/states.md`'s
+and `screens/once.md`'s sentence — and `main.rs` copied them faithfully. The code
+was right and the decision was wrong, which is the pair
+[D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)
+already named once.
+
+**And the sentence names a culprit it never measured.** k8rs measures a *difference
+between two clocks* and prints a verdict about whose is wrong. With this machine's
+clock and the API server's agreeing to the second and a middlebox thirty minutes
+fast between them, it printed *"Your computer's clock is 29 minutes behind"* — and
+a control-plane VM with a dead RTC or restored from a snapshot is ordinary in the
+field. Someone who trusts that line goes and breaks a correct laptop. The sentence
+names the gap and the direction; it does not assign fault.
+
+**Second blocker: `Client::send` returns `Ok` for a 403 or a 500, so a refusal's
+`Date` was being promoted to data.** kube's status classification is private, so
+the skew probe never saw one. Measured: `kubectl proxy` with the API server
+unreachable manufactures a whole `500` **from its own clock**, and k8rs printed *I
+was refused* on stderr and the middlebox's clock as the cluster's on stdout. The
+fix is one line — a non-success status returns `None` — and it makes the
+already-written *"every failure is the same answer: no measurement"* true, which it
+was not. **`tester` reviewed the same behaviour and ruled it acceptable** on the
+grounds that a refusal is still a live response from the same server; the
+measurement takes that premise away, and it is the reason a reviewer's finding
+stays an estimate until somebody runs it.
+
+**What is not reversed.** Five minutes, both directions, confirmed against a real
+cluster — it matches `age`'s boundary exactly, so no window exists where a sentence
+points at an unchanged screen. Two sentences rather than one. The raw magnitude,
+undressed: once a refusal can no longer feed it, an absurd number can only come
+from an API server whose clock really is absurd, and *"1563827708 minutes"* says
+*this cluster's clock is not set* in a way no cap does. `Request::get` under an
+empty base, pinned on the wire at `/version` with no query string. And the second
+`/version` call itself: behind a load balancer it can be answered by a different
+API server than the version read, which is a real disagreement and is boxed rather
+than fixed, because collapsing the two calls means re-implementing the status
+classification that this entry's second blocker just showed is load-bearing.
+
+**The magnitude rounds to nearest, and `age` still floors.** `as_mins()` truncates
+toward zero, so an offset of exactly 1800 s printed *29 minutes*. Flooring is right
+for `age` because elapsed time genuinely floors — a thing four minutes old is not
+five. A **difference between two clocks** is not elapsed time, and the operator's
+next command is `chronyc tracking`, which answers 30.0; two numbers disagreeing by
+one is a minute of doubt at 3am. So the two spellings differ on purpose, and the
+floor claim survives it: the smallest input past the threshold is 301 s, which
+rounds to five, so `1 minute` stays unreachable and `plural`'s singular is never
+drawn.
+
+**A mutant that was equivalent on every reachable input was still worth acting on.**
+The first draft rounded with `(seconds + 30 * seconds.signum()) / 60` and
+`just mutants-diff` reported `replace * with /` as MISSED. It is genuinely equivalent
+wherever the contract holds — and that is what made it informative rather than noise:
+`30 / signum` **panics** on a skew of zero, a value the contract forbids and the
+signature permits. Taking the magnitude first deletes the sign from the arithmetic,
+kills the mutant and removes the latent panic together. A surviving mutant usually
+means a test that cannot fail; this one meant a signature wider than its contract,
+which is the second thing the gate is good for and the one nobody looks for.

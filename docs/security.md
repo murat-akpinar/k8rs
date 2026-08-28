@@ -187,6 +187,18 @@ resource.
   `replace_*` siblings. A ban list over that surface is wrong the first time
   kube-rs adds a method; an allowlist asks "is this read-only", which is the
   question that actually matters.
+- **The list covers two types, and the door it leaves open is guarded at the
+  other end.** The allowlist is derived over `kube::Api` *and* `kube_core::Request`,
+  because a write does not have to go through `Api<K>`: a `Request` built by hand
+  and posted through the client was a complete DELETE that raised nothing
+  ([NOTES § D142](../NOTES.md#d142--a-write-does-not-have-to-go-through-apik-and-the-allowlist-already-fits-the-surface-that-was-missed-2026-08-22)).
+  `kube::Client` is deliberately **not** on the list — its `request` and `send`
+  are verb-agnostic, and a read outside `ops.rs` needs one of them. So what makes
+  such a call read-only is not the method that sends it but **the builder that
+  shaped it**: the only request k8rs sends this way is built by
+  `Request::get`, which is on the allowlist, and a `Request::delete` piped through
+  the same sender is caught at the builder. Reading the sender and not the builder
+  is how the DELETE above got through the first time.
 - `clippy.toml` still carries a `disallowed-methods` list crate-wide as the
   fast feedback loop (CI runs clippy with `-D warnings`), and `ops.rs` carries
   the single `#![allow(clippy::disallowed_methods)]` in the project — the

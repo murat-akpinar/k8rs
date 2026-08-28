@@ -47,7 +47,7 @@ use k8s_openapi::api::core::v1::{Node, PersistentVolumeClaim, Pod, Service};
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
-use k8s_openapi::jiff::Timestamp;
+use k8s_openapi::jiff::{SignedDuration, Timestamp};
 use k8s_openapi::serde::de::DeserializeOwned;
 use k8s_openapi::serde_json::{self, Value};
 use rules::{ClusterSnapshot, Finding, ObjectId, ObjectKind, Severity, analyze};
@@ -212,8 +212,16 @@ fn run(args: &[String]) -> Result<String, String> {
     Ok(out)
 }
 
-/// **The one clock call in the program**, read once and handed on as a value
-/// (invariant 5, NOTES § D18).
+/// **The clock the report is read against**, called once per report and handed on as a value —
+/// never from inside a rule (invariant 5, NOTES § D18).
+///
+/// **It is no longer the only clock call in the program, and that is deliberate.** `k8s.rs`'s
+/// `local_clock` reads the same machine at the moment the API server's `Date` header comes back,
+/// because a skew is the gap between two clocks at *one* instant and a value sampled here would
+/// be sampled minutes away from the answer it is compared against ([`k8s::Session::skew`]). The
+/// two share two library calls and nothing else: this one owes the reader a plain-language
+/// sentence per failure, that one owes nobody anything, because a clock that will not read is a
+/// skew that was not measured.
 ///
 /// `jiff` arrives through `k8s-openapi` with `default-features = false`, so `Timestamp::now`
 /// — which is behind `std` — does not exist here. The seconds come off `SystemTime` instead;
@@ -283,6 +291,14 @@ struct Input {
     /// Kinds no rule in `rules.rs` reads, counted by kind. Sorted, so the header is the same
     /// text twice for the same input.
     skipped: BTreeMap<String, usize>,
+    /// **How far this machine's clock is from the cluster's, when there is something to say** —
+    /// [`k8s::Session::skew`], and [`clock`] is what spells it.
+    ///
+    /// **Always `None` on the file-driven path, and that is the honest answer rather than a gap.**
+    /// A `.json` on disk has no API server to have answered with a `Date`, so there is no evidence
+    /// either way — which is the same silence a live cluster whose header was stripped produces
+    /// (`screens/states.md` § When there is nothing to say).
+    skew: Option<SignedDuration>,
 }
 
 /// Read every path into one snapshot, or say which file stopped it.
@@ -293,6 +309,8 @@ struct Input {
 /// a kind we claim to understand and does not decode.
 fn load(paths: &[String], now: Time) -> Result<Input, String> {
     let mut input = Input {
+        // No cluster answered, so nothing measured this machine's clock ([`Input::skew`]).
+        skew: None,
         snapshot: ClusterSnapshot {
             now,
             pods: Vec::new(),
@@ -462,15 +480,104 @@ fn render(findings: &[Finding], input: &Input) -> String {
         .collect();
     if order.is_empty() {
         lines.push("○ nothing is broken".to_string());
-        return lines.join("\n");
+    } else {
+        order.sort_by_key(|f| f.severity);
+        for finding in &order {
+            lines.push(card(finding, &input.snapshot.now));
+            lines.push(String::new());
+        }
+        lines.push(tally(&order));
     }
-    order.sort_by_key(|f| f.severity);
-    for finding in &order {
-        lines.push(card(finding, &input.snapshot.now));
+    // **Last, after the findings, and on both paths through the block above**
+    // (`screens/once.md` § When your clock and the cluster's disagree): it is *how much of this
+    // report can you trust*, read at the moment the reader is deciding whether to look away, and
+    // `○ nothing is broken` is as much a claim about times as a card is. The early return this
+    // replaced is why it is an `else` and not a second exit.
+    //
+    // **Last *of this block*, which puts it above `--analysis`'s panes rather than under them**
+    // (2026-08-28, a choice `screens/once.md` does not make because it draws no panes). What the
+    // sentence qualifies is the times on the cards, and it belongs against them rather than at
+    // the bottom of seven whole-cluster reports the reader may never scroll to.
+    if let Some(clock) = clock(input.skew) {
         lines.push(String::new());
+        lines.push(clock);
     }
-    lines.push(tally(&order));
     lines.join("\n")
+}
+
+/// **The one sentence that says the times in this report cannot be trusted**, or `None` when
+/// there is nothing to say.
+///
+/// **Two directions, two sentences, and they are drawn rather than composed here**
+/// (`screens/states.md` § Two directions, two sentences, because they break differently). Both are
+/// `screens/once.md` § When your clock and the cluster's disagree verbatim, re-wrapped.
+///
+/// **Neither names a culprit, and the pair this replaced did** (NOTES § D177). What k8rs measures
+/// is a *difference between two clocks*; *"your computer's clock is 11 minutes behind"* is a
+/// verdict about whose is wrong, and with a middlebox thirty minutes fast between two clocks that
+/// agreed to the second, it sent the reader to fix a correct laptop. The sentence states the gap
+/// and the direction and stops there.
+///
+/// **And the behind half does not only blank.** With this machine behind by `S`, an event of true
+/// age `A` gives `elapsed = A - S`, so `rules::age` refuses only while `A < S - 5min` and
+/// everything older prints a number the whole gap too small — 16 of 32 cards carried an age under
+/// the old *"times are blank"* sentence, and a twenty-minute-old crash read `9 min ago`. So the
+/// behind sentence names both failures and the ahead one names the single failure it has.
+///
+/// **No `⚠`.** This report's vocabulary is `● ▲ ○` and nothing else; the console's pointer borrows
+/// a glyph from its `⚠ disconnected` family, and this stream has never used that family
+/// (`screens/once.md` § Colour and symbols).
+///
+/// **It does not touch the exit code.** A clock being off is a fact about the data, not a failure
+/// to run (`screens/once.md` § Exit codes).
+///
+/// **The threshold is not re-checked here.** `Some` already means *past five minutes, in one
+/// direction or the other* — [`k8s::Session::skew`] is where that is decided, once, for every
+/// renderer this field will ever have.
+///
+/// **Whole minutes, rounded to the nearest — deliberately *not* `rules::age`'s floor.** That
+/// ladder floors because elapsed time genuinely does: an event four and a half minutes old *has*
+/// been four minutes. A gap between two clocks has not. A `Date` header carries whole seconds and
+/// is stamped before the response is read, so a true offset of exactly 1800 s arrives here as
+/// 1799-and-a-bit: floored, the built binary printed **29 minutes**
+/// (`reports/2026-08-28-clock-skew-date-header.md` § 4) while the reader's next command,
+/// `chronyc tracking`, says 30.0. Two numbers disagreeing at 3am is a minute of doubt this line
+/// exists to remove.
+///
+/// **The floor of the count is 5 and it can never be `1`.** `Some` starts strictly past five
+/// minutes, so the smallest reading is 301 s, which rounds to 5 — [`plural`] therefore never draws
+/// the singular here, and is called anyway rather than hard-coding an `s`, because one place
+/// spells a count in this file.
+///
+/// **The direction comes off the duration and the magnitude off `|seconds|`**, so the rounding
+/// never touches a sign and a `Some(0)` this contract forbids still prints rather than panicking.
+/// The cast is exact on every target this repo builds for —
+/// CI's four and the gnu host beside them are all 64-bit — and on a 32-bit one it could only
+/// truncate a reading no server can produce.
+fn clock(skew: Option<SignedDuration>) -> Option<String> {
+    let skew = skew?;
+    // **The magnitude first, so the rounding never has a sign to carry.** Rounding half up over
+    // `|seconds|` is the same arithmetic in both directions, in integers — no float in a number a
+    // reader will compare against `chronyc`. The first draft multiplied by `signum` instead, and
+    // the mutation gate caught what that costs: `30 * signum` and `30 / signum` agree on every
+    // reachable input, so the test could not tell them apart — and the division panics on a skew
+    // of zero, which is a shape this function's contract forbids but its signature allows.
+    let seconds = skew.as_secs().unsigned_abs();
+    let count = plural(((seconds + 30) / 60) as usize, "minute");
+    Some(if skew.is_negative() {
+        // This machine is behind: `rules::age` blanks what is younger than the gap and prints
+        // everything older short by it, so the sentence names both.
+        format!(
+            "This computer and the cluster disagree about the time by {count} (this one is \
+             behind), so recent times are missing and older ones can read smaller than they \
+             really are."
+        )
+    } else {
+        format!(
+            "This computer and the cluster disagree about the time by {count} (this one is \
+             ahead), so times can read larger than they really are."
+        )
+    })
 }
 
 /// What the report covered — the first line, so an empty report cannot be mistaken for a
@@ -862,6 +969,7 @@ fn live_report(
     last: &mut String,
     renewal: Option<&str>,
     analysis: bool,
+    skew: Option<SignedDuration>,
 ) -> Option<String> {
     let mut report = unreadable(&store.troubles(), renewal);
     match store.snapshot(now) {
@@ -871,6 +979,10 @@ fn live_report(
                 // Nothing was read that no rule reads: a watch carries the five kinds `k8s.rs`
                 // watches and nothing else, so the header's second half has nothing to say.
                 skipped: BTreeMap::new(),
+                // **Measured once, at connect, and the same for every report this session
+                // prints** ([`k8s::Session::skew`]) — so a session that says it lands on the
+                // first report and stays, and one that has nothing to say never starts.
+                skew,
             };
             let findings = analyze(&input.snapshot);
             if !report.is_empty() {
@@ -1210,6 +1322,9 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool
     // it.
     let renewal = session.renewal.clone();
     let renewal = renewal.as_deref();
+    // Read out here for the reason `renewal` is: `session.watches` is moved below and the borrow
+    // would not survive it. It is a `Copy` number, so this is a read and not a clone.
+    let skew = session.skew;
     let mut err = std::io::stderr();
     let _ = writeln!(err, "k8rs: watching — {}", greeting(&session).join(" · "));
     // The one line N4 has never had a server to say it about: a cluster outside the window this
@@ -1230,7 +1345,7 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool
         // A clock this driver cannot read is not a reason to stop watching; the next event asks
         // again. `wall_clock`'s own `Err` is a machine set before 1970.
         let Ok(now) = wall_clock() else { return };
-        if let Some(report) = live_report(store, now, &mut last, renewal, analysis) {
+        if let Some(report) = live_report(store, now, &mut last, renewal, analysis, skew) {
             // The write is dropped if it fails, for the reason `main` drops a failed stderr
             // write: there is nowhere left to report it, and this loop has no exit to take.
             let _ = writeln!(std::io::stdout(), "{report}\n");
