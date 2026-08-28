@@ -2980,7 +2980,20 @@ public release.
       for display. Phase 3 defined `ClusterSnapshot` and Phase 4 extended it
       ([NOTES § D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12));
       this is the step that fills it, and it has to happen before `k8s.rs`
-      freezes
+      freezes.
+      **The shape already exists and the sixth list is not the first one** — the
+      C2/C3 box above built `k8s.rs` § WHAT A REPORT ASKS FOR for exactly these,
+      and `certificate_requests` is the worked example: one cluster-scoped list,
+      every object through `ingest`, a `Bounded` impl for the snapshot type, and
+      a deadline (`REPORT_FETCH`) because nothing in kube bounds an *answer*.
+      CSRs are deliberately not in the six — they closed with C3. Read that
+      region before writing the first of these, and keep `None` meaning *nobody
+      looked* rather than *nothing to find*: the panes branch on it. **One thing
+      that region left open is this box's to rule**, not to inherit — the fixture
+      loader in `main.rs` § WHAT WAS READ leaves the field `None` for a capture
+      holding an empty `kind: List`, so a capture that says *this cluster has
+      none* reads as *nobody looked*; C3 made that sentence load-bearing and
+      changing it touches all six
 - [ ] **metrics-server polling**, the one thing that cannot be watched: 30s+,
       only for what is on screen, and only when the capability probe found
       `metrics.k8s.io`. Without it the Capacity report's usage column has no
