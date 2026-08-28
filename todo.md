@@ -2836,7 +2836,30 @@ public release.
       and is the Phase 6 box that follows the log buffer's bound
       ([D171](NOTES.md#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28) ·
       [reports/2026-08-28-ten-thousand-pod-resident-set.md](reports/2026-08-28-ten-thousand-pod-resident-set.md))
-- [ ] Startup errors (no kubeconfig / bad context) → stderr + non-zero exit
+- [x] Startup errors (no kubeconfig / bad context) → stderr + non-zero exit
+      **Already true at HEAD when this box came up, and closed on the measurement
+      rather than re-opened as work** — the fault taxonomy
+      ([D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27))
+      and `connect()`
+      ([D166](NOTES.md#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27))
+      landed both halves under a box that predates them. The PM's own run of
+      `target/release/k8rs`, both sentences on **stderr** with **stdout empty**
+      and **exit 2**:
+
+      ```
+      $ KUBECONFIG=/nonexistent/kc.yaml ./target/release/k8rs --live
+      k8rs: no cluster to watch — the kubeconfig itself could not be read — it is missing, unreadable, or not valid YAML
+      exit=2
+      $ ./target/release/k8rs --live --context no-such-context
+      k8rs: no cluster to watch — this kubeconfig has no such context — check the `--context` you gave, or the `current-context` line in the file
+      exit=2
+      ```
+
+      Held by tests either side of the binary:
+      `tests/binary.rs::live_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty`
+      for the stream and the code, and `Fault::NoContext` in `src/k8s_tests.rs`
+      for the second sentence
+      ([D172](NOTES.md#d172--three-kubeconfig-boxes-one-that-was-already-done-and-why-these-fixtures-are-hand-written-2026-08-28))
 - [ ] **The six kubeconfig shapes, each with a fixture** — the largest class in
       k9s's tracker is not the cluster, it is the file that describes it, and
       every shape below is a separate closed issue there. **No file** · **a file

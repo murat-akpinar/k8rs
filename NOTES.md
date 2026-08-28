@@ -193,6 +193,7 @@ its line moving with it.
 - [D169](#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28) — the three-reports box was placed above the boxes that fill its fields, and Capacity's half moves to the one that owns metrics
 - [D170](#d170--the-three-identity-fields-the-two-pm-claims-a-measurement-took-away-and-the-band-that-was-on-the-wrong-screen-2026-08-28) — the three identity fields, the two PM claims a measurement took away, and the band that was on the wrong screen
 - [D171](#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28) — the resident set measured at four sizes, the budget it broke, and the ruling that the budget stays
+- [D172](#d172--three-kubeconfig-boxes-one-that-was-already-done-and-why-these-fixtures-are-hand-written-2026-08-28) — three kubeconfig boxes, one that was already done, and why these fixtures are hand-written
 
 ## Why it exists — where the gap is
 
@@ -14859,3 +14860,54 @@ keeping is that **a 50Mi pod-watching sidecar is the first thing that dies at th
 size**, which is the same failure class as
 [PRIOR-ART § A6](PRIOR-ART.md#a6--unbounded-memory-in-the-field-for-8-days) seen
 from the other side.
+
+### D172 — three kubeconfig boxes, one that was already done, and why these fixtures are hand-written (2026-08-28)
+
+Phase 5's kubeconfig family came up as three boxes. Their premises were re-checked
+at HEAD before the brief, which is
+[CLAUDE.md § The brief](CLAUDE.md#the-brief-the-pm-hands-out-and-the-report-it-gets-back)'s
+rule and [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
+lesson. One of them had stopped being work.
+
+**`Startup errors → stderr + non-zero exit` was already true, and it closes on the
+run rather than on a dispatch.** The box predates the fault taxonomy
+([D167](#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27))
+and `connect()`
+([D166](#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27)),
+which landed both of its halves on the way past. Measured, not reasoned: both
+sentences are on stderr with stdout empty and exit 2, and the output is in the
+box. A stale box is closed with evidence or it is re-scoped; **it is never
+re-briefed as work somebody then re-does**, which is the way a phase stops
+converging.
+
+**The six kubeconfig shapes are hand-written, and here that is required rather
+than tolerated.** [CLAUDE.md § Code phase rules](CLAUDE.md#code-phase-rules) says
+fixtures come from real cluster captures and never from hand-written JSON, and
+every fixture in `tests/` obeys it. **A kubeconfig is the one artefact where
+obeying it would be the defect**: kind writes a real one and it carries a client
+certificate *and its key*, so capturing it puts key material in a committed file —
+the single thing `scripts/fixture-audit.sh` refuses in six framings and
+[REQUIREMENTS § DevSecOps](REQUIREMENTS.md#devsecops-requirements) puts first. The
+capture rule exists so nobody invents a cluster's behaviour; a kubeconfig is not
+the cluster's behaviour, it is a local file the reader wrote, and the six shapes
+are exactly the ones no healthy cluster produces.
+
+**So they live inline in `src/k8s_tests.rs`, beside the four `Kubeconfig::from_yaml`
+shapes already there**, and not as files under `tests/fixtures/`. One convention
+for one thing, and one writer: `k8s_tests.rs` has the same owner as `k8s.rs`
+([invariant 11](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)),
+while `tests/` is `tester`'s, and a shape split across two trees is two dispatches
+for one assertion. `connect_with(Kubeconfig, …)` exists precisely so a config can
+be handed in without a file. **The one shape this does not reach is `KUBECONFIG`
+holding several paths**, which is `Kubeconfig::read()`'s own job above
+`connect_with` — kube exposes `read_from` and `merge`, so it is still one test in
+the same file, with the temp files it writes removed after it.
+
+**The remaining two boxes are one turn.** *The six shapes* and *the context list*
+open the same code — the kubeconfig read — and the second is a lookup over the
+structure the first has to get right; briefed apart, the second turn re-opens what
+the first just decided
+([D109](#d109--the-family-is-the-unit-of-work-and-the-commit-stays-per-turn-2026-08-16)).
+**The clock-skew box below them is not in the family** and says so in its own
+body: it needs a `screens/` state before any Rust, so it is `tui-designer` then
+`dev-core`, and two turns.
