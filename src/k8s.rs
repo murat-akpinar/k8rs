@@ -1260,6 +1260,75 @@ pub struct Trouble<'a> {
     pub ended: bool,
 }
 
+/// **The three facts about a cluster that no watch carries**, handed to the store once
+/// (NOTES § D169).
+///
+/// [`Store`] is a store and not a connection: it is fed by five streams and has no client, no
+/// kubeconfig and no way to ask a server anything. These three come from [`connect`] — one from
+/// the API server, two from the reader's own file — so somebody has to carry them across, and
+/// [`Identity::of`] is that one step. Every field is `Option` and `None` is *nobody looked*
+/// (NOTES § D129), which is exactly what a [`Store::default`] that was never identified is.
+///
+/// **All three are already stripped and bounded where they were read** — [`session`] for the
+/// version, [`kubeconfig_context`] and [`kubeconfig_certificate`] for the other two — so nothing
+/// here strips a second time. The certificate is bytes and is never printed as text: the only
+/// thing that reads it is `rules.rs`'s PEM parser.
+///
+/// **Taken once at connect and never refreshed, so all three can be stale as well as absent**
+/// (`k8s-admin`, 2026-08-28). [`Store::identify`] runs after [`connect`] and the per-watch
+/// reconnect never calls it again (NOTES § D161), so these are frozen for the life of the process.
+/// A control plane upgraded while k8rs is open leaves Versions counting kubelets against the old
+/// string; a session an `exec` plugin holds open outlives the complete static pair beside it —
+/// the shape [`kubeconfig_certificate`] knowingly accepts — and C1's `Critical` *the cluster is
+/// refusing you* card then stands forever while everything works. That band **is** drawn in
+/// Alerts: only `Info` is filtered out of the card block (NOTES § D87).
+/// **No refresh in this box** — what is written here is the ceiling, so the next reader does not
+/// take `None` for the only way one of these can be wrong.
+///
+/// **No `Debug`, for [`Store`]'s own reason**: nothing here holds a credential — a certificate is
+/// the public half, and the key is deliberately not read — but two of the three come off a
+/// kubeconfig, and the security gate's rule about that is mechanical rather than a per-field
+/// judgement call.
+#[derive(Default)]
+pub(crate) struct Identity {
+    /// [`crate::rules::ClusterSnapshot::server_version`] — what the API server calls itself.
+    pub(crate) server_version: Option<String>,
+    /// [`crate::rules::ClusterSnapshot::context`] — what the reader calls this cluster, and C1's
+    /// object name.
+    pub(crate) context: Option<String>,
+    /// [`crate::rules::ClusterSnapshot::client_certificate`] — C1's PEM bytes, the certificate
+    /// alone and never the key ([`kubeconfig_certificate`]).
+    pub(crate) client_certificate: Option<Vec<u8>>,
+}
+
+impl Identity {
+    /// **What one connected session says about itself**, for the store to publish.
+    ///
+    /// **`Err` on the version is `None`, and it is the same `None` as *never asked***
+    /// (NOTES § D129): the reason a version could not be read is [`Session::version`]'s to keep
+    /// and `main.rs`'s startup line to print, and N4's answer either way is *say nothing rather
+    /// than compare against a guess*. A snapshot field that carried the difference would be a
+    /// second place to keep it.
+    pub(crate) fn of(session: &Session) -> Self {
+        Identity {
+            // **Empty is `None`, the same way [`renewal`] and [`kubeconfig_context`] answer it.**
+            // A `gitVersion` of nothing but control characters strips to `""` in [`session`], and
+            // `Some("")` is a version that was read — the Versions pane draws `Control plane `
+            // with a trailing space and then says the string cannot be compared against, about a
+            // string that is not there. Three readers of one shape, and this was the one that
+            // disagreed (`k8s-admin`, 2026-08-28).
+            server_version: session
+                .version
+                .as_ref()
+                .ok()
+                .filter(|version| !version.is_empty())
+                .cloned(),
+            context: session.context.clone(),
+            client_certificate: session.client_certificate.clone(),
+        }
+    }
+}
+
 /// Everything the permanent watch holds, and the gate that decides whether any of it may be
 /// read.
 ///
@@ -1286,9 +1355,22 @@ pub struct Store {
     /// `Err` is a fetch that did not produce one, kept so the same reference is not asked
     /// about again on the next pass ([`Fault`]).
     owners: BTreeMap<String, Result<WorkloadSnapshot, Fault>>,
+    /// **The three the watches cannot deliver** ([`Identity`]) — empty until [`Store::identify`]
+    /// is called, which the file driver never does and the live one does once.
+    identity: Identity,
 }
 
 impl Store {
+    /// **Take the three facts no watch carries** ([`Identity`], NOTES § D169) — called once,
+    /// after [`connect`], before the first snapshot.
+    ///
+    /// **A setter and not a constructor argument**, because [`Store::default`] is what the file
+    /// driver and every test that has no cluster build: a store that was never identified is a
+    /// store that could not ask, and `None` says exactly that.
+    pub(crate) fn identify(&mut self, identity: Identity) {
+        self.identity = identity;
+    }
+
     pub fn pod(&mut self, now: &Time, event: Event<Pod>) {
         self.pods.take(now, event);
     }
@@ -1489,13 +1571,19 @@ impl Store {
                 .chain(self.resolved_sets())
                 .collect(),
             // Read from the API server once at connect, and from the kubeconfig — neither came
-            // from a watch (`docs/architecture.md` § Data flow). The `connect()` box further
-            // down Phase 5 fills them; until then N4 and C1 correctly say nothing. **They do not
-            // pass through [`ingest`]**, so `server_version` — the API server's own text — owes
-            // [`text`] at the point that box sets it.
-            server_version: None,
-            context: None,
-            client_certificate: None,
+            // from a watch (`docs/architecture.md` § Data flow), which is why they arrive through
+            // [`Store::identify`] rather than through a stream (NOTES § D169). A store nobody
+            // identified answers `None` for all three, and N4 and C1 correctly say nothing.
+            //
+            // **They do not pass through [`ingest`]**, so each owes [`text`] where it is read:
+            // `server_version` in [`session`] because it is the API server's own string
+            // (invariant 9), and `context` in [`kubeconfig_context`] because a kubeconfig is
+            // written by tooling as often as by hand. `client_certificate` is bytes nothing ever
+            // prints as text — the one reader is `rules.rs`'s PEM parser
+            // ([`kubeconfig_certificate`]).
+            server_version: self.identity.server_version.clone(),
+            context: self.identity.context.clone(),
+            client_certificate: self.identity.client_certificate.clone(),
             // `None` is every namespace as far as this store knows. The `--namespace` box is
             // further down Phase 5.
             namespace_scope: None,
@@ -3645,6 +3733,25 @@ pub(crate) struct Session {
     /// print at all: nothing the API server wrote is in it. It is still stripped and bounded
     /// like any other text, because a kubeconfig can be built by a tool as easily as typed.
     pub(crate) renewal: Option<String>,
+    /// **What the reader calls this cluster** — the context this session was opened on, which is
+    /// `--context` when one was given and the kubeconfig's `current-context` otherwise
+    /// ([`kubeconfig_context`]). It is C1's object name
+    /// ([`crate::rules::ClusterSnapshot::context`]).
+    ///
+    /// `None` only for a session built from a client rather than a file, and for a kubeconfig
+    /// whose current context is empty — the state C1 already says nothing about
+    /// (NOTES § D51).
+    pub(crate) context: Option<String>,
+    /// **The client certificate this kubeconfig logs in with**, PEM bytes as they sit on disk —
+    /// C1's other input ([`kubeconfig_certificate`],
+    /// [`crate::rules::ClusterSnapshot::client_certificate`]).
+    ///
+    /// **The certificate and nothing else out of that block**: never the key, never a token,
+    /// never the `exec` plugin's output. A certificate is the public half and is what a server is
+    /// shown on every handshake; a key or a token copied into our own types is one `Debug` away
+    /// from a backtrace (invariant 8, NOTES § D51) — which is also why [`Session`] has no
+    /// `Debug` at all.
+    pub(crate) client_certificate: Option<Vec<u8>>,
 }
 
 /// **What one discovery answer says**, read twice at connect so nothing asks again
@@ -3758,6 +3865,10 @@ pub(crate) async fn connect_with(
     kubeconfig: Kubeconfig,
     context: Option<&str>,
 ) -> Result<Session, NotConnected> {
+    // **Read before the kubeconfig is moved into the loader**, which is the only place the
+    // *current* context is still legible: `KubeConfigOptions` carries what was asked for, and
+    // what was asked for is `None` on the ordinary run.
+    let named = kubeconfig_context(&kubeconfig, context);
     let config = Config::from_custom_kubeconfig(
         kubeconfig,
         &KubeConfigOptions {
@@ -3769,18 +3880,173 @@ pub(crate) async fn connect_with(
     .map_err(NotConnected::Kubeconfig)?;
     // **Read before the client is built, because building it consumes the `Config`** — and
     // read here rather than in [`session`] for the same reason § CONNECTING splits the two: a
-    // test may have a client and no kubeconfig at all.
+    // test may have a client and no kubeconfig at all. The certificate is read in the same place
+    // and for the same reason.
     let renewal = renewal(&config.auth_info);
+    let client_certificate = kubeconfig_certificate(&config.auth_info);
     // **Not a `?`**: the failure arm needs the login program as much as the success arm does, and
     // a `?` here is exactly how it got lost the first time (`tester`, 2026-08-27).
+    //
+    // **`client_certificate` is the one field here no test watches travel, and that is a cost the
+    // PM accepted rather than a thing nobody could do** (NOTES § D169). The straight route is
+    // shut: kube's `identity_pem` refuses a certificate with no key, and rustls refuses a key that
+    // is not one — the committed PEM with a PEM-shaped placeholder beside it came back
+    // `RustlsTls(InvalidPrivateKey("failed to parse private key as RSA, ECDSA, or EdDSA"))`, and a
+    // real key may not be committed. **A second route exists and was measured**: an `exec` plugin
+    // emitting an `ExecCredential` whose key is generated during the test — never committed, and
+    // an argument-vector spawn `scripts/security-guard.py` permits — reaches a successful
+    // `connect_with` carrying `Some(_)` (`tester`, 2026-08-28). **It was refused for what it puts
+    // in the gate**: `openssl` on `PATH` inside `cargo test`, and *`just check` is the whole of CI
+    // or it is a lie* — a step that needs a binary not every machine has is the gap that rule
+    // closes. So the read is proven at field level on `AuthInfo` ([`kubeconfig_certificate`]) and
+    // the line below is covered by the live binary alone; the mutation gate reports it MISSED and
+    // that report is correct.
     match Client::try_from(config) {
         Ok(client) => Ok(Session {
             renewal,
+            context: named,
+            client_certificate,
             ..session(client).await
         }),
         Err(failure) => Err(NotConnected::Client { failure, renewal }),
     }
 }
+
+/// **Which context this session is on**, cleaned and bounded — the name the reader gave, or the
+/// one their file already had.
+///
+/// **`--context` wins, and it is taken *before* the kubeconfig is loaded rather than read back
+/// off the `Config`.** kube's `Config` keeps no context name at all, and `KubeConfigOptions`
+/// carries only what was asked for — `None` on every ordinary run — so the current context is
+/// legible in exactly one place and only until the file is moved into the loader.
+///
+/// **The name that reaches C1 is the one that was connected with**, so it may not be the file's
+/// `current-context` when a flag overrode it. A card saying *your access to `prod` expires*
+/// while the run is watching `staging` is a rule telling a reader about a cluster they are not
+/// looking at.
+///
+/// **Stripped and bounded like the login program beside it** ([`renewal`], invariant 9,
+/// NOTES § D154): a kubeconfig is written by tooling as often as by hand, and a bidi override in
+/// a context name reverses the card it is printed on. Empty becomes `None` — C1 with no context
+/// says nothing, which is the state NOTES § D51 already describes.
+fn kubeconfig_context(kubeconfig: &Kubeconfig, asked_for: Option<&str>) -> Option<String> {
+    let mut name = asked_for
+        .map(str::to_string)
+        .or_else(|| kubeconfig.current_context.clone())?;
+    text(&mut name, IDENTIFIER);
+    (!name.is_empty()).then_some(name)
+}
+
+/// **The client certificate a kubeconfig logs in with, as PEM bytes** — C1's input, and the one
+/// thing off the credential block that is not a credential.
+///
+/// **Data first, then the path, because that is the order kube itself resolves them in**:
+/// `client-certificate-data` *overrides* `client-certificate` (`config/file_config.rs`, the
+/// field's own doc), so reading the file when both are present would report on a certificate the
+/// connection is not using. Both shapes are real — kind and EKS embed the data, kubeadm and
+/// minikube write a path — and a build that read only one would say *no certificate* to half the
+/// clusters there are.
+///
+/// **kube's own decoder, because there is no base64 crate here and there is not going to be**
+/// (invariant 10). `k8s_openapi::ByteString` is the type every `Secret` value is decoded through
+/// and its `Deserialize` is standard base64; going through it is the same decoder the rest of
+/// the product already uses rather than a hand-rolled second one.
+///
+/// **The certificate and never the key.** Where kube reads this pair at all it wants both —
+/// `identity_pem` refuses a certificate with no key and builds no client — but that is kube's
+/// business and not ours, and the paragraph below is the shape where it does not read them at
+/// all: nothing here reads `client-key`, `client-key-data`, `token` or an `exec` block's output,
+/// and a key in one of our own types is one `Debug` away from a backtrace (NOTES § D51,
+/// `docs/security.md` § Token hygiene).
+///
+/// **A certificate with no key is refused, and a complete pair is read even under an `exec`
+/// block** — one shape excluded because kube proves it cannot be the identity, one knowingly
+/// accepted (the PM's ruling as corrected by `k8s-admin`, 2026-08-28; NOTES § D19 is why a
+/// kubeconfig may run a program at all).
+///
+/// **Excluded: `client-certificate` with no `client-key`.** kube's `identity_pem` answers
+/// `(Some(_), None)` with `LoadClientKey(NoBase64DataOrFile)` (`config/file_config.rs:651-661`),
+/// so that file is never a live session's TLS identity: either an `exec` block supplied one and
+/// kube never opened this path, or `Client::try_from` failed before a byte was sent. It is not an
+/// exotic file — it is the residue of every auth migration, an `exec` block added for
+/// `aws-iam-authenticator` or `gke-gcloud-auth-plugin` with the old `client-certificate:` line
+/// left behind. Measured on the live cluster before this guard existed, k8rs drew a card, a badge
+/// and a `1 note` in the tally about a file with no bearing on the login (`k8s-admin`,
+/// 2026-08-28) — two of those three are gone anyway, because the same change stopped drawing the
+/// `Info` band in the card block (`main.rs`'s `render`, NOTES § D87), and the badge is what is
+/// left for this to answer. `kubectl` refuses that same kubeconfig outright:
+/// *"client-key-data or client-key must be specified for … to use the clientCert authentication
+/// method"*, run here against the file this guard was written for.
+///
+/// **Accepted: a complete pair shadowed by an `exec` block.** A plugin that returns a **token**
+/// falls through to `identity_pem`, so the static pair really is the TLS identity and C1 is
+/// exactly right; a plugin that returns `clientCertificateData` supplies its own, and C1's card is
+/// then true of the file and not of the session. Those two cannot be told apart without running
+/// the plugin, which this design refuses to do to answer a question — and going silent on every
+/// `exec` block would trade an over-broad true statement for a **missed expiry**, which is the one
+/// failure C1 exists to prevent.
+///
+/// **The path read is capped at [`CERTIFICATE_BYTES`], and the first draft's reason for leaving it
+/// unbounded was measured false** (`tester`, 2026-08-28). That reason was *kube reads the
+/// identical bytes one line later*, which holds only while `identity_pem()` is what supplies the
+/// TLS identity. When an `exec` plugin supplies one, kube takes the plugin's and never calls it
+/// (`client/config_ext.rs:391`), so `client-certificate` is a path **nothing else opens** —
+/// `tester` proved it by pointing the field at `/nonexistent/…` beside a working plugin and
+/// watching the binary connect anyway, and measured 16.4 GB and an OOM kill on `/dev/zero` in
+/// that shape. **Re-measured here on this build rather than taken on report**: a 400 MB file kube
+/// never opens cost **408 MB** of peak RSS uncapped and **18.8 MB** capped, against an 18.6 MB
+/// baseline with no `client-certificate` line at all — and `/dev/zero`, which has no end to reach,
+/// comes back at 18.4 MB. The `-data` read needs no cap: it is a string out of a kubeconfig kube
+/// has already parsed into memory.
+///
+/// **A file over the cap is `None`, the same `None` as *nobody looked*** (NOTES § D129), and
+/// nothing on screen pretends otherwise — C1 draws no card, exactly as for a login that carries no
+/// certificate. It is refused rather than truncated because a cut file is not a smaller answer, it
+/// is a different one: whatever PEM block happens to fall inside the first 64 KiB would be read as
+/// this login's certificate, and its date stated as fact.
+///
+/// **A path that will not read is `None` and not an error**: `Client::try_from` is about to fail
+/// on the same file with kube's own typed error, which is the sentence the reader gets
+/// (§ WHAT WENT WRONG) — in the one shape above it will not fail at all, and a session that works
+/// is not one to print a sentence about. Saying it twice, in two wordings, is the divergence this
+/// file is built to avoid. **Nothing distinguishes empty bytes from no certificate here for the
+/// same reason**: nothing downstream can tell them apart either, because `expires_at` answers
+/// `None` to both.
+fn kubeconfig_certificate(auth: &AuthInfo) -> Option<Vec<u8>> {
+    use std::io::Read;
+    // **A certificate with no key beside it cannot be what authenticated this session**, whoever
+    // else is in the file — kube refuses that pair outright (`config/file_config.rs:651-661`), so
+    // either an `exec` block supplied the identity and this file was never opened, or no client
+    // was built at all. Presence only: neither key field is read, so this costs no token hygiene.
+    if auth.client_key.is_none() && auth.client_key_data.is_none() {
+        return None;
+    }
+    if let Some(data) = &auth.client_certificate_data {
+        return k8s_openapi::serde_json::from_value::<k8s_openapi::ByteString>(Value::String(
+            data.clone(),
+        ))
+        .ok()
+        .map(|decoded| decoded.0);
+    }
+    let mut pem = Vec::new();
+    // **One byte past the cap**, so *exactly at the cap* and *over it* are two answers rather than
+    // one — `take(CERTIFICATE_BYTES)` alone cannot tell a file that fits from one that was cut.
+    std::fs::File::open(auth.client_certificate.as_ref()?)
+        .ok()?
+        .take(CERTIFICATE_BYTES + 1)
+        .read_to_end(&mut pem)
+        .ok()?;
+    (pem.len() as u64 <= CERTIFICATE_BYTES).then_some(pem)
+}
+
+/// The most a kubeconfig's `client-certificate` **file** may be: 64 KiB
+/// ([`kubeconfig_certificate`], the security gate's *sizes are bounded*).
+///
+/// **Measured rather than picked.** The live kind cluster's admin certificate is **1155 bytes** of
+/// PEM and the three committed fixtures are **1196–1220**, so the cap is room for roughly fifty of
+/// them — past any chain a client is issued, and small enough that the worst case this function
+/// can be pointed at costs 64 KiB instead of everything the machine has.
+const CERTIFICATE_BYTES: u64 = 64 * 1024;
 
 /// **The program a kubeconfig logs in with, cleaned and bounded** — the `exec` block's `command`,
 /// and nothing else out of that block.
@@ -3838,8 +4104,11 @@ pub(crate) async fn session(client: Client) -> Session {
         served,
         watches,
         // **`None` here and filled in by [`connect_with`]**, which is the only caller that has a
-        // kubeconfig to read it from. A client is not a file.
+        // kubeconfig to read them from. A client is not a file: it carries no context name and no
+        // certificate that could be read back off it.
         renewal: None,
+        context: None,
+        client_certificate: None,
     }
 }
 

@@ -18,14 +18,20 @@ fn fixture(name: &str) -> String {
 
 /// A fixed moment, so a card's age is the same string on every run (invariant 5, NOTES § D18).
 /// `main` reads the real clock; a test may not, or the ladder rung moves under it.
+///
+/// **It is the instant `scripts/certs-test.sh` pins the committed certificates against**, which
+/// this file joined when the live driver started printing the Certificates pane (NOTES § D169):
+/// C1's row and its badge are a subtraction between that pin and those bytes, and a file
+/// measuring them from an instant nothing compares is what that guard exists to refuse. It was
+/// `2026-08-16T12:00:00Z` while this file was only about card ages.
 fn now() -> Time {
-    Time("2026-08-16T12:00:00Z".parse().expect("a fixed timestamp"))
+    Time("2026-08-23T00:00:00Z".parse().expect("a fixed timestamp"))
 }
 
 /// Four minutes before [`now`] — the `4 min ago` rung of the ladder
 /// (`screens/widgets.md` § 1b).
 fn four_minutes_ago() -> Time {
-    Time("2026-08-16T11:56:00Z".parse().expect("a fixed timestamp"))
+    Time("2026-08-22T23:56:00Z".parse().expect("a fixed timestamp"))
 }
 
 /// Read nothing: the snapshot a report about findings alone is rendered against.
@@ -505,11 +511,16 @@ fn nothing_broken_still_says_what_was_read() {
     );
 }
 
-/// **Severity is the order** — the declaration order of [`Severity`] is severity order and the
-/// derived `Ord` is what sorts this report (NOTES § D35). Handed the three bands backwards,
-/// the report puts them back: `●` then `▲` then `○`.
+/// **Severity is the order, and the `Info` band is not in this block at all** — the declaration
+/// order of [`Severity`] is severity order and the derived `Ord` is what sorts what is left
+/// (NOTES § D35), and NOTES § D87 is why there is nothing to sort in the third band: `Info` on a
+/// rule *means* the finding lives in a report rather than in Alerts, and this block is Alerts.
+///
+/// **The finding is not dropped, it is drawn elsewhere** — `--analysis`'s panes, which
+/// [`certificates_draws_c1s_row_and_the_sidebar_badge`] reads. Handed all three bands backwards,
+/// the report puts two of them back and passes the third on.
 #[test]
-fn severity_orders_the_report_and_the_summary_names_all_three_bands() {
+fn severity_orders_the_report_and_the_info_band_is_not_in_it() {
     let findings = vec![
         finding(Severity::Info, node_id("node-3")),
         finding(Severity::Warn, pod_id("shop", "api-7")),
@@ -521,10 +532,32 @@ fn severity_orders_the_report_and_the_summary_names_all_three_bands() {
         .lines()
         .filter_map(|l| l.split(' ').next().filter(|s| ["●", "▲", "○"].contains(s)))
         .collect();
-    assert_eq!(symbols, ["●", "▲", "○"], "{report:?}");
+    assert_eq!(
+        symbols,
+        ["●", "▲"],
+        "an `Info` finding was drawn as a card above the tally, so C1 prints twice in one run — \
+         once here and once as the Certificates pane row (NOTES § D87): {report:?}"
+    );
     assert!(
-        report.ends_with("\n1 critical, 1 warning, 1 note"),
-        "{report:?}"
+        report.ends_with("\n1 critical, 1 warning"),
+        "the tally names a band whose cards are not drawn: {report:?}"
+    );
+    assert!(
+        !report.contains("node-3"),
+        "the `Info` finding's object reached the card block: {report:?}"
+    );
+}
+
+/// **A run whose only findings are `Info` says nothing is broken here**, because nothing in this
+/// block is (NOTES § D2, § D87). It is not silence about the finding: `--analysis` draws it, and
+/// whether `--once` should print the reports for exactly this reason is that box's question.
+#[test]
+fn a_report_of_nothing_but_notes_is_a_report_with_no_alerts_in_it() {
+    let only = vec![finding(Severity::Info, node_id("node-3"))];
+    assert_eq!(
+        render(&only, &nothing_read()),
+        "0 pods · 0 nodes\n\n○ nothing is broken",
+        "a block with no alerts in it drew a card, an empty tally, or both"
     );
 }
 
@@ -551,8 +584,18 @@ fn the_summary_leaves_out_the_bands_that_are_empty() {
     assert_eq!(summary(two(Severity::Critical)), "2 critical");
     assert_eq!(summary(one(Severity::Warn)), "1 warning");
     assert_eq!(summary(two(Severity::Warn)), "2 warnings");
-    assert_eq!(summary(one(Severity::Info)), "1 note");
-    assert_eq!(summary(two(Severity::Info)), "2 notes");
+    // **The third band is not empty here, it is not this block's** (NOTES § D87): the last line
+    // of a report whose only finding is an `Info` is the *no alerts* line, never `1 note`.
+    assert_eq!(summary(one(Severity::Info)), "○ nothing is broken");
+    assert_eq!(summary(two(Severity::Info)), "○ nothing is broken");
+    // And a band that is drawn is not silenced by one that is not.
+    assert_eq!(
+        summary(vec![
+            finding(Severity::Info, node_id("node-3")),
+            finding(Severity::Warn, pod_id("shop", "api-7")),
+        ]),
+        "1 warning"
+    );
 }
 
 // --- THE LOADER ---
@@ -1055,14 +1098,14 @@ fn the_other_four(store: &mut k8s::Store) {
 fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     let mut last = String::new();
     assert_eq!(
-        live_report(&k8s::Store::default(), now(), &mut last, None),
+        live_report(&k8s::Store::default(), now(), &mut last, None, false),
         None
     );
 
     // Four of the five landed and the fifth never opened: still not a cluster anyone may read.
     let mut store = k8s::Store::default();
     the_other_four(&mut store);
-    assert_eq!(live_report(&store, now(), &mut last, None), None);
+    assert_eq!(live_report(&store, now(), &mut last, None, false), None);
     assert!(
         last.is_empty(),
         "something was recorded as printed while the bootstrap was still running"
@@ -1072,12 +1115,13 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     // most recently, so a silent bootstrap has to stay silent *against a non-empty last* too —
     // an empty report is not a report, and printing one would put a blank block on stdout every
     // time a watch re-listed.
-    let printed = live_report(&listed(Vec::new()), now(), &mut last, None).expect("a listed store");
+    let printed =
+        live_report(&listed(Vec::new()), now(), &mut last, None, false).expect("a listed store");
     assert!(!printed.is_empty(), "the report is empty: {printed:?}");
     // `None` and not merely *empty*: `Some(String::new())` is a blank block on stdout, which is
     // what the driver would print every time a watch re-listed.
     assert_eq!(
-        live_report(&store, now(), &mut last, None),
+        live_report(&store, now(), &mut last, None, false),
         None,
         "a bootstrap with nothing wrong printed something after an earlier report"
     );
@@ -1095,14 +1139,15 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     let mut store = listed(objects::<Pod>("kube-system-pods.json"));
     let mut last = String::new();
 
-    let first = live_report(&store, now(), &mut last, None).expect("every initial LIST landed");
+    let first =
+        live_report(&store, now(), &mut last, None, false).expect("every initial LIST landed");
     println!("{first}");
     assert!(
         first.contains(" pods · "),
         "the live report is not the report `render` draws"
     );
     assert_eq!(
-        live_report(&store, now(), &mut last, None),
+        live_report(&store, now(), &mut last, None, false),
         None,
         "the same cluster printed twice"
     );
@@ -1112,12 +1157,212 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     )
     .expect("the capture decodes");
     store.pod(&now(), Event::Apply(crashloop));
-    let second =
-        live_report(&store, now(), &mut last, None).expect("a pod arrived, so the report moved");
+    let second = live_report(&store, now(), &mut last, None, false)
+        .expect("a pod arrived, so the report moved");
     println!("{second}");
     assert!(
         second.contains("broken-crashloop"),
         "a pod that arrived after the bootstrap never reached the report"
+    );
+}
+
+/// **A listed store that also knows the three facts no watch carries** (`k8s::Identity`,
+/// NOTES § D169), with the committed nodes on the node watch.
+///
+/// The nodes arrive as `Apply` rather than `InitApply` because [`listed`] has already closed
+/// every initial LIST — which is a real shape and not a shortcut: a node object arriving after
+/// the bootstrap is what the watch delivers for the rest of the session.
+fn identified(pods: Vec<Pod>, nodes: Vec<Node>, identity: k8s::Identity) -> k8s::Store {
+    let mut store = listed(pods);
+    store.identify(identity);
+    for node in nodes {
+        store.node(&now(), Event::Apply(node));
+    }
+    store
+}
+
+/// **The context and certificate of a reader whose login is nearly out** — the committed
+/// `expiring-client` certificate, whose dates `scripts/make-certs.sh` pins and
+/// `scripts/certs-test.sh` asserts, so it cannot expire out from under [`now`].
+fn nearly_out(server_version: Option<&str>) -> k8s::Identity {
+    let path = format!(
+        "{}/tests/fixtures/certs/expiring-client.crt.pem",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    k8s::Identity {
+        server_version: server_version.map(str::to_string),
+        context: Some("kind-k8rs".to_string()),
+        client_certificate: Some(
+            std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("certificate {path} does not read: {e}")),
+        ),
+    }
+}
+
+/// **Whole days between [`now`] and the committed `expiring-client` certificate's `notAfter`** —
+/// `scripts/certs-test.sh` asserts both ends of that subtraction and prints this same number in
+/// its own summary line, so it is a figure a guard pins rather than one transcribed off a run.
+const EXPIRES_IN_DAYS: u32 = 13;
+
+/// **`--analysis` is honoured beside `--live` too, and it is still a flag** (NOTES § D169).
+///
+/// Same rule as the file path's [`the_analysis_flag_adds_every_pane_and_is_not_a_file`], and the
+/// same spelling: the cards are unchanged and the seven panes go under them. Until this box the
+/// flag was accepted and silently dropped in this mode, so **no** report had ever been drawn off
+/// a cluster — and the two below have shapes only a cluster reaches.
+#[test]
+fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
+    let store = identified(
+        objects::<Pod>("kube-system-pods.json"),
+        objects::<Node>("nodes.json"),
+        nearly_out(Some("v1.36.1")),
+    );
+
+    let mut last = String::new();
+    let plain = live_report(&store, now(), &mut last, None, false).expect("every LIST landed");
+    for pane in PANES {
+        assert!(
+            !plain.contains(pane),
+            "{pane} is drawn on a live run that did not ask for it: {plain}"
+        );
+    }
+
+    let mut last = String::new();
+    let panes = live_report(&store, now(), &mut last, None, true).expect("every LIST landed");
+    for pane in PANES {
+        assert!(
+            panes.contains(pane),
+            "{pane} is missing from a live run: {panes}"
+        );
+    }
+    assert!(
+        panes.starts_with(&plain),
+        "the cards moved when the panes were asked for — the reports go under them, exactly as \
+         the file path prints them: {panes}"
+    );
+}
+
+/// **Versions draws the control plane and what it measured against it** — the shapes the binary
+/// had never printed, because the driver hard-coded `server_version` to `None`
+/// (NOTES § D169).
+///
+/// **Three shapes here and one before**: with no version the whole pane is one `NotComputed`, and
+/// that is the only one any run of the binary had ever produced. With one it is the heading, the
+/// control-plane line counting the kubelets it could compare, and either the machines that are
+/// behind or the sentence that closes a pane that flagged nobody.
+///
+/// **The behind half comes from a control plane ahead of the committed nodes, not from an edited
+/// capture** (NOTES § D53). The nodes are the fixture verbatim at `v1.36.1`; what moves is the
+/// string the API server answered with, which is exactly what a cluster looks like between the
+/// control-plane upgrade and the node one.
+#[test]
+fn versions_draws_the_control_plane_line_and_the_machines_behind_it() {
+    let nodes = || objects::<Node>("nodes.json");
+    let pane_of = |identity| {
+        let store = identified(Vec::new(), nodes(), identity);
+        let mut last = String::new();
+        let printed = live_report(&store, now(), &mut last, None, true).expect("every LIST landed");
+        let at = printed.find("[versions]").expect("the pane is drawn");
+        printed[at..].to_string()
+    };
+
+    // **The state every earlier run of the binary was in**: nobody read a version, so nothing on
+    // the pane can be measured against one.
+    let unread = pane_of(k8s::Identity::default());
+    assert!(
+        unread.contains("k8rs could not read it"),
+        "a run with no control-plane version did not say so: {unread}"
+    );
+
+    let matching = pane_of(nearly_out(Some("v1.36.1")));
+    assert!(
+        matching.contains("Control plane v1.36.1 · 4 of 4 kubelets match"),
+        "the control-plane line is not drawn from the version the server answered with, or the \
+         four committed nodes never reached the report: {matching}"
+    );
+    assert!(
+        matching.contains("Every machine is running the same version as the control plane."),
+        "a pane that flagged nobody did not close on the sentence that says so: {matching}"
+    );
+
+    // **A control plane four releases ahead of its machines** — N4's own window is three
+    // (NOTES § D81), so every one of them is a row.
+    let behind = pane_of(nearly_out(Some("v1.40.0")));
+    assert!(
+        behind.contains("Control plane v1.40.0 · 0 of 4 kubelets match"),
+        "the count did not move with the control plane's version: {behind}"
+    );
+    assert!(
+        behind.contains("k8rs-control-plane") && behind.contains("k8rs-worker3"),
+        "the machines too far behind the control plane are not drawn: {behind}"
+    );
+    assert!(
+        !behind.contains("Nothing to do."),
+        "a pane that flagged four machines still closed on `nothing to do`: {behind}"
+    );
+}
+
+/// **Certificates draws C1's row and the sidebar badge** — the pane's only row a reader can open
+/// a finding from, and the product's only duration badge (NOTES § D169, § D87).
+///
+/// **Neither had ever been printed by the binary.** C1's two inputs are the kubeconfig's context
+/// name and its client certificate, and the driver hard-coded both to `None`, so every run this
+/// repo has made drew the same pane: the CSR row that could not be checked, and nothing else.
+///
+/// **The badge is the expiring band's only route to a reader who has not opened the pane**, since
+/// `Severity::Info` keeps C1 off Alerts — so a pane that draws the row and drops the badge is a
+/// silent finding, which is why both are asserted here rather than one standing in for the other.
+///
+/// **The number is arithmetic and not a transcription** ([`EXPIRES_IN_DAYS`]): the committed
+/// certificate's `notAfter` is pinned by `scripts/make-certs.sh` and [`now`] is the instant
+/// `scripts/certs-test.sh` measures it from, so the two spellings — `13 days` in the row's
+/// sentence and `13d` in the badge — are one subtraction seen twice, in two implementations that
+/// NOTES § D129 requires to agree.
+#[test]
+fn certificates_draws_c1s_row_and_the_sidebar_badge() {
+    let printed = |identity| {
+        let store = identified(Vec::new(), Vec::new(), identity);
+        let mut last = String::new();
+        let printed = live_report(&store, now(), &mut last, None, true).expect("every LIST landed");
+        let at = printed.find("[certificates]").expect("the pane is drawn");
+        let end = printed[at..].find("[drain safety]").expect("the next pane");
+        printed[at..at + end].to_string()
+    };
+
+    // **The state every earlier run of the binary was in**: no kubeconfig reached the snapshot,
+    // so the one finding about the reader's own machine could not exist.
+    let silent = printed(k8s::Identity::default());
+    assert_eq!(
+        silent.lines().next(),
+        Some("[certificates]"),
+        "a pane with no certificate to report on drew a badge: {silent}"
+    );
+    assert!(
+        !silent.contains("kubeconfig certificate"),
+        "C1's row was drawn for a run that never read a kubeconfig: {silent}"
+    );
+
+    let pane = printed(nearly_out(Some("v1.36.1")));
+    assert_eq!(
+        pane.lines().next(),
+        Some(format!("[certificates] {EXPIRES_IN_DAYS}d").as_str()),
+        "the sidebar badge is missing or is not C1's countdown — it is the expiring band's only \
+         route to a reader who has not opened this pane (NOTES § D87): {pane}"
+    );
+    assert!(
+        pane.contains(&format!(
+            "▲ Your kubeconfig certificate expires in {EXPIRES_IN_DAYS} days"
+        )),
+        "C1's row is missing, or is not drawn in the band this pane gives it: {pane}"
+    );
+    assert!(
+        pane.contains("this is the file on your own machine that proves who you are"),
+        "the row lost the rule's own evidence, so the reader is told a certificate expires and \
+         not which one: {pane}"
+    );
+    assert!(
+        pane.contains("→ ask whoever gave you access for a new kubeconfig"),
+        "the row has no way out on it: {pane}"
     );
 }
 
@@ -1328,7 +1573,8 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     k8s::drive_watching(watches, &mut store, |_| {}).await;
 
     let mut last = String::new();
-    let failing = live_report(&store, now(), &mut last, None).expect("five watches are failing");
+    let failing =
+        live_report(&store, now(), &mut last, None, false).expect("five watches are failing");
     println!("{failing}");
     for kind in ["pods", "nodes", "Deployments", "StatefulSets", "DaemonSets"] {
         assert!(
@@ -1350,14 +1596,15 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     );
 
     // The same store again is not news…
-    assert_eq!(live_report(&store, now(), &mut last, None), None);
+    assert_eq!(live_report(&store, now(), &mut last, None, false), None);
 
     // …and then every watch delivers a complete answer, which is what a reconnect looks like
     // from in here: the failure clears itself and the report says so without being asked.
     store.pod(&now(), Event::Init);
     store.pod(&now(), Event::InitDone);
     the_other_four(&mut store);
-    let recovered = live_report(&store, now(), &mut last, None).expect("the cluster came back");
+    let recovered =
+        live_report(&store, now(), &mut last, None, false).expect("the cluster came back");
     println!("{recovered}");
     assert!(
         !recovered.contains("not getting"),
@@ -1379,7 +1626,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         .map(|watch| watch.take(2).boxed())
         .collect();
     k8s::drive_watching(watches, &mut store, |_| {}).await;
-    let stale = live_report(&store, now(), &mut last, None).expect("an outage is news");
+    let stale = live_report(&store, now(), &mut last, None, false).expect("an outage is news");
     println!("{stale}");
     let (unreadable, cards) = stale
         .split_once("\n\n")
@@ -1802,6 +2049,10 @@ fn saying(
         served,
         watches: Vec::new(),
         renewal: renewal.map(str::to_string),
+        // The startup line is about what the *cluster* answered; neither of these is a question
+        // the cluster was asked, and `k8s_tests.rs` § CONNECTING is where they are proven.
+        context: None,
+        client_certificate: None,
     }
 }
 
@@ -1928,7 +2179,10 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     };
 
     // **The context**: the file read perfectly and does not name what was asked for.
-    let unloadable = live(k8s::connect_with(yaml("{}"), Some("k8rs-tests-no-such-context")).await);
+    let unloadable = live(
+        k8s::connect_with(yaml("{}"), Some("k8rs-tests-no-such-context")).await,
+        false,
+    );
     let unloadable = unloadable.await;
     println!("{unloadable}");
     assert_eq!(
@@ -1943,7 +2197,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     // 2026-08-27).
     let moved = "{client-certificate: /nonexistent/k8rs-tests/client.crt, \
                  client-key: /nonexistent/k8rs-tests/client.key}";
-    let entry = live(k8s::connect_with(yaml(moved), None).await).await;
+    let entry = live(k8s::connect_with(yaml(moved), None).await, false).await;
     println!("{entry}");
     assert!(
         entry.contains("this kubeconfig loaded, and something it points at did not"),
@@ -1961,7 +2215,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     let user = format!(
         "{{exec: {{apiVersion: client.authentication.k8s.io/v1beta1, command: {helper}}}}}"
     );
-    let broken = live(k8s::connect_with(yaml(&user), None).await).await;
+    let broken = live(k8s::connect_with(yaml(&user), None).await, false).await;
     println!("{broken}");
     assert!(
         broken.contains(&format!("(`{helper}`)")),
@@ -2004,7 +2258,7 @@ async fn a_cluster_that_never_answers_prints_nothing_and_says_why_it_stopped() {
         .map(|watch| watch.take(2).boxed())
         .collect();
 
-    let stopped = live(Ok(session)).await;
+    let stopped = live(Ok(session), false).await;
 
     assert!(
         stopped.contains("every watch has stopped"),

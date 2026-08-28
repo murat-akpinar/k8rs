@@ -1378,6 +1378,33 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   D70's recorded limit on the other screen; it needs `rules.rs`, which is frozen.
   Measured by `dev-core` while proving the Calico render.
 
+### From the live-fields box and its attack (2026-08-28)
+
+- **C1's card says *"this is the file on your own machine that proves who you are"* about a
+  file the connection may never have touched.** When a kubeconfig's `exec` plugin returns
+  `clientCertificateData`, kube takes the plugin's identity and never calls `identity_pem()`,
+  so `client-certificate` is read by k8rs and by nobody else
+  (`kube-client-4.2.0/src/client/config_ext.rs:391`, measured on the binary by `tester`).
+  Ruled 2026-08-28: **k8rs keeps reading it** — an exec plugin returning a *token* does fall
+  through to `identity_pem`, so the certificate genuinely is the TLS identity there, and a
+  missed expiry is worse than an over-broad card. What is left is the card's *framing*, which
+  is `rules.rs` and frozen. Sweep it with the C-series wording.
+- **A context name has no length bound but `IDENTIFIER`'s 512**, and it is the first object
+  name on a card that is not a Kubernetes object name — the API caps its own at 253, a
+  kubeconfig context is whatever the user's file says. A 304-character name drew a 306-column
+  card line. Control characters are stripped and nothing crashes; it is a `views.rs` question
+  from Phase 8 on. Found by `tester`.
+- **`--context` without `--live` still prints errno jargon about a file nobody named** —
+  `k8rs --context prod` → `k8rs: --context: No such file or directory (os error 2)`, because
+  `run()` filters only `--analysis` out of `paths`. Invariant 14's exact shape, arriving
+  through the door `mistyped`'s own doc says it closed. **Pre-existing** — verified against
+  `git show HEAD:src/main.rs` — and not caused by the live-fields box. Found by `tester`.
+- **The one MISSED mutant on `connect_with`'s `client_certificate` has a route that was
+  refused, not one that does not exist.** An `exec` plugin emitting an ExecCredential with a
+  key generated at test time closes it and commits no key material. Refused 2026-08-28 because
+  it puts `openssl`-on-PATH into `cargo test`, and *`just check` is the whole of CI or it is a
+  lie*. Reopen only if the toolchain requirement stops being one. Found by `tester`.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

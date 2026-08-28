@@ -29,6 +29,68 @@ fn object<T: DeserializeOwned>(name: &str) -> T {
         .unwrap_or_else(|e| panic!("{name}.json does not decode: {e}"))
 }
 
+/// **Bytes standing in for a certificate, and deliberately not one of the committed ones.**
+///
+/// Nothing in this file measures a date off a certificate: what is asserted here is that the bytes
+/// handed in are the bytes that come back, and that base64 was decoded. Reading a committed PEM
+/// would put this file under `scripts/certs-test.sh`'s rule that every reader of those three
+/// files measures them from the one pinned instant — a rule this file could only satisfy by
+/// claiming a clock it does not use. The certificates whose *dates* matter are read where those
+/// dates are asserted.
+///
+/// PEM-shaped anyway, because that is the shape the real field carries, and it is what makes the
+/// *the base64 came back undecoded* assertion below mean anything.
+fn certificate_bytes(name: &str) -> Vec<u8> {
+    format!("-----BEGIN CERTIFICATE-----\nk8rs-tests-{name}\n-----END CERTIFICATE-----\n")
+        .into_bytes()
+}
+
+/// The same bytes on disk, for the `client-certificate` **path** shape kubeadm and minikube write.
+/// A real file and not a fixture, because nothing here parses it.
+///
+/// **Unique per file and removed when the test ends** ([`Scratch`], `k8s-admin`, 2026-08-28). A
+/// fixed name in a shared `TMPDIR` is two concurrent runs tearing each other's 64 KiB cap fixture,
+/// and one that is never removed is litter that grows.
+///
+/// **`create_new`, so an existing path is an error rather than a target.** A plain write follows a
+/// symlink planted where this is about to write; the counter makes a collision this run
+/// impossible, and the flag makes anything already sitting there loud.
+fn certificate_file(name: &str, bytes: &[u8]) -> Scratch {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-tests-{}-{}-{name}.crt.pem",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .and_then(|mut file| file.write_all(bytes))
+        .unwrap_or_else(|e| panic!("{} could not be written: {e}", path.display()));
+    Scratch(path.to_string_lossy().into_owned())
+}
+
+/// A scratch file that removes itself — including when the test around it panics, because a test
+/// binary unwinds. It derefs to its path, so it reads as the `String` it replaced.
+struct Scratch(String);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
 /// A `kubectl get -A` capture, which is a `kind: List` — the shape the initial LIST arrives in.
 fn items<T: DeserializeOwned>(name: &str) -> Vec<T> {
     let list = capture(name);
@@ -446,11 +508,19 @@ fn nothing_the_store_did_not_read_is_reported_as_read() {
         snapshot.metrics, None,
         "the metrics probe is a later box, and it did not run"
     );
+    // **The three [`Identity`] carries, over a store nobody identified** (NOTES § D169). They do
+    // not come from a watch, so a store fed nothing but streams has never been told them — and
+    // `None` is *nobody looked*, which is exactly true of the file driver.
     assert_eq!(
         snapshot.server_version, None,
-        "connect() is a later box, so N4 says nothing"
+        "a store nobody identified answered for the control plane's version, so N4 compares a \
+         kubelet against a version nobody read"
     );
-    assert_eq!(snapshot.context, None);
+    assert_eq!(
+        snapshot.context, None,
+        "a store nobody identified named a context, so C1 has an object name for a cluster \
+         nobody connected to"
+    );
     assert_eq!(
         snapshot.client_certificate, None,
         "C1's certificate never came from a watch"
@@ -458,6 +528,46 @@ fn nothing_the_store_did_not_read_is_reported_as_read() {
     assert_eq!(
         snapshot.namespace_scope, None,
         "every namespace, as far as this store knows"
+    );
+}
+
+/// **The three facts no watch carries reach the snapshot, each in its own field**
+/// ([`Identity`], NOTES § D169).
+///
+/// **The positive half of the test above**, and they are two tests rather than one because the
+/// claims are opposites: *a store nobody identified answers `None`* and *a store that was
+/// identified answers what it was told*. A single test asserting only the second cannot tell a
+/// field that is wired from a field that is hard-coded to the value the test happened to pick.
+///
+/// **Three different values, one per field**, so two fields swapped on the way through is a
+/// failure and not a green run: `server_version` and `context` are both `Option<String>` and a
+/// copy-paste between them compiles.
+#[test]
+fn the_three_facts_no_watch_carries_reach_the_snapshot() {
+    let certificate = certificate_bytes("in-the-snapshot");
+    let mut store = bootstrapped();
+    store.identify(Identity {
+        server_version: Some("v1.36.1".to_string()),
+        context: Some("kind-k8rs".to_string()),
+        client_certificate: Some(certificate.clone()),
+    });
+    let snapshot = store.snapshot(now()).expect("every initial LIST landed");
+    assert_eq!(
+        snapshot.server_version.as_deref(),
+        Some("v1.36.1"),
+        "the control plane's version did not reach the snapshot, so N4 and the Versions report \
+         say nothing about a cluster that answered"
+    );
+    assert_eq!(
+        snapshot.context.as_deref(),
+        Some("kind-k8rs"),
+        "the context name did not reach the snapshot, so C1 has no object to be about"
+    );
+    assert_eq!(
+        snapshot.client_certificate.as_deref(),
+        Some(certificate.as_slice()),
+        "the kubeconfig's certificate did not reach the snapshot, so C1 and the Certificates \
+         badge stay silent about a login that is running out"
     );
 }
 
@@ -5668,11 +5778,19 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
         served,
         watches,
         renewal,
+        context,
+        client_certificate,
     } = session(offline()).await;
 
     assert_eq!(
         renewal, None,
         "a client is not a file: `session` has no kubeconfig to read a login program out of"
+    );
+    assert_eq!(
+        (context.as_deref(), client_certificate.as_deref()),
+        (None, None),
+        "a client is not a file either way round: there is no context name and no certificate to \
+         read back off one, and inventing either is a card about a cluster nobody named"
     );
 
     assert!(
@@ -5731,6 +5849,18 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
 /// of cluster *objects*, which are never edited to make a test pass; a kubeconfig is the file on
 /// the reader's own laptop, and `PRIOR-ART § B1`'s six shapes are six such files. Writing one is
 /// the only way a test can own the thing it asserts about.
+/// **One `user:` block, built from the field names a kubeconfig spells** rather than from a
+/// struct literal — which is also the only way to set `client-key-data` here, because its type is
+/// `secrecy::SecretString` and `secrecy` is not one of the eleven crates (invariant 10). kube
+/// deserializes the real thing through the same impl.
+fn auth(fields: &[(&str, &str)]) -> AuthInfo {
+    let block: serde_json::Map<String, Value> = fields
+        .iter()
+        .map(|(name, value)| ((*name).to_string(), Value::String((*value).to_string())))
+        .collect();
+    serde_json::from_value(Value::Object(block)).expect("a user block this file wrote itself")
+}
+
 fn kubeconfig(context: &str, user: &str) -> Kubeconfig {
     Kubeconfig::from_yaml(&format!(
         "apiVersion: v1\n\
@@ -6035,6 +6165,391 @@ async fn the_login_program_reaches_the_session_and_nothing_else_from_that_block_
     assert_eq!(
         plain.renewal, None,
         "a kubeconfig with no `exec` block was given a login program to name"
+    );
+}
+
+/// **The context this session is on is the one it connected with, not always the file's**
+/// (NOTES § D169).
+///
+/// **The whole path, through `Config::from_custom_kubeconfig`**, because the name has to be read
+/// off the kubeconfig one line *before* it is moved into the loader — kube's `Config` keeps no
+/// context name, so there is nowhere to read it back from afterwards.
+///
+/// **The second half is the one that can silently not fail.** Handed a file with one context,
+/// ignoring the `--context` argument entirely returns that same name and every assertion stays
+/// green; the file below names two, so a run that connected to the wrong one is a different
+/// string. That is C1 naming the cluster the reader is *not* looking at.
+#[tokio::test]
+async fn the_context_a_session_names_is_the_one_it_connected_with() {
+    let ours = connect_with(
+        kubeconfig("k8rs-tests", "{token: k8rs-tests-fake-static-token}"),
+        None,
+    )
+    .await
+    .unwrap_or_else(|_| panic!("a kubeconfig with a static token built no client"));
+    assert_eq!(
+        ours.context.as_deref(),
+        Some("k8rs-tests"),
+        "a run with no `--context` did not pick up the file's own current context, so C1's card \
+         has no name on it"
+    );
+
+    // Two contexts over one cluster and one user, with `current-context` on the first: the only
+    // file where *the argument was ignored* and *the argument was used* are two answers.
+    let two = Kubeconfig::from_yaml(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-current\n\
+         clusters: [{name: c, cluster: {server: 'https://k8rs-tests.invalid:6443'}}]\n\
+         contexts:\n\
+         - {name: k8rs-tests-current, context: {cluster: c, user: u}}\n\
+         - {name: k8rs-tests-asked-for, context: {cluster: c, user: u}}\n\
+         users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
+    )
+    .expect("a kubeconfig this file wrote itself");
+    let asked = connect_with(two, Some("k8rs-tests-asked-for"))
+        .await
+        .unwrap_or_else(|_| panic!("a kubeconfig naming two contexts built no client"));
+    assert_eq!(
+        asked.context.as_deref(),
+        Some("k8rs-tests-asked-for"),
+        "`--context` was overridden by the file's current context, so a card would name the \
+         cluster this run is not watching"
+    );
+}
+
+/// **A context name is stripped, bounded and never invented** — the field-level half of
+/// [`kubeconfig_context`], written beside [`renewal`]'s for the same reason: a bidi override
+/// cannot travel through a successful connect, because kube refuses the context before a session
+/// exists.
+///
+/// **The strip is owed even though a kubeconfig is not the API server** (invariant 9,
+/// NOTES § D154). C1's card is *"Your kubeconfig certificate expires in 19 days"* over an object
+/// named with this string, and a `\u{202e}` in it reverses the line it is drawn on.
+#[test]
+fn a_context_name_is_stripped_bounded_and_never_invented() {
+    let file = |current: Option<&str>| Kubeconfig {
+        current_context: current.map(str::to_string),
+        ..Kubeconfig::default()
+    };
+    assert_eq!(
+        kubeconfig_context(&file(Some("prod\u{202e}dc")), None).as_deref(),
+        Some("proddc"),
+        "a bidi override in a context name survived, so the card it is drawn on reads backwards"
+    );
+    assert_eq!(
+        kubeconfig_context(&file(Some("keep")), Some("asked\u{200b}for")).as_deref(),
+        Some("askedfor"),
+        "the name the reader typed is not stripped, so `--context` is a second door into the \
+         terminal"
+    );
+    assert_eq!(
+        kubeconfig_context(&file(None), None),
+        None,
+        "a kubeconfig with no current context was given a name anyway — C1 says nothing rather \
+         than inventing one (NOTES § D51)"
+    );
+    assert_eq!(
+        kubeconfig_context(&file(Some("\u{202e}")), None),
+        None,
+        "a name that strips to nothing came back as an empty one, and an object named with the \
+         empty string is worse than no card"
+    );
+    let long = kubeconfig_context(&file(Some(&"n".repeat(IDENTIFIER * 2))), None)
+        .expect("a long name is still a name");
+    assert!(
+        long.len() < IDENTIFIER * 2 && long.ends_with(SHORTENED),
+        "a context name is not bounded, so a kubeconfig can hand the screen any length it likes"
+    );
+}
+
+/// **The client certificate comes off the kubeconfig, from the data or from the path**, and the
+/// key is not what is read ([`kubeconfig_certificate`], NOTES § D169).
+///
+/// **Field level, because a certificate with no key builds no client**: kube's `identity_pem`
+/// refuses that pair outright, so no `connect_with` in this file can carry a certificate through
+/// to a [`Session`] — and the only way to reach the whole path would be committing a private key,
+/// which the security gate refuses. This is the same limit [`renewal`]'s field-level test is
+/// written under. **That same refusal is now a rule of this function**, which is
+/// [`a_certificate_with_no_key_beside_it_is_not_this_sessions_identity`]'s subject; every
+/// `AuthInfo` here carries a key for that reason, and never one whose content is read.
+///
+/// **Both shapes are real and a build that read one is half wrong**: kind and EKS embed
+/// `client-certificate-data`, kubeadm and minikube write a `client-certificate` path. Every field
+/// that is not the one under test holds *different* bytes, so *which* one came back is an
+/// assertion rather than a coincidence.
+#[test]
+fn a_client_certificate_comes_off_the_data_or_the_path_and_never_the_key() {
+    let expiring = certificate_bytes("the-one-in-use");
+    let expiring_path = certificate_file("the-one-in-use", &expiring);
+    let other_path = certificate_file("the-one-not-in-use", &certificate_bytes("not-in-use"));
+    // kube's own encoding of the same bytes — a kubeconfig's `client-certificate-data` is
+    // standard base64 of the PEM, which is what `k8s_openapi::ByteString` writes.
+    let encoded = serde_json::to_value(k8s_openapi::ByteString(expiring.clone()))
+        .expect("bytes serialize")
+        .as_str()
+        .expect("a ByteString serializes as a string")
+        .to_string();
+
+    let path_only = AuthInfo {
+        client_certificate: Some(expiring_path.to_string()),
+        // The key is set to a *different* certificate, so a function reading the wrong field
+        // comes back with the wrong bytes rather than with the right ones by luck.
+        client_key: Some(other_path.to_string()),
+        ..AuthInfo::default()
+    };
+    assert_eq!(
+        kubeconfig_certificate(&path_only).as_deref(),
+        Some(expiring.as_slice()),
+        "a kubeconfig that names a certificate path was read as having none, so C1 is silent on \
+         every kubeadm and minikube cluster there is"
+    );
+
+    let data_only = AuthInfo {
+        client_certificate_data: Some(encoded.clone()),
+        // **The embedded half of the pair, so both key fields are proven to satisfy the presence
+        // check** — a kubeconfig that embeds its certificate embeds its key beside it.
+        ..auth(&[("client-key-data", "k8rs-tests-not-a-key")])
+    };
+    let decoded = kubeconfig_certificate(&data_only).expect("embedded data is a certificate");
+    assert_eq!(
+        decoded, expiring,
+        "embedded `client-certificate-data` did not decode, so C1 is silent on every kind and \
+         EKS cluster there is"
+    );
+    assert_ne!(
+        decoded.as_slice(),
+        encoded.as_bytes(),
+        "the base64 string came back undecoded — it is not PEM, and `expires_at` would read it \
+         as no certificate at all"
+    );
+
+    // **Data wins over a path, because that is the order kube resolves them in** — reading the
+    // file when both are present reports on a certificate the connection is not using.
+    let both = AuthInfo {
+        client_certificate: Some(other_path.to_string()),
+        client_certificate_data: Some(encoded),
+        client_key: Some("/nonexistent/k8rs-tests/client.key".to_string()),
+        ..AuthInfo::default()
+    };
+    assert_eq!(
+        kubeconfig_certificate(&both).as_deref(),
+        Some(expiring.as_slice()),
+        "the path won over the embedded data, so the card is about a file on disk that kube \
+         never looked at"
+    );
+
+    // **Three ways there is nothing to report, and none of them is an error**: no certificate at
+    // all, a path that is not there, and data that is not base64. `Client::try_from` fails on the
+    // last two with kube's own typed error, which is the sentence the reader gets.
+    //
+    // **The last two carry a key**, or they would come back `None` for the guard's reason instead
+    // of their own and stop testing what their sentences say.
+    let keyed = || Some("/nonexistent/k8rs-tests/client.key".to_string());
+    assert_eq!(kubeconfig_certificate(&AuthInfo::default()), None);
+    assert_eq!(
+        kubeconfig_certificate(&AuthInfo {
+            client_certificate: Some("/nonexistent/k8rs-tests/client.crt".to_string()),
+            client_key: keyed(),
+            ..AuthInfo::default()
+        }),
+        None,
+        "a certificate path that has moved produced bytes anyway"
+    );
+    assert_eq!(
+        kubeconfig_certificate(&AuthInfo {
+            client_certificate_data: Some("not base64 at all !!".to_string()),
+            client_key: keyed(),
+            ..AuthInfo::default()
+        }),
+        None,
+        "`client-certificate-data` that is not base64 produced bytes anyway"
+    );
+}
+
+/// **A certificate with no key beside it is not what authenticated this session, so C1 is silent
+/// about it** (`k8s-admin`, 2026-08-28).
+///
+/// **kube is what proves it, not a judgement here**: `identity_pem` answers `(Some(_), None)` with
+/// `LoadClientKey(NoBase64DataOrFile)` (`config/file_config.rs:651-661`), so either an `exec`
+/// block supplied the identity and this file was never opened, or no client was built at all.
+///
+/// **The shape is the residue of an auth migration** — an `exec` block added for
+/// `aws-iam-authenticator` and the old `client-certificate:` line left behind — and against it
+/// k8rs drew an amber card, a `1 note` and a permanent badge about a file with no bearing on the
+/// login, while `kubectl` refuses the same kubeconfig as malformed.
+///
+/// **Both spellings of the certificate and both of the key**, because the guard reads two fields
+/// and the certificate arrives through two: a check written for one of the four is three
+/// kubeconfigs it does not cover.
+#[test]
+fn a_certificate_with_no_key_beside_it_is_not_this_sessions_identity() {
+    let pem = certificate_bytes("no-key-beside-it");
+    let path = certificate_file("no-key-beside-it", &pem);
+    let encoded = serde_json::to_value(k8s_openapi::ByteString(pem.clone()))
+        .expect("bytes serialize")
+        .as_str()
+        .expect("a ByteString serializes as a string")
+        .to_string();
+
+    for certificate in [
+        ("client-certificate", &*path),
+        ("client-certificate-data", encoded.as_str()),
+    ] {
+        let spelling = certificate.0;
+        assert_eq!(
+            kubeconfig_certificate(&auth(&[(spelling, certificate.1)])),
+            None,
+            "a `{spelling}` with no key beside it was read as this session's login, so C1 counts \
+             down to the expiry of a file kube never opened"
+        );
+
+        // **The positive, so the guard is a narrowing and not a silence** — and both key fields
+        // satisfy it, or a check written for one of them is half the kubeconfigs there are.
+        for key in [
+            ("client-key", "/nonexistent/k8rs-tests/client.key"),
+            ("client-key-data", "k8rs-tests-not-a-key"),
+        ] {
+            assert_eq!(
+                kubeconfig_certificate(&auth(&[(spelling, certificate.1), key])).as_deref(),
+                Some(pem.as_slice()),
+                "a complete pair (`{spelling}` + `{}`) was refused — the guard closed the class \
+                 instead of narrowing it, and C1 goes silent on every certificate login there is",
+                key.0
+            );
+        }
+    }
+}
+
+/// **A `client-certificate` path is read with a cap on it, and an endless file is refused**
+/// ([`CERTIFICATE_BYTES`], the security gate's *sizes are bounded*).
+///
+/// **The bound is this function's own and cannot be delegated to kube**, which is what the first
+/// draft assumed. When an `exec` plugin supplies the TLS identity kube never opens
+/// `client-certificate` at all (`client/config_ext.rs:391`), so this is the only reader — and
+/// pointed at `/dev/zero` in that shape it peaked at 16.4 GB and was OOM-killed while kube alone
+/// connected fine (`tester`, 2026-08-28).
+///
+/// **Three sizes, because a cap that is only fed a small file and an enormous one proves an
+/// inequality nobody wrote**: under, exactly at, and one byte over. The middle one is what fails
+/// if the comparison drifts to `<`, and the last is the whole point.
+///
+/// **Over the cap is `None` and not a truncated certificate** (NOTES § D129): the first block of a
+/// cut file is a date C1 would state as fact.
+#[test]
+fn a_certificate_path_is_read_with_a_cap_and_an_endless_file_is_refused() {
+    let cap = usize::try_from(CERTIFICATE_BYTES).expect("the cap fits this machine's usize");
+    // Every file this test writes, held until it ends and removed then ([`Scratch`]).
+    let mut litter = Vec::new();
+    let mut sized = |name: &str, len: usize| {
+        let mut bytes = certificate_bytes(name);
+        bytes.resize(len, b'0');
+        let file = certificate_file(name, &bytes);
+        // **Presence, not content** — [`kubeconfig_certificate`] refuses a certificate with no key
+        // beside it and never reads either key field.
+        let block = auth(&[
+            ("client-certificate", &file),
+            ("client-key", "/nonexistent/k8rs-tests/client.key"),
+        ]);
+        litter.push(file);
+        block
+    };
+
+    let ordinary = sized("under-the-cap", 1220);
+    assert_eq!(
+        kubeconfig_certificate(&ordinary).map(|pem| pem.len()),
+        Some(1220),
+        "a certificate the size of every real one this repo has measured was refused"
+    );
+    assert_eq!(
+        kubeconfig_certificate(&sized("at-the-cap", cap)).map(|pem| pem.len()),
+        Some(cap),
+        "a file exactly at the cap was refused, so the bound is off by one and the number in the \
+         doc is not the number in the code"
+    );
+    assert_eq!(
+        kubeconfig_certificate(&sized("over-the-cap", cap + 1)).map(|pem| pem.len()),
+        None,
+        "a file one byte over the cap came back — the read is unbounded, and `/dev/zero` in a \
+         kubeconfig is this process OOM-killed where kube alone connects (`tester`, 2026-08-28)"
+    );
+}
+
+/// **What a session hands the store, and the one question whose failure is not a value**
+/// ([`Identity::of`], NOTES § D169).
+///
+/// **A hand-built [`Session`], because the three come from three places** — the API server, the
+/// `--context` argument and the kubeconfig — and only a literal can hold all three at once
+/// without a cluster. What the paths above prove is that each field is *filled*; this proves the
+/// one step that carries them across does not drop or swap one.
+///
+/// **`Err` on the version is `None` and not a sentence** (NOTES § D129): the reason lives in
+/// [`Session::version`] and is printed by the startup line, and N4's answer to a version it
+/// could not read is to say nothing rather than compare against a guess.
+#[tokio::test]
+async fn a_session_hands_the_store_what_it_learned_and_a_question_that_failed_is_nothing() {
+    let certificate = certificate_bytes("on-the-session");
+    let session = Session {
+        client: offline(),
+        version: Ok("v1.36.1".to_string()),
+        served: Err(kube::Error::InferKubeconfig(
+            kube::config::KubeconfigError::CurrentContextNotSet,
+        )),
+        watches: Vec::new(),
+        renewal: None,
+        context: Some("kind-k8rs".to_string()),
+        client_certificate: Some(certificate.clone()),
+    };
+    let identity = Identity::of(&session);
+    assert_eq!(
+        identity.server_version.as_deref(),
+        Some("v1.36.1"),
+        "the version the server answered with did not reach the store"
+    );
+    assert_eq!(
+        identity.context.as_deref(),
+        Some("kind-k8rs"),
+        "the context this session is on did not reach the store"
+    );
+    assert_eq!(
+        identity.client_certificate.as_deref(),
+        Some(certificate.as_slice()),
+        "the kubeconfig's certificate did not reach the store"
+    );
+
+    let refused = Session {
+        version: Err(kube::Error::InferKubeconfig(
+            kube::config::KubeconfigError::CurrentContextNotSet,
+        )),
+        ..session
+    };
+    let identity = Identity::of(&refused);
+    assert_eq!(
+        identity.server_version, None,
+        "a version question the server refused became a version, so N4 compares every kubelet \
+         against something nobody read"
+    );
+    assert_eq!(
+        identity.context.as_deref(),
+        Some("kind-k8rs"),
+        "one question failing took the other two with it"
+    );
+
+    // **An answer that strips to nothing is not an answer either** (`k8s-admin`, 2026-08-28). A
+    // `gitVersion` of nothing but control characters comes out of [`session`]'s [`text`] call as
+    // `""`, and `Some("")` is a version that was read: the Versions pane then draws
+    // `Control plane ` with a trailing space and says the string cannot be compared against —
+    // about a string that is not there. The two sibling reads in this file, [`renewal`] and
+    // [`kubeconfig_context`], both answer `None` to the same shape.
+    let empty = Session {
+        version: Ok(String::new()),
+        ..refused
+    };
+    assert_eq!(
+        Identity::of(&empty).server_version,
+        None,
+        "an empty version reached the snapshot as `Some(\"\")`, which is `Control plane ` on the \
+         pane and a claim that something unreadable was read"
     );
 }
 

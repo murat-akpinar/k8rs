@@ -2764,7 +2764,7 @@ public release.
       `/var/log` moves from last of fourteen to first, the all-`kube-system` pane is
       byte-identical to HEAD, and the Calico render is honest. **D124 bound 4 is owed:
       the whole-file mutation gate for `analysis.rs` re-runs at this phase's close**
-- [ ] **Three of the seven reports have never drawn their principal shape
+- [x] **Three of the seven reports have never drawn their principal shape
       through the binary.** The temporary driver hard-codes `server_version`,
       `context`, `client_certificate` and `metrics` to `None`, so the run every
       Phase 4 box was closed against exercised 1 of Versions' 6 shapes, neither
@@ -2778,6 +2778,49 @@ public release.
       report proven only by its tests is the thing
       [CLAUDE.md § Running it](CLAUDE.md#running-it--and-just-check) forbids
       reporting as done**
+      Done for **Versions and Certificates**; Capacity's `using …` paragraphs
+      moved to the metrics-server box, which deploys the thing that makes them
+      possible
+      ([D169](NOTES.md#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)) —
+      `kubectl top nodes` on the live cluster answers *Metrics API not
+      available*, so no wiring here could have printed one. The four `None`s
+      were **two** places and only one was wrong: `load()`'s are correct (a
+      fixture path has no kubeconfig), `Store::snapshot`'s were not, and
+      `connect()` had landed without filling them under a comment promising it
+      would. `--live` also printed no reports at all, so `--analysis` is now
+      honoured beside it. Shape and every choice in
+      [D170](NOTES.md#d170--the-three-identity-fields-the-two-pm-claims-a-measurement-took-away-and-the-band-that-was-on-the-wrong-screen-2026-08-28).
+      **Versions, live** (`timeout 40 ./target/release/k8rs --live --analysis`,
+      PM's own run):
+
+      ```
+      k8rs: watching — server v1.36.1 · 60 kinds · {DisruptionBudgets}
+      40 pods · 4 nodes
+      [versions]
+        Control plane v1.36.1 · 4 of 4 kubelets match
+        Every machine is running the same version as the control plane. Nothing to do.
+      ```
+
+      **Certificates, live** — C1's row *and* the sidebar badge, the pane's only
+      `Jump::Finding` and the product's only duration badge, drawn **read-only**:
+      a throwaway self-signed certificate made locally plus an `exec` block
+      returning the identity the live kubeconfig already holds, which decouples
+      what authenticates from what C1 reads. No CSR, no CA key off the node, no
+      cluster write; the credential was shredded. **The PM's claim that there
+      was no read-only route was wrong and the operator review measured it away**:
+
+      ```
+      [certificates] 8d
+        ▲ Your kubeconfig certificate expires in 8 days
+            valid until 2026-09-06T00:26:18Z · this is the file on your own machine
+            that proves who you are — nothing in the cluster is broken
+      ```
+
+      One of Versions' six shapes stays unreachable through `--live` for a
+      structural reason and not the cluster's: `Store::snapshot` answers `None`
+      until all five initial LISTs land, so a login that cannot list nodes never
+      produces a snapshot at all. The other two are the cluster's doing — one
+      version everywhere, 4 of 4 kubelets matching
 - [ ] **Measure resident memory against 10 000 pods** (kind + a generator)
       **plus the three workload watches**, and write the number down. Pruning `managedFields` is agreed; whether the
       pruned store actually fits is unmeasured, and an unmeasured number is not
@@ -2851,6 +2894,13 @@ public release.
       a capture nor a one-field plant on one. Deploy metrics-server into kind
       on the trip this box needs anyway, and read the units
       ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
+      **And Capacity's `using …` paragraphs are proven here**, moved from the
+      three-reports box above, which cannot reach them: `metrics` is this box's
+      field and the fixture cluster answers *Metrics API not available* until
+      this deploy runs
+      ([D169](NOTES.md#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)).
+      Done when the binary has printed a `using …` paragraph against the live
+      cluster and the output is pasted into this box
 - [ ] **The mutation gate reads one directory and names another, so a run that
       tested nothing reports the previous run's logs** — `scripts/mutants.sh`
       counts `$OUT/log` (the repo-root `mutants.out/`) while printing `$SCRATCH`
@@ -2928,6 +2978,14 @@ public release.
       pasted into a ticket it reaches a wider audience. One documented line,
       not a blanked field
       ([NOTES § D37](NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12))
+      **And decide whether `--once` prints the reports at all**, which the live
+      box made a live question: the card block now filters `Severity::Info`
+      because [D87](NOTES.md#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14)
+      says an `Info` finding lives in a report and not in Alerts, and D87's
+      stated alerting mechanism for it is the **sidebar badge**, which no
+      driver has until Phase 11. So C1's expiry, N4 and N5 reach a `--once`
+      reader only if `--once` prints the panes. Decide it here, where the
+      shipped surface is decided, not in the driver
 - [ ] **Release v0.0.1 to crates.io** — `k8rs --once`, exactly as
       [screens/once.md](screens/once.md) draws it: findings on stdout, the
       commands and errors on stderr, `● ▲ ○` carrying severity without colour,

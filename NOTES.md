@@ -190,6 +190,8 @@ its line moving with it.
 - [D166](#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27) — `connect()`: its shape, its fourteen choices, and the backoff kube's own default did not earn
 - [D167](#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27) — eight faults, not two, and the two the review had to produce
 - [D168](#d168--posture-sorts-the-row-it-cannot-vouch-for-first-and-says-the-check-instead-of-a-verdict-2026-08-28) — Posture sorts the row it cannot vouch for first, and says the check instead of a verdict
+- [D169](#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28) — the three-reports box was placed above the boxes that fill its fields, and Capacity's half moves to the one that owns metrics
+- [D170](#d170--the-three-identity-fields-the-two-pm-claims-a-measurement-took-away-and-the-band-that-was-on-the-wrong-screen-2026-08-28) — the three identity fields, the two PM claims a measurement took away, and the band that was on the wrong screen
 
 ## Why it exists — where the gap is
 
@@ -14607,3 +14609,138 @@ pod — which is what makes ruling 1 right to refuse. Bound 2 holds: the box ent
 `todo.md` at `6ccb7db`, before Phase 5's first code commit. Bound 3 holds: no rule added,
 `Finding`/`ObjectId`/`analyze` untouched. **Bound 4 is owed — the whole-file mutation gate
 for `analysis.rs` re-runs at Phase 5's close**, not only `rules.rs`'s.
+
+### D169 — the three-reports box was placed above the boxes that fill its fields, and Capacity's half moves to the one that owns metrics (2026-08-28)
+
+Phase 5's box *"Three of the seven reports have never drawn their principal shape
+through the binary"* asks for Versions, Certificates and Capacity to be printed by the
+binary against a live cluster. Re-checked at HEAD before briefing it, two of its
+premises had moved and one of its three halves cannot be satisfied where it stands.
+
+**What the box says is `None` is `None` in two places, and only one of them is wrong.**
+`load()`'s fields are `None` correctly — a fixture path has no kubeconfig, no server to
+ask and no metrics API. The live path's are not: `Store::snapshot` still returns
+`server_version: None`, `context: None` and `client_certificate: None`, under a comment
+saying *"the `connect()` box further down Phase 5 fills them"*. `connect()`
+[landed](#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27)
+and did not fill them, and no remaining box in the phase names either
+`server_version` or `client_certificate`. **So this box owns them** — it is the only
+one that does — and the stale comment is corrected in the same change rather than left
+to promise a box that already went by.
+
+**A second premise the box could not have known**: `--live` does not print the analysis
+reports at all. `live_report` renders the cards only; `reports()` is reachable from the
+file path under `--analysis`, and `--analysis` beside `--live` is accepted-and-ignored
+on purpose. So the box's own done-when — *printed by the binary against a live cluster*
+— is unreachable until the live driver prints reports, which is therefore inside this
+box and not an extra.
+
+**Capacity's half cannot be met here, and the fix is order, not scope.** Its `using …`
+paragraphs need `metrics`, and `metrics` is owned by the *metrics-server polling* box
+further down this phase — which says in its own body: *"Deploy metrics-server into kind
+on the trip this box needs anyway, and read the units."* Measured on the live fixture
+cluster rather than assumed: `kubectl top nodes` answers *Metrics API not available*, so
+no run from this box can print a `using` paragraph however the driver is wired.
+
+**Ruling: Capacity's proof moves into the metrics-server box's done-when**, where the
+deploy that makes it possible already lives. Versions and Certificates stay here,
+because their fields are this box's. This is the plan being wrong about order — the
+box was written above the boxes that fill its inputs — and
+[CLAUDE.md § Architecture workflow](CLAUDE.md#architecture-workflow) says to fix the
+order and record it rather than force the box. **It is not a scope cut and no box is
+added**: one done-when clause moves from a box that cannot prove it to the box that
+can, and both say so.
+
+**Why this was worth an entry rather than a quiet edit.** A box whose done-when is
+impossible gets closed by whoever meets it next with the half that *was* provable and a
+sentence about the rest — which is the false tick
+[the phase-close ritual](CLAUDE.md#phase-close--the-ritual-at-the-end-of-every-phase)
+exists to refuse. Moving the clause is what keeps the tick honest.
+
+### D170 — the three identity fields, the two PM claims a measurement took away, and the band that was on the wrong screen (2026-08-28)
+
+[D169](#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)
+set this box's scope. This is what it decided.
+
+**The shape.** A `pub(crate) struct Identity` — `server_version`, `context`,
+`client_certificate` — built by `Identity::of(&Session)` and handed to the store by
+`Store::identify()`. Rejected: three positional `Option`s on a setter (two are
+`Option<String>` and swap silently), and a constructor taking a `Session` (`Store::default()`
+is what the file driver and some forty tests build, and a test has no `Session`).
+`Identity::default()` is *nobody looked*, so no case is special.
+
+**`--analysis` is honoured beside `--live`** rather than always printing, which removes an
+accepted-and-ignored flag instead of adding a second rule, and shares `reports()` so there
+is one arrangement of the seven panes and not two. Measured: live pane order is byte-for-byte
+the file path's.
+
+**Two PM claims were wrong and a measurement took each one away.** Both are recorded because
+the pattern is the one this repo pays most for — a ruling reasoned from a definition instead
+of measured against the object.
+
+1. **"An `exec` plugin's identity cannot be told apart from a static certificate without
+   running the plugin."** False for the commonest bad shape, and the operator review found the
+   discriminator *inside the doc comment that cited the ruling*: kube answers
+   `(Some(cert), None)` with `LoadClientKey(NoBase64DataOrFile)`
+   (`kube-client-4.2.0/src/config/file_config.rs:651-661`), so **a `client-certificate` with no
+   key can never be a successful session's TLS identity** — either an `exec` block supplied one
+   and kube never opened the file, or no client was built at all. Measured live: `kubectl`
+   refuses that kubeconfig outright, and k8rs drew a card, a `1 note` and a permanent `8d`
+   badge about a file with no bearing on the login. That is the residue of every auth
+   migration — a user block moved to `aws-iam-authenticator` or `gke-gcloud-auth-plugin` with
+   the old `client-certificate:` line left behind. `kubeconfig_certificate` now returns `None`
+   for it, on **presence only**, so no key is ever read and it costs no token hygiene. **The
+   ruling survives narrowed**: a *complete* static pair shadowed by a plugin still draws the
+   card, knowingly, because a missed expiry is worse than an over-broad true statement.
+2. **"C1's row and badge cannot be drawn read-only."** Also false. The route is the same
+   `exec` freedom: a throwaway self-signed certificate made locally plus an `exec` block
+   returning the identity the live kubeconfig already holds decouples *what authenticates*
+   from *what C1 reads* — no CSR, no CA key off the node, no cluster write. C1's row **and**
+   the `8d` sidebar badge were drawn by the release binary against the live cluster, which is
+   the box's evidence rather than a sentence saying it was unreachable. **That recipe is how
+   any future live C1 check is taken**; `kubeadm certificateValidityPeriod` is not needed.
+
+**The `Info` band was reaching the card block, and that is D87 on the wrong screen.** The same
+finding printed twice in one run — a card above the tally and a pane row. `Severity::Info`
+already means *this finding lives in a report, not in Alerts*
+([D87](#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14)),
+so `render` now filters it, above both the empty check and the tally so the count and the
+cards cannot disagree, and `tally`'s `note` arm is gone — it counted the band *because* the
+cards were drawn, and that reason inverted. **No committed fixture changes output**, measured
+byte for byte over every fixture with and without `--analysis`: the file path hard-codes C1's
+inputs to `None`, so neither C1 nor N4 can fire and no capture oversubscribes a node for N5.
+This also closes D121's third divergence rather than moving it — `screens/once.md`'s own
+tally is two bands.
+
+**The bounds, and one that was a real regression.** `CERTIFICATE_BYTES = 64 KiB`, measured
+rather than picked: the live admin certificate is 1155 bytes of PEM and the committed fixtures
+are 1196–1220. Read as `take(cap + 1)` so *exactly at* and *over* are two answers, and over is
+`None` — refused rather than truncated, because a cut file is not a smaller answer but a
+different one, and whatever PEM block fell inside the first 64 KiB would have its date stated
+as fact. **The first draft was unbounded on the argument that kube reads the same bytes a line
+later — true in every shape but the one above**, where kube never opens the file at all: an
+`exec` kubeconfig pointing at `/dev/zero` OOM-killed k8rs at 16.4 GB where kube alone connects,
+and a 400 MB file cost 408 MB of peak RSS against an 18.6 MB baseline. Capped, 18.8 MB.
+`context` is bounded and stripped like `renewal`; `server_version` was already; both are proven
+inert on the whole live path against a bidi override and an ESC/CR/BEL-laden `gitVersion`.
+
+**An empty `server_version` is `None`, not `Some("")`** — its two siblings in the same file
+already normalised, and `Some("")` drew `Control plane ` with a trailing space under a sentence
+claiming the version was unreadable rather than absent. Three readers of one shape, two
+agreeing: the family defect a family review exists to find.
+
+**`Identity` is taken once and never refreshed**, and that is written down rather than fixed
+here: the per-watch reconnect ([D161](#d161--the-reconnect-boxs-code-lands-before-connect-and-its-proof-can-only-run-after-it-2026-08-26))
+never re-runs `connect()`, so a control-plane upgrade leaves Versions counting kubelets against
+a stale string, and a session an `exec` plugin holds open outlives the complete static pair
+beside it, leaving C1's `Critical` card standing. `Critical` is still drawn in Alerts; only
+`Info` is filtered.
+
+**One mutant is accepted as a documented limit.** `delete field client_certificate from struct
+Session expression in connect_with` survives: no test can reach a *successful* `connect_with`
+carrying a certificate, because kube's `identity_pem` refuses a certificate with no key and a
+placeholder key gives `RustlsTls(InvalidPrivateKey)`. A route exists and was measured — an
+`exec` plugin emitting an ExecCredential with a key generated during the test, committing
+nothing — and was **refused** because it puts `openssl` on `PATH` inside `cargo test`, and
+*`just check` is the whole of CI or it is a lie*. Recorded so the next run reads it as a known
+limit rather than re-deriving it.

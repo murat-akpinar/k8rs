@@ -6,10 +6,15 @@
 //! how the rules are exercised for real (CLAUDE.md § Running it).
 //!
 //! The output is `screens/once.md`'s card, minus the two things that need a later phase —
-//! owner grouping and its `3 of 5 pods` count, and recency as a second sort key (Phase 10) —
-//! and plus one that is not a phase: it draws the `Info` band `--once` will not, because a
-//! driver whose whole job is to show what `analyze` returned may not drop one of them, and
-//! Phase 5's `--once` box takes the band off (NOTES § D121).
+//! owner grouping and its `3 of 5 pods` count, and recency as a second sort key (Phase 10).
+//!
+//! **The third divergence is gone: the `Info` band is not drawn in the card block and not counted
+//! in the tally.** D121 added it because *a driver whose whole job is to show what `analyze`
+//! returned may not drop one of them*, and that held for as long as no `Info` could be produced —
+//! the file path hard-codes all three of their inputs to `None`. The first live run that filled
+//! them printed C1 twice, once as a card and once as the pane row, and NOTES § D87 is explicit
+//! that `Severity::Info` *means* a report rather than Alerts. So `analyze`'s `Info` findings are
+//! not dropped, they are drawn where D87 sends them — the panes under `--analysis` ([`reports`]).
 //! It may not invent a third format: one `rules.rs`, one set of strings.
 //!
 //! **`--analysis` prints `analysis.rs`'s seven reports under the cards**, which is what makes them
@@ -18,6 +23,13 @@
 //! them ([`pane`]). The five lists those reports join — Services, EndpointSlices, PVCs,
 //! PodDisruptionBudgets and CertificateSigningRequests — are read here from whatever files are
 //! named, so a pane's *not checked* state is still reachable by simply not naming one ([`take`]).
+//!
+//! **It is honoured beside `--live` too, and that is the door three of the seven had no way
+//! through** (NOTES § D169). Their principal shapes are about things a `k8rs pod.json` run does
+//! not have: Versions needs a control plane to have a version, C1's row and sidebar badge are
+//! about the reader's kubeconfig, and Capacity's `using …` paragraphs need a metrics API — the
+//! first two arrive with this flag, the third when the metrics box fills its field. Both modes
+//! call [`reports`], so there is one arrangement of the seven and not two.
 
 // A module no `mod` line reaches is not in the crate at all, so `rules.rs` is declared the
 // moment it exists rather than when something calls it (NOTES § D34).
@@ -67,7 +79,9 @@ fn main() {
                 .enable_all()
                 .build()
             {
-                Ok(runtime) => runtime.block_on(async { live(k8s::connect(context).await).await }),
+                Ok(runtime) => runtime.block_on(async {
+                    live(k8s::connect(context).await, analysis_wanted(&args)).await
+                }),
                 Err(failed) => runtime_failure(&failed),
             },
             None => match run(&args) {
@@ -138,9 +152,15 @@ fn runtime_failure(error: &std::io::Error) -> String {
 /// The three lines a run with no arguments gets. **Three, and `tests/binary.rs` counts them**:
 /// the file-driven form, the live one, and what the first of them still cannot do — a usage that
 /// named only half the binary would be the driver lying about itself.
-const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   k8rs --live [--context <name>]\n\
-    Each file holds Kubernetes objects as JSON: one object, or a list of them.\n\
-    Without --live this build reads files only — it cannot reach a cluster.";
+///
+/// **The synopsis is one printed line written across two source lines**, and the `\` that joins
+/// them keeps the three spaces before it: `scripts/width-guard.py` refuses a source line past 100
+/// columns and `cargo fmt` will not wrap a string literal — it pulls the whole `const` back onto
+/// one line however this is indented, so the break has to be inside the literal.
+const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   \
+     k8rs --live [--analysis] [--context <name>]\n\
+     Each file holds Kubernetes objects as JSON: one object, or a list of them.\n\
+     Without --live this build reads files only — it cannot reach a cluster.";
 
 /// **The one flag this driver has**, and it is scaffolding like the driver itself: `analysis.rs`'s
 /// seven reports are whole-cluster answers rather than per-object cards, so they are a second
@@ -150,11 +170,23 @@ const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   k8rs --live [
 /// **A flag and not the default**, because the default output is what `tests/binary.rs` pins as
 /// the report on stdout — and because a driver that printed seven panes for every `k8rs pod.json`
 /// would bury the cards it exists to show.
+///
+/// **One meaning in both modes** (NOTES § D169): it was accepted and ignored beside `--live`
+/// until the reports that need a cluster had nowhere else to be drawn — Versions has a
+/// control-plane version only when there is a control plane, and C1's row and badge are about a
+/// kubeconfig no file path has. A flag that is honoured in one mode and silently dropped in the
+/// other is the second rule this driver would then have.
 const ANALYSIS: &str = "--analysis";
+
+/// **Whether the seven panes were asked for**, read the same way for both modes because it is
+/// one flag ([`ANALYSIS`]).
+fn analysis_wanted(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == ANALYSIS)
+}
 
 /// The report, or the sentence that goes to stderr instead. `Err` is the whole of exit 2.
 fn run(args: &[String]) -> Result<String, String> {
-    let wanted = args.iter().any(|arg| arg == ANALYSIS);
+    let wanted = analysis_wanted(args);
     // Everything that is not a flag is a path. A word that *looks* like a flag and is not one
     // never gets here — [`mistyped`] refuses it for both modes at once — and a file really named
     // `--analysis` is not a shape this scaffolding owes an escape hatch to.
@@ -413,11 +445,25 @@ fn decode<T: DeserializeOwned>(doc: Value, kind: &str) -> Result<T, String> {
 /// is Phase 10's second key and is deliberately not here.
 fn render(findings: &[Finding], input: &Input) -> String {
     let mut lines = vec![header(input), String::new()];
-    if findings.is_empty() {
+    // **The `Info` band is not drawn here, because this block is Alerts** (NOTES § D87, § D2):
+    // `Severity::Info` on a rule already *means* this finding lives in a report rather than in
+    // Alerts, which is how N4 and N5 use it and how C1's expiring band reaches the Certificates
+    // pane at all. Filtering once, above the `is_empty` check and above [`tally`], is what stops
+    // the count and the cards disagreeing — the tally counted the band only because the cards
+    // were drawn, and both follow this one line (NOTES § D121's third divergence, now closed).
+    //
+    // **It was unreachable until this box.** The file path hard-codes C1's two inputs and the
+    // control-plane version to `None`, so nothing outside a live run could return an `Info` at
+    // all; the first live run with the fields filled printed C1 twice, once as a card above the
+    // tally and once as the pane row (`k8s-admin`, 2026-08-28).
+    let mut order: Vec<&Finding> = findings
+        .iter()
+        .filter(|f| f.severity != Severity::Info)
+        .collect();
+    if order.is_empty() {
         lines.push("○ nothing is broken".to_string());
         return lines.join("\n");
     }
-    let mut order: Vec<&Finding> = findings.iter().collect();
     order.sort_by_key(|f| f.severity);
     for finding in &order {
         lines.push(card(finding, &input.snapshot.now));
@@ -515,13 +561,10 @@ fn tally(findings: &[&Finding]) -> String {
     if warnings > 0 {
         parts.push(plural(warnings, "warning"));
     }
-    // The band is counted here because the cards above are drawn — this file's third divergence
-    // from `screens/once.md`, in the module doc (NOTES § D121; D87 is why `analyze` returns an
-    // `Info` at all). A card above a summary that does not mention it is the half-way house.
-    let notes = count(Severity::Info);
-    if notes > 0 {
-        parts.push(plural(notes, "note"));
-    }
+    // **No `note` count, because there is no `Info` card above it to count** — [`render`] filters
+    // the band out of this block entirely (NOTES § D87). Counting a band whose cards are not drawn
+    // is the half-way house the other way round: a summary naming something the reader can see no
+    // evidence for. `screens/once.md`'s own tally has two bands and so does this one now.
     parts.join(", ")
 }
 
@@ -747,10 +790,11 @@ fn live_context(args: &[String]) -> Option<Option<&str>> {
 /// named (invariant 14). The cost is that a file genuinely called `--x` cannot be read, which is
 /// an escape hatch this scaffolding already declined to owe anybody.
 ///
-/// **A flag that is real but useless in this mode is *not* refused** — `--analysis` beside
-/// `--live`, `--context` without it. Neither can point the run at something the reader did not
-/// name, which is the failure this guard is for, and Phase 12's real flag parsing is where a
-/// tighter answer belongs.
+/// **A flag that is real but useless in this mode is *not* refused** — `--context` without
+/// `--live`. It cannot point the run at something the reader did not name, which is the failure
+/// this guard is for, and Phase 12's real flag parsing is where a tighter answer belongs.
+/// **`--analysis` is no longer one of them**: it is honoured in both modes as of NOTES § D169,
+/// so the list that used to name it is one shorter rather than one longer.
 ///
 /// **A flag where `--context`'s value should be *is* refused**, and this is where that sentence
 /// lives because [`live_context`] has nowhere to print one. The realistic form is
@@ -806,29 +850,38 @@ fn mistyped(args: &[String]) -> Option<String> {
 /// reader's kubeconfig, read once at connect ([`k8s::Session::renewal`]), and this function has
 /// no session to reach it from. It is what a `401` on a watch — the ordinary EKS/GKE/AKS
 /// mid-session failure NOTES § D19 is about — is named beside.
+///
+/// **`analysis` is [`ANALYSIS`] and the panes go under the cards, spelled exactly as [`run`]
+/// spells it** (NOTES § D169) — one `\n` between the two blocks, and [`reports`] shared rather
+/// than a second arrangement of the same seven. Two of them draw a shape here that no file path
+/// can reach: Versions needs a control plane to have a version, and C1's row and badge are about
+/// a kubeconfig, which a `k8rs pod.json` run has none of.
 fn live_report(
     store: &k8s::Store,
     now: Time,
     last: &mut String,
     renewal: Option<&str>,
+    analysis: bool,
 ) -> Option<String> {
     let mut report = unreadable(&store.troubles(), renewal);
     match store.snapshot(now) {
         Some(snapshot) => {
-            let findings = analyze(&snapshot);
+            let input = Input {
+                snapshot,
+                // Nothing was read that no rule reads: a watch carries the five kinds `k8s.rs`
+                // watches and nothing else, so the header's second half has nothing to say.
+                skipped: BTreeMap::new(),
+            };
+            let findings = analyze(&input.snapshot);
             if !report.is_empty() {
                 report.push(String::new());
             }
-            report.push(render(
-                &findings,
-                &Input {
-                    snapshot,
-                    // Nothing was read that no rule reads: a watch carries the five kinds
-                    // `k8s.rs` watches and nothing else, so the header's second half has nothing
-                    // to say.
-                    skipped: BTreeMap::new(),
-                },
-            ));
+            let mut block = render(&findings, &input);
+            if analysis {
+                block.push('\n');
+                block.push_str(&reports(&input.snapshot, &findings));
+            }
+            report.push(block);
         }
         // Still bootstrapping and nothing wrong with it: the silence is the answer.
         None if report.is_empty() => return None,
@@ -1130,7 +1183,7 @@ fn greeting(session: &k8s::Session) -> Vec<String> {
 ///
 /// **A refusal on discovery is two features off and not a session that failed** (§ CONNECTING,
 /// NOTES § D160): the sentence says so, and the watches below it start anyway.
-async fn live(connected: Result<k8s::Session, k8s::NotConnected>) -> String {
+async fn live(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool) -> String {
     use std::io::Write;
     let session = match connected {
         Ok(session) => session,
@@ -1167,12 +1220,17 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>) -> String {
         let _ = writeln!(err, "k8rs: {note}");
     }
     let mut store = k8s::Store::default();
+    // **The three facts no watch delivers, handed over once** (`k8s::Identity`, NOTES § D169):
+    // the control plane's version, the context this run is on and the certificate it logs in
+    // with. Read at connect and before the watches move, because `session.watches` is taken
+    // below and the borrow would not survive it — the same reason `renewal` is read out above.
+    store.identify(k8s::Identity::of(&session));
     let mut last = String::new();
     k8s::drive_watching(session.watches, &mut store, |store| {
         // A clock this driver cannot read is not a reason to stop watching; the next event asks
         // again. `wall_clock`'s own `Err` is a machine set before 1970.
         let Ok(now) = wall_clock() else { return };
-        if let Some(report) = live_report(store, now, &mut last, renewal) {
+        if let Some(report) = live_report(store, now, &mut last, renewal, analysis) {
             // The write is dropped if it fails, for the reason `main` drops a failed stderr
             // write: there is nowhere left to report it, and this loop has no exit to take.
             let _ = writeln!(std::io::stdout(), "{report}\n");
