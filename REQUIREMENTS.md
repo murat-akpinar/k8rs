@@ -195,7 +195,12 @@
 
 ### Non-functional targets
 
-- Memory: < 50MB RSS at ~1000 pods. First paint < 1s, findings < 3s. **The
+- Memory: < 50MB RSS at ~1000 pods. **Measured 2026-08-28 and not met — 58 752
+  KiB (57.4 MiB) at 1 011 pods, peak and steady the same value; 125 704 KiB at
+  10 011. The figure above stays as written on purpose: do not move it to the
+  measurement, and see
+  [NOTES § D171](NOTES.md#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28)
+  before changing this line.** First paint < 1s, findings < 3s. **The
   paint figures hold up to a cluster size Phase 5 measures and then states**;
   the initial LIST has no size-independent bound and nothing may be drawn until
   it lands, so above that size the first paint says what it is still waiting for

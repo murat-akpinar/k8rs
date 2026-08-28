@@ -2821,10 +2821,21 @@ public release.
       until all five initial LISTs land, so a login that cannot list nodes never
       produces a snapshot at all. The other two are the cluster's doing — one
       version everywhere, 4 of 4 kubelets matching
-- [ ] **Measure resident memory against 10 000 pods** (kind + a generator)
+- [x] **Measure resident memory against 10 000 pods** (kind + a generator)
       **plus the three workload watches**, and write the number down. Pruning `managedFields` is agreed; whether the
       pruned store actually fits is unmeasured, and an unmeasured number is not
       a design ([NOTES § D25](NOTES.md#d25--what-this-review-did-not-decide))
+      The numbers — `target/release/k8rs --live` against a throwaway kind cluster
+      under `K8RS_CLUSTER=review`, peak from `VmHWM`, steady from `VmRSS`.
+      **10 011 pods with 1 002/200/32 workloads: 128 844 KiB peak, 125 704 KiB
+      steady** (131.9 / 128.7 MB), reproduced at 129 000 / 119 800. **1 011 pods:
+      58 752 KiB, peak and steady the same value.** Bare cluster, 11 pods:
+      11 244 KiB. There is no stated budget at 10 000 pods; the one at ~1 000 is
+      `REQUIREMENTS.md`'s `< 50MB RSS` and **it does not hold** — 57.4 MiB, over
+      on either reading of the unit. **Where the bytes go is not answered here**
+      and is the Phase 6 box that follows the log buffer's bound
+      ([D171](NOTES.md#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28) ·
+      [reports/2026-08-28-ten-thousand-pod-resident-set.md](reports/2026-08-28-ten-thousand-pod-resident-set.md))
 - [ ] Startup errors (no kubeconfig / bad context) → stderr + non-zero exit
 - [ ] **The six kubeconfig shapes, each with a fixture** — the largest class in
       k9s's tracker is not the cluster, it is the file that describes it, and
@@ -3052,6 +3063,23 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       killer, which then killed the pods it was there to watch
       ([#871](https://github.com/derailed/k9s/issues/871) ·
       [PRIOR-ART § A6](PRIOR-ART.md#a6--unbounded-memory-in-the-field-for-8-days))
+- [ ] **Where the 58 752 KiB at 1 000 pods actually is.** `REQUIREMENTS.md`'s
+      memory budget is measured and unmet, and the measurement could not name the
+      cause — it ruled out a per-object storage cost and located the *moment*
+      (the initial LIST), which is as far as `VmRSS` can see
+      ([D171](NOTES.md#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28)).
+      **The box is here because `k8s.rs` freezes at the end of this phase**, and
+      beside the log buffer above because both are the same question asked of a
+      different buffer. Done when the cause is named **by an instrument** — a
+      heap profile or allocator instrumentation, never arithmetic on `VmRSS` —
+      and either the number comes under the budget or `REQUIREMENTS.md` states
+      the measured one *with the cause*. **Two corrections ride along so `k8s.rs`
+      is opened once**: `INITIAL_LIST_PAGE`'s doc comment computes a 500-object
+      page at ~1.9 MB from a median over the *sanitized* captures and says a live
+      object is larger by an amount only a cluster can say — it is **~3.7 MB**,
+      measured; and the same comment cites the `< 50MB` budget as the thing a
+      page has to fit inside, which is now a citation of something known not to
+      hold
 - [ ] **Sanitising for the screen and emitting for a consumer are two different
       functions** — the box above strips control characters on the way in, which
       is half of it. Whatever the *display* does to a string has to be undone

@@ -192,6 +192,7 @@ its line moving with it.
 - [D168](#d168--posture-sorts-the-row-it-cannot-vouch-for-first-and-says-the-check-instead-of-a-verdict-2026-08-28) — Posture sorts the row it cannot vouch for first, and says the check instead of a verdict
 - [D169](#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28) — the three-reports box was placed above the boxes that fill its fields, and Capacity's half moves to the one that owns metrics
 - [D170](#d170--the-three-identity-fields-the-two-pm-claims-a-measurement-took-away-and-the-band-that-was-on-the-wrong-screen-2026-08-28) — the three identity fields, the two PM claims a measurement took away, and the band that was on the wrong screen
+- [D171](#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28) — the resident set measured at four sizes, the budget it broke, and the ruling that the budget stays
 
 ## Why it exists — where the gap is
 
@@ -14744,3 +14745,117 @@ placeholder key gives `RustlsTls(InvalidPrivateKey)`. A route exists and was mea
 nothing — and was **refused** because it puts `openssl` on `PATH` inside `cargo test`, and
 *`just check` is the whole of CI or it is a lie*. Recorded so the next run reads it as a known
 limit rather than re-deriving it.
+
+### D171 — the resident set measured at four sizes, the budget it broke, and the ruling that the budget stays (2026-08-28)
+
+[D25](#d25--what-this-review-did-not-decide) sent memory at scale to Phase 5 as a
+measurement with a number attached. It has been run
+([reports/2026-08-28-ten-thousand-pod-resident-set.md](reports/2026-08-28-ten-thousand-pod-resident-set.md)),
+and it produced a number, a broken budget, and one question it could not answer.
+
+**The four readings.** `target/release/k8rs --live` at `c66b311`, against a throwaway
+one-worker kind cluster under `K8RS_CLUSTER=review`; peak is the kernel's `VmHWM`
+and steady state is `VmRSS`, sampled at 10 Hz, because `/usr/bin/time` is not
+installed on this host.
+
+| pods | Deploy / STS / DS | peak | steady |
+|---|---|---|---|
+| 11 (bare cluster) | 2 / 0 / 2 | 11 244 KiB | 11 244 KiB |
+| 111 | 2 / 0 / 2 | 19 492 KiB | 19 492 KiB |
+| 111 | 1 002 / 200 / 32 | 51 216 KiB | 51 216 KiB |
+| 1 011 | 102 / 20 / 12 | **58 752 KiB** | **58 752 KiB** |
+| 10 011 | 1 002 / 200 / 32 | **128 844 KiB** | **125 704 KiB** |
+
+**The budget does not hold, and the budget stays.** `REQUIREMENTS.md`'s
+*`< 50MB RSS at ~1000 pods`* meets 58 752 KiB — 57.4 MiB, 60.2 MB — at 1 011 pods,
+over on either reading of the unit, and **peak and steady are the same value**: it is
+reached before the first snapshot is published and does not move again for the
+remaining 178 samples, so there is no lower resting figure to read the budget
+against. The number in `REQUIREMENTS.md` is **not rewritten to 60**. A target
+edited to match what the code returned is the same move as a test asserting what
+the implementation happens to return, which
+[CLAUDE.md § Code phase rules](CLAUDE.md#code-phase-rules) refuses; the line keeps
+its figure and gains a sentence saying it is measured and unmet, with a pointer
+here. A budget that is known to be missed is information. A budget that was
+quietly moved is not.
+
+**Where the bytes are is unmeasured, and that is the follow-up box, not this
+one.** Three slopes come out of the table and none of them agree: **82.5 KiB per
+pod** between 11 and 111, **25.8 KiB per workload object** between 4 and 1 234, and
+**7.52 KiB per pod** between 111 and 10 011. A per-object storage cost is one
+number; these are three, and the marginal falls as the count rises. What the run
+did establish is *when* the memory is taken: at 10 011 pods `VmHWM` is reached at
+~1.6 s — inside the initial LIST — and `VmRSS` then gives back 2.4 % of it and
+never anything more, out to 202 s. So the process holds its LIST burst for its
+whole life, which is the fact that matters to
+[D147](#d147--kube-already-paginates-so-the-box-was-a-measurement-and-one-timeout-field-serves-two-very-different-calls-2026-08-22)'s
+page-size argument: the page and the store are not additive-then-released, the
+larger of the two is simply resident. **Naming the cause needs a heap profile or
+allocator instrumentation, which is neither arithmetic on `VmRSS` nor this box**,
+and it lands in **Phase 6** because that is the last phase that may write
+`k8s.rs`.
+
+**The page arithmetic in `k8s.rs` understates by about two, and it said so.** The
+doc comment on `INITIAL_LIST_PAGE` computes a 500-object page at ~1.9 MB from a
+3 708-byte median over the committed captures, and adds that *"a live object is
+larger by an amount only a cluster can say"*. The cluster says: one generated pod
+as the API server serves it is **7 451 bytes compact, of which 2 853 — 38.3 % — is
+`managedFields`**, leaving 4 598 after the prune's first step. A 500-object page is
+therefore ~3.7 MB on the wire. The comment was honest and incomplete rather than
+wrong, so it is corrected in the same Phase 6 box rather than by a dispatch of its
+own.
+
+**The generator is not committed.** It is 160 lines of one-shot Python against
+`kubectl proxy`, pasted verbatim into the report, which is what makes the
+measurement reproducible; `scripts/` is `tester`'s tree
+([CLAUDE.md § Ownership](CLAUDE.md#ownership--and-the-file-each-one-may-write))
+and a one-shot generator that lives there is one more thing `just check` has to
+keep green forever for a run nobody repeats between phases.
+
+**Eight things the brief did not decide, decided by the measurement and recorded
+here rather than in the report, which holds evidence and not rulings.**
+
+1. **A pod's `status` is wiped on CREATE** — `POST` with a full status returns
+   `201` and `{"phase":"Pending"}` — so a realistic pod is two calls, the second a
+   `PUT` to `/status`. Measured against the API server before 10 000 were made,
+   not assumed.
+2. **A committed capture cannot be replayed into a cluster as-is.** The first
+   `PUT` came back `422 Invalid` on `status.podIPs[0]` and `status.hostIPs[0]`:
+   `scripts/sanitize.jq`'s address placeholder is not an address, and the API
+   server validates the form. The sanitizer is doing its job; a replay path has to
+   substitute.
+3. **Inertness is a property of the spec, not of a promise.** Pods carry
+   `schedulerName: nobody-answers-to-this` and no `spec.nodeName`, so no scheduler
+   and no kubelet ever touches them and the pod garbage collector has no orphan to
+   collect. Deployments and StatefulSets carry `replicas: 0` — which
+   `rules::short_of_pods` gates out at `desired > 0`, so W2 draws nothing —
+   and DaemonSets a `nodeSelector` no node matches. Verified rather than trusted:
+   pod totals were exactly `generated + 11` at every size.
+4. **The pods are the healthy capture**, so the rules stay quiet and the run
+   measures the store rather than 10 000 cards.
+5. **Workload:pod ratio**, which nobody had specified: 1 000 pods to
+   100 / 20 / 10, and 10 000 to 1 000 / 200 / 32.
+6. **"Settled" is two facts** — the store published a snapshot, which
+   `Store::snapshot` only does once all five initial LISTs have landed, so the
+   first stdout line is the proof; and `VmRSS` stopped changing. Every reading was
+   flat from ≤ 2.3 s to the end of a 45–202 s window.
+7. **The baseline cannot have a StatefulSet.** A bare kind cluster has none, so
+   *all three workload watches non-empty* is satisfiable at every generated size
+   and not at a baseline defined as nothing generated. A second 111-pod reading
+   with the full workload set is the control instead — which is also what makes
+   the 10 000-pod figure attributable, and an unattributable number is
+   [D25](#d25--what-this-review-did-not-decide)'s unmeasured claim in a different
+   font.
+8. **`VmHWM` is the peak instrument**, `/usr/bin/time` being absent from this
+   host.
+
+**And one thing the run produced that nothing in this repo predicted.** At 10 000
+pods the *cluster's* own CNI died first: `kindnet-cni`, 50Mi limit, watching every
+pod, `OOMKilled` on both nodes. k8rs printed two CRITICAL (rule 2) and one WARN
+(rule 5) naming it, with `limit 50Mi`, `exit 137` and the restart counts — three
+cards, not 10 000, with every generated pod silent. The rule set behaving
+correctly under the load the box was about is the good half; the half worth
+keeping is that **a 50Mi pod-watching sidecar is the first thing that dies at this
+size**, which is the same failure class as
+[PRIOR-ART § A6](PRIOR-ART.md#a6--unbounded-memory-in-the-field-for-8-days) seen
+from the other side.
