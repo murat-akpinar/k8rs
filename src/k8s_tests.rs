@@ -2579,6 +2579,29 @@ fn ingested_dump(kind: &str, document: serde_json::Value) -> Option<String> {
             let pod = serde_json::from_value(document).expect("a captured Pod decodes");
             return Some(format!("{:?}", ingested_pod(pod)));
         }
+        // **Fetched rather than watched, and swept here for the `Table`'s reason** (§ WHAT A
+        // REPORT ASKS FOR): it goes through the same one [`ingest`] door, so the two sweeps below
+        // cover C3's inputs without a second copy of themselves. There is no `Store` step — the
+        // list is filed whole by [`Store::certificates_fetched`] after this conversion, not one
+        // object at a time by a watch.
+        "CertificateSigningRequest" => {
+            let mut document = document;
+            // **`spec.request` is handed to the decoder empty, and it is the one field here that
+            // may be.** It is a `ByteString`, so `k8s-openapi` refuses anything that is not
+            // base64 and a poisoned one never decodes at all — the same reason the root
+            // `apiVersion` and `kind` are exempt above. It is also the CSR's own PEM body, which
+            // the prune drops on purpose and which no snapshot field carries
+            // ([`CertificateRequestSnapshot`]), so nothing that could be swept is lost. Done here
+            // rather than in `poison_every_string`, because a field name exempted in that helper
+            // is exempted for every kind it sweeps.
+            if let Some(request) = document.pointer_mut("/spec/request") {
+                *request = serde_json::Value::String(String::new());
+            }
+            let request: CertificateSigningRequest =
+                serde_json::from_value(document).expect("a captured CSR decodes");
+            let decoded: CertificateRequestSnapshot = ingest(request);
+            return Some(format!("{decoded:?}"));
+        }
         "Node" => {
             store = all_but("nodes");
             let node = serde_json::from_value(document).expect("a captured Node decodes");
@@ -5791,8 +5814,16 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
         namespace,
         client_certificate,
         skew,
+        serving_expiry,
     } = session(offline()).await;
 
+    assert_eq!(
+        serving_expiry,
+        Serving::Unread,
+        "[`session`] is handed a client and never a `Config`, so it has nothing to drive a second \
+         handshake from — C2's read is [`connect_with`]'s, and a reading here would mean this \
+         seam had grown a network call of its own (§ THE SERVER'S OWN CERTIFICATE)"
+    );
     assert_eq!(
         skew, None,
         "a cluster that answered nothing sent no `Date` header, so there is no reading to \
@@ -5885,6 +5916,12 @@ fn auth(fields: &[(&str, &str)]) -> AuthInfo {
 }
 
 fn kubeconfig(context: &str, user: &str) -> Kubeconfig {
+    kubeconfig_at("https://k8rs-tests.invalid:6443", context, user)
+}
+
+/// [`kubeconfig`] over a `server:` the caller chose — the one field the tests that need a real
+/// socket have to move, and a second copy of this YAML is a second place for it to drift.
+fn kubeconfig_at(server: &str, context: &str, user: &str) -> Kubeconfig {
     Kubeconfig::from_yaml(&format!(
         "apiVersion: v1\n\
          kind: Config\n\
@@ -5892,7 +5929,7 @@ fn kubeconfig(context: &str, user: &str) -> Kubeconfig {
          clusters:\n\
          - name: {context}\n\
          \x20 cluster:\n\
-         \x20   server: https://k8rs-tests.invalid:6443\n\
+         \x20   server: {server}\n\
          contexts:\n\
          - name: {context}\n\
          \x20 context:\n\
@@ -5903,6 +5940,56 @@ fn kubeconfig(context: &str, user: &str) -> Kubeconfig {
          \x20 user: {user}\n"
     ))
     .expect("a kubeconfig this file wrote itself")
+}
+
+/// **[`kubeconfig_at`]'s sibling, for the tests whose cluster block has to carry more than a
+/// `server:`** — one trust line, and the name to verify *as*.
+///
+/// **Both are load-bearing, and the trust line is a whole line because there are two of them.** A
+/// kubeconfig either names a CA ([`authority_data`]) or turns verification off
+/// (`insecure-skip-tls-verify`), and the probe has to honour whichever the reader wrote; passing
+/// the line rather than a flag is what keeps one builder here instead of two. With neither, the
+/// handshake fails as `UnknownIssuer` over a certificate no public root signed — and without
+/// `tls-server-name` it fails as `NotValidForName`, because the address is a loopback IP and the
+/// certificate is issued for `kubernetes`
+/// ([`server_name`], `kube-client-4.2.0/src/client/config_ext.rs:438`).
+fn kubeconfig_for(server: &str, trust: &str, tls_server_name: &str) -> Kubeconfig {
+    Kubeconfig::from_yaml(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests\n\
+         clusters:\n\
+         - name: k8rs-tests\n\
+         \x20 cluster:\n\
+         \x20   server: {server}\n\
+         \x20   {trust}\n\
+         \x20   tls-server-name: {tls_server_name}\n\
+         contexts:\n\
+         - name: k8rs-tests\n\
+         \x20 context:\n\
+         \x20   cluster: k8rs-tests\n\
+         \x20   user: k8rs-tests\n\
+         users:\n\
+         - name: k8rs-tests\n\
+         \x20 user: {{}}\n"
+    ))
+    .expect("a kubeconfig this file wrote itself")
+}
+
+/// One CA's PEM as a kubeconfig carries it: `certificate-authority-data`, base64 of the file.
+///
+/// **The base64 is `k8s-openapi`'s own**, through the `ByteString` whose `Deserialize` decodes
+/// every `client-certificate-data` `k8s.rs` reads — used here the other way round. No base64
+/// crate, and none wanted for one encode (invariant 10).
+fn authority_data(pem: &[u8]) -> String {
+    let encoded =
+        serde_json::to_value(k8s_openapi::ByteString(pem.to_vec())).expect("bytes re-serialise");
+    format!(
+        "certificate-authority-data: {}",
+        encoded
+            .as_str()
+            .expect("a `ByteString` encodes to a string")
+    )
 }
 
 /// **The context argument is used, and what comes back is the kubeconfig's own typed error.**
@@ -6601,6 +6688,7 @@ async fn a_session_hands_the_store_what_it_learned_and_a_question_that_failed_is
         namespace: None,
         client_certificate: Some(certificate.clone()),
         skew: None,
+        serving_expiry: Serving::Unread,
     };
     let identity = Identity::of(&session);
     assert_eq!(
@@ -8176,12 +8264,8 @@ async fn every_string_the_picker_draws_is_stripped_and_bounded() {
 // never will be: it knows nothing but those paths, and the moment a test here wants an object it
 // is the wrong tool.
 
-/// A stub API server on a loopback port the kernel picks, and the log of what it was asked.
-///
-/// **The address is built rather than written**, which is not a trick played on
-/// `scripts/security-guard.py`: the guard refuses a hardcoded loopback *URL* because in product
-/// code it is a second outbound path and usually a dev leftover, and there is no such URL here —
-/// the port is whatever `:0` gave us and the string does not exist until the test runs.
+/// A stub API server on a loopback port the kernel picks, and the log of what it was asked —
+/// [`stub`] with the six discovery paths for a body and the aggregated-Accept tag in its log.
 ///
 /// **`date` is the whole header line, name and all**, because the *name*'s spelling is one of the
 /// things a test here has to vary: a real API server sends `date:` over HTTP/2 and `Date:` over
@@ -8196,6 +8280,38 @@ async fn stub_apiserver(
     status: &str,
     date: Option<&str>,
 ) -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    stub(status, date, |request, path| {
+        // kube asks for aggregated discovery with an Accept header naming the
+        // `apidiscovery.k8s.io` type; the ordinary call has no such word in it.
+        let aggregated = if request.contains("apidiscovery") {
+            " [aggregated]"
+        } else {
+            ""
+        };
+        (format!("{path}{aggregated}"), discovery_answer(path))
+    })
+    .await
+}
+
+/// **The socket half of every stub server in this file** — bind, accept, read requests, log what
+/// was asked, answer each one with the same status and the caller's body.
+///
+/// **It is one function because it was two**: [`stub_apiserver`] and [`stub_list`] differ only in
+/// what they log and what they answer with, and forty lines of hand-written HTTP written twice is
+/// forty lines that can come apart (CLAUDE.md § Code phase rules).
+///
+/// **The address is built rather than written**, which is not a trick played on
+/// `scripts/security-guard.py`: the guard refuses a hardcoded loopback *URL* because in product
+/// code it is a second outbound path and usually a dev leftover, and there is no such URL here —
+/// the port is whatever `:0` gave us and the string does not exist until the test runs.
+///
+/// `answer` is handed the whole request text *and* its path, because one caller varies on a
+/// header and the other only on the path.
+async fn stub(
+    status: &str,
+    header: Option<&str>,
+    answer: impl Fn(&str, &str) -> (String, String) + Send + Sync + 'static,
+) -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -8204,13 +8320,15 @@ async fn stub_apiserver(
     let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
 
     let log = std::sync::Arc::clone(&asked);
-    let date = date.map_or(String::new(), |line| format!("{line}\r\n"));
+    let header = header.map_or(String::new(), |line| format!("{line}\r\n"));
     let status = status.to_string();
+    let answer = std::sync::Arc::new(answer);
     tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
             let log = std::sync::Arc::clone(&log);
-            let date = date.clone();
+            let header = header.clone();
             let status = status.clone();
+            let answer = std::sync::Arc::clone(&answer);
             tokio::spawn(async move {
                 // One connection carries several requests: hyper keeps it alive, so this reads
                 // until the socket closes rather than answering once and giving up.
@@ -8225,23 +8343,14 @@ async fn stub_apiserver(
                     while let Some(end) = pending.find("\r\n\r\n") {
                         let request: String = pending.drain(..end + 4).collect();
                         let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
-                        // kube asks for aggregated discovery with an Accept header naming the
-                        // `apidiscovery.k8s.io` type; the ordinary call has no such word in it.
-                        let aggregated = if request.contains("apidiscovery") {
-                            " [aggregated]"
-                        } else {
-                            ""
-                        };
-                        log.lock()
-                            .expect("the log is never poisoned")
-                            .push(format!("{path}{aggregated}"));
-                        let body = discovery_answer(&path);
-                        let answer = format!(
-                            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n{date}\
+                        let (logged, body) = answer(&request, &path);
+                        log.lock().expect("the log is never poisoned").push(logged);
+                        let sent = format!(
+                            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n{header}\
                              content-length: {}\r\n\r\n{body}",
                             body.len()
                         );
-                        if socket.write_all(answer.as_bytes()).await.is_err() {
+                        if socket.write_all(sent.as_bytes()).await.is_err() {
                             return;
                         }
                     }
@@ -8730,4 +8839,1299 @@ async fn the_shapes_a_server_can_send_that_must_not_become_a_reading() {
             "a reading was taken where there was no evidence for one: {why}"
         );
     }
+}
+
+// --- WHAT A REPORT ASKS FOR ---
+//
+// **C3's half of the certificate box: the fetch that fills
+// [`crate::rules::ClusterSnapshot::certificate_requests`]** (§ WHAT A REPORT ASKS FOR,
+// NOTES § D178). Everything downstream of the field already shipped — the snapshot type, its
+// decode, and `analysis::kubelets_waiting_to_join`, which draws both the row and the
+// `Row::NotComputed` that stands where the row goes while the field is `None`. What is proven
+// here is the wire and the three answers it can give.
+//
+// **`None` is *nobody looked* and `Some(vec![])` is *nothing to find*** (NOTES § D129), and the
+// two draw different things, so a test that only asserted *not a crash* would let the reassuring
+// wrong answer through.
+
+/// The committed CSR as a `kind: List` body, which is what the API server answers a list with.
+/// The object is the capture, unedited (NOTES § D53); the *envelope* is what is written here,
+/// exactly as § THE CAPTURES builds a stream rather than an object.
+fn csr_list_body() -> String {
+    let list = serde_json::json!({
+        "apiVersion": "certificates.k8s.io/v1",
+        "kind": "CertificateSigningRequestList",
+        "metadata": { "resourceVersion": "11807" },
+        "items": [capture("csr-pending")],
+    });
+    serde_json::to_string(&list).expect("a value this file built re-serialises")
+}
+
+/// [`stub`] answering every path with one body — the shape a single list read needs.
+///
+/// **Not a widening of [`stub_apiserver`]**: that one answers discovery per path because a session
+/// asks four different questions, and this one answers one list whatever is asked. They share the
+/// socket, which is the part that was worth sharing.
+async fn stub_list(
+    status: &str,
+    body: String,
+) -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    stub(status, None, move |_, path| {
+        (path.to_string(), body.clone())
+    })
+    .await
+}
+
+/// **The list a cluster answers becomes the snapshot's own, through the one ingest door** — the
+/// whole of C3's live path, off a socket rather than a `From` impl.
+///
+/// **The path is asserted as well as the answer.** `certificatesigningrequests` is cluster-scoped,
+/// and a request that went out namespaced would be a `404` on a real cluster and a silence on this
+/// screen — the failure that is indistinguishable from a refusal.
+#[tokio::test]
+async fn the_certificate_requests_a_cluster_lists_reach_the_snapshot() {
+    let (client, asked) = stub_list("200 OK", csr_list_body()).await;
+    let listed = certificate_requests(&client, REPORT_FETCH)
+        .await
+        .expect("the stub answered the list");
+
+    assert_eq!(listed.len(), 1, "the committed capture holds one request");
+    assert_eq!(listed[0].id.name, "k8rs-pending-fixture");
+    assert_eq!(
+        listed[0].signer_name, "kubernetes.io/kube-apiserver-client",
+        "the signer is the field the row tells a joining kubelet from a human by, and it did not \
+         survive the fetch"
+    );
+    assert!(
+        !listed[0].issued,
+        "the capture's `status.certificate` is unset, so nothing was issued"
+    );
+
+    let asked = asked.lock().expect("the log is never poisoned").clone();
+    assert_eq!(
+        asked,
+        vec!["/apis/certificates.k8s.io/v1/certificatesigningrequests?".to_string()],
+        "one cluster-scoped list and nothing else — a namespaced path here answers 404 on a real \
+         cluster and prints as a silence"
+    );
+}
+
+/// **A refusal is *nobody looked* and never an empty list** — the security gate's *a 403 degrades
+/// that one feature*, and the distinction NOTES § D129 exists for.
+///
+/// `list certificatesigningrequests` is cluster-scoped and most namespaced roles do not have it,
+/// so this is the ordinary answer on a real cluster rather than the exception. `Some(vec![])` here
+/// would tell the Certificates pane that no machine is waiting to join, over a list it was refused.
+#[tokio::test]
+async fn a_refused_certificate_request_list_is_nobody_looked() {
+    for status in [
+        "403 Forbidden",
+        "401 Unauthorized",
+        "500 Internal Server Error",
+    ] {
+        let (client, _) = stub_list(status, "{}".to_string()).await;
+        assert_eq!(
+            certificate_requests(&client, REPORT_FETCH).await,
+            None,
+            "a `{status}` became an answer — the pane would say nothing is waiting to join over a \
+             list nobody read"
+        );
+    }
+}
+
+/// **The other side of the same distinction: a cluster that really has none answers `Some`.**
+///
+/// Without this the test above passes with `certificate_requests` hard-coded to `None`, which is a
+/// function that cannot fail (NOTES § D26).
+#[tokio::test]
+async fn a_cluster_with_no_certificate_requests_answers_an_empty_list_and_not_a_silence() {
+    let empty = serde_json::json!({
+        "apiVersion": "certificates.k8s.io/v1",
+        "kind": "CertificateSigningRequestList",
+        "metadata": { "resourceVersion": "1" },
+        "items": [],
+    });
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::to_string(&empty).expect("a value this file built re-serialises"),
+    )
+    .await;
+    assert_eq!(
+        certificate_requests(&client, REPORT_FETCH).await,
+        Some(Vec::new()),
+        "*this cluster has none* and *nobody looked* came back as one answer, and the pane draws \
+         them differently"
+    );
+}
+
+/// **A server that takes the request and never answers does not hold the startup path open** —
+/// [`REPORT_FETCH`]'s whole reason, run at a deadline a suite can afford.
+///
+/// **This is a hang and not a slow answer, and it is the *startup* path.** `Config::read_timeout`
+/// is `None` in every kube constructor, so without the bound this test never returns and the
+/// binary never draws: the fetch runs after `k8rs: watching — …` has gone to stderr and before the
+/// first watch, so the reader sees a tool that connected and then stopped
+/// (`main.rs`'s `live`, `tester` 2026-08-28).
+///
+/// **The listener accepts and keeps the socket** — never read from, never written to, never
+/// dropped. Dropping it would close the connection and make this the ordinary `Err` the test above
+/// already covers, which is the failure that *does* come back on its own.
+#[tokio::test]
+async fn a_list_that_is_never_answered_does_not_hold_the_startup_path_open() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let held = tokio::spawn(async move {
+        let mut open = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            open.push(socket);
+        }
+    });
+    let client = Client::try_from(Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing");
+
+    let started = std::time::Instant::now();
+    let read = certificate_requests(&client, std::time::Duration::from_millis(200)).await;
+    let waited = started.elapsed();
+    held.abort();
+
+    assert_eq!(read, None, "a list nobody answered became an answer");
+    assert!(
+        waited < std::time::Duration::from_secs(5),
+        "the fetch waited {waited:?} on a deadline of 200ms, so nothing is bounding it and a real \
+         run would sit here with the greeting printed and no report behind it"
+    );
+    println!("a list that is never answered came back in {waited:?}");
+}
+
+/// **What a report fetched reaches the snapshot the rules and reports are handed**, and a store
+/// nobody fetched for still says *nobody looked*.
+#[test]
+fn a_fetched_certificate_request_list_reaches_the_snapshot_and_an_unfetched_one_does_not() {
+    let mut store = bootstrapped();
+    assert_eq!(
+        store
+            .snapshot(now())
+            .expect("every initial LIST landed")
+            .certificate_requests,
+        None,
+        "a store nobody fetched for claimed to have looked"
+    );
+
+    let request: CertificateSigningRequest = object("csr-pending");
+    let ingested: CertificateRequestSnapshot = ingest(request);
+    store.certificates_fetched(Some(vec![ingested.clone()]));
+    assert_eq!(
+        store
+            .snapshot(now())
+            .expect("every initial LIST landed")
+            .certificate_requests,
+        Some(vec![ingested]),
+        "the list a report asked for did not reach the snapshot"
+    );
+
+    store.certificates_fetched(None);
+    assert_eq!(
+        store
+            .snapshot(now())
+            .expect("every initial LIST landed")
+            .certificate_requests,
+        None,
+        "a refusal filed after an answer left the answer standing"
+    );
+}
+
+/// **Every `String` [`CertificateRequestSnapshot`] carries is named by its `Bounded` impl**,
+/// derived from `rules.rs` rather than typed out here — the sibling of
+/// [`every_string_a_watched_snapshot_type_carries_is_named_by_the_ingest_guard`] for the one
+/// snapshot type that is fetched instead of watched, and which that walk therefore refuses to
+/// reach on purpose.
+///
+/// A field added to this type and forgotten in `k8s.rs` fails here; the whole-repo poison sweep
+/// above only proves what the one committed capture happens to carry.
+#[test]
+fn every_string_a_fetched_certificate_request_carries_is_named_by_the_ingest_guard() {
+    let types = declared_types(RULES_SOURCE);
+    let fields = types
+        .get("CertificateRequestSnapshot")
+        .expect("rules.rs declares CertificateRequestSnapshot");
+    let body = bounded_impl("CertificateRequestSnapshot")
+        .expect("CertificateRequestSnapshot carries text and k8s.rs has no `impl Bounded` for it");
+
+    let mut checked = Vec::new();
+    for (field, kind) in fields {
+        if !words(kind).any(|word| word == "String") {
+            continue;
+        }
+        assert!(
+            words(body).any(|word| word == *field),
+            "CertificateRequestSnapshot.{field} is a String a fetch keeps and the ingest guard \
+             never names it"
+        );
+        checked.push(*field);
+    }
+    println!("CertificateRequestSnapshot String fields: {checked:?}");
+    assert!(
+        checked.contains(&"signer_name"),
+        "signer_name was not derived from rules.rs, so this guard is reading the wrong type: \
+         {checked:?}"
+    );
+    assert!(
+        words(body).any(|word| word == "conditions"),
+        "the conditions are not bounded, and a condition's `message` is free text the API server \
+         wrote"
+    );
+    assert!(
+        words(body).any(|word| word == "id"),
+        "the identity is not bounded, and `metadata.name` is the row's own subject"
+    );
+}
+
+/// **A condition's message is free text and is stripped and bounded like any other** — the
+/// framing the committed capture cannot reach, because its `status` is empty (D29: the shapes the
+/// pipeline hands it, not the ones a fixture happens to have).
+///
+/// **A one-field plant on the committed object**, which is what `analysis_tests` does with the
+/// same capture; the object is never edited on disk (NOTES § D53).
+#[test]
+fn a_condition_a_signer_wrote_is_stripped_and_bounded_on_the_way_in() {
+    use k8s_openapi::api::certificates::v1::CertificateSigningRequestCondition;
+    let mut request: CertificateSigningRequest = object("csr-pending");
+    request.status.get_or_insert_default().conditions =
+        Some(vec![CertificateSigningRequestCondition {
+            type_: "Denied".to_string(),
+            status: "True".to_string(),
+            reason: Some("\u{202e}not-really".to_string()),
+            message: Some(format!("\u{1b}[2Jdenied {}", "M".repeat(FREE_TEXT))),
+            ..Default::default()
+        }]);
+    request.spec.signer_name = format!("\u{200b}kubernetes.io/{}", "S".repeat(IDENTIFIER));
+
+    let kept: CertificateRequestSnapshot = ingest(request);
+    let condition = &kept.conditions[0];
+    let message = condition.message.as_deref().expect("the message survived");
+    assert!(
+        !message.contains('\u{1b}'),
+        "an escape sequence a signer wrote reached the snapshot: {message:?}"
+    );
+    assert!(
+        message.ends_with(SHORTENED),
+        "a message past {FREE_TEXT} bytes was not shortened: {} bytes",
+        message.len()
+    );
+    assert_eq!(
+        condition.reason.as_deref(),
+        Some("not-really"),
+        "a bidi override in a `reason` reverses the row it is drawn on"
+    );
+    assert!(
+        !kept.signer_name.starts_with('\u{200b}') && kept.signer_name.ends_with(SHORTENED),
+        "the signer name was not stripped and bounded: {:?}",
+        kept.signer_name
+    );
+}
+
+// --- THE SERVER'S OWN CERTIFICATE ---
+//
+// **C2's half: where the second handshake goes, and every way it comes back with nothing**
+// (§ THE SERVER'S OWN CERTIFICATE, NOTES § D178).
+//
+// **A successful handshake is here too, and the first draft of this comment said it could not
+// be** ([`a_server_presenting_its_own_certificate`]). The claim was that standing up a TLS server
+// needs a private key that may not be committed and a generator that is not among the twelve
+// crates. Neither half held: `openssl` is already a hard dependency of `just check`
+// (`scripts/certs-test.sh` shells to `openssl x509` for the C1 fixtures), and rustls's server side
+// is compiled in beside the client one. `tester` stood it up in an afternoon, 2026-08-28. A false
+// constraint written into a doc comment is worse than no comment, because the next reader believes
+// it — so what is *actually* not here is named instead: `config.proxy_url`, which
+// [`serving_expiry`]'s own doc records as a known silence.
+//
+// **The key is generated per run and deleted before the test asserts anything**, so nothing under
+// `tests/fixtures/` grows a credential and nothing expires on a schedule.
+//
+// The *reading* half — DER in, an expiry out — is still `main_tests.rs`'s, against the committed
+// certificates and from the one instant `scripts/certs-test.sh` pins.
+
+/// **A `server:` that is not `https` has no certificate to read, and no packet is sent finding
+/// out.** The stub servers in this file are exactly that shape, so a probe that ignored the scheme
+/// would be opening a second connection to every one of them.
+///
+/// **The listener is what makes *no packet* an assertion rather than a claim.** A `None` alone
+/// proves only that nothing was read; the accept count proves the connection was never opened.
+#[tokio::test]
+async fn a_cluster_reached_over_plain_http_is_not_probed_for_a_certificate() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = std::sync::Arc::clone(&accepted);
+    let serving = tokio::spawn(async move {
+        while listener.accept().await.is_ok() {
+            counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+
+    let config = Config::new(
+        format!("http://{address}/api")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    );
+    assert_eq!(
+        endpoint(&config),
+        None,
+        "an `http://` server was treated as somewhere to drive a handshake"
+    );
+    assert!(
+        probe(&config).is_none(),
+        "an `http://` server was prepared as somewhere to sample"
+    );
+    assert_eq!(
+        serving_expiry(
+            probe(&config),
+            std::time::Duration::from_millis(200),
+            SERVING_SAMPLES
+        )
+        .await,
+        Serving::Unread,
+        "a plain-http server produced a certificate reading"
+    );
+    serving.abort();
+    assert_eq!(
+        accepted.load(std::sync::atomic::Ordering::Relaxed),
+        0,
+        "the probe opened a connection to a server it has no certificate to read from"
+    );
+}
+
+/// **Where the second connection goes** — the port the scheme decides, the port the file names,
+/// and an IPv6 literal with the brackets `http::Uri` keeps and neither the resolver nor rustls
+/// accepts.
+#[test]
+fn the_second_connection_goes_to_the_host_and_port_the_kubeconfig_names() {
+    let at = |server: &str| {
+        endpoint(&Config::new(
+            server.parse().expect("a URL this file wrote itself"),
+        ))
+    };
+    assert_eq!(
+        at("https://api.example:6443"),
+        Some(("api.example".to_string(), 6443)),
+        "the port the kubeconfig names is the port the certificate is read from"
+    );
+    assert_eq!(
+        at("https://api.example"),
+        Some(("api.example".to_string(), 443)),
+        "a `server:` with no port is HTTPS's own 443 — 6443 is a kubeadm convention and would \
+         connect somewhere the client is not"
+    );
+    assert_eq!(
+        at("https://[2001:db8::1]:6443"),
+        Some(("2001:db8::1".to_string(), 6443)),
+        "the brackets `http::Uri::host` keeps reached the resolver, which has no host by that name"
+    );
+    assert_eq!(
+        at("https://[2001:db8::1]"),
+        Some(("2001:db8::1".to_string(), 443)),
+        "the same, with the port left to the scheme"
+    );
+}
+
+/// **Which name the handshake is verified against, over the three shapes a kubeconfig has** —
+/// `tls-server-name` set, absent, and set to something rustls will not take.
+///
+/// **The middle one is why this test exists and the handshake test is not enough.** That one
+/// always sets `tls-server-name`, so a fallback that quietly stopped using [`endpoint`]'s host
+/// would be green there and silent on every ordinary kubeconfig in the world — which is the
+/// majority shape, and the one where a silence looks exactly like a cluster with nothing to say.
+#[test]
+fn the_name_the_handshake_verifies_is_the_one_kube_would_have_used() {
+    // **One `server:` throughout, so the only thing that varies is the field under test.** The
+    // host is a reserved name rather than the IP a real kubeconfig of this shape carries
+    // (`10.0.0.1`), because `scripts/security-guard.py` refuses a hardcoded address in this tree
+    // and the shape being proven does not need one: what matters is that the two names differ.
+    let at = |named: Option<&str>| {
+        let mut config = Config::new(
+            "https://api.example:6443"
+                .parse()
+                .expect("a URL this file wrote itself"),
+        );
+        config.tls_server_name = named.map(str::to_string);
+        let (host, _) = endpoint(&config).expect("an https server");
+        server_name(&config, &host)
+    };
+    assert_eq!(
+        at(Some("kubernetes")),
+        ServerName::try_from("kubernetes").ok(),
+        "`tls-server-name` was ignored — kube installs a `FixedServerNameResolver` from it \
+         (config_ext.rs:438), so this probe would verify and SNI a different server than the \
+         session does and can be handed a different certificate back"
+    );
+    assert_eq!(
+        at(None),
+        ServerName::try_from("api.example").ok(),
+        "a kubeconfig that names no `tls-server-name` — the ordinary one — stopped being \
+         verified against its own host, which is a silence on every cluster"
+    );
+    assert_eq!(
+        at(Some("")),
+        None,
+        "a name rustls will not take became something other than the silence every failure on \
+         this path is"
+    );
+}
+
+/// **A server that is not speaking TLS is one silence** — a real socket, accepted and answered
+/// with something that is not a handshake.
+///
+/// This is the ordinary shape behind a proxy that terminates TLS somewhere else, and the one that
+/// must not become a panic, an error, or a session that failed to start.
+#[tokio::test]
+async fn a_server_that_does_not_speak_tls_is_one_silence() {
+    use tokio::io::AsyncWriteExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let _ = socket.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+        }
+    });
+    let config = Config::new(
+        format!("https://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    );
+    assert_eq!(
+        serving_expiry(
+            probe(&config),
+            std::time::Duration::from_secs(5),
+            SERVING_SAMPLES
+        )
+        .await,
+        Serving::Unread,
+        "a handshake that could not complete produced a reading — and a failure that is not a \
+         typed expiry is the same silence every other one is"
+    );
+}
+
+/// **A `server:` that does not resolve is the same silence** — the third of the three failures
+/// `screens/once.md` collapses into one, reached before a packet is sent.
+///
+/// `.invalid` is reserved by RFC 6761 and can never resolve, which is the same double
+/// `main_tests.rs` builds its offline client from.
+#[tokio::test]
+async fn a_server_that_does_not_resolve_is_the_same_silence() {
+    let config = Config::new(
+        "https://k8rs.invalid"
+            .parse()
+            .expect("a URL this file wrote itself"),
+    );
+    assert_eq!(
+        serving_expiry(
+            probe(&config),
+            std::time::Duration::from_secs(5),
+            SERVING_SAMPLES
+        )
+        .await,
+        Serving::Unread
+    );
+}
+
+/// **A server that accepts the socket and never speaks does not hold the probe open, and twenty
+/// samples cost one deadline and not twenty** — [`SERVING_PROBE`]'s whole reason, run at a
+/// deadline a suite can afford.
+///
+/// **This is a hang and not a slow answer.** Without the timeout this test never returns: the
+/// listener below accepts and then does nothing at all, which is what a middlebox in front of a
+/// dead control plane does, and the probe runs inside `connect_with` before the first screen.
+///
+/// **Twenty samples at 200 ms is the assertion, not decoration** (`k8s-admin`, 2026-08-28): a
+/// deadline wrapped around each handshake instead of the loop would spend four seconds here, so
+/// the ceiling below is what tells the two apart. At the shipped numbers that same mistake is
+/// [`SERVING_SAMPLES`] × [`SERVING_PROBE`] — fifty seconds before the first screen — and a suite
+/// that proved it at those numbers would spend them.
+#[tokio::test]
+async fn a_server_that_accepts_and_never_speaks_does_not_hold_the_probe_open() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let held = tokio::spawn(async move {
+        // Accepted and kept, never written to and never dropped: dropping the socket would close
+        // the connection and turn this into the test above.
+        let mut open = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            open.push(socket);
+        }
+    });
+    let config = Config::new(
+        format!("https://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    );
+
+    let deadline = std::time::Duration::from_millis(200);
+    let started = std::time::Instant::now();
+    let read = serving_expiry(probe(&config), deadline, 20).await;
+    let waited = started.elapsed();
+    held.abort();
+
+    assert_eq!(
+        read,
+        Serving::Unread,
+        "a stalled handshake produced a reading"
+    );
+    assert!(
+        waited < deadline * 4,
+        "the probe waited {waited:?} on a deadline of {deadline:?} over 20 samples, so the bound \
+         is around one handshake rather than around the loop — and a real run pays it once per \
+         sample before the first screen"
+    );
+    println!("20 stalled handshakes came back in {waited:?}");
+}
+
+/// **DER that is not a certificate is one silence, in every shape the wrap can be handed one.**
+///
+/// The positive — a real certificate's DER, in and out — is `main_tests.rs`'s, for the reason
+/// this region's head gives, and so is the [`CERTIFICATE_BYTES`] boundary: refusing a run of
+/// zeroes here would prove nothing, because a run of zeroes is not a certificate whatever its
+/// length, and only a real one past the cap can tell the bound from the parser.
+#[test]
+fn bytes_that_are_not_a_certificate_have_no_expiry() {
+    for (what, der) in [
+        ("nothing at all", Vec::new()),
+        ("a run of zeroes", vec![0_u8; 64]),
+        (
+            "a PEM handed in where DER was expected",
+            b"-----BEGIN CERTIFICATE-----\n".to_vec(),
+        ),
+    ] {
+        assert_eq!(
+            expiry_of(&der),
+            None,
+            "{what} was read as a certificate with an expiry"
+        );
+    }
+}
+
+/// **A session built from a client alone has no handshake to have driven** — the seam
+/// `main_tests.rs` and this file both use, and the one place a network call could grow unnoticed.
+#[tokio::test]
+async fn a_session_over_a_bare_client_reads_no_serving_certificate() {
+    assert_eq!(session(offline()).await.serving_expiry, Serving::Unread);
+}
+
+/// **A client kube refuses to build never opens the probe's connection** — F3, and the reason
+/// this test's assertion is the opposite of the one it used to carry.
+///
+/// **Until 2026-08-28 the probe ran first and this counted the connection it opened**, which
+/// pinned the ordering as a choice. `k8s-admin` then measured what that ordering costs on a
+/// kubeconfig `Client::try_from` refuses without touching the network — a `proxy-url` whose
+/// scheme this build cannot speak: **10.008 s** of a dead terminal before an error that was
+/// available in zero (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 5). Reversed, the
+/// same isolation proves the fix: the plugin is not on the disk, so kube sends nothing at all,
+/// and **any** connection to this listener could only have been the probe's.
+///
+/// **Elapsed is asserted beside the count, because the count alone is not the complaint.** What
+/// the reader felt was ten seconds; a probe that opened no connection but still waited would pass
+/// a count-only test.
+#[tokio::test]
+async fn a_client_that_cannot_be_built_never_opens_the_certificate_probes_connection() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = std::sync::Arc::clone(&accepted);
+    // **Accepted and held, never answered**, which is the shape [`SERVING_PROBE`] exists for: a
+    // probe that ran here would spend its whole deadline rather than failing fast, so the elapsed
+    // assertion below has something to measure.
+    let serving = tokio::spawn(async move {
+        let mut open = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            open.push(socket);
+        }
+    });
+
+    let user = "{exec: {apiVersion: client.authentication.k8s.io/v1beta1, \
+                command: /nonexistent/k8rs-tests-no-such-credential-plugin}}";
+    let started = std::time::Instant::now();
+    let connected = connect_with(
+        kubeconfig_at(&format!("https://{address}"), "k8rs-tests", user),
+        None,
+    )
+    .await;
+    let waited = started.elapsed();
+    serving.abort();
+
+    assert!(
+        connected.is_err(),
+        "the credential plugin is not on the disk and a session was built anyway, so kube's own \
+         calls could have opened the connection counted below"
+    );
+    assert_eq!(
+        accepted.load(std::sync::atomic::Ordering::Relaxed),
+        0,
+        "the certificate probe connected on a run that had already failed to build a client — \
+         which is where the measured ten seconds of dead terminal came from"
+    );
+    assert!(
+        waited < SERVING_PROBE / 2,
+        "a connection kube refused without sending a packet took {waited:?}, and the whole point \
+         of moving the probe below `Client::try_from` is that this run costs nothing"
+    );
+    println!("a client that could not be built came back in {waited:?}");
+}
+
+/// **Run `openssl` with an argument vector**, and fail loudly when it is not there.
+///
+/// **It is already a hard dependency of `just check`** — `scripts/certs-test.sh` shells to
+/// `openssl x509` to pin the committed C1 fixtures' dates — so a machine that can run the gate can
+/// run this. A machine that cannot gets a panic naming the binary, never a skipped test
+/// (CLAUDE.md § Running it: a missing binary is a loud error, a missing step is an invisible gap).
+///
+/// **An argument vector and never a command string** (the security gate). Nothing here is an API
+/// value either: every argument is a literal this file wrote or a path under the machine's own
+/// temp directory.
+fn openssl(args: &[&str]) {
+    let done = std::process::Command::new("openssl")
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| {
+            panic!(
+                "`openssl` did not run, and `just check` already needs it \
+                 (scripts/certs-test.sh): {e}"
+            )
+        });
+    assert!(
+        done.status.success(),
+        "openssl {args:?} failed: {}",
+        String::from_utf8_lossy(&done.stderr)
+    );
+}
+
+/// The DER inside one PEM block, whatever its label — the certificate and the key beside it go
+/// through the same decoder, which is `rules.rs`'s own parser crate and not a new one.
+fn pem_body(pem: &[u8]) -> Vec<u8> {
+    x509_parser::pem::parse_x509_pem(pem)
+        .expect("openssl wrote a PEM block")
+        .1
+        .contents
+}
+
+/// **One leaf**: the certificate's DER and the private key's, as rustls's server side wants them.
+type Leaf = (Vec<u8>, Vec<u8>);
+
+/// **One CA and a leaf under it per entry in `days`** — the PEM of the authority, and each leaf
+/// as `(certificate DER, private key DER)`.
+///
+/// **CA-signed and not self-signed, and that was measured rather than assumed.** Swapping this for
+/// one `openssl req -x509` certificate — SAN and all, trusted as its own root — makes this whole
+/// region read `Unread` again (2026-08-28): `openssl req -x509` writes
+/// `basicConstraints=critical,CA:TRUE`, and webpki refuses a CA as an end entity before it looks
+/// at a name or a date (`rustls-webpki-0.102.8/src/verify_cert.rs:420`, `CaUsedAsEndEntity` —
+/// the line, not the string, because [`serving_expiry`] turns every failure into one silence).
+///
+/// **Every leaf is issued for `kubernetes` and the server answers on a loopback IP**, which is
+/// [`server_name`]'s whole shape: `tls-server-name` is what a reader sets when `server:` names an
+/// address the certificate does not cover, and a probe that verified the URL host would fail here
+/// exactly as it fails on their cluster.
+///
+/// **`days: 0` is a certificate that expired the instant it was signed**, and it is how the
+/// typed-expiry case is reached on any `openssl` a machine may have. `-not_before` / `-not_after`
+/// would be the direct spelling and arrived only in OpenSSL 3.4; `-days -1` is refused outright
+/// (*end date before start date*, measured here on 3.6.3). `-days 0` writes
+/// `notBefore == notAfter == now`, so a caller that waits past that second has an expired
+/// certificate everywhere `just check` runs.
+///
+/// **Generated per run and deleted before anything is asserted.** A committed key is a credential
+/// in git history, and a committed certificate is a date that stops meaning what it meant; both
+/// are what `scripts/certs-test.sh` exists to police for C1's three, and neither is worth taking
+/// on for a certificate nothing outside this test ever sees.
+fn an_authority_and_leaves(days: &[u32]) -> (Vec<u8>, Vec<Leaf>) {
+    let dir = std::env::temp_dir().join(format!(
+        "k8rs-tests-serving-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a machine set after 1970")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("a directory in the machine's own temp dir");
+    let at = |name: &str| dir.join(name).to_string_lossy().into_owned();
+    let curve = "ec_paramgen_curve:prime256v1";
+    openssl(&[
+        "req",
+        "-x509",
+        "-newkey",
+        "ec",
+        "-pkeyopt",
+        curve,
+        "-nodes",
+        // Longer than any leaf below, because webpki checks the whole chain against `now` and a
+        // 300-day leaf under a 30-day authority is a question a reader of this test would have to
+        // stop and answer.
+        "-days",
+        "400",
+        "-subj",
+        "/CN=k8rs-tests-ca",
+        "-keyout",
+        &at("ca.key"),
+        "-out",
+        &at("ca.crt"),
+    ]);
+    // The SAN is what verification matches on. `serverAuth` beside it is **not** required —
+    // rustls asks `KeyUsage::server_auth()`, which is `RequiredIfPresent`, so a leaf carrying no
+    // EKU at all verifies (`rustls-webpki-0.102.8/src/verify_cert.rs:465,488`; read there after
+    // this comment first claimed the opposite from memory). It is written anyway because a real
+    // serving certificate carries one, and a stand-in that is easier to verify than the thing it
+    // stands in for proves less than it looks like it does. Both live in this file because
+    // `openssl x509 -req` copies neither out of the request.
+    std::fs::write(
+        at("leaf.ext"),
+        "subjectAltName=DNS:kubernetes\nextendedKeyUsage=serverAuth\n",
+    )
+    .expect("a file in a directory this function just made");
+    let read = |name: &str| {
+        std::fs::read(at(name)).unwrap_or_else(|e| panic!("openssl wrote no {name}: {e}"))
+    };
+    let mut leaves = Vec::new();
+    for (nth, days) in days.iter().enumerate() {
+        let key = at(&format!("leaf{nth}.key"));
+        let csr = at(&format!("leaf{nth}.csr"));
+        let crt = at(&format!("leaf{nth}.crt"));
+        openssl(&[
+            "req",
+            "-new",
+            "-newkey",
+            "ec",
+            "-pkeyopt",
+            curve,
+            "-nodes",
+            "-subj",
+            "/CN=kubernetes",
+            "-keyout",
+            &key,
+            "-out",
+            &csr,
+        ]);
+        openssl(&[
+            "x509",
+            "-req",
+            "-days",
+            &days.to_string(),
+            "-CAcreateserial",
+            "-in",
+            &csr,
+            "-CA",
+            &at("ca.crt"),
+            "-CAkey",
+            &at("ca.key"),
+            "-extfile",
+            &at("leaf.ext"),
+            "-out",
+            &crt,
+        ]);
+        leaves.push((
+            pem_body(&read(&format!("leaf{nth}.crt"))),
+            pem_body(&read(&format!("leaf{nth}.key"))),
+        ));
+    }
+    let authority = read("ca.crt");
+    std::fs::remove_dir_all(&dir).expect("the generated keys are removed as soon as they are read");
+    (authority, leaves)
+}
+
+/// **A TLS server that hands out the leaves in order, one per connection, round and round** — the
+/// address it answers on.
+///
+/// **The rotation is what stands in for a load balancer.** One reading off a three-replica control
+/// plane is a coin flip (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 2), and the fix
+/// is [`SERVING_SAMPLES`] readings; nothing about that can be tested against a server that always
+/// answers the same. The probe connects sequentially, so which leaf a given sample gets is
+/// deterministic and the *first* one is `leaves[0]`.
+///
+/// **Each connection is dropped the moment its handshake finishes**, deliberately. Whoever
+/// connected has the certificate by then, and a socket held open would hang `connect_with`'s own
+/// four calls — which have no read deadline under them (§ WHAT A REPORT ASKS FOR).
+async fn a_server_presenting(
+    leaves: Vec<Leaf>,
+) -> (
+    std::net::SocketAddr,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    use tokio_rustls::rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+    let acceptors: Vec<_> = leaves
+        .into_iter()
+        .map(|(leaf, key)| {
+            let served = tokio_rustls::rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![CertificateDer::from(leaf)],
+                    PrivatePkcs8KeyDer::from(key).into(),
+                )
+                .expect("the certificate and the key openssl just made are a pair");
+            tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(served))
+        })
+        .collect();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = std::sync::Arc::clone(&accepted);
+    tokio::spawn(async move {
+        while let Ok((socket, _)) = listener.accept().await {
+            let nth = counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let acceptor = acceptors[nth % acceptors.len()].clone();
+            tokio::spawn(async move {
+                let _ = acceptor.accept(socket).await;
+            });
+        }
+    });
+    (address, accepted)
+}
+
+/// **One server presenting one twenty-day certificate** — the shape most of this region wants,
+/// over the two helpers above.
+async fn a_server_presenting_its_own_certificate() -> (std::net::SocketAddr, Vec<u8>, Vec<u8>) {
+    let (authority, leaves) = an_authority_and_leaves(&[20]);
+    let leaf = leaves[0].0.clone();
+    let (address, _) = a_server_presenting(leaves).await;
+    (address, authority, leaf)
+}
+
+/// **A kubeconfig-shaped `Config` for a server this file just stood up** — the CA to verify
+/// against, and the name the certificates are issued for.
+fn verifying(server: &str, authority: &[u8]) -> Config {
+    let mut config = Config::new(server.parse().expect("an address the kernel just gave us"));
+    config.root_cert = Some(vec![pem_body(authority)]);
+    config.tls_server_name = Some("kubernetes".to_string());
+    config
+}
+
+/// **The handshake completes, the expiry read off it is the certificate's own, and the field
+/// [`connect_with`] fills is that same value** — the positive this region did not have, and the
+/// one assertion `delete field serving_expiry from struct Session` cannot survive.
+///
+/// **It is also where [`server_name`] is proven end to end.** The kubeconfig below is the shape
+/// the correction exists for: `server:` names a loopback address, the certificate is issued for
+/// `kubernetes`, and `tls-server-name` says so. A probe verifying [`endpoint`]'s host reads
+/// nothing at all here — and on a real cluster in this shape it reads nothing, or worse, reads a
+/// *different* certificate back from an SNI-routing front end and prints a date the reader's own
+/// kubectl will never meet.
+///
+/// **The two halves are asserted equal rather than each against a literal**: the certificate is
+/// generated per run, so its `notAfter` is not a number this file can carry — and the question
+/// being asked is *does the field hold what the wire said*, which is an equality and not a date.
+#[tokio::test]
+async fn a_completed_handshake_reads_the_expiry_and_connect_with_files_it() {
+    let (address, authority, leaf) = a_server_presenting_its_own_certificate().await;
+    let expected = expiry_of(&leaf).expect("the certificate openssl just made has an expiry");
+    let server = format!("https://{address}");
+
+    let config = verifying(&server, &authority);
+    let read = serving_expiry(
+        probe(&config),
+        std::time::Duration::from_secs(5),
+        SERVING_SAMPLES,
+    )
+    .await;
+    println!("serving_expiry over a real handshake = {read:?}");
+    assert_eq!(
+        read,
+        Serving::Until(expected),
+        "the handshake read nothing, or read something else — the certificate this server \
+         presents expires at {expected} and is issued for the name `tls-server-name` gives"
+    );
+
+    // `let … else` and not `expect`: [`NotConnected`] carries kube's own errors and has no
+    // `Debug` on purpose, because `Display` on one interpolates an `exec` plugin's stdout
+    // (invariant 8, `docs/security.md` § Token hygiene).
+    let Ok(session) = connect_with(
+        kubeconfig_for(&server, &authority_data(&authority), "kubernetes"),
+        None,
+    )
+    .await
+    else {
+        panic!("a kubeconfig naming no credentials at all did not build a client");
+    };
+    println!(
+        "connect_with(...).serving_expiry     = {:?}",
+        session.serving_expiry
+    );
+    assert_eq!(
+        session.serving_expiry,
+        Serving::Until(expected),
+        "the field `connect_with` fills is not the value the handshake read"
+    );
+
+    // **The reader's own `insecure-skip-tls-verify`, honoured here as it is everywhere else** —
+    // the same server, no CA named at all, and the certificate still read. The knob is the
+    // *kubeconfig's*, and reading it is not turning it: `scripts/security-guard.py` refuses that
+    // field being set anywhere in this tree, so asking the question through a kubeconfig is both
+    // the only honest way to ask it and the only way a reader ever does.
+    //
+    // It is also the one assertion that [`trust_only`] carries `accept_invalid_certs` across:
+    // without it this shape is a silence, and a silence is what a reader with a self-signed
+    // control plane would get instead of the warning they need.
+    let Ok(lax) = connect_with(
+        kubeconfig_for(&server, "insecure-skip-tls-verify: true", "kubernetes"),
+        None,
+    )
+    .await
+    else {
+        panic!("a kubeconfig that skips verification did not build a client");
+    };
+    assert_eq!(
+        lax.serving_expiry,
+        Serving::Until(expected),
+        "a kubeconfig that turns verification off got no reading — the probe stopped honouring \
+         the reader's own knob, and every cluster with a certificate nothing signed goes quiet"
+    );
+}
+
+/// **Several samples a connect, and the answer is the soonest deadline any of them read** — F1.
+///
+/// **The server rotates two certificates, because one reading off a load balancer is a coin
+/// flip.** Three replicas behind kind's own balancer, one reissued to twelve days: the same
+/// command eight times printed the sentence three times and nothing five times, with nothing about
+/// the cluster changing between runs
+/// (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 2).
+///
+/// **The far certificate is served first, and that is the whole assertion.** With
+/// [`SERVING_SAMPLES`] at 1 this test reads the 300-day leaf and goes red — so the constant is
+/// pinned above one by the thing it exists for, rather than by a test asserting a number against
+/// itself.
+///
+/// **The connection count is asserted too**, because *soonest* would also be satisfied by a probe
+/// that took one sample and got lucky on the ordering.
+#[tokio::test]
+async fn several_samples_are_taken_and_the_soonest_deadline_any_of_them_read_is_the_answer() {
+    let (authority, leaves) = an_authority_and_leaves(&[300, 20]);
+    let far = expiry_of(&leaves[0].0).expect("the far certificate has an expiry");
+    let near = expiry_of(&leaves[1].0).expect("the near certificate has an expiry");
+    assert!(
+        near < far,
+        "the two leaves were generated the wrong way round"
+    );
+    let (address, accepted) = a_server_presenting(leaves).await;
+
+    let config = verifying(&format!("https://{address}"), &authority);
+    let read = serving_expiry(
+        probe(&config),
+        std::time::Duration::from_secs(10),
+        SERVING_SAMPLES,
+    )
+    .await;
+    let opened = accepted.load(std::sync::atomic::Ordering::SeqCst);
+    println!(
+        "{SERVING_SAMPLES} samples over two certificates read {read:?}; near={near} far={far}"
+    );
+
+    assert_eq!(
+        read,
+        Serving::Until(near),
+        "the probe reported {far} — the certificate the *first* connection happened to get — so \\
+         it is still taking one sample of N and the reader is told about whichever replica the \\
+         balancer picked"
+    );
+    assert_eq!(
+        opened, SERVING_SAMPLES,
+        "the probe opened {opened} connections and not {SERVING_SAMPLES}: the soonest reading \\
+         above would be satisfied by luck as well as by sampling"
+    );
+}
+
+/// **An API server whose certificate has already run out is a typed fact and not a silence** — F2,
+/// and the whole reason [`Serving`] has three outcomes.
+///
+/// **This is the moment C2 exists for and it was the moment C2 went quiet.** rustls verifies, so
+/// the handshake fails and the old `.ok()?` collapsed it into the same `None` as an unparseable
+/// address. Measured on a real API server three days past its own `notAfter`, with a verifying
+/// kubeconfig: `grep -c "API server's own certificate"` over the run was `0`, and the operator got
+/// a wall of *nothing usable came back* while k8rs held the typed error
+/// (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 3).
+///
+/// **The variant rustls actually produces is printed rather than assumed.** The review named
+/// `CertificateError::Expired`; this rustls maps webpki's `CertExpired` to `ExpiredContext`
+/// instead, and the two are **not** equal under rustls's own `PartialEq`
+/// (`rustls-0.23.43/src/error.rs:524`, `webpki/mod.rs:66-69`). Only the second carries a date, and
+/// only the second means a certificate ran out ([`refused_for_expiry`]); this line says which one
+/// arrived — the difference between reading a definition and reading the object (NOTES § D136).
+///
+/// **The date in the refusal is the leaf's own, and that is asserted against the same bytes.**
+/// `expiry_of` reads `notAfter` out of the certificate `openssl` just wrote; rustls reads it out
+/// of the handshake it refused. Two readings of one value that must not disagree, which is the
+/// whole reason `main.rs` may print a relative age beside an absolute stamp.
+///
+/// **The `insecure-skip-tls-verify` half is the other side of the same certificate.** With
+/// verification off the handshake completes and the date is read, which is the path
+/// `screens/once.md`'s *expired N days ago* sentence is reachable on at all — measured on the same
+/// real server (§ 3, second run). Both readings come off one leaf here, so nothing can drift
+/// between them.
+#[tokio::test]
+async fn a_server_whose_certificate_has_already_expired_is_a_typed_fact() {
+    // `-days 0` writes `notBefore == notAfter == now`, so the certificate is expired the moment
+    // that second is behind us — [`an_authority_and_leaves`] has why this rather than
+    // `-not_after`.
+    let (authority, leaves) = an_authority_and_leaves(&[0]);
+    let expired_at = expiry_of(&leaves[0].0).expect("the certificate openssl just made has a date");
+    let (address, _) = a_server_presenting(leaves).await;
+    // **Past the whole second and not past the instant**, which cost this test one red run.
+    // webpki compares `UnixTime`s in whole seconds, so a handshake 200 ms after a `notAfter` of
+    // `…:29Z` still reads `now == not_after` and **verifies**: the first instant it can see as
+    // strictly greater is the next second.
+    let wait = (expired_at.as_second() + 1 - Timestamp::now().as_second()).max(0);
+    // **A loud failure rather than an astronomical sleep**, if some other `openssl` reads `-days 0`
+    // as *no well-defined expiry* (RFC 5280 §4.1.2.5's year 9999) instead of *expires now*. This
+    // was measured on 3.6.3 only, and the version that disagrees is the one nobody here can run.
+    assert!(
+        wait < 10,
+        "`openssl x509 -req -days 0` wrote notAfter={expired_at}, which is not a certificate that \
+         has already expired — this openssl reads `-days 0` differently and this test needs \
+         another way to make one"
+    );
+    let wait = std::time::Duration::from_millis(wait as u64 * 1000 + 200);
+    println!("waiting {wait:?} for notAfter={expired_at} to be a whole second behind us");
+    tokio::time::sleep(wait).await;
+
+    let server = format!("https://{address}");
+    let config = verifying(&server, &authority);
+    let read = serving_expiry(
+        probe(&config),
+        std::time::Duration::from_secs(10),
+        SERVING_SAMPLES,
+    )
+    .await;
+    println!("a verifying kubeconfig against an expired serving certificate read {read:?}");
+    assert_eq!(
+        read,
+        Serving::Expired(expired_at),
+        "a handshake rustls refused *because the certificate has expired* came back as the same \\
+         silence as an address that will not parse — which is the wall of `nothing usable came \\
+         back` this box exists to replace"
+    );
+
+    // Which spelling arrived, printed rather than reasoned about.
+    let refused = tokio_rustls::TlsConnector::from(std::sync::Arc::new(
+        trust_only(&config)
+            .rustls_client_config()
+            .expect("the reader's own trust builds"),
+    ))
+    .connect(
+        server_name(&config, "unused").expect("`tls-server-name` is set above"),
+        tokio::net::TcpStream::connect(address)
+            .await
+            .expect("the server this test started"),
+    )
+    .await
+    .expect_err("an expired certificate completed a verifying handshake");
+    println!("rustls said: {refused:?}");
+    assert_eq!(
+        refused_for_expiry(&refused),
+        Some(expired_at),
+        "the typed expiry did not hand back the certificate's own notAfter: {refused:?}"
+    );
+
+    // **The other side of the same leaf**: the reader's own knob turns verification off, the
+    // handshake completes, and the date is read — the one path `screens/once.md`'s *expired N days
+    // ago* sentence is reachable on, and the shape § 3's second run measured.
+    //
+    // **Asked through a kubeconfig and never by setting the field**, which is not a stylistic
+    // choice: `scripts/security-guard.py` refuses `accept_invalid_certs = true` anywhere in this
+    // tree, and it is right to — the knob is the *reader's*, and reading it is not turning it.
+    // Written the other way this test went red on the security gate, which is the gate working.
+    let Ok(lax) = connect_with(
+        kubeconfig_for(&server, "insecure-skip-tls-verify: true", "kubernetes"),
+        None,
+    )
+    .await
+    else {
+        panic!("a kubeconfig that skips verification did not build a client");
+    };
+    println!(
+        "with verification off, connect_with read {:?}",
+        lax.serving_expiry
+    );
+    assert_eq!(
+        lax.serving_expiry,
+        Serving::Until(expired_at),
+        "a kubeconfig that skips verification did not read the expired date — and that is the \
+         only way the report's *expired N days ago* sentence is ever drawn"
+    );
+}
+
+/// **A deadline outranks a typed expiry, and that is what keeps `main.rs` from refusing to start
+/// on a cluster that works** ([`Serving::soonest`]).
+///
+/// **It is a unit test because the shape it guards is a race.** A load-balanced control plane with
+/// one expired replica hands some samples a certificate and refuses others; the fold is what
+/// decides, and asking a server to produce that ordering reliably is a test that passes for the
+/// wrong reason on a slow day.
+#[test]
+fn a_deadline_from_any_sample_outranks_an_expiry_from_another() {
+    let soon = Timestamp::from_second(1_770_000_000).expect("an instant this file wrote itself");
+    let later = Timestamp::from_second(1_780_000_000).expect("an instant this file wrote itself");
+    let fold = |samples: &[Serving]| {
+        samples
+            .iter()
+            .fold(Serving::Unread, |seen, sample| seen.soonest(*sample))
+    };
+    assert_eq!(
+        fold(&[Serving::Expired(soon), Serving::Until(later)]),
+        Serving::Until(later),
+        "one expired replica behind a balancer decided the whole reading, so k8rs would abort a \\
+         cluster whose other replicas verify"
+    );
+    assert_eq!(
+        fold(&[Serving::Until(later), Serving::Expired(soon)]),
+        Serving::Until(later),
+        "the same, with the samples the other way round — the fold has an order-dependence"
+    );
+    assert_eq!(
+        fold(&[Serving::Until(later), Serving::Until(soon)]),
+        Serving::Until(soon),
+        "the reading is not the soonest deadline seen"
+    );
+    assert_eq!(
+        fold(&[Serving::Unread, Serving::Expired(later), Serving::Unread]),
+        Serving::Expired(later),
+        "a typed expiry beside two silences was thrown away, which is the wall of generic \\
+         messages this box replaces"
+    );
+    assert_eq!(fold(&[Serving::Unread, Serving::Unread]), Serving::Unread);
+    assert_eq!(
+        fold(&[Serving::Expired(later), Serving::Expired(soon)]),
+        Serving::Expired(soon),
+        "two expired replicas folded to the later one, so the report would name a deadline that \
+         is not the soonest this probe saw"
+    );
+    // The renderer's half: both readings carry a date now, and only a silence does not — which is
+    // what lets one expired replica behind a working balancer reach the report trailer.
+    assert_eq!(Serving::Until(soon).until(), Some(soon));
+    assert_eq!(Serving::Expired(soon).until(), Some(soon));
+    assert_eq!(Serving::Unread.until(), None);
+}
+
+/// **Only the spelling that carries a date is read as an expiry** — [`refused_for_expiry`], over
+/// the four shapes an `io::Error` off a refused handshake actually arrives in.
+///
+/// **The bare `CertificateError::Expired` is deliberately not matched, and that is a narrowing.**
+/// It was, until the date moved into [`Serving::Expired`]. rustls files webpki's
+/// `InvalidCertValidity` under that spelling — *"the notAfter time is earlier than the notBefore
+/// time"* (`rustls-webpki-0.103.15/src/error.rs:83`, `rustls-0.23.43/src/webpki/mod.rs:68`) — which
+/// is a certificate nobody could ever have used rather than one that ran out, and it carries no
+/// date to build a sentence from. It goes back as one more [`Serving::Unread`], beside every other
+/// malformed certificate on this path (`screens/once.md` § No reading at all is one silence).
+///
+/// **The whole-second conversion is pinned here rather than reasoned about**, and it is the claim
+/// the real-server test above paid a red run for: `UnixTime` is seconds since the epoch, nothing
+/// finer, so `notAfter` maps onto a `Timestamp` with no
+/// nanoseconds and the sentence `main.rs` draws is exact.
+///
+/// **The wrapper is `tokio-rustls`'s own** — `io::Error::new(ErrorKind::InvalidData, err)`
+/// (`tokio-rustls-0.26.4/src/common/mod.rs:115`) — so the downcast under test is the one the real
+/// path performs, and a plain `io::Error` with no typed source is the fourth shape.
+#[test]
+fn only_the_dated_spelling_of_a_refusal_is_an_expiry() {
+    use tokio_rustls::rustls::{CertificateError, Error, pki_types::UnixTime};
+    let refused = |certificate| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            Error::InvalidCertificate(certificate),
+        )
+    };
+    let seconds = |n| UnixTime::since_unix_epoch(std::time::Duration::from_secs(n));
+    let read = refused_for_expiry(&refused(CertificateError::ExpiredContext {
+        time: seconds(1_770_086_400),
+        not_after: seconds(1_770_000_000),
+    }));
+    println!("ExpiredContext {{ not_after: 1770000000 }} read as {read:?}");
+    assert_eq!(
+        read,
+        Some(
+            "2026-02-02T02:40:00Z"
+                .parse()
+                .expect("an instant this file wrote itself")
+        ),
+        "the notAfter rustls refused over did not come back as the instant it names"
+    );
+    assert_eq!(
+        refused_for_expiry(&refused(CertificateError::Expired)),
+        None,
+        "webpki's `InvalidCertValidity` — a notAfter before its notBefore — was read as a \
+         certificate that has run out, and there is no date in it to say when"
+    );
+    assert_eq!(
+        refused_for_expiry(&refused(CertificateError::UnknownIssuer)),
+        None,
+        "a certificate signed by a CA this kubeconfig does not trust was read as an expiry"
+    );
+    assert_eq!(
+        refused_for_expiry(&std::io::Error::other("the connection was reset")),
+        None,
+        "a refusal with no typed error under it at all was read as an expiry"
+    );
+}
+
+/// **The probe never starts the reader's login program — and before 2026-08-28 it started it a
+/// second time**, found by this box's own second pass rather than by a reviewer.
+///
+/// `Config::rustls_client_config` calls kube's `exec_identity_pem`, which calls `Auth::try_from`,
+/// which **spawns the `exec` block's command** (`kube-client-4.2.0/src/client/auth/mod.rs:344`) —
+/// so a probe built off the reader's whole `Config` ran their credential plugin once, and
+/// `Client::try_from` ran it again. On an EKS or OIDC kubeconfig that is a second `get-token`
+/// round trip against someone's rate limit, or a second browser window opening; and it materialises
+/// a credential for a call that is reading a *public* certificate off the wire.
+///
+/// **The counter is `mktemp`**: one new file per run, a standard program, and no shell. The number
+/// of files in the directory afterwards is the number of times kube started it.
+///
+/// **The server does not have to exist for this.** `rustls_client_config` is called before the
+/// first packet, and `.invalid` can never resolve (RFC 6761), so the probe fails at the lookup and
+/// the count is still whatever the login path did.
+#[tokio::test]
+async fn the_certificate_probe_never_starts_the_kubeconfigs_login_program() {
+    let dir = std::env::temp_dir().join(format!(
+        "k8rs-tests-login-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a directory in the machine's own temp dir");
+    let user = format!(
+        "{{exec: {{apiVersion: client.authentication.k8s.io/v1beta1, command: mktemp, \
+         args: [{}/ran.XXXXXX]}}}}",
+        dir.display()
+    );
+
+    let _ = connect_with(
+        kubeconfig_at("https://k8rs.invalid", "k8rs-tests", &user),
+        None,
+    )
+    .await;
+
+    let ran = std::fs::read_dir(&dir)
+        .expect("the directory this test made")
+        .count();
+    std::fs::remove_dir_all(&dir).expect("nothing this test wrote outlives it");
+    assert!(
+        ran > 0,
+        "the login program never ran at all — `mktemp` is what counts the runs here, and a \
+         machine without it measures nothing"
+    );
+    assert_eq!(
+        ran, 1,
+        "the kubeconfig's login program ran {ran} times for one connect: the certificate probe \
+         has no business logging in, and it is reading a certificate the server shows everybody"
+    );
 }

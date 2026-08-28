@@ -199,6 +199,8 @@ its line moving with it.
 - [D175](#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28) — the ruling in D174 was wrong about RFC 3986, and the parse that is safe in both directions
 - [D176](#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28) — the clock-skew line does not fit in the header, and the two halves do not share a sentence
 - [D177](#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28) — the behind half does not only blank, it also under-reports, and a refusal's `Date` is not the cluster's clock
+- [D178](#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28) — C3 lands whole, C2's row cannot be drawn in a frozen pane, and the twelfth crate was already compiled
+- [D179](#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28) — the refusal that kept a mutant alive rested on a dependency `just check` already had
 
 ## Why it exists — where the gap is
 
@@ -7545,6 +7547,11 @@ into the in-cluster ServiceAccount environment. No TLS verification knob turned
 off by us.
 
 **Two of those guard a class that is empty today, and that is the point.**
+*(Written 2026-08-16 and true then. `src/` gained a spawner on 2026-08-28 —
+[D179](#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28)
+— and `kube` landed in Phase 5, so check 2 now passes over something real. The
+argument below is why the guards were written before either; it is not a claim
+about the tree today.)*
 `src/` spawns no process and holds no client, so checks 2, 5 and 6 pass over
 nothing — they exist so the class *stays* empty when `$EDITOR` lands in v0.4 and
 `kube` in Phase 5. That is the honest version of an early guard, and it is the
@@ -14760,7 +14767,11 @@ placeholder key gives `RustlsTls(InvalidPrivateKey)`. A route exists and was mea
 `exec` plugin emitting an ExecCredential with a key generated during the test, committing
 nothing — and was **refused** because it puts `openssl` on `PATH` inside `cargo test`, and
 *`just check` is the whole of CI or it is a lie*. Recorded so the next run reads it as a known
-limit rather than re-deriving it.
+limit rather than re-deriving it. **Reversed on 2026-08-28 —
+[D179](#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28)**:
+the premise was already false when this was written, because `certs-test.sh` runs `openssl`
+inside `just check`. The sibling mutant on `Session::serving_expiry` is killed; this one is not
+yet, and it is the same route.
 
 ### D171 — the resident set measured at four sizes, the budget it broke, and the ruling that the budget stays (2026-08-28)
 
@@ -15381,3 +15392,165 @@ signature permits. Taking the magnitude first deletes the sign from the arithmet
 kills the mutant and removes the latent panic together. A surviving mutant usually
 means a test that cannot fail; this one meant a signature wider than its contract,
 which is the second thing the gate is good for and the one nobody looks for.
+
+### D178 — C3 lands whole, C2's row cannot be drawn in a frozen pane, and the twelfth crate was already compiled (2026-08-28)
+
+The Phase 5 box reads *Certificate rules that need the wire: C2 (API server serving
+cert) and C3 (pending CSRs)*. Re-checked at HEAD before briefing, the two halves are
+not the same size and only one of them is buildable in this phase.
+
+**C3 is one fetch and nothing else.** Everything else it needs already shipped:
+`ClusterSnapshot::certificate_requests` is an `Option` field on the frozen snapshot
+types, `CertificateRequestSnapshot` and its `From<CertificateSigningRequest>` decode
+are beside it, and `analysis::kubelets_waiting_to_join` already draws both the row
+and the `Row::NotComputed` that stands where the row would be while the field is
+`None`. So C3 is `k8s.rs` filling a field that is waiting for it, and it touches no
+frozen file. It lands whole.
+
+**C2 has nowhere to land, and that is a hole in the plan rather than a hard box.**
+Measured, not argued:
+
+```
+$ grep -c '^    pub ' <ClusterSnapshot>      # 14 fields, none for a serving certificate
+$ sed -n '2098p' todo.md
+**Frozen after:** `analysis.rs`.
+```
+
+`analysis::certificates` is `c1_row(findings)` plus
+`kubelets_waiting_to_join(snapshot.certificate_requests)` and has no third source, so
+a C2 row means changing `analysis.rs`. `analysis.rs` froze at Phase 4 close.
+The snapshot types froze with it —
+[D42](#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)'s
+one-phase window closed there — and
+[D124](#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+condition 3 refuses both halves by name: *"It may **not** add a rule … `ClusterSnapshot`
+keeps D42's window and no more."* D124 is also unavailable on its own terms, because its
+condition 1 wants a defect proven on a committed capture and C2 is a missing feature, not
+a wrong card.
+[D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20)
+wrote *"C2 draws no row and the screen is not changed for it … it is a Phase 5 box"*, and
+`screens/analysis.md` repeats it — but Phase 4 then froze the only file that could ever
+draw the row. Both sentences were written honestly and cannot both be obeyed.
+
+**The ruling, in two parts.**
+
+*The read lands now, as a `Session` field.* `k8s.rs` freezes at Phase 6 close
+(todo.md § Phase 5, *Frozen after*), so a wire read deferred past that needs a larger
+reversal later than the one being avoided. The shape is one commit old and is not
+invented here:
+[`Session::skew`](#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)
+is a Phase 5 fact with no snapshot field, read once at connect, carried on `Session`,
+spelled by `main.rs`, with the drawn form left to the phase that owns a renderer. C2 is
+that shape exactly. It is an `Option` and it can never fail the session, for
+§ CONNECTING's stated reason: only what cannot be connected *with* is an error.
+
+*The pane row is a later phase's box, and it needs an `analysis.rs` unfreeze that
+nobody has granted.* It is not added to Phase 5 — a box is never added to an open
+phase — and it does not belong to any phase that exists, so it goes to
+[`backlog.md`](backlog.md) for triage at phase close
+([D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)).
+`screens/analysis.md`'s note keeps saying the row is not drawn and stops saying the
+reason is Phase 4's; the reason is now the freeze.
+
+**The twelfth crate is `tokio-rustls`, and it is
+[D143](#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)'s
+narrow case rather than a new argument.** The peer certificate is only readable from a
+handshake we drive ourselves, and driving one needs a connector. Measured rather than
+assumed:
+
+```
+$ cargo tree -i tokio-rustls
+tokio-rustls v0.26.4
+└── hyper-rustls v0.27.9
+    └── kube-client v4.2.0 → kube v4.2.0 → k8rs
+
+$ cargo tree -e features,no-dev -i tokio | grep 'tokio feature "net"'
+├── tokio feature "net"        # already on in the release build, via hyper-util
+```
+
+Confirmed after the fact by the one number D143 used, which is the measurement that
+actually settles it: **213 packages in `Cargo.lock` before and after**, the whole diff
+being `tokio-rustls` added to k8rs's own dependency list and not a single new
+`[[package]]`.
+
+So naming it adds **no compiled code**, which is the whole of what made `futures-util`
+the narrow case: the build already links it and what is missing is the right to write
+the name. `tokio-rustls` re-exports `rustls`, so one crate is named and not two, and
+`tokio`'s `net` feature moves out of `[dev-dependencies]` for the reason its own comment
+already records — the feature is on either way, and naming it stops a transitive crate's
+choice from being inherited silently.
+
+**And the trust configuration is kube's own, which is why this does not touch the
+security gate's TLS line.** `kube::client::ConfigExt::rustls_client_config()` builds a
+`rustls::ClientConfig` from the same kubeconfig CA and `accept_invalid_certs` the real
+client uses. Nothing here calls `dangerous()`, installs a verifier or relaxes a check: a
+handshake that fails verification yields `None` and no sentence, never a second unverified
+attempt.
+
+**The probe is handed the trust and deliberately not the identity, and that was a defect
+before it was a design.** `rustls_client_config()` reads `identity_pem()`, which goes
+through `Auth::try_from` — and that **spawns the kubeconfig's `exec` block**
+(`kube-client-4.2.0/src/client/auth/mod.rs:344`). The first draft therefore ran the
+reader's login program *twice* per connect: a second `aws eks get-token`, or a second
+browser window, for a certificate expiry nobody asked for. Found by `dev-core`'s own
+second pass and proven rather than reasoned — `left: 2 / right: 1`, counting the
+executions for one `connect`. So the probe builds a `Config` carrying the CA and
+`accept_invalid_certs` and no client identity at all, which costs nothing: an API server
+*requests* a client certificate and does not *require* one, which is what makes every
+token-authenticated `kubectl` work. **Written as reasoned-not-measured, and the operator
+review measured it the same day** — it holds, against a real API server:
+
+```
+$ openssl s_client -connect …:6444 -CAfile ca.crt -servername kubernetes \
+    -tls1_3 -verify_return_error </dev/null      # no -cert, no -key
+subject=CN=kube-apiserver
+Acceptable client certificate CA names
+Verify return code: 0 (ok)
+```
+
+and through the product on a bearer-only kubeconfig carrying no client key at all, the C2
+sentence printed. Withholding the identity costs nothing
+([reports/2026-08-28-c2-c3-against-a-real-api-server.md](reports/2026-08-28-c2-c3-against-a-real-api-server.md)). A kubeconfig that *itself* sets
+`insecure-skip-tls-verify` is honoured here exactly as it is honoured everywhere else —
+the gate's line is *never disabled **by us***, and this reads the user's knob rather than
+turning one.
+
+### D179 — the refusal that kept a mutant alive rested on a dependency `just check` already had (2026-08-28)
+
+[D169](#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)
+accepted a surviving mutant on `Session::client_certificate` as a documented limit. The
+route to killing it — generate a key during the test, commit nothing — was measured and
+**refused**, because it "puts `openssl` on `PATH` inside `cargo test`, and *`just check` is
+the whole of CI or it is a lie*".
+
+**The premise was already false when it was written**, and `dev-core` said so while fixing
+a `tester` finding on the sibling field. Measured, one chain:
+
+```
+justfile:43        just guards
+scripts/guards.sh:82   bash scripts/certs-test.sh
+scripts/certs-test.sh:119  dates=$(openssl x509 -in "$pem" -noout -dateopt iso_8601 -dates)
+```
+
+`openssl` is a **hard dependency of `just check`** and has been since Phase 3's certificate
+fixtures. A test that shells to it adds no host requirement that a green `just check` did
+not already impose. And the rule the refusal cited says the opposite of what it was used
+for: *a missing binary is a loud error, a missing step is an invisible gap*. A test that
+fails loudly without `openssl` is the loud error; the accepted mutant was the invisible gap.
+
+**So the same route was taken for C2 and the mutant is dead.** The seam needed two things
+that are worth writing down because both cost a round to find: the leaf must be **CA-signed
+and not self-signed** — a self-signed leaf fails as `CaUsedAsEndEntity` — and the kubeconfig
+needs a sibling carrying `certificate-authority-data`.
+
+**One caveat, and it is D133's class rather than a reason to skip the test.** Planting this
+mutant by hand leaves an `unused variable` warning, and under the justfile's `-D warnings`
+cargo-mutants files that as **`unviable` rather than `caught`** — so the mutation gate is not
+what proves this field, the test is. That is the general shape: a gate that reports a failed
+build and a killed mutant with different words but the same effect on the count.
+
+**What this does not license.** The refusal was wrong about its own premise, not about the
+principle. A test may reach for a binary `just check` already requires; reaching for one it
+does not is the same decision made fresh, and `just check` gains the step in the same change
+or the gap is invisible again. `D169`'s own mutant is still alive — this entry makes it a
+choice nobody has made yet rather than a limit somebody proved.

@@ -2949,9 +2949,30 @@ public release.
       nearest, and the two drawn sentences byte-identical in both renderers. The
       TUI pointer and banner are Phase 9's — `views.rs` does not exist. The two
       `SKEW_ALLOWANCE` copies could drift silently and now cannot
-      (`scripts/skew-guard.py`, in `just check`). 617 tests, 0 missed mutants
-- [ ] Certificate rules that need the wire: C2 (API server serving cert) and
-      C3 (pending CSRs)
+      (`scripts/twin-guard.py`, in `just check` — it was `skew-guard.py` until the
+      C2 box gave it a second pair to hold). 617 tests, 0 missed mutants
+- [x] Certificate rules that need the wire: C2 (API server serving cert) and
+      C3 (pending CSRs). **The two are not the same size and only C3 was where
+      the plan put it** — C3's snapshot field, decode and report row already
+      existed, so it is one cluster-scoped fetch; C2 has no field and can have
+      none, because `analysis.rs` and the snapshot types froze at Phase 4 close
+      and [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+      condition 3 refuses both by name. So C2 is a `Session` field spelled by
+      `main.rs`, the shape `Session::skew` took one commit earlier, and the
+      Certificates-pane row is in [backlog.md](backlog.md) with the unfreeze it
+      needs ([D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)).
+      `tokio-rustls` is the twelfth crate and added no compiled code — 213
+      packages in `Cargo.lock` before and after. The operator review is what
+      made this box true rather than plausible: every run before it was against
+      a hand-built stub, and a real cluster took away three claims — C2 was a
+      coin flip on an HA control plane (3 of 8 runs spoke), its expired state
+      was unreachable on any verifying kubeconfig, and the probe charged ten
+      seconds to runs that could not connect at all
+      ([reports/2026-08-28-c2-c3-against-a-real-api-server.md](reports/2026-08-28-c2-c3-against-a-real-api-server.md)).
+      All three fixed; the openssl-in-`cargo test` refusal that had kept a
+      mutant alive was reversed on a premise `just check` already broke
+      ([D179](NOTES.md#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28)).
+      651 tests, 0 missed mutants
 - [ ] **The typed lists `analysis.rs` needs**, fetched on demand when a report
       is opened: Deployments, ReplicaSets, Services, EndpointSlices, PVCs,
       PDBs. These are *not* the browser's `Table` path — a report needs

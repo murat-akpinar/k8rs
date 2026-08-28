@@ -253,6 +253,368 @@ this section silent rather than guess. A `--once` run piped to a file on
 either of those days looks exactly like one from a cluster with a perfectly
 set clock, which is the correct answer when there is no evidence either way.
 
+## When the API server's own certificate is running out
+
+This is C2
+([NOTES § Certificate rules](../NOTES.md#certificate-rules-c-series--and-what-is-not-reachable)):
+the certificate the API server itself presents on every connection, read once
+at connect the same way
+[`Session::skew`](#when-your-clock-and-the-clusters-disagree) is. Like
+`skew`, it is a session-level fact rather than a `Finding` — it names no
+cluster object, so it carries no severity band and earns no place in the
+tally by design, the same way `skew` never has
+([NOTES § D178](../NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)).
+A Certificates-pane row is a separate question — `analysis::certificates`
+would have to grow a third source beside `c1_row` and
+`kubelets_waiting_to_join`, and `analysis.rs` froze at Phase 4 close, one
+phase before this box could reach it; that gap is
+[screens/analysis.md](analysis.md)'s to record, not this file's. The TUI's
+own answer to this fact — a header pointer plus a banner — is Phase 9's, the
+same ruling D176 already made for the clock line; not designed here.
+
+Because it is the same shape as the clock reading, it prints in the same
+place: **last, in the trailer, after the cards.** Not because it is
+low-urgency — a cluster days from refusing every connection is closer to
+catastrophic than most things that do earn a card — but because this file
+groups by *source*, not by severity: everything read off `Session` rather
+than off a cluster object prints below every card that has one, in the order
+it was added. That is [D176](../NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)'s
+**append, do not reorder** call applied for a second reason — there it
+decided which fact drops first if the header runs out of room, here it
+decides where a new trailer fact joins one that already prints correctly.
+
+**Below thirty days, nothing prints, and that already matches the rule
+beside it.** `expires_at` answers `None` for a certificate more than
+`CERT_EXPIRY_WARN` from running out, so C1 draws no card for a healthy
+kubeconfig certificate — a 210-day reading here would be exactly that noise,
+on every single run, for as long as the cluster is healthy. A working
+control plane renews its own serving certificate on its own schedule; a
+report that mentioned it anyway would be telling the reader to check
+something that needs no checking.
+
+**One threshold, thirty days, shared with the kubeconfig certificate.**
+`CERT_EXPIRY_WARN` is reused rather than a second, unbacked number invented
+beside it. The reasoning that constant already carries — "long enough to ask
+a human who is on holiday, short enough not to sit on the screen for a
+quarter" (`rules.rs` § the certificate rules) — is a notice period for
+getting a credential renewed by a person who has to be found and asked, and a
+control-plane certificate renewal is exactly that kind of operation. Two
+certificates on one report, warning at two different distances with nothing
+here to justify why one gets more runway than the other, is the thing
+invariant 14 calls noise before it calls information.
+
+**The sentence carries its own disambiguation, for the same reason:
+`— not your kubeconfig's —`.** C1 and C2 can print on the same run — a
+kubeconfig certificate and the server's own certificate running out inside
+the same month is not a rare coincidence, since one team's renewal habit
+often misses both — and a reader who has just read a card naming *their
+own* certificate's expiry needs one clause telling them this is a second,
+different certificate, not the same fact printed twice. The clause stays in
+every drawing of this sentence, not only the run where a C1 card happens to
+share the page.
+
+**The sentence describes what this run saw, not what the cluster has.**
+"An API server" usually means one process, but a control plane can run
+several behind one address — a load balancer in front of two or three
+`kube-apiserver` replicas, each free to carry its own certificate on its
+own renewal schedule. The check has no way to ask the load balancer what
+else is behind it, or even how many replicas there are; it can only read
+whatever answers. Measured against a three-replica kind cluster where one
+replica's certificate had been reissued to twelve days and the other two
+were healthy for a year: the same command, run eight times back to back
+with nothing about the cluster changing between runs, printed this
+sentence on three of the eight runs and nothing on the other five — the
+load balancer routed differently each time, and only one of the three
+replicas was the one worth warning about
+([reports/2026-08-28-c2-c3-against-a-real-api-server.md § 2](../reports/2026-08-28-c2-c3-against-a-real-api-server.md#2-ha-control-plane-eight-consecutive-runs-of-one-command)).
+**"The API server's own certificate" is the wrong noun phrase for that
+result** — a definite, singular claim about a cluster that may have
+several, drawn from a sample of one connection. "A certificate the API
+server presented" claims exactly what was read: true on a single kind
+node and true on a three-way HA control plane alike, with no
+cluster-topology caveat for the common single-instance case to read past
+— k8rs cannot reliably tell the two apart in the first place, since a
+managed cluster's control-plane replicas are not Node objects a kubeconfig
+can see. Taking more than one sample a run and keeping the soonest
+deadline seen (a Phase 5 change, cheap at tens of milliseconds a
+connection) narrows the miss window this measurement exposed; it does not
+close it, and it does not turn "a certificate" into "the cluster's
+earliest" — the sentence stays a report of what this run's samples saw,
+worded the same whether there was one replica behind the address or
+several.
+
+```
+$ k8rs --once
+prod-eu · 84 pods · 3 nodes
+
+● payments/web · 3 of 5 pods · 4 min ago
+  Containers exceeded their memory limit and were killed by the kernel
+  (OOMKilled)
+  limit 256Mi · exit 137 · 47 restarts
+  → raise limits.memory, or find the leak
+
+▲ shop/api · 2 of 6 pods · 12 min ago
+  Running, but not receiving traffic — the readiness check is failing
+  → check the app's /healthz endpoint
+
+1 critical, 1 warning
+
+A certificate the API server presented — not your kubeconfig's —
+expires in 12 days (valid until 2026-09-09T00:00:00Z). Once it runs
+out, kubectl and everything else stop being able to reach this
+cluster until someone on the control plane renews it — not something
+k8rs can do.
+```
+
+```
+$ k8rs --once
+prod-eu · 84 pods · 3 nodes
+
+● payments/web · 3 of 5 pods · 4 min ago
+  Containers exceeded their memory limit and were killed by the kernel
+  (OOMKilled)
+  limit 256Mi · exit 137 · 47 restarts
+  → raise limits.memory, or find the leak
+
+▲ shop/api · 2 of 6 pods · 12 min ago
+  Running, but not receiving traffic — the readiness check is failing
+  → check the app's /healthz endpoint
+
+1 critical, 1 warning
+
+A certificate the API server presented — not your kubeconfig's —
+expired 3 days ago (was valid until 2026-08-25T00:00:00Z). When that
+happens, kubectl and everything else stop being able to reach a
+cluster until someone on the control plane renews its certificate —
+not something k8rs can do.
+```
+
+**Two different situations reach this sentence, and only one needs
+anything turned off.** The first is unchanged: `insecure-skip-tls-verify:
+true` in the reader's own kubeconfig is the only way *this* connection
+completes a handshake with a certificate already past its `notAfter` — a
+verifying kubeconfig gets
+[§ When the certificate is why nothing came back](#when-the-certificate-is-why-nothing-came-back)
+instead, on a single connection, measured on a real API server whose
+certificate had expired three days earlier
+([reports/2026-08-28-c2-c3-against-a-real-api-server.md § 3](../reports/2026-08-28-c2-c3-against-a-real-api-server.md#3-twelve-day-and-expired-serving-certificates-single-node)).
+
+**The second needs nothing turned off: an HA control plane.** Earlier in
+this section, eight consecutive runs of one command against a three-replica
+control plane already measured this probe's five samples landing on
+different replicas behind one load balancer
+([reports/2026-08-28-c2-c3-against-a-real-api-server.md § 2](../reports/2026-08-28-c2-c3-against-a-real-api-server.md#2-ha-control-plane-eight-consecutive-runs-of-one-command)).
+A fully verifying kubeconfig refuses the sample
+that draws an already-expired replica and reads its date doing so — while
+the report's own connection needs only one working replica, which the
+balancer is just as likely to hand it. So this same sentence can print for
+a reader whose kubeconfig checks everything, on a control plane that is
+otherwise serving traffic fine. That combination is drawn below, and the
+tense stays timeless for the same reason as every other reading here —
+*"valid until … on a red card reads as though it still is"* (`rules.rs`
+§ the certificate rules) — a claim about clients that check, not about
+whichever connection this run happened to make.
+
+```
+$ k8rs --once
+prod-eu · 84 pods · 3 nodes
+
+○ nothing is broken
+
+A certificate the API server presented — not your kubeconfig's —
+expired 3 days ago (was valid until 2026-08-25T00:00:00Z). When that
+happens, kubectl and everything else stop being able to reach a
+cluster until someone on the control plane renews its certificate —
+not something k8rs can do.
+```
+
+**A clean tally does not mean every replica is current.** The other
+control-plane replicas are still carrying this cluster's traffic while
+this one waits on a renewal nobody has done yet — worth saying before a
+second replica also runs out and the balancer has nowhere healthy left
+to route around it.
+
+**The same discipline picks the article, not only the verb.** This sentence
+says kubectl and everything else "stop being able to reach *a* cluster" —
+not *this* cluster — because naming this cluster beside a claim that it
+cannot be reached would contradict the report the reader is holding: it
+reached them, so this cluster was plainly reachable a moment ago. The
+expiring-soon sentence, drawn three times elsewhere on this page, makes no
+such claim — nothing has failed yet — so it names the cluster the reader
+is looking at directly: "reach *this* cluster."
+
+```
+$ k8rs --once
+prod-eu · 84 pods · 3 nodes
+
+○ nothing is broken
+
+A certificate the API server presented — not your kubeconfig's —
+expires in 12 days (valid until 2026-09-09T00:00:00Z). Once it runs
+out, kubectl and everything else stop being able to reach this
+cluster until someone on the control plane renews it — not something
+k8rs can do.
+```
+
+**A clean cluster is the case this matters most for.** `○ nothing is broken`
+reads as permission to look away, and a certificate days from taking the
+whole cluster down is exactly the fact that permission would hide — the same
+reason the clock sentence prints after `○ nothing is broken` too, not only
+after a tally ([§ What it prints](#what-it-prints) established the parallel;
+this is the second fact to use it).
+
+**No reading at all is still one silence for two causes, and a third pulls
+itself out.** A server address that cannot be parsed into something to
+connect to a second time, and a certificate whose `notAfter` will not
+parse, are two different failures with the same content: k8rs does not
+know when this certificate runs out, and neither is common or actionable
+enough to earn its own sentence. C1 already answers exactly this question
+the same way — `expires_at` returns `None` alike for a truncated
+certificate, a wrong PEM label and an RFC 5280 §4.1.2.5 "no well-defined
+expiry", and draws no card for any of them (`rules.rs` § the certificate
+rules). Collapsing those two into one silence is not a new policy; it is
+the sibling rule's own policy read across, and it is a closer precedent
+than [`Session::skew`](#when-your-clock-and-the-clusters-disagree)'s four,
+not just an available one.
+
+**A handshake that fails is no longer automatically a third instance of
+that silence.** rustls types *why* a handshake failed, and when the reason
+it gives is that the server's certificate has already expired, k8rs knows
+something worth a sentence that it does not know for the other two causes
+above: the date this certificate ran out, not only the fact that it did.
+That one case is drawn on its own —
+[§ When the certificate is why nothing came back](#when-the-certificate-is-why-nothing-came-back),
+below. Every other reason a handshake can fail — the wrong CA, a reset
+connection, a timeout — still folds into this same silence, because k8rs
+knows no more about those than it does about an address it cannot reuse.
+
+The analogy to `skew` is not exact, and the difference is worth stating
+rather than papering over: silence about the clock is close to the truth on
+its own — `--once` runs for a few seconds, so an unmeasured skew is very
+likely a small one — while silence about a certificate is not, because a
+healthy 210-day reading and a failed read look identical on screen and a
+failed read could just as easily be hiding three days. What limits the
+damage is that a second connection failing to the same host and port a
+first connection just succeeded against needs an unusual cause — a server
+address this probe cannot reuse, a network fault in the instant between the
+two calls — rather than a common one a reader should expect to hit often.
+The alternative, a fourth on-screen state that says *"unknown"* with no
+number attached, would be a claim with nothing behind it, which is the exact
+failure D176 already ruled out for the clock line. Printing nothing stays
+the honest answer, and it needs no example: it is the absence of one, same
+as [the two cases that print nothing](#the-two-cases-that-print-nothing)
+above it.
+
+**`--once` has no live/disconnected state to suppress this for.**
+`Session::skew`'s doc reserves that suppression for a renderer with a stale
+"last successful" reading to protect against — the TUI, which stays open
+between connections. `--once` connects once and either has this reading or
+does not by the time it prints anything at all, so there is no second state
+here that needs one.
+
+### When the certificate is why nothing came back
+
+**This is the state that matters most, and it is not a trailer line.**
+Every reading drawn above prints inside a report that already succeeded —
+the report is the proof the connection worked. This one means the
+connection did not: on a verifying kubeconfig, a server certificate that
+has already expired fails the handshake the same way for the dedicated
+probe as it does for every other call `--once` needs — reading
+`/version`, discovering what the cluster serves, listing pods. Measured
+today, before this box, on a real API server three days past its own
+`notAfter`, with a verifying kubeconfig and the temporary driver that
+stands in for `--once` until Phase 11 wires it: `grep -c "API server's own
+certificate"` over the run is `0`, and instead of a diagnosis the run
+prints the same generic line once for every call that could not
+complete — *"could not read the server version (nothing usable came back
+when k8rs tried to `get /version`)"*, worded identically for `/apis` and
+for the pods watch, with nothing tying the three together
+([reports/2026-08-28-c2-c3-against-a-real-api-server.md § 3](../reports/2026-08-28-c2-c3-against-a-real-api-server.md#3-twelve-day-and-expired-serving-certificates-single-node)).
+That wall is not `--once`'s own shape — `--once` collapses a total
+failure to reach the cluster to one sentence already, never a list of
+symptoms (below) — it is evidence of the gap this box closes: every one
+of those three generic lines is `k8s::Fault::Unanswered`, "one variant on
+purpose, because from the reader's side they are one fact"
+([docs/architecture.md § Error handling](../docs/architecture.md#error-handling)),
+and today that variant is genuinely all k8rs knows, on every one of the
+three calls. It no longer has to be. rustls already knows the one fact
+that ties them together; this state is k8rs saying it.
+
+**So this is not three generic messages with one true one added above
+them; it is the true one in place of all three.** `--once` already answers
+every other startup failure it can name — no kubeconfig, no route to the
+server, no permission to list pods — with one specific sentence and a
+non-zero exit, never a list of every symptom. The words for this one live
+once, in [states.md § Before the TUI ever
+starts](states.md#before-the-tui-ever-starts), not redrawn a second time
+here — exit code `2`, like the other three ([§ Exit codes](#exit-codes)).
+A certificate the API server presented, typed as expired by rustls
+itself, is exactly that kind of known cause, and it earns the same
+treatment: one sentence, not a wall — and now one that names the date
+rustls already knew, not only the fact.
+
+**There is a date here too, and it is not invented.** rustls's own
+refusal names it: the typed error is not the plain `CertificateError::
+Expired` this section long assumed but `ExpiredContext { not_after, .. }`
+— the certificate's real expiry, carried inside the very handshake that
+refused to hand back anything else. A verifying kubeconfig still reads
+nothing about this certificate for any other purpose, but it does not
+need to for this one date: the failure already told it. So the startup
+message states it in the same shape as the trailer line above it — a
+relative age first, the exact timestamp beside it — worded once, in
+[states.md § Before the TUI ever
+starts](states.md#before-the-tui-ever-starts), and not redrawn here.
+D176's rule against a placeholder still holds; what changed is that this
+number is read off the failure, not invented to fill the space where one
+used to be missing.
+
+### Stacked with the other trailer lines
+
+The order is **clock, then this, then the check-that-could-not-run line**,
+and each join has its own reason rather than one blanket rule. Clock goes
+first because it says something about *every* line above it, cards
+included — a reader has to know whether to trust the ages before anything
+else on the page. The check-that-could-not-run line stays absolute last on
+purpose ([§ When a check could not run](#when-a-check-could-not-run): "the
+last thing a reader is already looking at to decide whether the report is
+complete"), and this box does not reopen that. So the only open slot was
+between them, and that is where the newest fact goes — the same append, do
+not reorder call made above, applied to print order rather than drop order.
+This ordering is for the two readings that print *inside* a report — the
+expired-and-typed reading above does not join it, because when that one
+fires there is no report for it to join
+([§ When the certificate is why nothing came back](#when-the-certificate-is-why-nothing-came-back)).
+
+```
+$ k8rs --once --namespace payments
+prod-eu · ns: payments · 12 pods · 3 nodes
+
+○ nothing is broken
+
+This computer and the cluster disagree about the time by 11 minutes
+(this one is behind), so recent times are missing and older ones can
+read smaller than they really are.
+
+A certificate the API server presented — not your kubeconfig's —
+expires in 12 days (valid until 2026-09-09T00:00:00Z). Once it runs
+out, kubectl and everything else stop being able to reach this
+cluster until someone on the control plane renews it — not something
+k8rs can do.
+
+One node check is off: spotting a node someone started emptying and
+did not finish needs every pod in the cluster.
+```
+
+**No `⚠`, for the same reason as the clock line.** `● ▲ ○` is this file's
+whole vocabulary ([§ Colour and symbols](#colour-and-symbols)); the
+console's pointer family has never been drawn here and this is not where it
+starts.
+
+**It does not touch the exit code.** `0` still means "k8rs ran and
+reported" — a certificate running out is a fact about the cluster, not a
+failure of this run to read it, the same distinction the clock line already
+draws ([§ Exit codes](#exit-codes)).
+
 ## stdout and stderr are split on purpose
 
 **stdout is the findings. stderr is everything else** — the commands k8rs

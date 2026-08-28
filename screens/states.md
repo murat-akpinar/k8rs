@@ -568,15 +568,25 @@ making it while one check is switched off.
 ## Before the TUI ever starts
 
 **No kubeconfig at all** is always this — stderr, exit non-zero, no raw mode —
-there is nothing yet to list a context from. The other two below hold only
+there is nothing yet to list a context from. The other three below hold only
 when the picker never opened: one context in the file, `--context` given,
 `--once`, or a non-tty. Once two-or-more contexts put the picker on screen,
-raw mode is already on, and *cannot reach the cluster* / *not allowed* become
-the modal in
+raw mode is already on, and *cannot reach the cluster* / *the certificate
+has expired* / *not allowed* become the modal in
 [context.md § When the new cluster does not work](context.md#when-the-new-cluster-does-not-work)
 instead of a stderr message. Panicking inside a TUI corrupts the user's
 terminal, so whichever form applies, the failure is handled before it can do
 that.
+
+**The certificate-has-expired message is a more specific *cannot reach the
+cluster*, not a fourth kind of failure.** Both mean the connection did not
+complete; the generic wording above prints only when k8rs genuinely does not
+know why, and steps aside for this one the moment rustls names the reason —
+a fallback string is never printed over a typed error it could have used
+instead ([docs/architecture.md § Error handling](../docs/architecture.md#error-handling)).
+The reasoning that earns it its own sentence, rather than folding into the
+generic one, is [once.md § When the certificate is why nothing came
+back](once.md#when-the-certificate-is-why-nothing-came-back).
 
 ```
 $ k8rs
@@ -586,13 +596,31 @@ k8rs: no kubeconfig found.
 
   k8rs uses the same file kubectl does. If kubectl works on this
   machine, k8rs will too.
+```
 
+```
 $ k8rs
 k8rs: cannot reach the cluster at https://10.0.0.1:6443
 
   The address is in your kubeconfig, but nothing answered.
   Is the cluster running? Are you on the right VPN?
+```
 
+```
+$ k8rs
+k8rs: the certificate the API server presented expired 3 days ago
+
+  Not your kubeconfig's — the API server's own, and it ran out on
+  2026-08-25T00:00:00Z. That is why nothing about this cluster
+  could be read this run: kubectl and anything else that connects
+  to it the normal way is refused too, until someone on the
+  control plane renews it — not something k8rs can do.
+
+  If this cluster runs more than one API server behind a load
+  balancer, trying again may reach one that still works.
+```
+
+```
 $ k8rs
 k8rs: your user is not allowed to list pods in this cluster.
 

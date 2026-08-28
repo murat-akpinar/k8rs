@@ -59,13 +59,24 @@ binary can mutate anything, and the result comes back through the same watch
 stream as any other change — there is no optimistic local mutation of the
 store.
 
-**Two things in the store did not come from a watch**, and the diagram would
-otherwise imply they did: the API server's version, read once at startup for
-N4's skew comparison, and — for certificate rule C1 — the kubeconfig context
-name and the client **certificate**, which never came from the cluster at all.
-Rules are pure functions over the snapshot, so an input that is not an API
-object still has to arrive on it. The private key is not carried; see
+**Three kinds of thing in the store did not come from a watch**, and the diagram
+would otherwise imply they did. First, the API server's version, read once at
+startup for N4's skew comparison. Second — for certificate rule C1 — the
+kubeconfig context name and the client **certificate**, which never came from the
+cluster at all. Third, **a list a report asks for**: certificate signing requests
+for rule C3 are fetched once, cluster-scoped, only on a run that draws a pane, and
+never watched (a refusal leaves the field `None`, which is *nobody looked* and not
+*nothing to find*). Rules are pure functions over the snapshot, so an input that is
+not an API object still has to arrive on it. The private key is not carried; see
 [Token hygiene](security.md#token-hygiene).
+
+**And one fact does not reach the store at all.** Rule C2 — *the API server's own
+certificate expires in N days* — is the peer certificate of a TLS handshake, so it
+is neither an API object nor a field any rule can read: the snapshot types froze a
+phase before it landed, and the pane that would draw it froze with them. It is
+carried on the session beside the clock-skew reading and spelled by the renderer,
+which is why it appears in no rule and in no report
+([NOTES § D178](../NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)).
 
 Why watch instead of polling: every `LIST pods -A` forces the API server to
 read and serialize every pod from etcd, degrading linearly with cluster

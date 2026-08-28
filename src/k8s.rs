@@ -114,12 +114,13 @@
 mod tests;
 
 use crate::rules::{
-    ClusterSnapshot, Condition, ContainerSnapshot, ContainerState, ExitRule, HostPathMount,
-    NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, Taint, Terminated, Toleration,
-    WorkloadSnapshot, minor_version,
+    CertificateRequestSnapshot, ClusterSnapshot, Condition, ContainerSnapshot, ContainerState,
+    ExitRule, HostPathMount, NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, Taint, Terminated,
+    Toleration, WorkloadSnapshot, expires_at, minor_version,
 };
 use futures_util::stream::{self, BoxStream, Stream, StreamExt, select_all};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::certificates::v1::CertificateSigningRequest;
 use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{APIGroupList, Time};
 use k8s_openapi::jiff::fmt::rfc2822::DateTimeParser;
@@ -129,9 +130,9 @@ use k8s_openapi::jiff::{SignedDuration, Timestamp};
 // 10's narrowest possible answer: a crate already in the build, not even needing to be named.
 use k8s_openapi::serde::Deserialize;
 use k8s_openapi::serde_json::Value;
-use kube::client::Body;
+use kube::client::{Body, ConfigExt};
 use kube::config::{AuthInfo, Config, KubeConfigOptions, Kubeconfig};
-use kube::core::params::GetParams;
+use kube::core::params::{GetParams, ListParams};
 use kube::core::response::reason;
 use kube::core::{DynamicObject, Request, Status, gvk::GroupVersionKind};
 use kube::discovery::{ApiCapabilities, ApiGroup, ApiResource, Discovery, Scope, verbs};
@@ -140,6 +141,8 @@ use kube::runtime::utils::Backoff;
 use kube::runtime::watcher::{self, Event, watcher};
 use kube::{Api, Client, Resource};
 use std::collections::{BTreeMap, BTreeSet};
+use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::pki_types::ServerName;
 
 // --- THE INGEST GUARD START ---
 //
@@ -471,6 +474,27 @@ impl Bounded for WorkloadSnapshot {
     fn bound(&mut self) {
         self.id.bound();
         self.owner.bound();
+        self.conditions.bound();
+    }
+}
+
+/// **The one snapshot type here that no watch decodes** (invariant 6 — CSRs are fetched when a
+/// report asks for them, § WHAT A REPORT ASKS FOR).
+///
+/// **It is here anyway, and the reason is that it was not.** The fixture path in `main.rs` decodes
+/// a `CertificateSigningRequest` straight through `rules.rs`'s `From`, and until the live fetch
+/// landed there was no second path — so nothing carried this type past [`ingest`] and its absence
+/// cost nothing. A live fetch that skipped this door would put `spec.signerName` and a condition's
+/// `message`, both free text the API server wrote, on a screen unstripped and unbounded
+/// (invariant 9, the security gate's *sizes are bounded*).
+///
+/// **`issued` is a `bool` and has nothing to bound**, which is
+/// [`CertificateRequestSnapshot::issued`]'s own point: the bit is kept and the certificate's bytes
+/// are not.
+impl Bounded for CertificateRequestSnapshot {
+    fn bound(&mut self) {
+        self.id.bound();
+        text(&mut self.signer_name, IDENTIFIER);
         self.conditions.bound();
     }
 }
@@ -1361,6 +1385,14 @@ pub struct Store {
     /// **The three the watches cannot deliver** ([`Identity`]) — empty until [`Store::identify`]
     /// is called, which the file driver never does and the live one does once.
     identity: Identity,
+    /// **Rule C3's input, filed by [`Store::certificates_fetched`]** — `None` until somebody
+    /// fetches it, and `None` again when they tried and were refused
+    /// ([`crate::rules::ClusterSnapshot::certificate_requests`], § WHAT A REPORT ASKS FOR).
+    ///
+    /// **`None` is *nobody looked* and `Some(vec![])` is *nothing to find*** (NOTES § D129), which
+    /// is the distinction `analysis::kubelets_waiting_to_join` branches on: the first draws the
+    /// row that says the check did not run, the second says nothing is waiting.
+    certificate_requests: Option<Vec<CertificateRequestSnapshot>>,
 }
 
 impl Store {
@@ -1372,6 +1404,23 @@ impl Store {
     /// store that could not ask, and `None` says exactly that.
     pub(crate) fn identify(&mut self, identity: Identity) {
         self.identity = identity;
+    }
+
+    /// **File one CSR list**, or the refusal that is the same `None` the store started with
+    /// (§ WHAT A REPORT ASKS FOR).
+    ///
+    /// **A setter for [`Store::identify`]'s reason**: the store has no client and cannot ask
+    /// anybody anything, so the fetch is the caller's and this is where its answer lands.
+    ///
+    /// **It takes the `Option` rather than a `Result`, because there is no second answer to
+    /// give.** [`certificate_requests`] has already collapsed every failure into *nobody looked*,
+    /// which is the state the pane draws a `NotComputed` row for and names no cause on
+    /// (`analysis::kubelets_waiting_to_join`). A `Result` here would be a fault nothing reads.
+    pub(crate) fn certificates_fetched(
+        &mut self,
+        requests: Option<Vec<CertificateRequestSnapshot>>,
+    ) {
+        self.certificate_requests = requests;
     }
 
     pub fn pod(&mut self, now: &Time, event: Event<Pod>) {
@@ -1592,8 +1641,8 @@ impl Store {
             namespace_scope: None,
             // **`None` is *nobody looked*, and it is not `Some(vec![])`** (NOTES § D129). None of
             // these is watched (invariant 6); `k8s.rs` fetches them when a report's pane opens,
-            // which is a later box, and an empty `Vec` here would tell Waste that nothing is
-            // going to waste over lists it never read.
+            // which for the five below is a later box, and an empty `Vec` here would tell Waste
+            // that nothing is going to waste over lists it never read.
             //
             // **The owner cache is not this list and may not be poured into it**
             // (§ RESOLVING AN OWNER). Waste's row is *ReplicaSets parked at 0 replicas*, and a
@@ -1606,13 +1655,120 @@ impl Store {
             endpoint_slices: None,
             claims: None,
             disruption_budgets: None,
-            certificate_requests: None,
+            // **The one of the six that is filled, and it is not filled from a watch**
+            // (§ WHAT A REPORT ASKS FOR): [`Store::certificates_fetched`] puts it here when a
+            // report asks, and it stays `None` when nobody asked or the cluster refused.
+            certificate_requests: self.certificate_requests.clone(),
             metrics: None,
         })
     }
 }
 
 // --- THE STORE END ---
+
+// --- WHAT A REPORT ASKS FOR START ---
+//
+// **The lists no watch carries, fetched when a report wants one and never on a timer**
+// (invariant 6, todo.md § Phase 5). The permanent watch is Alerts' five kinds and nothing else; a
+// report's own inputs are read on demand, once, and a `None` that stays `None` is what the pane
+// draws its *not checked* row from.
+//
+// **One list lives here today and the other six are the next box's.** C3's
+// CertificateSigningRequests are here because the certificate box owns them; Deployments,
+// ReplicaSets, Services, EndpointSlices, PVCs and PodDisruptionBudgets arrive with the box that
+// fills [`crate::rules::ClusterSnapshot::services`] and the four beside it, into this region.
+//
+// **Every failure is one silence, and that is why nothing here is a `Result`.** § WHAT WENT WRONG
+// is the one place a failed call is classified, and it is read by whoever owes the reader a
+// sentence. Nobody does here: `analysis::kubelets_waiting_to_join` draws its `NotComputed` row
+// with **no cause named**, deliberately, because `None` is *nobody fetched it*, *this login may
+// not list them* and *the answer never came* ([`REPORT_FETCH`]) at once, and the field cannot tell
+// the three apart. That is [`skew`]'s shape exactly —
+// *it owes no sentence, so it needs no taxonomy* — and it is what keeps a `403` on a cluster-scoped
+// verb from becoming a second classifier.
+//
+// **`list certificatesigningrequests` is cluster-scoped, so the refusal is the ordinary case
+// rather than the exception** (`crate::rules::ClusterSnapshot::certificate_requests`, the security
+// gate's *a 403 degrades that one feature*). It degrades one row of one pane, it never touches the
+// session, and **nothing retries it** — [`Store::unresolved_owners`]'s rule (NOTES § D151): a
+// standing refusal re-asked once a pass is the retry loop the security gate forbids by name.
+
+/// **How long one fetch on this path gets before it is the same silence a refusal is** — ten
+/// seconds (§ WHAT A REPORT ASKS FOR).
+///
+/// **It exists because the failure it bounds is a hang, not a slow answer.** `Config::read_timeout`
+/// is `None` in every kube constructor — `config/mod.rs:191`, `:273`, `:339` — so nothing under
+/// this call bounds it, and a middlebox that accepts the connection, reads the request and answers
+/// nothing holds it forever. That is [`SERVING_PROBE`]'s reasoning, which this box wrote one
+/// function away and did not apply here: the fetch runs on the startup path *after* the greeting
+/// has gone to stderr, so an unbounded one prints `k8rs: watching — …` and then nothing at all,
+/// looking connected (`tester`, 2026-08-28).
+///
+/// **The same ten seconds, and deliberately shorter than kube's own 30-second `connect_timeout`**
+/// (`config/mod.rs:418`) — which bounds *connecting* and not answering, so it is not a fallback
+/// this could have leaned on. This call owes the reader nothing: a link too slow for ten seconds
+/// produces exactly the `None` a 403 produces, and `analysis::kubelets_waiting_to_join` draws one
+/// *not checked* row for both.
+///
+/// **The four calls `connect_with` makes have no such bound and are not this box's to give one**
+/// (§ CONNECTING). They are older than this region, a session cannot start without them, and a
+/// deadline on them is a decision about what k8rs does when a cluster half-answers — which is a
+/// box, not a line. What is true and worth writing down is that the hole is the same one.
+///
+/// **`pub(crate)` because the one call site is `main.rs`'s**, which is the only difference from
+/// [`SERVING_PROBE`]: the deadline is a parameter for that constant's reason — a bound nothing can
+/// wait out is a bound nothing tests — and the caller that has to be honest about it is the driver.
+pub(crate) const REPORT_FETCH: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// **Every CertificateSigningRequest the cluster has**, or `None` when there was no answer to
+/// have (§ WHAT A REPORT ASKS FOR).
+///
+/// `Some(vec![])` is *this cluster has none*, which is a different fact from this function's
+/// `None` and is drawn differently (NOTES § D129).
+///
+/// **The whole list in one call, deliberately, and the ceiling is named rather than guarded.**
+/// A `ListParams` carrying a `limit` would hand back a *page*, and `Some(first 500 of 4000)` tells
+/// the report that four kubelets are waiting when four hundred are — the *short list read as a
+/// small cluster* failure NOTES § D28 shuts the whole snapshot for. So the answer is whole or it is
+/// nothing, and `ListParams::default()` really does send no `limit`: measured on the wire against a
+/// stub API server, this goes out as `…/certificatesigningrequests?` with an empty query while the
+/// watches beside it carry `&limit=500`
+/// (`the_certificate_requests_a_cluster_lists_reach_the_snapshot` asserts the same path).
+///
+/// **What that costs is one allocation the size of the cluster's CSR list, and nothing bounds
+/// it** — not this function, and not the API server, which has no page size to fall back on once
+/// none was asked for. That is stated rather than fixed because the alternative is the wrong
+/// answer above: `kubectl get csr` reads it exactly this way, every string on the objects is
+/// bounded field by field on the way through [`ingest`], and a cluster holding enough CSRs for
+/// the *count* to matter has a different problem from this row.
+///
+/// **Not watched, ever** (invariant 6). The Alerts view's inputs are the five permanent watches;
+/// this is one fetch for one row of one report.
+///
+/// **Bounded by the caller's `deadline`, because nothing under it is** — [`REPORT_FETCH`], which
+/// the one call site names. An unbounded version of this line printed the greeting and then hung
+/// forever against a listener that answers nothing (`tester`, 2026-08-28).
+///
+/// **The objects go through [`ingest`] like every other**, which is what strips and bounds
+/// `spec.signerName` and each condition's `message` — free text the API server wrote (invariant 9,
+/// `impl Bounded for CertificateRequestSnapshot`). It is also the prune: `spec.request` is the
+/// CSR's own PEM body and `spec.extra` carries the requester's credential id, and neither is a
+/// field `CertificateRequestSnapshot` has.
+pub(crate) async fn certificate_requests(
+    client: &Client,
+    deadline: std::time::Duration,
+) -> Option<Vec<CertificateRequestSnapshot>> {
+    let listed = tokio::time::timeout(
+        deadline,
+        Api::<CertificateSigningRequest>::all(client.clone()).list(&ListParams::default()),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    Some(listed.items.into_iter().map(ingest).collect())
+}
+
+// --- WHAT A REPORT ASKS FOR END ---
 
 // --- RESOLVING AN OWNER START ---
 //
@@ -3604,13 +3760,22 @@ impl Browsing {
 // second [`connect`] beside a live one is two sessions, not a mutated one — which is what makes
 // a failed switch able to leave the old session running rather than falling back to nothing.
 //
-// **Four round trips before the first watch and no fifth.** `/version` for [`version_note`], the
-// same path a second time for the `Date` header alone ([`skew`]), then the aggregated discovery
-// pair `/apis` and `/api` that § EVERY KIND THE CLUSTER SERVES prices at two — one answer read
-// twice, for the sidebar and for the capability probe (§ WHAT ELSE THE CLUSTER SERVES). The
-// watches' own initial LISTs are the fifth onwards and they are not waited for:
-// [`Store::snapshot`] is shut until they land (NOTES § D28) and [`Store::still_listing`] is what
-// a screen draws meanwhile.
+// **Four HTTP round trips before the first watch, and one TLS handshake beside them.**
+// `/version` for [`version_note`], the same path a second time for the `Date` header alone
+// ([`skew`]), then the aggregated discovery pair `/apis` and `/api` that § EVERY KIND THE CLUSTER
+// SERVES prices at two — one answer read twice, for the sidebar and for the capability probe
+// (§ WHAT ELSE THE CLUSTER SERVES). The watches' own initial LISTs are the fifth onwards and they
+// are not waited for: [`Store::snapshot`] is shut until they land (NOTES § D28) and
+// [`Store::still_listing`] is what a screen draws meanwhile.
+//
+// **The handshake is C2's and it sends no request at all** (§ THE SERVER'S OWN CERTIFICATE,
+// NOTES § D178). It is not a fifth call: it opens a connection to the same host and port, reads
+// the certificate the server presents, and closes — because that certificate is reachable no other
+// way, kube driving its own handshake inside `hyper-rustls` and handing back no connection. It is
+// bounded by [`SERVING_PROBE`] and every failure of it is `None`.
+//
+// **What is *not* here is the CSR list** (§ WHAT A REPORT ASKS FOR). A report's inputs are
+// fetched when a report asks for them, so nothing on this path pays for a pane nobody opened.
 //
 // **The second `/version` is what not growing a second classifier costs**, and it is the choice
 // this box had to make (2026-08-28). `Client::apiserver_version` is the only call that decodes
@@ -3806,6 +3971,40 @@ pub(crate) struct Session {
     /// so the suppression is the drawing's, at Phase 9, and it is written here because this field
     /// is what that drawing will read.
     pub(crate) skew: Option<SignedDuration>,
+    /// **When the certificate this API server presents stops being accepted** — C2, or
+    /// [`Serving::Unread`] when there was no reading to take (§ THE SERVER'S OWN CERTIFICATE,
+    /// NOTES § D178).
+    ///
+    /// **It is the soonest of several samples and never *the cluster's earliest*.** A control
+    /// plane can run several API servers behind one address, and this probe cannot ask the load
+    /// balancer what else is behind it ([`SERVING_SAMPLES`]).
+    ///
+    /// **[`Serving::Expired`] draws two different screens and the session does not choose between
+    /// them.** With both round trips below also silent it is the message `main.rs` prints *instead
+    /// of* a report (`screens/states.md` § Before the TUI ever starts); on a session that read the
+    /// cluster fine it is one more replica past its `notAfter`, and it joins the report through
+    /// [`Serving::until`] as the ordinary expired line (`screens/once.md` § *A clean tally does
+    /// not mean every replica is current*). Which one is `main.rs`'s call, on facts this field
+    /// does not have.
+    ///
+    /// **The answer and not the bytes.** [`CertificateRequestSnapshot::issued`] makes this
+    /// argument for the same reason: a certificate is public, but nothing on any screen prints
+    /// one, and a field nothing reads is a field that ends up in a `Debug` line (invariant 8).
+    ///
+    /// **No threshold has been applied**, unlike [`skew`] one field up. A gap between two clocks
+    /// does not move; a deadline does, so the *is this worth saying* comparison against
+    /// [`CERT_EXPIRY_WARN`] belongs to the renderer, at the instant it draws.
+    ///
+    /// **Read once at connect and never refreshed** — the ceiling [`Identity`] states for the
+    /// three facts beside it, and [`skew`] for itself. A control-plane replica that renews its
+    /// certificate while k8rs is open keeps being reported at the old date until the next
+    /// [`connect`].
+    ///
+    /// **`None` for a session built from a client rather than a kubeconfig**, because the
+    /// handshake is driven off the `Config` and [`session`] has none — the same place
+    /// [`renewal`](Session::renewal) and [`client_certificate`](Session::client_certificate) are
+    /// filled from.
+    pub(crate) serving_expiry: Serving,
 }
 
 /// **What one discovery answer says**, read twice at connect so nothing asks again
@@ -3985,12 +4184,39 @@ pub(crate) async fn connect_with(
     // closes. So the read is proven at field level on `AuthInfo` ([`kubeconfig_certificate`]) and
     // the line below is covered by the live binary alone; the mutation gate reports it MISSED and
     // that report is correct.
+    // **C2's read of the *kubeconfig*, and it happens here because this is where the `Config`
+    // still exists** — building the client consumes it, and the probe needs the same CA and
+    // `accept_invalid_certs` the client is about to be built with (§ THE SERVER'S OWN CERTIFICATE,
+    // [`trust_only`], which is what keeps the reader's *identity* out of it). **Not a `?` and
+    // never one**: every failure is a silence, because only what cannot be connected *with* is an
+    // error (§ CONNECTING).
+    //
+    // **The network half is below the client and not here, which is a correction and not a
+    // preference** (`k8s-admin`, 2026-08-28). A kubeconfig `Client::try_from` refuses without
+    // sending a packet — a `proxy-url` whose scheme this build cannot speak — used to pay the
+    // whole of [`SERVING_PROBE`] first: measured at 10.008 s of a dead terminal before an error
+    // that was available in zero (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 5).
+    let probe = probe(&config);
+    // **Both halves are asserted: that the probe runs, and that its answer lands in the field
+    // below.** `a_completed_handshake_reads_the_expiry_and_connect_with_files_it` stands up a real
+    // TLS server and compares the field with what the wire said, and
+    // `a_client_that_cannot_be_built_never_opens_the_certificate_probes_connection` counts the
+    // connections on the arm that must not open one.
+    //
+    // **The first draft of this comment said the handshake test was impossible, and it was
+    // wrong** — `openssl` is already a hard `just check` dependency and rustls's server side is
+    // compiled in (`tester`, 2026-08-28). Worth keeping as a warning: `delete field
+    // serving_expiry from struct Session` is *not* reported MISSED either way, because planting it
+    // leaves `serving_expiry` unused and `-D warnings` files the build as `unviable` — the class
+    // NOTES § D133 is about, an honest-looking count over a question nobody asked. The test is the
+    // gate here, not the run.
     match Client::try_from(config) {
         Ok(client) => Ok(Session {
             renewal,
             context: named,
             namespace,
             client_certificate,
+            serving_expiry: serving_expiry(probe, SERVING_PROBE, SERVING_SAMPLES).await,
             ..session(client).await
         }),
         Err(failure) => Err(NotConnected::Client { failure, renewal }),
@@ -4661,14 +4887,23 @@ fn kubeconfig_certificate(auth: &AuthInfo) -> Option<Vec<u8>> {
     (pem.len() as u64 <= CERTIFICATE_BYTES).then_some(pem)
 }
 
-/// The most a kubeconfig's `client-certificate` **file** may be: 64 KiB
-/// ([`kubeconfig_certificate`], the security gate's *sizes are bounded*).
+/// The most a certificate this file reads may be: 64 KiB — a kubeconfig's `client-certificate`
+/// **file** ([`kubeconfig_certificate`]) and the leaf a server presents on a handshake
+/// ([`serving_expiry`]), the security gate's *sizes are bounded*.
+///
+/// **One number for both, because both are one certificate and neither is ours.** The second
+/// reader arrived with C2 and is measured against the same census below; a second constant beside
+/// it would be two answers to *how big may a certificate be*.
+///
+/// **`pub(crate)` for [`expiry_of`]'s reason** — the boundary is pinned from `main_tests.rs`,
+/// which is where a file may read the committed certificates, and only a *real* certificate past
+/// the cap can tell this bound from the parser refusing nonsense.
 ///
 /// **Measured rather than picked.** The live kind cluster's admin certificate is **1155 bytes** of
 /// PEM and the three committed fixtures are **1196–1220**, so the cap is room for roughly fifty of
 /// them — past any chain a client is issued, and small enough that the worst case this function
 /// can be pointed at costs 64 KiB instead of everything the machine has.
-const CERTIFICATE_BYTES: u64 = 64 * 1024;
+pub(crate) const CERTIFICATE_BYTES: u64 = 64 * 1024;
 
 /// **The program a kubeconfig logs in with, cleaned and bounded** — the `exec` block's `command`,
 /// and nothing else out of that block.
@@ -4736,6 +4971,7 @@ pub(crate) async fn session(client: Client) -> Session {
         context: None,
         namespace: None,
         client_certificate: None,
+        serving_expiry: Serving::Unread,
     }
 }
 
@@ -4850,6 +5086,10 @@ fn measure(local: Timestamp, date: &[u8]) -> Option<SignedDuration> {
 /// not `pub`, and this box may not reach back to make it so (CLAUDE.md § forward-only). The
 /// number is not re-argued here: `screens/states.md` § The threshold reuses it deliberately, in
 /// both directions, rather than inventing a second one, and NOTES § D69 is where it was chosen.
+///
+/// **`scripts/twin-guard.py` is what stops the two copies drifting** — [`CERT_EXPIRY_WARN`]'s own
+/// doc has the measurement, and this pair is the same shape one rule down: neither file's tests
+/// can see the other move.
 ///
 /// **Strictly past it, which is `age`'s own boundary.** `age` blanks when the elapsed time is
 /// `< -SKEW_ALLOWANCE`, so a skew of exactly five minutes changes nothing on screen — and a
@@ -5069,3 +5309,488 @@ fn watches(client: &Client) -> Vec<BoxStream<'static, Update>> {
 }
 
 // --- CONNECTING END ---
+
+// --- THE SERVER'S OWN CERTIFICATE START ---
+//
+// **C2 — *the API server's own certificate expires in N days*** (NOTES § Certificate rules,
+// § D178). It is the certificate the server presents on every connection, and it is the one C1 is
+// not about: C1 reads the reader's kubeconfig, this reads the wire. **The rule's name is not the
+// sentence it prints**: that reads *a certificate the API server presented*, because one reading
+// off a load-balanced control plane is a sample and not the cluster ([`SERVING_SAMPLES`],
+// `screens/once.md` § When the API server's own certificate is running out).
+//
+// **It is a [`Session`] field and not a snapshot field, which is a ruling and not a shortcut**
+// (NOTES § D178). `analysis.rs` and the snapshot types froze at Phase 4 close, so there is no row
+// for it to fill and no rule for it to be; what it is instead is the shape
+// [`Session::skew`] took one commit earlier — a Phase 5 fact with no snapshot field, read once at
+// connect, carried on the session, spelled by `main.rs`. It carries no severity and no place in
+// the tally, for the same reason `skew` never has: it names no cluster object. The Certificates
+// pane's row is a later phase's box and is in `backlog.md`.
+//
+// **The trust configuration is kube's own and nothing here relaxes one.**
+// `ConfigExt::rustls_client_config` builds a `rustls::ClientConfig` from the same kubeconfig CA
+// and the same `accept_invalid_certs` the real client uses, so the security gate's *TLS
+// verification is never disabled **by us*** holds structurally rather than by review: there is no
+// `dangerous()` call here, no verifier of ours, and no second attempt after a verification
+// failure. A kubeconfig that itself sets `insecure-skip-tls-verify` is honoured exactly as it is
+// honoured everywhere else — that is the reader's own knob, and reading it is not turning it.
+//
+// **What it is *not* built from is the reader's identity** ([`trust_only`]): the probe carries no
+// token, no client key and no `exec` block, because asking kube for an identity runs the login
+// program a second time and a server's certificate needs no login to read.
+//
+// **Handshakes of our own are what it costs, and there is no first one to read instead.** kube
+// drives its own inside `hyper-rustls` and hands back no connection, so the peer certificate is
+// reachable only from a handshake we drive — which is why `tokio-rustls` is named in `Cargo.toml`
+// at all (NOTES § D178: it adds no compiled code, `hyper-rustls` already links it). It was one
+// until 2026-08-28 and is [`SERVING_SAMPLES`] now, for the reason two paragraphs down.
+//
+// **It reads several and reports the soonest, because one reading off a load balancer is a coin
+// flip** ([`SERVING_SAMPLES`]). Measured on three kind control-planes behind one balancer with a
+// single replica reissued to twelve days: the same command eight times printed the sentence three
+// times and nothing five times, with nothing about the cluster changing between runs
+// (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 2).
+//
+// **It cannot fail the session on its own, and one reading of it can end a run that had already
+// failed.** § CONNECTING's rule is unchanged — only what cannot be connected *with* is an error —
+// and [`Serving::Expired`] is not connected *with* anything: it is *why* a session that read
+// nothing read nothing, and `main.rs` is where the two facts are put together
+// (`screens/states.md` § Before the TUI ever starts: *a more specific cannot reach the cluster,
+// not a fourth kind of failure*). On a session that read the cluster fine it is one more reading
+// for the report instead ([`Serving::until`]). Every **other** failure here is
+// [`Serving::Unread`] and no sentence, which is C1's own policy read across: `expires_at` answers
+// `None` alike for a truncated certificate, a wrong PEM label and an RFC 5280 §4.1.2.5 *no
+// well-defined expiry*, and draws no card for any of them
+// (`screens/once.md` § No reading at all is one silence, not several).
+//
+// **The probe runs after the client is built and the [`Probe`] it needs is prepared before**
+// (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 5). It used to run first, and on a
+// kubeconfig `Client::try_from` refuses without touching the network — a `proxy-url` whose scheme
+// this build cannot speak — that charged the whole of [`SERVING_PROBE`] to a run that was about
+// to print an error it already had: ten seconds of a dead terminal, measured. Splitting it in two
+// costs nothing, because [`endpoint`], [`trust_only`] and [`server_name`] all read the `Config`
+// that `Client::try_from` consumes and none of them sends a packet.
+
+/// **How long the whole probe gets** — ten seconds over the DNS lookup, the TCP connect and the
+/// handshake together.
+///
+/// **It exists because the failure it bounds is a hang and not a slow answer.** A port that
+/// silently drops SYNs costs Linux's own default around two minutes, and a middlebox that accepts
+/// the socket and never speaks TLS costs forever — and this runs inside [`connect_with`], before
+/// the first screen, so either one is a tool that looks broken while a cluster is fine
+/// (`PRIOR-ART § A7`, NOTES § D150).
+///
+/// **Deliberately shorter than kube's own 30-second `connect_timeout`** (`config/mod.rs:418`),
+/// which is what the four calls a session actually needs get — and *only* over the connecting:
+/// `read_timeout` is `None` in every kube constructor, so nothing bounds their answers at all
+/// ([`REPORT_FETCH`], which is the same hole one region down). This one owes the reader nothing: a
+/// link too slow for ten seconds produces exactly the same silence as a handshake that failed, and
+/// no screen is different for it.
+///
+/// **It bounds the whole sampling loop and not one handshake** ([`SERVING_SAMPLES`]), so a slow
+/// endpoint cannot multiply it: five handshakes against a listener that accepts and never speaks
+/// still cost ten seconds once, which is the number this constant promises.
+const SERVING_PROBE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// **How many handshakes one connect drives** — five, and the answer is the soonest deadline any
+/// of them read.
+///
+/// **One reading is a coin flip on an HA control plane and that was measured, not reasoned.**
+/// Three `kube-apiserver` replicas behind one load balancer, one of them reissued to twelve days:
+/// eight consecutive runs of the same command printed the certificate sentence **three** times and
+/// nothing five times (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 2). The balancer
+/// picks the replica, and a probe that opens one connection samples one of N.
+///
+/// **Five, because it is free and because it cannot be enough.** A whole connect — the four HTTP
+/// calls a session makes *and* this probe — measured 24–36 ms on the review host, so the extra
+/// four handshakes are noise beside it. On three replicas, five independent samples take the
+/// chance of missing the one worth warning about from about two in three to about one in eight.
+/// **It does not reach zero and is not meant to**: what this reports is *the soonest deadline
+/// these samples saw*, never *the cluster's earliest*, and `screens/once.md` § When the API
+/// server's own certificate is running out words the sentence for exactly that claim — which is
+/// why a bigger number here buys wording nothing, only odds.
+const SERVING_SAMPLES: usize = 5;
+
+/// **What the samples saw** — a deadline, a `notAfter` already behind us, or nothing.
+///
+/// **Three outcomes and not two, because the moment C2 exists for is the moment it went silent**
+/// (`screens/once.md` § When the certificate is why nothing came back). rustls *verifies*, so an
+/// API server whose certificate has already run out fails the handshake — and a probe with two
+/// outcomes collapses that into the same silence as an unparseable address, while it is holding
+/// the typed error that says exactly what is wrong. Measured against a real API server three days
+/// past its own `notAfter`: `grep -c "API server's own certificate"` over the run was `0` and what
+/// the operator got was a wall of *nothing usable came back*
+/// (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 3), which is `PRIOR-ART § C1` on the
+/// one failure this product ships a dedicated probe to diagnose.
+///
+/// **The other two silences stay one silence.** An address this probe cannot reuse and a
+/// `notAfter` that will not parse are still [`Unread`](Serving::Unread) alike — that ruling is
+/// unchanged, and the reason it survives is that neither of them is a *typed* fact the way this
+/// one is.
+///
+/// **`Default` is derived for the mutation gate and the default is the honest one**
+/// (NOTES § D133). cargo-mutants replaces a function body with `Default::default()`, and a type
+/// without one turns that into an `unviable` — which reads exactly like a mutant that was tested.
+/// Three of this region's four new functions were filed that way on 2026-08-28, so the body
+/// replacement nobody could plant was also the body replacement nobody had to kill. `Unread` is
+/// what the type means by nothing, so the derive costs no meaning either.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Serving {
+    /// **The soonest `notAfter` any sample read**, over a handshake that completed.
+    Until(Timestamp),
+    /// **The `notAfter` rustls refused a sample over** — the certificate's real expiry, carried
+    /// out of the very handshake that would hand back nothing else
+    /// (`CertificateError::ExpiredContext`, `rustls-0.23.43/src/error.rs:382`). Nothing is
+    /// invented here and nothing is placeheld: a verifying kubeconfig never receives the bytes,
+    /// and it does not need to, because the refusal already named the date.
+    ///
+    /// **The date is no longer what separates this from [`Until`](Serving::Until) — a completed
+    /// handshake is.** That is the whole of the distinction `main.rs` keys its abort on: `Until`
+    /// is proof some replica behind this address serves a certificate a verifying client accepts,
+    /// and this one is proof of nothing but its own sample.
+    Expired(Timestamp),
+    /// **No reading**, which is every other way this can come back.
+    #[default]
+    Unread,
+}
+
+impl Serving {
+    /// **The deadline, for the renderer that draws one** — `None` only when nothing was read.
+    ///
+    /// **[`Expired`](Serving::Expired) answers with its date too**, which is the whole of the
+    /// second sentence C2 draws: a session that read the cluster fine while the probe met an
+    /// already-expired replica gets the *same* trailer line [`Until`](Serving::Until) draws, not a
+    /// new one (`screens/once.md` § *A clean tally does not mean every replica is current*).
+    pub(crate) fn until(self) -> Option<Timestamp> {
+        match self {
+            Serving::Until(at) | Serving::Expired(at) => Some(at),
+            Serving::Unread => None,
+        }
+    }
+
+    /// **Two samples folded into one answer** — the soonest deadline wins, and a deadline beats a
+    /// typed expiry beats nothing.
+    ///
+    /// **A date outranks [`Expired`](Serving::Expired), and that ordering is what keeps the
+    /// startup message off a cluster that works.** A completed handshake means some replica behind
+    /// this address is serving a certificate a verifying client accepts; saying *the certificate
+    /// has expired* over the top of that would be `main.rs`'s abort firing on a cluster k8rs can
+    /// read.
+    fn soonest(self, other: Self) -> Self {
+        match (self, other) {
+            (Serving::Until(a), Serving::Until(b)) => Serving::Until(a.min(b)),
+            (Serving::Until(at), _) | (_, Serving::Until(at)) => Serving::Until(at),
+            (Serving::Expired(a), Serving::Expired(b)) => Serving::Expired(a.min(b)),
+            (Serving::Expired(at), _) | (_, Serving::Expired(at)) => Serving::Expired(at),
+            (Serving::Unread, Serving::Unread) => Serving::Unread,
+        }
+    }
+}
+
+/// **How close the API server's certificate has to be to running out before anything is said** —
+/// thirty days.
+///
+/// **The same thirty `rules.rs` warns C1 at, and a second copy only because that one is private to
+/// a frozen file** — exactly [`SKEW_ALLOWANCE`]'s position. `rules.rs` froze at the end of Phase 3
+/// and its `CERT_EXPIRY_WARN` is not `pub`, and this box may not reach back to make it so
+/// (CLAUDE.md § forward-only). The number is not re-argued here: `screens/once.md` § When the API
+/// server's own certificate is running out reuses it deliberately rather than inventing a second
+/// distance for a second certificate on the same report, and `rules.rs` § the certificate rules is
+/// where it was chosen.
+///
+/// **What stops the two copies drifting is `scripts/twin-guard.py`, and nothing else does.**
+/// Measured on 2026-08-28: setting this to sixty days leaves the whole suite green, because
+/// `rules_tests` pins only `rules.rs`'s copy and `main_tests` asks its boundary question in terms
+/// of *this* one — so a re-tune of one file and its tests ships one report warning about two
+/// certificates at two distances. The guard compares the durations rather than the spellings and
+/// runs inside `just check`.
+///
+/// **It is `pub(crate)` because the renderer applies it, not this file.** Unlike [`SKEW_ALLOWANCE`]
+/// — a gap between two clocks, which does not move — an expiry is a deadline and the days left
+/// change under a long-running session, so the comparison has to happen at draw time. One constant
+/// below every renderer is what stops the report and the Phase 9 banner keeping two.
+pub(crate) const CERT_EXPIRY_WARN: SignedDuration = SignedDuration::from_hours(30 * 24);
+
+/// **Everything one sample needs, computed off the `Config` before the client consumes it** —
+/// where to connect, what to verify against, and the trust to verify with.
+///
+/// **It exists so the connecting can happen after `Client::try_from` and the reading of the
+/// kubeconfig before it** (§ THE SERVER'S OWN CERTIFICATE's last paragraph). Nothing in
+/// [`probe`] touches the network, so a kubeconfig kube refuses outright fails in zero seconds
+/// instead of ten.
+struct Probe {
+    /// [`endpoint`]'s host, already unbracketed.
+    host: String,
+    /// [`endpoint`]'s port.
+    port: u16,
+    /// The reader's own trust and nothing that can log in ([`trust_only`]). Shared across the
+    /// samples rather than rebuilt per handshake — building it is where the certificate parsing
+    /// happens.
+    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+    /// [`server_name`]'s answer: what kube's own connection verifies and SNIs.
+    name: ServerName<'static>,
+}
+
+/// **The half of the probe that reads the kubeconfig**, or `None` when this `server:` is not
+/// somewhere a handshake can be driven a second time.
+fn probe(config: &Config) -> Option<Probe> {
+    let (host, port) = endpoint(config)?;
+    let tls = std::sync::Arc::new(trust_only(config).rustls_client_config().ok()?);
+    let name = server_name(config, &host)?;
+    Some(Probe {
+        host,
+        port,
+        tls,
+        name,
+    })
+}
+
+/// **When the certificate this API server presents stops being accepted** — [`Serving`], over
+/// several samples (§ THE SERVER'S OWN CERTIFICATE).
+///
+/// **Every failure but one is [`Serving::Unread`].** A handshake that does not complete for any
+/// reason other than a `notAfter` behind us, a `server:` this probe cannot turn into somewhere to
+/// connect a second time, a certificate past [`CERTIFICATE_BYTES`], and a `notAfter` that will not
+/// parse are four different things with one content: k8rs does not know when this certificate runs
+/// out. C1's `expires_at` already answers exactly this question the same way. **A refusal rustls
+/// spells without a date is on that list too** — [`refused_for_expiry`] has which one and why. The
+/// exception is [`Serving::Expired`], whose own doc has the measurement.
+///
+/// **No threshold is applied here**, which is where this parts company with [`skew`]: a date this
+/// hands back is *this is when it expires*, not *this is worth saying*.
+/// [`CERT_EXPIRY_WARN`]'s own doc has the reason — a deadline moves against `now` and a clock gap
+/// does not.
+///
+/// **The leaf and only the leaf.** rustls hands back the chain the server sent, whose first entry
+/// is the end-entity certificate (RFC 8446 §4.4.2); the intermediates above it are the CA's
+/// business and expire on their own schedule.
+///
+/// **Where it connects and what it verifies are two different names** ([`endpoint`],
+/// [`server_name`]), which is the correction `tester` sent this box back for: reading the second
+/// off the URL host is a probe that can hand back a *different certificate* than the reader's own
+/// connection uses.
+///
+/// **`config.proxy_url` is a known silence.** kube honours it and this does not — the probe opens
+/// its own TCP connection to the `server:` host — so on a kubeconfig behind a proxy the reading is
+/// whatever that host answers directly, and usually nothing at all. That is one more
+/// [`Serving::Unread`] on the list above rather than a wrong sentence, and closing it means
+/// speaking `CONNECT` (or SOCKS5, which this build's kube cannot do either — `Cargo.toml`,
+/// `default-features = false`) by hand. It is stated rather than fixed because the fix is a proxy
+/// client and the cost of not having one is the silence every other failure here already produces.
+///
+/// **The deadline and the sample count are parameters, and [`SERVING_PROBE`] and
+/// [`SERVING_SAMPLES`] are named at the one call site.** A bound nothing can wait out is a bound
+/// nothing tests: the shape it exists for is a listener that accepts and never speaks, and a suite
+/// that proved it at the real numbers would spend ten seconds doing so.
+///
+/// **The samples accumulate outside the timeout on purpose.** Written inside it, a deadline that
+/// fires on the last handshake throws away the four readings that already came back — which is the
+/// slow endpoint turning a good answer into a silence.
+async fn serving_expiry(
+    probe: Option<Probe>,
+    deadline: std::time::Duration,
+    samples: usize,
+) -> Serving {
+    let Some(probe) = probe else {
+        return Serving::Unread;
+    };
+    let mut seen = Serving::Unread;
+    // **One deadline over the lookups, the connects and the handshakes**, because each of them can
+    // hang and only the outermost one can bound them all ([`SERVING_PROBE`]).
+    let _ = tokio::time::timeout(deadline, async {
+        for _ in 0..samples {
+            seen = seen.soonest(presented(&probe).await);
+        }
+    })
+    .await;
+    seen
+}
+
+/// **One handshake, and what it said.**
+async fn presented(probe: &Probe) -> Serving {
+    let Ok(socket) = tokio::net::TcpStream::connect((probe.host.as_str(), probe.port)).await else {
+        return Serving::Unread;
+    };
+    let connector = TlsConnector::from(std::sync::Arc::clone(&probe.tls));
+    match connector.connect(probe.name.clone(), socket).await {
+        // Bounded inside [`expiry_of`], which is where the bytes are copied and re-encoded.
+        Ok(session) => session
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(|chain| chain.first())
+            .and_then(|leaf| expiry_of(leaf))
+            .map_or(Serving::Unread, Serving::Until),
+        Err(refused) => refused_for_expiry(&refused).map_or(Serving::Unread, Serving::Expired),
+    }
+}
+
+/// **When rustls refused this handshake because the certificate had already run out** — the one
+/// failure that is a fact and not a silence, and the fact carries the date
+/// (`screens/once.md` § When the certificate is why nothing came back).
+///
+/// **`tokio-rustls` wraps the typed error in an `io::Error`** —
+/// `io::Error::new(ErrorKind::InvalidData, err)` (`tokio-rustls-0.26.4/src/common/mod.rs:115`) —
+/// so the fact is reached by downcast and never by matching on a string. Nothing here formats the
+/// error: § WHAT WENT WRONG's *select, never format* holds on this path too.
+///
+/// **`ExpiredContext` and deliberately not the dateless `CertificateError::Expired` beside it.**
+/// rustls documents the two as "semantically the same" and they are **not** equal under its own
+/// `PartialEq` (`rustls-0.23.43/src/error.rs:376,380,524`), so which one arrives matters — and
+/// what decides it is not a coin flip. webpki's `CertExpired { time, not_after }` becomes the
+/// context spelling and is the *only* one that means a certificate ran out; the bare `Expired` is
+/// where rustls files webpki's `InvalidCertValidity`, which is "notAfter time is earlier than the
+/// notBefore time" (`rustls-webpki-0.103.15/src/error.rs:83`) — a certificate nobody could ever
+/// have used, not one that has run out, and it carries no date to say anything with. It goes back
+/// as one more [`Serving::Unread`], where every other malformed certificate on this path already
+/// is. The typed-fact test prints the variant it actually got, and on 2026-08-28 it was
+/// `ExpiredContext`; `UnixTime` is whole seconds, which is pinned there too.
+fn refused_for_expiry(refused: &std::io::Error) -> Option<Timestamp> {
+    use tokio_rustls::rustls::{CertificateError, Error};
+    match refused.get_ref()?.downcast_ref::<Error>()? {
+        Error::InvalidCertificate(CertificateError::ExpiredContext { not_after, .. }) => {
+            Timestamp::from_second(not_after.as_secs() as i64).ok()
+        }
+        _ => None,
+    }
+}
+
+/// **Where to open the second connection**, or `None` when this `server:` is not somewhere a
+/// handshake can be driven a second time.
+///
+/// **`https` only.** A kubeconfig pointing at `http://` has no certificate to read and is not a
+/// failure to report; the stub server `k8s_tests.rs` builds is exactly that shape.
+///
+/// **A bracketed IPv6 literal comes back bare**, because that is what both `TcpStream::connect`
+/// and rustls's `ServerName` want and what `http::Uri::host` does not give: it keeps the brackets
+/// (`[::1]`), and handing that to either is a lookup for a host with no such name. The same
+/// unwrapping [`host_of`] does one region up, on the value that has already been parsed.
+///
+/// **443 is the default and it is HTTPS's, not Kubernetes'.** A `server:` with no port is a URL
+/// whose port the scheme decides, which is the same answer kube's own client reaches through
+/// `http::Uri`; 6443 is a *kubeadm* convention and writing it here would connect somewhere the
+/// client is not.
+fn endpoint(config: &Config) -> Option<(String, u16)> {
+    let url = &config.cluster_url;
+    if url.scheme_str() != Some("https") {
+        return None;
+    }
+    let host = url.host()?;
+    let host = host
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(host);
+    Some((host.to_string(), url.port_u16().unwrap_or(443)))
+}
+
+/// **Which name this handshake is verified against and sends as SNI** — `tls-server-name` where
+/// the kubeconfig sets one, and the host it connected to otherwise.
+///
+/// **It mirrors kube's own connector rather than reasoning about what a name is for**
+/// (`kube-client-4.2.0/src/client/config_ext.rs:438`): when `tls_server_name` is set, kube installs
+/// a `hyper_rustls::FixedServerNameResolver` built from it, so *its* connection verifies and SNIs
+/// that name and not [`endpoint`]'s host. A probe that read the URL host instead would be a second
+/// answer to *which server is this*, and this is the file that already refuses to keep two
+/// (NOTES § D129).
+///
+/// **Two failures, and only the second is why this is not a nicety.** `tls-server-name` is exactly
+/// what a reader sets when `server:` names an IP the certificate does not cover, so the wrong name
+/// verifies against nothing and the report says nothing on an ordinary shape. And an SNI-routing
+/// front end can answer two names with two *different* certificates — so the wrong name reads a
+/// real expiry off a certificate nobody's kubectl will ever be handed, and the sentence
+/// `main.rs::serving_certificate` prints is then confidently about the wrong one (`tester`,
+/// 2026-08-28).
+///
+/// **`None` for a name rustls will not take**, which is the same silence every other failure on
+/// this path is: an empty `tls-server-name`, or one that is not a DNS name or an IP literal.
+/// **The same trust configuration with nothing that can log in** — the CA to verify against and
+/// the reader's own `insecure-skip-tls-verify`, and no credential of any kind.
+///
+/// **It exists because building the probe's TLS off the whole `Config` *runs the login program*.**
+/// `Config::rustls_client_config` asks for a client identity, which goes through kube's
+/// `Auth::try_from`, which spawns the `exec` block's command
+/// (`kube-client-4.2.0/src/client/auth/mod.rs:344`) — so the first draft of this box started the
+/// reader's credential plugin twice per connect: once here and once in `Client::try_from`. On an
+/// EKS or OIDC kubeconfig that is a second token round trip, or a second browser window
+/// (this box's own second pass, 2026-08-28).
+///
+/// **Nothing is relaxed by leaving the identity out.** `root_cert` and `accept_invalid_certs` are
+/// copied across, so verification is exactly the reader's — the security gate's *TLS verification
+/// is never disabled by us*, still structural. What is dropped is the half a *server* certificate
+/// has no use for: an API server requests a client certificate and never requires one, which is
+/// what makes every token-authenticated `kubectl` in the world work, so the handshake completes
+/// without one and the server's certificate arrives before the question is even asked.
+///
+/// **It is also the smaller claim.** A probe that carries no token, no key and no plugin cannot
+/// leak one (invariant 8), and `tls_server_name` is deliberately *not* copied: [`server_name`]
+/// reads it off the original.
+///
+/// **`root_cert_file` is not copied either, and that is a no-op rather than a choice.** kube fills
+/// it on the in-cluster path only, which this program has no door into (invariant 3, the security
+/// gate's *no in-cluster ServiceAccount path*) — so it is always `None` here, and what it would
+/// otherwise switch on is a verifier that re-reads the same CA from disk on rotation.
+fn trust_only(config: &Config) -> Config {
+    let mut probe = Config::new(config.cluster_url.clone());
+    probe.root_cert = config.root_cert.clone();
+    probe.accept_invalid_certs = config.accept_invalid_certs;
+    probe
+}
+
+fn server_name(config: &Config, host: &str) -> Option<ServerName<'static>> {
+    let name = config.tls_server_name.clone();
+    ServerName::try_from(name.unwrap_or_else(|| host.to_string())).ok()
+}
+
+/// **One DER certificate's expiry, answered by the rule's own parser** (NOTES § D129).
+///
+/// **The wrap is the whole function, and it is what stops a second answer to *when does this
+/// certificate expire* existing.** `rules::expires_at` is C1's parser and takes **PEM**; rustls
+/// hands back **DER**. Re-parsing the DER here with `x509-parser` is two lines shorter and is the
+/// divergence D129 congratulated itself for avoiding — the two would then disagree the day one of
+/// them changes, and the one that would not get fixed is this one. What comes free with going
+/// through it: the `CERTIFICATE` label check, and RFC 5280 §4.1.2.5's *no well-defined expiry*
+/// answering `None` rather than a date in the year 9999 (NOTES § D56).
+///
+/// **The base64 is `k8s-openapi`'s own**, through the `ByteString` whose `Deserialize` already
+/// decodes every `Secret` value and every `client-certificate-data` in this file
+/// ([`kubeconfig_certificate`]) — read the other way round. No base64 crate, none wanted for one
+/// encode (invariant 10).
+///
+/// **No line wrapping, which was measured rather than assumed**: `x509-parser`'s PEM reader
+/// accepts the body as one line, so the 64-column fold PEM is usually written with buys nothing
+/// here. `pem_body_on_one_line_is_a_certificate_this_parser_reads` is what fails if that stops
+/// being true.
+///
+/// **Bounded at [`CERTIFICATE_BYTES`], and here rather than at the handshake**, because this is
+/// the function that copies the bytes, base64-encodes them and hands the result to a parser — the
+/// security gate's *sizes are bounded*, and the same number and the same rule
+/// [`kubeconfig_certificate`] keeps for the certificate on the reader's own disk. It is
+/// [`DATE_BYTES`]'s narrower claim: rustls has already read the chain off the wire under the TLS
+/// stack's own limits, so what this refuses is three more copies of an unbounded value.
+///
+/// **`pub(crate)` for one reason: where it can honestly be tested.** `scripts/certs-test.sh`
+/// requires every file under `src/` that reads the committed certificates to pin the one instant
+/// they are measured from, and `k8s_tests.rs` keeps no such clock — its own `certificate_bytes`
+/// doc says so. `main_tests.rs` does pin it, and reads those bytes already, so the positive case
+/// is asserted from there against the same instant C1's card is.
+pub(crate) fn expiry_of(der: &[u8]) -> Option<Timestamp> {
+    // **The length is bound to a name first, and that is not style.** Written inline,
+    // `der.len() as u64 > CERTIFICATE_BYTES` makes the flipped comparison a *parse* error —
+    // `as u64 <` reads as the start of generic arguments — so the mutation gate files it
+    // `unviable` and the boundary this guard exists for is proven by nothing it can see
+    // (NOTES § D133: an honest unviable still hides a real question).
+    let size = der.len() as u64;
+    if size > CERTIFICATE_BYTES {
+        return None;
+    }
+    let encoded = k8s_openapi::serde_json::to_value(k8s_openapi::ByteString(der.to_vec())).ok()?;
+    expires_at(
+        format!(
+            "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+            encoded.as_str()?
+        )
+        .as_bytes(),
+    )
+}
+
+// --- THE SERVER'S OWN CERTIFICATE END ---

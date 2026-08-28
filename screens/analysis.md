@@ -2042,12 +2042,20 @@ real 53-column region, in the exact words the row and its action carry:
   `certificates  30d` is C1's own countdown and its alerting mechanism.
 - **The API server's own certificate has no row, and that is not an
   omission.** The earlier sketch drew `○ the API server certificate has 210
-  days`; C2 needs the peer certificate off a second TLS connection, which
-  `analysis.rs`'s own module doc rules out for Phase 4 — *"a Security gate
-  question before it is a snapshot field... a Phase 5 box."* A row this
-  screen cannot yet compute is not drawn a placeholder value; it is simply
-  not drawn, the same rule that keeps a `—` off every other empty cell on
-  this page.
+  days`; C2's read landed in Phase 5, but only as a `Session` field spelled
+  by `--once` ([once.md § When the API server's own certificate is running
+  out](once.md#when-the-api-servers-own-certificate-is-running-out)) — a
+  Certificates-pane row needs `analysis::certificates` to grow a third
+  source beside `c1_row` and `kubelets_waiting_to_join`, and `analysis.rs`
+  froze at Phase 4 close, one phase before this box could reach it. The row
+  is not undrawn for lack of a phase to hold it; it is undrawn because the
+  one file that could draw it is frozen and nobody has granted the unfreeze
+  that would change that
+  ([NOTES § D178](../NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28),
+  [backlog.md § From the C2/C3 certificate box](../backlog.md#from-the-c2c3-certificate-box-2026-08-28)).
+  A row this screen cannot yet draw is not drawn a placeholder value; it is
+  simply not drawn, the same rule that keeps a `—` off every other empty
+  cell on this page.
 - **The expiry is inside the sentence, not right-aligned in a column.** The
   earlier sketch put `30 days` and `210 days` at the pane's right edge, which
   is a column `analysis.rs` would have had to pad.

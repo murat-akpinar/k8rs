@@ -10,12 +10,14 @@ mattered became a script (`write-guard.py` for invariant 1, `test-guard.py` for
    read, every `uses:` pinned to a 40-hex commit SHA rather than a tag (a tag
    is a moving pointer somebody else controls), and no `pull_request_target`,
    which runs with the base repo's secrets against a fork's code.
-2. **No API string ever reaches a shell** (invariant 9). `src/` spawns nothing
-   at all today; the guard keeps the *class* empty, so it is already standing
-   when `$EDITOR` arrives with `e` in v0.4 — the one place this repo will ever
-   spawn a process, and the one that must use an argument vector.
-3. **No telemetry, no second outbound path** — the dependency list is the
-   eleven invariant 10 allows and nothing else (an allowlist, because a
+2. **No API string ever reaches a shell** (invariant 9). Two files spawn today,
+   each through an argument vector: `tests/binary.rs` runs the built binary
+   (`CARGO_BIN_EXE_k8rs`), and `src/k8s_tests.rs` runs `openssl` on literals and
+   temp paths to build the CA and leaf its TLS server needs. The rule does not
+   soften for a caller, and will not for `$EDITOR` in v0.4 — in every file that
+   spawns at all it refuses a shell program, a `-c` flag and a command string.
+3. **No telemetry, no second outbound path** — the dependency list is what
+   invariant 10 allows and nothing else (an allowlist, because a
    denylist of HTTP crates would need to know about `reqwest`, `hyper`,
    `ureq`, `isahc`, `attohttpc`… and whatever ships next month), and no
    hardcoded host in the code. Both halves are narrower than the name: the
@@ -74,17 +76,18 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # --- what each check is allowed to see -----------------------------------
 
-# The eleven of invariant 10 (CLAUDE.md § Hard invariants). A twelfth is a
+# The twelve of invariant 10 (CLAUDE.md § Hard invariants). A thirteenth is a
 # recorded decision, so it lands here and in CLAUDE.md in the same change —
-# which is exactly the review this line exists to force. It forced the
-# eleventh: `futures-util` is a reversal of "no new dependencies", ruled in
-# NOTES § D143 — every entry point in kube-runtime returns `impl Stream`,
-# `Stream` is not in `std`, and the crate was already linked under
-# `kube-client`, so it names a trait rather than adding compiled code.
+# which is exactly the review this line exists to force. It forced both
+# reversals of "no new dependencies", and each is a crate the build already
+# linked, so it names something rather than adding compiled code:
+# `futures-util` for `Stream`, which `kube-runtime` returns and `std` does not
+# have (NOTES § D143), and `tokio-rustls` for the connector C2 needs to drive
+# its own handshake and read the API server's certificate (NOTES § D178).
 ALLOWED_CRATES = {
     "kube", "k8s-openapi", "ratatui", "crossterm", "tokio",
     "anyhow", "serde_json", "serde_yaml_ng", "x509-parser", "similar",
-    "futures-util",
+    "futures-util", "tokio-rustls",
 }
 
 # Reserved names that cannot resolve to a real service (RFC 2606 / RFC 6761),

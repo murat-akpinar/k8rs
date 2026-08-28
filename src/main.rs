@@ -299,6 +299,18 @@ struct Input {
     /// either way — which is the same silence a live cluster whose header was stripped produces
     /// (`screens/states.md` § When there is nothing to say).
     skew: Option<SignedDuration>,
+    /// **When the API server's own certificate stops being accepted, when that was readable at
+    /// all** — [`k8s::Session::serving_expiry`], and [`serving_certificate`] is what spells it.
+    ///
+    /// **`None` on the file-driven path, for [`Input::skew`]'s reason and not a weaker one.** A
+    /// `.json` on disk presented no certificate to anybody, so there is nothing to have read —
+    /// the same silence a live cluster whose handshake failed produces (`screens/once.md` § No
+    /// reading at all is one silence, not several).
+    ///
+    /// **Unthresholded, on purpose**: `Some` here is *this is when it expires*, not *this is worth
+    /// saying*. [`k8s::CERT_EXPIRY_WARN`] is applied where the sentence is drawn, because the days
+    /// left move against `now` and a session outlives the instant it connected at.
+    serving_expiry: Option<Timestamp>,
 }
 
 /// Read every path into one snapshot, or say which file stopped it.
@@ -309,8 +321,10 @@ struct Input {
 /// a kind we claim to understand and does not decode.
 fn load(paths: &[String], now: Time) -> Result<Input, String> {
     let mut input = Input {
-        // No cluster answered, so nothing measured this machine's clock ([`Input::skew`]).
+        // No cluster answered, so nothing measured this machine's clock ([`Input::skew`]) and no
+        // server presented a certificate to read ([`Input::serving_expiry`]).
         skew: None,
+        serving_expiry: None,
         snapshot: ClusterSnapshot {
             now,
             pods: Vec::new(),
@@ -372,10 +386,23 @@ fn load(paths: &[String], now: Time) -> Result<Input, String> {
 ///
 /// **The five on-demand lists arrive here too, and `None` still means *nobody looked***
 /// (NOTES § D129). A cluster answers them on a fetch when a report's pane opens; this driver
-/// answers them from whatever files were named, so the field stays `None` until one such object
-/// is read and becomes `Some` — an empty `Vec` only where a capture held a `kind: List` with
-/// nothing in it. That is the same distinction the fetch draws, and it is what lets Waste say
-/// *nothing is going to waste* over the lists it read and *not checked* over the ones it did not.
+/// answers them from whatever files were named, so a field stays `None` until one object of that
+/// kind is read and becomes `Some` on the first. That is what lets Waste say *nothing is going to
+/// waste* over the lists it read and *not checked* over the ones it did not.
+///
+/// **What this path cannot say is *this cluster has none*, and the fetch can** — the one place
+/// the two differ, stated because a comment claiming they match was wrong until 2026-08-28
+/// (`tester`). [`load`] iterates a `kind: List`'s `.items[]`, so an *empty* envelope makes zero
+/// calls to this function, `get_or_insert_with` never runs, and the field is left at *nobody
+/// looked* over a capture that says in as many words that there is nothing to find.
+/// `k8s::certificate_requests` answers that same cluster `Some(vec![])`.
+///
+/// **Not closed here.** Filing `Some(vec![])` for an empty envelope is a decision about all six
+/// `Option` lists on the snapshot at once — the five above and `replica_sets` — and five of those
+/// belong to *The typed lists `analysis.rs` needs*
+/// (todo.md § Phase 5) — the box that fills them from a cluster and is the one place their two
+/// paths can be made to agree in one edit. Reshaping five kinds from inside the certificate box
+/// would be that box's ruling made by somebody else.
 ///
 /// **A ReplicaSet lands in two fields on purpose.** `workloads` is the permanent watch's, which
 /// the W-rules read; `replica_sets` is the list Waste's *parked at 0 replicas* row is counted
@@ -502,6 +529,25 @@ fn render(findings: &[Finding], input: &Input) -> String {
         lines.push(String::new());
         lines.push(clock);
     }
+    // **Under the clock line, which is the trailer order `screens/once.md` § Stacked with the
+    // other trailer lines fixes**: clock first because it qualifies every line above it, cards
+    // included; this next, because it is the newest fact and the only open slot; the
+    // check-that-could-not-run line absolutely last, which this file cannot yet draw
+    // ([`Input::skipped`] is empty on every live path).
+    //
+    // **Last *of this block*, so `--analysis`'s panes still print under it** — the same placement
+    // the clock line above takes and for the same reason (2026-08-28, a choice `screens/once.md`
+    // does not make because it draws no panes): both qualify the cards, and both belong against
+    // them rather than at the bottom of seven whole-cluster reports the reader may never reach.
+    //
+    // **Grouped by source and not by severity, deliberately.** A cluster days from refusing every
+    // connection is closer to catastrophic than most things that earn a card — but everything read
+    // off a [`k8s::Session`] rather than off a cluster object prints below every card that has one,
+    // and reordering for this one would be the second rule that file does not need.
+    if let Some(expiry) = serving_certificate(input.serving_expiry, &input.snapshot.now) {
+        lines.push(String::new());
+        lines.push(expiry);
+    }
     lines.join("\n")
 }
 
@@ -578,6 +624,90 @@ fn clock(skew: Option<SignedDuration>) -> Option<String> {
              ahead), so times can read larger than they really are."
         )
     })
+}
+
+/// **The one sentence that says this cluster is running out of the certificate it answers every
+/// connection with** — C2, or `None` when there is nothing to say (`screens/once.md` § When the
+/// API server's own certificate is running out).
+///
+/// **Two drawings, one string each, and there is exactly one draw site** — this function, called
+/// once by [`render`], which is what both the file path and the live path go through. NOTES § D177
+/// is the class: a sentence spelled in two places is two sentences the day one of them is edited.
+///
+/// **It is a session fact and not a `Finding`** (NOTES § D178): it names no cluster object, so it
+/// carries no severity band and appears in no tally, the same way the clock line never has.
+///
+/// **Below thirty days nothing prints at all.** [`k8s::CERT_EXPIRY_WARN`] is the same distance C1
+/// warns the reader's *own* certificate at, reused rather than a second unbacked number invented
+/// beside it — two certificates on one report warning at two distances, with nothing to justify why
+/// one gets more runway, is what invariant 14 calls noise before information. A healthy control
+/// plane renews its serving certificate on its own schedule, and a `210 days` line on every run
+/// would be telling the reader to check something that needs no checking.
+///
+/// **The `— not your kubeconfig's —` clause is in every drawing and not only the shared one.** C1
+/// and C2 can print on the same report — one team's renewal habit often misses both — and a reader
+/// who has just read a card about *their own* certificate needs one clause saying this is a second,
+/// different one rather than the same fact twice.
+///
+/// **The expired sentence is timeless and says *a* cluster, not *this* one**, which is the article
+/// doing work the tense cannot. This report exists, so this cluster was plainly reachable a moment
+/// ago; naming it beside a claim that it cannot be reached would contradict the page it is printed
+/// on. What really happened is narrower — the connection got through while that certificate is
+/// expired, which is ordinary behind a load-balanced control plane where one replica has fallen
+/// behind on renewal. The expiring sentence makes no such claim and names the cluster directly.
+///
+/// **It does not touch the exit code.** `0` still means *k8rs ran and reported*: a certificate
+/// running out is a fact about the cluster, not a failure of this run to read it
+/// (`screens/once.md` § Exit codes).
+///
+/// **No `⚠`.** `● ▲ ○` is this report's whole vocabulary, and the console's pointer family has
+/// never been drawn on this stream.
+fn serving_certificate(expiry: Option<Timestamp>, now: &Time) -> Option<String> {
+    let expiry = expiry?;
+    let left = expiry.duration_since(now.0);
+    if left > k8s::CERT_EXPIRY_WARN {
+        return None;
+    }
+    // RFC 5280 §4.1.2.5: the certificate is valid *through* `notAfter`, so only what is past the
+    // deadline has run out — C1's own boundary, one file over.
+    if left < SignedDuration::ZERO {
+        return Some(format!(
+            "A certificate the API server presented — not your kubeconfig's — expired {} ago \
+             (was valid until {expiry}). When that happens, kubectl and everything else stop \
+             being able to reach a cluster until someone on the control plane renews its \
+             certificate — not something k8rs can do.",
+            in_days(left)
+        ));
+    }
+    Some(format!(
+        "A certificate the API server presented — not your kubeconfig's — expires in {} (valid \
+         until {expiry}). Once it runs out, kubectl and everything else stop being able to reach \
+         this cluster until someone on the control plane renews it — not something k8rs can do.",
+        in_days(left)
+    ))
+}
+
+/// **Whole days, in the words the sentence prints** — `12 days`, `1 day`, and **`less than a day`
+/// where a truncated `0 days` would be both wrong and the most urgent thing this line ever says**.
+///
+/// **A second spelling of `rules.rs`'s own `in_days`, and only because that one is private to a
+/// frozen file** — the position [`k8s::CERT_EXPIRY_WARN`] is in, one layer down. C1 and C2 print
+/// day counts on the same report and a reader may not be shown two ways of counting a day; the two
+/// merge when C1's own renderer arrives.
+///
+/// The sign is dropped: the caller's sentence carries the direction — *expires in* one way,
+/// *expired … ago* the other — and the same length has to read correctly in both.
+///
+/// **The cast is exact on every target this repo builds for** — CI's four and the gnu host beside
+/// them are all 64-bit, the note [`clock`] already carries for its own. On a 32-bit one it could
+/// truncate a day count no certificate a server presents can carry.
+fn in_days(span: SignedDuration) -> String {
+    let days = span.as_hours().abs() / 24;
+    if days == 0 {
+        "less than a day".to_string()
+    } else {
+        plural(days as usize, "day")
+    }
 }
 
 /// What the report covered — the first line, so an empty report cannot be mistaken for a
@@ -970,6 +1100,7 @@ fn live_report(
     renewal: Option<&str>,
     analysis: bool,
     skew: Option<SignedDuration>,
+    serving_expiry: Option<Timestamp>,
 ) -> Option<String> {
     let mut report = unreadable(&store.troubles(), renewal);
     match store.snapshot(now) {
@@ -983,6 +1114,11 @@ fn live_report(
                 // prints** ([`k8s::Session::skew`]) — so a session that says it lands on the
                 // first report and stays, and one that has nothing to say never starts.
                 skew,
+                // **Read once, at connect, for the same reason** ([`k8s::Session::serving_expiry`])
+                // — but *unlike* the skew this one is not the same sentence every pass: the days
+                // left are measured against the snapshot's own `now`, so a session left open over
+                // a threshold starts saying so without reconnecting.
+                serving_expiry,
             };
             let findings = analyze(&input.snapshot);
             if !report.is_empty() {
@@ -1272,6 +1408,80 @@ fn greeting(session: &k8s::Session) -> Vec<String> {
     said
 }
 
+/// **Whether an expired serving certificate is why this session read nothing** — `Some` is the
+/// message that replaces the whole report, and `None` is every other run.
+///
+/// **The sentence is `screens/states.md` § Before the TUI ever starts, byte for byte**, including
+/// its wrapping and its indent. It is a *more specific* cannot-reach-the-cluster and not a fourth
+/// kind of failure, which is that section's own ruling: the wall it replaces is
+/// `k8s::Fault::Unanswered` said once per call, and the only thing added is the reason the three
+/// have in common. Its last paragraph is what makes it honest — the condition below cannot reach
+/// zero false positives behind a load balancer, and that is where the reader is told so.
+///
+/// **The age and the stamp are two spellings of one `notAfter` and are derived from one value.**
+/// [`k8s::Serving::Expired`] carries the date rustls refused the handshake over, so *expired 3
+/// days ago* and *ran out on …* cannot disagree the way two independently formatted readings of
+/// one instant can. [`in_days`] is the same day count the report trailer prints, and drops the
+/// sign because the sentence carries the direction — and it cannot be *counting* backwards here,
+/// because rustls refused this handshake against this same machine's clock, so a `now` this
+/// message could compare against is already past that `notAfter`.
+///
+/// **The invariant this function exists to keep is that k8rs never refuses to start on a cluster
+/// it could otherwise read** (`k8s-admin`, 2026-08-28). A control plane can run several API
+/// servers behind one address, so k8rs's probe can meet an expired replica while the client is
+/// being served by a healthy one; a typed expiry that ended the session *by itself* would turn a
+/// diagnostic into an outage on a cluster that works. So the reading may only replace the
+/// **generic** wording of a session that has comprehensively failed anyway — it never causes a
+/// failure, it renames one.
+///
+/// **The condition, and why each half is in it.**
+///
+/// * **[`k8s::Serving::Expired`], which is already *no sample completed a handshake*.** A single
+///   completed one outranks a typed expiry inside `k8s::Serving::soonest`, so a `Serving::Until`
+///   from any of the five samples takes this branch off the table — and a completed handshake is
+///   proof that something behind this address serves a certificate a verifying client accepts.
+/// * **`get /version` and `get /apis` both came back [`k8s::Fault::Unanswered`].** Not
+///   `Refused`: a kubeconfig whose role lacks the `nonResourceURLs` grant gets `403` on both of
+///   them and lists pods perfectly well (NOTES § D160), and that run must start. Not a success
+///   either, obviously. `Unanswered` is *nothing usable came back*, which is what a refused
+///   handshake looks like from above.
+///
+/// **Two calls and not the watches, because the watches cannot be asked.** kube's `watcher()`
+/// never ends and the backoff under it never gives up (`k8s.rs` § THE DRIVER), so there is no
+/// moment before the first screen at which their verdict exists. What is available is the two
+/// round trips the session already made, and they are the same TLS to the same address.
+///
+/// **What is left is a residue rather than a hole, and it is priced.** It fires wrongly only when
+/// every one of the five probe samples *and* both session calls land on the expired replica.
+/// Round-robin over one expired replica of two, that is one run in 128; of three, one in 2187 —
+/// and the message's own last paragraph tells that reader to try again. **The probe alone would be
+/// one in 32 and one in 243**, which is the whole reason the session's own answers are in the
+/// condition — a one-in-32 refusal to start is a tool an operator stops trusting, and the cluster
+/// it refuses is working.
+fn certificate_is_why(session: &k8s::Session, now: &Time) -> Option<String> {
+    let k8s::Serving::Expired(at) = session.serving_expiry else {
+        return None;
+    };
+    let unanswered = |fault: Option<k8s::Fault>| fault == Some(k8s::Fault::Unanswered);
+    (unanswered(session.version.as_ref().err().map(k8s::fault))
+        && unanswered(session.served.as_ref().err().map(k8s::fault)))
+    .then(|| {
+        format!(
+            "k8rs: the certificate the API server presented expired {} ago
+
+  Not your kubeconfig's — the API server's own, and it ran out on
+  {at}. That is why nothing about this cluster
+  could be read this run: kubectl and anything else that connects
+  to it the normal way is refused too, until someone on the
+  control plane renews it — not something k8rs can do.
+
+  If this cluster runs more than one API server behind a load
+  balancer, trying again may reach one that still works.",
+            in_days(at.duration_since(now.0))
+        )
+    })
+}
+
 /// **Watch, and print the report every time it changes** — until the process is killed.
 ///
 /// **It takes what connecting produced rather than doing it**, so a test can hand it a session
@@ -1318,13 +1528,32 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool
             );
         }
     };
+    // **The one session-level reading that ends the run instead of joining the report**
+    // (`screens/states.md` § Before the TUI ever starts). It is placed above the greeting because
+    // the greeting is the wall it replaces: without it the operator gets *nothing usable came
+    // back* once per call, while k8rs is holding the typed error that says why.
+    // A clock this machine cannot read costs the sentence and not the run: with no `now` there is
+    // no *how long ago*, and what is left is the generic wall. That machine has no report either —
+    // [`live_report`]'s loop drops every pass for the same `Err`.
+    if let Some(why) = wall_clock()
+        .ok()
+        .and_then(|n| certificate_is_why(&session, &n))
+    {
+        return why;
+    }
+
     // Read out once, because `session.watches` is moved below and the borrow would not survive
     // it.
     let renewal = session.renewal.clone();
     let renewal = renewal.as_deref();
     // Read out here for the reason `renewal` is: `session.watches` is moved below and the borrow
-    // would not survive it. It is a `Copy` number, so this is a read and not a clone.
+    // would not survive it. Both are `Copy`, so these are reads and not clones.
     let skew = session.skew;
+    // **The date and not the whole reading** ([`k8s::Serving::until`]) — including one the probe
+    // met while this session read the cluster fine, which is a replica that has already run out
+    // (`screens/once.md` § *A clean tally does not mean every replica is current*). The
+    // run-ending case returned above.
+    let serving_expiry = session.serving_expiry.until();
     let mut err = std::io::stderr();
     let _ = writeln!(err, "k8rs: watching — {}", greeting(&session).join(" · "));
     // The one line N4 has never had a server to say it about: a cluster outside the window this
@@ -1340,12 +1569,44 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool
     // with. Read at connect and before the watches move, because `session.watches` is taken
     // below and the borrow would not survive it — the same reason `renewal` is read out above.
     store.identify(k8s::Identity::of(&session));
+    // **The one list a report asks for, fetched once and only on a run that draws reports**
+    // (`k8s.rs` § WHAT A REPORT ASKS FOR, NOTES § D178). CSRs are never watched (invariant 6) and
+    // there is no pane to open yet, so [`ANALYSIS`] is the closest honest analogue this driver has
+    // of a report being opened: a `k8rs --live` without it prints no Certificates pane, and a
+    // request sent for a pane nobody asked for is a request on a path that does not need one.
+    //
+    // **Once, and never again.** A refusal is a standing fact about this kubeconfig's role —
+    // `list certificatesigningrequests` is cluster-scoped and most namespaced roles do not have
+    // it — so re-asking per pass is the retry loop the security gate forbids by name
+    // (`k8s::Store::unresolved_owners`'s rule, NOTES § D151). What that costs is the ceiling
+    // [`k8s::Identity`] already states for the three facts beside it: a kubelet that starts waiting
+    // to join after this line has run is not seen until the next connect. The refresh belongs to
+    // the phase that has a pane to open one from.
+    //
+    // **Bounded, and the bound is the reason this line is not where the run stops.** Nothing
+    // under it has a read deadline of its own ([`k8s::REPORT_FETCH`]), and this `await` sits
+    // *after* the greeting above and *before* the first watch — so an unbounded one prints
+    // `k8rs: watching — …` and then nothing, which is a tool that looks connected while it is
+    // hung (`tester`, 2026-08-28).
+    if analysis {
+        store.certificates_fetched(
+            k8s::certificate_requests(&session.client, k8s::REPORT_FETCH).await,
+        );
+    }
     let mut last = String::new();
     k8s::drive_watching(session.watches, &mut store, |store| {
         // A clock this driver cannot read is not a reason to stop watching; the next event asks
         // again. `wall_clock`'s own `Err` is a machine set before 1970.
         let Ok(now) = wall_clock() else { return };
-        if let Some(report) = live_report(store, now, &mut last, renewal, analysis, skew) {
+        if let Some(report) = live_report(
+            store,
+            now,
+            &mut last,
+            renewal,
+            analysis,
+            skew,
+            serving_expiry,
+        ) {
             // The write is dropped if it fails, for the reason `main` drops a failed stderr
             // write: there is nowhere left to report it, and this loop has no exit to take.
             let _ = writeln!(std::io::stdout(), "{report}\n");

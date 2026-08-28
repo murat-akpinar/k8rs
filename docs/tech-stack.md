@@ -20,12 +20,17 @@
 | X.509 | **x509-parser** | Certificate expiry warnings. Hand-parsing ASN.1 dates in a security-adjacent path is the wrong place to be clever. |
 | Diff | **similar** *(v0.4)* | The diff shown before an edit is applied — the thing that makes `e` safe to press. Approved, but it enters the build with `edit`, not before. |
 
-Full dependency list (**eleven** crates approved; ten ship in v0.1, `similar`
-arrives with `edit` in v0.4). The eleventh, `futures-util`, was a reversal of
-invariant 10 and added no compiled code — `kube-runtime` returns `impl Stream`,
-`Stream` is not in `std`, and `futures-util` was already linked under
-`kube-client`
-([NOTES § D143](../NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)):
+Full dependency list (**twelve** crates approved; eleven ship in v0.1, `similar`
+arrives with `edit` in v0.4). **The last two were reversals of invariant 10 and
+neither added compiled code**, which is the only shape that reversal takes here.
+The eleventh, `futures-util`: `kube-runtime` returns `impl Stream`, `Stream` is
+not in `std`, and the crate was already linked under `kube-client`
+([NOTES § D143](../NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)).
+The twelfth, `tokio-rustls`: rule C2 reads the API server's own certificate off
+the peer certificate of a handshake, `kube` drives its handshake internally
+without exposing one, and driving a second needs a connector — **213 packages in
+`Cargo.lock` before and after**, because `hyper-rustls` already linked it
+([NOTES § D178](../NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)):
 
 ```toml
 kube            # client + runtime (watcher/reflector); discovery comes with `client`
@@ -39,21 +44,27 @@ serde_yaml_ng   # edit / view YAML
 x509-parser     # certificate expiry
 similar         # edit diff
 futures-util    # StreamExt::next — the only way to drive kube's watcher
+tokio-rustls    # C2's handshake — re-exports rustls, so one name covers both
 ```
 
-The last three were added by the 2026-08-11 scope reversal. Everything else
-predates it.
+Three of these were added by the 2026-08-11 scope reversal — `serde_yaml_ng`,
+`x509-parser` and `similar`. Everything above them predates it; the two below
+were the invariant-10 reversals above.
 
 **What is actually in `Cargo.toml` today** — approved is not the same as present,
-and four of the ten have not arrived yet:
+and **five** of the twelve have not arrived yet: `ratatui`, `crossterm`,
+`anyhow`, `serde_yaml_ng` and `similar`. (This said *four* from before
+`futures-util` landed; counted against the file on 2026-08-28 it was already
+wrong then, which is what a number nobody re-measures does.)
 
 | Crate | Pin | Landed | Features |
 |---|---|---|---|
 | `k8s-openapi` | `0.28.0` | Phase 3 | `v1_36` |
 | `x509-parser` | `0.18.1` | Phase 3 | — |
 | `kube` | `4.2.0` | Phase 5 | `client`, `runtime`, `rustls-tls`, `ring`, no defaults |
-| `tokio` | `1.53.1` | Phase 5 | `rt-multi-thread`, `macros`, no defaults |
+| `tokio` | `1.53.1` | Phase 5 | `rt-multi-thread`, `macros`, `net`, no defaults |
 | `futures-util` | `0.3.34` | Phase 5 | `std`, no defaults — the narrow crate, not the `futures` facade |
+| `tokio-rustls` | `0.26.4` | Phase 5 | no defaults — the connector C2's handshake is driven with |
 | `serde_json` | `1` | Phase 3, as a **dev**-dependency | — |
 
 `kube` 4.x is the line that resolves against the `k8s-openapi` pin — 3.1.0 wants

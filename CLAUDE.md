@@ -169,9 +169,10 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
    the temp file behind `e` edit: mode 0600, removed after use.
 9. **Free text from the API is untrusted.** Strip control characters before it
    reaches the screen, or a crafted pod name rewrites the user's terminal.
-10. **No new dependencies without asking.** The **eleven** allowed crates:
+10. **No new dependencies without asking.** The **twelve** allowed crates:
     `kube`, `k8s-openapi`, `ratatui`, `crossterm`, `tokio`, `anyhow`,
-    `serde_json`, `serde_yaml_ng`, `x509-parser`, `similar`, `futures-util`.
+    `serde_json`, `serde_yaml_ng`, `x509-parser`, `similar`, `futures-util`,
+    `tokio-rustls`.
     `similar` arrives only in v0.4 with `edit` — approved is not the same as
     present. No `clap` while the flags are `--read-only` / `--context` /
     `--namespace` / `--once`; no `tracing` until debugging demands it
@@ -184,6 +185,15 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     because `futures-util` was already linked under `kube-client`. A crate that
     is already in the build and only needs *naming* is the narrow case; `clap`
     and `tracing` are not, which is why they are still refused.
+    **The twelfth is the same shape, measured the same way**
+    ([D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)):
+    C2 is only readable off the peer certificate of a handshake we drive, driving
+    one needs a connector, and `tokio-rustls` was already linked under
+    `hyper-rustls` — **213 packages in `Cargo.lock` before and after**. It
+    re-exports `rustls`, so one crate is named and not two, and the `ClientConfig`
+    it is handed is `kube::client::ConfigExt`'s, built from the same kubeconfig CA
+    the real client uses — so nothing here calls `dangerous()` and
+    the TLS line of the security gate holds structurally.
 11. **Eight product files, flat.** `main.rs / k8s.rs / ops.rs / rules.rs /
     analysis.rs / views.rs / ui.rs / theme.rs` — no `mod.rs` pyramid, no trait
     layer, no plugin system. Exactly one ninth is pre-approved: `dialog.rs`, if
@@ -275,10 +285,13 @@ that goes green says nothing about those.
       stripped of control characters before it reaches the screen.
 - [auto] **No API string is ever interpolated into a shell** — the guard reads
       `src/`, `tests/`, `examples/` and `benches/`, and for every file that spawns
-      at all it refuses a shell program, a `-c` flag and a command string. One
-      file spawns today: `tests/binary.rs`, which runs the built binary through an
-      argument vector. When `$EDITOR` lands it is an argument vector too, never a
-      command string; a pod named `; rm -rf ~` is boring.
+      at all it refuses a shell program, a `-c` flag and a command string. **Two
+      files spawn today**, each through an argument vector: `tests/binary.rs` runs
+      the built binary, and `src/k8s_tests.rs` runs `openssl` on literals and temp
+      paths to build the CA and leaf its TLS server needs
+      ([D179](NOTES.md#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28)).
+      When `$EDITOR` lands it is an argument vector too, never a command string;
+      a pod named `; rm -rf ~` is boring.
 - [ ] The command log is display text. k8rs does not execute it, and nothing in
       it is fed back into a process.
 - [ ] Object names are sanitised before they build a filesystem path — `../` in

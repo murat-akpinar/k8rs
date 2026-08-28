@@ -832,6 +832,7 @@ dependencies = [
  "kube",
  "serde_json",
  "tokio",
+ "tokio-rustls",
  "x509-parser",
 ]
 

@@ -794,6 +794,19 @@ fn an_empty_list_reads_as_nothing_at_all() {
         render(&[], &input),
         "0 pods · 0 nodes\n\n○ nothing is broken"
     );
+
+    // **And the list stays *nobody looked* over a file that says this cluster has none** — the
+    // one place the fixture path and the live fetch answer differently, which [`take`]'s doc
+    // claimed they did not until 2026-08-28 (`tester`). `load` iterates `.items[]`, so an empty
+    // envelope calls `take` zero times and `get_or_insert_with` never runs;
+    // `k8s::certificate_requests` answers the same cluster `Some(vec![])`. Asserted rather than
+    // only written down, so that the box owning all six lists (todo.md § Phase 5, *The typed
+    // lists `analysis.rs` needs*) meets a red test and not a stale comment when it closes this.
+    assert_eq!(
+        input.snapshot.services, None,
+        "an empty envelope filed *looked and found nothing* — if that is now deliberate, it is \
+         `take`'s doc that has gone stale, and the other five lists have to move with it"
+    );
 }
 
 /// A path that does not exist is exit 2 and a sentence naming the file, never a panic
@@ -1098,7 +1111,15 @@ fn the_other_four(store: &mut k8s::Store) {
 fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     let mut last = String::new();
     assert_eq!(
-        live_report(&k8s::Store::default(), now(), &mut last, None, false, None),
+        live_report(
+            &k8s::Store::default(),
+            now(),
+            &mut last,
+            None,
+            false,
+            None,
+            None
+        ),
         None
     );
 
@@ -1106,7 +1127,7 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     let mut store = k8s::Store::default();
     the_other_four(&mut store);
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false, None),
+        live_report(&store, now(), &mut last, None, false, None, None),
         None
     );
     assert!(
@@ -1118,13 +1139,21 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     // most recently, so a silent bootstrap has to stay silent *against a non-empty last* too —
     // an empty report is not a report, and printing one would put a blank block on stdout every
     // time a watch re-listed.
-    let printed = live_report(&listed(Vec::new()), now(), &mut last, None, false, None)
-        .expect("a listed store");
+    let printed = live_report(
+        &listed(Vec::new()),
+        now(),
+        &mut last,
+        None,
+        false,
+        None,
+        None,
+    )
+    .expect("a listed store");
     assert!(!printed.is_empty(), "the report is empty: {printed:?}");
     // `None` and not merely *empty*: `Some(String::new())` is a blank block on stdout, which is
     // what the driver would print every time a watch re-listed.
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false, None),
+        live_report(&store, now(), &mut last, None, false, None, None),
         None,
         "a bootstrap with nothing wrong printed something after an earlier report"
     );
@@ -1142,7 +1171,7 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     let mut store = listed(objects::<Pod>("kube-system-pods.json"));
     let mut last = String::new();
 
-    let first = live_report(&store, now(), &mut last, None, false, None)
+    let first = live_report(&store, now(), &mut last, None, false, None, None)
         .expect("every initial LIST landed");
     println!("{first}");
     assert!(
@@ -1150,7 +1179,7 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
         "the live report is not the report `render` draws"
     );
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false, None),
+        live_report(&store, now(), &mut last, None, false, None, None),
         None,
         "the same cluster printed twice"
     );
@@ -1160,7 +1189,7 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     )
     .expect("the capture decodes");
     store.pod(&now(), Event::Apply(crashloop));
-    let second = live_report(&store, now(), &mut last, None, false, None)
+    let second = live_report(&store, now(), &mut last, None, false, None, None)
         .expect("a pod arrived, so the report moved");
     println!("{second}");
     assert!(
@@ -1223,7 +1252,7 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
 
     let mut last = String::new();
     let plain =
-        live_report(&store, now(), &mut last, None, false, None).expect("every LIST landed");
+        live_report(&store, now(), &mut last, None, false, None, None).expect("every LIST landed");
     for pane in PANES {
         assert!(
             !plain.contains(pane),
@@ -1232,7 +1261,8 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
     }
 
     let mut last = String::new();
-    let panes = live_report(&store, now(), &mut last, None, true, None).expect("every LIST landed");
+    let panes =
+        live_report(&store, now(), &mut last, None, true, None, None).expect("every LIST landed");
     for pane in PANES {
         assert!(
             panes.contains(pane),
@@ -1265,8 +1295,8 @@ fn versions_draws_the_control_plane_line_and_the_machines_behind_it() {
     let pane_of = |identity| {
         let store = identified(Vec::new(), nodes(), identity);
         let mut last = String::new();
-        let printed =
-            live_report(&store, now(), &mut last, None, true, None).expect("every LIST landed");
+        let printed = live_report(&store, now(), &mut last, None, true, None, None)
+            .expect("every LIST landed");
         let at = printed.find("[versions]").expect("the pane is drawn");
         printed[at..].to_string()
     };
@@ -1328,8 +1358,8 @@ fn certificates_draws_c1s_row_and_the_sidebar_badge() {
     let printed = |identity| {
         let store = identified(Vec::new(), Vec::new(), identity);
         let mut last = String::new();
-        let printed =
-            live_report(&store, now(), &mut last, None, true, None).expect("every LIST landed");
+        let printed = live_report(&store, now(), &mut last, None, true, None, None)
+            .expect("every LIST landed");
         let at = printed.find("[certificates]").expect("the pane is drawn");
         let end = printed[at..].find("[drain safety]").expect("the next pane");
         printed[at..at + end].to_string()
@@ -1579,8 +1609,8 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     k8s::drive_watching(watches, &mut store, |_| {}).await;
 
     let mut last = String::new();
-    let failing =
-        live_report(&store, now(), &mut last, None, false, None).expect("five watches are failing");
+    let failing = live_report(&store, now(), &mut last, None, false, None, None)
+        .expect("five watches are failing");
     println!("{failing}");
     for kind in ["pods", "nodes", "Deployments", "StatefulSets", "DaemonSets"] {
         assert!(
@@ -1603,7 +1633,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
 
     // The same store again is not news…
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false, None),
+        live_report(&store, now(), &mut last, None, false, None, None),
         None
     );
 
@@ -1612,8 +1642,8 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     store.pod(&now(), Event::Init);
     store.pod(&now(), Event::InitDone);
     the_other_four(&mut store);
-    let recovered =
-        live_report(&store, now(), &mut last, None, false, None).expect("the cluster came back");
+    let recovered = live_report(&store, now(), &mut last, None, false, None, None)
+        .expect("the cluster came back");
     println!("{recovered}");
     assert!(
         !recovered.contains("not getting"),
@@ -1636,7 +1666,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         .collect();
     k8s::drive_watching(watches, &mut store, |_| {}).await;
     let stale =
-        live_report(&store, now(), &mut last, None, false, None).expect("an outage is news");
+        live_report(&store, now(), &mut last, None, false, None, None).expect("an outage is news");
     println!("{stale}");
     let (unreadable, cards) = stale
         .split_once("\n\n")
@@ -2066,8 +2096,10 @@ fn saying(
         client_certificate: None,
         // The clock line is stdout's, beside the findings, and this function builds the session
         // the *startup* line is read off — `screens/once.md` § When your clock and the cluster's
-        // disagree keeps the two streams apart.
+        // disagree keeps the two streams apart. The certificate sentence beside it is stdout's for
+        // the same reason.
         skew: None,
+        serving_expiry: k8s::Serving::Unread,
     }
 }
 
@@ -2486,6 +2518,7 @@ async fn a_measured_clock_reaches_the_live_report_and_sits_under_what_it_qualifi
         None,
         false,
         Some(SignedDuration::from_mins(9)),
+        None,
     )
     .expect("a bootstrapped store with a watch in trouble is news");
     println!("{report}");
@@ -2508,5 +2541,603 @@ async fn a_measured_clock_reaches_the_live_report_and_sits_under_what_it_qualifi
         report.matches("disagree about the time").count(),
         1,
         "one measurement is one sentence — got:\n{report}"
+    );
+}
+
+// --- THE SERVING CERTIFICATE LINE ---
+//
+// **C2, the second trailer fact** (`screens/once.md` § When the API server's own certificate is
+// running out, NOTES § D178). It is a [`k8s::Session`] field rather than a `Finding` — it names no
+// cluster object, so it carries no severity and no place in the tally, the same way the clock line
+// never has.
+//
+// **Both sentences are written out here as literals**, for [`BEHIND`]'s reason: a test that
+// composes the string the way the product does passes for any wording, the wrong one included.
+//
+// **The dates are the committed certificates' own**, measured from [`now`] — the instant
+// `scripts/certs-test.sh` pins and asserts both ends of. So the day counts below are figures a
+// guard holds rather than numbers transcribed off a run, and all three bands of this line are
+// drawn from the three files C1 already uses.
+
+/// One committed certificate's **DER**, which is what rustls hands back off a handshake and what
+/// [`k8s::expiry_of`] is written to take. `x509-parser` is the crate `rules.rs` parses with, so
+/// nothing new is named to undo a PEM wrapper here.
+fn der(name: &str) -> Vec<u8> {
+    let path = format!(
+        "{}/tests/fixtures/certs/{name}.crt.pem",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let pem =
+        std::fs::read(&path).unwrap_or_else(|e| panic!("certificate {path} does not read: {e}"));
+    let (_, block) = x509_parser::pem::parse_x509_pem(&pem)
+        .unwrap_or_else(|e| panic!("{path} is not a PEM certificate: {e}"));
+    block.contents
+}
+
+/// **Whole days between [`now`] and the committed `expired-client` certificate's `notAfter`** —
+/// the sibling of [`EXPIRES_IN_DAYS`], and asserted by `scripts/certs-test.sh` in the same list.
+const EXPIRED_DAYS_AGO: u32 = 14;
+
+/// The sentence a certificate inside the window gets, as `screens/once.md` draws it.
+const EXPIRING: &str = "A certificate the API server presented — not your kubeconfig's — \
+                        expires in 13 days (valid until 2026-09-05T00:00:00Z). Once it runs out, \
+                        kubectl and everything else stop being able to reach this cluster until \
+                        someone on the control plane renews it — not something k8rs can do.";
+
+/// The sentence a certificate that has already run out gets, as `screens/once.md` draws it.
+///
+/// **It says *a* cluster and not *this* one, and that is the article doing the work.** This report
+/// reached the reader, so this cluster was plainly reachable a moment ago; a sentence naming it
+/// beside a claim that it cannot be reached would contradict the page it is printed on.
+const EXPIRED: &str = "A certificate the API server presented — not your kubeconfig's — expired \
+                       14 days ago (was valid until 2026-08-09T00:00:00Z). When that happens, \
+                       kubectl and everything else stop being able to reach a cluster until \
+                       someone on the control plane renews its certificate — not something k8rs \
+                       can do.";
+
+/// **A real certificate's DER goes in and C1's own answer comes back** — the positive
+/// [`k8s::expiry_of`] cannot have in `k8s_tests.rs`, because reading these bytes puts a file under
+/// `scripts/certs-test.sh`'s rule that it pins the instant they are measured from, and that file
+/// keeps no such clock.
+///
+/// **It is asserted against `rules::expires_at` over the PEM, not against a date typed here.**
+/// What the wrap has to be is *the same answer as the rule's own parser* (NOTES § D129) — a
+/// literal would still pass the day the two came apart, which is the whole failure being guarded.
+///
+/// **It is also where the one-line PEM body is measured rather than assumed.** `expiry_of` writes
+/// the base64 as a single line instead of folding it at 64 columns; that `x509-parser` reads it is
+/// a fact about the crate, and this is what fails if it stops being one.
+#[test]
+fn pem_body_on_one_line_is_a_certificate_this_parser_reads() {
+    for name in ["expiring-client", "healthy-client", "expired-client"] {
+        let path = format!(
+            "{}/tests/fixtures/certs/{name}.crt.pem",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let pem = std::fs::read(&path).expect("the committed certificate reads");
+        let by_the_rule = rules::expires_at(&pem).expect("the committed certificate has an expiry");
+        assert_eq!(
+            k8s::expiry_of(&der(name)),
+            Some(by_the_rule),
+            "{name}: the DER off a handshake and the PEM off the disk are the same certificate, \
+             and the wrap answered something else — a second parser for *when does this expire* \
+             is exactly what NOTES § D129 refuses"
+        );
+        println!("{name}: DER through the wrap reads {by_the_rule}");
+    }
+}
+
+/// **The two bands get the two sentences they were drawn with**, byte for byte, from the committed
+/// certificates and the pinned instant.
+#[test]
+fn the_two_bands_get_the_sentences_screens_once_draws() {
+    assert_eq!(
+        serving_certificate(k8s::expiry_of(&der("expiring-client")), &now()).as_deref(),
+        Some(EXPIRING),
+        "the expiring sentence is not the one `screens/once.md` draws"
+    );
+    assert_eq!(
+        serving_certificate(k8s::expiry_of(&der("expired-client")), &now()).as_deref(),
+        Some(EXPIRED),
+        "the expired sentence is not the one `screens/once.md` draws"
+    );
+    assert!(
+        EXPIRING.contains(&format!("expires in {EXPIRES_IN_DAYS} days"))
+            && EXPIRED.contains(&format!("expired {EXPIRED_DAYS_AGO} days ago")),
+        "the day counts in the two literals above are no longer the ones \
+         `scripts/certs-test.sh` pins, so this test measures a different certificate than C1 does"
+    );
+    for sentence in [EXPIRING, EXPIRED] {
+        // **The noun phrase claims a sample and not a cluster** (`screens/once.md` § When the API
+        // server's own certificate is running out, rewritten 2026-08-28). *"The API server's own
+        // certificate"* is a definite, singular claim drawn from one connection out of N: eight
+        // consecutive runs against three replicas behind one balancer, with one replica reissued
+        // to twelve days, printed it on three of the eight
+        // (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 2). Sampling narrows that
+        // window and cannot close it, so the words have to survive the miss.
+        assert!(
+            sentence.starts_with("A certificate the API server presented"),
+            "the definite singular is back, and this reading is one sample from a control plane \
+             that may be several API servers: {sentence}"
+        );
+        assert!(
+            sentence.contains("— not your kubeconfig's —"),
+            "the clause that tells this certificate from C1's is missing, and the two can print \
+             on the same report: {sentence}"
+        );
+        assert!(
+            !sentence.contains('⚠'),
+            "`● ▲ ○` is this report's whole vocabulary and a fourth symbol arrives with no legend"
+        );
+    }
+    assert!(
+        EXPIRED.contains("reach a cluster") && EXPIRING.contains("reach this cluster"),
+        "the expired sentence named *this* cluster beside a claim it cannot be reached, on a \
+         report that reached the reader"
+    );
+}
+
+/// **A healthy control plane says nothing at all**, and the boundary is the same thirty days C1
+/// warns the reader's own certificate at.
+///
+/// **`healthy-client` is the committed negative** — 354 days out, which is the ordinary state of a
+/// working cluster and the one a `210 days` line would sit on every single run.
+#[test]
+fn a_certificate_outside_the_window_prints_nothing() {
+    assert_eq!(
+        serving_certificate(k8s::expiry_of(&der("healthy-client")), &now()),
+        None,
+        "a healthy serving certificate drew a line, which is noise on every run of every healthy \
+         cluster"
+    );
+    assert_eq!(
+        serving_certificate(None, &now()),
+        None,
+        "nothing was read and something was printed"
+    );
+
+    // The boundary itself, from both sides. The `notAfter` is *inside* the window at exactly
+    // thirty days out — C1's own reading of RFC 5280 §4.1.2.5 — so the drawn side is `<=`.
+    let at = |offset: SignedDuration| {
+        serving_certificate(now().0.checked_add(offset).ok(), &now()).is_some()
+    };
+    assert!(
+        at(k8s::CERT_EXPIRY_WARN),
+        "exactly thirty days out drew nothing, and C1 reports its own certificate there"
+    );
+    assert!(
+        !at(k8s::CERT_EXPIRY_WARN + SignedDuration::from_secs(1)),
+        "a second past the window drew a line"
+    );
+}
+
+/// **`less than a day` and never `0 days`** — the most urgent thing this line ever says, and the
+/// one a truncating division would print as zero. `rules::in_days` makes the same call for C1.
+#[test]
+fn the_last_day_is_words_and_not_a_zero() {
+    let hours = |n: i64| {
+        serving_certificate(
+            now().0.checked_add(SignedDuration::from_hours(n)).ok(),
+            &now(),
+        )
+        .expect("inside the window")
+    };
+    assert!(
+        hours(1).contains("expires in less than a day"),
+        "an hour left printed a count: {}",
+        hours(1)
+    );
+    assert!(
+        hours(-1).contains("expired less than a day ago"),
+        "an hour past printed a count: {}",
+        hours(-1)
+    );
+    assert!(hours(25).contains("expires in 1 day"), "{}", hours(25));
+    assert!(hours(49).contains("expires in 2 days"), "{}", hours(49));
+
+    // **`notAfter` itself is still valid, so the deadline exactly is *expires* and not *expired***
+    // — RFC 5280 §4.1.2.5, and C1's own reading of it one file over. The two sentences send a
+    // reader to two different places: one is *go and ask someone*, the other is *this is already
+    // broken*, and at the instant the clock reads `notAfter` only the first is true.
+    let at_the_deadline =
+        serving_certificate(Some(now().0), &now()).expect("the deadline is inside");
+    assert!(
+        at_the_deadline.contains("expires in less than a day"),
+        "a certificate is valid *through* its `notAfter`, and the deadline itself was reported \
+         as already run out: {at_the_deadline}"
+    );
+    assert!(
+        hours(-1).contains("(was valid until"),
+        "the past tense did not follow the expired branch: {}",
+        hours(-1)
+    );
+    assert!(
+        at_the_deadline.contains("(valid until"),
+        "the present tense did not follow the expiring branch: {at_the_deadline}"
+    );
+}
+
+/// **The trailer order is clock, then this** (`screens/once.md` § Stacked with the other trailer
+/// lines), on both paths through the block — after a tally, and after `○ nothing is broken`.
+///
+/// **The clean-cluster case is the one this matters most for.** `○ nothing is broken` reads as
+/// permission to look away, and a certificate days from taking the whole cluster down is exactly
+/// the fact that permission would hide.
+#[test]
+fn the_certificate_line_comes_after_the_clock_line_whether_or_not_anything_is_broken() {
+    let mut input = read(&["oom.json"]);
+    input.skew = Some(SignedDuration::from_mins(-11));
+    input.serving_expiry = k8s::expiry_of(&der("expiring-client"));
+
+    let clean = render(&[], &input);
+    assert_eq!(
+        clean,
+        format!("1 pod · 0 nodes\n\n○ nothing is broken\n\n{BEHIND}\n\n{EXPIRING}")
+    );
+
+    let broken = render(
+        &[finding(Severity::Critical, pod_id("payments", "web-0"))],
+        &input,
+    );
+    assert!(
+        broken.ends_with(&format!("1 critical\n\n{BEHIND}\n\n{EXPIRING}")),
+        "the two trailer lines are not clock-then-certificate under a tally: {broken}"
+    );
+
+    // Alone, with nothing measured about the clock: the certificate line does not depend on it.
+    input.skew = None;
+    assert!(
+        render(&[], &input).ends_with(&format!("○ nothing is broken\n\n{EXPIRING}")),
+        "the certificate line went missing when there was no clock line above it"
+    );
+}
+
+/// **It carries no severity and appears in no tally** (NOTES § D178): it names no cluster object,
+/// so there is no band for it to be counted in.
+#[test]
+fn the_certificate_line_is_in_no_tally_and_carries_no_symbol() {
+    let mut input = read(&["oom.json"]);
+    input.serving_expiry = k8s::expiry_of(&der("expired-client"));
+    let report = render(
+        &[finding(Severity::Critical, pod_id("payments", "web-0"))],
+        &input,
+    );
+    assert!(
+        report.contains("\n1 critical\n"),
+        "the tally counted the certificate line: {report}"
+    );
+    assert!(
+        !report.contains(&format!("● {EXPIRED}")) && !report.contains(&format!("▲ {EXPIRED}")),
+        "the sentence was drawn as a card: {report}"
+    );
+}
+
+/// **What a session read reaches the report the session prints, and it is the same string the
+/// file path draws** — one sentence, two renderers, which is the rule NOTES § D177 was written
+/// about.
+#[tokio::test]
+async fn a_read_certificate_reaches_the_live_report_as_the_same_sentence() {
+    let expiry = k8s::expiry_of(&der("expiring-client"));
+    let store = identified(
+        objects::<Pod>("kube-system-pods.json"),
+        objects::<Node>("nodes.json"),
+        nearly_out(Some("v1.36.1")),
+    );
+
+    let mut last = String::new();
+    let live = live_report(&store, now(), &mut last, None, false, None, expiry)
+        .expect("every LIST landed");
+    assert!(
+        live.ends_with(EXPIRING),
+        "the certificate line is not last on the live path: {live}"
+    );
+    assert_eq!(
+        live.matches("A certificate the API server presented")
+            .count(),
+        1,
+        "one reading is one sentence: {live}"
+    );
+
+    let mut input = read(&["oom.json"]);
+    input.serving_expiry = expiry;
+    let file = render(&[], &input);
+    assert!(
+        file.ends_with(EXPIRING) && live.ends_with(EXPIRING),
+        "the two renderers drew two different sentences, which is the defect class D177 named"
+    );
+
+    let mut last = String::new();
+    let unread =
+        live_report(&store, now(), &mut last, None, false, None, None).expect("every LIST landed");
+    assert!(
+        !unread.contains("A certificate the API server presented"),
+        "a session that read nothing printed a sentence anyway: {unread}"
+    );
+}
+
+// --- WHEN THE CERTIFICATE IS WHY NOTHING CAME BACK ---
+//
+// **F2's half in this file: the one certificate reading that is not a trailer line.**
+// `screens/states.md` § Before the TUI ever starts draws the message; `screens/once.md` § When the
+// certificate is why nothing came back has why it replaces three generic ones rather than joining
+// them.
+//
+// **The trap this region exists to hold shut is that it must never *cause* a failure.** That
+// section calls it "a more specific *cannot reach the cluster*, not a fourth kind of failure", and
+// on a load-balanced control plane k8rs's probe can meet an expired replica while the client is
+// being served by a healthy one. So both sides are tested: expired-and-everything-broken prints
+// it, and expired-but-readable runs normally.
+
+/// The message `screens/states.md` draws, byte for byte — indent, wrapping, blank lines and both
+/// of its numbers. Written out as a literal rather than composed from the product's own format
+/// string, because a test that composes the string the way the code does passes for any wording,
+/// the wrong one included.
+///
+/// **The drawing's own instants, not this file's [`now`].** The block pins *3 days ago* against
+/// *2026-08-25T00:00:00Z*, and those are two spellings of one value: a literal that kept the
+/// screen's words and substituted the file's clock would be asserting a sentence nobody drew, and
+/// would not notice the two halves disagreeing — the defect class this pair is most exposed to
+/// (NOTES § D177).
+const CERTIFICATE_IS_WHY: &str = "k8rs: the certificate the API server presented expired 3 days ago
+
+  Not your kubeconfig's — the API server's own, and it ran out on
+  2026-08-25T00:00:00Z. That is why nothing about this cluster
+  could be read this run: kubectl and anything else that connects
+  to it the normal way is refused too, until someone on the
+  control plane renews it — not something k8rs can do.
+
+  If this cluster runs more than one API server behind a load
+  balancer, trying again may reach one that still works.";
+
+/// The `notAfter` [`CERTIFICATE_IS_WHY`] names, and the instant it is three days behind.
+fn expired_at() -> Timestamp {
+    "2026-08-25T00:00:00Z".parse().expect("a fixed timestamp")
+}
+
+fn three_days_later() -> Time {
+    Time("2026-08-28T00:00:00Z".parse().expect("a fixed timestamp"))
+}
+
+/// **A session that read nothing, and a certificate that says why, is one sentence instead of a
+/// wall** — and `main` turns it into exit 2.
+///
+/// **The wall is what was measured, on a real API server three days past its own `notAfter` with a
+/// verifying kubeconfig**: `grep -c "API server's own certificate"` over the run was `0`, and what
+/// printed instead was *nothing usable came back when k8rs tried to `get /version`*, worded
+/// identically for `/apis` and for the pods watch
+/// (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 3).
+///
+/// **`k8s::session(offline())` is the shape and not a stand-in.** Its two errors are a real
+/// resolver failure against a name RFC 6761 reserves, so the `Unanswered` this asserts on is
+/// classified from a genuine error rather than one this file built to be classified.
+///
+/// **It is asserted through [`live`] and not only through [`certificate_is_why`]**, because what
+/// has to be true is that the run *stops here*: the greeting below this point is the wall.
+///
+/// **The streams are cut after two items each so that the failure is a failure and not a hang.**
+/// A real watch never ends (`k8s.rs` § THE DRIVER), so a `live` missing this check would sit here
+/// until the harness killed it — measured, this test ran past sixty seconds against the code
+/// before the fix. Cut, the same code comes back with *every watch has stopped* and the assertion
+/// below reads it in milliseconds.
+#[tokio::test]
+async fn an_expired_certificate_on_a_session_that_read_nothing_is_the_message_and_not_the_wall() {
+    use futures_util::stream::StreamExt;
+    // **The wording, against a fixed clock** — `live` below reads the real one, so the byte-for-
+    // byte assertion has to be made where both instants are pinned. Same session shape, and the
+    // `Unanswered` on both calls is a real resolver failure rather than one built to be
+    // classified.
+    let mut fixed = k8s::session(offline()).await;
+    fixed.serving_expiry = k8s::Serving::Expired(expired_at());
+    let drawn = certificate_is_why(&fixed, &three_days_later());
+    println!("{}", drawn.clone().unwrap_or_default());
+    assert_eq!(
+        drawn.as_deref(),
+        Some(CERTIFICATE_IS_WHY),
+        "the run did not print `screens/states.md`'s sentence"
+    );
+
+    let mut session = k8s::session(offline()).await;
+    session.serving_expiry = k8s::Serving::Expired(expired_at());
+    session.watches = session
+        .watches
+        .into_iter()
+        .map(|watch| watch.take(2).boxed())
+        .collect();
+
+    // **`live` reads the real clock, so what is asserted here is that the run *stops* here** —
+    // the greeting below this point is the wall. The date is pinned; the age beside it is
+    // whatever today makes it, and [`CERTIFICATE_IS_WHY`] above already holds every word.
+    let said = live(Ok(session), false).await;
+    println!("{said}");
+    assert!(
+        said.starts_with("k8rs: the certificate the API server presented expired ")
+            && said.contains(&format!("it ran out on\n  {}. That is why", expired_at())),
+        "the run did not print `screens/states.md`'s sentence: {said:?}"
+    );
+    assert!(
+        !said.contains("nothing usable came back"),
+        "the generic wording printed beside the specific one: {said:?}"
+    );
+}
+
+/// **k8rs never refuses to start on a cluster it could otherwise read** — the invariant this whole
+/// change is fenced by (`k8s-admin`, 2026-08-28).
+///
+/// **Three sessions that must all run normally**, each a shape a real cluster produces:
+///
+/// * **The version answered.** An HA control plane where the probe met the expired replica and the
+///   client did not. A typed expiry that ended the session by itself would take this cluster down.
+/// * **Both calls refused with `403`.** The `nonResourceURLs` shape NOTES § D160 measured: a
+///   kubeconfig whose role may not `get /version` or `get /apis` and lists pods perfectly well.
+///   *Refused* is not *nothing came back*, and reading it as such would turn a documented
+///   least-privilege role into a tool that will not start.
+/// * **No typed expiry at all**, which is every ordinary run.
+/// * **One call answered and the other one silent, both ways round.** The same HA control plane
+///   as the first case, caught mid-failover: `get /version` came back from a healthy replica while
+///   `get /apis` reached the expired one, or the reverse. The condition is an **and** for exactly
+///   this — one answer from this address is proof the cluster can be read, and either half alone
+///   would refuse a start on a run that works. Measured as a surviving `&&` → `||` mutant on
+///   2026-08-28, with the three cases above all passing under it.
+#[tokio::test]
+async fn a_cluster_that_can_still_be_read_is_never_refused_a_start() {
+    let expired = |mut session: k8s::Session| {
+        session.serving_expiry = k8s::Serving::Expired(expired_at());
+        session
+    };
+    let refused = || api_error(403, "Forbidden");
+    // **Real `Unanswered`s, taken off a session rather than built to be classified**: a resolver
+    // failure against a name RFC 6761 reserves.
+    let dead = k8s::session(offline()).await;
+    let (no_version, no_apis) = (dead.version, dead.served);
+    let discovered = || {
+        Ok(k8s::Served {
+            kinds: Vec::new(),
+            capabilities: None,
+        })
+    };
+
+    assert_eq!(
+        certificate_is_why(
+            &expired(saying(Ok("v1.36.1".to_string()), Err(refused()), None)),
+            &three_days_later()
+        ),
+        None,
+        "the probe met an expired replica while the client was reading the cluster, and k8rs \
+         refused to start — which turns a diagnostic into an outage on a working cluster"
+    );
+    assert_eq!(
+        certificate_is_why(
+            &expired(saying(Err(refused()), Err(refused()), None)),
+            &three_days_later()
+        ),
+        None,
+        "a kubeconfig whose role lacks the `nonResourceURLs` grant was told its cluster's \
+         certificate has expired, and refused a start it makes today (NOTES § D160)"
+    );
+    assert_eq!(
+        certificate_is_why(&k8s::session(offline()).await, &three_days_later()),
+        None,
+        "a cluster that is simply not there was told the certificate expired, on a probe that \
+         read nothing at all"
+    );
+    assert_eq!(
+        certificate_is_why(
+            &expired(saying(Ok("v1.36.1".to_string()), no_apis, None)),
+            &three_days_later()
+        ),
+        None,
+        "`get /version` answered and `get /apis` did not, and k8rs refused to start — one answer \
+         from this address is proof the cluster can be read"
+    );
+    assert_eq!(
+        certificate_is_why(
+            &expired(saying(no_version, discovered(), None)),
+            &three_days_later()
+        ),
+        None,
+        "the same shape the other way round: discovery answered, `get /version` did not, and the \
+         run was refused anyway"
+    );
+}
+
+/// **The other half of the same ruling: a probe that met an expired replica while the session read
+/// the cluster fine prints the ordinary expired trailer, where it used to print nothing.**
+///
+/// **It is one sentence and not a second one** (`screens/once.md` § *A clean tally does not mean
+/// every replica is current*). [`k8s::Serving::Expired`] carries a date now, so it composes from
+/// what the report already draws — asserted here by feeding [`EXPIRED`]'s own certificate through
+/// both readings and demanding the same bytes, which is the check that catches a second wording
+/// growing beside the first (NOTES § D177).
+///
+/// **`○ nothing is broken` is the case the ruling names**, because that is the screen where a
+/// control-plane replica already past its `notAfter` is the only thing on the page worth saying.
+#[test]
+fn an_expired_replica_on_a_readable_cluster_draws_the_ordinary_expired_line() {
+    let at = k8s::expiry_of(&der("expired-client")).expect("the committed certificate has a date");
+    let drawn = |reading: k8s::Serving| {
+        let mut input = read(&["oom.json"]);
+        input.serving_expiry = reading.until();
+        render(&[], &input)
+    };
+    let typed = drawn(k8s::Serving::Expired(at));
+    println!("{typed}");
+    assert!(
+        typed.ends_with(&format!("○ nothing is broken\n\n{EXPIRED}")),
+        "a replica whose certificate has already expired printed nothing at all: {typed}"
+    );
+    assert_eq!(
+        typed,
+        drawn(k8s::Serving::Until(at)),
+        "the typed refusal and a completed handshake drew two different sentences about one \
+         `notAfter`, which is the second wording D177 refuses"
+    );
+    assert!(
+        !drawn(k8s::Serving::Unread).contains(EXPIRED),
+        "a probe that read nothing printed a certificate sentence anyway"
+    );
+}
+
+/// **A session that read nothing without a typed expiry still gets the wall, and that is the
+/// unchanged half** — the message is a rename of a failure, never an extra one.
+///
+/// It is the negative for the test above it: same session, same silence, one field different.
+///
+/// **The streams are cut after two items each** for
+/// [`a_cluster_that_never_answers_prints_nothing_and_says_why_it_stopped`]'s reason: a real watch
+/// never ends, so a `live` that gets past the check under test would hang the suite rather than
+/// fail it. That the positive above needs no such cut is itself the point — it returns before the
+/// watches are ever driven.
+#[tokio::test]
+async fn without_a_typed_expiry_the_same_dead_session_still_says_nothing_usable_came_back() {
+    use futures_util::stream::StreamExt;
+    let mut session = k8s::session(offline()).await;
+    session.watches = session
+        .watches
+        .into_iter()
+        .map(|watch| watch.take(2).boxed())
+        .collect();
+
+    let said = live(Ok(session), false).await;
+    println!("{said}");
+    assert!(
+        !said.contains("the certificate the API server presented expired"),
+        "a cluster that is merely unreachable was told its certificate has expired: {said:?}"
+    );
+}
+
+/// **A certificate past [`k8s::CERTIFICATE_BYTES`] is not read, and one at the cap is** — the
+/// security gate's *sizes are bounded*, over the value a server chooses.
+///
+/// **Padded rather than invented, because trailing bytes are tolerated and that was measured.**
+/// `x509-parser` reads the DER `SEQUENCE` and ignores what follows it — `healthy-client`'s 843
+/// bytes with sixteen zeroes after them parse to the same instant — so a padded real certificate
+/// is a *valid* input that is only refused by the bound. A run of zeroes would be refused by the
+/// parser whatever the cap said, which is a test that cannot fail.
+#[test]
+fn a_served_certificate_past_the_cap_is_not_read_and_one_at_the_cap_is() {
+    let cap = k8s::CERTIFICATE_BYTES as usize;
+    let real = der("healthy-client");
+    assert!(
+        real.len() < cap,
+        "the committed certificate is {} bytes, which is not under the {cap}-byte cap this test \
+         pads up to",
+        real.len()
+    );
+    let padded = |size: usize| {
+        let mut der = real.clone();
+        der.resize(size, 0);
+        k8s::expiry_of(&der)
+    };
+    assert_eq!(
+        padded(cap),
+        k8s::expiry_of(&real),
+        "a certificate exactly at the cap was refused, so the bound is off by one and a real \
+         chain could be dropped for being the size it is"
+    );
+    assert_eq!(
+        padded(cap + 1),
+        None,
+        "a certificate one byte past the cap was copied, base64-encoded and parsed — the value \
+         is whatever the server chose to send"
     );
 }

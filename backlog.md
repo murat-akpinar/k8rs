@@ -1462,6 +1462,34 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   culprit, which stays true whichever clock the header came from. Measure it if one is ever to
   hand. Found by `k8s-admin`, who named it unproven rather than inferring it.
 
+### From the C2/C3 certificate box (2026-08-28)
+
+- **C2's Certificates-pane row has no phase, because the only file that can draw it is frozen.**
+  `analysis::certificates` is `c1_row` plus `kubelets_waiting_to_join` and has no third source, so
+  the row means changing `analysis.rs`, which froze at Phase 4 close; the snapshot types froze with
+  it and [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  condition 3 refuses a snapshot field for it by name. The *fact* is not lost — it lands on
+  `Session` and `main.rs` spells it — but the pane keeps the gap `screens/analysis.md` already
+  draws. Needs a narrow `analysis.rs` unfreeze in the phase that has a renderer, decided the way
+  D124 decided `rules.rs`'s: bounds first, and named by the box
+  ([D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)).
+  **What the operator review adds to this**: until the row lands, the most catastrophic
+  thing k8rs can detect prints with no `●`, no contribution to the `N critical, N warning`
+  tally and exit code `0` — so anyone piping `k8rs --once` into an alerting path gets no
+  signal for it at all. C1, one file over, is banded `Critical` when expired for a
+  certificate on the reader's own laptop; the *cluster's* is prose. That is the freeze's
+  consequence and not a second ruling, but it is the cost the unfreeze buys back.
+- **The four session calls have no read deadline, and a half-answering cluster hangs k8rs
+  forever with nothing on either stream.** `/version` twice, `/apis` and `/api`, all inside
+  `connect_with`, all unbounded — `Config::read_timeout` defaults to `None`. Measured
+  against a TLS server that completes every handshake, reads the request and answers
+  nothing: `exit=124 elapsed=120.007125650 s`, stdout empty, stderr empty. `PRIOR-ART § A7`
+  one layer down. Not created by the C2/C3 box — that box bounded both calls it added
+  (`SERVING_PROBE`, `REPORT_FETCH`) and the asymmetry inside one file is now what makes the
+  hole visible. `k8s-admin` called it a high-priority box rather than a blocker and the PM
+  agrees; the one-line `tokio::time::timeout` wrapper is already spelled twice in that file
+  ([reports/2026-08-28-c2-c3-against-a-real-api-server.md](reports/2026-08-28-c2-c3-against-a-real-api-server.md) § 4).
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
