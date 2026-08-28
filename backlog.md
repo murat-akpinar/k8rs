@@ -1407,19 +1407,27 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
 
 ### From the clock-skew screen spec (2026-08-28)
 
-- **Nothing decides whether a zero severity count is omitted or printed as `0`**, and the
-  first draft of the clock-skew mockups settled it twice by accident — `1 critical` in the
-  `--once` summary line, `│▸ ALERTS     1 ●    │` in the sidebar badge. Every count drawn
-  anywhere else in `screens/` is either blank or `3 ● 7 ▲`, and `once.md`'s only summary line
-  is `1 critical, 2 warnings`, both nonzero — so both forms were new shapes. Kept out of that
-  box on 2026-08-28 and its mockups re-drawn with counts the repo already has
-  ([D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28));
-  the question itself is real and binds `views.rs` in Phase 10 and the `--once` renderer
-  beside it. Note the all-zero case is **not** this question — it is already drawn as a
-  different thing entirely (`○ nothing is broken`), which is why the counter is not a
-  fixed-shape template and `0 warnings` has nothing to stand on. Two files, one answer, and
-  it is a `tui-designer` turn before it is a renderer's. Found by `tui-designer`, which
-  flagged it against itself.
+- **Nothing decides whether a zero severity count is omitted or printed as `0` in the sidebar
+  badge.** The clock-skew mockups first drew `│▸ ALERTS     1 ●    │`; every badge drawn
+  anywhere else in `screens/` is either blank or `3 ● 7 ▲`, so it was a new shape and was
+  re-drawn out of that box on 2026-08-28
+  ([D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)).
+  It is a `views.rs` question and that file does not exist yet, so it is Phase 10's.
+  **The answer is very likely already fixed by precedent**, and whoever picks this up should
+  start there rather than re-deciding it: `--once` settled the identical question in code —
+  `tally()` emits *only the bands that have something in them* (`src/main.rs:550-566`) — and
+  `screens/once.md`'s own rule is one string, two renderers. A badge that reads `1 ● 0 ▲`
+  would put the two renderers in disagreement on the same fact.
+  **The all-zero case is not this question**: it is already drawn as a different thing entirely
+  (`○ nothing is broken`, the centred pane), which is why the counter is not a fixed-shape
+  template. Found by `tui-designer`, which flagged it against itself.
+
+  > **The `--once` half of this entry was wrong and is deleted.** As first written on
+  > 2026-08-28 it also called `1 critical` an unbacked shape and had the mockups re-drawn to
+  > avoid it. `tally()` had answered that in shipped code for a phase, and the PM ruled on the
+  > `screens/` files without opening `main.rs` — the failure `CLAUDE.md` § *Where a leak would
+  > actually happen* names as *a claim reasoned from a definition instead of measured against
+  > the object*. Both drawn forms are correct; only the badge is open.
 
 ## Ruled out
 

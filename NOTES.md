@@ -15271,11 +15271,21 @@ line and the incomplete-view line both apply they stack clock-first, in both
 renderers — what is true of *every* fact on the page before what is true of
 *which* facts are on it.
 
-**What this box was not allowed to settle.** The first draft's mockups printed
-`1 critical` and a `1 ●` sidebar badge, which decide *a zero count is omitted
-rather than printed as `0`* — a shape no drawn screen in this repo backs, and one
-that binds the renderer two phases from here. It went to
-[backlog.md](backlog.md), not into these files: a box about clock skew is not
-where the severity counter is settled in passing
+**What this box was not allowed to settle — and the half of that ruling that was
+wrong.** The first draft's mockups printed `1 critical` and a `1 ●` sidebar badge,
+both deciding *a zero count is omitted rather than printed as `0`*. The PM called
+both unbacked and had them re-drawn with counts already in the repo.
+
+Only the badge was. **`1 critical` was backed by shipped code the whole time** —
+`tally()` in `src/main.rs:550-566` emits *only the bands that have something in
+them*, and `plural()` beside it already gives `1 warning`. The ruling was made
+from `screens/` alone, without opening the file that renders the line, which is
+`CLAUDE.md`'s *claim reasoned from a definition instead of measured against the
+object* in its quiet, prose form. Nothing wrong shipped — both drawn forms are
+correct — and the cost was one re-dispatch and a backlog entry that had to be
+half retracted.
+
+The badge half stands and is in [backlog.md](backlog.md): it is `views.rs`, which
+does not exist yet, and a box about clock skew is not where the severity counter
+is settled in passing
 ([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
-The mockups now reuse counts the repo has already drawn.
