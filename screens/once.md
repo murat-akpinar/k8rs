@@ -138,6 +138,113 @@ one when the same check was switched off.
   a report that does not say what it covered cannot be trusted after it is
   pasted into a ticket.
 
+## When your clock and the cluster's disagree
+
+The TUI answers this with a header pointer plus a banner, because it has a
+header row to put a pointer in
+([states.md § Your computer's clock is off](states.md#your-computers-clock-is-off)
+— read that section first; D55 and D69 are cited there, not restated here).
+`--once` has no header row, only the one-liner, so the question this file has
+to answer is where the sentence goes instead — and the answer is the same
+place [the check-could-not-run line](#when-a-check-could-not-run) already
+found for the same problem: **last**, after the findings, on **stdout**. Both
+are "how much of this report can you trust", both are read at the moment the
+reader is deciding whether to look away, and inventing a second slot for the
+second one would be inventing a second rule this file does not need.
+
+```
+$ k8rs --once
+prod-eu · 84 pods · 3 nodes
+
+● payments/web · 3 of 5 pods
+  Containers exceeded their memory limit and were killed by the kernel
+  (OOMKilled)
+  limit 256Mi · exit 137 · 47 restarts
+  → raise limits.memory, or find the leak
+
+▲ shop/api · 2 of 6 pods
+  Running, but not receiving traffic — the readiness check is failing
+  → check the app's /healthz endpoint
+
+1 critical, 1 warning
+
+Your computer's clock is 11 minutes behind the cluster's, so times
+are blank rather than guessed.
+```
+
+```
+$ k8rs --once
+prod-eu · 84 pods · 3 nodes
+
+● payments/web · 3 of 5 pods · 4 min ago
+  Containers exceeded their memory limit and were killed by the kernel
+  (OOMKilled)
+  limit 256Mi · exit 137 · 47 restarts
+  → raise limits.memory, or find the leak
+
+▲ shop/api · 2 of 6 pods · 12 min ago
+  Running, but not receiving traffic — the readiness check is failing
+  → check the app's /healthz endpoint
+
+1 critical, 1 warning
+
+Your computer's clock is 9 minutes ahead of the cluster's, so times
+may be wrong.
+```
+
+The title-line suffix is missing from the first report's card and present on
+the second's, for the same reason a card's age is ever missing here: "it is
+present only when a field says when the event happened," stated above
+([§ What it prints](#what-it-prints)) and unchanged by this box — clock skew
+does not add a rule, it changes how often the existing one fires.
+
+**No `⚠`.** This file's own vocabulary is `● ▲ ○` and nothing else
+([§ Colour and symbols](#colour-and-symbols)); the console's pointer borrows a
+glyph from its `⚠ disconnected` / `⚠ login expired` family, but this stream
+has never used that family, and starting here would be a fourth symbol a
+reader of `--once` output has no legend for.
+
+**Both sentences are exactly the strings the console draws**, re-wrapped
+flush left at this report's own width instead of the pane's — the same
+treatment [the check-could-not-run sentence](#when-a-check-could-not-run)
+already gets. One string, two renderers, the rule this whole file is built
+on, unchanged by this box.
+
+**It does not touch the exit code.** `0` still means "k8rs ran and reported,"
+the same as an incomplete-check notice does today
+([§ Exit codes](#exit-codes)); a clock being off is a fact about the data,
+not a failure to run.
+
+### Stacked with a check that could not run
+
+The two lines are independent — a `--namespace` run can be both scoped and
+skewed — and when both apply they stack in the same order the TUI banner
+does: the clock line first, because it says something about *every* fact on
+the page, before the completeness line says something about *which* facts
+are on it at all.
+
+```
+$ k8rs --once --namespace payments
+prod-eu · ns: payments · 12 pods · 3 nodes
+
+○ nothing is broken
+
+Your computer's clock is 11 minutes behind the cluster's, so times
+are blank rather than guessed.
+
+One node check is off: spotting a node someone started emptying and
+did not finish needs every pod in the cluster.
+```
+
+### The two cases that print nothing
+
+Same as the console
+([states.md § When there is nothing to say](states.md#when-there-is-nothing-to-say)):
+a `Date` header k8rs could not read, and a skew under five minutes, both leave
+this section silent rather than guess. A `--once` run piped to a file on
+either of those days looks exactly like one from a cluster with a perfectly
+set clock, which is the correct answer when there is no evidence either way.
+
 ## stdout and stderr are split on purpose
 
 **stdout is the findings. stderr is everything else** — the commands k8rs

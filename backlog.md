@@ -1405,6 +1405,22 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   it puts `openssl`-on-PATH into `cargo test`, and *`just check` is the whole of CI or it is a
   lie*. Reopen only if the toolchain requirement stops being one. Found by `tester`.
 
+### From the clock-skew screen spec (2026-08-28)
+
+- **Nothing decides whether a zero severity count is omitted or printed as `0`**, and the
+  first draft of the clock-skew mockups settled it twice by accident — `1 critical` in the
+  `--once` summary line, `│▸ ALERTS     1 ●    │` in the sidebar badge. Every count drawn
+  anywhere else in `screens/` is either blank or `3 ● 7 ▲`, and `once.md`'s only summary line
+  is `1 critical, 2 warnings`, both nonzero — so both forms were new shapes. Kept out of that
+  box on 2026-08-28 and its mockups re-drawn with counts the repo already has
+  ([D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28));
+  the question itself is real and binds `views.rs` in Phase 10 and the `--once` renderer
+  beside it. Note the all-zero case is **not** this question — it is already drawn as a
+  different thing entirely (`○ nothing is broken`), which is why the counter is not a
+  fixed-shape template and `0 warnings` has nothing to stand on. Two files, one answer, and
+  it is a `tui-designer` turn before it is a renderer's. Found by `tui-designer`, which
+  flagged it against itself.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

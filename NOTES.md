@@ -197,6 +197,7 @@ its line moving with it.
 - [D173](#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28) — the tag's matching rules, tightened against the object rather than the wording, and the credential the server line was drawing
 - [D174](#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28) — the operator review of the kubeconfig family: ten fixed, one refused, and the two reversals it forced
 - [D175](#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28) — the ruling in D174 was wrong about RFC 3986, and the parse that is safe in both directions
+- [D176](#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28) — the clock-skew line does not fit in the header, and the two halves do not share a sentence
 
 ## Why it exists — where the gap is
 
@@ -2847,9 +2848,19 @@ binding on later boxes:
   > ([D71](#d71--nine-rules-three-blockers-and-the-two-that-were-decisions-not-code-2026-08-13)).
 - **The slow half is detectable, so it is said out loud.** Any snapshot
   timestamp more than a few seconds after `now` means the laptop is behind the
-  cluster. That is data k8rs already holds, and it belongs in the header in
-  plain language — *"your computer's clock is 11 minutes behind the cluster —
-  the times on this screen are wrong"* — not only in a test assertion.
+  cluster. That is data k8rs already holds, and it belongs on the screen in
+  plain language — not only in a test assertion.
+
+  > **The sentence quoted here was corrected on 2026-08-28, and it is this
+  > half's own pre-[D69](#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)
+  > belief.** It read *"the times on this screen are wrong"*, which is true of
+  > the **fast** half and false of this one: D69 gave `age` a five-minute bound,
+  > so past it a slow laptop draws **no number at all** rather than a wrong one.
+  > The two halves therefore get two sentences, not one — and neither goes in
+  > the header, which has room for a pointer and not for a sentence. Both are
+  > drawn in
+  > [screens/states.md § Your computer's clock is off](screens/states.md#your-computers-clock-is-off)
+  > ([D176](#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)).
 - **The fast half is not detectable from object timestamps**, and pretending
   "just now" covers it is how the wrong belief survived this long. The honest
   source is the API server's `Date` response header, which is a Phase 5
@@ -15206,3 +15217,65 @@ cursor-reachable: the reader lands on it, reads its address, presses `⏎` and
 opens the entry above. The data is right and the screen has not caught up. It is a
 `tui-designer` turn in Phase 6 — no shipped behaviour is out of sync, because
 nothing draws `Choice` yet.
+
+### D176 — the clock-skew line does not fit in the header, and the two halves do not share a sentence (2026-08-28)
+
+The box that owns the clock-skew warning quoted
+[D55](#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12)'s
+sentence and called it *a line in the header*. Drawing it made both halves of
+that description false, and the correction is in
+[screens/states.md § Your computer's clock is off](screens/states.md#your-computers-clock-is-off)
+and [screens/once.md § When your clock and the cluster's disagree](screens/once.md#when-your-clock-and-the-clusters-disagree).
+
+**The sentence is 97 characters and the header row is one line.** It already
+carries `nodes 3/3` on the left and up to four `·`-separated facts on the right,
+and the context may never be truncated
+([widgets.md § 1a](screens/widgets.md#1a-the-header-row)). So the header carries
+a **pointer** — `⚠ your clock is behind`, sized like the `⚠ disconnected,
+retrying` and `⚠ login expired` already living in that zone — and the sentence
+goes in a content-pane banner, the slot the namespace-scoping banner already
+uses for the same reason. The pointer is the newest segment and therefore the
+first *added* fact to drop; the existing sacrifice order is unchanged beneath it.
+
+**The two halves get two sentences, because they break differently.** Behind the
+cluster, `age` returns `None` and times go *blank*; ahead of it, `age` returns a
+plausible, too-large number and nothing looks wrong at all. One sentence covering
+both would have to hedge, and a beginner reading *"may be blank or wrong"* cannot
+tell which card in front of them to distrust:
+
+| Direction | What happens | The sentence |
+|---|---|---|
+| **behind** | ages blank past five minutes | *"Your computer's clock is 11 minutes behind the cluster's, so times are blank rather than guessed."* |
+| **ahead** | ages inflate; nothing blanks | *"Your computer's clock is 9 minutes ahead of the cluster's, so times may be wrong."* |
+
+The second is D55's sentence carrying the direction it was actually true of;
+the first replaces it, and D55 is corrected in place to say so. Neither says *"on this screen"*: `--once` draws the
+identical strings re-wrapped, and a word that does not survive being piped to a
+file would have forced a second copy.
+
+**One threshold, five minutes, both directions** — `rules::age`'s
+`SKEW_ALLOWANCE`, reused rather than a second constant invented beside it. Below
+it nothing on screen is different, so a warning there would point at nothing.
+D69 bound only the *blanking* threshold on the *behind* side; the ahead side's,
+and the pointer's own trigger on both sides, were open and are decided here.
+
+**Four smaller calls, all in the same direction — say nothing rather than guess.**
+`--once` gets no `⚠`, because `● ▲ ○` is that stream's whole vocabulary and a
+fourth symbol would arrive with no legend. A missing or unparseable `Date` header
+prints nothing, which is indistinguishable from a healthy clock and is the honest
+answer, because there is no evidence either way. The line is suppressed while
+disconnected or while the login has expired: the reading needs a live response,
+and a value carried over from the last successful request is exactly the guess
+[widgets.md § 1a](screens/widgets.md#1a-the-header-row) forbids. When the clock
+line and the incomplete-view line both apply they stack clock-first, in both
+renderers — what is true of *every* fact on the page before what is true of
+*which* facts are on it.
+
+**What this box was not allowed to settle.** The first draft's mockups printed
+`1 critical` and a `1 ●` sidebar badge, which decide *a zero count is omitted
+rather than printed as `0`* — a shape no drawn screen in this repo backs, and one
+that binds the renderer two phases from here. It went to
+[backlog.md](backlog.md), not into these files: a box about clock skew is not
+where the severity counter is settled in passing
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+The mockups now reuse counts the repo has already drawn.

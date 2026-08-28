@@ -136,6 +136,297 @@ out mid-session ([NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kub
 - Stale data stays visible and stays labelled, exactly as on the disconnected
   screen. k8rs does not clear the screen because it lost its token.
 
+## Your computer's clock is off
+
+D55 found the direction the header owed an explanation was backwards, and D69
+drew the boundary this box inherits: past five minutes of skew, `rules::age`
+produces no number at all, not a wrong one
+([NOTES § D55](../NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) ·
+[§ D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+This is the state that says why, on the two screens whose whole promise is
+that a number on them can be believed.
+
+### It does not fit in the header, so it does not go there whole
+
+*"Your computer's clock is 11 minutes behind the cluster's, so times are
+blank rather than guessed."* is 97 characters. The header row is one line
+([widgets.md § 1a](widgets.md#1a-the-header-row)), already carrying `nodes
+3/3` on the left and up to four `·`-separated facts on the right, and the
+context is never truncated. There is no wrapping, no abbreviation and no
+reflow of that row that fits the sentence in whole.
+
+So the header carries a **pointer**, sized like the two pointers already
+living there — `⚠ disconnected, retrying`, `⚠ login expired` — and the
+sentence itself goes where those two put their own explanation: the content
+pane, above whatever else is there, the same slot [the namespace-scoping
+banner](#you-can-only-see-some-namespaces) uses for the same reason (more to
+say than one line holds).
+
+```
+ctx: prod-eu · live · admin · ⚠ your clock is behind
+```
+
+25 characters (` · ⚠ your clock is behind`) added to the busiest right zone
+this file draws — `ctx: prod-eu · ns: payments · read-only`, 39 — lands at 64:
+comfortably inside the 70-column page this file is drawn at and the 80-column
+floor both ([the combined case, below](#your-clock-and-a-scoped-namespace-together)).
+Neither word is jargon: [invariant 14](../CLAUDE.md) rules out "clock skew"
+and "NTP", and "clock" plus "behind"/"ahead" is the whole vocabulary the
+pointer needs.
+
+**The pointer is the newest, lowest-priority segment in that zone**, so it is
+the first of the *added* facts to drop if a longer context name or a TLS
+warning ever left no room — after it, the existing sacrifice order
+([widgets.md § 1a](widgets.md#1a-the-header-row): name, then vitals, never
+context) still applies unchanged. In every case measured for this file, it
+never has to: the worst-case right zone above still fits with 6 columns to
+spare at 80.
+
+### Two directions, two sentences, because they break differently
+
+D55 is explicit the two halves are not the same bug: behind the cluster,
+`age` returns `None` and the screen goes **quietly blank** where a time used
+to be; ahead of it, `age` returns a **plausible-looking, too-large** number,
+because a fast clock inflates every elapsed duration and nothing about the
+result looks wrong — this is the half D55 calls out as *manufacturing
+findings on a healthy cluster*. One sentence covering both would have to
+hedge ("may be blank or wrong"), and a beginner reading a hedge does not know
+which card in front of them to distrust. So there are two:
+
+| Direction | What actually happens | The sentence |
+|---|---|---|
+| **behind** the cluster | ages blank past 5 minutes ([D69](../NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)) | *"Your computer's clock is 11 minutes behind the cluster's, so times are blank rather than guessed."* |
+| **ahead** of the cluster | ages inflate; nothing blanks; findings can be manufactured on a healthy cluster (D55) | *"Your computer's clock is 9 minutes ahead of the cluster's, so times may be wrong."* |
+
+Both sentences are written for **any renderer that can hold one line**,
+deliberately not tied to the word "screen" — [`--once` carries the identical
+strings](once.md#when-your-clock-and-the-clusters-disagree), re-wrapped, the
+same rule every shared string in this product already follows.
+
+Neither is the box's original two-clause wording verbatim. That wording
+(*"...the times on this screen are wrong"*) is the **behind** case's *old*,
+pre-D69 belief — D69 changed what `age` does on that side from "wrong number"
+to "no number," so this file corrects it in place rather than shipping a
+sentence the code has already stopped being true of, the same way D55
+corrected D18 in place instead of leaving the old claim standing next to the
+fix. The box's original wording describes the **ahead** case almost exactly,
+and is kept there.
+
+### The threshold: five minutes, the same five, both directions
+
+`rules::age`'s `SKEW_ALLOWANCE` is already five minutes — the conventional
+clock-skew tolerance D69 borrowed rather than tuned. This box reuses that
+same number for the header pointer and banner, in both directions, rather
+than inventing a second constant:
+
+- **Below it, nothing on screen is different.** No age blanks; no finding is
+  inflated by more than rule 12's own 60-second margin already absorbs
+  ([D55](../NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12)).
+  A sentence appearing before anything is visibly different would be a
+  warning with nothing on screen to point at.
+- **One number is one fewer thing to explain**, and D69's own argument for
+  five minutes — the tolerance Kerberos, JWT `nbf`/`exp` and most TLS
+  handshakes already settled on — does not argue for a slow laptop
+  differently than it argues for a fast one.
+- This is a **tui-designer** call, not a restatement of D69: D69 bound only
+  the *blanking* threshold on the *behind* side. The *ahead* side's threshold,
+  and the header pointer's own trigger point on both sides, were open, and
+  are decided here, together, at the same number.
+
+### Behind the cluster
+
+```
+ nodes 3/3       ctx: prod-eu · live · admin · ⚠ your clock is behind
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  ⚠ Your computer's clock is 11 minutes behind │
+│ RESOURCES          │    the cluster's, so times are blank rather   │
+│   workloads        │    than guessed.                              │
+│   network          │                                               │
+│   storage          │  ● payments/web  ·  3 of 5 pods               │
+│   config           │    Containers exceeded their memory limit     │
+│   cluster          │    and were killed by the kernel (OOMKilled)  │
+│ ANALYSIS           │    limit 256Mi · exit 137 · 47 restarts       │
+│   capacity      1 ▲│    → raise limits.memory, or find the leak    │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch                                      │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  ? all keys  q quit                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+The card's right edge — normally `4 min ago` on this exact finding
+([the connection dropped](#the-connection-dropped)) — is simply absent. That
+is not a new rendering rule: it is *No number we cannot produce*
+([alerts.md](alerts.md#the-rules-this-screen-obeys)), the same mechanism the
+cordon card already uses for a taint stamped by hand
+([alerts.md § the cordon card](alerts.md#the-cordon-card-with-and-without-its-clock)).
+What is new here is the **scale**: normally one rare card in the whole list
+goes ageless and explains itself by being the only one; under this state
+*every* card that would ordinarily carry a time loses it at once, which is
+exactly the situation that turns a self-explaining absence into one that
+needs the banner above it.
+
+### Ahead of the cluster
+
+```
+ nodes 3/3        ctx: prod-eu · live · admin · ⚠ your clock is ahead
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  ⚠ Your computer's clock is 9 minutes ahead of│
+│ RESOURCES          │    the cluster's, so times may be wrong.      │
+│   workloads        │                                               │
+│   network          │  ● payments/web  ·  3 of 5 pods    4 min ago  │
+│   storage          │    Containers exceeded their memory limit     │
+│   config           │    and were killed by the kernel (OOMKilled)  │
+│   cluster          │    limit 256Mi · exit 137 · 47 restarts       │
+│ ANALYSIS           │    → raise limits.memory, or find the leak    │
+│   capacity      1 ▲│                                               │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch                                      │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  ? all keys  q quit                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+This card is **byte-for-byte identical** to one on a correctly-clocked
+cluster. `4 min ago` is not flagged, not asterisked, not dimmed differently —
+there is nothing on the card itself that can carry the doubt, which is
+exactly D55's point about this direction: it does not blank, it lies quietly.
+The banner above is the *only* signal on the whole screen, which is why it
+gets a whole sentence rather than a symbol.
+
+### Nothing is broken, and the clock is still off
+
+The pointer and the banner do not wait for a finding to exist — they are a
+statement about the data on screen, not about the cluster, and a laptop that
+has simply never synced deserves to be told before anything else goes wrong:
+
+```
+ nodes 3/3       ctx: prod-eu · live · admin · ⚠ your clock is behind
+┌────────────────────┬───────────────────────────────────────────────┐
+│▸ ALERTS            │                                               │
+│ RESOURCES          │               ○  nothing is broken            │
+│   workloads        │                                               │
+│   network          │        84 pods and 3 nodes checked, none of   │
+│   storage          │        them is in trouble right now.          │
+│   config           │                                               │
+│   cluster          │        Your computer's clock is 11 minutes    │
+│ ANALYSIS           │        behind the cluster's, so times are     │
+│   capacity      1 ▲│        blank rather than guessed.             │
+│   certificates  30d│                                               │
+│   drain safety     │                                               │
+│   posture          │                                               │
+│   restarts         │                                               │
+│   waste            │                                               │
+│   versions         │                                               │
+├────────────────────┴───────────────────────────────────────────────┤
+│ $ kubectl get pods -A --watch                                      │
+├────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  ? all keys  q quit                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+The `⚠` is gone here on purpose, not by omission. It belongs to the alarmed,
+left-flush family this section's first two mockups borrow from
+(`disconnected`, `login expired`); the calm, centred nothing-is-broken family
+never uses it, exactly as [the namespace-scoped variant of this same
+page](#nothing-broken-and-something-not-checked) already drops it for its own
+caveat. Clock skew is drawn in whichever family the rest of the screen is
+already in — it does not bring its own.
+
+The `Worth a look anyway → capacity` line from the [plain nothing-is-broken
+state](#nothing-is-broken) is left off this mockup for room, not for a rule:
+unlike the namespace-scoped variant, clock skew does not switch the Capacity
+check off, so that line is free to stay in the real screen. It is only absent
+here because this file has fourteen rows to draw in and the clock paragraph
+already uses three of them.
+
+### Your clock and a scoped namespace together
+
+Both banners can be true at once — being unable to list pods cluster-wide
+says nothing about the machine's own clock. They stack, most-fundamental
+first: the clock line before the namespace line, because a reader who cannot
+trust *any* time on the page should be told that before being told which
+*part* of the page they can see.
+
+```
+ nodes 3/3     ctx: prod-eu · ns: payments · read-only · ⚠ your clock is behind
+┌────────────────────┬─────────────────────────────────────────────────────────┐
+│▸ ALERTS     3 ● 7 ▲│  ⚠ Your computer's clock is 11 minutes behind the       │
+│ RESOURCES          │    cluster's, so times are blank rather than guessed.   │
+│   workloads        │                                                         │
+│   network          │  You can't list pods across the whole cluster, so k8rs  │
+│   storage          │  is showing the namespace your kubeconfig points at:    │
+│   config           │  payments. Use --namespace <name> for a different one,  │
+│   cluster          │  or ask for cluster-wide read access.                   │
+│ ANALYSIS           │                                                         │
+│   capacity         │  One node check is off: spotting a node someone started │
+│   certificates  30d│  emptying and did not finish needs every pod in the     │
+│   drain safety     │  cluster.                                               │
+│   posture          │                                                         │
+│   restarts         │  ● payments/web  ·  3 of 5 pods                         │
+│   waste            │    Containers exceeded their memory limit               │
+│   versions         │                                                         │
+├────────────────────┴─────────────────────────────────────────────────────────┤
+│ $ kubectl get pods -n payments --watch                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ↑↓ move  ⏎ open  ? all keys  q quit                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+This is the one mockup on this page drawn at the real 80-column floor rather
+than the file's usual 70-column page width — `ns: payments · read-only ·
+⚠ your clock is behind` alone is 44 characters, and at 70 columns total the
+header has nowhere to put it beside `nodes 3/3` and `ctx: prod-eu`. At 80 it
+fits with 6 columns of gap to spare; a context name one character longer
+than `prod-eu`, or a fourth badge (a TLS warning), is what the sacrifice
+order in the section above exists for — the clock pointer is the first of
+the three to go, and the banner underneath still carries the full sentence
+on its own.
+
+### While disconnected, or while the login has expired
+
+Neither pointer nor banner survives a state where k8rs is not currently
+completing requests, and this is not a special case written for clock skew —
+[the connection-dropped header](#the-connection-dropped) and [the
+login-expired header](#your-login-expired) are exactly as drawn on their own
+pages, with no `⚠ your clock is behind` appended, even if one was showing the
+moment before the connection or the token died. The reading needs a live
+response's `Date` header to stay honest
+([D55](../NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12)),
+and a value computed from the *last* successful request is exactly the kind
+of guess [the header's own rule](widgets.md#1a-the-header-row) forbids — "a
+vital that cannot be read is blank, never guessed" applies here as much as it
+does to `nodes …` while connecting. The clock line returns the moment a
+request succeeds again, same as every other vital on the page.
+
+### When there is nothing to say
+
+Two more cases, and both are silence, not a new mockup:
+
+- **The `Date` header is missing or does not parse.** Some proxies strip it;
+  some do not send one at all. k8rs cannot measure a skew it cannot read, so
+  neither the pointer nor the banner appears — the same "blank rather than
+  guessed" rule as above, applied to the input instead of the output. This is
+  indistinguishable on screen from a clock that is fine, which is the honest
+  answer: k8rs has no evidence either way.
+- **The skew is real but under five minutes.** Nothing on screen is
+  different (the threshold section above), so nothing is drawn. This is the
+  overwhelmingly common case — most laptops drift by seconds, not minutes —
+  and it is why the pointer and banner are rare enough, when they do appear,
+  to be worth reading in full.
+
 ## You can only see some namespaces
 
 Not an error — the common case for anyone who is not a cluster admin. A 403
@@ -315,6 +606,9 @@ k8rs: your user is not allowed to list pods in this cluster.
   first thing a newcomer ever sees from k8rs is one of these.
 - A 403 degrades exactly the feature that needed the permission and names the
   missing verb and resource. It never crashes and never retries in a loop.
+- **A laptop clock more than five minutes off the cluster's says so, in both
+  directions, and stays silent below that line and while disconnected.**
+  [§ Your computer's clock is off](#your-computers-clock-is-off).
 - **A check that could not run says so, on the screen where its findings would
   have appeared.** Silence is the one thing it may not do: an alert list with a
   disabled rule behind it looks identical to an alert list that found nothing,

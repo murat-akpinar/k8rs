@@ -2930,7 +2930,15 @@ public release.
       just step 2 of the cycle, named here because a box whose files have two
       owners is where "someone will do it" means nobody does
       ([NOTES § D55](NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) ·
-      [§ D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13))
+      [§ D69](NOTES.md#d69--the-operator-review-that-reopened-the-box-and-the-prune-line-that-was-never-true-2026-08-13)).
+      **Turn one is landed** — the states are drawn in
+      [screens/states.md § Your computer's clock is off](screens/states.md#your-computers-clock-is-off)
+      and [screens/once.md § When your clock and the cluster's disagree](screens/once.md#when-your-clock-and-the-clusters-disagree),
+      and **the sentence quoted above is the *ahead* half's**: the header holds a
+      pointer and the banner holds the sentence, the two halves do not share one,
+      and behind the cluster `age` blanks rather than lies. Take the strings from
+      the screens, not from this box
+      ([D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28))
 - [ ] Certificate rules that need the wire: C2 (API server serving cert) and
       C3 (pending CSRs)
 - [ ] **The typed lists `analysis.rs` needs**, fetched on demand when a report
