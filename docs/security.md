@@ -223,6 +223,19 @@ resource.
   of its own, so a stray `{session:?}` is a compile error rather than a leak,
   and `scripts/security-guard.py` refuses the derive if anyone adds it back
   ([NOTES § D166](../NOTES.md#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27)).
+- **A credential can arrive in the `server:` line, and it is stripped before
+  that address is drawn.** `clusters[].server` may carry URL userinfo
+  (`https://admin:hunter2@host`) — basic auth at a proxy in front of an API
+  server — and it is all printable, so no control-character strip removes it.
+  The context picker draws that address on its most prominent row, so a
+  kubeconfig password would reach the first screen a stranger sees and every
+  screenshot of it. `k8s::address` removes the userinfo, and **where the two
+  readings of an ambiguous `@` disagree it draws nothing at all rather than
+  guessing** — guessing the other way invents a hostname, which is a different
+  lie on the same line
+  ([NOTES § D175](../NOTES.md#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28)).
+  No script sees this class: it is printable text in a field nothing else
+  treats as secret.
 - This includes the panic path: a backtrace dumped to stderr must not
   contain credentials.
 - **A `kube` error is never formatted whole — not with `{}`, not with `{:?}`.**

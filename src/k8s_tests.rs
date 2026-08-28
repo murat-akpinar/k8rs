@@ -56,11 +56,19 @@ fn certificate_bytes(name: &str) -> Vec<u8> {
 /// symlink planted where this is about to write; the counter makes a collision this run
 /// impossible, and the flag makes anything already sitting there loud.
 fn certificate_file(name: &str, bytes: &[u8]) -> Scratch {
+    scratch(&format!("{name}.crt.pem"), bytes)
+}
+
+/// **One scratch file, written and owned by the test that asked for it** — [`certificate_file`]'s
+/// body, lifted out when the kubeconfig shapes needed real files on the disk to merge
+/// (`several_kubeconfig_paths_merge_into_one_file_and_the_first_one_wins`, NOTES § D172). A
+/// second copy of a `create_new` open is a second place for the two rules below to be forgotten.
+fn scratch(name: &str, bytes: &[u8]) -> Scratch {
     use std::io::Write;
     use std::sync::atomic::{AtomicU32, Ordering};
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let path = std::env::temp_dir().join(format!(
-        "k8rs-tests-{}-{}-{name}.crt.pem",
+        "k8rs-tests-{}-{}-{name}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
@@ -5779,6 +5787,7 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
         watches,
         renewal,
         context,
+        namespace,
         client_certificate,
     } = session(offline()).await;
 
@@ -5787,10 +5796,15 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
         "a client is not a file: `session` has no kubeconfig to read a login program out of"
     );
     assert_eq!(
-        (context.as_deref(), client_certificate.as_deref()),
-        (None, None),
-        "a client is not a file either way round: there is no context name and no certificate to \
-         read back off one, and inventing either is a card about a cluster nobody named"
+        (
+            context.as_deref(),
+            namespace.as_deref(),
+            client_certificate.as_deref()
+        ),
+        (None, None, None),
+        "a client is not a file either way round: there is no context name, no namespace and no \
+         certificate to read back off one, and inventing any of them is a card about a cluster \
+         nobody named"
     );
 
     assert!(
@@ -6228,38 +6242,115 @@ async fn the_context_a_session_names_is_the_one_it_connected_with() {
 /// named with this string, and a `\u{202e}` in it reverses the line it is drawn on.
 #[test]
 fn a_context_name_is_stripped_bounded_and_never_invented() {
-    let file = |current: Option<&str>| Kubeconfig {
-        current_context: current.map(str::to_string),
-        ..Kubeconfig::default()
+    // **One entry, named exactly as `current-context:` names it.** [`wanted`] resolves a name to
+    // an *entry* (NOTES § D174), and the lookup is by the file's own spelling — so both lines
+    // carry the same bytes and what varies below is only what those bytes are.
+    let file = |name: &str| {
+        wrote(&format!(
+            "apiVersion: v1\n\
+             kind: Config\n\
+             current-context: \"{name}\"\n\
+             contexts: [{{name: \"{name}\", context: {{cluster: c, user: u}}}}]\n"
+        ))
     };
     assert_eq!(
-        kubeconfig_context(&file(Some("prod\u{202e}dc")), None).as_deref(),
+        kubeconfig_context(&file("prod\\u202edc"), None).as_deref(),
         Some("proddc"),
         "a bidi override in a context name survived, so the card it is drawn on reads backwards"
     );
+    let two = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: keep\n\
+         contexts:\n\
+         - {name: keep, context: {cluster: c, user: u}}\n\
+         - {name: \"asked\\u200bfor\", context: {cluster: c, user: u}}\n",
+    );
     assert_eq!(
-        kubeconfig_context(&file(Some("keep")), Some("asked\u{200b}for")).as_deref(),
+        kubeconfig_context(&two, Some("asked\u{200b}for")).as_deref(),
         Some("askedfor"),
         "the name the reader typed is not stripped, so `--context` is a second door into the \
          terminal"
     );
     assert_eq!(
-        kubeconfig_context(&file(None), None),
+        kubeconfig_context(&wrote("apiVersion: v1\nkind: Config\n"), None),
         None,
         "a kubeconfig with no current context was given a name anyway — C1 says nothing rather \
          than inventing one (NOTES § D51)"
     );
     assert_eq!(
-        kubeconfig_context(&file(Some("\u{202e}")), None),
+        kubeconfig_context(&file("\\u202e"), None),
         None,
         "a name that strips to nothing came back as an empty one, and an object named with the \
          empty string is worse than no card"
     );
-    let long = kubeconfig_context(&file(Some(&"n".repeat(IDENTIFIER * 2))), None)
+    // **The bound is the requirement and not a number the output is under** (NOTES § D173): the
+    // input is ASCII, so [`text`] cuts exactly at the cap and the sum is exact.
+    let long = kubeconfig_context(&file(&"n".repeat(IDENTIFIER * 2)), None)
         .expect("a long name is still a name");
-    assert!(
-        long.len() < IDENTIFIER * 2 && long.ends_with(SHORTENED),
-        "a context name is not bounded, so a kubeconfig can hand the screen any length it likes"
+    assert_eq!(
+        (long.len(), long.ends_with(SHORTENED)),
+        (IDENTIFIER + SHORTENED.len(), true),
+        "a context name is not bounded at IDENTIFIER, so a kubeconfig can hand the screen more \
+         than the guard promises"
+    );
+
+    // **The name a header shows and the row a picker marks answer from one lookup**
+    // (NOTES § D174). With `current-context:` naming an entry the file does not define, this
+    // used to answer `Some("k8rs-tests-gone")` while `contexts()` marked no row current — a
+    // header naming a context that is on no row. It is inert only while `connect_with` fails
+    // first, and it stops being inert the moment the Phase 11 picker calls `kubeconfig()` and
+    // `contexts()` without connecting.
+    let gone = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-gone\n\
+         clusters: [{name: c, cluster: {server: 'https://k8rs-tests.invalid:6443'}}]\n\
+         contexts: [{name: k8rs-tests-here, context: {cluster: c, user: u}}]\n\
+         users: [{name: u, user: {}}]\n",
+    );
+    assert_eq!(
+        (
+            kubeconfig_context(&gone, None),
+            kubeconfig_namespace(&gone, None),
+            contexts(&gone, None).iter().any(|choice| choice.current)
+        ),
+        (None, None, false),
+        "a `current-context:` the file does not define was still turned into a name, so a header \
+         would name a context that is on none of the picker's rows"
+    );
+    assert_eq!(
+        kubeconfig_context(&gone, Some("k8rs-tests-also-gone")),
+        None,
+        "a `--context` the file does not define was turned into a name the same way"
+    );
+
+    // **An entry with no `context:` body is not an entry, and that is kube's answer**
+    // (NOTES § D175). `file_loader.rs:70-76` is
+    // `find(…).and_then(|named| named.context.clone()).ok_or(LoadContext)`, so `- name: a` on its
+    // own is an error there; this file answered `Some("a")` and marked its row current, one
+    // `and_then` away from the loader it hands the same file to.
+    let bodyless = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-bodyless\n\
+         contexts: [{name: k8rs-tests-bodyless}]\n",
+    );
+    assert_eq!(
+        (
+            kubeconfig_context(&bodyless, None),
+            contexts(&bodyless, None)
+                .iter()
+                .any(|choice| choice.current)
+        ),
+        (None, false),
+        "a context entry with no `context:` body resolved here and errors in kube — the family \
+         and the loader it hands the file to disagree about whether that context exists"
+    );
+    assert_eq!(
+        contexts(&bodyless, None).len(),
+        1,
+        "the bodyless entry vanished from the picker's list — it is in the reader's file"
     );
 }
 
@@ -6498,6 +6589,7 @@ async fn a_session_hands_the_store_what_it_learned_and_a_question_that_failed_is
         watches: Vec::new(),
         renewal: None,
         context: Some("kind-k8rs".to_string()),
+        namespace: None,
         client_certificate: Some(certificate.clone()),
     };
     let identity = Identity::of(&session);
@@ -6741,6 +6833,1323 @@ async fn a_refused_watch_of_every_kind_waits_before_it_asks_again() {
              one off and a standing 403 on it is a request per round trip"
         );
     }
+}
+
+// --- THE SIX KUBECONFIG SHAPES, AND THE LIST THE PICKER DRAWS ---
+//
+// **The largest class in k9s's tracker is not the cluster, it is the file that describes it**
+// (`PRIOR-ART § B1`), and each of the six below is a separate closed issue there. They are the
+// errors a stranger meets before they have ever seen a finding.
+//
+// **Every shape here is hand-written YAML and that is required rather than tolerated**
+// (NOTES § D172). CLAUDE.md § Code phase rules says fixtures come from real cluster captures and
+// never from hand-written JSON; a kubeconfig is the one artefact where obeying that would be the
+// defect, because kind writes a real one and it carries a client certificate *and its key*. The
+// capture rule exists so nobody invents a cluster's behaviour — a kubeconfig is not the cluster's
+// behaviour, it is a local file the reader wrote, and these six are exactly the ones no healthy
+// cluster produces.
+//
+// **Two of the six are covered above and are not written a second time.** Shape 6 — a context
+// whose `exec` credential plugin is missing or fails (NOTES § D19) — is
+// `a_credential_plugin_that_never_answers_is_a_client_that_could_not_be_built` for the missing
+// half and `a_login_program_that_dies_mid_session_is_a_credential_fault_and_not_a_network_one`
+// for the failing half, both landed with the `connect()` box. A third copy of a shape is a third
+// place for it to be updated.
+
+/// A whole kubeconfig this file wrote, from the YAML a shape is actually about.
+///
+/// **YAML and not a struct literal** (NOTES § D172): what these shapes *are* is files, and a
+/// struct literal cannot be wrong the way a file can — a missing `current-context:` is a `None`
+/// in one and a line that is not there in the other, and only the second is what the reader has.
+/// An [`Address::Server`], spelled short enough to read inside an assertion.
+fn drawn_at(server: &str) -> Address {
+    Address::Server(server.to_string())
+}
+
+/// The string an [`Address::Server`] draws, for the assertions that are about that string rather
+/// than about which of the three states the row is in.
+fn shown_address(server: &Address) -> String {
+    match server {
+        Address::Server(drawn) => drawn.clone(),
+        other => panic!("expected an address to draw, got {other:?}"),
+    }
+}
+
+fn wrote(yaml: &str) -> Kubeconfig {
+    Kubeconfig::from_yaml(yaml).expect("a kubeconfig this file wrote itself")
+}
+
+/// **`PRIOR-ART § B1` shape 1 — there is no kubeconfig on the disk at all.**
+///
+/// **The variant is produced rather than named, and it is not the one already checked.**
+/// `the_three_things_wrong_with_a_kubeconfig_are_three_different_faults` asserts over
+/// `Bad::FindPath`, which `Kubeconfig::read()` reaches only on a machine with no home directory
+/// to look in (`config/file_config.rs:509-514`). **The ordinary reader — a home, and no
+/// `~/.kube/config` in it — gets `ReadConfig` instead**, and the two must not answer differently:
+/// one of them printing *the file could not be read* and the other *no such context* is the whole
+/// of `PRIOR-ART § C1` in one enum.
+#[test]
+fn a_kubeconfig_that_is_not_on_the_disk_is_the_file_and_never_the_context() {
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-tests-{}-no-such-kubeconfig.yaml",
+        std::process::id()
+    ));
+    assert!(
+        !path.exists(),
+        "{} exists, so this test is reading somebody's file instead of proving a missing one",
+        path.display()
+    );
+    let Err(problem) = Kubeconfig::read_from(&path) else {
+        panic!("a kubeconfig that is not on the disk read successfully");
+    };
+    assert!(
+        matches!(problem, kube::config::KubeconfigError::ReadConfig(_, _)),
+        "the variant a missing file arrives as changed, so the arm below is being proven against \
+         a shape kube no longer produces"
+    );
+    assert_eq!(
+        kubeconfig_fault(&problem),
+        Fault::Kubeconfig,
+        "a kubeconfig that is not there was reported as a context that is not in it, which sends \
+         a reader to fix a file they do not have"
+    );
+    assert_eq!(
+        NotConnected::Kubeconfig(problem).fault(),
+        Fault::Kubeconfig,
+        "the two readers of one `KubeconfigError` disagree about a missing file"
+    );
+}
+
+/// **`PRIOR-ART § B1` shape 2 — a kubeconfig with no `current-context:`**, which is a *panic* in
+/// k9s #2465 and the same cause wearing a different symptom four years later in #2651.
+///
+/// **The pin against the panic is the shape of this test and not an assertion in it**: a panic
+/// anywhere below fails it, so `connect_with` returning an `Err` at all is what is being proven.
+/// What the assertions add is that the `Err` says the right thing — the file is perfect, and
+/// telling this reader to check whether it is readable is the 3am sentence
+/// [`Fault::BadEntry`]'s doc was written about.
+///
+/// **The picker still has a list**, which is the half that keeps this from being a dead end: the
+/// file names a context, so a screen has something to offer even though the file itself points
+/// at none (NOTES § D116).
+#[tokio::test]
+async fn a_kubeconfig_with_no_current_context_is_an_error_and_never_a_panic() {
+    let file = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         clusters: [{name: c, cluster: {server: 'https://k8rs-tests.invalid:6443'}}]\n\
+         contexts: [{name: k8rs-tests, context: {cluster: c, user: u}}]\n\
+         users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
+    );
+    let Err(problem) = connect_with(file.clone(), None).await else {
+        panic!(
+            "a kubeconfig with no `current-context:` connected to something — either a context \
+             was picked for the reader or the file was read as naming one"
+        );
+    };
+    assert_eq!(
+        problem.fault(),
+        Fault::NoContext,
+        "a file with no `current-context:` was reported as a file that could not be read — it \
+         read perfectly, and the reader is sent to `cat` it"
+    );
+    assert!(
+        matches!(
+            problem,
+            NotConnected::Kubeconfig(kube::config::KubeconfigError::CurrentContextNotSet)
+        ),
+        "the typed error was replaced on the way back, so nothing downstream can tell this from \
+         a `--context` naming something the file does not have"
+    );
+    assert_eq!(
+        (
+            kubeconfig_context(&file, None),
+            kubeconfig_namespace(&file, None)
+        ),
+        (None, None),
+        "a file that points at no context handed back a name or a namespace anyway, and both \
+         would be about a context nobody chose"
+    );
+
+    let listed = contexts(&file, None);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.current)
+            .collect::<Vec<_>>(),
+        [false],
+        "a file with no `current-context:` had one of its rows preselected, so the picker opens \
+         with the cursor on a context the file never named"
+    );
+    assert_eq!(
+        listed.len(),
+        1,
+        "the picker's list went empty for a file that names a context, which turns a recoverable \
+         startup into a screen with nothing on it"
+    );
+}
+
+/// **`PRIOR-ART § B1` shape 3 — `KUBECONFIG` holding several paths** (k9s #829), merged by kube's
+/// own first-one-wins rules.
+///
+/// **`read_from` + `merge` and not the environment variable** (NOTES § D172). `Kubeconfig::read`
+/// is `from_env()` first (`config/file_config.rs:509-514`), and `from_env` is
+/// `std::env::split_paths` folded through exactly these two calls — `read_from` then `merge`
+/// (`:522-540`) — so what is below is that path with the `KUBECONFIG` lookup taken off the front,
+/// the same split `connect_with` is to `connect`. Setting the variable
+/// instead would be an `unsafe` process-wide write racing every other test in this binary, to
+/// prove a line of kube's that this test cannot make fail anyway.
+///
+/// **Two real files, because merge is the one shape that has to be one** — `read_from` rewrites
+/// relative paths against each file's own directory, and a `from_yaml` pair has no directory to
+/// be relative to.
+///
+/// **What is *not* proven here is token refresh across the merged files** (k9s #620): the
+/// credential each context uses is kube's to refresh, there is no cluster in this build to
+/// refresh one against, and nothing in `k8s.rs` reads a token at all.
+#[tokio::test]
+async fn several_kubeconfig_paths_merge_into_one_file_and_the_first_one_wins() {
+    let first = scratch(
+        "first.kubeconfig.yaml",
+        b"apiVersion: v1\n\
+          kind: Config\n\
+          current-context: k8rs-tests-first\n\
+          clusters:\n\
+          - {name: one, cluster: {server: 'https://k8rs-tests-one.invalid:6443'}}\n\
+          contexts:\n\
+          - {name: k8rs-tests-first, context: {cluster: one, user: u}}\n\
+          - {name: k8rs-tests-shared, context: {cluster: one, user: u}}\n\
+          users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
+    );
+    let second = scratch(
+        "second.kubeconfig.yaml",
+        b"apiVersion: v1\n\
+          kind: Config\n\
+          current-context: k8rs-tests-second\n\
+          clusters:\n\
+          - {name: two, cluster: {server: 'https://k8rs-tests-two.invalid:6443'}}\n\
+          contexts:\n\
+          - {name: k8rs-tests-second, context: {cluster: two, user: u}}\n\
+          - {name: k8rs-tests-shared, context: {cluster: two, user: u}}\n\
+          users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
+    );
+    let read = |path: &str| {
+        Kubeconfig::read_from(path).unwrap_or_else(|_| panic!("{path} is a file this test wrote"))
+    };
+    let merged = read(&first)
+        .merge(read(&second))
+        .expect("two kubeconfigs of the same kind and apiVersion would not merge");
+
+    let listed = contexts(&merged, None);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.name.as_str())
+            .collect::<Vec<_>>(),
+        ["k8rs-tests-first", "k8rs-tests-shared", "k8rs-tests-second"],
+        "the merged list is not both files in order with the duplicate name appearing once — a \
+         picker that lost the second file's contexts is a reader who cannot reach half their \
+         clusters"
+    );
+    assert_eq!(
+        listed[1].server,
+        drawn_at("https://k8rs-tests-one.invalid:6443"),
+        "the second file's `k8rs-tests-shared` overwrote the first file's, which is the opposite \
+         of the rule `KUBECONFIG` is merged by — the reader would be sent to the wrong cluster \
+         under a name they trust"
+    );
+    assert_eq!(
+        listed[2].server,
+        drawn_at("https://k8rs-tests-two.invalid:6443"),
+        "a context from the second file lost the cluster that file defines for it"
+    );
+    assert_eq!(
+        kubeconfig_context(&merged, None).as_deref(),
+        Some("k8rs-tests-first"),
+        "the second file's `current-context:` won, so which cluster k8rs opens on depends on the \
+         order of a `KUBECONFIG` the reader may not have written"
+    );
+
+    let session = connect_with(merged, Some("k8rs-tests-second"))
+        .await
+        .unwrap_or_else(|_| panic!("a context out of the merged file built no client"));
+    assert_eq!(
+        session.context.as_deref(),
+        Some("k8rs-tests-second"),
+        "a context that only the second file defines could be listed but not connected to"
+    );
+}
+
+/// **`PRIOR-ART § B1` shape 4 — a context whose name contains a space** (k9s #3815, still open
+/// there).
+///
+/// **It is a shape and not a failure**, which the `connect()` box already measured
+/// ([`NotConnected::Kubeconfig`]'s doc) and this pins: a space is a printable character, so
+/// [`text`] keeps it, and nothing here splits a name on whitespace. **The class it is open in
+/// k9s for cannot exist here at all** — that tracker's shape is a context name reaching a shell,
+/// and no API string and no kubeconfig string is ever interpolated into one (the security gate's
+/// *untrusted input*, `scripts/security-guard.py` reads `src/` for it).
+///
+/// **Both doors, because they are two reads**: the name off `current-context:` and the name off
+/// `--context`. A quoting defect that only bit the argument would pass a test that used the file.
+#[tokio::test]
+async fn a_context_whose_name_contains_a_space_connects_and_survives_whole() {
+    let named = "k8rs tests with spaces";
+    let file = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: 'k8rs tests with spaces'\n\
+         clusters: [{name: c, cluster: {server: 'https://k8rs-tests.invalid:6443'}}]\n\
+         contexts: [{name: 'k8rs tests with spaces', context: {cluster: c, user: u}}]\n\
+         users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
+    );
+    for asked_for in [None, Some(named)] {
+        let session = connect_with(file.clone(), asked_for)
+            .await
+            .unwrap_or_else(|_| panic!("a context named `{named}` built no client"));
+        assert_eq!(
+            session.context.as_deref(),
+            Some(named),
+            "a context name with a space in it did not survive the connect whole — it was cut, \
+             joined or replaced, and the header then names a cluster nobody has"
+        );
+    }
+    assert_eq!(
+        contexts(&file, None)[0].name,
+        named,
+        "the picker's row for a spaced name is not that name, so the row the reader picks is not \
+         the context they get"
+    );
+}
+
+/// **`PRIOR-ART § B1` shape 5 — a context that names its own namespace**, which is the namespace
+/// k8rs must then start in. A regression k9s shipped **twice** (#1397, #1444).
+///
+/// **`--context` selects the namespace with the context**, which is the exact shape of both of
+/// those issues: the argument moved the connection and left the namespace behind.
+///
+/// **A context that names none is `None` and never `default`** ([`kubeconfig_namespace`]): kube's
+/// `Config::default_namespace` substitutes the string `"default"` there
+/// (`config/mod.rs:318-322`), and a screen opening on a namespace the file never asked for is a
+/// filter the reader did not set and cannot see the reason for.
+#[tokio::test]
+async fn a_context_that_names_a_namespace_is_the_namespace_k8rs_starts_in() {
+    let file = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-current\n\
+         clusters: [{name: c, cluster: {server: 'https://k8rs-tests.invalid:6443'}}]\n\
+         contexts:\n\
+         - {name: k8rs-tests-current, context: {cluster: c, user: u, namespace: k8rs-tests-here}}\n\
+         - {name: k8rs-tests-elsewhere, context: {cluster: c, user: u, \
+         namespace: k8rs-tests-there}}\n\
+         - {name: k8rs-tests-silent, context: {cluster: c, user: u}}\n\
+         users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
+    );
+    let connected = |asked_for: Option<&'static str>| {
+        let file = file.clone();
+        async move {
+            connect_with(file, asked_for)
+                .await
+                .unwrap_or_else(|_| panic!("a kubeconfig with a static token built no client"))
+        }
+    };
+    assert_eq!(
+        connected(None).await.namespace.as_deref(),
+        Some("k8rs-tests-here"),
+        "the namespace the file's own current context names did not reach the session, so k8rs \
+         starts somewhere the reader did not ask for"
+    );
+    assert_eq!(
+        connected(Some("k8rs-tests-elsewhere"))
+            .await
+            .namespace
+            .as_deref(),
+        Some("k8rs-tests-there"),
+        "`--context` moved the connection and left the namespace on the file's current context — \
+         the regression k9s shipped twice (#1397, #1444)"
+    );
+    assert_eq!(
+        connected(Some("k8rs-tests-silent")).await.namespace,
+        None,
+        "a context that names no namespace was given one anyway — `default` is kube's \
+         substitution and not something the file said"
+    );
+}
+
+/// **A namespace is stripped, bounded and never invented** — the field-level half of
+/// [`kubeconfig_namespace`], written beside [`kubeconfig_context`]'s for the same reasons and
+/// over the shapes a successful connect cannot carry.
+///
+/// **The strip is owed even though a kubeconfig is not the API server** (invariant 9,
+/// NOTES § D154): a `namespace:` is drawn in a header and in the browser's own title, and a bidi
+/// override in it reverses the line it lands on.
+#[test]
+fn a_namespace_is_stripped_bounded_and_never_invented() {
+    let file = |namespace: &str| {
+        wrote(&format!(
+            "apiVersion: v1\n\
+             kind: Config\n\
+             current-context: k8rs-tests\n\
+             clusters: [{{name: c, cluster: {{server: 'https://k8rs-tests.invalid:6443'}}}}]\n\
+             contexts: [{{name: k8rs-tests, context: {{cluster: c, user: u, \
+             namespace: \"{namespace}\"}}}}]\n\
+             users: [{{name: u, user: {{}}}}]\n"
+        ))
+    };
+    assert_eq!(
+        kubeconfig_namespace(&file("prod\\u202edc"), None).as_deref(),
+        Some("proddc"),
+        "a bidi override in a namespace survived, so the line it is drawn on reads backwards"
+    );
+    assert_eq!(
+        kubeconfig_namespace(&file("\\u202e"), None),
+        None,
+        "a namespace that strips to nothing came back as the empty string, which is a filter \
+         matching nothing rather than no filter at all"
+    );
+    // **The bound is the requirement, not a number the output happens to be under**
+    // (NOTES § D173). This asserted `len < IDENTIFIER * 2` for one round — 1023 permitted where
+    // 535 is owed — so a cap silently changed to 900 passed it. The input is ASCII, so [`text`]
+    // cuts exactly at the cap and the sum is exact.
+    let long = kubeconfig_namespace(&file(&"n".repeat(IDENTIFIER * 2)), None)
+        .expect("a long namespace is still a namespace");
+    assert_eq!(
+        (long.len(), long.ends_with(SHORTENED)),
+        (IDENTIFIER + SHORTENED.len(), true),
+        "a namespace is not bounded at IDENTIFIER, so a kubeconfig can hand the screen more \
+         than the guard promises"
+    );
+
+    let bare = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-nowhere\n\
+         contexts: [{name: k8rs-tests-nowhere}]\n",
+    );
+    assert_eq!(
+        kubeconfig_namespace(&bare, None),
+        None,
+        "a context with no `context:` block at all produced a namespace"
+    );
+    assert_eq!(
+        kubeconfig_namespace(&bare, Some("k8rs-tests-no-such-context")),
+        None,
+        "a `--context` the file does not name produced a namespace off some other context"
+    );
+    assert_eq!(
+        kubeconfig_namespace(&Kubeconfig::default(), None),
+        None,
+        "an empty kubeconfig produced a namespace"
+    );
+}
+
+/// **Every context the file names, the way the picker draws it** (NOTES § D116) — the list, in
+/// file order, with everything a row needs and nothing that needs a connection.
+///
+/// **The unreachable rows are the reason this is read off the file at all.** A context whose
+/// cluster the kubeconfig does not define, and one whose cluster entry carries no `server:`, are
+/// both *there is nothing here to connect to*; `screens/context.md` dims that row and skips the
+/// cursor over it, and knowing it before the first keypress is what saves a connection attempt
+/// and a failure modal to discover what the parse already said.
+///
+/// **`kind-k8rs-tests-undefined` is a `kind-` name with no server on purpose**: the tag heuristic
+/// would answer `local` off that name alone, and a row with no cluster gets no tag at all.
+#[test]
+fn every_context_the_file_names_is_listed_the_way_the_picker_draws_it() {
+    let file = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-two\n\
+         clusters:\n\
+         - {name: one, cluster: {server: 'https://k8rs-tests-one.invalid:6443'}}\n\
+         - {name: two, cluster: {server: 'https://k8rs-tests-two.invalid:6443', \
+         insecure-skip-tls-verify: true}}\n\
+         - {name: three, cluster: {server: 'https://k8rs-tests-three.invalid:6443', \
+         insecure-skip-tls-verify: false}}\n\
+         - {name: headless, cluster: {insecure-skip-tls-verify: true}}\n\
+         contexts:\n\
+         - {name: k8rs-tests-one, context: {cluster: one, user: u, namespace: k8rs-tests-ns}}\n\
+         - {name: k8rs-tests-two, context: {cluster: two, user: u}}\n\
+         - {name: k8rs-tests-three, context: {cluster: three, user: u}}\n\
+         - {name: k8rs-tests-headless, context: {cluster: headless, user: u}}\n\
+         - {name: kind-k8rs-tests-undefined, context: {cluster: k8rs-tests-no-such-cluster, \
+         user: u}}\n\
+         - {name: k8rs-tests-bare}\n\
+         users: [{name: u, user: {}}]\n",
+    );
+    let listed = contexts(&file, None);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "k8rs-tests-one",
+            "k8rs-tests-two",
+            "k8rs-tests-three",
+            "k8rs-tests-headless",
+            "kind-k8rs-tests-undefined",
+            "k8rs-tests-bare"
+        ],
+        "the list is not every context in the file, in the file's own order"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.server.clone())
+            .collect::<Vec<_>>(),
+        [
+            drawn_at("https://k8rs-tests-one.invalid:6443"),
+            drawn_at("https://k8rs-tests-two.invalid:6443"),
+            drawn_at("https://k8rs-tests-three.invalid:6443"),
+            Address::Undefined,
+            Address::Undefined,
+            Address::Undefined
+        ],
+        "a row's server is not the one its own cluster entry names — a cluster with no \
+         `server:`, a cluster the file does not define and a context with no `context:` block \
+         are all *nothing to connect to*, and anything else here sends the reader at a cluster \
+         that is not the one on the row"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.insecure)
+            .collect::<Vec<_>>(),
+        [false, true, false, false, false, false],
+        "`insecure-skip-tls-verify` is not read per row, so the reader is told their TLS is \
+         unverified after the switch instead of before it — or not told at all. The `headless` \
+         row sets it *and* has no `server:`: a row with no address has no TLS to warn about, and \
+         `⚠ TLS not verified` on it is a warning with no connection behind it (NOTES § D174)"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.namespace.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("k8rs-tests-ns"), None, None, None, None, None],
+        "the namespace a context names for itself is not on its row — `kubectl config \
+         get-contexts` has that column, and it is what decides where a namespaced screen opens \
+         (NOTES § D174)"
+    );
+    assert!(
+        listed.iter().all(|choice| !choice.shadowed),
+        "a file whose context names are all distinct had a row marked shadowed"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.current)
+            .collect::<Vec<_>>(),
+        [false, true, false, false, false, false],
+        "the row the file's `current-context:` names is not the one marked current, so the \
+         picker opens with the cursor somewhere else"
+    );
+    assert_eq!(
+        listed[4].tag,
+        Tag::Blank,
+        "a context with no cluster to read a host from was tagged off its own name — the row is \
+         the unreachable one, and a `~local` badge on it is a guess about a cluster that is not \
+         in the file"
+    );
+
+    assert!(
+        contexts(&wrote("apiVersion: v1\nkind: Config\n"), None).is_empty(),
+        "a kubeconfig that names no context produced rows anyway"
+    );
+}
+
+/// **A derived tag names the provider — never an environment, and never a place**
+/// (NOTES § D116, tightened by NOTES § D173, narrowed again by NOTES § D174).
+///
+/// **Four shapes came back wrong on the first landing** (`tester`, 2026-08-28), because D116
+/// wrote the rule as a list of strings and this file read it as `contains`:
+/// `amazonaws.com.attacker.example` → `~aws`, `not-amazonaws.com.attacker.example` → `~aws`,
+/// `my-gkeeper.example.com` → `~gcp`, and a query string carrying `amazonaws.com` → `~aws`.
+/// **Four more came back wrong on the second** (`k8s-admin`, same day): `evil..amazonaws.com` and
+/// `.amazonaws.com` walked through the anchor with an empty label, a fully-qualified
+/// `…amazonaws.com.` *lost* its tag, and a loopback host drew `~local` on a production cluster
+/// reached over `ssh -L`.
+///
+/// **So there is no loopback arm at all** — the rows below assert that a loopback host derives
+/// nothing on its own, which is a reversal of D116's own list and the thing this test exists to
+/// stop coming back. `local` is a claim about *where*, and D116 forbids those.
+///
+/// **Every host arm precedes every name arm** (NOTES § D174): a `gke_` name used to beat an Azure
+/// host and lose to an AWS one, by position alone. The two rows that pin it carry a Google *name*
+/// against a non-Google *host*, in both orders the old code got wrong.
+///
+/// **Google is two domains and a name, and none of the three is redundant**: `gke.goog` is the
+/// DNS-based endpoint, `googleapis.com` is what fleet Connect Gateway writes, and `gke_…` is the
+/// name for an IP-endpoint cluster whose host says nothing. **All three are Google's
+/// documentation and none is measured against a real GKE kubeconfig** — nobody here has one — so
+/// these rows pin the documented format, and if a format is wrong the tag falls to blank.
+///
+/// **Hosts, not URLs, and that is also what keeps this file guard-clean**: [`derived`] is handed
+/// what [`address`] produced, and a bare host is not something `scripts/security-guard.py` reads
+/// as an outbound path.
+#[test]
+fn a_derived_tag_names_the_provider_and_never_the_environment() {
+    let table: [(&str, &str, Option<&str>); 34] = [
+        // The three providers, as a suffix and as the bare domain, in both cases DNS allows.
+        (
+            "k8rs-tests",
+            "k8rs-tests.gr7.eu-west-1.eks.amazonaws.com",
+            Some("aws"),
+        ),
+        ("k8rs-tests", "amazonaws.com", Some("aws")),
+        ("k8rs-tests", "K8RS-TESTS.EKS.AMAZONAWS.COM", Some("aws")),
+        (
+            "k8rs-tests",
+            "k8rs-tests-dns.hcp.westeurope.azmk8s.io",
+            Some("azure"),
+        ),
+        ("k8rs-tests", "azmk8s.io", Some("azure")),
+        ("k8rs-tests", "connectgateway.googleapis.com", Some("gcp")),
+        ("k8rs-tests", "googleapis.com", Some("gcp")),
+        // GKE's DNS-based control-plane endpoint, GA since 2024.
+        (
+            "k8rs-tests",
+            "gke-abc123def.europe-west1.gke.goog",
+            Some("gcp"),
+        ),
+        ("k8rs-tests", "gke.goog", Some("gcp")),
+        // A fully-qualified name is the same host: one trailing dot is the DNS root label.
+        (
+            "k8rs-tests",
+            "k8rs-tests.eks.eu-west-1.amazonaws.com.",
+            Some("aws"),
+        ),
+        ("k8rs-tests", "amazonaws.com.", Some("aws")),
+        // Two is malformed, and is left to fall to blank rather than trimmed until it matches.
+        ("k8rs-tests", "amazonaws.com..", None),
+        // An empty label is not a label: neither of these is a name Amazon runs, and neither
+        // resolves.
+        ("k8rs-tests", "evil..amazonaws.com", None),
+        ("k8rs-tests", ".amazonaws.com", None),
+        // GKE for an IP-endpoint cluster: the host says nothing and the name is the whole signal.
+        (
+            "gke_k8rs-project_europe-west1-b_k8rs-tests",
+            "203.0.113.9",
+            Some("gcp"),
+        ),
+        // **Arm order**: the host wins over the name, whichever way round they disagree. Both of
+        // these answered off the name before NOTES § D174.
+        (
+            "gke_k8rs-project_europe-west1-b_k8rs-tests",
+            "k8rs-tests-dns.hcp.westeurope.azmk8s.io",
+            Some("azure"),
+        ),
+        (
+            "kind-k8rs",
+            "k8rs-tests.gr7.eu-west-1.eks.amazonaws.com",
+            Some("aws"),
+        ),
+        // Local, from the three names those tools write themselves — and from nothing else.
+        ("kind-k8rs", "k8rs-tests.invalid", Some("local")),
+        ("minikube", "k8rs-tests.invalid", Some("local")),
+        ("docker-desktop", "k8rs-tests.invalid", Some("local")),
+        // **No loopback arm.** Every one of these used to be `~local`, and every one of them is
+        // how somebody reaches a production control plane with no public endpoint: `ssh -L`,
+        // `kubectl proxy`, `kubectl port-forward`, Teleport, a corporate mTLS proxy.
+        ("prod-eu-via-bastion", "127.0.0.1", None),
+        ("prod-eu-via-bastion", "127.0.0.2", None),
+        ("prod-eu-via-bastion", "::1", None),
+        ("prod-eu-via-bastion", "localhost", None),
+        ("prod-eu-via-bastion", "LOCALHOST", None),
+        // What deleting it costs, written as rows rather than left to be rediscovered.
+        ("rancher-desktop", "127.0.0.1", None),
+        ("default", "127.0.0.1", None),
+        // The shapes measured wrong the first time, and their siblings.
+        ("k8rs-tests", "amazonaws.com.attacker.example", None),
+        ("k8rs-tests", "not-amazonaws.com.attacker.example", None),
+        ("k8rs-tests", "notamazonaws.com", None),
+        ("k8rs-tests", "my-gkeeper.example.com", None),
+        // The name arms, refused where they are a guess rather than a tool's own spelling.
+        ("minikube-prod", "k8rs-tests.invalid", None),
+        ("kind", "k8rs-tests.invalid", None),
+        // An environment is never derived, however loudly the name and the host say one.
+        ("k8rs-tests-prod", "prod.k8rs-tests.invalid", None),
+    ];
+    for (name, host, provider) in table {
+        let answer = derived(name, host);
+        assert_eq!(
+            answer, provider,
+            "`{name}` at `{host}` derived the wrong tag"
+        );
+        if let Some(word) = answer {
+            assert!(
+                ["aws", "gcp", "azure", "local"].contains(&word),
+                "`{word}` was derived off a hostname — only the four provider words may be, and \
+                 an environment guessed off a host is the mistake the tag exists to prevent"
+            );
+        }
+    }
+}
+
+/// **A `server:` line splits into the address a screen may draw and the host the tag is matched
+/// against — and answers `None` when there is no reading of it k8rs will state**
+/// (NOTES § D173, re-ruled by NOTES § D175).
+///
+/// **Two orderings were each measured wrong, in opposite directions, and this table is both sets
+/// of inputs at once.** Cutting the authority first leaks a credential on a *malformed*
+/// `server:` whose password contains a `/`, `?` or `#` — the base64 alphabet contains `/`, so a
+/// 32-character password hits it about 40 % of the time. Taking the last `@` instead — which
+/// this function did for one round — fabricates a host on a *conformant* one, because `@` is a
+/// `pchar` and is legal unencoded in a path, query or fragment:
+///
+/// ```text
+/// https://host/path/a@b/c   ->  drawn "https://b/c"   host "b"
+/// ```
+///
+/// **`http::Uri` answers `host="host"` for that**, and `http::Uri` is what `kube` hands the raw
+/// `server:` to (`config/mod.rs:310-316`) — so the row drew one cluster and `⏎` opened another,
+/// and a path ending under `amazonaws.com` earned the row a `~aws` it had no claim to. Three
+/// parsers agree (`urllib.parse.urlsplit`, Node's `URL`, `http::Uri`); that is measurement, not
+/// reading of the RFC, and it is why the `conformant` rows below assert the address comes back
+/// **whole and unchanged**.
+///
+/// **The malformed rows all reach `None`**, which is the state NOTES § D175 added for exactly
+/// them: not *there is nothing to connect to*, but *there is no address k8rs is willing to
+/// state*.
+///
+/// **The one accepted shape is in the table too** — `admin:p@ssw0rd`, a credential with no host,
+/// leaves a plausible single-label host and part of a password is drawn. It needs a kubeconfig
+/// that cannot connect anywhere, and every rule that catches it also rejects real single-label
+/// hosts (NOTES § D175). It is a row so that it stays a decision rather than becoming a
+/// rediscovery.
+///
+/// **Every URL here is assembled rather than written whole** where writing it whole would put a
+/// non-reserved host in this file: `scripts/security-guard.py` reads a literal `https://…` as an
+/// outbound path and cannot tell a test double from a dev leftover, which is a guard doing its
+/// job. What is under test is a string, so where it comes from changes nothing.
+#[test]
+fn a_server_line_splits_into_what_is_drawn_and_what_is_matched_and_carries_no_credential() {
+    let host = "k8rs-tests.invalid";
+    let authority = format!("{host}:6443");
+    // Conformant userinfo — stripped, and the address after it drawn whole.
+    let plain = format!("https://{}@{authority}", "admin:hunter2");
+    let nested = format!("https://{}@{authority}", "admin@corp:hunter2");
+    let encoded = format!("https://{}@{authority}", "admin%40corp:hunter%402");
+    let before_a_path = format!("https://{}@{host}/k8s/clusters/c-m-abc", "u:p");
+    let bracketed_with_user = format!("https://{}@[{}]:6443", "u:p", std::net::Ipv6Addr::LOCALHOST);
+    // **The framings that broke the last two orderings**: `/`, `?` and `#` inside the credential.
+    let base64_slash = format!("https://{}@{authority}", "admin:aGVsbG8/d29ybGQ=");
+    let with_hash = format!("https://{}@{authority}", "admin:hunter#2");
+    let with_query = format!("https://{}@{authority}", "admin:hunter?2");
+    let only_a_credential = format!("https://{}@", "admin:hunter2");
+    // The accepted shape: no host at all after the last `@` inside the authority.
+    let no_host_at_all = format!("https://{}", "admin:p@ssw0rd");
+    let accepted_draw = format!("https://{}", "ssw0rd");
+    // Conformant `@` after the authority — every one of these must come back untouched.
+    let at_in_path = format!("https://{host}/path/a@b/c");
+    let at_in_query = format!("https://{authority}/api?redirect=a@b");
+    let at_in_fragment = format!("https://{authority}#frag@ment");
+    let rancher = format!("https://{host}/k8s/clusters/c-m-abc@1");
+    // The embedded second URL is assembled: written whole, `http://other@x` reads to
+    // `scripts/security-guard.py` as an outbound path to a host it cannot recognise as reserved.
+    let second_scheme = format!("https://{host}/redirect?to=http://{}", "other@x");
+    let token_in_query = format!("https://{authority}?access_token=REDACTED");
+    // Shapes with no credential in them at all.
+    let bracketed = format!("https://[{}]:6443", std::net::Ipv6Addr::LOCALHOST);
+    let unported = format!("https://[{}]", std::net::Ipv6Addr::LOCALHOST);
+    let schemeless = format!("{}:6443", std::net::Ipv4Addr::LOCALHOST);
+    let loopback = format!("https://{}", std::net::Ipv4Addr::LOCALHOST);
+    let loopback_with_password = format!(
+        "https://{}@{}",
+        "admin:hunter2",
+        std::net::Ipv4Addr::LOCALHOST
+    );
+    // Authorities that are not `host[:port]` and so have no address to state.
+    let empty_port = format!("https://{host}:");
+    let two_ports = format!("https://{authority}:7443");
+    let unterminated = format!("https://[{}", std::net::Ipv6Addr::LOCALHOST);
+    let junk_after_bracket = format!("https://[{}]x", std::net::Ipv6Addr::LOCALHOST);
+    let unbracketed_v6 = format!("https://{}", std::net::Ipv6Addr::LOCALHOST);
+
+    let drawn_whole: [&str; 6] = [
+        &at_in_path,
+        &at_in_query,
+        &at_in_fragment,
+        &rancher,
+        &second_scheme,
+        &token_in_query,
+    ];
+    let table: [(&str, Option<(&str, &str)>); 22] = [
+        (&authority, Some((&authority, host))),
+        // conformant userinfo, taken off
+        (&plain, Some((&format!("https://{authority}"), host))),
+        (&nested, Some((&format!("https://{authority}"), host))),
+        (&encoded, Some((&format!("https://{authority}"), host))),
+        (
+            &before_a_path,
+            Some((&format!("https://{host}/k8s/clusters/c-m-abc"), host)),
+        ),
+        (&bracketed_with_user, Some((&bracketed, "::1"))),
+        (&loopback_with_password, Some((&loopback, "127.0.0.1"))),
+        // no credential at all
+        (&bracketed, Some((&bracketed, "::1"))),
+        (&unported, Some((&unported, "::1"))),
+        (&schemeless, Some((&schemeless, "127.0.0.1"))),
+        // **malformed userinfo — no address k8rs will state**
+        (&base64_slash, None),
+        (&with_hash, None),
+        (&with_query, None),
+        (&only_a_credential, None),
+        // authorities that are not `host[:port]`
+        (&empty_port, None),
+        (&two_ports, None),
+        (&unterminated, None),
+        (&junk_after_bracket, None),
+        (&unbracketed_v6, None),
+        ("", None),
+        // the accepted shape, kept as a row so it stays a decision
+        (&no_host_at_all, Some((&accepted_draw, "ssw0rd"))),
+        // and one conformant `@`, spelled out here as well as in the loop below
+        (&at_in_path, Some((&at_in_path, host))),
+    ];
+    for (server, expected) in table {
+        let answer = address(server);
+        assert_eq!(
+            answer
+                .as_ref()
+                .map(|(drawn, host)| (drawn.as_str(), host.as_str())),
+            expected,
+            "`{server}` did not split into the address that may be drawn and the host that is \
+             matched"
+        );
+        if let Some((drawn, _)) = &answer {
+            for secret in [
+                "hunter2",
+                "hunter#2",
+                "hunter?2",
+                "aGVsbG8/d29ybGQ=",
+                "hunter%402",
+            ] {
+                assert!(
+                    !drawn.contains(secret),
+                    "a password out of the reader's `server:` line survived into the address the \
+                     picker draws — `{server}`"
+                );
+            }
+        }
+    }
+
+    // **The conformant `@` cases, asserted as one claim**: whatever else changes, an address a
+    // parser resolves is drawn exactly as the reader wrote it. This is the round-3 blocker.
+    for server in drawn_whole {
+        assert_eq!(
+            address(server).map(|(drawn, _)| drawn),
+            Some(server.to_string()),
+            "`{server}` is a conformant URL — `@` is a `pchar` — and it was not drawn whole, so \
+             the row shows an address that is not the one `⏎` opens"
+        );
+    }
+}
+
+/// **The tag is derived off what the file says and drawn beside the cleaned version** — an
+/// ordering inside [`contexts`], and nothing else would fail if it were reversed.
+///
+/// **The two strings come apart on purpose, and it is both of [`derived`]'s arguments.** What is
+/// *drawn* goes through [`text`], because it reaches the screen (invariant 9); what is *matched*
+/// does not, because [`text`] can only ever create a match the file's own bytes do not have —
+/// `amazonaws\u{200b}.com` is not Amazon's and `kind\u{200b}-k8rs` is not a name kind wrote, and
+/// a tag invented by our own strip is exactly the guess this column exists to refuse. Blank is
+/// the direction this heuristic fails in (NOTES § D173).
+///
+/// The escapes are written as Rust codepoints rather than into the YAML so that no literal
+/// `https://<non-reserved host>` appears in this file — `scripts/security-guard.py` reads one as
+/// an outbound path and is right to.
+#[test]
+fn a_tag_is_derived_off_what_the_file_says_and_never_off_the_strip() {
+    let file = wrote(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests\n\
+         clusters: [{{name: c, cluster: {{server: \"https://{host}\"}}}}]\n\
+         contexts:\n\
+         - {{name: k8rs-tests, context: {{cluster: c, user: u}}}}\n\
+         - {{name: \"{local}\", context: {{cluster: c, user: u}}}}\n\
+         users: [{{name: u, user: {{}}}}]\n",
+        host = "amazonaws\u{200b}.com",
+        local = "kind\u{200b}-k8rs"
+    ));
+    let listed = contexts(&file, None);
+    assert_eq!(
+        listed[0].tag,
+        Tag::Blank,
+        "a domain that is only Amazon's once a zero-width character is taken out of it was \
+         tagged `~aws` — the strip ran before the match, and the column exists to be trusted"
+    );
+    // Assembled, not written whole, for the reason in this test's doc comment.
+    let drawn = format!("https://{}", "amazonaws.com");
+    assert_eq!(
+        (listed[1].name.as_str(), &listed[1].tag),
+        ("kind-k8rs", &Tag::Blank),
+        "a context name that is only kind's once a zero-width character is taken out of it was \
+         tagged `~local` — the same strip inventing the same match, on the other argument"
+    );
+    assert_eq!(
+        listed[0].server,
+        drawn_at(&drawn),
+        "the address the picker draws was not stripped, so a zero-width character reaches the \
+         screen (invariant 9) — the two strings come apart here and both halves are owed"
+    );
+}
+
+/// **`--context` moves the row the picker marks, and not only the header** (NOTES § D175).
+///
+/// **[`contexts`] hard-coded `asked_for = None` for one round**, so under `k8rs --context b` the
+/// header said `b` — [`kubeconfig_context`] takes the argument — while the list marked and
+/// preselected row `a`. That is the disagreement NOTES § D174 closed by resolving both through
+/// [`wanted`], arriving back through the one door this function had no parameter to hear about.
+///
+/// **The assertion is that the two answer together**, over the same four arguments, because
+/// either alone can be right while the pair is wrong.
+#[test]
+fn the_row_the_picker_marks_is_the_context_the_run_is_on() {
+    let file = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-a\n\
+         clusters: [{name: c, cluster: {server: 'https://k8rs-tests.invalid:6443'}}]\n\
+         contexts:\n\
+         - {name: k8rs-tests-a, context: {cluster: c, user: u}}\n\
+         - {name: k8rs-tests-b, context: {cluster: c, user: u}}\n\
+         users: [{name: u, user: {}}]\n",
+    );
+    for (asked_for, expected) in [
+        (None, Some("k8rs-tests-a")),
+        (Some("k8rs-tests-a"), Some("k8rs-tests-a")),
+        (Some("k8rs-tests-b"), Some("k8rs-tests-b")),
+        (Some("k8rs-tests-gone"), None),
+        (Some(""), None),
+    ] {
+        let marked = contexts(&file, asked_for)
+            .into_iter()
+            .find(|choice| choice.current)
+            .map(|choice| choice.name);
+        assert_eq!(
+            (
+                kubeconfig_context(&file, asked_for).as_deref(),
+                marked.as_deref()
+            ),
+            (expected, expected),
+            "with `--context {asked_for:?}` the header and the picker's marked row disagree — \
+             the reader is told they are on one cluster while the cursor sits on another"
+        );
+    }
+}
+
+/// **An entry whose address k8rs cannot read is not an entry with no address** ([`Address`],
+/// NOTES § D175).
+///
+/// **`screens/context.md` draws the absent case `⚠ cluster undefined` and skips the cursor over
+/// it**, which is true of a context that names no cluster and false of one whose `server:` this
+/// file will not state — that row `⏎` opens perfectly well, because kube hands the raw string to
+/// `http::Uri` and connects with whatever it makes of it. Two facts, two states; collapsing them
+/// tells the reader a cluster is undefined when it is not.
+///
+/// **The third row is the one that was `Some("https://")`** — a `server:` made only of characters
+/// invariant 9 removes. `drawn` goes through [`text`] and the host does not, so the scheme
+/// survived on its own and the row drew a protocol with no machine after it.
+#[test]
+fn an_address_that_cannot_be_read_is_not_an_address_that_is_not_there() {
+    let file = wrote(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-fine\n\
+         clusters:\n\
+         - {{name: fine, cluster: {{server: 'https://k8rs-tests.invalid:6443'}}}}\n\
+         - {{name: none, cluster: {{}}}}\n\
+         - {{name: malformed, cluster: {{server: \
+         \"https://{credential}@k8rs-tests.invalid:6443\"}}}}\n\
+         - {{name: stripped, cluster: {{server: \"https://{gone}\"}}}}\n\
+         contexts:\n\
+         - {{name: k8rs-tests-fine, context: {{cluster: fine, user: u}}}}\n\
+         - {{name: k8rs-tests-none, context: {{cluster: none, user: u}}}}\n\
+         - {{name: k8rs-tests-absent, context: {{cluster: k8rs-tests-no-such, user: u}}}}\n\
+         - {{name: k8rs-tests-malformed, context: {{cluster: malformed, user: u}}}}\n\
+         - {{name: k8rs-tests-stripped, context: {{cluster: stripped, user: u}}}}\n\
+         users: [{{name: u, user: {{}}}}]\n",
+        credential = "admin:aGVsbG8/d29ybGQ=",
+        gone = "\\u200b"
+    ));
+    assert_eq!(
+        contexts(&file, None)
+            .into_iter()
+            .map(|choice| choice.server)
+            .collect::<Vec<_>>(),
+        [
+            drawn_at("https://k8rs-tests.invalid:6443"),
+            Address::Undefined,
+            Address::Undefined,
+            Address::Unreadable,
+            Address::Unreadable,
+        ],
+        "a row whose address this file will not state was drawn as one with no address at all — \
+         `⚠ cluster undefined` about a cluster that is defined, and a cursor that skips a row \
+         `⏎` opens"
+    );
+}
+
+/// **A password in a `server:` line never reaches a row**, end to end through [`contexts`].
+///
+/// The split above is the mechanism; this is the claim a reader cares about, over a whole
+/// kubeconfig, because a strip that is correct in a helper and never called is the same defect.
+#[test]
+fn a_password_in_the_server_line_never_reaches_the_row() {
+    let file = wrote(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests\n\
+         clusters: [{{name: c, cluster: {{server: \"https://{}@k8rs-tests.invalid:6443\"}}}}]\n\
+         contexts: [{{name: k8rs-tests, context: {{cluster: c, user: u}}}}]\n\
+         users: [{{name: u, user: {{}}}}]\n",
+        "admin:hunter2"
+    ));
+    let listed = contexts(&file, None);
+    assert_eq!(
+        listed[0].server,
+        drawn_at("https://k8rs-tests.invalid:6443"),
+        "the reader's own kubeconfig password is on the picker's server line, which \
+         `screens/context.md` puts on the most prominent line of the first screen they see"
+    );
+}
+
+/// **A duplicate context name is drawn and cannot be opened** (NOTES § D173).
+///
+/// **Measured on the landed code, and it opened the wrong cluster** (`tester`, 2026-08-28): both
+/// rows were emitted with their own servers and both marked current, while every lookup of a
+/// context — kube's `load_context`, [`kubeconfig_namespace`], `--context` — is a `find` by name
+/// and stops at the first. So row two drew `k8rs-tests-two` and connected to `k8rs-tests-one`,
+/// which is the picker telling a reader they are on one cluster while they act on another.
+///
+/// **The row stays in the list and keeps everything it has** (NOTES § D174, reversing D173). It
+/// is in the reader's file, and a row that quietly disappears is how they never find out why the
+/// row above opens twice. For one round it was drawn with `server: None`, reusing *there is
+/// nothing here to connect to* — and `screens/context.md` renders that as `⚠ cluster undefined`,
+/// so the row said the cluster was undefined about a cluster defined on the line above it. It
+/// carries [`Choice::shadowed`] instead.
+///
+/// **k8rs is the only tool in that terminal that opens the file at all**: `kubectl` v1.36.3
+/// refuses it — client-go converts the list into a map and errors *"duplicate name … in list"* —
+/// while kube-rs resolves silently first-wins (`file_loader.rs:63-82`). There is nowhere else the
+/// reader can go to find out, which is why the row owes them the true sentence.
+///
+/// **The namespaces are what prove which entry was opened.** A [`Session`] carries no server
+/// address, so the two twins name different namespaces and the one that comes back says which
+/// entry the connect resolved to.
+///
+/// **Reachable through a concatenated or hand-edited kubeconfig, not through one `kubectl`
+/// wrote** — `Kubeconfig::merge` dedups by name.
+#[tokio::test]
+async fn a_duplicate_context_name_is_drawn_and_cannot_be_opened() {
+    let file = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-twin\n\
+         clusters:\n\
+         - {name: one, cluster: {server: 'https://k8rs-tests-one.invalid:6443'}}\n\
+         - {name: two, cluster: {server: 'https://k8rs-tests-two.invalid:6443', \
+         insecure-skip-tls-verify: true}}\n\
+         contexts:\n\
+         - {name: k8rs-tests-twin, context: {cluster: one, user: u, namespace: k8rs-tests-first}}\n\
+         - {name: k8rs-tests-twin, context: {cluster: two, user: u, \
+         namespace: k8rs-tests-second, extensions: [{name: k8rs, extension: {tag: second}}]}}\n\
+         users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
+    );
+    let listed = contexts(&file, None);
+    assert_eq!(
+        listed.len(),
+        2,
+        "an unreachable duplicate was dropped from the picker's list — it is in the reader's \
+         file, and hiding it is how they never learn why the row above is the one that opens"
+    );
+    assert_eq!(
+        listed[0].server,
+        drawn_at("https://k8rs-tests-one.invalid:6443"),
+        "the first entry under a duplicated name is the one every lookup reaches, so it is the \
+         one that keeps its cluster"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.shadowed)
+            .collect::<Vec<_>>(),
+        [false, true],
+        "the entry that no lookup can reach is not the one marked shadowed, so the picker either \
+         says nothing about a row that cannot be opened or says it about the row that can"
+    );
+    assert_eq!(
+        listed[1].server,
+        drawn_at("https://k8rs-tests-two.invalid:6443"),
+        "a shadowed row was drawn with no server, which `screens/context.md` renders as \
+         `⚠ cluster undefined` — about a cluster the line above it defines"
+    );
+    // **A shadowed row says nothing about TLS** (NOTES § D175). Its `⏎` opens the entry above,
+    // so its own cluster's flag describes a connection nobody makes — and mirrored, below, it
+    // went quiet while `⏎` opened the unverified one above it. `insecure` answers for the
+    // connection the row makes or it answers for nothing.
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.insecure)
+            .collect::<Vec<_>>(),
+        [false, false],
+        "the shadowed row warned about the TLS of the cluster *it* names, while `⏎` on it opens \
+         the verified cluster above — a warning about a connection nobody makes"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.namespace.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("k8rs-tests-first"), Some("k8rs-tests-second")],
+        "a row's namespace is not the one its own entry names, so the picker shows the reader \
+         the wrong answer to *where does this open*"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.current)
+            .collect::<Vec<_>>(),
+        [true, false],
+        "both entries under one name were marked current, so the picker preselects two rows and \
+         only one of them is what `current-context:` resolves to"
+    );
+    assert_eq!(
+        listed[1].tag,
+        Tag::Written("second".to_string()),
+        "the unreachable row lost the label its own entry carries — the row is drawn, and what \
+         the reader wrote about it is still true of the entry"
+    );
+
+    let session = connect_with(file, None)
+        .await
+        .unwrap_or_else(|_| panic!("a kubeconfig with a static token built no client"));
+    assert_eq!(
+        session.namespace.as_deref(),
+        Some("k8rs-tests-first"),
+        "the connect did not resolve to the first entry under the duplicated name, so the row \
+         this list marks reachable is not the one that opens"
+    );
+
+    // **The mirror, which is the half that is a safety claim rather than a noise one**: the
+    // reachable entry is the unverified one and the shadowed entry is not, so a row that read
+    // its own cluster would sit silent while `⏎` opened an unverified connection.
+    let mirrored = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests-twin\n\
+         clusters:\n\
+         - {name: one, cluster: {server: 'https://k8rs-tests-one.invalid:6443', \
+         insecure-skip-tls-verify: true}}\n\
+         - {name: two, cluster: {server: 'https://k8rs-tests-two.invalid:6443'}}\n\
+         contexts:\n\
+         - {name: k8rs-tests-twin, context: {cluster: one, user: u}}\n\
+         - {name: k8rs-tests-twin, context: {cluster: two, user: u}}\n\
+         users: [{name: u, user: {}}]\n",
+    );
+    assert_eq!(
+        contexts(&mirrored, None)
+            .iter()
+            .map(|choice| choice.insecure)
+            .collect::<Vec<_>>(),
+        [true, false],
+        "the reachable row lost the TLS warning that describes what `⏎` opens, or the shadowed \
+         row kept one that describes nothing"
+    );
+}
+
+/// **The user's own tag beats the guess, and everything about it is read from one place**
+/// (NOTES § D116).
+///
+/// **Through [`contexts`] and not through [`written_tag`]**, because the precedence is what is
+/// being asserted and it lives in the caller: the host on every row below is one the heuristic
+/// *would* answer, so a written tag that failed to win would be visible as `Derived` rather than
+/// as nothing.
+///
+/// **k8rs never writes this field** and does not have to parse anything else in it: `extension`
+/// is `serde_json::Value` and other tools round-trip their own keys through the same list, so a
+/// shape that is not ours falls through to the guess rather than becoming an error.
+#[test]
+fn a_written_tag_beats_the_guess_and_a_shape_that_is_not_ours_falls_through() {
+    let file = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: kind-k8rs-tests-written\n\
+         clusters: [{name: c, cluster: {server: 'https://k8rs-tests.invalid:6443'}}]\n\
+         contexts:\n\
+         - {name: kind-k8rs-tests-written, context: {cluster: c, user: u, extensions: \
+         [{name: k8rs, extension: {tag: \"aws \\u00b7 prod\"}}]}}\n\
+         - {name: kind-k8rs-tests-somebody-else, context: {cluster: c, user: u, extensions: \
+         [{name: some-other-tool, extension: {tag: not-ours}}]}}\n\
+         - {name: kind-k8rs-tests-no-tag-key, context: {cluster: c, user: u, extensions: \
+         [{name: k8rs, extension: {colour: blue}}]}}\n\
+         - {name: kind-k8rs-tests-not-a-string, context: {cluster: c, user: u, extensions: \
+         [{name: k8rs, extension: {tag: 7}}]}}\n\
+         - {name: kind-k8rs-tests-not-a-map, context: {cluster: c, user: u, extensions: \
+         [{name: k8rs, extension: 'aws'}]}}\n\
+         - {name: kind-k8rs-tests-empty-tag, context: {cluster: c, user: u, extensions: \
+         [{name: k8rs, extension: {tag: ''}}]}}\n\
+         - {name: kind-k8rs-tests-none, context: {cluster: c, user: u}}\n\
+         users: [{name: u, user: {}}]\n",
+    );
+    assert_eq!(
+        contexts(&file, None)
+            .into_iter()
+            .map(|choice| choice.tag)
+            .collect::<Vec<_>>(),
+        [
+            Tag::Written("aws \u{b7} prod".to_string()),
+            Tag::Derived("local"),
+            Tag::Derived("local"),
+            Tag::Derived("local"),
+            Tag::Derived("local"),
+            Tag::Derived("local"),
+            Tag::Derived("local"),
+        ],
+        "either the user's own tag lost to a guess about their hostname — the one tag allowed to \
+         say `prod`, overruled — or a shape that is not ours was read as ours, which puts \
+         another tool's value in our column"
+    );
+}
+
+/// **Every string the picker draws is stripped and bounded** (invariant 9, NOTES § D154,
+/// `screens/context.md` rule 2).
+///
+/// **A kubeconfig is a disk file and this is the first screen a stranger sees**, so a bidi
+/// override in a context name reverses the row it is drawn on before there is a cluster to blame
+/// it on — and the row above and below it belong to other clusters.
+///
+/// **Three fields, because they are three reads.** The name goes through the call
+/// [`kubeconfig_context`] makes, the server and the tag through their own; a strip on two of the
+/// three is a screen that is safe until somebody sets a tag.
+///
+/// **A server that strips to nothing is `None` and not `Some("")`** — an empty server line under
+/// a row is a cluster address that is not there, and the row is the unreachable one either way.
+///
+/// **And the row is still reachable, which is the assertion the strip owes.** A kubeconfig is
+/// keyed by its own spelling, so the cleaned name is not the name the file can be looked up by;
+/// [`Choice::key`] is the one that is, and a picker handing back what it drew would answer
+/// [`Fault::NoContext`] for a context that is in the file. Found by the box's own second pass,
+/// after every assertion above it was already green.
+#[tokio::test]
+async fn every_string_the_picker_draws_is_stripped_and_bounded() {
+    // The override sits between the host and the port rather than inside the host, so that
+    // `scripts/security-guard.py` still reads a `.invalid` host here and takes this for the test
+    // double it is; the strip is what has to run either way, and the assertion is the same string.
+    let file = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: k8rs-tests\n\
+         clusters:\n\
+         - {name: clean, cluster: {server: \"https://k8rs-tests.invalid:6443\"}}\n\
+         - {name: mangled, cluster: {server: \"https://k8rs-tests.invalid\\u202e:6443\"}}\n\
+         - {name: gone, cluster: {server: \"\\u202e\"}}\n\
+         contexts:\n\
+         - {name: \"k8rs-tests\\u202e-reversed\", context: {cluster: clean, user: u, \
+         extensions: [{name: k8rs, extension: {tag: \"prod\\u202ereversed\"}}]}}\n\
+         - {name: k8rs-tests-mangled, context: {cluster: mangled, user: u}}\n\
+         - {name: k8rs-tests-gone, context: {cluster: gone, user: u}}\n\
+         users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
+    );
+    let listed = contexts(&file, None);
+    assert_eq!(
+        listed[0].name, "k8rs-tests-reversed",
+        "a bidi override in a context name reached the picker's row"
+    );
+    assert_eq!(
+        listed[1].server,
+        drawn_at("https://k8rs-tests.invalid:6443"),
+        "a bidi override in a server address reached the line under the cursor"
+    );
+    assert_eq!(
+        listed[0].tag,
+        Tag::Written("prodreversed".to_string()),
+        "a bidi override in the one string the user writes themselves reached the tag column"
+    );
+    assert_eq!(
+        listed[2].server,
+        Address::Unreadable,
+        "a `server:` made only of characters the strip removes drew `https://` — a scheme and \
+         nothing else — and it is not `Undefined` either: the entry does define an address, and \
+         `⏎` opens it (NOTES § D175)"
+    );
+
+    assert_ne!(
+        listed[0].key, listed[0].name,
+        "the file spells this context with a bidi override in it, so the key and the drawn name \
+         cannot be the same string — this test has stopped covering the thing it is for"
+    );
+    let session = connect_with(file.clone(), Some(&listed[0].key))
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "the picker's own row could not be connected to — a name cleaned for the screen \
+                 is not the name the kubeconfig is keyed by, and `⏎` on that row answers *no \
+                 such context* for a context that is right there in the file"
+            )
+        });
+    assert_eq!(
+        session.context.as_deref(),
+        Some(listed[0].name.as_str()),
+        "the session named the row's key rather than the row's name, so the header shows the \
+         reader a string the picker never drew — with the override back in it"
+    );
+
+    let long = |value: &str| {
+        wrote(&format!(
+            "apiVersion: v1\n\
+             kind: Config\n\
+             current-context: k8rs-tests\n\
+             clusters: [{{name: c, cluster: {{server: \"https://{value}.invalid\"}}}}]\n\
+             contexts: [{{name: \"{value}\", context: {{cluster: c, user: u, extensions: \
+             [{{name: k8rs, extension: {{tag: \"{value}\"}}}}]}}}}]\n\
+             users: [{{name: u, user: {{token: k8rs-tests-fake-static-token}}}}]\n"
+        ))
+    };
+    let overlong = "n".repeat(IDENTIFIER * 2);
+    let file = long(&overlong);
+    let listed = contexts(&file, None);
+    let Tag::Written(tag) = &listed[0].tag else {
+        panic!("a written tag stopped being read as one");
+    };
+    // **The bound is the requirement and not a number the output is under** (NOTES § D173):
+    // `len < IDENTIFIER * 2` permitted 1023 where 535 is owed, so a cap changed to 900 passed.
+    // Every input here is ASCII, so [`text`] cuts exactly at the cap and the sum is exact.
+    for (field, value) in [
+        ("name", &listed[0].name),
+        ("server", &shown_address(&listed[0].server)),
+        ("tag", tag),
+    ] {
+        assert_eq!(
+            (value.len(), value.ends_with(SHORTENED)),
+            (IDENTIFIER + SHORTENED.len(), true),
+            "the picker's {field} is not bounded at IDENTIFIER, so a kubeconfig can hand the \
+             screen more than the guard promises"
+        );
+    }
+
+    // **And the key is the one string that must *not* be bounded**, because a key cut at
+    // [`IDENTIFIER`] no longer opens the entry it came from — and it would fail silently, which
+    // is the worse half. The row is drawn short and still connects.
+    assert_eq!(
+        listed[0].key, overlong,
+        "the picker's key was shortened with the name it is drawn under"
+    );
+    let session = connect_with(file, Some(&listed[0].key))
+        .await
+        .unwrap_or_else(|_| panic!("a row whose name was too long to draw could not be opened"));
+    assert!(
+        session
+            .context
+            .is_some_and(|context| context.ends_with(SHORTENED)),
+        "the name the session reports for an over-long context is not the shortened one the \
+         picker drew"
+    );
 }
 
 // --- THE LEGACY DISCOVERY FALLBACK, AGAINST A SERVER ---

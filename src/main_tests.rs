@@ -2052,6 +2052,7 @@ fn saying(
         // The startup line is about what the *cluster* answered; neither of these is a question
         // the cluster was asked, and `k8s_tests.rs` § CONNECTING is where they are proven.
         context: None,
+        namespace: None,
         client_certificate: None,
     }
 }

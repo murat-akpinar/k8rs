@@ -2860,7 +2860,7 @@ public release.
       for the stream and the code, and `Fault::NoContext` in `src/k8s_tests.rs`
       for the second sentence
       ([D172](NOTES.md#d172--three-kubeconfig-boxes-one-that-was-already-done-and-why-these-fixtures-are-hand-written-2026-08-28))
-- [ ] **The six kubeconfig shapes, each with a fixture** — the largest class in
+- [x] **The six kubeconfig shapes, each with a fixture** — the largest class in
       k9s's tracker is not the cluster, it is the file that describes it, and
       every shape below is a separate closed issue there. **No file** · **a file
       with no current context** — a *panic* in
@@ -2880,7 +2880,15 @@ public release.
       already. They sit beside the box above because they *are* startup errors —
       the ones a stranger meets before they ever see a finding
       ([PRIOR-ART § B1](PRIOR-ART.md#b1--kubeconfig-is-harder-than-it-looks))
-- [ ] **The kubeconfig read hands back the context *list*, not just the one in
+      **Five of the six already behaved correctly and got a pinning test rather
+      than new code**; only *a context that names its own namespace* was unbuilt.
+      The fixtures are hand-written `Kubeconfig::from_yaml` inline in
+      `src/k8s_tests.rs`, and here that is required rather than tolerated: a
+      captured kubeconfig carries a client certificate *and its key*
+      ([D172](NOTES.md#d172--three-kubeconfig-boxes-one-that-was-already-done-and-why-these-fixtures-are-hand-written-2026-08-28)).
+      `KUBECONFIG` with several paths is the one shape `connect_with` cannot
+      reach, and goes through `read_from` + `merge`
+- [x] **The kubeconfig read hands back the context *list*, not just the one in
       use** — name, API server host, `insecure-skip-tls-verify`, and the tag:
       the user's own from `contexts[].context.extensions` under the name `k8rs`,
       or, absent that, derived from the host (`aws` / `gcp` / `azure` / `local`
@@ -2890,6 +2898,23 @@ public release.
       after Phase 6 — the same forward-only correction
       [D16](NOTES.md#d16--the-context-switcher) made for `connect()`
       ([NOTES § D116](NOTES.md#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19))
+      `contexts(&Kubeconfig, Option<&str>) -> Vec<Choice>`, with `Address` and
+      `Tag` beside it, and `kubeconfig()` so the picker can read the file without
+      connecting — `k8s.rs` stays the only reader of the credential boundary.
+      **Four review rounds, and three of them found a defect the round before had
+      declared fixed**
+      ([D173](NOTES.md#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28) ·
+      [D174](NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28) ·
+      [D175](NOTES.md#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28) ·
+      [reports/2026-08-28-kubeconfig-shapes-and-context-list-review.md](reports/2026-08-28-kubeconfig-shapes-and-context-list-review.md)).
+      D116's derivation was written as substrings and matched
+      `amazonaws.com.attacker.example`; the domain arms now anchor at a label
+      boundary, the loopback arm is deleted because `~local` on a bastion tunnel
+      is a claim about *where* and D116 forbids those, and a `server:` carrying
+      URL userinfo drew a password on the picker's most prominent row. **The PM
+      ruled that last one wrong once** — the fix it ordered fabricated a hostname
+      out of a conformant path — and D175 is the parse that is safe in both
+      directions. 608 tests, 68 mutants, 1 authorized MISSED
 - [ ] **The clock-skew line in the header, which D55 declared binding on later
       boxes and nobody owned.** *"Your computer's clock is 11 minutes behind
       the cluster — the times on this screen are wrong"*, in plain language,
@@ -3086,6 +3111,34 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       killer, which then killed the pods it was there to watch
       ([#871](https://github.com/derailed/k9s/issues/871) ·
       [PRIOR-ART § A6](PRIOR-ART.md#a6--unbounded-memory-in-the-field-for-8-days))
+- [ ] **A context whose name strips to nothing is two readers disagreeing, and
+      the screen has no answer for it.** `name: ""`, or a name made only of
+      characters invariant 9 removes: `kubeconfig_context` collapses it to
+      `None` while the namespace beside it is real, so the header says *no
+      context* about the very context the run is on, and `contexts()` draws a
+      blank row marked `(current)`. Both readers agree on *which entry* and the
+      key round-trips, so nothing opens the wrong cluster — which is why it was
+      deferred out of the family that found it rather than fixed inside it
+      ([D173](NOTES.md#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28)).
+      **It is here because the answer is a screen decision before it is a Rust
+      one** — what a row with no drawable name looks like, and what the header
+      says — so it is `tui-designer` then `dev-core`, and it is in time only
+      while `k8s.rs` is still open
+- [ ] **`screens/context.md` does not know about `shadowed` or `Unreadable`, and
+      the code now hands it both.** `grep shadowed screens/context.md` returns
+      nothing, so as specified a duplicate-named context is an ordinary
+      cursor-reachable row: the reader lands on it, reads *its* address, presses
+      `⏎` and opens the entry above it. And `Address::Unreadable` — an address
+      k8rs refuses to state rather than guess — has no rendering at all and must
+      not fall back to `⚠ cluster undefined`, which is a different fact. No
+      shipped behaviour is out of sync because nothing draws `Choice` yet, and
+      that is exactly why this is cheap now
+      ([D174](NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28) ·
+      [D175](NOTES.md#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28)).
+      `tui-designer`'s turn; the words for both, plus whether a shadowed row is
+      reachable at all, and the sentence that says *two contexts in your file
+      have this name; the first one is the one that opens* — which is the one
+      kubectl never gets to say, because client-go refuses the whole file
 - [ ] **Where the 58 752 KiB at 1 000 pods actually is.** `REQUIREMENTS.md`'s
       memory budget is measured and unmet, and the measurement could not name the
       cause — it ruled out a per-object storage cost and located the *moment*

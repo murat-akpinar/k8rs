@@ -194,6 +194,9 @@ its line moving with it.
 - [D170](#d170--the-three-identity-fields-the-two-pm-claims-a-measurement-took-away-and-the-band-that-was-on-the-wrong-screen-2026-08-28) — the three identity fields, the two PM claims a measurement took away, and the band that was on the wrong screen
 - [D171](#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28) — the resident set measured at four sizes, the budget it broke, and the ruling that the budget stays
 - [D172](#d172--three-kubeconfig-boxes-one-that-was-already-done-and-why-these-fixtures-are-hand-written-2026-08-28) — three kubeconfig boxes, one that was already done, and why these fixtures are hand-written
+- [D173](#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28) — the tag's matching rules, tightened against the object rather than the wording, and the credential the server line was drawing
+- [D174](#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28) — the operator review of the kubeconfig family: ten fixed, one refused, and the two reversals it forced
+- [D175](#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28) — the ruling in D174 was wrong about RFC 3986, and the parse that is safe in both directions
 
 ## Why it exists — where the gap is
 
@@ -14911,3 +14914,295 @@ the first just decided
 **The clock-skew box below them is not in the family** and says so in its own
 body: it needs a `screens/` state before any Rust, so it is `tui-designer` then
 `dev-core`, and two turns.
+
+### D173 — the tag's matching rules, tightened against the object rather than the wording, and the credential the server line was drawing (2026-08-28)
+
+[D116](#d116--the-environment-picker-moves-to-startup-and-the-tag-comes-out-of-the-kubeconfig-itself-2026-08-19)
+wrote the tag derivation as a list of strings — `amazonaws.com` → `aws`,
+`gke`/`googleapis` → `gcp`, `azmk8s.io` → `azure` — and `dev-core` implemented it
+literally, with `contains`. `tester` fed the framings the wording does not cover
+and four of them come back wrong, in the one column the feature exists to make
+trustworthy. **This is a reversal of D116's letter in service of D116's own
+stated reason**, which is why it is written here before it is acted on.
+
+**The wording was satisfied and the purpose was not.** Measured, on the landed
+code:
+
+```
+host="amazonaws.com.attacker.example"     -> Some("aws")
+host="not-amazonaws.com.attacker.example" -> Some("aws")
+host="my-gkeeper.example.com"             -> Some("gcp")
+host="k8rs.invalid:6443?x=amazonaws.com"  -> Some("aws")
+host="k8rs.invalid:6443#gke"              -> Some("gcp")
+```
+
+`~aws` on a domain Amazon does not run is a false statement about who runs the
+machine, and D116's own sentence is that *a guessed `prod` on a cluster that is
+not prod is worse than an empty column*. A substring anywhere in an
+attacker-controlled DNS name is that guess with no anchor.
+
+**So the three domain arms anchor at the end of the host**, after the port is
+cut: `.amazonaws.com`, `.azmk8s.io`, `.googleapis.com` — a suffix, or the bare
+domain itself, and nothing else. **Matching is case-insensitive**, because DNS is
+and `HOST.EKS.AMAZONAWS.COM` is the same machine as its lowercase spelling; it
+previously fell to blank, which was safe and still wrong.
+
+**The bare `gke` substring is deleted rather than anchored, and moves to the
+context name.** A GKE cluster's endpoint is a bare IP address, so the host
+carries no `gke` at all and that arm could only ever have fired on something
+else — every match it had was a false one. The signal GKE actually leaves is the
+context name `gcloud container clusters get-credentials` writes, `gke_<project>_<zone>_<cluster>`,
+so the arm is `name` beginning `gke_`. **Stated from gcloud's documented format
+and not measured against a real GKE kubeconfig** — nobody here has one — and
+recorded as such: if it is wrong the tag falls to blank, which is the direction
+this whole heuristic is built to fail in.
+
+**`minikube` and `docker-desktop` become equality; `kind-` keeps its prefix.**
+`starts_with("minikube")` tagged `minikube-prod` as `~local`, and that is the
+unsafe direction — a context somebody named `minikube-prod` may well be a cloud
+cluster. Those two tools write their context name exactly; kind writes
+`kind-<cluster>` and needs the prefix.
+
+**The server line was drawing a password, and that is the more serious half.**
+A `server:` may carry URL userinfo, and it is all printable, so it survived every
+strip:
+
+```
+drawn_server=Some("https://admin:hunter2@k8rs-tests.invalid:6443")
+```
+
+`screens/context.md` deliberately puts that address on the most prominent line
+of the first screen a stranger sees, so a kubeconfig password reaches the screen
+and every screenshot of it. **Userinfo is removed before the address is kept** —
+in the one place that produces the host, so the drawn string and the matched host
+cannot disagree. It fixes a second thing for free: `https://user:pass@127.0.0.1`
+used to defeat the loopback arm while still matching the substring arms.
+
+**One defect that is not the tag's: a duplicate context name drew a row that
+opens somebody else's cluster.** `contexts()` emitted both entries with their own
+servers, while kube's lookup is `find()` — first wins — so the second row drew
+`k8rs-two` and connected to `k8rs-one`, with both marked current. **A row a
+name-lookup cannot reach is drawn with `server: None`**, which is the
+representation the file already uses for *there is nothing here to connect to*,
+and `current` is decided by the same first-wins rule. Not dropped from the list:
+the entry is in the reader's file and hiding it is how they never find out why.
+Reachable through a concatenated or hand-edited kubeconfig, not through one
+`kubectl` wrote — `merge` dedups by name.
+
+**And one assertion that could not fail.** Two bound tests asserted
+`len < IDENTIFIER * 2` where the requirement is `IDENTIFIER + SHORTENED.len()`
+— 1023 permitted against 535 required, so a cap silently changed to 900 would
+pass. Not an assertion updated to match the output, which is the failure
+[CLAUDE.md § Code phase rules](CLAUDE.md#code-phase-rules) names; one written
+loose enough to be immune to the requirement. It becomes the requirement-derived
+form.
+
+**What is *not* fixed here, and why.** A context whose name strips to nothing —
+`name: ""`, or a name made only of unprintable characters — is reported as `None`
+by `kubeconfig_context` and as a real namespace by `kubeconfig_namespace`, and
+draws a blank picker row marked current. Both readers agree on *which entry*, so
+nothing connects to the wrong cluster, and no tool writes such a name. Making it
+honest means deciding **how a nameless row draws**, which is `screens/`' answer
+and not this family's, so it is a Phase 6 box — in time, because `k8s.rs` freezes
+at that phase's end.
+
+### D174 — the operator review of the kubeconfig family: ten fixed, one refused, and the two reversals it forced (2026-08-28)
+
+`k8s-admin` read the family together and returned eleven findings
+([reports/2026-08-28-kubeconfig-shapes-and-context-list-review.md](reports/2026-08-28-kubeconfig-shapes-and-context-list-review.md)).
+Ten are fixed and one is refused, with the reason here rather than in a reply
+nobody can find later. Two of them reverse a decision written earlier the same
+day, which is why they are written before they are acted on.
+
+**The blocker: the credential strip [D173](#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28)
+claimed only worked on URLs that did not need it.** `address()` cut the authority
+at the first `/`, `?` or `#` and *then* looked for the `@`, so any of those three
+inside the userinfo pushed the `@` past the cut and the whole credential was
+drawn:
+
+```
+server="//admin:aGVsbG8/d29ybGQ=@APISERVER:6443"
+  drawn="//admin:aGVsbG8/d29ybGQ=@APISERVER:6443"   host="admin:aGVsbG8"
+```
+
+The realistic shape is basic auth at a proxy in front of an API server, and the
+base64 alphabet contains `/` — so a 32-character password hits it about 40 % of
+the time. The old test proved the strip for one framing of one value
+(`admin:hunter2`), which is [D31](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)
+exactly.
+
+**The ruling: the *last* `@` ends the userinfo, and the host is parsed from what
+follows it.** This is the credential-safe reading of an ambiguous string, chosen
+knowing what it costs: a `server:` whose *path* contains a literal `@` is drawn
+shortened. That cost is accepted, because RFC 3986 requires `/`, `?` and `#` to
+be percent-encoded inside userinfo — so the only inputs where the two readings
+differ are already malformed — and between a password on the first screen a
+stranger sees and a mangled address nobody has been observed to write, the choice
+is not close. **`server: None` was the other candidate and is wrong**: it would
+say *there is nothing here to connect to* about a row that `⏎` opens fine, which
+is the same class of lie one door over.
+
+**Reversal 1 — the loopback arm is deleted, and `local` comes only from a name.**
+D116 derived `~local` from a loopback host. Measured: `ssh -L`, `kubectl proxy`,
+`kubectl port-forward`, Teleport and a corporate mTLS proxy all write or imply a
+loopback `server:`, and all of them are how people reach *production* control
+planes with no public endpoint — so the picker told a reader on a bastion tunnel
+that `prod-eu-via-bastion` was `~local`. **`local` is not a provider; it is a
+claim about where the cluster is**, and it is the one word in the set a newcomer
+reads as *safe to break*. D116's own boundary — a derived tag names the provider
+and never the environment — refuses it. What deleting it costs is measured and
+small: kind, minikube and docker-desktop are already caught by their **name**
+arms; `rancher-desktop` and k3s-on-the-node fall to blank, which is the direction
+this heuristic is built to fail in.
+
+**Reversal 2 — a shadowed duplicate keeps its own `server`, and says so in a
+field of its own.** [D173](#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28)
+put an unreachable duplicate under `server: None`, reusing *there is nothing here
+to connect to*. That was wrong in a way only somebody reading the screen beside
+the code would see: `screens/context.md` renders that state as **`⚠ cluster
+undefined`**, so the row would say the cluster is undefined about a cluster
+defined on the line above it — [PRIOR-ART § C1](PRIOR-ART.md#c-errors-that-lie)
+arriving from the data side. It matters more than it looks, because **kubectl
+does not do first-wins here at all — it refuses the whole file**:
+
+```
+$ KUBECONFIG=dup.yaml kubectl config get-contexts
+error: ... error converting *[]NamedContext into *map[string]*api.Context:
+duplicate name "twin" in list
+```
+
+client-go treats a duplicate name as a corrupt kubeconfig; kube-rs does silent
+first-wins (`file_loader.rs:63-82`). k8rs will be the only tool in that reader's
+terminal that opens the file, so it owes them the true sentence. The row keeps
+its address and carries **`shadowed`**; `server: None` goes back to meaning only
+what it meant. The wording is `screens/`' and comes later.
+
+**Six smaller fixes, each measured.** `under()` accepted an empty label, so
+`evil..amazonaws.com` and `.amazonaws.com` drew `~aws` — the same false claim one
+spelling further along. A fully-qualified host (`…amazonaws.com.`) lost its tag,
+and the same condition fixes both. The arm order let a `gke_` **name** beat an
+Azure **host** and lose to an AWS one, purely by position — a host is what you
+connect to and a name is what somebody typed, so every host arm now precedes
+every name arm. `.gke.goog` joins the domain arms: GKE's DNS-based control-plane
+endpoint has been GA since 2024 and writes `https://gke-<hash>.<region>.gke.goog`,
+which the deleted `gke` substring used to catch by accident and nothing caught
+after. `googleapis.com` stays and is **not** dead code — `gcloud container fleet
+memberships get-credentials` writes a `connectgateway.googleapis.com` server
+under a context named `connectgateway_…`, so the host arm is the only thing that
+sees it. And `insecure` is `false` wherever there is no address, so no row warns
+about the TLS of a connection it cannot make.
+
+**Two readers that disagreed, caught before it cost anything.** With
+`current-context` naming an entry the file does not define, `kubeconfig_context`
+answered `Some("gone")` while `contexts()` marked no row current — a header naming
+a context that is on no row. It is inert only because `connect_with` fails first;
+it stops being inert the moment the Phase 11 picker calls `kubeconfig()` and
+`contexts()` *without* connecting, which is the entire reason `kubeconfig()` was
+extracted. Both now answer from the same test. This is the class
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+is about, found by the only pass that read the family together.
+
+**`Choice` gains the namespace**, because `kubeconfig_namespace` already computes
+it, `kubectl config get-contexts` has a column for it, and it is the field that
+decides where a namespaced screen opens — the reader has no other way to see it
+before pressing `⏎`. One line now against a frozen file later.
+
+**The one refused: a third spelling of the context name for the command log.**
+The review is right that neither field is printable there — `key` is the real name
+and printing it puts an unprintable character on screen (invariant 9), `name` is
+safe to draw and names a context that does not exist (invariant 4). **It is
+refused because the missing thing is not a field.** `k8s.rs` already hands out the
+true bytes and the safe display; turning the true bytes into something printable
+is an escaping decision, it belongs to whoever draws the command log, and a third
+string in this layer would be a display choice living where nothing can see the
+display. The freeze is not the argument it looks like: `key` is the fact, and no
+later phase needs `k8s.rs` re-opened to escape it.
+
+### D175 — the ruling in D174 was wrong about RFC 3986, and the parse that is safe in both directions (2026-08-28)
+
+[D174](#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28)
+ruled that `address()` should take the **last `@`** as the end of the userinfo,
+and justified it: *"RFC 3986 requires `/`, `?` and `#` to be percent-encoded
+inside userinfo — so the only inputs where the two readings differ are already
+malformed."* **The second half of that sentence is false, and it is the half the
+ruling rested on.** The first half is true of *userinfo*; `@` is a `pchar`, so an
+unencoded `@` in a **path, query or fragment is conformant**, and those are inputs
+where the two readings differ and nothing is malformed. Round 3 measured it
+rather than arguing it — three parsers, one string:
+
+```
+urllib.parse.urlsplit('https://host/path/a@b/c') -> hostname='host'  path='/path/a@b/c'
+node  new URL('https://host/path/a@b/c')         -> host   'host'    path '/path/a@b/c'
+http::Uri "https://host/path/a@b/c"              -> host Some("host")
+```
+
+**And the cost is not what D174 said it was.** The decision wrote *"drawn
+shortened"*. Measured, it is a **fabricated host** — the text after the last `@`
+with the scheme re-attached in front of it:
+
+```
+server="https://host/path/a@b/c"          drawn="https://b/c"     host="b"
+//APISERVER/tenant/a@AWSHOST/x            drawn="//AWSHOST/x"     tag=Derived("aws")
+```
+
+The third line is the one that settles it: a row whose real API server is
+`APISERVER` draws an AWS address **and earns `~aws`**. That is the
+`amazonaws.com.attacker.example` class [D173](#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28)
+closed, re-opened through the path. And `kube-client`'s `config/mod.rs:310-316`
+parses the raw `server:` with `http::Uri`, so **the connection goes to `host`
+while the screen's "am I about to touch production" line says `https://b/c`** —
+[invariant 4](CLAUDE.md#hard-invariants--never-break-one-without-an-explicit-decision)'s
+spirit, and a record that lies.
+
+**The parse that is safe in both directions, because the two failures are not the
+same failure.** Neither reading is right on its own: the RFC order leaks the
+credential on a malformed URL, and the last-`@` order fabricates a host on a
+conformant one. So the parse is the RFC's — `http::Uri`'s, which is what kube
+connects with — plus **one validation**:
+
+1. Cut the authority at the first `/`, `?` or `#`, as RFC 3986 and every parser do.
+2. Strip userinfo at the last `@` **inside that authority**, never past it.
+3. **Require what remains to be a plausible `host[:port]`** — a port, if present,
+   is digits. It is not, on exactly the malformed inputs: `//admin:aGVsbG8/d29ybGQ=@APISERVER:6443`
+   leaves an authority of `admin:aGVsbG8`, whose `:` is followed by letters.
+4. When step 3 fails, **there is no address k8rs can state**, and it says that
+   rather than picking one of the two readings.
+
+Checked against every framing round 2 and round 3 fed: the conformant path,
+query and fragment cases are drawn **correctly and whole** — `https://host/path/a@b/c`
+stays itself — and every malformed-userinfo case reaches step 4 with nothing
+drawn. There is no input where a credential is drawn and none where a host is
+invented.
+
+**Step 4 needs a state, and it is not `server: None`.** That means *there is
+nothing here to connect to*, `screens/context.md` draws it `⚠ cluster undefined`
+and skips the cursor over it — and a row whose address we cannot read is a row
+`⏎` opens perfectly well. So **`Choice::server` becomes an enum**: the address, or
+*this entry defines none*, or *this entry's address cannot be read*. Three states
+because there are three facts; the alternative was a second boolean beside
+`shadowed`, and a screen cannot draw a truth it was handed as two flags that can
+both be set.
+
+**One nit is accepted rather than fixed, and written down so it is not
+re-derived.** `//admin:p@ssw0rd` — a `server:` with a credential and no host at
+all — leaves `ssw0rd`, which is a plausible host, so part of a password is drawn.
+It needs a kubeconfig that cannot connect anywhere, and every rule that would
+catch it also rejects real single-label hosts.
+
+**Three more from the same round.** `contexts()` hard-codes `asked_for = None`, so
+under `k8rs --context b` the picker marks and preselects row `a` while the header
+says `b` — the same disagreement D174 just closed, arriving through the one door
+`contexts(&Kubeconfig)` has no parameter to hear about. It takes the argument
+`wanted()` already takes, now, because `k8s.rs` freezes at the end of Phase 6.
+`insecure` is gated on `server.is_some()` and not on `!shadowed`, so a shadowed
+row warns about the TLS of a connection it cannot make — and, mirrored, stays
+silent while `⏎` opens the unverified one above it. And a `server:` made only of
+characters the strip removes draws `https://` while its own doc lists that case
+under `None`.
+
+**What is owed to `screens/` and is not code.** `grep shadowed screens/context.md`
+returns nothing, so as specified the duplicate row is ordinary and
+cursor-reachable: the reader lands on it, reads its address, presses `⏎` and
+opens the entry above. The data is right and the screen has not caught up. It is a
+`tui-designer` turn in Phase 6 — no shipped behaviour is out of sync, because
+nothing draws `Choice` yet.

@@ -3742,6 +3742,13 @@ pub(crate) struct Session {
     /// whose current context is empty — the state C1 already says nothing about
     /// (NOTES § D51).
     pub(crate) context: Option<String>,
+    /// **The namespace that context names for itself**, or `None` for a context that names none
+    /// — [`kubeconfig_namespace`] is what reads it, and why the two are not one answer.
+    ///
+    /// **It is the namespace k8rs must start in** (`PRIOR-ART § B1`), and it is *not* a filter on
+    /// the permanent watch: Alerts is every namespace at once (invariant 6, NOTES § D28), so what
+    /// this decides is where a screen that has a namespace opens.
+    pub(crate) namespace: Option<String>,
     /// **The client certificate this kubeconfig logs in with**, PEM bytes as they sit on disk —
     /// C1's other input ([`kubeconfig_certificate`],
     /// [`crate::rules::ClusterSnapshot::client_certificate`]).
@@ -3839,11 +3846,38 @@ pub(crate) enum NotConnected {
 /// disabled here — a kubeconfig that sets `insecure-skip-tls-verify` is honoured, because it is
 /// the user's own file, and saying so in the header is `views.rs`'s.
 pub(crate) async fn connect(context: Option<&str>) -> Result<Session, NotConnected> {
-    connect_with(
-        Kubeconfig::read().map_err(NotConnected::Kubeconfig)?,
-        context,
-    )
-    .await
+    connect_with(kubeconfig()?, context).await
+}
+
+/// **The reader's kubeconfig, read the one way it is ever read** — `KUBECONFIG`'s paths merged by
+/// kube's own rules, or `~/.kube/config`, and nothing else.
+///
+/// **It exists so that the Phase 11 picker does not become a second reader of the file.** That
+/// picker needs the context list ([`contexts`]) *before* it connects, and [`connect`] reads the
+/// file and drops it — so without this the screen would call `Kubeconfig::read()` itself and the
+/// security gate's *credentials come from the kubeconfig current context and nowhere else* would
+/// stop being mechanical, which is the only thing that makes it checkable (the PM's ruling,
+/// 2026-08-28). It is here rather than in Phase 11 because this file freezes at the end of
+/// Phase 6.
+///
+/// **Nothing covers this line and that is deliberate.** It reads the ambient machine, so a test
+/// over it passes for one reason on a runner with a kubeconfig and another on a runner without —
+/// the shape NOTES § D26 refuses, and the whole reason [`connect_with`] exists beside
+/// [`connect`]. The mutation gate reports it MISSED and that report is correct.
+///
+/// **`result_large_err` is expected rather than designed around.** clippy sees a 136-byte
+/// [`NotConnected`] over a smaller `Ok`; [`connect`] and [`connect_with`] carry the same `Err`
+/// and do not trip it only because a [`Session`] is bigger. Boxing it would reshape the type five
+/// call sites read, and narrowing this to `KubeconfigError` would put the
+/// `NotConnected::Kubeconfig` wrap back at every caller — which is the duplication this function
+/// exists to remove. It is called once, at startup. `expect` rather than `allow` so it expires by
+/// itself if the type ever shrinks.
+#[expect(
+    clippy::result_large_err,
+    reason = "one call at startup; boxing reshapes a type five sites read"
+)]
+pub(crate) fn kubeconfig() -> Result<Kubeconfig, NotConnected> {
+    Kubeconfig::read().map_err(NotConnected::Kubeconfig)
 }
 
 /// **[`connect`] over a kubeconfig that is already in hand**, which is the same call with the
@@ -3869,6 +3903,9 @@ pub(crate) async fn connect_with(
     // *current* context is still legible: `KubeConfigOptions` carries what was asked for, and
     // what was asked for is `None` on the ordinary run.
     let named = kubeconfig_context(&kubeconfig, context);
+    // Read here for the same reason and through the same [`wanted`], so the name a session
+    // reports and the namespace it starts in can never come off two different entries.
+    let namespace = kubeconfig_namespace(&kubeconfig, context);
     let config = Config::from_custom_kubeconfig(
         kubeconfig,
         &KubeConfigOptions {
@@ -3905,6 +3942,7 @@ pub(crate) async fn connect_with(
         Ok(client) => Ok(Session {
             renewal,
             context: named,
+            namespace,
             client_certificate,
             ..session(client).await
         }),
@@ -3930,11 +3968,548 @@ pub(crate) async fn connect_with(
 /// a context name reverses the card it is printed on. Empty becomes `None` — C1 with no context
 /// says nothing, which is the state NOTES § D51 already describes.
 fn kubeconfig_context(kubeconfig: &Kubeconfig, asked_for: Option<&str>) -> Option<String> {
-    let mut name = asked_for
-        .map(str::to_string)
-        .or_else(|| kubeconfig.current_context.clone())?;
+    let mut name = wanted(kubeconfig, asked_for)?.name.clone();
     text(&mut name, IDENTIFIER);
     (!name.is_empty()).then_some(name)
+}
+
+/// **The context entry this run is on** — the one place `--context` beats `current-context`, and
+/// the one place a name is turned into an entry.
+///
+/// **Three readers, so it is written once**: [`kubeconfig_context`] for the name a session
+/// reports, [`kubeconfig_namespace`] for the namespace it starts in, and [`contexts`] for the row
+/// the picker preselects. A second copy of `asked_for.or(…)` is how a session comes to report one
+/// context's name beside another context's namespace.
+///
+/// **It returns the entry and not the name, which is NOTES § D174's fix for two readers that had
+/// come apart.** With `current-context:` naming something the file does not define, the name
+/// resolved and the entry did not — so [`kubeconfig_context`] answered `Some("gone")` while
+/// [`contexts`] marked no row current, and a header would name a context that is on no row. It is
+/// inert only while [`connect_with`] fails first; it stops being inert the moment the Phase 11
+/// picker calls [`kubeconfig`] and [`contexts`] *without* connecting, which is why [`kubeconfig`]
+/// exists. Resolving through the entry makes the disagreement unrepresentable.
+///
+/// **The lookup is by the file's own spelling and never by a cleaned one**: `kubeconfig.contexts`
+/// is keyed by that spelling, so a `find` against a stripped name would miss exactly the entry
+/// whose name was the reason for stripping it.
+///
+/// **First wins, which is kube's rule and not ours** (`file_loader.rs:63-82`); [`contexts`] says
+/// what that costs a duplicate.
+///
+/// **An entry with no `context:` body is not an entry, which is kube's answer too**
+/// (NOTES § D175). `file_loader.rs:70-76` is
+/// `find(…).and_then(|named| named.context.clone()).ok_or(LoadContext)`, so `- name: a` on its
+/// own is an error there and used to be `Some(entry)` here — one `and_then` between this family
+/// and the loader it hands the file to. *Does this context exist* has one reader.
+fn wanted<'a>(
+    kubeconfig: &'a Kubeconfig,
+    asked_for: Option<&str>,
+) -> Option<&'a kube::config::NamedContext> {
+    let name = asked_for.or(kubeconfig.current_context.as_deref())?;
+    kubeconfig
+        .contexts
+        .iter()
+        .find(|entry| entry.name == name)
+        .filter(|entry| entry.context.is_some())
+}
+
+/// **The namespace the context names for itself** — the one k8rs starts in, and a regression k9s
+/// shipped twice (`PRIOR-ART § B1`, #1397 and #1444).
+///
+/// **Read off the file rather than off `Config::default_namespace`, which is this field with its
+/// most useful answer removed.** kube writes `.unwrap_or_else(|| String::from("default"))`
+/// (`config/mod.rs:318-322`), so *the context asked for `default`* and *the context asked for
+/// nothing* arrive as one string. Those are not one state here: k8rs watches every namespace
+/// (invariant 6), so a context that names none has asked for nothing at all, and a screen that
+/// opened on `default` because the file was silent would be showing a filter the reader never
+/// set. `None` is *the context named none*, the same `None` as everywhere else in this file
+/// (NOTES § D129).
+///
+/// **Stripped, bounded and empty-is-`None`, exactly as [`kubeconfig_context`] treats the name
+/// beside it** (invariant 9, NOTES § D154): a `namespace:` is text off a disk file like any other
+/// and a bidi override in one reverses whatever line it is drawn on.
+fn kubeconfig_namespace(kubeconfig: &Kubeconfig, asked_for: Option<&str>) -> Option<String> {
+    namespace_of(wanted(kubeconfig, asked_for)?.context.as_ref())
+}
+
+/// **One context entry's `namespace:`, cleaned and bounded** — [`kubeconfig_namespace`] for the
+/// entry this run is on, [`Choice::namespace`] for every row the picker draws (NOTES § D174).
+///
+/// Two callers and one read, so the namespace a session starts in and the namespace its row shows
+/// cannot come out differently.
+fn namespace_of(context: Option<&kube::config::Context>) -> Option<String> {
+    let mut namespace = context?.namespace.clone()?;
+    text(&mut namespace, IDENTIFIER);
+    (!namespace.is_empty()).then_some(namespace)
+}
+
+/// **One context in the reader's kubeconfig, as the startup picker draws it** (NOTES § D116).
+///
+/// **Nothing here connects to anything.** Every field is off the file, so the whole list — an
+/// unreachable context included — is known before the first keypress, and the picker spends no
+/// round trip and no failure modal discovering a fact `kube::config::Kubeconfig` already parsed.
+///
+/// **No `Debug`, for [`Store`]'s own reason**: nothing here holds a credential — a context name,
+/// a server address and a label are all display text — but the type is built out of a kubeconfig,
+/// and the security gate's rule about that is mechanical rather than a per-field judgement call.
+/// [`Tag`] below carries one and says why it may.
+#[derive(Clone)]
+pub(crate) struct Choice {
+    /// **The context's name as it is drawn**, stripped and bounded through the same [`text`] call
+    /// [`kubeconfig_context`] makes, so the name on this row and the name a [`Session`] reports
+    /// are one string by construction.
+    pub(crate) name: String,
+    /// **The same name as the *file* spells it — what [`connect`] must be handed to open this
+    /// row**, and the one field here that is never drawn.
+    ///
+    /// **Two fields because they are two strings, and the second pass of the box that added this
+    /// list is what found it.** A context whose name carries a zero-width or bidi character is
+    /// drawn without it (invariant 9, [`name`](Choice::name)) and looked up *with* it — a
+    /// kubeconfig is keyed by its own spelling and [`wanted`] says why that spelling is never
+    /// cleaned — so a picker handing its row's `name` back to [`connect`] would draw a row that
+    /// cannot be connected to, and answer [`Fault::NoContext`] for a context that is right there
+    /// in the file.
+    ///
+    /// **Deliberately *not* bounded, which is the one place this file's size rule would be the
+    /// defect.** [`name`](Choice::name) is cut at [`IDENTIFIER`] because it is drawn; a key cut
+    /// at 512 bytes is a key that no longer opens the entry it came from, and it would fail
+    /// silently. The bound that applies is the kubeconfig's own: this is a clone of a string kube
+    /// has already parsed into memory, so nothing here holds anything the file did not.
+    pub(crate) key: String,
+    /// **What this row would connect to** — an [`Address`], which is three states because there
+    /// are three facts (NOTES § D175).
+    ///
+    /// **It was an `Option<String>` for two rounds and that was one state short.**
+    /// `screens/context.md` renders the absent case as `⚠ cluster undefined` and skips the cursor
+    /// over it, which is true of an entry that names no cluster and false of one whose address
+    /// k8rs merely cannot read — that row `⏎` opens perfectly well. A second boolean beside
+    /// [`shadowed`](Choice::shadowed) was the alternative, and a screen cannot draw a truth handed
+    /// to it as two flags that can both be set.
+    pub(crate) server: Address,
+    /// **An entry earlier in the file already has this name, so nothing can open this one**
+    /// (NOTES § D174). The row keeps its own address and its own everything; what it does not
+    /// have is a way to be reached, because every lookup — kube's `load_context`, [`wanted`],
+    /// `--context` — is a `find` by name and stops at the first.
+    ///
+    /// **k8rs is the only tool in that reader's terminal that opens the file at all.** `kubectl`
+    /// v1.36.3 refuses it outright — client-go converts the list into a map and errors
+    /// *"duplicate name … in list"* — while kube-rs resolves silently first-wins
+    /// (`file_loader.rs:63-82`), so there is nowhere else the reader can go to find out. What the
+    /// row says about it is `screens/`'.
+    ///
+    /// **[`current`](Choice::current) is the one thing it does *not* keep**: `current-context:`
+    /// resolves through the same first-wins `find`, so the row that gets preselected is the entry
+    /// above this one even when both spell the name it names.
+    pub(crate) shadowed: bool,
+    /// **The namespace this context names for itself**, or `None` for a context that names none —
+    /// [`namespace_of`] is the read, shared with [`kubeconfig_namespace`] so a row and the
+    /// session it opens cannot say two different things.
+    ///
+    /// **A column `kubectl config get-contexts` has and the picker owes** (NOTES § D174): it is
+    /// what decides where a namespaced screen opens, and the reader has no other way to see it
+    /// before pressing `⏎`.
+    pub(crate) namespace: Option<String>,
+    /// **The cluster sets `insecure-skip-tls-verify`.** Honoured, because it is the user's own
+    /// file — and said out loud *before* the switch rather than in a header afterwards, which is
+    /// the half of the security gate's *identity and transport* row no script can see.
+    ///
+    /// **True only where this row's own cluster is what `⏎` opens**, which is two conditions and
+    /// each closed a defect of its own. **`false` where the entry names no `server:`**
+    /// (NOTES § D174): there is no connection to warn about, and `⚠ TLS not verified` on it is a
+    /// warning with nothing behind it. **`false` on a [`shadowed`](Choice::shadowed) row**
+    /// (NOTES § D175): the connection that row opens is the entry above's, so its own flag
+    /// describes a connection nobody makes — and, mirrored, it went quiet while `⏎` opened the
+    /// unverified cluster above it.
+    ///
+    /// **[`Address::Unreadable`] still warns**, which is the one that looks like an exception and
+    /// is not: kube hands the raw `server:` to `http::Uri` and connects with it, so the flag
+    /// describes a connection that really happens. What k8rs cannot do is *draw* the address.
+    pub(crate) insecure: bool,
+    /// [`Tag`] — the user's own label, or the provider guessed off the host.
+    pub(crate) tag: Tag,
+    /// **This is the context the file is already on**, which the picker preselects.
+    ///
+    /// **Decided here and not upstairs** so the comparison happens beside the one [`wanted`]
+    /// makes, over the file's own spelling; a screen comparing its own idea of *current* against
+    /// these cleaned names is a second reader that can disagree with this one.
+    pub(crate) current: bool,
+}
+
+/// **What a row would connect to, and the three answers there are** (NOTES § D175).
+///
+/// **Three states because there are three facts**, and the screen draws a different thing for
+/// each: an address it can show, an entry that names none, and an entry whose address k8rs will
+/// not put on the screen because it cannot read it without guessing. The last of those is a row
+/// `⏎` opens perfectly well — kube parses the raw `server:` with `http::Uri` and connects — so
+/// collapsing it into the second would tell the reader a cluster is undefined when it is not.
+///
+/// **`Debug` for [`Tag`]'s reason**: every string that can reach here has been through
+/// [`address`], which drops the userinfo, and then through [`text`] (`docs/security.md`
+/// § Token hygiene).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Address {
+    /// The API server this row opens, stripped and bounded — scheme, host, port and path as the
+    /// reader wrote them, minus any credential ([`address`]).
+    Server(String),
+    /// **The entry names no cluster, or that cluster has no `server:` line.** There is nothing
+    /// here to connect to, and `screens/context.md` draws it `⚠ cluster undefined`.
+    Undefined,
+    /// **There is a `server:` and k8rs will not state what it is** — the authority is not a
+    /// plausible `host[:port]` ([`host_of`]), or nothing of it survives invariant 9's strip. The
+    /// row is still openable; what is missing is a line the reader can trust, and the honest
+    /// answer to *am I about to touch production* is not a guess between two readings.
+    Unreadable,
+}
+
+/// **A context's short label, and which of the two kinds it is** (NOTES § D116).
+///
+/// **Telling them apart is the type's whole job.** A written tag is a statement by whoever owns
+/// the cluster and may say `prod`; a derived one is a guess off a hostname and names the provider
+/// and never the environment. A screen that could not tell them apart would present a guess as a
+/// statement, which is the exact mistake the tag exists to prevent — *how* the difference is
+/// marked is `screens/context.md`'s, and it is marked, not merely coloured.
+///
+/// **This is the one type in the pair that derives `Debug`, and it is not an oversight**: the
+/// whole of it is one short label the reader typed into their own file, or one of four constants
+/// this file wrote. Nothing off an API server and nothing out of a `user:` block can reach it, so
+/// `{:?}` on it prints what a screen prints (`docs/security.md` § Token hygiene).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Tag {
+    /// `contexts[].context.extensions[name=k8rs].extension.tag`, stripped and bounded.
+    Written(String),
+    /// Guessed: one of `aws`, `gcp`, `azure`, `local`, and never anything else.
+    Derived(&'static str),
+    /// No extension of ours and nothing the host gave away. The ordinary case on day one, and
+    /// not an error state.
+    Blank,
+}
+
+/// **Every context the kubeconfig names, in file order** — the startup picker's list
+/// (NOTES § D116), and the reason that box sits in this phase rather than in Phase 11.
+///
+/// **It takes `asked_for` for the same reason [`wanted`] does** (NOTES § D175). It hard-coded
+/// `None` for one round, so under `k8rs --context b` the picker marked and preselected row `a`
+/// while the header said `b` — the disagreement NOTES § D174 closed, arriving back through the
+/// one door this function had no parameter to hear about.
+///
+/// **A lookup and not a parser.** `kube::config::Kubeconfig` has already read the whole file,
+/// clusters included, so the join below is over two `Vec`s that are in memory; nothing here opens
+/// a file, and no second reader of the kubeconfig is introduced.
+///
+/// **Every string is stripped and bounded on the way out** (invariant 9, NOTES § D154). A
+/// kubeconfig is written by tooling as often as by hand and this picker is the first screen a
+/// stranger sees, so a bidi override in a context name would reverse the row it is drawn on
+/// before there is a cluster to blame it on.
+pub(crate) fn contexts(kubeconfig: &Kubeconfig, asked_for: Option<&str>) -> Vec<Choice> {
+    let current = wanted(kubeconfig, asked_for).map(|entry| entry.name.as_str());
+    kubeconfig
+        .contexts
+        .iter()
+        .enumerate()
+        .map(|(at, named)| {
+            // **A second entry under a name already taken can never be opened** (NOTES § D173,
+            // corrected by NOTES § D174). Every lookup of a context — kube's `load_context`,
+            // [`wanted`], the `--context` argument — is a `find` by name, so the first entry wins
+            // and this one is unreachable however the reader picks it.
+            //
+            // **It keeps everything it has and carries [`Choice::shadowed`] instead.** For one
+            // round it was drawn with `server: None`, reusing *there is nothing here to connect
+            // to* — and `screens/context.md` renders that as `⚠ cluster undefined`, about a
+            // cluster the line above defines. A row that lies about the file is the failure this
+            // list exists to avoid.
+            let shadowed = kubeconfig
+                .contexts
+                .iter()
+                .position(|entry| entry.name == named.name)
+                != Some(at);
+            let context = named.context.as_ref();
+            let cluster = context.and_then(|context| {
+                kubeconfig
+                    .clusters
+                    .iter()
+                    .find(|entry| entry.name == context.cluster)?
+                    .cluster
+                    .as_ref()
+            });
+            // **Derived off what the file says, drawn as the cleaned version** — one rule for
+            // both of [`derived`]'s arguments (NOTES § D173). [`text`] can only ever *create* a
+            // match that the file's own bytes do not have: `amazonaws\u{200b}.com` is not
+            // Amazon's and `kind\u{200b}-k8rs` is not a name kind wrote, and a tag invented by
+            // our own strip is the guess this column exists to refuse. Blank is the direction it
+            // fails in.
+            //
+            // **One split, two outputs, so what is drawn and what is matched cannot disagree**
+            // ([`address`], NOTES § D173).
+            // **Three answers, not two** ([`Address`], NOTES § D175): no `server:` line at all,
+            // one this file will not state, or the address itself.
+            let (server, host) = match cluster.and_then(|cluster| cluster.server.as_deref()) {
+                None => (Address::Undefined, String::new()),
+                Some(raw) => match address(raw) {
+                    None => (Address::Unreadable, String::new()),
+                    Some((mut drawn, host)) => {
+                        text(&mut drawn, IDENTIFIER);
+                        // **A host made only of characters invariant 9 removes leaves nothing to
+                        // put on screen**, and `drawn` alone cannot say so — it still carries the
+                        // scheme, which is how this drew `https://` for one round. The question
+                        // is asked of the host directly rather than by stripping a copy of it:
+                        // what [`derived`] matches is still the file's own bytes (NOTES § D173).
+                        if host.chars().any(|character| !unprintable(character)) {
+                            (Address::Server(drawn), host)
+                        } else {
+                            (Address::Unreadable, String::new())
+                        }
+                    }
+                },
+            };
+            let mut name = named.name.clone();
+            text(&mut name, IDENTIFIER);
+            let tag = match written_tag(context) {
+                Some(written) => Tag::Written(written),
+                // **A written tag is never a second opinion on a derived one and never the other
+                // way round** (NOTES § D116): the heuristic runs only where the file said nothing.
+                None if matches!(server, Address::Server(_)) => {
+                    derived(&named.name, &host).map_or(Tag::Blank, Tag::Derived)
+                }
+                None => Tag::Blank,
+            };
+            Choice {
+                current: !shadowed && current == Some(named.name.as_str()),
+                // **Only where this row's own cluster is what `⏎` opens** — an entry with no
+                // `server:` has no connection to warn about (NOTES § D174), and a shadowed row's
+                // `⏎` opens the entry above, so its own flag describes a connection nobody makes
+                // (NOTES § D175). [`Address::Unreadable`] is *not* excluded: kube connects with
+                // the raw string whatever this file can draw.
+                insecure: !shadowed
+                    && server != Address::Undefined
+                    && cluster
+                        .and_then(|cluster| cluster.insecure_skip_tls_verify)
+                        .unwrap_or(false),
+                namespace: namespace_of(context),
+                key: named.name.clone(),
+                shadowed,
+                tag,
+                name,
+                server,
+            }
+        })
+        .collect()
+}
+
+/// **The tag the person who owns the cluster wrote**, out of the context's own `extensions`
+/// (NOTES § D116) — the one tag that may make a claim about an environment, because a human made
+/// it.
+///
+/// **One field of a `serde_json::Value`, and anything else under that name is ignored rather than
+/// refused.** A kubeconfig is round-tripped by other tools and `extensions` is the field they
+/// round-trip it *through*, so a strict read here would turn somebody else's key into our error.
+///
+/// **Empty is `None`** for [`kubeconfig_context`]'s reason: a blank column is the ordinary case,
+/// and a tag that is present and says nothing is worse than one that is absent.
+fn written_tag(context: Option<&kube::config::Context>) -> Option<String> {
+    let mut tag = context?
+        .extensions
+        .as_ref()?
+        .iter()
+        .find(|extension| extension.name == "k8rs")?
+        .extension
+        .get("tag")?
+        .as_str()?
+        .to_string();
+    text(&mut tag, IDENTIFIER);
+    (!tag.is_empty()).then_some(tag)
+}
+
+/// **The provider a server host gives away — never an environment, and never a *place***
+/// (NOTES § D116, tightened by NOTES § D173, narrowed again by NOTES § D174).
+///
+/// **The boundary is the decision and not the heuristic.** A `prod` guessed off a hostname and
+/// printed against a cluster that is not prod is the exact mistake the tag was added to prevent,
+/// so what is derivable is *who runs the machine* and nothing else. Anything unrecognised is
+/// [`Tag::Blank`], and a blank column is the safe answer rather than a missing feature.
+///
+/// **There is no loopback arm, and that is a reversal of D116's own list** (NOTES § D174).
+/// `ssh -L`, `kubectl proxy`, `kubectl port-forward`, Teleport and a corporate mTLS proxy all
+/// leave a loopback `server:`, and all of them are how people reach *production* control planes
+/// with no public endpoint — so the picker drew `~local` on `prod-eu-via-bastion`, measured.
+/// `local` is not a provider: it is a claim about *where* the cluster is, and it is the one word
+/// in the set a newcomer reads as *safe to break*. kind, minikube and Docker Desktop still get it
+/// from their **name**; `rancher-desktop` and k3s-on-the-node fall to blank, which is the
+/// direction this heuristic is built to fail in.
+///
+/// **Every host arm precedes every name arm** (NOTES § D174). Before, a `gke_` name beat an Azure
+/// host and lost to an AWS one, by position alone. A host is what you connect to; a name is what
+/// somebody typed, and it is the weaker evidence of the two wherever they disagree.
+///
+/// **The domain arms anchor at the end of the host and D116's own wording did not**
+/// (NOTES § D173). It listed `amazonaws.com` and this file read it as `contains`, so
+/// `amazonaws.com.attacker.example` — a DNS name anybody can register — came back `~aws`.
+/// [`under`] is the anchor. **Case-insensitive, because DNS is**:
+/// `HOST.EKS.AMAZONAWS.COM` is the same machine and used to fall to blank. **And one trailing dot
+/// is the DNS root**, so a fully-qualified `…amazonaws.com.` is the same host and used to lose
+/// its tag (NOTES § D174).
+///
+/// **Google is two domains and a name, and none of the three is redundant** (NOTES § D174).
+/// `gke.goog` is the DNS-based control-plane endpoint — GA since 2024, and spelled
+/// `gke-<hash>.<region>.gke.goog` — which the old bare `gke` substring caught by accident and
+/// nothing caught after it was deleted. `googleapis.com` is what `gcloud container fleet
+/// memberships get-credentials` writes (`connectgateway.googleapis.com`), and the host arm is the
+/// only thing that sees it. The name
+/// `gke_<project>_<zone>_<cluster>` is what `gcloud container clusters get-credentials` writes for
+/// an IP-endpoint cluster, where the host says nothing at all. **All three are read off Google's
+/// documentation and none is measured against a real GKE kubeconfig** — nobody here has one — and
+/// if any is wrong the tag falls to blank.
+///
+/// **A row with no address never reaches here at all**, name arms included: [`contexts`] does not
+/// call this where there is no host to read, and that row is one `screens/context.md` dims.
+///
+/// **The name arms: `kind-` is a prefix, the other two are equality** (NOTES § D173).
+/// `starts_with("minikube")` tagged `minikube-prod` `~local`, and a context somebody named that
+/// may well be a cloud cluster — the unsafe direction. minikube and Docker Desktop write their
+/// context name exactly; kind writes `kind-<cluster>`. **The name arms stay case-sensitive**,
+/// unlike the host: these are strings three tools write themselves, all lowercase, and a
+/// case-folded `KIND-` is a name a human chose.
+fn derived(name: &str, host: &str) -> Option<&'static str> {
+    let lowered = host.to_ascii_lowercase();
+    // One trailing dot is the DNS root label and names the same host fully qualified. Two is
+    // malformed and is left to fall to blank.
+    let host = lowered.strip_suffix('.').unwrap_or(&lowered);
+    if under(host, "amazonaws.com") {
+        return Some("aws");
+    }
+    if under(host, "azmk8s.io") {
+        return Some("azure");
+    }
+    if under(host, "gke.goog") || under(host, "googleapis.com") {
+        return Some("gcp");
+    }
+    if name.starts_with("gke_") {
+        return Some("gcp");
+    }
+    (name.starts_with("kind-") || name == "minikube" || name == "docker-desktop").then_some("local")
+}
+
+/// **Is this host the domain itself, or one under it** — the anchor D116's list of substrings did
+/// not have (NOTES § D173).
+///
+/// A label boundary and not a string one: `amazonaws.com` and `eks.eu-west-1.amazonaws.com` are
+/// Amazon's, `amazonaws.com.attacker.example` and `notamazonaws.com` are not. The caller has
+/// already lowercased and taken off the root dot.
+///
+/// **The label before the domain has to be a label**, which it did not until NOTES § D174:
+/// `evil..amazonaws.com` and `.amazonaws.com` both ended in `.amazonaws.com` and both drew `~aws`
+/// — the same false claim one spelling further along. Neither is a name that resolves, and
+/// neither is a name Amazon runs.
+fn under(host: &str, domain: &str) -> bool {
+    host == domain
+        || host
+            .strip_suffix(domain)
+            .and_then(|above| above.strip_suffix('.'))
+            .is_some_and(|label| !label.is_empty() && !label.ends_with('.'))
+}
+
+/// **One `server:` line, split into the address a screen may draw and the host [`derived`]
+/// matches** — one function, because those two must not disagree (NOTES § D173), and `None` when
+/// there is no reading of it k8rs is willing to state (NOTES § D175).
+///
+/// **Two orderings, two different lies, and the fix is neither of them alone** (NOTES § D175).
+/// Cutting the authority first and looking for the `@` inside it is RFC 3986's order and every
+/// parser's — and on a *malformed* `server:` whose credential contains a `/`, `?` or `#`, the cut
+/// lands inside the credential and the whole of it is drawn:
+///
+/// ```text
+/// //admin:aGVsbG8/d29ybGQ=@APISERVER:6443  ->  authority "admin:aGVsbG8", the rest drawn
+/// ```
+///
+/// Taking the **last** `@` instead — which is what this function did for one round, on a ruling
+/// that said an unencoded `/` in userinfo made such inputs malformed — fabricates a host on a
+/// *conformant* one, because `@` is a `pchar` and is legal unencoded in a path, query or
+/// fragment:
+///
+/// ```text
+/// https://host/path/a@b/c        ->  drawn "https://b/c", host "b"
+/// //APISERVER/tenant/a@AWSHOST/x ->  drawn "//AWSHOST/x", and the row earns `~aws`
+/// ```
+///
+/// That second line is the one that settles it: `http::Uri` — the parser **kube itself** hands
+/// the raw `server:` to (`kube-client-4.2.0/src/config/mod.rs:310-316`) — answers `host="host"`
+/// and `host="APISERVER"` for those, so the connection went one place while the row said another,
+/// and the `amazonaws.com.attacker.example` class NOTES § D173 closed came back through the path.
+///
+/// **So the parse is the RFC's, plus one validation.** Cut the authority at the first `/`, `?` or
+/// `#`; take the userinfo off at the last `@` *inside that authority*; then require what is left
+/// to be a plausible `host[:port]` ([`host_of`]). It is not, on exactly the malformed inputs —
+/// `admin:aGVsbG8` has a `:` followed by letters — and when it is not, **there is no address k8rs
+/// can state and this answers `None`** rather than picking one of the two readings. No input
+/// draws a credential, and none invents a host.
+///
+/// **Hand-written, and the reason is the parse and not the dependency list** (NOTES § D175;
+/// `http` is already in `Cargo.lock` at 1.5.0, which is D143's narrow case, so invariant 10 is
+/// the weaker argument and not the one to lean on). `http::Uri` alone reproduces the round-2
+/// blocker verbatim — it answers `host=Some("admin")` for the base64 line above — because a URL
+/// parser still has to be *told* which reading of an ambiguous `@` to take. The validation is the
+/// telling, and it is what no parser does for us.
+///
+/// **One shape is accepted rather than caught, so nobody re-derives it** (NOTES § D175):
+/// `//admin:p@ssw0rd` — a credential with no host at all — leaves `ssw0rd`, which is a plausible
+/// single-label host, so part of a password is drawn. It needs a kubeconfig that cannot connect
+/// anywhere, and every rule that catches it also rejects real single-label hosts. Its sibling is
+/// a credential whose first segment ends in digits — `//admin:123/rest@APISERVER:6443` leaves
+/// `admin:123`, a plausible `host:port` — and there the drawn address is *right*, because
+/// `http::Uri` reads it the same way and that is where kube connects.
+///
+/// **The path is kept in what is drawn**, because a proxied cluster is
+/// `https://rancher.example/k8s/clusters/c-abc` and an address with its path cut off is not the
+/// address the reader connects to. **The port comes off the host and never off the drawn
+/// address.**
+fn address(server: &str) -> Option<(String, String)> {
+    let (scheme, rest) = match server.split_once("://") {
+        Some((scheme, rest)) => (Some(scheme), rest),
+        None => (None, server),
+    };
+    // 1. RFC 3986's order: the authority ends at the first `/`, `?` or `#`.
+    let (authority, tail) = rest.split_at(rest.find(['/', '?', '#']).unwrap_or(rest.len()));
+    // 2. The userinfo is everything to the last `@` **inside that authority**, never past it.
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, after)| after);
+    // 3. What is left has to look like somewhere to connect to, or there is nothing to say.
+    let host = host_of(authority)?;
+    let drawn = match scheme {
+        Some(scheme) => format!("{scheme}://{authority}{tail}"),
+        None => format!("{authority}{tail}"),
+    };
+    Some((drawn, host.to_string()))
+}
+
+/// **The host inside an authority, or `None` when that authority is not `host[:port]`** — step 3
+/// of [`address`] (NOTES § D175), and the whole of what tells a real authority from a credential
+/// the first `/` cut in half.
+///
+/// **A port is digits.** `admin:aGVsbG8` and `admin:hunter` are the shapes a malformed `server:`
+/// leaves behind, and both have a `:` followed by letters. An empty port (`host.example:`) is
+/// refused for the same reason: it is not a port and it is not a host either.
+///
+/// **A bracketed IPv6 literal is read as one** and comes back bare, so `[::1]:6443` and `[::1]`
+/// are one answer to [`derived`]. Outside brackets a host may not contain a `:` at all, which is
+/// what refuses `host:6443:7443` and a bare `::1` somebody forgot to bracket.
+///
+/// **An empty host is not a host**: `//admin:hunter2@` leaves nothing after the `@`, and *nothing*
+/// is not an address to draw.
+fn host_of(authority: &str) -> Option<&str> {
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(literal) => match literal.split_once(']')? {
+            (host, "") => (host, None),
+            (host, after) => (host, Some(after.strip_prefix(':')?)),
+        },
+        None => match authority.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        },
+    };
+    let plausible = !host.is_empty()
+        && (authority.starts_with('[') || !host.contains(':'))
+        && port.is_none_or(|port| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()));
+    plausible.then_some(host)
 }
 
 /// **The client certificate a kubeconfig logs in with, as PEM bytes** — C1's input, and the one
@@ -4108,6 +4683,7 @@ pub(crate) async fn session(client: Client) -> Session {
         // certificate that could be read back off it.
         renewal: None,
         context: None,
+        namespace: None,
         client_certificate: None,
     }
 }
