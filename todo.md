@@ -3024,7 +3024,7 @@ public release.
 
       — matching `kubectl top nodes` for the same minute (`k8rs-worker2` 13m/201Mi
       against `0.013 cpu`/`200.2Mi`).
-- [ ] **The mutation gate reads one directory and names another, so a run that
+- [x] **The mutation gate reads one directory and names another, so a run that
       tested nothing reports the previous run's logs** — `scripts/mutants.sh`
       counts `$OUT/log` (the repo-root `mutants.out/`) while printing `$SCRATCH`
       as the location it read. Measured 2026-08-22: a run with zero mutants left
@@ -3038,7 +3038,15 @@ public release.
       nothing in it to mutate. Both are `tester`'s. Not a blocker at Phase 4's
       close — that phase's own sweep wrote a fresh `mutants.out` per shard (212
       logs each, 0 missed), so its evidence stands
-      ([D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21))
+      ([D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)).
+      **Both closed 2026-08-29** — the report is read only when its `lock.json`
+      moved across the run, the log line names `mutants.out/log` instead of the
+      build volume, and `just mutants-diff` passes `--gate`, which refuses a run
+      that produced no mutants. The premise was re-measured at HEAD first and was
+      worse than written: the `0 mutants` honesty line never fired, because it was
+      guarded on the same stale `outcomes.json`. Also closes the same finding's
+      backlog entry
+      ([D182](NOTES.md#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29))
 - [ ] **A pod can name a node the snapshot does not have, and nothing has ruled
       on what that means.** Two independently-timed watches produce it
       (invariant 6): a pod delivered before the node LIST has landed, or a node

@@ -203,6 +203,7 @@ its line moving with it.
 - [D179](#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28) — the refusal that kept a mutant alive rested on a dependency `just check` already had
 - [D180](#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29) — the box named six lists and five were real, an empty envelope names no kind, and a sweep that edits in place made a reader measure a moving object
 - [D181](#d181--the-metrics-states-are-read-off-the-answer-and-not-off-the-capability-probe-and-a-down-aggregated-backend-answers-503-2026-08-29) — the metrics states are read off the answer and not off the capability probe, and a down aggregated backend answers 503
+- [D182](#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29) — the gate reports a run it did not make, and *stated, not failed* was written about the wrong caller
 
 ## Why it exists — where the gap is
 
@@ -15819,3 +15820,82 @@ and cheaper than the case the design already polls forever. The security gate's
 failure mode, not about a bounded-rate poll. So `again` is unconditionally true and
 the branch is gone — **one cadence for four states is also less code than the rule
 it replaces.**
+
+### D182 — the gate reports a run it did not make, and *stated, not failed* was written about the wrong caller (2026-08-29)
+
+Measured at HEAD on 2026-08-29, before the box was briefed. A `--in-diff` run over a
+diff with no Rust in it:
+
+```
+ INFO Diff changes no Rust source files
+mutants: no log names the filesystem or a denied lint — 21 log(s) read on /home/shyuuhei/.cache/k8rs-mutants
+mutants: 7 unviable — each of these is a claim that there was nothing to test:
+           src/k8s.rs:1766:9: replace Store::snapshot …
+```
+
+`mutants.out/`'s mtime was `12:17:31` before the run and `12:17:31` after it. Every
+number in that output belongs to a run thirty-four minutes earlier, and the path it
+names is `$SCRATCH` — the build volume, where no log has ever been written. Exit 0.
+
+**This is [D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
+in its third shape.** The first two were a build that never happened reading as
+`unviable`. This one is a *whole run* that never happened reading as a pass, and it
+defeats the honesty line written for exactly this case: `0 mutants — this run tested
+nothing` is guarded on `outcomes.json`, and the stale `outcomes.json` says
+`total_mutants: 20`. **A scan that cannot tell the report it is reading from the run
+it is reporting on has no way to be honest**, and no count fixes that — the numbers
+were all real, they were just somebody else's.
+
+**The ruling, because the script's own comment says the opposite of the box.**
+`scripts/mutants.sh` carries *"Stated, not failed: a docs turn has no mutants to run
+and blocking it would teach people to skip the gate."* That is a real argument and it
+was attached to the wrong thing. The split:
+
+- **`scripts/mutants.sh` states.** It is the shared driver — `just mutants` whole and
+  sharded, and a hand-typed call. It must never attribute to this run a directory
+  this run did not write, and must name the directory it actually read. Whether zero
+  mutants is a failure is not its call, because its callers differ.
+- **`just mutants-diff` refuses.** It is *the per-turn gate `CLAUDE.md` § step 4
+  names*, and a gate that exits 0 having mutated nothing is
+  [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)'s green build with a
+  tool's signature on it. `#[cfg(test)]` code is not mutated, so the shape this
+  refuses is not the docs turn — it is **a turn that changed only tests**, where the
+  author's verification is precisely what went unverified.
+
+The comment's fear survives in the wording, not in the exit code: the refusal says
+the turn has *nothing to gate*, which is not the same sentence as *you failed*. A
+docs turn does not reach step 4 at all — there is no code in it to gate — so nobody
+is being taught to skip anything they were owed.
+
+**Four choices the brief left open, each settled against the object rather than
+argued.** The brief offered `--output`, rotating `$OUT` beforehand, or `lock.json`
+as ways to tell this run's report from a stale one.
+
+- **`lock.json` is the stamp, read and never written — and rotation was tried
+  first and measured wrong.** Rotating `$OUT` moves a *concurrently running*
+  sweep's report and its lock with it, so cargo-mutants creates a fresh directory
+  and runs beside it, defeating the lock that caught the 2026-08-22 collision.
+  Measured with a real run holding it: the blocked invocation printed `Waiting for
+  lock … os error 11` then `interrupted`, and `lock.json` came out with the same
+  content, the same mtime **and the same inode**. So *a run that never got the
+  lock* falls out of the same comparison for free, with nothing touched.
+- **The count comes from `outcomes.json`, not from the directory.** A run can
+  leave one without the other: `--file src/theme.rs` — a file Phase 5 has not
+  written — prints `Found 0 mutants to test`, creates `mutants.out/` with an empty
+  `log/`, and writes no `outcomes.json` at all. The first draft of the message said
+  the directory did not exist while it was sitting right there, which is this
+  entry's own defect inside the fix for it.
+- **The mechanism sits in `scripts/mutants.sh`; the policy stays with the
+  caller.** `--gate` is a flag the script consumes and only `mutants-diff` passes.
+  Four inline lines in the recipe would work and would be invisible to
+  `--self-test`, and would put a second copy of *how you read a report* beside the
+  first. The split above is unchanged: the script still only *states* unless a
+  caller asks it to refuse.
+- **`gated_ok` is fail-closed** — `none`, an empty reading and any non-number all
+  refuse. A gate that fails open is not a gate. `mutant_count` ends in `|| echo
+  none` so a `outcomes.json` torn by a killed run refuses rather than dying under
+  `set -e` with jq's status, where the gate would never speak at all.
+
+**Ceiling:** a caller that passes `--output` gets *this run started nothing* and,
+under `--gate`, a refusal. Loud rather than silent, still wrong, and no caller
+passes it.

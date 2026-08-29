@@ -170,6 +170,16 @@ mutants *ARGS:
 # the diff decides the scope, and a filter beside it would silently drop a mutant
 # in a file the turn actually changed.
 #
+# **`--gate` is what makes this recipe the one that refuses** (NOTES § D182).
+# `scripts/mutants.sh` only *states* that a run found nothing, because `just
+# mutants` and a hand-typed sweep have callers that legitimately want the
+# statement; this one is the per-turn gate CLAUDE.md § step 4 names, so a run that
+# mutated nothing has to be red here. The two refusals below are different shapes
+# and neither covers the other: an *empty* diff never reaches cargo-mutants, while
+# a diff full of `#[cfg(test)]` changes does and comes back with no mutants —
+# which is D133's subject in a second shape, a gate passing a diff with nothing in
+# it to mutate.
+#
 # Mutation testing over the author's own diff — the per-turn gate, not the sweep
 mutants-diff:
     #!/usr/bin/env bash
@@ -180,7 +190,7 @@ mutants-diff:
     # subject wearing a different hat: nothing to test reads exactly like nothing
     # got past. Refuse instead.
     [ -s "$diff" ] || { echo "mutants-diff: 'git diff HEAD' is empty, so there are no mutants to run and a green run would prove nothing (NOTES § D26, § D133)" >&2; exit 1; }
-    bash scripts/mutants.sh --timeout 90 --in-diff "$diff"
+    bash scripts/mutants.sh --gate --timeout 90 --in-diff "$diff"
 
 # --- the test cluster (scripts/cluster.sh does the work) ---
 

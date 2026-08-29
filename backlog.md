@@ -594,7 +594,15 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   a new product file would be a silent gap of exactly the kind
   [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
   and [D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21)
-  are both about. Found by the author, 2026-08-21
+  are both about. Found by the author, 2026-08-21. **The gap stopped being silent
+  on 2026-08-29 and is not otherwise smaller**: `just mutants-diff` now refuses a
+  diff it found no mutants in, so a turn whose only product change is an untracked
+  new `src/*.rs` exits 1 saying *nothing to gate* instead of passing quietly
+  ([D182](NOTES.md#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29)).
+  The refusal's own text tells the reader to check whether the product change is
+  missing from `git diff HEAD`, which is exactly this. Still worth fixing at the
+  source — the reader is being asked to diagnose what the recipe could scope
+  correctly
 - **`scripts/certs-test.sh` has no `--self-test`.** It grew a second check this
   turn — the two files that pin an instant against the committed certificates —
   and its red was proven on scratch copies rather than by a self-test, which every
@@ -1163,28 +1171,6 @@ not a phase close.*
   like every other bounded field, or give the cap a second, wider budget for the
   author-written case
 
-- **`scripts/mutants.sh`'s three log scans read `mutants.out` unconditionally, so
-  a run that never got the lock reports another run's numbers.** Reproduced by
-  accident during the re-close review: an invocation that tested **zero** mutants
-  printed *"180 log(s) read"* and *"18 unviable"*, all of them `analysis.rs`, from
-  a sweep another process was running in the same tree. cargo-mutants only rotates
-  its output directory once it holds the lock. **The exit status is unaffected**
-  (`exit $rc`), so nothing has ever passed on this — what it corrupts is the
-  human-readable line the script exists to make trustworthy, which is the whole
-  point of [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21).
-  **Seen a second way an hour later, which is what makes it a box rather than a
-  curiosity**: `just mutants-diff` over a diff that contains **only** a
-  `#[cfg(test)]` module printed `INFO No mutants to filter` and then thirteen
-  `src/rules.rs` unviables from a shard of the whole-file sweep that had ended
-  twenty minutes earlier. Exit 0 both times. The recipe already refuses an
-  *empty* diff for exactly this reason — nothing to test reads like nothing got
-  past — and does not refuse a diff with **no mutants in it**, which is the same
-  sentence. If boxed: the scans run only when this invocation owned the lock and
-  actually tested something, the stale output directory is cleared or
-  timestamped, and the `--self-test` gains both cases — a run that never held the
-  lock, and a run that held it and tested zero — each of which must print
-  *nothing read*, never a count
-
 ### From the Phase 4 re-close review (2026-08-23)
 
 *Two findings from [`reports/2026-08-23-phase-4-reclose-family-review.md`](reports/2026-08-23-phase-4-reclose-family-review.md)
@@ -1676,6 +1662,24 @@ things naming it does not fix.*
   and PodMetrics is out of scope — but it is the shape the first pod-level consumer
   will get wrong, and `metrics_saying` in `analysis.rs` has two call sites and neither
   feeds a bare suffix today.
+
+### From the mutation-gate box (2026-08-29)
+
+*One finding from the box that fixed the stale-report defect
+([D182](NOTES.md#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29)).
+It is in `src/`, which `tester` may not write, and it is not a defect in that box.*
+
+- **`src/k8s_tests.rs`'s stalled-handshake test asserts a bound five times tighter
+  than the property it is testing, and it is flaky in CI.**
+  `a_server_that_accepts_and_never_speaks_does_not_hold_the_probe_open` asserts
+  `waited < deadline * 4` — 800 ms — while the property it exists to prove is *one
+  deadline around the loop, not twenty around each handshake*, whose discriminating
+  boundary is `20 x 200 ms = 4 s`. Measured 2026-08-29: **1 failure in 5 isolated
+  runs**, observed at 1.046 s inside `just check` and 963 ms on an idle re-run, both
+  four times under the boundary the design property actually needs — so the property
+  held on every run that went red. A gate that is red for nothing is one people learn
+  to wave through, which is the justfile's own argument for why `just check` is CI.
+  `dev-core`'s file. Found by `tester`, 2026-08-29
 
 ## Ruled out
 
