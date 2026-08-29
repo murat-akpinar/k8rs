@@ -116,8 +116,9 @@ mod tests;
 use crate::rules::{
     CertificateRequestSnapshot, ClaimSnapshot, ClusterSnapshot, Condition, ContainerSnapshot,
     ContainerState, DisruptionBudgetSnapshot, EndpointSliceSnapshot, ExitRule, HostPathMount,
-    NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, Selector, SelectorRequirement,
-    ServiceSnapshot, Taint, Terminated, Toleration, WorkloadSnapshot, expires_at, minor_version,
+    Metrics, NodeSnapshot, NodeUsage, ObjectId, ObjectKind, PodSnapshot, Selector,
+    SelectorRequirement, ServiceSnapshot, Taint, Terminated, Toleration, WorkloadSnapshot,
+    expires_at, minor_version,
 };
 use futures_util::stream::{self, BoxStream, Stream, StreamExt, select_all};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
@@ -551,6 +552,51 @@ impl Bounded for DisruptionBudgetSnapshot {
         // *the controller could not compute this at all*, and its `message` is a sentence
         // ([`Condition`]'s impl caps them apart).
         self.conditions.bound();
+    }
+}
+
+/// **What one node reported it is using**, from the one call in this file that is *polled*
+/// (§ WHAT A NODE IS USING).
+///
+/// **Both are [`IDENTIFIER`]s, like every other quantity this guard sees** — the values measured
+/// off a live metrics API are `76530604n` and `1107584Ki` (§ WHAT A NODE IS USING has the
+/// reading) — words a reader scans rather than sentences. `analysis.rs` parses them with
+/// `rules::quantity_milli` and prints the number, so nothing unbounded is drawn either way; what
+/// the cap stops is a metrics API answering something that is not a quantity and putting a
+/// megabyte on the heap per node.
+impl Bounded for NodeUsage {
+    fn bound(&mut self) {
+        text(&mut self.cpu, IDENTIFIER);
+        text(&mut self.memory, IDENTIFIER);
+    }
+}
+
+/// **[`pairs`]'s shape, for a map whose value is a type rather than a string** — the key is a
+/// node name the cluster wrote, so the map is rebuilt for that function's reason, and two keys
+/// that cut to the same bytes collapse the same way.
+///
+/// **Only [`Metrics::Read`] carries anything the cluster wrote.** The other three arms are this
+/// file's own classification of a call that did not answer with usage (§ WHAT A NODE IS USING),
+/// and hold no string at all.
+impl Bounded for Metrics {
+    fn bound(&mut self) {
+        let Metrics::Read(nodes) = self else { return };
+        let mut bounded = BTreeMap::new();
+        for (mut name, mut usage) in std::mem::take(nodes) {
+            text(&mut name, IDENTIFIER);
+            // **The strip can empty a name that was not empty**, and this is the only place that
+            // can happen: `\u{200b}\u{feff}` is a name the decode accepts and [`text`] removes
+            // whole. Dropping it here is what makes [`NodeMetricsList`]'s *no entry under the
+            // empty string* true of the map a reader gets rather than only of the map the decode
+            // built — two hostile names strip to the same `""` and collide, which is the
+            // collision that doc forbids arriving one function later (`tester`'s F2, 2026-08-29).
+            if name.is_empty() {
+                continue;
+            }
+            usage.bound();
+            bounded.entry(name).or_insert(usage);
+        }
+        *nodes = bounded;
     }
 }
 
@@ -1475,6 +1521,15 @@ pub struct Store {
     /// `None`-is-*nobody looked* rule as the field above, five fields at once ([`ReportLists`],
     /// § WHAT A REPORT ASKS FOR).
     reports: ReportLists,
+    /// **The Capacity report's live usage, filed by [`Store::metrics_polled`]** — the one field
+    /// here that is refilled on a timer rather than read once (§ WHAT A NODE IS USING).
+    ///
+    /// **The `Option` is *nobody asked* and the four arms inside it are everything else**
+    /// ([`crate::rules::Metrics`], whose doc is precise about why that fifth state is the
+    /// `Option` and not a fifth variant). A run without `--analysis` never polls, so it stays
+    /// `None` and `analysis::live_usage_row` draws the one sentence that names k8rs rather than
+    /// the cluster.
+    metrics: Option<Metrics>,
 }
 
 impl Store {
@@ -1520,6 +1575,21 @@ impl Store {
     /// nothing reads is a fault nothing draws.
     pub(crate) fn reports_fetched(&mut self, lists: ReportLists) {
         self.reports = lists;
+    }
+
+    /// **File one metrics poll**, whichever of the four things it found (§ WHAT A NODE IS USING).
+    ///
+    /// **It takes the [`crate::rules::Metrics`] rather than an `Option`, so a caller cannot file
+    /// *nobody asked* after having asked.** That state is the store's starting one and the only
+    /// honest way back to it is never to have polled; every poll produces one of the four, and
+    /// [`node_usage`] has already collapsed the failures into three of them.
+    ///
+    /// **Called more than once, unlike every other setter here** — this is the poll, so the last
+    /// answer wins, and every transition between the four is drawn within one [`METRICS_POLL`]:
+    /// a metrics-server that is installed, one that comes back up, a role that is granted the
+    /// verb. Nothing here is a state the store gets stuck in (NOTES § D181).
+    pub(crate) fn metrics_polled(&mut self, metrics: Metrics) {
+        self.metrics = Some(metrics);
     }
 
     pub fn pod(&mut self, now: &Time, event: Event<Pod>) {
@@ -1756,7 +1826,11 @@ impl Store {
             // The sixth on-demand list, filed one setter over because C3 owns it
             // ([`Store::certificates_fetched`]).
             certificate_requests: self.certificate_requests.clone(),
-            metrics: None,
+            // **`None` is *k8rs never asked*, which is a run with no report open — and it is not
+            // one of [`crate::rules::Metrics`]'s four arms** (§ WHAT A NODE IS USING). Filled by
+            // [`Store::metrics_polled`] every thirty seconds while a report wants it, so unlike
+            // the six lists above this one is not a photograph.
+            metrics: self.metrics.clone(),
         })
     }
 }
@@ -2062,6 +2136,413 @@ pub(crate) async fn report_lists(client: &Client, deadline: std::time::Duration)
 }
 
 // --- WHAT A REPORT ASKS FOR END ---
+
+// --- WHAT A NODE IS USING START ---
+//
+// **The one call in this file that runs on a timer, and the only one invariant 6 allows to**
+// (todo.md § Phase 5, whose first line is *the one thing that cannot be watched*). Everything
+// else is a permanent watch or a single fetch a report opens.
+//
+// **What a usage number is, measured off the objects rather than argued from the API's shape**:
+// each entry carries its own `window`, and on the cluster this box deployed to those windows ran
+// **10.006s to 20.056s against a configured 15s resolution** — so the value is an average over a
+// period the object states and that period is not even constant between two nodes read in one
+// answer. What is *not* claimed here is why watching is unavailable: whether `metrics.k8s.io`
+// serves a `watch` verb was not read off a cluster in this turn, and the premise this region
+// rests on is the box's, not a measurement of this agent's.
+//
+// **Thirty seconds, only while a report wants it, and it never stops** ([`METRICS_POLL`],
+// [`node_usage_poll`]). *Only for what is on screen* is `main.rs`'s `--analysis`, the same gate
+// § WHAT A REPORT ASKS FOR's six fetches sit behind, because there is no pane to open yet.
+//
+// ## Why every state keeps polling, including the two that look final
+//
+// **It shipped stopping on [`crate::rules::Metrics::NotInstalled`] and
+// [`crate::rules::Metrics::Denied`], and that was a defect** (`k8s-admin`, 2026-08-29;
+// NOTES § D181 carries the cost table). Those two arms draw *"Install metrics-server if you want
+// it"* and *"Ask for read access to node metrics"* — and ended the poll in the same tick. The
+// operator does exactly what the screen asked, and the screen keeps saying the thing they just
+// fixed until k8rs is restarted, with nothing on it hinting that a restart is what is needed.
+// **A pane that instructs an action has to be able to observe that action.** It is D181's own
+// argument from the other side: probe-gating was refused for printing *install metrics-server* at
+// a cluster that had one, and this version could not even self-correct.
+//
+// **The rule was also applied to the two cheap answers and not to the expensive one.** Measured:
+// a `404` costs 11–36 ms and a `403` 12–35 ms, while the `Silent` the design already polled
+// forever costs the full ten seconds of [`REPORT_FETCH`]. Stopping saved the two that were nearly
+// free.
+//
+// **And [`Store::unresolved_owners`]'s rule does not reach here, which is what three readings of
+// it in a row got wrong.** NOTES § D151's words are *"a standing 403 would otherwise become one
+// refused request **per pod per pass**"* — a count that scales with the cluster and with the event
+// rate. **Two requests a minute** is not that: it is a heartbeat, on a timer that was already
+// running for two of the four states, behind an opt-in flag, and cheaper than the `Silent` case
+// the design polled forever anyway. The security gate's *never retries in a loop* is about
+// hammering a refused endpoint as fast as the socket allows — § WHAT A THROTTLE LOOKS LIKE's
+// subject, and the k9s failure mode `PRIOR-ART § B3` names — not about a bounded cadence. What
+// the gate does ask of a `403` is that it degrade one feature and never the session, and that is
+// unchanged: the pane draws its own sentence and nothing else on screen moves.
+//
+// ## The four states, and what picks between them
+//
+// [`crate::rules::Metrics`] has four arms because a reader acts differently on each, and this
+// call's own answer is the only input:
+//
+// * **200** is [`crate::rules::Metrics::Read`].
+// * **403** is [`crate::rules::Metrics::Denied`] — [`Fault::Refused`], *ask for read access*.
+// * **404** is [`crate::rules::Metrics::NotInstalled`] — [`Fault::Gone`], which is already this
+//   file's *this server says there is no such thing*. That is a fact somebody stated rather than a
+//   failed request read as an absence — *who* stated it is the next section, and it is not always
+//   the API server.
+// * **everything else** is [`crate::rules::Metrics::Silent`] — a `500`, a body that is not a
+//   `NodeMetricsList` (that type is where the shape is enforced), and every answer that never
+//   arrives at all.
+//
+// **`503`, `429` and `504` land on `Silent` by the deadline rather than by their status**, and
+// [`node_usage`]'s doc has the measurement: kube retries those three under this call, so none of
+// them reaches the classifier, and the commonest *installed and not answering* cluster costs one
+// [`REPORT_FETCH`] per poll.
+//
+// ## What a status line is worth here, in both directions
+//
+// **kube keeps the *body's* `Status.code` and discards the HTTP status line** whenever the body
+// parses as a `Status` (`client/mod.rs:551-559`). [`answer`]'s own doc writes one direction down:
+// a refusal whose body is JSON that is **not** a `Status` arrives with its code already gone and
+// lands on `Silent` — the harmless miss, because it names nothing to go and install.
+//
+// **The other direction is this region's to own, because the consequence here is not the usual
+// one.** A body carrying `code: 404` makes *any* HTTP status
+// [`crate::rules::Metrics::NotInstalled`] and one carrying `Forbidden` makes it `Denied` —
+// measured: a `500` whose body is `Status{code:404}` is `NotInstalled`, a `404` whose body is
+// `Status{code:403}` is `Denied`, and a `403` whose body is `Status{code:200}` is `Silent`
+// (`tester`, 2026-08-29).
+//
+// **What makes that this region's problem is that this is the first caller whose behaviour the
+// classification changes.** § WHAT A REPORT ASKS FOR discards it — every failure there is one
+// `None`, so a misread code selects between one outcome — and § WHAT WENT WRONG's other readers
+// pick a sentence. Here it picks a sentence **and** decides whether to keep asking
+// ([`node_usage_poll`]), so a middlebox that writes its own error bodies can take live usage off
+// the screen until k8rs is restarted.
+//
+// **Not guarded, and that is the choice rather than an oversight.** [`answer`] is the one
+// classifier (§ WHAT WENT WRONG) and a second reading of the status line beside it is exactly the
+// divergence this file refuses. What is owed instead is that the two shapes which *stop* the poll
+// are fed rather than reasoned about, and they are.
+//
+// ## Why the capability probe is not consulted
+//
+// **[`Served::capabilities`] is deliberately *not* an input** (NOTES § D181, which holds the whole
+// argument and is not restated here). What that costs on a cluster with no metrics-server is one
+// `404` every [`METRICS_POLL`], at 11–36 ms each — **not** *one per session*, which is what this
+// sentence said while the poll could stop and which deleting that rule made false.
+//
+// **What it buys was measured on a live cluster, and it is the sentence the four states rest on.**
+// metrics-server was deleted and the endpoint polled through the restart: **74 polls, 61 ×
+// `503 ServiceUnavailable`, 13 × `200`, and zero `403`**, over two restarts that both recovered
+// (`k8s-admin`, 2026-08-29). So a registered aggregated API whose backend is gone answers **`503`**
+// — not the `404` that would have been read as *not installed*, and not a `403`. With kube
+// retrying `503` for the full deadline that lands on [`crate::rules::Metrics::Silent`] —
+// *installed and did not answer* — and `Silent` keeps polling, so the screen recovers on its own
+// exactly as the cluster did.
+//
+// **What that run measured is a *pod* restart, and it is the narrower claim.** No transient `403`
+// appeared in those 74 polls. That mattered while the poll could stop — a transient refusal would
+// have ended it for good — and it is a smaller fact now that nothing stops: a state this poll
+// enters wrongly is a state it leaves again within thirty seconds. An RBAC change, the
+// `system:auth-delegator` binding, was **not** measured and is now the same shape as any other:
+// the screen follows it, in both directions, without a reconnect.
+//
+// **A `401` is [`crate::rules::Metrics::Silent`] and not `Denied`**, which is a choice between two
+// wrong sentences rather than a right one. An expired login is not a missing permission, so *ask
+// for read access to node metrics* would send the reader to their cluster administrator over a
+// `kubectl` login they can renew themselves; *did not answer* is at least true of what happened.
+// The reader is not left with only this: every watch is failing at the same moment and
+// `main.rs`'s `unreadable` names the expired credential and the program to renew it with.
+
+/// **How often the metrics API is asked** — thirty seconds, the floor todo.md § Phase 5 names.
+///
+/// **It is a constant and not a knob**, which is the box's own line. A number the reader can turn
+/// down is a number somebody sets to one second, and the windows measured on a live cluster were
+/// 10s to 20s wide (the region above) — so a poll faster than the interval is a round trip for an
+/// average that may not have moved.
+///
+/// **`MissedTickBehavior::Delay` in [`node_usage_poll`] is what makes *30s+* literally true.**
+/// Tokio's default is `Burst`, which schedules the next tick relative to the one that was missed —
+/// so a fetch that took the whole of [`REPORT_FETCH`] would be followed immediately by another.
+/// With `Delay` the gap between two polls is never less than this, whatever the answer cost.
+///
+/// **The `+` is the answer's own cost, and on one cluster it is not small** — the period is this
+/// constant *plus* however long the fetch took, so it is a floor and not the period
+/// (`k8s-admin`, 2026-08-29). Measured per answer:
+///
+/// | what the cluster answers | the fetch costs | so the period is |
+/// |---|---|---|
+/// | `200` — a reading | milliseconds | ~30s |
+/// | `404` — [`crate::rules::Metrics::NotInstalled`] | 11–36 ms | ~30s |
+/// | `403` — [`crate::rules::Metrics::Denied`] | 12–35 ms | ~30s |
+/// | `503` — [`crate::rules::Metrics::Silent`] | 10s, the whole of [`REPORT_FETCH`] | **40s** |
+///
+/// **The one that is 40s is the one that is retried**, and only that row: a cluster whose
+/// metrics-server is down is asked once every forty seconds and not every thirty. Nothing on
+/// screen depends on the difference — the pane draws the same sentence throughout, and the
+/// recovery it is waiting for arrives one period late at worst.
+const METRICS_POLL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// **The one path this region asks for** — every node's usage, cluster-scoped, one request.
+///
+/// **Written out rather than built from an [`ApiResource`]**, which is § THE BROWSER'S ROWS'
+/// pattern and not this one's: `k8s-openapi` ships no `metrics.k8s.io` types (the group is served
+/// by an aggregated API server and is not part of the core spec), so there is no `Api<K>` to take
+/// a path from and nothing here to disagree with. **Nothing the cluster wrote is interpolated into
+/// it** — it is a literal, so [`path_safe`]'s class of failure cannot arise.
+const METRICS_NODES: &str = "/apis/metrics.k8s.io/v1beta1/nodes";
+
+/// What the metrics API calls its own answer — checked in [`node_usage`], never assumed
+/// (`tester`'s F3, 2026-08-29). [`TABLE_KIND`] is the same field read for the same reason.
+const METRICS_KIND: &str = "NodeMetricsList";
+
+/// The group version whose **units** this code has read off a live cluster ([`UsageResponse`]) —
+/// checked beside the kind, because a later version that changed them would decode perfectly here
+/// and print wrong numbers.
+const METRICS_VERSION: &str = "metrics.k8s.io/v1beta1";
+
+/// **The body of a `NodeMetricsList`, cut to the three values a snapshot needs** — and the cut
+/// *is* the prune (invariant 6, § THE INGEST GUARD's module doc).
+///
+/// **Hand-rolled because there is nothing to derive it from.** `k8s-openapi` has no
+/// `metrics.k8s.io` module at any feature level; the group is an aggregated API metrics-server
+/// serves, and the alternative — `DynamicObject` — would name the resource by hand *and* keep the
+/// whole object, which is the prune given up for nothing.
+///
+/// **`timestamp` and `window` are not named here, so serde never builds them.** `window` is the
+/// averaging period the object states, measured at 10.006s–20.056s on a cluster configured for
+/// 15s; nothing on screen says it today, and a field with no reader is one nobody can prove
+/// ([`Column`] drops discovery's `shortNames` under the same rule).
+///
+/// # Nothing defaults, and that is the opposite of [`TableResponse`]
+///
+/// **The decode is the only thing standing between a `200` and a reading**, so every field this
+/// type names is required and a body missing one is not a `NodeMetricsList`. While they defaulted,
+/// anything that was JSON at all decoded — measured: `{}`, `[]` and a `Status` carrying
+/// `code: 403` each came back `Read({})`, which draws no measurement **and no sentence saying
+/// why** (`tester`'s F3, 2026-08-29). An authorizing proxy answering `200` with a JSON error body
+/// is the ordinary way to reach it, and *the pane going quiet* is exactly what
+/// [`crate::rules::Metrics`]'s four arms exist to prevent.
+///
+/// **[`TableResponse`] defaults for a reason this type does not have**: one decode there covers
+/// two shapes the server chooses between, so a missing field is a legal answer. There is one shape
+/// here.
+///
+/// **`Read(∅)` stays reachable and is a different fact** — `{"kind":…,"apiVersion":…,"items":[]}`
+/// is a metrics API with nothing to report, which is *this cluster has none* rather than *nobody
+/// looked* (NOTES § D129). What is refused is `Read(∅)` from a body that is not one of these.
+///
+/// **One rule for every deviation, because two near-neighbours behaving oppositely is what
+/// `tester` measured next**: a wrongly-typed `usage.cpu` (a number, not a quantity string) lost the
+/// whole reading while a *missing* `usage` degraded one node. Both are `Silent` now. A
+/// `resource.Quantity` is a string in every Kubernetes API by definition, so a number there means
+/// something that is not metrics-server answered — and one entry the schema does not fit is not
+/// evidence about the other entries beside it, it is evidence about the writer.
+///
+/// **Unknown fields are still accepted** (no `deny_unknown_fields`): a metrics-server that adds a
+/// field is not a metrics-server that stopped being one, and refusing those would be a pin on a
+/// version rather than on a shape.
+#[derive(Deserialize)]
+#[serde(crate = "k8s_openapi::serde", rename_all = "camelCase")]
+struct NodeMetricsList {
+    /// The server's own word for what it sent, checked against [`METRICS_KIND`] — [`Table`]'s
+    /// `kind` branch reads the same field for the same reason, and a `PodMetricsList` reaching
+    /// this decode would otherwise be filed as nodes.
+    kind: String,
+    /// Checked against [`METRICS_VERSION`], because the **units** are what this code knows off
+    /// that group version and no other (the reading is on [`UsageResponse`]). A `v2` that changed
+    /// them would decode here perfectly and print wrong numbers.
+    api_version: String,
+    items: Vec<NodeMetricsResponse>,
+}
+
+/// One node's entry in that list.
+#[derive(Deserialize)]
+#[serde(crate = "k8s_openapi::serde")]
+struct NodeMetricsResponse {
+    metadata: NodeMetricsName,
+    usage: UsageResponse,
+}
+
+/// **The one field of a node metrics object's `metadata` that is read**: which node this is.
+///
+/// **Not [`MetadataResponse`], which is one type over and holds three fields.** Two of them —
+/// `namespace` and `uid` — have no reader here, and a struct that names only what the snapshot
+/// needs is what makes the decode the prune. The saving is small; the property is not.
+///
+/// **Required, and the `From` impl below therefore has no nameless entry to drop.** The name is
+/// the map's *key* and an entry without one could not be joined to any node — so an object that
+/// omits it is not a `NodeMetrics`, which is the type's rule above rather than a second one here.
+/// The one place an empty key can still appear is the strip, and `impl Bounded for Metrics` is
+/// where it is dropped.
+#[derive(Deserialize)]
+#[serde(crate = "k8s_openapi::serde")]
+struct NodeMetricsName {
+    name: String,
+}
+
+/// **The two quantities, as the metrics API writes them** — and it writes them in units nothing
+/// else in this repo sends.
+///
+/// **Read off a live cluster rather than off upstream's docs** (todo.md § Phase 5, which exists
+/// partly to do this): `usage.cpu` is **nanocores** — `76530604n` — and `usage.memory` is
+/// **`Ki`** — `1107584Ki`. `rules::quantity_milli` already maps both suffixes, and `76530604n`
+/// comes out 77 milli-cores, which is the column `kubectl top nodes` prints.
+///
+/// **This API also writes `"0"`, with no suffix at all** — observed on the `PodMetricsList` beside
+/// the node one, on an idle container, and **not** on a node, which never idles that far. It is
+/// fed to the parser here anyway: `quantity_milli`'s `""` arm had never seen a string from this
+/// source, and D29 is about the shapes a check was fed rather than the ones it was likely to meet.
+///
+/// It is a `String` for [`crate::rules::NodeUsage`]'s reason — a quantity stays the API's own text
+/// and the caller that needs a number owns the parse.
+#[derive(Deserialize)]
+#[serde(crate = "k8s_openapi::serde")]
+struct UsageResponse {
+    cpu: String,
+    memory: String,
+}
+
+/// **A body that decoded is always [`crate::rules::Metrics::Read`]** — the other three arms are
+/// what [`node_usage`] makes of a call that produced no body, and none of them is reachable from
+/// here.
+///
+/// **Nothing is dropped here and nothing can be**, which is a change: an entry with no name used
+/// to be filtered out at this line, and the rule moved up into the decode, where a missing name is
+/// one of the deviations that makes a body not a `NodeMetricsList` ([`NodeMetricsName`]). The
+/// empty key this file must not build can now only come from the *strip*, and
+/// `impl Bounded for Metrics` is the one place that drops it — one guard where there were two,
+/// and the one that runs last (`tester`'s F2, 2026-08-29).
+impl From<NodeMetricsList> for Metrics {
+    fn from(list: NodeMetricsList) -> Self {
+        Self::Read(
+            list.items
+                .into_iter()
+                .map(|node| {
+                    (
+                        node.metadata.name,
+                        NodeUsage {
+                            cpu: node.usage.cpu,
+                            memory: node.usage.memory,
+                        },
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+
+/// **What every node is using, or which way the question failed** — one request, classified into
+/// [`crate::rules::Metrics`]'s four arms (the region above, which is where the mapping is argued).
+///
+/// **Not a `Result` and not an `Option`, unlike every other fetch in this file.** § WHAT A REPORT
+/// ASKS FOR collapses every failure into one silence because the pane it feeds owes the reader no
+/// sentence about *why*. This one does owe one — `screens/analysis.md` § *Live usage* writes four
+/// different wordings and four different ways out — so the taxonomy is the return type.
+///
+/// **The request is built through an invariant-1 reader.** `Request::list` supplies the `GET` and
+/// is on the allowlist; a hand-rolled `http::Request` with a verb of our own choosing is what
+/// NOTES § D142 caught. `ListParams::default()` sends no `limit`, so the answer is whole — the
+/// same reasoning [`whole_list`] carries, and it costs less here because the list is one entry per
+/// node.
+///
+/// **Bounded by the caller's `deadline`, because nothing under it is** — `Config::read_timeout` is
+/// `None` in every kube constructor. Unbounded, a middlebox that accepts the connection and
+/// answers nothing would hold this poll's stream forever and the *next* poll would never be sent,
+/// so the pane would keep drawing a reading that stopped being true (the failure [`REPORT_FETCH`]
+/// was added for, one stream along).
+///
+/// **And the deadline is what ends three status codes as well as the hang**, which was measured
+/// here rather than inherited: kube retries **`429`, `503` and `504`** inside a tower layer with
+/// no callback, so none of the three ever reaches the classifier below — `500` and `502` come back
+/// in a millisecond and those three run to the deadline. That is NOTES § D148's fifteen retries
+/// seen from this call, and it is the ordinary shape of the failure this box cares most about: an
+/// aggregated metrics API whose backend is down answers **`503`**, so *metrics-server is installed
+/// here but did not answer* costs one [`REPORT_FETCH`] every [`METRICS_POLL`] to keep saying. Both
+/// halves are pinned by `the_deadline_and_not_a_status_is_what_ends_a_throttled_metrics_api`,
+/// which fails if kube's retry layer ever covers a different set.
+///
+/// **What that costs the cluster is counted, not estimated: 10–11 requests** inside these ten
+/// seconds — measured against the stub at this deadline, three retried statuses, and 5–7 at 300ms
+/// (`dev-core`, 2026-08-29). It brackets slightly below the eleven-or-twelve D148's constants
+/// predict, which is what jitter drawing under its mean looks like. The test beside it asserts
+/// *more than one* rather than the figure, at a deadline a suite can afford; the figure is here
+/// because it is the number an operator pays every [`METRICS_POLL`] while metrics-server is down.
+///
+/// **Every string goes through [`ingest`] like every other object in this file** — invariant 9,
+/// and the node name is a map *key*, which is the shape `impl Bounded for Metrics` exists for.
+///
+/// **What is bounded is every field; what is not is the entry count** — [`whole_list`]'s ceiling
+/// exactly, named here rather than restated, and one entry per node makes it the smallest of the
+/// seven calls that carry it. The response body is collected whole before the decode, so the peak
+/// is the body plus the decoded `Vec`, and this repeats every [`METRICS_POLL`] where the six
+/// fetches run once — which is why it matters that the list is short.
+pub(crate) async fn node_usage(client: &Client, deadline: std::time::Duration) -> Metrics {
+    let Ok(asked) = Request::new(METRICS_NODES).list(&ListParams::default()) else {
+        return Metrics::Silent;
+    };
+    match tokio::time::timeout(deadline, client.request::<NodeMetricsList>(asked)).await {
+        // **The body says what it is, and it is checked.** [`NodeMetricsList`] has already refused
+        // everything not shaped like one; these two refuse the two that *are* — a `PodMetricsList`
+        // decoded as nodes, and a group version whose units this code has never read.
+        Ok(Ok(list)) if list.kind == METRICS_KIND && list.api_version == METRICS_VERSION => {
+            ingest(list)
+        }
+        Ok(Ok(_)) => Metrics::Silent,
+        // **The one classifier, not a second reading of a status code** (§ WHAT WENT WRONG).
+        Ok(Err(failure)) => match fault(&failure) {
+            Fault::Refused => Metrics::Denied,
+            Fault::Gone => Metrics::NotInstalled,
+            _ => Metrics::Silent,
+        },
+        // The deadline. Nothing answered, which is the same thing to say as a `503`.
+        Err(_) => Metrics::Silent,
+    }
+}
+
+/// **[`node_usage`] on a timer, as one more stream for [`drive_watching`]** — the whole of how a
+/// poll reaches a store the watch loop holds `&mut`.
+///
+/// **An [`Update`] and not a task, so nothing here needs a lock.** The store is owned by the pump
+/// and mutated only between events; a second task holding it would need a mutex, and a mutex over
+/// the store is a second way for a snapshot to be read half-written. `select_all` merges this with
+/// the five watches and the closure lands on the same single-threaded loop every event does.
+///
+/// **The first poll is immediate**: `tokio::time::interval` completes its first tick at once, so a
+/// report drawn seconds after connect already carries usage rather than an empty slot for half a
+/// minute. Every tick after it is at least [`METRICS_POLL`] apart, which is what
+/// `MissedTickBehavior::Delay` buys.
+///
+/// **It never stops, and every one of the four states keeps polling** — there is no branch here
+/// and that is the fix, not an omission (the region above, NOTES § D181). It shipped ending on
+/// `NotInstalled` and `Denied`, so a pane that told the operator to install metrics-server could
+/// not see them do it. One cadence for four states is also less code than the rule it replaced.
+///
+/// **So the reader watching the screen sees every direction of travel**: a metrics-server that is
+/// restarting comes back, one that is installed starts answering, and a role that is granted the
+/// verb starts working — each within one [`METRICS_POLL`], without touching anything.
+///
+/// **Like the five watches, this stream cannot end**, which is what `select_all` in
+/// [`drive_watching`] wants: [`updates`] appends an end marker precisely because a watch that
+/// finishes would otherwise be read as live, and there is nothing here that can finish.
+pub(crate) fn node_usage_poll(client: Client) -> BoxStream<'static, Update> {
+    let mut ticker = tokio::time::interval(METRICS_POLL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    stream::unfold((client, ticker), |(client, mut ticker)| async move {
+        ticker.tick().await;
+        let metrics = node_usage(&client, REPORT_FETCH).await;
+        let update = Box::new(move |store: &mut Store| store.metrics_polled(metrics)) as Update;
+        Some((update, (client, ticker)))
+    })
+    .boxed()
+}
+
+// --- WHAT A NODE IS USING END ---
 
 // --- RESOLVING AN OWNER START ---
 //
@@ -3129,6 +3610,13 @@ pub fn browsable(
 // distinction is owed by the box that first routes on [`Served::capabilities`]** — the freshness
 // field is one direct `/apis` call away and this file does not make it — and until that box lands
 // the only honest reading of a missing row is the floor above.
+//
+// **That box has landed, and it discharged the debt by not routing on this set at all**
+// (§ WHAT A NODE IS USING). [`crate::rules::Metrics`]'s four arms come off the metrics call's own
+// status, so *registered and down* and *not installed there* are told apart by what the aggregator
+// answers rather than by a row that is absent for both reasons. Nothing above changes: this
+// function is still a floor and not a census, and the next feature to key on a missing row
+// inherits the same debt with no precedent for paying it this way.
 //
 // **A trimmed discovery answer is the same shape and is `connect()`'s to not build.**
 // `Discovery::filter`/`exclude` set a mode every group is gated on before it is kept

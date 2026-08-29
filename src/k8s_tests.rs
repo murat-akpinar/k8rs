@@ -10136,6 +10136,820 @@ fn every_string_a_fetched_report_list_carries_is_named_by_the_ingest_guard() {
     }
 }
 
+// --- WHAT A NODE IS USING ---
+//
+// **The four states of the metrics poll, and the units this repo had never read off an object.**
+// Everything about `metrics.k8s.io` in `analysis.rs`'s tests up to now was hand-built, because the
+// fixture cluster served no metrics API at all — `kubectl top nodes` answered *Metrics API not
+// available* until the deploy in todo.md § Phase 5 (NOTES § D137, which is what took the four
+// claims away the first time).
+//
+// **The bodies below are transcribed from that live cluster and not invented.** There is no
+// `tests/fixtures/node-metrics.json` to read: `tests/` belongs to a different writer and a capture
+// is a committed artifact under the sanitization gate, so what is here is the *envelope* built by
+// hand around the values the run printed — the same split `csr_list_body` above already makes,
+// one step further because the objects were read rather than saved. The values, off
+// `kubectl get --raw /apis/metrics.k8s.io/v1beta1/nodes`:
+//
+// ```
+// k8rs-control-plane   usage.cpu=76530604n   usage.memory=1107584Ki   window=10.015s
+// k8rs-worker          usage.cpu=43218986n   usage.memory=577936Ki    window=20.056s
+// ```
+//
+// **and `usage.cpu` of `"0"`, with no suffix at all**, which every idle container in the
+// `PodMetricsList` beside it carried. That is a third shape `quantity_milli` had never been fed
+// from this source (NOTES § D29).
+
+/// One `NodeMetricsList` body, from the node names and quantities a live metrics-server wrote.
+///
+/// `window` and `timestamp` are carried even though nothing names them, because the point of a
+/// decode test is the body the server really sends: a type that named them would decode the same
+/// either way, and one that trips over them would be caught here rather than on a cluster. The
+/// `window` is one constant rather than the per-node values the run printed — nothing reads it,
+/// and a varying one here would look like a fact under test.
+fn node_metrics_body(nodes: &[(&str, &str, &str)]) -> String {
+    let items: Vec<_> = nodes
+        .iter()
+        .map(|(name, cpu, memory)| {
+            serde_json::json!({
+                "metadata": { "name": name, "creationTimestamp": "2026-08-29T07:12:03Z" },
+                "timestamp": "2026-08-29T07:11:56Z",
+                "window": "10.015s",
+                "usage": { "cpu": cpu, "memory": memory },
+            })
+        })
+        .collect();
+    serde_json::to_string(&serde_json::json!({
+        "kind": "NodeMetricsList",
+        "apiVersion": "metrics.k8s.io/v1beta1",
+        "metadata": {},
+        "items": items,
+    }))
+    .expect("a value this file built re-serialises")
+}
+
+/// **The units, read off the objects a live metrics API wrote** — the whole reason this box needed
+/// a cluster (todo.md § Phase 5).
+///
+/// **Three shapes and not one** (NOTES § D29): nanocores with an `n`, `Ki` memory, and a bare
+/// `"0"` with no suffix — the third observed on the `PodMetricsList` beside this one rather than
+/// on a node, and fed here because it is the arm of `quantity_milli`'s suffix table nothing had
+/// ever reached from this source.
+///
+/// **The path is asserted too.** A metrics request that went out namespaced answers `404` on a
+/// real cluster, and this poll reads a `404` as *no metrics-server installed* — so a wrong path
+/// here does not fail loudly, it tells an operator with a working metrics-server to install one.
+#[tokio::test]
+async fn the_units_a_live_metrics_api_writes_are_the_numbers_the_capacity_report_prints() {
+    let (client, asked) = stub_list(
+        "200 OK",
+        node_metrics_body(&[
+            ("k8rs-control-plane", "76530604n", "1107584Ki"),
+            ("k8rs-worker", "43218986n", "577936Ki"),
+            // The cluster read `9804617n` here; the bare `0` is substituted deliberately, so the
+            // one suffix-less shape this API writes is fed to the parser (the doc above).
+            ("k8rs-worker2", "0", "206816Ki"),
+        ]),
+    )
+    .await;
+
+    let Metrics::Read(nodes) = node_usage(&client, REPORT_FETCH).await else {
+        panic!("a metrics API that answered was not read as an answer");
+    };
+    assert_eq!(nodes.len(), 3, "one entry per node the list carried");
+    assert_eq!(
+        nodes["k8rs-control-plane"],
+        NodeUsage {
+            cpu: "76530604n".to_string(),
+            memory: "1107584Ki".to_string(),
+        },
+        "the quantities did not reach the snapshot as the API's own strings"
+    );
+
+    // The parse the Capacity report does, on the strings a real server sent — nanocores, `Ki`,
+    // and the bare `0` (the doc above says which of the three came off a pod rather than a node).
+    assert_eq!(
+        crate::rules::quantity_milli(&nodes["k8rs-control-plane"].cpu),
+        Some(77),
+        "76530604n is 77 milli-cores, which is the column `kubectl top nodes` prints"
+    );
+    assert_eq!(
+        crate::rules::quantity_milli(&nodes["k8rs-control-plane"].memory),
+        Some(1_134_166_016_000),
+        "1107584Ki is 1134166016 bytes, and quantity_milli answers in thousandths"
+    );
+    assert_eq!(
+        crate::rules::quantity_milli(&nodes["k8rs-worker2"].cpu),
+        Some(0),
+        "a bare `0` with no suffix is a shape this API writes, and it must parse"
+    );
+    println!(
+        "read off a live metrics API: cpu {:?} -> {:?}m · memory {:?} -> {:?}",
+        nodes["k8rs-control-plane"].cpu,
+        crate::rules::quantity_milli(&nodes["k8rs-control-plane"].cpu),
+        nodes["k8rs-control-plane"].memory,
+        crate::rules::quantity_milli(&nodes["k8rs-control-plane"].memory),
+    );
+
+    let asked = asked.lock().expect("the log is never poisoned").clone();
+    assert_eq!(
+        asked,
+        vec!["/apis/metrics.k8s.io/v1beta1/nodes?".to_string()],
+        "one cluster-scoped list of node metrics and nothing else"
+    );
+}
+
+/// **The empty key, from both directions it can arrive** — the decode, and the strip that runs
+/// after it.
+///
+/// **`Metrics::Read` is keyed by [`crate::rules::NodeSnapshot::id`]'s name**, so an entry under
+/// `""` is a row no node can ever match, and — being a key — one that swallows every other such
+/// entry beside it. Two guards used to be needed and now one is: a *missing* name makes the body
+/// not a `NodeMetricsList` at all (the decode's rule), and the only way left to reach `""` is a
+/// name that [`text`] strips to nothing.
+///
+/// **That second door was open and shipped**, which is `tester`'s F2 (2026-08-29): the `From` impl
+/// dropped a nameless entry and its own doc said why, then `Bounded` ran afterwards and rebuilt
+/// exactly the state that doc forbids — two hostile names collapsing into one `""` entry. Inert,
+/// because `analysis::using` does `nodes.get(node)` and `""` matches no node; false all the same,
+/// and `nodes.len()` was wrong for anything that counts.
+#[tokio::test]
+async fn no_node_is_ever_filed_under_the_empty_name_however_the_name_got_there() {
+    // Door one: no name at all. Not a `NodeMetrics`, so not a `NodeMetricsList`, so no reading —
+    // and *not* a partial one, which would have been a measurement with a node silently missing.
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::to_string(&serde_json::json!({
+            "kind": METRICS_KIND,
+            "apiVersion": METRICS_VERSION,
+            "items": [
+                { "metadata": {}, "usage": { "cpu": "1n", "memory": "1Ki" } },
+                {
+                    "metadata": { "name": "k8rs-worker" },
+                    "usage": { "cpu": "2n", "memory": "2Ki" },
+                },
+            ],
+        }))
+        .expect("a value this file built re-serialises"),
+    )
+    .await;
+    assert_eq!(
+        node_usage(&client, REPORT_FETCH).await,
+        Metrics::Silent,
+        "an entry with no name is not a NodeMetrics, so the body is not a NodeMetricsList"
+    );
+
+    // Door two: two different names that both strip to nothing, beside one that survives. Before
+    // F2 these collided into a single `""` entry and the map had two keys instead of one.
+    let (client, _) = stub_list(
+        "200 OK",
+        node_metrics_body(&[
+            ("\u{200b}\u{feff}", "1n", "1Ki"),
+            ("\u{202a}\u{202c}", "2n", "2Ki"),
+            ("k8rs-worker", "3n", "3Ki"),
+        ]),
+    )
+    .await;
+    let Metrics::Read(nodes) = node_usage(&client, REPORT_FETCH).await else {
+        panic!("a metrics API that answered was not read as an answer");
+    };
+    println!("two names that strip to nothing, and one that does not: {nodes:?}");
+    assert!(
+        !nodes.contains_key(""),
+        "a name the strip emptied was filed under the empty key: {nodes:?}"
+    );
+    assert_eq!(
+        nodes.keys().collect::<Vec<_>>(),
+        vec!["k8rs-worker"],
+        "the map a reader gets is not the one node that has a name: {nodes:?}"
+    );
+    assert_eq!(
+        nodes.len(),
+        1,
+        "the entry count is wrong, which is what the empty key costs anything that counts"
+    );
+}
+
+/// **A `200` is not a reading — a `200` carrying a `NodeMetricsList` is** (`tester`'s F3,
+/// 2026-08-29).
+///
+/// **Every field of the decode used to default, so anything that was JSON came back `Read(∅)`**:
+/// no measurement *and no sentence saying why*, which is the pane going quiet — the one state
+/// `crate::rules::Metrics`' four arms exist to prevent. An authorizing proxy or a gateway
+/// answering `200` with a JSON error body is the ordinary way to reach it, and the shipped test
+/// fed `"not json at all"`, the one shape that already got the right answer.
+///
+/// **`Read(∅)` stays reachable and is asserted first**, or this test passes against a decode that
+/// refuses everything: a metrics API with nothing to report is *this cluster has none*, which is
+/// not *nobody looked* (NOTES § D129).
+///
+/// **The last two rows are the near-neighbours `tester` measured behaving oppositely** — a
+/// wrongly-typed `usage.cpu` lost the whole reading while a *missing* `usage` degraded one node.
+/// One rule now: a `resource.Quantity` is a string in every Kubernetes API, so a number there is
+/// not metrics-server answering, and one entry the schema does not fit is evidence about the
+/// writer rather than about the entries beside it.
+#[tokio::test]
+async fn a_two_hundred_that_is_not_a_node_metrics_list_is_silent_and_never_an_empty_reading() {
+    let well_formed = node_metrics_body(&[("k8rs-worker", "1n", "1Ki")]);
+    let item = |usage: serde_json::Value| {
+        serde_json::to_string(&serde_json::json!({
+            "kind": METRICS_KIND,
+            "apiVersion": METRICS_VERSION,
+            "items": [{ "metadata": { "name": "k8rs-worker" }, "usage": usage }],
+        }))
+        .expect("a value this file built re-serialises")
+    };
+
+    // *This cluster has none* — the one empty reading that is real, and it must survive.
+    let (client, _) = stub_list("200 OK", node_metrics_body(&[])).await;
+    assert_eq!(
+        node_usage(&client, REPORT_FETCH).await,
+        Metrics::Read(BTreeMap::new()),
+        "a metrics API with nothing to report stopped being a reading"
+    );
+
+    for (what, body) in [
+        ("an empty object", "{}".to_string()),
+        ("an array", "[]".to_string()),
+        ("a bare string", "\"\"".to_string()),
+        ("not JSON at all", "not json at all".to_string()),
+        (
+            "a Status a proxy answered 200 with",
+            status_body(403, "Forbidden", "nodes.metrics.k8s.io is forbidden"),
+        ),
+        (
+            "a null items",
+            serde_json::to_string(&serde_json::json!({
+                "kind": METRICS_KIND, "apiVersion": METRICS_VERSION, "items": null,
+            }))
+            .expect("a value this file built re-serialises"),
+        ),
+        (
+            "no kind at all",
+            well_formed.replace(&format!("\"kind\":\"{METRICS_KIND}\","), ""),
+        ),
+        (
+            "the pod list, which is the other thing this endpoint's neighbour serves",
+            well_formed.replace(METRICS_KIND, "PodMetricsList"),
+        ),
+        (
+            "a group version whose units this code has never read",
+            well_formed.replace(METRICS_VERSION, "metrics.k8s.io/v2"),
+        ),
+        (
+            "a quantity that is a number",
+            item(serde_json::json!({ "cpu": 0, "memory": "1Ki" })),
+        ),
+        ("no usage at all", item(serde_json::json!(null))),
+    ] {
+        let (client, _) = stub_list("200 OK", body.clone()).await;
+        assert_eq!(
+            node_usage(&client, REPORT_FETCH).await,
+            Metrics::Silent,
+            "a 200 carrying {what} became a reading — the pane draws no number and no sentence \
+             either. Body: {body}"
+        );
+        println!("200 carrying {what} -> Silent");
+    }
+}
+
+/// **kube reads the code off the *body*, and the two shapes that stop this poll are fed rather
+/// than reasoned about** (`tester`'s F4, 2026-08-29).
+///
+/// **`answer` is the one classifier and this does not second-guess it** (§ WHAT WENT WRONG) — what
+/// is new is the consequence. Everywhere else in `k8s.rs` a misread code costs one pane one
+/// moment; here `NotInstalled` and `Denied` **stop the poll for the rest of the session**, so a
+/// middlebox that writes its own error bodies takes live usage off the screen until k8rs restarts.
+/// The third row is the mirror and is why this is a property of the body and not of the status.
+#[tokio::test]
+async fn the_body_and_not_the_status_line_is_what_can_stop_this_poll() {
+    for (status, body, expected) in [
+        (
+            "500 Internal Server Error",
+            status_body(
+                404,
+                "NotFound",
+                "the server could not find the requested resource",
+            ),
+            Metrics::NotInstalled,
+        ),
+        (
+            "404 Not Found",
+            status_body(403, "Forbidden", "nodes.metrics.k8s.io is forbidden"),
+            Metrics::Denied,
+        ),
+        (
+            "403 Forbidden",
+            status_body(200, "", "nothing is wrong, says the body"),
+            Metrics::Silent,
+        ),
+    ] {
+        let (client, _) = stub_list(status, body).await;
+        assert_eq!(
+            node_usage(&client, REPORT_FETCH).await,
+            expected,
+            "`{status}` did not take its answer from the body's own code"
+        );
+        println!("`{status}` + a body of its own -> {expected:?}");
+    }
+}
+
+/// **A refusal body as an API server writes one** — a real `Status`, because that is what decides
+/// the answer and not the status line.
+///
+/// **kube keeps the *body's* `code` and throws the HTTP status away whenever the body parses as a
+/// `Status`** (`client/mod.rs:551-559`, read after a first draft of the test below fed `{}` and
+/// watched a `404` come back `Silent`). `{}` *is* a valid `Status` — every field defaults, so
+/// `code` is `0` — and § WHAT WENT WRONG already writes that ceiling down at [`answer`]. So a
+/// test that wants to prove the `404`/`403` split has to send what a server sends.
+fn status_body(code: u16, reason: &str, message: &str) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "kind": "Status",
+        "apiVersion": "v1",
+        "metadata": {},
+        "status": "Failure",
+        "message": message,
+        "reason": reason,
+        "code": code,
+    }))
+    .expect("a value this file built re-serialises")
+}
+
+/// **The four states are four different sentences with four different ways out**, so the call that
+/// produces them may not collapse two of them (`screens/analysis.md` § *Live usage*).
+///
+/// **`404` is `NotInstalled` and `403` is `Denied`, and getting that pair backwards is the
+/// expensive one**: one asks the reader to install software they may already have, the other to go
+/// and ask an administrator for access they may already have.
+///
+/// **Both shapes of `404` are fed, because they are different bodies** and § THE BROWSER'S ROWS
+/// already measured the difference: a group nobody serves answers the literal text
+/// `404 page not found`, which kube reconstructs into a `Status` carrying the HTTP code, while a
+/// resource missing from a group the server *does* serve answers a real `Status` with
+/// `reason: NotFound`. Only the code is the same in both, which is the field this routes on.
+///
+/// **Everything else is `Silent`** — a `500`, a `502`, a `401` from a login that ran out
+/// mid-session, and a `200` carrying something that is not a `NodeMetricsList` at all.
+///
+/// **`503`, `429` and `504` are *not* here and have a test of their own**
+/// ([`the_deadline_and_not_a_status_is_what_ends_a_throttled_metrics_api`]).
+/// kube retries those three inside a tower layer, so they never reach the classifier at all —
+/// which is worth ten seconds per case here and is the wrong place to spend it.
+///
+/// **And the one ceiling the whole file already has**: a refusal whose body is JSON that is *not*
+/// a `Status` arrives with its HTTP code gone ([`answer`]'s own doc), so a `404` carrying `{}` is
+/// `Silent`. It is asserted rather than left to be discovered — and `Silent` is the harmless
+/// direction of that miss, since it names nothing to go and install.
+#[tokio::test]
+async fn each_way_the_metrics_api_can_fail_is_its_own_state_and_never_an_empty_reading() {
+    for (status, body, expected) in [
+        // A group the server does not serve at all: no `Status`, just the mux's own line.
+        (
+            "404 Not Found",
+            "404 page not found".to_string(),
+            Metrics::NotInstalled,
+        ),
+        (
+            "404 Not Found",
+            status_body(
+                404,
+                "NotFound",
+                "the server could not find the requested resource",
+            ),
+            Metrics::NotInstalled,
+        ),
+        (
+            "403 Forbidden",
+            status_body(
+                403,
+                "Forbidden",
+                "nodes.metrics.k8s.io is forbidden: User \"reader\" cannot list resource \
+                 \"nodes\" in API group \"metrics.k8s.io\" at the cluster scope",
+            ),
+            Metrics::Denied,
+        ),
+        (
+            "500 Internal Server Error",
+            status_body(500, "InternalError", "an error on the server"),
+            Metrics::Silent,
+        ),
+        (
+            "502 Bad Gateway",
+            "bad gateway".to_string(),
+            Metrics::Silent,
+        ),
+        (
+            "401 Unauthorized",
+            status_body(401, "Unauthorized", "Unauthorized"),
+            Metrics::Silent,
+        ),
+        // The documented ceiling: JSON that is not a `Status` takes the HTTP code with it.
+        ("404 Not Found", "{}".to_string(), Metrics::Silent),
+    ] {
+        let (client, _) = stub_list(status, body.clone()).await;
+        assert_eq!(
+            node_usage(&client, REPORT_FETCH).await,
+            expected,
+            "a `{status}` carrying {body:?} was read as something other than {expected:?}"
+        );
+    }
+
+    // A `200` whose body is not a list of node metrics: the decode fails, and *nothing usable came
+    // back* is `Silent` and never `Read(∅)` — an empty map draws no `using` line and no sentence
+    // either, which is the pane going quiet.
+    let (client, _) = stub_list("200 OK", "not json at all".to_string()).await;
+    assert_eq!(
+        node_usage(&client, REPORT_FETCH).await,
+        Metrics::Silent,
+        "a body that is not a NodeMetricsList became a reading"
+    );
+}
+
+/// **A cluster whose metrics-server has nothing to report answers `Read` with an empty map**, and
+/// that is not the same as any of the three failures.
+///
+/// Without it the test above passes against a `node_usage` hard-coded to `Silent` (NOTES § D26).
+#[tokio::test]
+async fn a_metrics_api_with_no_nodes_to_report_on_is_still_a_reading() {
+    let (client, _) = stub_list("200 OK", node_metrics_body(&[])).await;
+    assert_eq!(
+        node_usage(&client, REPORT_FETCH).await,
+        Metrics::Read(BTreeMap::new()),
+        "an empty list was read as a failure"
+    );
+}
+
+/// **A poll nobody answers does not hold the stream open forever** — [`REPORT_FETCH`]'s reason,
+/// one stream along from the six fetches it was written for.
+///
+/// **What it costs here is worse than on the startup path.** The next tick is only sent after this
+/// one returns, so an unbounded poll stops at the *first* one and the pane keeps drawing a reading
+/// that stopped being true, with nothing on screen saying so.
+#[tokio::test]
+async fn a_metrics_poll_that_is_never_answered_does_not_stop_the_polling() {
+    let (client, held) = never_answers().await;
+
+    let started = std::time::Instant::now();
+    let read = node_usage(&client, std::time::Duration::from_millis(200)).await;
+    let waited = started.elapsed();
+    held.abort();
+
+    assert_eq!(
+        read,
+        Metrics::Silent,
+        "a poll nobody answered became a reading"
+    );
+    assert!(
+        waited < std::time::Duration::from_secs(5),
+        "the poll waited {waited:?} on a deadline of 200ms, so nothing is bounding it and the \
+         next tick would never be sent"
+    );
+    println!("a metrics poll that is never answered came back in {waited:?}");
+}
+
+/// **Everything the metrics API wrote goes through the ingest guard, and the node name is a map
+/// *key*** — the shape `impl Bounded for Metrics` exists for and the one `pairs` does not cover.
+///
+/// **Three framings, one per place the value sits** (NOTES § D31): a bidi override *inside* a node
+/// name, a quantity that is a megabyte long, and a name that is nothing but unprintable
+/// characters. A guard that only stripped the value would leave the first two on the screen.
+///
+/// **The third framing has a second half and it is asserted next door**
+/// ([`no_node_is_ever_filed_under_the_empty_name_however_the_name_got_there`]): a name the strip
+/// empties is *dropped*, not filed under `""`. This test would pass either way, which is what let
+/// the defect ship (`tester`'s F2, 2026-08-29) — what it owns is that nothing unprintable
+/// survives, and what it does not own is where the survivor goes.
+#[tokio::test]
+async fn a_metrics_api_that_writes_control_characters_cannot_reach_the_screen_with_them() {
+    let long = "9".repeat(4096);
+    let body = node_metrics_body(&[
+        ("k8rs\u{202e}worker", "1n", "1Ki"),
+        ("k8rs-worker2", &long, "1Ki"),
+        ("\u{200b}\u{feff}", "1n", "1Ki"),
+    ]);
+    let (client, _) = stub_list("200 OK", body).await;
+
+    let Metrics::Read(nodes) = node_usage(&client, REPORT_FETCH).await else {
+        panic!("a metrics API that answered was not read as an answer");
+    };
+    println!("poisoned node metrics kept as: {nodes:?}");
+    assert!(
+        nodes.contains_key("k8rsworker"),
+        "the bidi override in a node name survived the guard: {:?}",
+        nodes.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        nodes.keys().all(|name| !name.contains('\u{202e}')
+            && !name.contains('\u{200b}')
+            && !name.contains('\u{feff}')),
+        "an unprintable character reached a node name: {:?}",
+        nodes.keys().collect::<Vec<_>>()
+    );
+    let cut = &nodes["k8rs-worker2"].cpu;
+    assert!(
+        cut.len() < 4096 && cut.ends_with("(shortened by k8rs)"),
+        "a 4096-byte quantity was kept whole: {} bytes",
+        cut.len()
+    );
+}
+
+/// **A store nobody polled says *nobody asked*, and one that polled says what it found** — the
+/// `Option` around [`Metrics`] against the four arms inside it.
+#[test]
+fn a_polled_reading_reaches_the_snapshot_and_an_unpolled_store_says_nobody_asked() {
+    let mut store = bootstrapped();
+    assert_eq!(
+        store
+            .snapshot(now())
+            .expect("every initial LIST landed")
+            .metrics,
+        None,
+        "a store nobody polled claimed to have asked"
+    );
+
+    let reading = Metrics::Read(BTreeMap::from([(
+        "k8rs-worker".to_string(),
+        NodeUsage {
+            cpu: "43218986n".to_string(),
+            memory: "577936Ki".to_string(),
+        },
+    )]));
+    store.metrics_polled(reading.clone());
+    assert_eq!(
+        store
+            .snapshot(now())
+            .expect("every initial LIST landed")
+            .metrics,
+        Some(reading),
+        "the reading the poll filed did not reach the snapshot"
+    );
+
+    // The poll runs again, and the last answer wins: a metrics-server that stopped answering
+    // replaces a reading rather than sitting behind it.
+    store.metrics_polled(Metrics::Silent);
+    assert_eq!(
+        store
+            .snapshot(now())
+            .expect("every initial LIST landed")
+            .metrics,
+        Some(Metrics::Silent),
+        "a second poll left the first answer standing"
+    );
+}
+
+/// **The poll's first tick is immediate, its answer reaches the store through the watch loop's own
+/// door, and it will ask again whatever it found** (NOTES § D181).
+///
+/// **This test asserted the opposite for three of its five rows, and it was wrong.** The poll
+/// ended on `NotInstalled` and `Denied`, so the pane that says *install metrics-server* could not
+/// see the operator install it — `k8s-admin` (2026-08-29) called that blocking, and D151, which
+/// three readings in a row leaned on, is about *one refused request per pod per pass* rather than
+/// about a fixed cadence.
+///
+/// **What *asking again* is observed as, and the limit of it.** A stream that has ended answers
+/// `None` immediately; one that is still polling is asleep on its next tick, which is
+/// [`METRICS_POLL`] away and never inside this window — so `Err(Elapsed)` is *alive and waiting*
+/// and `Ok(None)` is *stopped*, and that is exactly the bit the deleted branch flipped. Watching
+/// the second request land would take a thirty-second test per row, or an interval knob the box
+/// forbids; what is asserted instead is that the endpoint has been asked **once** so far, which
+/// rules out the other way this could look alive — a poll spinning with no ticker.
+#[tokio::test]
+async fn the_metrics_poll_files_its_first_answer_at_once_and_asks_again_whatever_it_found() {
+    let waited = std::time::Duration::from_millis(500);
+    for (status, body, expected) in [
+        (
+            "200 OK",
+            node_metrics_body(&[("k8rs-worker", "43218986n", "577936Ki")]),
+            Metrics::Read(BTreeMap::from([(
+                "k8rs-worker".to_string(),
+                NodeUsage {
+                    cpu: "43218986n".to_string(),
+                    memory: "577936Ki".to_string(),
+                },
+            )])),
+        ),
+        // The two the poll used to end on. Both draw a sentence telling the operator what to go
+        // and do, and neither could see them do it (NOTES § D181).
+        (
+            "404 Not Found",
+            "404 page not found".to_string(),
+            Metrics::NotInstalled,
+        ),
+        (
+            "403 Forbidden",
+            status_body(403, "Forbidden", "nodes.metrics.k8s.io is forbidden"),
+            Metrics::Denied,
+        ),
+        // A status line saying one thing and a body saying another — kube takes the body's code,
+        // which `the_body_and_not_the_status_line_is_what_can_stop_this_poll` classifies. It is
+        // here because it used to be the worst case: a middlebox writing its own error bodies
+        // ended live usage for the session. Now it is one poll like any other.
+        (
+            "500 Internal Server Error",
+            status_body(
+                404,
+                "NotFound",
+                "the server could not find the requested resource",
+            ),
+            Metrics::NotInstalled,
+        ),
+        // Not a `503`: kube retries that one until the deadline, and this loop is about what the
+        // poll does with an answer rather than about how long one takes to arrive
+        // (`the_deadline_and_not_a_status_is_what_ends_a_throttled_metrics_api`).
+        (
+            "500 Internal Server Error",
+            status_body(500, "InternalError", "an error on the server"),
+            Metrics::Silent,
+        ),
+    ] {
+        let (client, asked) = stub_list(status, body).await;
+        let mut poll = node_usage_poll(client);
+        let mut store = bootstrapped();
+
+        let began = std::time::Instant::now();
+        let first = tokio::time::timeout(waited, poll.next())
+            .await
+            .unwrap_or_else(|_| panic!("`{status}`: the first tick did not fire at once"))
+            .unwrap_or_else(|| panic!("`{status}`: the poll ended before it asked anything"));
+        let ticked = began.elapsed();
+        first(&mut store);
+        assert_eq!(
+            store
+                .snapshot(now())
+                .expect("every initial LIST landed")
+                .metrics,
+            Some(expected.clone()),
+            "`{status}`: the poll filed something other than {expected:?}"
+        );
+
+        match tokio::time::timeout(waited, poll.next()).await {
+            Ok(None) => panic!(
+                "`{status}`: the poll ended, so a pane that tells the operator what to fix can \
+                 never see them fix it (NOTES § D181)"
+            ),
+            Ok(Some(_)) => panic!("`{status}`: a second poll fired inside {waited:?}"),
+            Err(_) => {}
+        }
+        // Alive *and* waiting: one request so far, which is what separates a ticker asleep on its
+        // next tick from a poll spinning with no ticker at all.
+        let sent = asked.lock().expect("the log is never poisoned").len();
+        assert_eq!(
+            sent, 1,
+            "`{status}`: the endpoint was asked {sent} times inside {waited:?}, so this poll is \
+             not on its {METRICS_POLL:?} timer"
+        );
+        println!("`{status}` -> {expected:?}, first tick in {ticked:?}, still polling");
+    }
+}
+
+/// **Socket to pane, in one process** — the metrics API answers over a real TCP connection, the
+/// answer goes into the store the watch loop holds, and the Capacity report draws a `using …`
+/// paragraph under every node row.
+///
+/// **This is the closest thing to the box's own done-when that a test can be.** That one is the
+/// binary against the live cluster and is the PM's to run; what is here is the same pipeline with
+/// the same numbers — the four nodes, their usage and their names are transcribed from
+/// `kubectl get --raw /apis/metrics.k8s.io/v1beta1/nodes` on the cluster the deploy went to, and
+/// the node names are the fixture cluster's own, so they join onto the committed `nodes.json`.
+///
+/// **What it proves that the four tests above do not is the join.** Each of them holds one link:
+/// the decode, the classification, the store, the guard. A `using` line needs the map's key to
+/// equal `NodeSnapshot::id.name`, which is the one thing no single-link test can be wrong about
+/// on its own — and getting it wrong draws a pane with no measurement and no sentence saying why.
+#[tokio::test]
+async fn a_metrics_api_a_cluster_answers_puts_a_using_line_under_every_node_of_the_capacity_pane() {
+    let (client, _) = stub_list(
+        "200 OK",
+        node_metrics_body(&[
+            ("k8rs-control-plane", "76530604n", "1107584Ki"),
+            ("k8rs-worker", "43218986n", "577936Ki"),
+            ("k8rs-worker2", "9804617n", "206816Ki"),
+            ("k8rs-worker3", "26028835n", "481100Ki"),
+        ]),
+    )
+    .await;
+
+    let mut store = bootstrapped();
+    store.metrics_polled(node_usage(&client, REPORT_FETCH).await);
+    let snapshot = store.snapshot(now()).expect("every initial LIST landed");
+    let drawn = crate::pane("capacity", &crate::analysis::capacity(&snapshot, &[]));
+    println!("{drawn}");
+
+    for node in [
+        "k8rs-control-plane",
+        "k8rs-worker",
+        "k8rs-worker2",
+        "k8rs-worker3",
+    ] {
+        assert!(
+            snapshot.nodes.iter().any(|known| known.id.name == node),
+            "{node} is not in the committed nodes.json, so this test joins on nothing"
+        );
+    }
+    assert_eq!(
+        drawn.matches("using ").count(),
+        4,
+        "one `using …` paragraph per node was not drawn:\n{drawn}"
+    );
+    assert!(
+        drawn.contains("using 0.077 cpu and 1Gi"),
+        // `76530604n` is 77 milli-cores and `1107584Ki` is 1134166016 bytes; the spelling is
+        // `cpu_text`'s and `bytes`' — the same two functions that wrote the row above it, which
+        // is `analysis::using`'s whole reason for parsing rather than printing the API's string.
+        "the control plane's own measurement is not on the pane:\n{drawn}"
+    );
+    assert!(
+        !drawn.contains("metrics-server"),
+        "a cluster whose metrics API answered was told about metrics-server:\n{drawn}"
+    );
+}
+
+/// **A `503`, a `429` and a `504` never reach the classifier, and only the deadline ends them** —
+/// measured here rather than reasoned about, because the first draft of the tests beside this one
+/// spent twenty seconds proving `Silent` by timing out and read as if it had proved a mapping.
+///
+/// **kube retries those three inside a tower layer with no callback**, which NOTES § D148 already
+/// measured from the other side: fifteen retries, two and a half to eight minutes of silence for
+/// one `get` against a throttling server. `500` and `502` are *not* retried and come back in a
+/// millisecond, which is what makes this a property of those three status codes and not of the
+/// stub.
+///
+/// **So the bound is the whole answer for this class.** [`REPORT_FETCH`] is what turns a
+/// metrics-server whose aggregator is refusing into [`crate::rules::Metrics::Silent`] on a
+/// schedule the reader can watch, instead of a poll that never returns and a pane that keeps
+/// drawing the last reading as if it were current.
+#[tokio::test]
+async fn the_deadline_and_not_a_status_is_what_ends_a_throttled_metrics_api() {
+    let deadline = std::time::Duration::from_millis(300);
+    for (status, retried) in [
+        ("429 Too Many Requests", true),
+        ("503 Service Unavailable", true),
+        ("504 Gateway Timeout", true),
+        ("500 Internal Server Error", false),
+        ("502 Bad Gateway", false),
+    ] {
+        let (client, asked) = stub_list(status, status_body(0, "x", "y")).await;
+        let began = std::time::Instant::now();
+        let got = node_usage(&client, deadline).await;
+        let took = began.elapsed();
+        let sent = asked.lock().expect("the log is never poisoned").len();
+        println!(
+            "`{status}` -> {got:?} in {took:?}, {sent} request(s) (kube retries it: {retried})"
+        );
+        assert_eq!(
+            got,
+            Metrics::Silent,
+            "`{status}` was read as something other than Silent"
+        );
+        assert!(
+            took < deadline * 5,
+            "`{status}` took {took:?} against a deadline of {deadline:?}, so nothing bounded it"
+        );
+        assert_eq!(
+            took >= deadline,
+            retried,
+            "`{status}` took {took:?}: kube's retry layer no longer covers the same statuses, so \
+             the paragraph above is describing a different client"
+        );
+        // **The retry is counted and not only timed**, which is the half the wall clock cannot
+        // see: a deadline is also what a single request that hangs would produce. `> 1` rather
+        // than a figure, because the number is kube's jitter and not ours — the magnitude is on
+        // [`REPORT_FETCH`]'s doc, measured at the real deadline this test cannot afford to use.
+        assert_eq!(
+            sent > 1,
+            retried,
+            "`{status}` sent {sent} request(s) to the endpoint, which is not what *kube retries \
+             this one* means"
+        );
+    }
+}
+
+/// **Every `String` the metrics poll keeps is named by the ingest guard**, derived from `rules.rs`
+/// — the sibling of the two walks above, for the one snapshot field that is polled rather than
+/// watched or fetched once.
+///
+/// **The map key is the half a field walk cannot see**, so it is asserted by name: `Metrics.Read`
+/// is `BTreeMap<String, NodeUsage>` and the `String` in it is a node name the cluster wrote.
+#[test]
+fn every_string_the_metrics_poll_keeps_is_named_by_the_ingest_guard() {
+    let types = declared_types(RULES_SOURCE);
+    let reachable = reachable_from(&types, vec!["Metrics"]);
+    assert!(
+        reachable.contains("NodeUsage"),
+        "NodeUsage is not reachable from Metrics, so the walk is broken"
+    );
+
+    let checked = assert_the_guard_names_every_string(&types, &reachable, "a metrics poll keeps");
+    println!("metrics-poll String fields: {checked:?}");
+    for expected in ["Metrics.Read", "NodeUsage.cpu", "NodeUsage.memory"] {
+        assert!(
+            checked.iter().any(|field| field == expected),
+            "{expected} was not derived from rules.rs, so this guard is reading the wrong \
+             types: {checked:?}"
+        );
+    }
+}
+
 // --- THE SERVER'S OWN CERTIFICATE ---
 //
 // **C2's half: where the second handshake goes, and every way it comes back with nothing**

@@ -202,6 +202,7 @@ its line moving with it.
 - [D178](#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28) — C3 lands whole, C2's row cannot be drawn in a frozen pane, and the twelfth crate was already compiled
 - [D179](#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28) — the refusal that kept a mutant alive rested on a dependency `just check` already had
 - [D180](#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29) — the box named six lists and five were real, an empty envelope names no kind, and a sweep that edits in place made a reader measure a moving object
+- [D181](#d181--the-metrics-states-are-read-off-the-answer-and-not-off-the-capability-probe-and-a-down-aggregated-backend-answers-503-2026-08-29) — the metrics states are read off the answer and not off the capability probe, and a down aggregated backend answers 503
 
 ## Why it exists — where the gap is
 
@@ -15722,3 +15723,99 @@ terminate. **Every one was written by someone being careful, in a file whose oth
 paragraphs are measured**, which is the shape [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
 describes; what caught them was a reader who owns clusters rather than a gate.
 
+### D181 — the metrics states are read off the answer and not off the capability probe, and a down aggregated backend answers 503 (2026-08-29)
+
+**The brief said the probe decides and the brief was wrong.** `rules::Metrics` has
+four cases — `Read`, `NotInstalled`, `Silent`, `Denied` — and the PM's brief for the
+metrics box said `NotInstalled` must come from the capability probe rather than from
+a failed request, because *no metrics-server* and *metrics-server did not answer* are
+different facts with different ways out. `dev-core` reversed it and routes all four
+off the metrics request's own answer: 200 → `Read`, 403 → `Denied`, 404 →
+`NotInstalled`, anything else → `Silent`.
+
+**The reason is measured and it was already written in this repo.** `k8s.rs`
+§ WHAT ELSE THE CLUSTER SERVES records that kube builds no
+`(ApiResource, ApiCapabilities)` pair for a group version whose `resources` array is
+empty — so **a registered APIService whose backend is down is byte-identical, in the
+probe, to a cluster that never installed metrics-server**. Routing on the probe
+therefore tells an operator whose metrics-server is crash-looping to *install
+metrics-server*: a plain false sentence on screen, which is invariant 14 and not a
+nuance. That region had already assigned the distinction, by name, to *"the box that
+first routes on `Served::capabilities`"*, and this was that box. Routing on the
+answer is never worse — a cluster with no metrics-server 404s and lands on
+`NotInstalled` either way — and is better whenever the aggregator answers anything
+else.
+
+**A first draft of this entry ended *"the probe still gates the poll"*, and that was
+false of the code and wrong on the merits** (`k8s-admin`, 2026-08-29, which found the
+sentence in `NOTES.md`, in the `todo.md` box, and cited back by the region's own doc
+comment). The poll is gated on `--analysis` and on nothing else. It should be:
+gating on the probe would suppress the poll on precisely the cluster this ruling
+exists to serve — the one whose metrics-server is down and therefore absent from the
+probe — so the probe would have silently reintroduced, as *never ask at all*, the
+same defect it was rejected for printing. **The probe is not an input to this path in
+any form.**
+
+**And the premise the whole four-state design rested on is no longer an assumption.**
+Both the author and the operator review marked *a down aggregated backend answers
+503* as reasoned, not measured. Measured, on the fixture cluster, by deleting
+metrics-server's pod and polling the aggregated API as tightly as `kubectl` allows:
+
+```
+restart 1:  503 ServiceUnavailable  ->  200 NodeMetricsList   (recovered in 22s)
+restart 2:  74 polls — 61x 503 ServiceUnavailable, 13x 200, and zero 403
+```
+
+So a registered API whose backend is gone answers **503**, not 404 and not 403.
+Beside the author's own measurement that kube retries `429`/`503`/`504` inside a
+tower layer for the full deadline while `403`/`404`/`500`/`502` return in about a
+millisecond ([D148](#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22)),
+that means the commonest broken cluster costs one `REPORT_FETCH` per poll and lands
+on `Silent` — *installed and did not answer*, which keeps polling and recovers by
+itself. Both restarts did.
+
+**Zero 403s across a full restart is also what justifies stopping the poll on
+`Denied`**, and the limit is worth stating rather than rounding off: what was
+measured is a *pod* restart. An RBAC edit — the `system:auth-delegator` binding
+being removed — is a different event, and it is exactly the *somebody edited the
+cluster* the stop rule already assumes.
+
+**The shape of the ruling matters more than the ruling.** A PM brief that names a
+mechanism is a design decision made by someone who has not read the mechanism, and
+the author had the file open. What made it cheap to reverse was that the author
+argued from a measurement already in the repo and said plainly which half it could
+not prove; what made it necessary was that the wrong half would have printed a
+sentence a reader could act on and be wrong.
+
+**The poll never stops, and the rule that said it should was being read wrong by
+three people.** The first version ended the stream on `NotInstalled` and `Denied` —
+*neither changes without somebody editing the cluster* — citing
+[D151](#d151--owner-resolution-and-the-noun-collision-that-turned-out-to-be-the-headers-fault-2026-08-22).
+But **somebody editing the cluster is the scenario, and the pane is what asked them
+to**: `NotInstalled` draws *"Install metrics-server if you want it"* and ended the
+poll in the same tick, so the operator does exactly what the screen said, the server
+comes up, and the screen goes on saying *this cluster does not have it installed* for
+the rest of the session. `Denied` is the same shape one permission over. **A pane that
+instructs an action must be able to observe that action** — which is this decision's
+own argument arriving from the other direction, and unlike the probe version it never
+self-corrects.
+
+The cost table is what shows the rule had been attached to the wrong two states
+(`k8s-admin`, six samples each):
+
+| answer | cost per poll | stopped the poll? |
+|---|---|---|
+| `404` → `NotInstalled` | 11–36 ms | yes |
+| `403` → `Denied` | 12–35 ms | yes |
+| `503` → `Silent` | 10 s, the full `REPORT_FETCH` | no |
+
+The expensive one was kept and the two cheap ones dropped. **And D151 does not say
+what all three of us used it for.** Its words are *"a standing 403 would otherwise
+become one refused request **per pod per pass**"* — a count that scales with the
+cluster and the event rate. One request per thirty seconds is not that; it is a
+heartbeat on a timer already running for the other two states, behind an opt-in flag,
+and cheaper than the case the design already polls forever. The security gate's
+*never retries in a loop* is about hammering a refused endpoint, which is the k9s
+failure mode, not about a bounded-rate poll. So `again` is unconditionally true and
+the branch is gone — **one cadence for four states is also less code than the rule
+it replaces.**

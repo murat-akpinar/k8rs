@@ -124,9 +124,12 @@ rules:
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
     verbs: ["get", "list", "watch"]
-  # only needed for the capacity report
+  # only needed for the capacity report's `using …` lines. `nodes` and not
+  # `pods`: k8rs reads one item per node, never one per pod — the pod half was
+  # granted before anything read either, and a grant nothing uses is not least
+  # privilege (`k8s-admin`, 2026-08-29). It is also the expensive half.
   - apiGroups: ["metrics.k8s.io"]
-    resources: ["pods", "nodes"]
+    resources: ["nodes"]
     verbs: ["get", "list"]
   # only needed for rule C4, and only where cert-manager is installed —
   # omitted deliberately, add it if you want the certificate rows it feeds:

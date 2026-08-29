@@ -1584,6 +1584,99 @@ things naming it does not fix.*
   session. `endpoint_slices`' doc already says the pairing is the report's to
   enforce; what it does not say is that *fetched together* is not *consistent*.
 
+### From the metrics-poll operator review (2026-08-29)
+
+- **`Read(∅)` renders byte-identically to a healthy cluster, which reverses a
+  `PRIOR-ART § C2` item this repo marks *covered*.** `analysis.rs`'s `live_usage_row`
+  returns `None` for `Some(Metrics::Read(_))` without looking inside the map, so an
+  answered-but-empty reading draws no `using` line, no row and no sentence — the same
+  screen a cluster with usage on every node would draw, and the same screen as *not
+  loaded yet*. C2 is tagged covered on the strength of *"three states, not two:
+  loading · empty · denied"*; here empty and answered are one screen. Measured that
+  the shape is real and passes the strict decode:
+  `{"kind":"PodMetricsList","apiVersion":"metrics.k8s.io/v1beta1","metadata":{},"items":[]}`.
+  It matters most in the window right after somebody installs metrics-server, which
+  serves an empty list before its first scrape. `analysis.rs` is frozen; no test feeds
+  it either.
+- **k8rs and `kubectl top` print different numbers for the same node in the same
+  minute.** k8rs drew `1Gi` where `kubectl top nodes` drew `1083Mi` — `bytes()`
+  computes its one decimal as 0 at the Gi boundary and `trimmed` drops it. The
+  operator's own cross-check is the thing that disagrees, which is worse than being
+  imprecise. `rules.rs` frozen.
+- **The Capacity line puts an averaged sample beside a declared reservation, in one
+  visual frame, with different denominators.** `k8rs-control-plane 0.95 of 12 cpu ·
+  290Mi of 23.1Gi` / `using 0.077 cpu and 1Gi`: `290Mi` is the sum of pod *requests*,
+  `1Gi` is the *whole node* including kubelet, containerd and page cache — a newcomer
+  reads *we promised 290Mi and we're using 1Gi* and concludes the requests are four
+  times too low. And `using 0.077` beside `0.95 of 12` invites *cut the requests by
+  twelve*, off a 10–20s average sampled once per 30s, which can describe an interval
+  that ended ~50s ago. Requests exist to survive the peak. `window` and `timestamp`
+  are deliberately not decoded, so the screen could not say so even if it wanted to
+  — which is the box to open, not the field to add on its own.
+- **The equivalent command for the command log is not `kubectl top nodes`.**
+  `screens/analysis.md` § Live usage says `$ kubectl top nodes` appears in the command
+  log only if k8rs actually called it (invariant 4) — k8rs never will. Measured with
+  `-v=6`: `kubectl top nodes` sends four requests (`/api`, `/apis`, the metrics list,
+  and `/api/v1/nodes`); `node_usage` sends one. The honest line is
+  `kubectl get --raw /apis/metrics.k8s.io/v1beta1/nodes`. Nothing lies today because
+  no command log exists; decide it before Phase 12 writes the wrong one.
+- **`Silent`'s first move is right for the cause that was measured and wrong for the
+  commonest managed-cluster one.** *"metrics-server is installed here but did not
+  answer" → "Check that its pods are running"* fits a pod restart (the 61× 503 that
+  was measured). On a managed control plane that cannot reach the backend port,
+  `kubectl -n kube-system get pods` shows Running and the advice dead-ends; it is also
+  wrong for a 401. The one read that discriminates all of them is
+  `kubectl get apiservice v1beta1.metrics.k8s.io`. Same class, all four sentences:
+  they name the **product** for a state read off the **group**, and `metrics.k8s.io`
+  is also served by prometheus-adapter and by control planes with no visible pod.
+  `screens/analysis.md` is `tui-designer`'s and `analysis.rs` is frozen.
+- **Under `--analysis` the poll alone reprints the whole report twice a minute
+  forever.** Two consecutive 252-line reports 30s apart differed only in
+  `using 0.03 cpu and 534.4Mi` → `534.3Mi` and `0.014` → `0.013`. Invariant 7 is not
+  broken — a poll is not an FPS and the box authorised it — but *block when idle* stops
+  being true in practice under that flag, and the last digit is noise the sample does
+  not support. Belongs with whichever box first makes the renderer decide what counts
+  as a change.
+
+### From the metrics-server box and its attack (2026-08-29)
+
+- **`main.rs`'s `if analysis { watches.push(node_usage_poll(…)) }` has no test, and
+  the mutant that would prove it hangs instead of failing.** Deleting the gate keeps
+  the suite green; forcing it on makes two `main_tests.rs` tests run past 60s,
+  because a real watch never ends — so under `just check` that mutation is a CI run
+  that never returns rather than a red build. The behaviour *is* right, measured on
+  the binary against a logging listener: **0 metrics requests without `--analysis`,
+  1 with it against a 404, and 3 in 75 s against a 500 (t=0, 30, 60)** — which also
+  proves the 30s interval, the immediate first tick, and the security gate's *never
+  retries in a loop* end to end. What is missing is a test, and closing it needs a
+  stub server that today lives only in `k8s_tests.rs`: two `#[path]` children of
+  different product files with no module between them, so it is a decision about
+  test-file structure under invariant 11 rather than a line
+  ([D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)).
+  Found by `tester`, 2026-08-29.
+- **Two doc sentences went stale the moment the poll landed, and both are in files
+  this box may not write.** `analysis.rs`'s `live_usage_row` says the fifth wording
+  is *"the only one that happens"* until Phase 5's poll lands — it has landed, and
+  `Metrics: None` now means only *this run passed no `--analysis`*. `screens/analysis.md`
+  says k8rs *"has not asked (every cluster, through the whole of Phase 4…)"* — same
+  staleness, and that file is `tui-designer`'s. Neither is wrong about the code as it
+  was; both describe a world that ended this morning.
+- **The `Denied` wording does not name the verb and resource, and the object now
+  proves it could.** `screens/analysis.md`'s refusal reads *"Ask for read access to
+  node metrics"* — a deliberate plain-language choice, not a regression. But the
+  security gate asks a 403 to name the missing verb + resource, and the measured
+  `Status` for this refusal carries `details: {"group":"metrics.k8s.io","kind":"nodes"}`
+  **populated** — the exact opposite of the `nonResourceURL` refusal that had an empty
+  `details` and forced a path-shaped sentence
+  ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+  So the two halves can both be had here, and the screen spec is where that is decided.
+- **27 `PodMetrics` items carry 28 containers, so a per-item reader under-counts.**
+  Measured on the live cluster: one pod has two containers, and 12 of the 28 report
+  `cpu: "0"` with no suffix at all. Not this box — `Metrics::Read` is keyed by node
+  and PodMetrics is out of scope — but it is the shape the first pod-level consumer
+  will get wrong, and `metrics_saying` in `analysis.rs` has two call sites and neither
+  feeds a bare suffix today.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

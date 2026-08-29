@@ -2995,25 +2995,35 @@ public release.
       tells you it might be wrong, it is not no longer wrong. The re-read needs a
       pane to open one from and is boxed in [`backlog.md`](backlog.md) with five
       other findings from the operator review.
-- [ ] **metrics-server polling**, the one thing that cannot be watched: 30s+,
-      only for what is on screen, and only when the capability probe found
-      `metrics.k8s.io`. Without it the Capacity report's usage column has no
-      source — and it says so rather than showing a blank
-      **And it is where the units get measured for the first time.** Capacity's
-      tests hand-build their metrics because the fixture cluster serves no
-      metrics API (`kubectl top nodes` → *Metrics API not available*), so *the
-      server writes nanocores and `Ki`* is upstream knowledge this repo has
-      never read off an object — the one input in `analysis.rs` that is neither
-      a capture nor a one-field plant on one. Deploy metrics-server into kind
-      on the trip this box needs anyway, and read the units
-      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
-      **And Capacity's `using …` paragraphs are proven here**, moved from the
-      three-reports box above, which cannot reach them: `metrics` is this box's
-      field and the fixture cluster answers *Metrics API not available* until
-      this deploy runs
-      ([D169](NOTES.md#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)).
-      Done when the binary has printed a `using …` paragraph against the live
-      cluster and the output is pasted into this box
+- [x] **metrics-server polling**, the one thing that cannot be watched: 30s+, only
+      for what is on screen, and only under `--analysis`. Without it the Capacity
+      report's usage column has no source — and it says so rather than showing a
+      blank. **The probe is not an input to this path at all**, and **the poll never
+      stops** — the two states that look final are the two the pane tells the reader
+      to go fix
+      ([NOTES § D181](NOTES.md#d181--the-metrics-states-are-read-off-the-answer-and-not-off-the-capability-probe-and-a-down-aggregated-backend-answers-503-2026-08-29)).
+      The units are measured off the object for the first time — cpu in nanocores,
+      memory in `Ki`, and a bare `"0"` with no suffix — and `quantity_milli` already
+      handled all three
+      ([reports/2026-08-29-metrics-server-units.md](reports/2026-08-29-metrics-server-units.md)).
+      Done: metrics-server v0.8.0 into kind, then `k8rs --live --analysis --context
+      kind-k8rs` against it —
+
+      ```
+      [capacity]
+        What each node promised, and what it has
+          k8rs-control-plane   0.95 of 12 cpu · 290Mi of 23.1Gi
+            using 0.081 cpu and 1Gi
+          k8rs-worker   0.47 of 12 cpu · 378Mi of 23.1Gi
+            using 0.025 cpu and 525.6Mi
+          k8rs-worker2   0.1 of 12 cpu · 50Mi of 23.1Gi
+            using 0.013 cpu and 200.2Mi
+          k8rs-worker3   0.22 of 12 cpu · 282Mi of 23.1Gi
+            using 0.041 cpu and 469Mi
+      ```
+
+      — matching `kubectl top nodes` for the same minute (`k8rs-worker2` 13m/201Mi
+      against `0.013 cpu`/`200.2Mi`).
 - [ ] **The mutation gate reads one directory and names another, so a run that
       tested nothing reports the previous run's logs** — `scripts/mutants.sh`
       counts `$OUT/log` (the repo-root `mutants.out/`) while printing `$SCRATCH`

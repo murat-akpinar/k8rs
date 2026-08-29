@@ -27,9 +27,12 @@
 //! **It is honoured beside `--live` too, and that is the door three of the seven had no way
 //! through** (NOTES § D169). Their principal shapes are about things a `k8rs pod.json` run does
 //! not have: Versions needs a control plane to have a version, C1's row and sidebar badge are
-//! about the reader's kubeconfig, and Capacity's `using …` paragraphs need a metrics API — the
-//! first two arrive with this flag, the third when the metrics box fills its field. Both modes
-//! call [`reports`], so there is one arrangement of the seven and not two.
+//! about the reader's kubeconfig, and Capacity's `using …` paragraphs need a metrics API. All
+//! three arrive with this flag: the third since the metrics poll landed beside it below
+//! (`k8s.rs` § WHAT A NODE IS USING), which is gated on `--analysis` for the reason the six lists
+//! are — there is no pane to open yet, and a poll for a report nobody asked for is a request on a
+//! path that does not need one. Both modes call [`reports`], so there is one arrangement of the
+//! seven and not two.
 
 // A module no `mod` line reaches is not in the crate at all, so `rules.rs` is declared the
 // moment it exists rather than when something calls it (NOTES § D34).
@@ -917,8 +920,10 @@ fn reports(snapshot: &ClusterSnapshot, findings: &[Finding]) -> String {
 /// for one turn, and they disagreed. Making the remaining one mechanical needs the source-text
 /// walk `k8s_tests.rs` runs over `rules.rs`, which `main_tests.rs` cannot reach — the two test
 /// files are `#[path]` children of different product files with no module between them — so it is
-/// a box and not a line. The next `Option` due on that type is `metrics`, which is **polled**
-/// rather than read once (todo.md § Phase 5) and so does not belong in this sentence at all.
+/// a box and not a line. **`metrics` was the next `Option` due on that type and it has landed**,
+/// and it did not join this sentence: it is **polled** rather than read once (`k8s.rs` § WHAT A
+/// NODE IS USING), so there is no *how old is this* to warn about — the field is refilled while
+/// the reader watches, which is the opposite of what this line exists for.
 ///
 /// **The list join is spelled here and not shared with `analysis.rs`'s `and_list`.** That one is
 /// private to a frozen file and carries an `over` tail for a *"and 2 more"* budget this sentence
@@ -1777,8 +1782,26 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool
         serving_expiry,
         lists_read_at,
     };
+    // **The one thing on this path that runs on a timer, and it is a stream like the five
+    // watches** (`k8s.rs` § WHAT A NODE IS USING, invariant 6). It is merged in rather than
+    // spawned so the store needs no lock: every update — watch event and poll alike — lands on
+    // this one loop.
+    //
+    // **Behind [`ANALYSIS`] for the reason the six lists above are**, and behind it for longer:
+    // those are read once at connect, this one keeps asking for as long as the run lasts, so a
+    // `k8rs --live` with no report on screen would be sending a request every thirty seconds for
+    // a paragraph nothing draws.
+    //
+    // **It is deliberately *not* part of [`lists_were_read`]'s sentence.** That line exists
+    // because the panes redraw off lists that stopped changing at connect; this field does not
+    // stop changing, so it needs no *how old is this* caveat and would make the one above less
+    // true by joining it.
+    let mut watches = session.watches;
+    if analysis {
+        watches.push(k8s::node_usage_poll(session.client.clone()));
+    }
     let mut last = String::new();
-    k8s::drive_watching(session.watches, &mut store, |store| {
+    k8s::drive_watching(watches, &mut store, |store| {
         // A clock this driver cannot read is not a reason to stop watching; the next event asks
         // again. `wall_clock`'s own `Err` is a machine set before 1970.
         let Ok(now) = wall_clock() else { return };
