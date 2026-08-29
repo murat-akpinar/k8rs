@@ -2973,27 +2973,28 @@ public release.
       mutant alive was reversed on a premise `just check` already broke
       ([D179](NOTES.md#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28)).
       651 tests, 0 missed mutants
-- [ ] **The typed lists `analysis.rs` needs**, fetched on demand when a report
-      is opened: Deployments, ReplicaSets, Services, EndpointSlices, PVCs,
-      PDBs. These are *not* the browser's `Table` path — a report needs
-      `minAvailable` and `.spec.selector` as fields, and Table gives strings
-      for display. Phase 3 defined `ClusterSnapshot` and Phase 4 extended it
-      ([NOTES § D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12));
-      this is the step that fills it, and it has to happen before `k8s.rs`
-      freezes.
-      **The shape already exists and the sixth list is not the first one** — the
-      C2/C3 box above built `k8s.rs` § WHAT A REPORT ASKS FOR for exactly these,
-      and `certificate_requests` is the worked example: one cluster-scoped list,
-      every object through `ingest`, a `Bounded` impl for the snapshot type, and
-      a deadline (`REPORT_FETCH`) because nothing in kube bounds an *answer*.
-      CSRs are deliberately not in the six — they closed with C3. Read that
-      region before writing the first of these, and keep `None` meaning *nobody
-      looked* rather than *nothing to find*: the panes branch on it. **One thing
-      that region left open is this box's to rule**, not to inherit — the fixture
-      loader in `main.rs` § WHAT WAS READ leaves the field `None` for a capture
-      holding an empty `kind: List`, so a capture that says *this cluster has
-      none* reads as *nobody looked*; C3 made that sentence load-bearing and
-      changing it touches all six
+- [x] **The typed lists `analysis.rs` needs**, fetched on demand when a report is
+      opened: ReplicaSets, Services, EndpointSlices, PVCs, PDBs — **five, not the
+      six this box named**, because Deployments were already the permanent watch's
+      ([NOTES § D180](NOTES.md#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)).
+      Not the browser's `Table` path — a report needs `minAvailable` and
+      `.spec.selector` as fields, and `Table` gives strings for display.
+      `certificate_requests`' shape generalised into one `whole_list`: every object
+      through `ingest`, a `Bounded` impl per snapshot type, a `REPORT_FETCH`
+      deadline because nothing in kube bounds an *answer*, and the five joined so
+      the worst case stays one deadline rather than five. `None` still means
+      *nobody looked*
+      ([NOTES § D129](NOTES.md#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20)),
+      and the empty-`kind: List` question this box owed is ruled in D180: the
+      envelope names no resource kind, so the file path cannot answer it and `None`
+      stands
+      ([NOTES § D42](NOTES.md#d42--the-snapshot-types-freeze-one-phase-after-the-file-they-live-in-2026-08-12)).
+      **What shipped is a mitigation, not a fix, and the box says so**: the lists
+      are read once at connect and four of the five carry status that moves, so
+      `main.rs` prints how old they are and that they do not refresh — the tool
+      tells you it might be wrong, it is not no longer wrong. The re-read needs a
+      pane to open one from and is boxed in [`backlog.md`](backlog.md) with five
+      other findings from the operator review.
 - [ ] **metrics-server polling**, the one thing that cannot be watched: 30s+,
       only for what is on screen, and only when the capability probe found
       `metrics.k8s.io`. Without it the Capacity report's usage column has no

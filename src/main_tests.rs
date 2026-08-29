@@ -796,16 +796,219 @@ fn an_empty_list_reads_as_nothing_at_all() {
     );
 
     // **And the list stays *nobody looked* over a file that says this cluster has none** — the
-    // one place the fixture path and the live fetch answer differently, which [`take`]'s doc
-    // claimed they did not until 2026-08-28 (`tester`). `load` iterates `.items[]`, so an empty
-    // envelope calls `take` zero times and `get_or_insert_with` never runs;
-    // `k8s::certificate_requests` answers the same cluster `Some(vec![])`. Asserted rather than
-    // only written down, so that the box owning all six lists (todo.md § Phase 5, *The typed
-    // lists `analysis.rs` needs*) meets a red test and not a stale comment when it closes this.
+    // one place the fixture path and the live fetch answer differently, and since 2026-08-29 a
+    // ruling rather than an open question ([`take`]'s doc, which carries the measurement). `load`
+    // iterates `.items[]`, so an empty envelope calls `take` zero times and `get_or_insert_with`
+    // never runs; the envelope's own `kind` is `List` and names no resource, so there is no field
+    // to file it under. `k8s::services` answers the same cluster `Some(vec![])` because it asked
+    // for Services by name.
     assert_eq!(
         input.snapshot.services, None,
-        "an empty envelope filed *looked and found nothing* — if that is now deliberate, it is \
-         `take`'s doc that has gone stale, and the other five lists have to move with it"
+        "an empty envelope filed *looked and found nothing* over a document whose `kind` is \
+         `List` — which of the six lists did it think it was?"
+    );
+}
+
+/// **The panes redraw and the lists behind three of them do not, so the driver says so**
+/// ([`lists_were_read`], NOTES § D46).
+///
+/// **Both halves are asserted, because only one of them is load-bearing and it is not the
+/// number.** *How old* is what a reader checks; *it does not refresh* is what stops them trusting
+/// a `ready to drain` verdict computed against a budget from before the change they just made.
+#[test]
+fn the_panes_say_how_old_the_lists_behind_them_are_and_that_they_do_not_refresh() {
+    // **Each of the six alone, and the pane it is drawn in named — not the other two.** A check
+    // is proven only for the shapes it was fed (NOTES § D29): fed only `services.json` this
+    // passed with five of the six terms unexercised, and `just mutants-diff` turned one `||` into
+    // `&&` with nothing objecting (2026-08-29). Each capture below holds exactly one of the six.
+    for (capture, pane) in [
+        ("healthy-replicasets.json", "waste"),
+        ("services.json", "waste"),
+        ("endpointslices.json", "waste"),
+        ("persistentvolumeclaims.json", "waste"),
+        ("poddisruptionbudgets.json", "drain safety"),
+        ("csr-pending.json", "machines waiting to join"),
+    ] {
+        let said = lists_were_read(
+            &read(&[capture]).snapshot,
+            &now(),
+            Some(&four_minutes_ago()),
+        )
+        .unwrap_or_else(|| panic!("a run that read {capture} did not say when it had read"));
+        assert!(
+            said.contains(pane),
+            "{capture} feeds {pane} and the line does not name it: {said:?}"
+        );
+        for other in ["waste", "drain safety", "machines waiting to join"] {
+            assert!(
+                other == pane || !said.contains(other),
+                "{capture} feeds only {pane}, and the line also claimed {other} had been read: \
+                 {said:?}"
+            );
+        }
+    }
+
+    let read = read(&["services.json"]).snapshot;
+    let said = lists_were_read(&read, &now(), Some(&four_minutes_ago()))
+        .expect("a run that read a list says when");
+
+    assert!(
+        said.contains("4 min ago"),
+        "the age is not on the one ladder every other age in this tool is drawn on \
+         (`rules::age`): {said:?}"
+    );
+    assert!(
+        said.contains("does not read them again"),
+        "the line named a moment and never said the lists stop there, which is the half that \
+         keeps a stale `ready to drain` from being believed: {said:?}"
+    );
+    println!("{said}");
+}
+
+/// **The shape a real read-only login actually produces: five lists and no CSR list.**
+///
+/// Upstream's built-in `view` ClusterRole grants all five namespaced kinds and grants
+/// `certificatesigningrequests` in neither `view` nor `edit` (`k8s.rs` § WHAT A REPORT ASKS FOR),
+/// so this is the ordinary cluster-wide read-only principal and not an exotic one. An
+/// unconditional list of three panes said *machines waiting to join read their lists 4 min ago*
+/// directly above a certificates pane saying **not checked** — two sentences on one screen that
+/// cannot both be true (`k8s-admin`, 2026-08-29).
+#[test]
+fn a_login_refused_only_the_joining_machines_list_is_not_told_that_one_was_read() {
+    let view_role = read(&[
+        "healthy-replicasets.json",
+        "services.json",
+        "endpointslices.json",
+        "persistentvolumeclaims.json",
+        "poddisruptionbudgets.json",
+    ])
+    .snapshot;
+    assert!(
+        view_role.certificate_requests.is_none(),
+        "this fixture set was supposed to leave the CSR list unread, and the shape is the whole \
+         point of the test"
+    );
+
+    let said = lists_were_read(&view_role, &now(), Some(&four_minutes_ago()))
+        .expect("five lists came back, so there is a reading to date");
+    println!("{said}");
+    assert!(
+        said.contains("waste") && said.contains("drain safety"),
+        "the two panes whose lists did come back are not named: {said:?}"
+    );
+    assert!(
+        !said.contains("machines waiting to join"),
+        "the line claims a list this login was refused, over a pane that says *not checked* two \
+         lines below it: {said:?}"
+    );
+}
+
+/// **And the mirror image**, so the filter is proven in both directions rather than by a name
+/// that happens to sort last: a login with the CSR list and nothing else names only that.
+#[test]
+fn a_login_that_read_only_the_joining_machines_list_names_only_that_pane() {
+    let said = lists_were_read(
+        &read(&["csr-pending.json"]).snapshot,
+        &now(),
+        Some(&four_minutes_ago()),
+    )
+    .expect("one list came back");
+    println!("{said}");
+    assert!(
+        said.contains("machines waiting to join")
+            && !said.contains("waste")
+            && !said.contains("drain safety"),
+        "the line names panes whose lists were never read: {said:?}"
+    );
+}
+
+/// **A run that read nothing claims no reading** — `None` is *nobody looked* and the panes
+/// already draw *not checked* for it (NOTES § D129).
+///
+/// Without this the test above passes with the line hard-coded, and a `--live` refused all six
+/// lists would print *"read 4 min ago"* over six refusals.
+#[test]
+fn a_run_that_was_refused_every_list_does_not_claim_to_have_read_one() {
+    assert_eq!(
+        lists_were_read(&nothing_read().snapshot, &now(), Some(&four_minutes_ago())),
+        None,
+        "a run that read nothing named a moment it read at"
+    );
+}
+
+/// **A clock this machine could not read loses the number and keeps the warning.**
+///
+/// [`wall_clock`] can fail — a machine set before 1970 — and the line's two facts are not equally
+/// important: dropping the whole caveat to lose the age would trade the load-bearing half for the
+/// decoration.
+#[test]
+fn a_clock_that_could_not_be_read_still_warns_that_the_lists_are_frozen() {
+    let said = lists_were_read(&read(&["services.json"]).snapshot, &now(), None)
+        .expect("the warning does not depend on the clock");
+    assert!(
+        said.contains("earlier in this run") && said.contains("does not read them again"),
+        "a clock that could not be read took the whole caveat with it: {said:?}"
+    );
+}
+
+/// **And it is printed, above the panes, on the live path** — the whole point being that a reader
+/// sees it beside the verdict it qualifies rather than in a doc comment.
+#[test]
+fn the_live_report_prints_the_reading_line_above_the_panes() {
+    let mut store = listed(Vec::new());
+    store.reports_fetched(k8s::ReportLists {
+        disruption_budgets: Some(Vec::new()),
+        ..Default::default()
+    });
+    let mut last = String::new();
+    let printed = live_report(
+        &store,
+        now(),
+        &mut last,
+        true,
+        &AtConnect {
+            lists_read_at: Some(four_minutes_ago()),
+            ..Default::default()
+        },
+    )
+    .expect("a bootstrapped store draws a report");
+
+    let line = printed
+        .lines()
+        .find(|line| line.contains("does not read them again"))
+        .expect("the reading line is printed");
+    // The assembled block, as the driver hands it to stdout — this is the run the report quotes.
+    println!(
+        "{}",
+        printed
+            .lines()
+            .skip_while(|l| !l.contains("does not read them again"))
+            .take(4)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let at = printed.find(line).expect("it is in the report");
+    let panes = printed.find("[capacity]").expect("the panes are printed");
+    assert!(
+        at < panes,
+        "the caveat is printed under the panes it qualifies, where a reader meets the verdict \
+         first"
+    );
+
+    // **And a run that read nothing prints no such line**, off the same driver — the negative
+    // that keeps this from passing on a line that is always emitted.
+    let mut last = String::new();
+    let quiet = live_report(
+        &listed(Vec::new()),
+        now(),
+        &mut last,
+        true,
+        &AtConnect::default(),
+    )
+    .expect("a bootstrapped store draws a report");
+    assert!(
+        !quiet.contains("does not read them again"),
+        "a run that fetched nothing told the reader when it had read: {quiet}"
     );
 }
 
@@ -1115,10 +1318,8 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
             &k8s::Store::default(),
             now(),
             &mut last,
-            None,
             false,
-            None,
-            None
+            &AtConnect::default()
         ),
         None
     );
@@ -1127,7 +1328,7 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     let mut store = k8s::Store::default();
     the_other_four(&mut store);
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false, None, None),
+        live_report(&store, now(), &mut last, false, &AtConnect::default()),
         None
     );
     assert!(
@@ -1143,17 +1344,15 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
         &listed(Vec::new()),
         now(),
         &mut last,
-        None,
         false,
-        None,
-        None,
+        &AtConnect::default(),
     )
     .expect("a listed store");
     assert!(!printed.is_empty(), "the report is empty: {printed:?}");
     // `None` and not merely *empty*: `Some(String::new())` is a blank block on stdout, which is
     // what the driver would print every time a watch re-listed.
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false, None, None),
+        live_report(&store, now(), &mut last, false, &AtConnect::default()),
         None,
         "a bootstrap with nothing wrong printed something after an earlier report"
     );
@@ -1171,7 +1370,7 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     let mut store = listed(objects::<Pod>("kube-system-pods.json"));
     let mut last = String::new();
 
-    let first = live_report(&store, now(), &mut last, None, false, None, None)
+    let first = live_report(&store, now(), &mut last, false, &AtConnect::default())
         .expect("every initial LIST landed");
     println!("{first}");
     assert!(
@@ -1179,7 +1378,7 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
         "the live report is not the report `render` draws"
     );
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false, None, None),
+        live_report(&store, now(), &mut last, false, &AtConnect::default()),
         None,
         "the same cluster printed twice"
     );
@@ -1189,7 +1388,7 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     )
     .expect("the capture decodes");
     store.pod(&now(), Event::Apply(crashloop));
-    let second = live_report(&store, now(), &mut last, None, false, None, None)
+    let second = live_report(&store, now(), &mut last, false, &AtConnect::default())
         .expect("a pod arrived, so the report moved");
     println!("{second}");
     assert!(
@@ -1251,8 +1450,8 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
     );
 
     let mut last = String::new();
-    let plain =
-        live_report(&store, now(), &mut last, None, false, None, None).expect("every LIST landed");
+    let plain = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("every LIST landed");
     for pane in PANES {
         assert!(
             !plain.contains(pane),
@@ -1261,8 +1460,8 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
     }
 
     let mut last = String::new();
-    let panes =
-        live_report(&store, now(), &mut last, None, true, None, None).expect("every LIST landed");
+    let panes = live_report(&store, now(), &mut last, true, &AtConnect::default())
+        .expect("every LIST landed");
     for pane in PANES {
         assert!(
             panes.contains(pane),
@@ -1295,7 +1494,7 @@ fn versions_draws_the_control_plane_line_and_the_machines_behind_it() {
     let pane_of = |identity| {
         let store = identified(Vec::new(), nodes(), identity);
         let mut last = String::new();
-        let printed = live_report(&store, now(), &mut last, None, true, None, None)
+        let printed = live_report(&store, now(), &mut last, true, &AtConnect::default())
             .expect("every LIST landed");
         let at = printed.find("[versions]").expect("the pane is drawn");
         printed[at..].to_string()
@@ -1358,7 +1557,7 @@ fn certificates_draws_c1s_row_and_the_sidebar_badge() {
     let printed = |identity| {
         let store = identified(Vec::new(), Vec::new(), identity);
         let mut last = String::new();
-        let printed = live_report(&store, now(), &mut last, None, true, None, None)
+        let printed = live_report(&store, now(), &mut last, true, &AtConnect::default())
             .expect("every LIST landed");
         let at = printed.find("[certificates]").expect("the pane is drawn");
         let end = printed[at..].find("[drain safety]").expect("the next pane");
@@ -1609,7 +1808,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     k8s::drive_watching(watches, &mut store, |_| {}).await;
 
     let mut last = String::new();
-    let failing = live_report(&store, now(), &mut last, None, false, None, None)
+    let failing = live_report(&store, now(), &mut last, false, &AtConnect::default())
         .expect("five watches are failing");
     println!("{failing}");
     for kind in ["pods", "nodes", "Deployments", "StatefulSets", "DaemonSets"] {
@@ -1633,7 +1832,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
 
     // The same store again is not news…
     assert_eq!(
-        live_report(&store, now(), &mut last, None, false, None, None),
+        live_report(&store, now(), &mut last, false, &AtConnect::default()),
         None
     );
 
@@ -1642,7 +1841,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     store.pod(&now(), Event::Init);
     store.pod(&now(), Event::InitDone);
     the_other_four(&mut store);
-    let recovered = live_report(&store, now(), &mut last, None, false, None, None)
+    let recovered = live_report(&store, now(), &mut last, false, &AtConnect::default())
         .expect("the cluster came back");
     println!("{recovered}");
     assert!(
@@ -1665,8 +1864,8 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         .map(|watch| watch.take(2).boxed())
         .collect();
     k8s::drive_watching(watches, &mut store, |_| {}).await;
-    let stale =
-        live_report(&store, now(), &mut last, None, false, None, None).expect("an outage is news");
+    let stale = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("an outage is news");
     println!("{stale}");
     let (unreadable, cards) = stale
         .split_once("\n\n")
@@ -2515,10 +2714,11 @@ async fn a_measured_clock_reaches_the_live_report_and_sits_under_what_it_qualifi
         &store,
         now(),
         &mut last,
-        None,
         false,
-        Some(SignedDuration::from_mins(9)),
-        None,
+        &AtConnect {
+            skew: Some(SignedDuration::from_mins(9)),
+            ..Default::default()
+        },
     )
     .expect("a bootstrapped store with a watch in trouble is news");
     println!("{report}");
@@ -2825,8 +3025,17 @@ async fn a_read_certificate_reaches_the_live_report_as_the_same_sentence() {
     );
 
     let mut last = String::new();
-    let live = live_report(&store, now(), &mut last, None, false, None, expiry)
-        .expect("every LIST landed");
+    let live = live_report(
+        &store,
+        now(),
+        &mut last,
+        false,
+        &AtConnect {
+            serving_expiry: expiry,
+            ..Default::default()
+        },
+    )
+    .expect("every LIST landed");
     assert!(
         live.ends_with(EXPIRING),
         "the certificate line is not last on the live path: {live}"
@@ -2847,8 +3056,8 @@ async fn a_read_certificate_reaches_the_live_report_as_the_same_sentence() {
     );
 
     let mut last = String::new();
-    let unread =
-        live_report(&store, now(), &mut last, None, false, None, None).expect("every LIST landed");
+    let unread = live_report(&store, now(), &mut last, false, &AtConnect::default())
+        .expect("every LIST landed");
     assert!(
         !unread.contains("A certificate the API server presented"),
         "a session that read nothing printed a sentence anyway: {unread}"

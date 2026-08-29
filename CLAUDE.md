@@ -506,6 +506,19 @@ exists if two writers are ever unavoidable, but reach for the plan fix first.
 **Review is not one of these slots** — nothing is built on top of a box until
 `k8s-admin` reports, and the dev idles meanwhile.
 
+**A sweep that edits in place is a writer for as long as it runs, and what it
+breaks is a reader.** A statement-deletion run that mutates the shared tree, waits
+for a test, then restores is a writer holding that file — and when the ten-minute
+tool cap kills it, the restore on its last line never runs. The tree survives,
+because the author restores it; what does not survive is anybody who *read* the
+file meanwhile and measured a real state no commit ever held. That is how the PM
+filed a live invariant-9 defect against a line that was there the whole time
+([D180](NOTES.md#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)).
+So a sweep runs against a copy with its own `CARGO_TARGET_DIR`, and its restore
+lives in a `try`/`finally` and not on a last line. **`just mutants-diff` is already
+this shape** — `scripts/mutants.sh` names its own scratch volume — which is why the
+hand sweeps are the ones that need saying.
+
 **A re-dispatch to fix a finding is a write, not a review** — `screens/` went to
 its owner for a rewrite in the slot the table below reserves for two *reviewers*,
 and the reviewer's first read carried a section that no longer existed

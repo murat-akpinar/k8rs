@@ -114,14 +114,17 @@
 mod tests;
 
 use crate::rules::{
-    CertificateRequestSnapshot, ClusterSnapshot, Condition, ContainerSnapshot, ContainerState,
-    ExitRule, HostPathMount, NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, Taint, Terminated,
-    Toleration, WorkloadSnapshot, expires_at, minor_version,
+    CertificateRequestSnapshot, ClaimSnapshot, ClusterSnapshot, Condition, ContainerSnapshot,
+    ContainerState, DisruptionBudgetSnapshot, EndpointSliceSnapshot, ExitRule, HostPathMount,
+    NodeSnapshot, ObjectId, ObjectKind, PodSnapshot, Selector, SelectorRequirement,
+    ServiceSnapshot, Taint, Terminated, Toleration, WorkloadSnapshot, expires_at, minor_version,
 };
 use futures_util::stream::{self, BoxStream, Stream, StreamExt, select_all};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::certificates::v1::CertificateSigningRequest;
-use k8s_openapi::api::core::v1::{Node, Pod};
+use k8s_openapi::api::core::v1::{Node, PersistentVolumeClaim, Pod, Service};
+use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{APIGroupList, Time};
 use k8s_openapi::jiff::fmt::rfc2822::DateTimeParser;
 use k8s_openapi::jiff::{SignedDuration, Timestamp};
@@ -496,6 +499,81 @@ impl Bounded for CertificateRequestSnapshot {
         self.id.bound();
         text(&mut self.signer_name, IDENTIFIER);
         self.conditions.bound();
+    }
+}
+
+/// **The four types the five report fetches decode into that no watch also decodes**
+/// (§ WHAT A REPORT ASKS FOR) — the same door
+/// [`Bounded for CertificateRequestSnapshot`](CertificateRequestSnapshot) came through and for the
+/// same reason: a fetch that skipped it would put a label a user chose and a `reason` the
+/// disruption controller wrote onto a screen unstripped and unbounded (invariant 9, the security
+/// gate's *sizes are bounded*).
+///
+/// **Four impls for five fetches, and the missing one is deliberate.** A ReplicaSet fetched for
+/// Waste's *parked at 0 replicas* row decodes into [`WorkloadSnapshot`], which the workload watch
+/// already brought through this guard — which is the point of `rules.rs` giving four kinds one
+/// type.
+///
+/// **A selector's keys are bounded as well as its values.** A label key is
+/// `prefix/name` and the prefix is a DNS subdomain the object's author chose; `pairs` caps both
+/// halves, and a guard that bounded only the value would leave the half that is drawn first.
+impl Bounded for ServiceSnapshot {
+    fn bound(&mut self) {
+        self.id.bound();
+        pairs(&mut self.selector, IDENTIFIER);
+    }
+}
+
+impl Bounded for EndpointSliceSnapshot {
+    fn bound(&mut self) {
+        self.id.bound();
+        // `kubernetes.io/service-name`'s *value*, which is a Service name and an identifier.
+        // The count beside it is a `usize` and has nothing to strip.
+        maybe(&mut self.service, IDENTIFIER);
+    }
+}
+
+impl Bounded for ClaimSnapshot {
+    fn bound(&mut self) {
+        self.id.bound();
+        maybe(&mut self.phase, IDENTIFIER);
+        // A quantity, like every other one here: the API's own string, kept as a word
+        // ([`ClaimSnapshot::capacity`]).
+        maybe(&mut self.capacity, IDENTIFIER);
+    }
+}
+
+impl Bounded for DisruptionBudgetSnapshot {
+    fn bound(&mut self) {
+        self.id.bound();
+        self.selector.bound();
+        // `DisruptionAllowed`'s `reason` is what separates *the workload is at its floor* from
+        // *the controller could not compute this at all*, and its `message` is a sentence
+        // ([`Condition`]'s impl caps them apart).
+        self.conditions.bound();
+    }
+}
+
+/// **A label selector is free text twice over** — a `matchLabels` key and value, and a
+/// `matchExpressions` entry's key, operator and every value in its list.
+///
+/// **`operator` is bounded rather than validated.** `rules.rs` keeps it as the API's own string
+/// on purpose — *"a reader that does not know an operator must match nothing and say so"* — so
+/// this layer's job is the strip and the cap, not the vocabulary.
+impl Bounded for Selector {
+    fn bound(&mut self) {
+        pairs(&mut self.match_labels, IDENTIFIER);
+        self.match_expressions.bound();
+    }
+}
+
+impl Bounded for SelectorRequirement {
+    fn bound(&mut self) {
+        text(&mut self.key, IDENTIFIER);
+        text(&mut self.operator, IDENTIFIER);
+        for value in &mut self.values {
+            text(value, IDENTIFIER);
+        }
     }
 }
 
@@ -1393,6 +1471,10 @@ pub struct Store {
     /// is the distinction `analysis::kubelets_waiting_to_join` branches on: the first draws the
     /// row that says the check did not run, the second says nothing is waiting.
     certificate_requests: Option<Vec<CertificateRequestSnapshot>>,
+    /// **Waste's and Drain safety's inputs, filed by [`Store::reports_fetched`]** — the same
+    /// `None`-is-*nobody looked* rule as the field above, five fields at once ([`ReportLists`],
+    /// § WHAT A REPORT ASKS FOR).
+    reports: ReportLists,
 }
 
 impl Store {
@@ -1421,6 +1503,23 @@ impl Store {
         requests: Option<Vec<CertificateRequestSnapshot>>,
     ) {
         self.certificate_requests = requests;
+    }
+
+    /// **File the five lists a report joins**, or the refusals that are the same `None` the store
+    /// started with ([`report_lists`], § WHAT A REPORT ASKS FOR).
+    ///
+    /// **One setter and one value, for [`ReportLists`]'s reason** — five setters are five things
+    /// a caller can forget one of, and a store holding Services because somebody called four of
+    /// the five is the *every Service matches nothing* answer `rules.rs` warns about, arrived at
+    /// by a typo. **A field that is `None` because the cluster refused it is a different thing and
+    /// still reachable** ([`ReportLists`]): what one value removes is the half-filled store nobody
+    /// meant, not the partial answer a role produces.
+    ///
+    /// **It takes the `Option`s rather than a `Result`, for [`Store::certificates_fetched`]'s
+    /// reason**: each fetch has already collapsed every failure into *nobody looked*, and a fault
+    /// nothing reads is a fault nothing draws.
+    pub(crate) fn reports_fetched(&mut self, lists: ReportLists) {
+        self.reports = lists;
     }
 
     pub fn pod(&mut self, now: &Time, event: Event<Pod>) {
@@ -1640,24 +1739,22 @@ impl Store {
             // further down Phase 5.
             namespace_scope: None,
             // **`None` is *nobody looked*, and it is not `Some(vec![])`** (NOTES § D129). None of
-            // these is watched (invariant 6); `k8s.rs` fetches them when a report's pane opens,
-            // which for the five below is a later box, and an empty `Vec` here would tell Waste
-            // that nothing is going to waste over lists it never read.
+            // these is watched (invariant 6); [`Store::reports_fetched`] fills them from
+            // [`report_lists`] on a run that draws reports, and each stays `None` when nobody
+            // asked or the cluster refused — an empty `Vec` here would tell Waste that nothing is
+            // going to waste over lists it never read.
             //
-            // **The owner cache is not this list and may not be poured into it**
-            // (§ RESOLVING AN OWNER). Waste's row is *ReplicaSets parked at 0 replicas*, and a
-            // parked ReplicaSet has no pods — so it is exactly what the owner cache structurally
-            // never holds. Filling this from the cache would answer *nothing is parked* off a
-            // list that cannot contain a parked one, which is D129's reassuring wrong answer
-            // with a new cause.
-            replica_sets: None,
-            services: None,
-            endpoint_slices: None,
-            claims: None,
-            disruption_budgets: None,
-            // **The one of the six that is filled, and it is not filled from a watch**
-            // (§ WHAT A REPORT ASKS FOR): [`Store::certificates_fetched`] puts it here when a
-            // report asks, and it stays `None` when nobody asked or the cluster refused.
+            // **The owner cache is not this list and may not be poured into it** — the whole
+            // argument is on [`replica_sets`], which is the fetch that does answer Waste's
+            // *parked at 0 replicas* row, and it is not restated here: the second copy is the one
+            // that goes stale, and this one had already gone stale by 2026-08-29.
+            replica_sets: self.reports.replica_sets.clone(),
+            services: self.reports.services.clone(),
+            endpoint_slices: self.reports.endpoint_slices.clone(),
+            claims: self.reports.claims.clone(),
+            disruption_budgets: self.reports.disruption_budgets.clone(),
+            // The sixth on-demand list, filed one setter over because C3 owns it
+            // ([`Store::certificates_fetched`]).
             certificate_requests: self.certificate_requests.clone(),
             metrics: None,
         })
@@ -1673,10 +1770,11 @@ impl Store {
 // report's own inputs are read on demand, once, and a `None` that stays `None` is what the pane
 // draws its *not checked* row from.
 //
-// **One list lives here today and the other six are the next box's.** C3's
-// CertificateSigningRequests are here because the certificate box owns them; Deployments,
-// ReplicaSets, Services, EndpointSlices, PVCs and PodDisruptionBudgets arrive with the box that
-// fills [`crate::rules::ClusterSnapshot::services`] and the four beside it, into this region.
+// **Six lists, one shape** ([`whole_list`]). C3's CertificateSigningRequests came first and the
+// five [`ReportLists`] carries — ReplicaSets, Services, EndpointSlices, PVCs and
+// PodDisruptionBudgets — followed into the same region. **Deployments are not among them**: they
+// are on the permanent watch already ([`Store::deployment`]), and a second read of a kind the
+// store is streaming would be two answers to one question.
 //
 // **Every failure is one silence, and that is why nothing here is a `Result`.** § WHAT WENT WRONG
 // is the one place a failed call is classified, and it is read by whoever owes the reader a
@@ -1692,6 +1790,25 @@ impl Store {
 // gate's *a 403 degrades that one feature*). It degrades one row of one pane, it never touches the
 // session, and **nothing retries it** — [`Store::unresolved_owners`]'s rule (NOTES § D151): a
 // standing refusal re-asked once a pass is the retry loop the security gate forbids by name.
+//
+// **The five beside it are namespaced kinds read cluster-wide, which is a different refusal with
+// the same answer.** `Api::all` sends `/api/v1/services`, not `/api/v1/namespaces/x/services`, and
+// a request that carries no namespace can only be authorized cluster-wide — so what it needs is
+// `list services` granted by a ClusterRole, which a namespaced Role never provides however many
+// namespaces that Role covers.
+//
+// **The two refusals are different populations and are not ordered, which an earlier draft here
+// got backwards** (`k8s-admin`, 2026-08-29, against upstream's `viewRules()`). The built-in `view`
+// ClusterRole grants every one of the five this region fetches — `replicasets`, `services`,
+// `endpointslices`, `persistentvolumeclaims`, `poddisruptionbudgets` — and grants
+// `certificatesigningrequests` in neither `view` nor `edit`. So the ordinary cluster-wide
+// read-only principal gets the five and is refused the sixth, while a namespaced Role loses all
+// six. Neither refusal is *likelier*; they are refused by different roles.
+//
+// It degrades the same way whichever it is: [`ReportLists`] keeps that one field `None`, the pane
+// draws *not checked*, and nothing asks again. **The `--namespace` box is what changes the path,
+// not the grant** — it is further down Phase 5 (`Store::snapshot`'s `namespace_scope`), and until
+// it lands every read here is cluster-wide.
 
 /// **How long one fetch on this path gets before it is the same silence a refusal is** — ten
 /// seconds (§ WHAT A REPORT ASKS FOR).
@@ -1720,52 +1837,228 @@ impl Store {
 /// wait out is a bound nothing tests — and the caller that has to be honest about it is the driver.
 pub(crate) const REPORT_FETCH: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// **Every CertificateSigningRequest the cluster has**, or `None` when there was no answer to
-/// have (§ WHAT A REPORT ASKS FOR).
+/// **One list, whole, through the one ingest door, or the silence that is every failure** —
+/// the shape all six fetches in this region are (§ WHAT A REPORT ASKS FOR).
 ///
 /// `Some(vec![])` is *this cluster has none*, which is a different fact from this function's
 /// `None` and is drawn differently (NOTES § D129).
 ///
-/// **The whole list in one call, deliberately, and the ceiling is named rather than guarded.**
-/// A `ListParams` carrying a `limit` would hand back a *page*, and `Some(first 500 of 4000)` tells
-/// the report that four kubelets are waiting when four hundred are — the *short list read as a
-/// small cluster* failure NOTES § D28 shuts the whole snapshot for. So the answer is whole or it is
-/// nothing, and `ListParams::default()` really does send no `limit`: measured on the wire against a
-/// stub API server, this goes out as `…/certificatesigningrequests?` with an empty query while the
-/// watches beside it carry `&limit=500`
-/// (`the_certificate_requests_a_cluster_lists_reach_the_snapshot` asserts the same path).
+/// **The answer must be whole, and this sends one unpaged request to get it.** `Some(first 500 of
+/// 4000)` tells the report that four kubelets are waiting when four hundred are — the *short list
+/// read as a small cluster* failure NOTES § D28 shuts the whole snapshot for.
+/// `ListParams::default()` really does send no `limit`: measured against a stub API server, it goes
+/// out as `…/certificatesigningrequests?` with an empty query, while the watches beside it carry
+/// `&limit=500` (`the_certificate_requests_a_cluster_lists_reach_the_snapshot` and
+/// `the_five_lists_a_cluster_answers_reach_the_snapshot` assert every one of the six paths).
 ///
-/// **What that costs is one allocation the size of the cluster's CSR list, and nothing bounds
-/// it** — not this function, and not the API server, which has no page size to fall back on once
-/// none was asked for. That is stated rather than fixed because the alternative is the wrong
-/// answer above: `kubectl get csr` reads it exactly this way, every string on the objects is
-/// bounded field by field on the way through [`ingest`], and a cluster holding enough CSRs for
-/// the *count* to matter has a different problem from this row.
+/// **A `limit` is not the same thing as a page, and saying so here was wrong** (`k8s-admin`,
+/// 2026-08-29). Paging to completion also produces a whole answer, and § THE INITIAL LIST in this
+/// same file documents kube doing exactly that on every watch — `limit=500`, the server's
+/// `continue` token sent back until a page arrives without one, *"several HTTP responses are one
+/// LIST"*. **`kubectl` chunks the same way by default**: `kubectl get --help` under client
+/// `v1.36.3` prints `--chunk-size=500: Return large lists in chunks rather than all at once. Pass
+/// 0 to disable.` — the same minor as the `v1.36.1` kind node this repo captures against. So
+/// `kubectl get rs -A` pages, and what this line sends is what `--chunk-size=0` sends.
+/// **So one request is a choice about round trips, not about wholeness**,
+/// and the real reason it is made this way is that paging is a `continue`-token loop with a
+/// compaction failure mode of its own — § THE INITIAL LIST carries that loop's whole argument for
+/// the watch path. Adding a second one here is a box with its own tests, not a line
+/// (`backlog.md`).
 ///
-/// **Not watched, ever** (invariant 6). The Alerts view's inputs are the five permanent watches;
-/// this is one fetch for one row of one report.
+/// **What one request costs is one allocation the size of that kind's whole list, and the number
+/// worth naming is ReplicaSets.** A ReplicaSet carries the entire pod template, and
+/// `revisionHistoryLimit` defaults to **10** — so a cluster with 1000 Deployments holds up to
+/// 10 000 template-carrying ReplicaSets, and this holds each list twice at its peak: the response
+/// body and the decoded `Vec`. **The six run concurrently ([`report_lists`]), so the peak is their
+/// sum**, not the largest of them. **Named rather than capped**, because a cap is the wrong answer
+/// in the first paragraph wearing a different hat — a truncated list is a confident short answer,
+/// and the honest fixes are paging or a refusal, both of which are boxes. Every *string* on these
+/// objects is already bounded field by field on the way through [`ingest`]; what is unbounded is
+/// the object **count**.
+///
+/// **Nothing here is watched, ever** (invariant 6). The Alerts view's inputs are the five
+/// permanent watches; these are one fetch each for one report's rows.
 ///
 /// **Bounded by the caller's `deadline`, because nothing under it is** — [`REPORT_FETCH`], which
 /// the one call site names. An unbounded version of this line printed the greeting and then hung
 /// forever against a listener that answers nothing (`tester`, 2026-08-28).
 ///
-/// **The objects go through [`ingest`] like every other**, which is what strips and bounds
-/// `spec.signerName` and each condition's `message` — free text the API server wrote (invariant 9,
-/// `impl Bounded for CertificateRequestSnapshot`). It is also the prune: `spec.request` is the
-/// CSR's own PEM body and `spec.extra` carries the requester's credential id, and neither is a
-/// field `CertificateRequestSnapshot` has.
-pub(crate) async fn certificate_requests(
-    client: &Client,
-    deadline: std::time::Duration,
-) -> Option<Vec<CertificateRequestSnapshot>> {
+/// **Every object goes through [`ingest`] like every other**, which is the strip, the bound and
+/// the prune at once (invariant 9, § THE INGEST GUARD).
+///
+/// **`Api::all` and not `Api::default_namespaced`**, for every one of the six — a report reads the
+/// cluster, and the namespaced five are read cluster-wide until the `--namespace` box says
+/// otherwise (the region doc, on what that costs in refusals).
+async fn whole_list<K, T>(client: &Client, deadline: std::time::Duration) -> Option<Vec<T>>
+where
+    K: Resource + Clone + std::fmt::Debug + k8s_openapi::serde::de::DeserializeOwned + 'static,
+    <K as Resource>::DynamicType: Default,
+    T: From<K> + Bounded,
+{
     let listed = tokio::time::timeout(
         deadline,
-        Api::<CertificateSigningRequest>::all(client.clone()).list(&ListParams::default()),
+        Api::<K>::all(client.clone()).list(&ListParams::default()),
     )
     .await
     .ok()?
     .ok()?;
     Some(listed.items.into_iter().map(ingest).collect())
+}
+
+/// **Every CertificateSigningRequest the cluster has**, or `None` when there was no answer to
+/// have — rule C3's input ([`whole_list`], which is the whole of the shape).
+///
+/// **The prune follows the decode here, and the difference is not academic.** [`whole_list`]
+/// deserializes the full typed `CertificateSigningRequest` into `listed.items` first; the prune is
+/// the `From` impl inside `.map(ingest)` *afterwards*. So `spec.request` — the CSR's own PEM body
+/// — and `spec.extra`, the requester's credential id, **are on the heap for the length of that
+/// map, over the whole list**. What is true is the thing that matters downstream: neither is a
+/// field [`CertificateRequestSnapshot`] has, so **nothing past the decode can hold one, print one
+/// or put one in a `Debug` line**. An earlier draft here said *neither is ever held*, which is a
+/// stronger claim than the code makes (`k8s-admin`, 2026-08-29). **Decode first, prune second is
+/// the shape of all six fetches** — they share [`whole_list`] — so this paragraph is about the
+/// whole region and sits here only because the CSR is the one carrying secrets.
+///
+/// What the guard strips on top of that is `spec.signerName` and each condition's `message` — free
+/// text the API server wrote (`impl Bounded for CertificateRequestSnapshot`).
+pub(crate) async fn certificate_requests(
+    client: &Client,
+    deadline: std::time::Duration,
+) -> Option<Vec<CertificateRequestSnapshot>> {
+    whole_list::<CertificateSigningRequest, _>(client, deadline).await
+}
+
+/// **Every ReplicaSet the cluster has** — Waste's *parked at 0 replicas* row
+/// ([`crate::rules::ClusterSnapshot::replica_sets`]).
+///
+/// **Not the owner cache, and the owner cache may not stand in for it** (§ RESOLVING AN OWNER).
+/// The argument is a **subset** one and not an emptiness one: that map is selected by *some pod
+/// named this as its controller*, and this row asks *which ReplicaSets want zero copies*. A list
+/// selected by one predicate cannot answer a question asked by another, however much the two
+/// overlap — so the cache would answer *nothing is parked* from whatever happened to be in it.
+///
+/// **It is deliberately not the stronger claim.** *The cache structurally cannot contain a parked
+/// ReplicaSet* was written here and is false (`k8s-admin`, 2026-08-29): a ReplicaSet scaled to 0
+/// keeps its pods while they terminate — a grace period, a stuck finalizer, an unreachable node —
+/// and every one of those pods still names it as controller. The subset argument survives that
+/// case; the emptiness one does not, and a wrong reason is what gets repaired into a wrong fix.
+pub(crate) async fn replica_sets(
+    client: &Client,
+    deadline: std::time::Duration,
+) -> Option<Vec<WorkloadSnapshot>> {
+    whole_list::<ReplicaSet, _>(client, deadline).await
+}
+
+/// **Every Service the cluster has** — Waste's *the 503 nobody can explain*, the selector half
+/// ([`crate::rules::ClusterSnapshot::services`]).
+pub(crate) async fn services(
+    client: &Client,
+    deadline: std::time::Duration,
+) -> Option<Vec<ServiceSnapshot>> {
+    whole_list::<Service, _>(client, deadline).await
+}
+
+/// **Every EndpointSlice the cluster has** — the other half of that row, and the reason it does
+/// not have to match a selector against every pod in the cluster
+/// ([`crate::rules::ClusterSnapshot::endpoint_slices`]).
+///
+/// **Both halves or neither**: `rules.rs` says the row needs Services *and* slices to be `Some`,
+/// because slices missing beside Services present reads as *every Service matches nothing*. That
+/// pairing is the report's to enforce and this function cannot — which is why the two are fetched
+/// together by [`report_lists`] rather than one at a time by whoever remembers.
+pub(crate) async fn endpoint_slices(
+    client: &Client,
+    deadline: std::time::Duration,
+) -> Option<Vec<EndpointSliceSnapshot>> {
+    whole_list::<EndpointSlice, _>(client, deadline).await
+}
+
+/// **Every PersistentVolumeClaim the cluster has** — Waste's *a disk was reserved for it and no
+/// pod ever mounted it* ([`crate::rules::ClusterSnapshot::claims`]).
+pub(crate) async fn claims(
+    client: &Client,
+    deadline: std::time::Duration,
+) -> Option<Vec<ClaimSnapshot>> {
+    whole_list::<PersistentVolumeClaim, _>(client, deadline).await
+}
+
+/// **Every PodDisruptionBudget the cluster has** — the Drain safety report's whole subject
+/// ([`crate::rules::ClusterSnapshot::disruption_budgets`]).
+///
+/// **`None` here is the direction that report may not be wrong in.** A drain check that answered
+/// *this node is ready* over budgets it never read is the false green light in front of a
+/// destructive operation NOTES § D46 refuses, which is why the field stays `None` rather than
+/// empty and the pane draws *not checked*.
+pub(crate) async fn disruption_budgets(
+    client: &Client,
+    deadline: std::time::Duration,
+) -> Option<Vec<DisruptionBudgetSnapshot>> {
+    whole_list::<PodDisruptionBudget, _>(client, deadline).await
+}
+
+/// **The five on-demand lists a report joins, as one value** — what [`report_lists`] answers and
+/// what [`Store::reports_fetched`] files.
+///
+/// **One struct and not five `Store` fields**, for the reason `rules.rs` gives four workload kinds
+/// one type: five fields, five setters and five call-site lines are five places a sixth list has
+/// to be remembered, and the names here are the snapshot's own so nothing is positional.
+///
+/// **Every field is independently `None`.** They are fetched together but refused separately — a
+/// role may list Services and not PodDisruptionBudgets — so one refusal silences one row and not
+/// the other four (NOTES § D129).
+///
+/// **No `Debug`**, for [`Store`]'s reason: the rule is mechanical, not a per-field judgement call.
+#[derive(Clone, Default)]
+pub(crate) struct ReportLists {
+    pub(crate) replica_sets: Option<Vec<WorkloadSnapshot>>,
+    pub(crate) services: Option<Vec<ServiceSnapshot>>,
+    pub(crate) endpoint_slices: Option<Vec<EndpointSliceSnapshot>>,
+    pub(crate) claims: Option<Vec<ClaimSnapshot>>,
+    pub(crate) disruption_budgets: Option<Vec<DisruptionBudgetSnapshot>>,
+}
+
+/// **All five, at once, on one deadline rather than five** (§ WHAT A REPORT ASKS FOR).
+///
+/// **Concurrent and not sequential, and the number is the reason.** This runs on the startup path,
+/// *after* `k8rs: watching — …` has gone to stderr and *before* the first watch, so every second
+/// spent here is a second the tool looks connected and draws nothing ([`REPORT_FETCH`]). Awaited
+/// one after another the five deadlines add up: a cluster that accepts connections and answers
+/// none holds the greeting for fifty seconds instead of ten, and the bound that was put here
+/// precisely so the run could not hang would have been spent five times over. `tokio::join!` polls
+/// them on **one task** — no thread, no spawn, and `futures_util` not needed for it — so the worst
+/// case is one [`REPORT_FETCH`] whatever the count grows to. *How many TCP connections hyper opens
+/// underneath* is not claimed here: it depends on whether ALPN negotiated h2, and an earlier draft
+/// asserted *one connection* without measuring either (`k8s-admin`, 2026-08-29). Nothing above
+/// rests on the answer.
+///
+/// **What is measured is the wall clock**, which is the claim that matters:
+/// `the_five_lists_wait_side_by_side_and_not_one_after_another` holds five unanswered fetches
+/// against a 200ms deadline and asserts they come back together — 201ms, against 1008ms for the
+/// same five awaited in a row.
+///
+/// **Five requests and not one.** There is no API that lists five kinds in one call, and the
+/// browser's `Table` path is not it (invariant 12 is about *columns*, not about this): a report
+/// needs `minAvailable`'s resolved counter and `.spec.selector` as fields, and `Table` gives
+/// strings for display (todo.md § Phase 5).
+///
+/// **Once per session, never on a timer** — the region doc's rule, NOTES § D151. A kubelet that
+/// starts waiting to join after this has run is not seen until the next connect, which is the
+/// ceiling [`Identity`] already states for the three facts beside it.
+pub(crate) async fn report_lists(client: &Client, deadline: std::time::Duration) -> ReportLists {
+    let (replica_sets, services, endpoint_slices, claims, disruption_budgets) = tokio::join!(
+        replica_sets(client, deadline),
+        services(client, deadline),
+        endpoint_slices(client, deadline),
+        claims(client, deadline),
+        disruption_budgets(client, deadline),
+    );
+    ReportLists {
+        replica_sets,
+        services,
+        endpoint_slices,
+        claims,
+        disruption_budgets,
+    }
 }
 
 // --- WHAT A REPORT ASKS FOR END ---

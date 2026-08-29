@@ -50,7 +50,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use k8s_openapi::jiff::{SignedDuration, Timestamp};
 use k8s_openapi::serde::de::DeserializeOwned;
 use k8s_openapi::serde_json::{self, Value};
-use rules::{ClusterSnapshot, Finding, ObjectId, ObjectKind, Severity, analyze};
+use rules::{ClusterSnapshot, Finding, ObjectId, ObjectKind, Severity, age, analyze};
 use std::collections::BTreeMap;
 
 /// **stdout is the findings, stderr is everything else** (`screens/once.md` § stdout and
@@ -342,8 +342,8 @@ fn load(paths: &[String], now: Time) -> Result<Input, String> {
             // holding one of these kinds is named, and an empty `Vec` would tell a report that
             // nothing is wasted and nothing is waiting to join, which is the reassuring wrong
             // answer. [`take`] turns each of them into a `Some` the moment it reads one; no
-            // rule in `rules.rs` reads any of these, and on a real cluster the Phase 5 fetch
-            // fills them when a pane opens.
+            // rule in `rules.rs` reads any of these, and on a real cluster `k8s::report_lists`
+            // and `k8s::certificate_requests` are what fill them.
             replica_sets: None,
             services: None,
             endpoint_slices: None,
@@ -397,12 +397,23 @@ fn load(paths: &[String], now: Time) -> Result<Input, String> {
 /// looked* over a capture that says in as many words that there is nothing to find.
 /// `k8s::certificate_requests` answers that same cluster `Some(vec![])`.
 ///
-/// **Not closed here.** Filing `Some(vec![])` for an empty envelope is a decision about all six
-/// `Option` lists on the snapshot at once — the five above and `replica_sets` — and five of those
-/// belong to *The typed lists `analysis.rs` needs*
-/// (todo.md § Phase 5) — the box that fills them from a cluster and is the one place their two
-/// paths can be made to agree in one edit. Reshaping five kinds from inside the certificate box
-/// would be that box's ruling made by somebody else.
+/// **Closed, and the answer is that the two paths differ because this one was handed less**
+/// (todo.md § Phase 5, *The typed lists `analysis.rs` needs* — the box that fetched all five and
+/// owned the ruling). An empty envelope cannot be filed under a kind, because it does not name
+/// one: `just fixtures` captures with `kubectl get "$kind" -A -o json`, and what lands on disk
+/// carries `"kind": "List"` — not `ServiceList`, not `PodDisruptionBudgetList`. Measured on the
+/// committed corpus, `services.json`'s top-level keys are
+/// `["apiVersion", "items", "kind", "metadata"]` with `kind` reading `List`, and
+/// `scripts/sanitize.jq` records the same fact independently. So
+/// `{"apiVersion":"v1","items":[],"kind":"List","metadata":{…}}` is byte-identical whether it was
+/// a capture of Services or of PDBs, and `Some(vec![])` filed from it would be a guess at which of
+/// the six fields it belonged to.
+///
+/// **And the filename is not the missing kind.** `k8rs empty.json` is argv; keying a snapshot
+/// field off what a file is called would make *this cluster has none* a property of a name a user
+/// typed, which is the same guess wearing a path. A live fetch knows the kind because it asked
+/// for it by name, and that is the whole of the difference: `k8s::services` answers the empty
+/// cluster `Some(vec![])`, this path answers `None`, and both are true of what they were given.
 ///
 /// **A ReplicaSet lands in two fields on purpose.** `workloads` is the permanent watch's, which
 /// the W-rules read; `replica_sets` is the list Waste's *parked at 0 replicas* row is counted
@@ -852,6 +863,113 @@ fn reports(snapshot: &ClusterSnapshot, findings: &[Finding]) -> String {
     .join("\n")
 }
 
+/// **When the on-demand lists were read, said out loud, because three panes below draw a live
+/// number beside a frozen one** (`k8s.rs` § WHAT A REPORT ASKS FOR, NOTES § D46).
+///
+/// **The panes update and half of what they update from does not.** `analysis::drain_safety`
+/// recomputes its per-node rows on every watch event, off pods and nodes that are streaming; the
+/// PodDisruptionBudget behind the same row — `disruptionsAllowed`, `currentHealthy`,
+/// `desiredHealthy`, `observedGeneration` — was read once, before the first watch, and is never
+/// read again. So *"node-3 is ready to drain"* can be printed against a budget that is minutes
+/// old, and a budget applied after connect is not in the answer at all. That is D46's own
+/// failure — **a false green light in front of a destructive operation** — and it is reachable
+/// for the first time in this box, because `disruption_budgets` was `None` before it and a
+/// `None` draws *not checked* rather than a verdict. Waste has the milder version of the same
+/// thing: a `Critical` *matches no pod* row outlives the pod that fixed it.
+///
+/// **The fix is a re-read when a reader opens a pane, and it cannot be written here.** A timer is
+/// what invariant 6 forbids by name — six cluster-wide LISTs a pass is the poll-list this project
+/// refuses — and *on demand* needs a pane to be opened from, which does not exist until Phase 10.
+/// So what this box owes the reader is not freshness, it is **knowing which half is old**
+/// (`backlog.md` holds the re-read).
+///
+/// **The precedent is eight lines up**: [`Input::skew`] and [`Input::serving_expiry`] are read
+/// once at connect and each says so in its own doc. The difference that earns this a line *on
+/// screen* rather than in a comment is direction — those two are stable or under-report, and
+/// these four over-report, on a pane that looks live.
+///
+/// **`None` when nothing was read**, which is not the same sentence and must not borrow this
+/// one: a run whose six lists were all refused has read nothing, the panes already say *not
+/// checked*, and naming a moment would be inventing a read that never happened.
+///
+/// **And it names only the panes whose lists actually came back, because the commonest
+/// partial-permission case makes the other names false.** The built-in `view` ClusterRole grants
+/// all five namespaced kinds and grants `certificatesigningrequests` in neither `view` nor `edit`
+/// (`k8s.rs` § WHAT A REPORT ASKS FOR), so the ordinary cluster-wide read-only login gets **five
+/// `Some` and a CSR `None`** — and an unconditional list of three printed *machines waiting to
+/// join read their lists 4 min ago* directly above a certificates pane saying **not checked**.
+/// Two sentences on one screen that cannot both be true, which is the class this line exists to
+/// remove rather than to join (`k8s-admin`, 2026-08-29).
+///
+/// **The age is [`age`]'s ladder and not a wall-clock time** (NOTES § D68, `screens/widgets.md`
+/// § 1b) — the one ladder every age in this tool is drawn on, so this cannot drift from the
+/// card timestamps beside it. It is also the more useful half at 3am: `47 min ago` needs no
+/// subtraction, and it *grows* while the reader watches, which a frozen `02:40:15` does not.
+///
+/// **A clock this driver could not read still gets the warning**, without the number. The two
+/// facts the reader needs are *how old* and *it does not refresh*; only the first can go missing,
+/// and dropping the whole line to lose it would trade the load-bearing half for the decoration.
+///
+/// **The mapping is written once, in the array below, and nothing checks it — that is the
+/// ceiling.** A seventh on-demand list added to [`ClusterSnapshot`] and forgotten there would be
+/// covered by no warning and no test, which is this function's own failure one field along. What
+/// the array fixed is the *second* copy: whether to speak and which panes to name were two lists
+/// for one turn, and they disagreed. Making the remaining one mechanical needs the source-text
+/// walk `k8s_tests.rs` runs over `rules.rs`, which `main_tests.rs` cannot reach — the two test
+/// files are `#[path]` children of different product files with no module between them — so it is
+/// a box and not a line. The next `Option` due on that type is `metrics`, which is **polled**
+/// rather than read once (todo.md § Phase 5) and so does not belong in this sentence at all.
+///
+/// **The list join is spelled here and not shared with `analysis.rs`'s `and_list`.** That one is
+/// private to a frozen file and carries an `over` tail for a *"and 2 more"* budget this sentence
+/// has no use for; reaching it would mean unfreezing `analysis.rs` to export six lines.
+///
+/// **Only [`live_report`] prints it, and the file path deliberately does not.** `k8rs *.json`
+/// prints once and exits — a photograph that looks like a photograph, with nothing redrawing
+/// beside a frozen number. The defect this line exists for is a *live* pane recomputing half its
+/// row, so on the path where nothing recomputes there is nothing to warn about.
+fn lists_were_read(
+    snapshot: &ClusterSnapshot,
+    now: &Time,
+    read_at: Option<&Time>,
+) -> Option<String> {
+    // **The one place the six lists are mapped to the panes they feed.** Every field appears
+    // exactly once, beside the pane it is drawn in, so naming a pane and deciding whether to
+    // speak at all cannot disagree — they were two lists for one turn and the six-way `||`
+    // spoke for panes that had been refused.
+    let named: Vec<&str> = [
+        (
+            "waste",
+            snapshot.replica_sets.is_some()
+                || snapshot.services.is_some()
+                || snapshot.endpoint_slices.is_some()
+                || snapshot.claims.is_some(),
+        ),
+        ("drain safety", snapshot.disruption_budgets.is_some()),
+        (
+            "machines waiting to join",
+            snapshot.certificate_requests.is_some(),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(pane, read)| read.then_some(pane))
+    .collect();
+
+    // Nothing was read, so there is no reading to date — the panes already say *not checked*.
+    let (last, head) = named.split_last()?;
+    let panes = match head {
+        [] => (*last).to_string(),
+        head => format!("{} and {last}", head.join(", ")),
+    };
+    let when = read_at
+        .and_then(|at| age(now, at))
+        .unwrap_or_else(|| "earlier in this run".to_string());
+    Some(format!(
+        "k8rs read the lists behind {panes} {when} and does not read them again while it is \
+         running — anything added to the cluster since then is missing from them"
+    ))
+}
+
 /// **One report as this driver prints it** — the sidebar label and badge, the pane heading, and
 /// one block per row.
 ///
@@ -1081,6 +1199,34 @@ fn mistyped(args: &[String]) -> Option<String> {
 /// which costs a line; the alternative — comparing findings and ignoring the clock — is a driver
 /// that goes quiet, which costs the proof this mode exists for.
 ///
+/// **The facts read once, at connect, that a report needs and [`live_report`] cannot reach a
+/// session from** — one value because they are one category, and because four bare `Option`s in a
+/// row at a call site is a swap nobody sees. It is also what kept [`live_report`] under
+/// `clippy::too_many_arguments` when the fourth arrived.
+///
+/// **Every one of them is a *photograph* the panes are drawn over.** The watches keep running and
+/// these values do not change again — what *is* redrawn from them can still move, which each
+/// field's own doc says where it is true, and which [`lists_were_read`] says out loud for the one
+/// that makes a pane lie.
+#[derive(Default)]
+struct AtConnect<'a> {
+    /// A fact about the reader's kubeconfig ([`k8s::Session::renewal`]) — what a `401` on a watch
+    /// is named beside, the ordinary EKS/GKE/AKS mid-session failure NOTES § D19 is about.
+    renewal: Option<&'a str>,
+    /// **The same sentence for every report this session prints** ([`k8s::Session::skew`]): a
+    /// session that has something to say says it on the first report and keeps saying it, and one
+    /// that has nothing never starts.
+    skew: Option<SignedDuration>,
+    /// **Read once, and *not* the same sentence every pass** ([`k8s::Session::serving_expiry`]) —
+    /// the days left are measured against the snapshot's own `now`, so a session left open across
+    /// a threshold starts saying so without reconnecting.
+    serving_expiry: Option<Timestamp>,
+    /// **When the six on-demand lists were read** ([`lists_were_read`], which turns it into the
+    /// line above the panes). `None` is a run that fetched nothing, or a clock this machine could
+    /// not read.
+    lists_read_at: Option<Time>,
+}
+
 /// **The clock is the caller's** (invariant 5, NOTES § D18): one instant per pass, handed in.
 ///
 /// **`renewal` travels with it for the same reason the clock does**: it is a fact about the
@@ -1097,12 +1243,10 @@ fn live_report(
     store: &k8s::Store,
     now: Time,
     last: &mut String,
-    renewal: Option<&str>,
     analysis: bool,
-    skew: Option<SignedDuration>,
-    serving_expiry: Option<Timestamp>,
+    at: &AtConnect,
 ) -> Option<String> {
-    let mut report = unreadable(&store.troubles(), renewal);
+    let mut report = unreadable(&store.troubles(), at.renewal);
     match store.snapshot(now) {
         Some(snapshot) => {
             let input = Input {
@@ -1113,12 +1257,12 @@ fn live_report(
                 // **Measured once, at connect, and the same for every report this session
                 // prints** ([`k8s::Session::skew`]) — so a session that says it lands on the
                 // first report and stays, and one that has nothing to say never starts.
-                skew,
+                skew: at.skew,
                 // **Read once, at connect, for the same reason** ([`k8s::Session::serving_expiry`])
                 // — but *unlike* the skew this one is not the same sentence every pass: the days
                 // left are measured against the snapshot's own `now`, so a session left open over
                 // a threshold starts saying so without reconnecting.
-                serving_expiry,
+                serving_expiry: at.serving_expiry,
             };
             let findings = analyze(&input.snapshot);
             if !report.is_empty() {
@@ -1127,6 +1271,17 @@ fn live_report(
             let mut block = render(&findings, &input);
             if analysis {
                 block.push('\n');
+                // **Above the panes and not inside one**, because it is true of three of them
+                // ([`lists_were_read`]) — and a caveat repeated per pane is a caveat the reader
+                // stops seeing.
+                if let Some(said) = lists_were_read(
+                    &input.snapshot,
+                    &input.snapshot.now,
+                    at.lists_read_at.as_ref(),
+                ) {
+                    block.push_str(&said);
+                    block.push_str("\n\n");
+                }
                 block.push_str(&reports(&input.snapshot, &findings));
             }
             report.push(block);
@@ -1569,44 +1724,65 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool
     // with. Read at connect and before the watches move, because `session.watches` is taken
     // below and the borrow would not survive it — the same reason `renewal` is read out above.
     store.identify(k8s::Identity::of(&session));
-    // **The one list a report asks for, fetched once and only on a run that draws reports**
-    // (`k8s.rs` § WHAT A REPORT ASKS FOR, NOTES § D178). CSRs are never watched (invariant 6) and
+    // **The six lists a report asks for, fetched once and only on a run that draws reports**
+    // (`k8s.rs` § WHAT A REPORT ASKS FOR, NOTES § D178). None of them is watched (invariant 6) and
     // there is no pane to open yet, so [`ANALYSIS`] is the closest honest analogue this driver has
-    // of a report being opened: a `k8rs --live` without it prints no Certificates pane, and a
-    // request sent for a pane nobody asked for is a request on a path that does not need one.
+    // of a report being opened: a `k8rs --live` without it prints no Certificates, Waste or Drain
+    // safety pane, and a request sent for a pane nobody asked for is a request on a path that does
+    // not need one.
     //
     // **Once, and never again.** A refusal is a standing fact about this kubeconfig's role —
-    // `list certificatesigningrequests` is cluster-scoped and most namespaced roles do not have
-    // it — so re-asking per pass is the retry loop the security gate forbids by name
-    // (`k8s::Store::unresolved_owners`'s rule, NOTES § D151). What that costs is the ceiling
-    // [`k8s::Identity`] already states for the three facts beside it: a kubelet that starts waiting
-    // to join after this line has run is not seen until the next connect. The refresh belongs to
-    // the phase that has a pane to open one from.
+    // `list certificatesigningrequests` is cluster-scoped, and the five namespaced kinds are read
+    // cluster-wide, which a namespaced Role does not grant either — so re-asking per pass is the
+    // retry loop the security gate forbids by name (`k8s::Store::unresolved_owners`'s rule,
+    // NOTES § D151). What that costs is the ceiling [`k8s::Identity`] already states for the three
+    // facts beside it: a kubelet that starts waiting to join after this line has run is not seen
+    // until the next connect. The refresh belongs to the phase that has a pane to open one from.
     //
     // **Bounded, and the bound is the reason this line is not where the run stops.** Nothing
     // under it has a read deadline of its own ([`k8s::REPORT_FETCH`]), and this `await` sits
     // *after* the greeting above and *before* the first watch — so an unbounded one prints
     // `k8rs: watching — …` and then nothing, which is a tool that looks connected while it is
     // hung (`tester`, 2026-08-28).
+    //
+    // **One `join!` and not six `await`s, so the bound stays ten seconds and does not become
+    // sixty.** [`k8s::REPORT_FETCH`] bounds one fetch; awaited in a row against a cluster that
+    // accepts connections and answers nothing, six of them hold this exact line — greeting
+    // printed, no watch started — for a minute, which is the failure the deadline was added to
+    // prevent, six times over. `tokio::join!` needs no task and no thread (`k8s::report_lists`).
+    //
+    // **And the moment is stamped here, because nothing downstream can recover it.** The panes
+    // redraw on every watch event off lists that stopped changing on this line, so
+    // [`lists_were_read`] needs to say how old they are — and a `None` from a clock this machine
+    // could not read is handled there rather than dropped.
+    let mut lists_read_at = None;
     if analysis {
-        store.certificates_fetched(
-            k8s::certificate_requests(&session.client, k8s::REPORT_FETCH).await,
+        // **Stamped before the `await` and not after it, so the age is never flattering.** The
+        // fetch may take the whole of [`k8s::REPORT_FETCH`], and a stamp taken on the way out
+        // would call ten-second-old data fresh — under-reporting staleness in the one direction
+        // [`lists_were_read`] exists to prevent. Read *at least this old* is the honest claim.
+        lists_read_at = wall_clock().ok();
+        let (certificates, reports) = tokio::join!(
+            k8s::certificate_requests(&session.client, k8s::REPORT_FETCH),
+            k8s::report_lists(&session.client, k8s::REPORT_FETCH),
         );
+        store.certificates_fetched(certificates);
+        store.reports_fetched(reports);
     }
+    // **One value, assembled once** ([`AtConnect`]) — every field above is already read out of
+    // `session`, which is moved into the watch loop below.
+    let at = AtConnect {
+        renewal,
+        skew,
+        serving_expiry,
+        lists_read_at,
+    };
     let mut last = String::new();
     k8s::drive_watching(session.watches, &mut store, |store| {
         // A clock this driver cannot read is not a reason to stop watching; the next event asks
         // again. `wall_clock`'s own `Err` is a machine set before 1970.
         let Ok(now) = wall_clock() else { return };
-        if let Some(report) = live_report(
-            store,
-            now,
-            &mut last,
-            renewal,
-            analysis,
-            skew,
-            serving_expiry,
-        ) {
+        if let Some(report) = live_report(store, now, &mut last, analysis, &at) {
             // The write is dropped if it fails, for the reason `main` drops a failed stderr
             // write: there is nowhere left to report it, and this loop has no exit to take.
             let _ = writeln!(std::io::stdout(), "{report}\n");

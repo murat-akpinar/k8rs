@@ -2602,6 +2602,50 @@ fn ingested_dump(kind: &str, document: serde_json::Value) -> Option<String> {
             let decoded: CertificateRequestSnapshot = ingest(request);
             return Some(format!("{decoded:?}"));
         }
+        // **The five a report fetches, swept for the `Table`'s and the CSR's reason** (§ WHAT A
+        // REPORT ASKS FOR): each goes through the same one [`ingest`] door, so the two sweeps
+        // below cover them without a third copy of themselves. There is no `Store` step for any
+        // of them — a list is filed whole by [`Store::reports_fetched`] after this conversion,
+        // never one object at a time by a watch.
+        //
+        // **A ReplicaSet is here and not with the three workload kinds above** even though it
+        // decodes into the same [`WorkloadSnapshot`]: those three are watched and go through a
+        // `Store`, and this one is fetched. Sweeping it through `all_but("deployments")` would be
+        // asserting on a path no ReplicaSet takes.
+        //
+        // **These five arms were missing when the box first landed**, and seven statements in the
+        // `Bounded` impls they reach could be deleted with the whole suite still green
+        // (`tester`, 2026-08-29). The sweep is what proves those statements do something.
+        "Service" => {
+            let service: Service =
+                serde_json::from_value(document).expect("a captured Service decodes");
+            let decoded: ServiceSnapshot = ingest(service);
+            return Some(format!("{decoded:?}"));
+        }
+        "EndpointSlice" => {
+            let slice: EndpointSlice =
+                serde_json::from_value(document).expect("a captured EndpointSlice decodes");
+            let decoded: EndpointSliceSnapshot = ingest(slice);
+            return Some(format!("{decoded:?}"));
+        }
+        "PersistentVolumeClaim" => {
+            let claim: PersistentVolumeClaim =
+                serde_json::from_value(document).expect("a captured PVC decodes");
+            let decoded: ClaimSnapshot = ingest(claim);
+            return Some(format!("{decoded:?}"));
+        }
+        "PodDisruptionBudget" => {
+            let budget: PodDisruptionBudget =
+                serde_json::from_value(document).expect("a captured PDB decodes");
+            let decoded: DisruptionBudgetSnapshot = ingest(budget);
+            return Some(format!("{decoded:?}"));
+        }
+        "ReplicaSet" => {
+            let set: ReplicaSet =
+                serde_json::from_value(document).expect("a captured ReplicaSet decodes");
+            let decoded: WorkloadSnapshot = ingest(set);
+            return Some(format!("{decoded:?}"));
+        }
         "Node" => {
             store = all_but("nodes");
             let node = serde_json::from_value(document).expect("a captured Node decodes");
@@ -2635,6 +2679,47 @@ fn ingested_dump(kind: &str, document: serde_json::Value) -> Option<String> {
     Some(format!("{workloads:?}"))
 }
 
+/// **Every kind [`ingested_dump`] decodes** — the list the two sweeps below assert they actually
+/// reached.
+///
+/// **A total is not this assertion, and `swept > 40` was one.** Five kinds went unswept for a box
+/// because `ingested_dump` had no arm for them, and the 75 pods, nodes, workloads and tables that
+/// did sweep kept the number comfortably over the floor: 17 objects and seven `Bounded` statements
+/// were invisible (`tester`, 2026-08-29). Six of these twelve kinds contribute five objects or
+/// fewer — one CertificateSigningRequest, one StatefulSet — so *no* total can see one of them
+/// leave. The set can (CLAUDE.md § A derived list asserts it found something).
+const SWEPT_KINDS: [&str; 12] = [
+    "CertificateSigningRequest",
+    "DaemonSet",
+    "Deployment",
+    "EndpointSlice",
+    "Node",
+    "PersistentVolumeClaim",
+    "Pod",
+    "PodDisruptionBudget",
+    "ReplicaSet",
+    "Service",
+    "StatefulSet",
+    "Table",
+];
+
+/// What the two sweeps below check once each object is through: every kind this repo's captures
+/// hold reached [`ingested_dump`], and none of them is answering `None` in silence.
+fn assert_every_kind_swept(reached: &BTreeSet<String>, swept: usize) {
+    let expected: BTreeSet<String> = SWEPT_KINDS.iter().map(|kind| (*kind).to_string()).collect();
+    assert_eq!(
+        *reached, expected,
+        "the sweep no longer reaches every kind `ingested_dump` decodes — a kind missing here is \
+         a kind whose `Bounded` impl nothing exercises, which is how seven statements came to be \
+         deletable with the suite green"
+    );
+    assert!(
+        swept > 80,
+        "only {swept} objects were swept over {} kinds, so the corpus has shrunk under this check",
+        reached.len()
+    );
+}
+
 /// **Every capture in the repo, poisoned in every string it has, through the real ingest path.**
 ///
 /// The assertion is made on the `Debug` of what the store *kept*: a control character survives
@@ -2646,6 +2731,7 @@ fn no_captured_object_can_carry_an_unbounded_or_unprintable_field_through_ingest
     let poison = poison();
     let too_long = "P".repeat(FREE_TEXT + 1);
     let mut swept = 0;
+    let mut reached = BTreeSet::new();
     for (fixture, kind, mut document) in every_captured_object() {
         poison_every_string(&mut document, &poison, true);
         let Some(dump) = ingested_dump(&kind, document) else {
@@ -2653,6 +2739,7 @@ fn no_captured_object_can_carry_an_unbounded_or_unprintable_field_through_ingest
         };
         let where_from = format!("{fixture}.json ({kind})");
         swept += 1;
+        reached.insert(kind.clone());
         assert!(
             !dump.contains(&too_long),
             "{where_from} kept a field longer than {FREE_TEXT} bytes"
@@ -2666,11 +2753,8 @@ fn no_captured_object_can_carry_an_unbounded_or_unprintable_field_through_ingest
             "{where_from} came through the guard with nothing marked, so it proves nothing"
         );
     }
-    println!("{swept} poisoned objects swept through ingest");
-    assert!(
-        swept > 40,
-        "only {swept} objects reached the three watched kinds, so the sweep is nearly empty"
-    );
+    println!("{swept} poisoned objects swept through ingest, over {reached:?}");
+    assert_every_kind_swept(&reached, swept);
 }
 
 /// **The negative side of the bound: no object a real cluster sent is ever shortened.** Every
@@ -2680,11 +2764,13 @@ fn no_captured_object_can_carry_an_unbounded_or_unprintable_field_through_ingest
 #[test]
 fn no_captured_object_is_shortened_by_the_guard() {
     let mut compared = 0;
+    let mut reached = BTreeSet::new();
     for (fixture, kind, document) in every_captured_object() {
         let Some(dump) = ingested_dump(&kind, document) else {
             continue;
         };
         compared += 1;
+        reached.insert(kind.clone());
         assert!(
             !dump.contains(SHORTENED),
             "{fixture}.json ({kind}) was shortened by the guard, so \
@@ -2692,7 +2778,7 @@ fn no_captured_object_is_shortened_by_the_guard() {
         );
     }
     println!("{compared} captured objects came through the guard with nothing shortened");
-    assert!(compared > 40, "only {compared} objects were compared");
+    assert_every_kind_swept(&reached, compared);
 }
 
 /// **A real cluster does send control characters, and this is the message that decided how they
@@ -2826,13 +2912,147 @@ fn guard_region() -> &'static str {
     &K8S_SOURCE[start..end]
 }
 
-/// The body of `impl Bounded for <type>`, or `None` if there is no such impl.
-fn bounded_impl(type_name: &str) -> Option<&'static str> {
+/// **Rust source with every comment line removed** — what a guard reading an impl body is allowed
+/// to count as an answer.
+///
+/// **A guard satisfied by a comment is not a guard.** [`words`] splits on non-alphanumerics and a
+/// comment naming a field is words like any other, so the line
+/// `// A quantity … ([`ClaimSnapshot::capacity`])` answered *is `capacity` bounded?* for a body
+/// that had stopped bounding it — measured by `tester` on 2026-08-29 against
+/// `ClaimSnapshot::capacity` and `EndpointSliceSnapshot::service`, the two fields resting on it.
+///
+/// **Line-based, and that is enough for what it reads.** The only input is the ingest guard
+/// region, whose bodies are `rustfmt`-formatted statements and whole-line `//` comments; a `/* */`
+/// or a trailing `// …` after code would slip through, and neither exists here or survives
+/// `cargo fmt` in this file's style. Named rather than guarded, because the alternative is a Rust
+/// lexer in a test helper.
+fn code_only(source: &str) -> String {
+    source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The body of `impl Bounded for <type>`, comments stripped ([`code_only`]), or `None` if there is
+/// no such impl.
+fn bounded_impl(type_name: &str) -> Option<String> {
     let region = guard_region();
     let head = format!("\nimpl Bounded for {type_name} {{\n");
     let at = region.find(&head)? + head.len();
     let rest = &region[at..];
-    Some(&rest[..rest.find("\n}\n")?])
+    Some(code_only(&rest[..rest.find("\n}\n")?]))
+}
+
+/// Every `impl Bounded for X` in the guard region, as the type's name against its body with
+/// comments stripped ([`code_only`]).
+///
+/// **The blanket impls are excluded by the literal it searches for.** `impl<T: Bounded> Bounded
+/// for Vec<T>` and its `Option` sibling begin `impl<`, so the `\nimpl Bounded for ` prefix never
+/// matches them — which is right, because they carry no field of their own to forget.
+fn bounded_impls() -> BTreeMap<&'static str, String> {
+    let region = guard_region();
+    let mut found = BTreeMap::new();
+    for (at, _) in region.match_indices("\nimpl Bounded for ") {
+        let rest = &region[at + "\nimpl Bounded for ".len()..];
+        let Some(open) = rest.find(" {\n") else {
+            continue;
+        };
+        let name = &rest[..open];
+        if name.contains(['<', ' ']) {
+            continue;
+        }
+        let body = &rest[open + 3..];
+        let Some(end) = body.find("\n}\n") else {
+            continue;
+        };
+        found.insert(name, code_only(&body[..end]));
+    }
+    found
+}
+
+/// **A parent that holds a `Bounded` field must call into it** — the *chain*, which nothing
+/// checked until 2026-08-29.
+///
+/// **This is the one class every other gate is blind to.** `cargo mutants` replaces whole bodies,
+/// so a body that does four of its five jobs is not a mutant. The guards beside this one ask
+/// whether each type's own impl names its own `String`s, which `SelectorRequirement`'s does — and
+/// a `SelectorRequirement::bound` nothing ever calls passes that check while stripping nothing.
+/// And the corpus sweep
+/// ([`no_captured_object_can_carry_an_unbounded_or_unprintable_field_through_ingest`]) is a
+/// *sample*: it plants into the fields real captures happen to carry, so a field no cluster in the
+/// corpus ever wrote — `spec.selector.matchExpressions` is one, present in no committed PDB — is
+/// invisible to it forever.
+///
+/// **The check is three steps over text already parsed here**: the set of types with an
+/// `impl Bounded`, each one's fields from the file that declares it, and every identifier in a
+/// field's type — which is what makes `Option<Selector>` and `Vec<SelectorRequirement>` fall out
+/// with no generics handling at all. If one of those identifiers has an impl and the field's own
+/// name is absent from the parent's body, the chain is cut.
+///
+/// **Comments are stripped on both sides** ([`code_only`], [`field_of`]), or this rebuilds one
+/// level up the loophole F3 closed: a doc comment naming `match_expressions` would answer for a
+/// body that never touches it.
+///
+/// **The class has one instance in this codebase and it is closed**, which is worth knowing
+/// before reading the count as reassurance. Measured: 23 impls, 29 parent-to-child links, and the
+/// only one that can be cut is `Selector.match_expressions` — delete
+/// `Selector::bound`'s `self.match_expressions.bound()` and this test fails naming exactly that
+/// field; put it back and nothing is cut.
+#[test]
+fn every_bounded_field_of_a_bounded_type_is_reached_by_its_parents_impl() {
+    let impls = bounded_impls();
+    assert!(
+        impls.len() > 20,
+        "only {} `impl Bounded` blocks were parsed out of the guard region, so this check is \
+         reading nothing",
+        impls.len()
+    );
+    let mut declared = declared_types(RULES_SOURCE);
+    declared.extend(declared_types(K8S_SOURCE));
+    // **An impl whose type the field parser never found contributes no links and says nothing**,
+    // which is this check's own version of the silence it exists to catch (CLAUDE.md § A derived
+    // list asserts it found something).
+    let unparsed: Vec<_> = impls
+        .keys()
+        .filter(|name| !declared.contains_key(*name))
+        .collect();
+    assert!(
+        unparsed.is_empty(),
+        "these types have an `impl Bounded` and no struct this file could parse, so their fields \
+         are checked by nothing: {unparsed:?}"
+    );
+
+    let mut cut = Vec::new();
+    let mut checked = Vec::new();
+    for (parent, body) in &impls {
+        for (field, kind) in declared.get(parent).into_iter().flatten() {
+            let child = words(kind).find(|word| impls.contains_key(word));
+            let Some(child) = child else { continue };
+            checked.push(format!("{parent}.{field}: {child}"));
+            if !words(body).any(|word| word == *field) {
+                cut.push(format!("{parent}.{field}: {kind} -> {child}"));
+            }
+        }
+    }
+    println!(
+        "{} Bounded impls scanned, {} chained field(s): {checked:?}",
+        impls.len(),
+        checked.len()
+    );
+    assert!(
+        // 29 at the time of writing, over 23 impls; a floor of 5 would have been satisfied by
+        // `PodSnapshot` alone.
+        checked.len() > 20,
+        "only {} parent-to-child links were found, so this check is reading nearly nothing: \
+         {checked:?}",
+        checked.len()
+    );
+    assert!(
+        cut.is_empty(),
+        "a type holds a field whose own `Bounded` impl is never reached, so everything that impl \
+         strips reaches the screen unstripped (invariant 9): {cut:?}"
+    );
 }
 
 /// **`ObjectKind` has no impl of its own** — it is one arm inside `ObjectId`'s, because it has
@@ -2840,10 +3060,80 @@ fn bounded_impl(type_name: &str) -> Option<&'static str> {
 /// answered by the region as a whole rather than by its own impl.
 const BOUNDED_INSIDE_ANOTHER_IMPL: [&str; 1] = ["ObjectKind"];
 
+/// **Every `String` the reachable types carry, against the impl that has to name it** — and the
+/// list of what was checked, so a caller can assert its own canaries on it.
+///
+/// **One body, run by the watched walk and the fetched walk both.** They asked the same question
+/// of the same source in two copies until 2026-08-29, which is the second place a widening gets
+/// forgotten (CLAUDE.md § never write the same code twice).
+///
+/// `kept_by` is the half of the message that differs: *the store keeps* against *a report fetch
+/// keeps*, which is the only thing the two callers ever disagreed about.
+fn assert_the_guard_names_every_string(
+    types: &BTreeMap<&'static str, Vec<(&'static str, &'static str)>>,
+    reachable: &BTreeSet<&'static str>,
+    kept_by: &str,
+) -> Vec<String> {
+    let mut checked = Vec::new();
+    for name in reachable {
+        let carries_text: Vec<_> = types[name]
+            .iter()
+            .filter(|(_, kind)| words(kind).any(|word| word == "String"))
+            .map(|(field, _)| *field)
+            .collect();
+        if carries_text.is_empty() {
+            continue;
+        }
+        // **Comments stripped on both sides** ([`code_only`]) — a doc comment naming the field
+        // answered this check for a body that had stopped bounding it (F3, `tester` 2026-08-29).
+        let body = if BOUNDED_INSIDE_ANOTHER_IMPL.contains(name) {
+            code_only(guard_region())
+        } else {
+            bounded_impl(name).unwrap_or_else(|| {
+                panic!("{name} carries {carries_text:?} and k8s.rs has no `impl Bounded` for it")
+            })
+        };
+        for field in carries_text {
+            assert!(
+                words(&body).any(|word| word == field),
+                "{name}.{field} is a String {kept_by} and the ingest guard never names it"
+            );
+            checked.push(format!("{name}.{field}"));
+        }
+    }
+    checked
+}
+
 /// **Every `String` a watched snapshot type can carry is named by the ingest guard**, derived
 /// from `rules.rs` rather than typed out here. A field added to a snapshot type and forgotten in
 /// `k8s.rs` fails this test; a generic sentence about "names and messages" is what lets one be
 /// missed (todo.md, Phase 5 § Security gate).
+/// Every type reachable from `roots` by following the field types `rules.rs` declares — the
+/// transitive closure one decode carries.
+///
+/// **One walk and not two.** The watched types and the fetched ones ask the same question of the
+/// same source, and a second copy of it is the second place a widening gets forgotten.
+fn reachable_from(
+    types: &BTreeMap<&'static str, Vec<(&'static str, &'static str)>>,
+    roots: Vec<&'static str>,
+) -> BTreeSet<&'static str> {
+    let mut reachable = BTreeSet::new();
+    let mut queue = roots;
+    while let Some(name) = queue.pop() {
+        if !reachable.insert(name) {
+            continue;
+        }
+        for (_, kind) in types.get(name).into_iter().flatten() {
+            for word in words(kind) {
+                if let Some((declared, _)) = types.get_key_value(word) {
+                    queue.push(declared);
+                }
+            }
+        }
+    }
+    reachable
+}
+
 #[test]
 fn every_string_a_watched_snapshot_type_carries_is_named_by_the_ingest_guard() {
     let types = declared_types(RULES_SOURCE);
@@ -2854,20 +3144,10 @@ fn every_string_a_watched_snapshot_type_carries_is_named_by_the_ingest_guard() {
     );
 
     // The three types the five permanent watches decode into, and everything they reach.
-    let mut reachable = BTreeSet::new();
-    let mut queue = vec!["PodSnapshot", "NodeSnapshot", "WorkloadSnapshot"];
-    while let Some(name) = queue.pop() {
-        if !reachable.insert(name) {
-            continue;
-        }
-        for (_, kind) in types.get(name).into_iter().flatten() {
-            for word in words(kind) {
-                if types.contains_key(word) {
-                    queue.push(word);
-                }
-            }
-        }
-    }
+    let reachable = reachable_from(
+        &types,
+        vec!["PodSnapshot", "NodeSnapshot", "WorkloadSnapshot"],
+    );
     for expected in [
         "ObjectId",
         "ObjectKind",
@@ -2897,31 +3177,7 @@ fn every_string_a_watched_snapshot_type_carries_is_named_by_the_ingest_guard() {
         );
     }
 
-    let mut checked = Vec::new();
-    for name in &reachable {
-        let carries_text: Vec<_> = types[name]
-            .iter()
-            .filter(|(_, kind)| words(kind).any(|word| word == "String"))
-            .map(|(field, _)| *field)
-            .collect();
-        if carries_text.is_empty() {
-            continue;
-        }
-        let body = if BOUNDED_INSIDE_ANOTHER_IMPL.contains(name) {
-            guard_region()
-        } else {
-            bounded_impl(name).unwrap_or_else(|| {
-                panic!("{name} carries {carries_text:?} and k8s.rs has no `impl Bounded` for it")
-            })
-        };
-        for field in carries_text {
-            assert!(
-                words(body).any(|word| word == field),
-                "{name}.{field} is a String the store keeps and the ingest guard never names it"
-            );
-            checked.push(format!("{name}.{field}"));
-        }
-    }
+    let checked = assert_the_guard_names_every_string(&types, &reachable, "the store keeps");
 
     for named_by_the_security_gate in [
         "ContainerState.message",
@@ -4295,7 +4551,7 @@ fn every_string_the_sidebar_keeps_is_named_by_the_ingest_guard() {
     for field in carries_text {
         println!("bounded: Browsable.{field}");
         assert!(
-            words(body).any(|word| word == field),
+            words(&body).any(|word| word == field),
             "Browsable.{field} is a String the sidebar keeps and the ingest guard never names it"
         );
     }
@@ -5485,7 +5741,7 @@ fn every_string_the_browsers_rows_keep_is_named_by_the_ingest_guard() {
         for field in carries_text {
             println!("bounded: {name}.{field}");
             assert!(
-                words(body).any(|word| word == field),
+                words(&body).any(|word| word == field),
                 "{name}.{field} is a String a row keeps and the ingest guard never names it"
             );
         }
@@ -8280,7 +8536,8 @@ async fn stub_apiserver(
     status: &str,
     date: Option<&str>,
 ) -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
-    stub(status, date, |request, path| {
+    let status = status.to_string();
+    stub(date, move |request, path| {
         // kube asks for aggregated discovery with an Accept header naming the
         // `apidiscovery.k8s.io` type; the ordinary call has no such word in it.
         let aggregated = if request.contains("apidiscovery") {
@@ -8288,13 +8545,18 @@ async fn stub_apiserver(
         } else {
             ""
         };
-        (format!("{path}{aggregated}"), discovery_answer(path))
+        (
+            format!("{path}{aggregated}"),
+            status.clone(),
+            discovery_answer(path),
+        )
     })
     .await
 }
 
 /// **The socket half of every stub server in this file** — bind, accept, read requests, log what
-/// was asked, answer each one with the same status and the caller's body.
+/// was asked, and answer each one with the status line and body the caller's `answer` returns for
+/// it.
 ///
 /// **It is one function because it was two**: [`stub_apiserver`] and [`stub_list`] differ only in
 /// what they log and what they answer with, and forty lines of hand-written HTTP written twice is
@@ -8306,11 +8568,18 @@ async fn stub_apiserver(
 /// the port is whatever `:0` gave us and the string does not exist until the test runs.
 ///
 /// `answer` is handed the whole request text *and* its path, because one caller varies on a
-/// header and the other only on the path.
+/// header and the rest only on the path. It returns **what to log, the status line, and the
+/// body**.
+///
+/// **The status is part of the answer and not a parameter, since 2026-08-29.** While it was a
+/// parameter the whole server had one status, so *this path is refused and the next is served* —
+/// what a role that may list Services and not PodDisruptionBudgets produces — could not be
+/// spelled, and the test that wanted it varied the body and wrote its own comment around the
+/// limitation instead (`a_role_that_may_not_list_one_kind_still_answers_the_four_beside_it`,
+/// `tester`'s F5). The callers that want one status for everything close over it in one line.
 async fn stub(
-    status: &str,
     header: Option<&str>,
-    answer: impl Fn(&str, &str) -> (String, String) + Send + Sync + 'static,
+    answer: impl Fn(&str, &str) -> (String, String, String) + Send + Sync + 'static,
 ) -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -8321,13 +8590,11 @@ async fn stub(
 
     let log = std::sync::Arc::clone(&asked);
     let header = header.map_or(String::new(), |line| format!("{line}\r\n"));
-    let status = status.to_string();
     let answer = std::sync::Arc::new(answer);
     tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
             let log = std::sync::Arc::clone(&log);
             let header = header.clone();
-            let status = status.clone();
             let answer = std::sync::Arc::clone(&answer);
             tokio::spawn(async move {
                 // One connection carries several requests: hyper keeps it alive, so this reads
@@ -8343,7 +8610,7 @@ async fn stub(
                     while let Some(end) = pending.find("\r\n\r\n") {
                         let request: String = pending.drain(..end + 4).collect();
                         let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
-                        let (logged, body) = answer(&request, &path);
+                        let (logged, status, body) = answer(&request, &path);
                         log.lock().expect("the log is never poisoned").push(logged);
                         let sent = format!(
                             "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n{header}\
@@ -8876,8 +9143,9 @@ async fn stub_list(
     status: &str,
     body: String,
 ) -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
-    stub(status, None, move |_, path| {
-        (path.to_string(), body.clone())
+    let status = status.to_string();
+    stub(None, move |_, path| {
+        (path.to_string(), status.clone(), body.clone())
     })
     .await
 }
@@ -8964,20 +9232,13 @@ async fn a_cluster_with_no_certificate_requests_answers_an_empty_list_and_not_a_
     );
 }
 
-/// **A server that takes the request and never answers does not hold the startup path open** —
-/// [`REPORT_FETCH`]'s whole reason, run at a deadline a suite can afford.
+/// **A client pointed at a listener that accepts and answers nothing** — the hang [`REPORT_FETCH`]
+/// exists for, and the handle to abort it with.
 ///
-/// **This is a hang and not a slow answer, and it is the *startup* path.** `Config::read_timeout`
-/// is `None` in every kube constructor, so without the bound this test never returns and the
-/// binary never draws: the fetch runs after `k8rs: watching — …` has gone to stderr and before the
-/// first watch, so the reader sees a tool that connected and then stopped
-/// (`main.rs`'s `live`, `tester` 2026-08-28).
-///
-/// **The listener accepts and keeps the socket** — never read from, never written to, never
-/// dropped. Dropping it would close the connection and make this the ordinary `Err` the test above
-/// already covers, which is the failure that *does* come back on its own.
-#[tokio::test]
-async fn a_list_that_is_never_answered_does_not_hold_the_startup_path_open() {
+/// **The socket is held** — never read from, never written to, never dropped. Dropping it would
+/// close the connection and make this the ordinary `Err` a refusal already covers, which is the
+/// failure that *does* come back on its own.
+async fn never_answers() -> (Client, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a loopback port");
@@ -8994,6 +9255,24 @@ async fn a_list_that_is_never_answered_does_not_hold_the_startup_path_open() {
             .expect("an address the kernel just gave us"),
     ))
     .expect("a client over plain http asks the machine for nothing");
+    (client, held)
+}
+
+/// **A server that takes the request and never answers does not hold the startup path open** —
+/// [`REPORT_FETCH`]'s whole reason, run at a deadline a suite can afford.
+///
+/// **This is a hang and not a slow answer, and it is the *startup* path.** `Config::read_timeout`
+/// is `None` in every kube constructor, so without the bound this test never returns and the
+/// binary never draws: the fetch runs after `k8rs: watching — …` has gone to stderr and before the
+/// first watch, so the reader sees a tool that connected and then stopped
+/// (`main.rs`'s `live`, `tester` 2026-08-28).
+///
+/// **The listener accepts and keeps the socket** — never read from, never written to, never
+/// dropped. Dropping it would close the connection and make this the ordinary `Err` the test above
+/// already covers, which is the failure that *does* come back on its own.
+#[tokio::test]
+async fn a_list_that_is_never_answered_does_not_hold_the_startup_path_open() {
+    let (client, held) = never_answers().await;
 
     let started = std::time::Instant::now();
     let read = certificate_requests(&client, std::time::Duration::from_millis(200)).await;
@@ -9062,6 +9341,7 @@ fn every_string_a_fetched_certificate_request_carries_is_named_by_the_ingest_gua
         .expect("rules.rs declares CertificateRequestSnapshot");
     let body = bounded_impl("CertificateRequestSnapshot")
         .expect("CertificateRequestSnapshot carries text and k8s.rs has no `impl Bounded` for it");
+    let body = body.as_str();
 
     let mut checked = Vec::new();
     for (field, kind) in fields {
@@ -9134,6 +9414,726 @@ fn a_condition_a_signer_wrote_is_stripped_and_bounded_on_the_way_in() {
         "the signer name was not stripped and bounded: {:?}",
         kept.signer_name
     );
+}
+
+// --- THE FIVE LISTS A REPORT JOINS ---
+//
+// **The other half of the same region: the five fetches that fill
+// [`crate::rules::ClusterSnapshot::services`] and the four beside it** (§ WHAT A REPORT ASKS FOR,
+// todo.md § Phase 5). Everything downstream already shipped — the five snapshot types, their
+// decodes, and `analysis.rs`'s Waste and Drain safety producers, which draw a `Row::NotComputed`
+// wherever one of these is `None`.
+//
+// **What is proven here is the wire, the three answers it can give, and the field each one lands
+// in.** The last of those is the one a shared helper makes possible to get wrong: six one-line
+// functions over one generic ([`whole_list`]) means a copy-paste that names the wrong kind
+// compiles, so [`every_one_of_the_five_lists_reaches_the_field_its_report_reads`] answers each
+// path with *its own* capture and checks the names that came back.
+//
+// **`Some(vec![])` is *this cluster has none* and `None` is *nobody looked*** (NOTES § D129), and
+// the panes draw them differently, so both directions are asserted for every one of the five: a
+// hard-coded `None` would pass a refusal test on its own.
+
+/// The five on-demand lists, each as the field it fills, the committed `kind: List` capture that
+/// is that kind's answer, and the path exactly one cluster-wide list must go out on.
+///
+/// **The path is asserted and not only the answer.** `Api::all` is what makes these cluster-wide;
+/// a fetch that went out namespaced would read one namespace on a real cluster and print as a
+/// short list, which is the *small cluster* failure [`whole_list`] refuses paging for.
+const REPORT_LISTS: [(&str, &str, &str); 5] = [
+    (
+        "replica_sets",
+        "healthy-replicasets",
+        "/apis/apps/v1/replicasets?",
+    ),
+    ("services", "services", "/api/v1/services?"),
+    (
+        "endpoint_slices",
+        "endpointslices",
+        "/apis/discovery.k8s.io/v1/endpointslices?",
+    ),
+    (
+        "claims",
+        "persistentvolumeclaims",
+        "/api/v1/persistentvolumeclaims?",
+    ),
+    (
+        "disruption_budgets",
+        "poddisruptionbudgets",
+        "/apis/policy/v1/poddisruptionbudgets?",
+    ),
+];
+
+/// A committed `kind: List` capture, as the body an API server answers a list with. The objects
+/// and the envelope are both the capture's own here — unlike [`csr_list_body`], whose subject is a
+/// single-object file (NOTES § D53).
+fn list_body(name: &str) -> String {
+    serde_json::to_string(&capture(name)).expect("a committed capture re-serialises")
+}
+
+/// The same envelope with its items taken out — **this cluster has none**, off a real capture
+/// rather than hand-written JSON, and the assertion is what keeps it from becoming a tautology if
+/// a source ever empties on its own (`main_tests.rs`'s `emptied_list`, same rule).
+fn emptied_list_body(name: &str) -> String {
+    let mut list = capture(name);
+    assert!(
+        !list["items"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name}.json has no items array"))
+            .is_empty(),
+        "{name}.json had nothing to empty, so emptying it proves nothing"
+    );
+    list["items"] = serde_json::Value::Array(Vec::new());
+    serde_json::to_string(&list).expect("a value this file built re-serialises")
+}
+
+/// Every `metadata.name` in a committed capture, in the order it is on disk.
+///
+/// **It asserts it found something, because the tests that compare against it are the kind that
+/// pass on nothing.** `assert_eq!(fetched, capture_names(f))` over an emptied capture is
+/// `Some(vec![]) == Some(vec![])`, which is green and proves nothing at all — measured on both
+/// callers (`tester`, 2026-08-29). *Extracted nothing* and *nothing to extract* print the same
+/// line (CLAUDE.md § A derived list asserts it found something).
+fn capture_names(name: &str) -> Vec<String> {
+    let names: Vec<String> = capture(name)["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{name}.json has no items array"))
+        .iter()
+        .map(|item| {
+            item["metadata"]["name"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{name}.json holds an object with no name"))
+                .to_string()
+        })
+        .collect();
+    assert!(
+        !names.is_empty(),
+        "{name}.json holds no objects, so every comparison against this list is green over \
+         nothing"
+    );
+    names
+}
+
+/// The names one fetched list came back with — **the one shape five different element types can
+/// be compared in**, and the reason these tests loop instead of repeating themselves five times.
+fn names<T>(listed: &Option<Vec<T>>, id: fn(&T) -> &ObjectId) -> Option<Vec<String>> {
+    listed
+        .as_ref()
+        .map(|list| list.iter().map(|object| id(object).name.clone()).collect())
+}
+
+/// One of the five, fetched by the name [`REPORT_LISTS`] calls it and reduced to what came back.
+///
+/// **A dispatch and not a trait.** Five one-line arms is the whole of it; an abstraction over the
+/// five would be a second place the kind-to-field mapping lives, which is exactly the mistake
+/// these tests exist to catch.
+async fn fetched_names(
+    which: &str,
+    client: &Client,
+    deadline: std::time::Duration,
+) -> Option<Vec<String>> {
+    match which {
+        "replica_sets" => names(&replica_sets(client, deadline).await, |o| &o.id),
+        "services" => names(&services(client, deadline).await, |o| &o.id),
+        "endpoint_slices" => names(&endpoint_slices(client, deadline).await, |o| &o.id),
+        "claims" => names(&claims(client, deadline).await, |o| &o.id),
+        "disruption_budgets" => names(&disruption_budgets(client, deadline).await, |o| &o.id),
+        _ => panic!("{which} is not one of the five lists"),
+    }
+}
+
+/// [`stub`] answering **each of the five paths with its own capture** and everything else with
+/// nothing — what `report_lists` has to be checked against, because a stub that answers one body
+/// to every path cannot tell a list wired to the wrong field from one wired right.
+async fn stub_reports() -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    stub(None, |_, path| {
+        (path.to_string(), "200 OK".to_string(), report_body(path))
+    })
+    .await
+}
+
+/// What [`stub_reports`] answers one path with: that kind's own committed capture, or nothing for
+/// a path none of the five owns.
+fn report_body(path: &str) -> String {
+    REPORT_LISTS
+        .iter()
+        .find(|(_, _, asked)| path == *asked)
+        .map_or_else(|| "{}".to_string(), |(_, name, _)| list_body(name))
+}
+
+/// **The list a cluster answers becomes the snapshot's own, through the one ingest door**, for
+/// every one of the five — and it goes out on the cluster-wide path.
+#[tokio::test]
+async fn the_five_lists_a_cluster_answers_reach_the_snapshot() {
+    for (which, capture, path) in REPORT_LISTS {
+        let (client, asked) = stub_list("200 OK", list_body(capture)).await;
+        assert_eq!(
+            fetched_names(which, &client, REPORT_FETCH).await,
+            Some(capture_names(capture)),
+            "{which} did not come back as the list {capture}.json holds"
+        );
+        assert_eq!(
+            asked.lock().expect("the log is never poisoned").clone(),
+            vec![path.to_string()],
+            "{which} sent something other than one cluster-wide list — a namespaced path here \
+             reads one namespace and prints as a short cluster"
+        );
+    }
+}
+
+/// **A refusal is *nobody looked* and never an empty list** — the security gate's *a 403 degrades
+/// that one feature*, and the distinction NOTES § D129 exists for.
+///
+/// **The five are namespaced kinds read cluster-wide, so a namespaced Role is refused all of
+/// them** — `Api::all` sends a path with no namespace in it, and only a ClusterRole can authorize
+/// that. **Which role refuses what is argued once, in `k8s.rs` § WHAT A REPORT ASKS FOR**, and is
+/// not restated here: this doc carried a copy that said the five were a *likelier* 403 than the
+/// CSR list, upstream's built-in `view` grants exactly the opposite way round, and the copy is
+/// why it survived the fix to the original (`k8s-admin`, 2026-08-29).
+///
+/// `Some(vec![])` would tell Waste that nothing is going to waste over a list it was refused.
+#[tokio::test]
+async fn a_refused_report_list_is_nobody_looked() {
+    for status in [
+        "403 Forbidden",
+        "401 Unauthorized",
+        "500 Internal Server Error",
+    ] {
+        for (which, _, _) in REPORT_LISTS {
+            let (client, _) = stub_list(status, "{}".to_string()).await;
+            assert_eq!(
+                fetched_names(which, &client, REPORT_FETCH).await,
+                None,
+                "a `{status}` became an answer for {which} — the pane would report on a list \
+                 nobody read"
+            );
+        }
+    }
+}
+
+/// **The other side of the same distinction: a cluster that really has none answers `Some`.**
+///
+/// Without this the test above passes with any of the five hard-coded to `None`, which is a
+/// function that cannot fail (NOTES § D26). It is also the one place the live fetch says something
+/// the fixture path cannot — `main.rs`'s `take` carries that ruling and its measurement.
+#[tokio::test]
+async fn a_cluster_with_none_of_them_answers_an_empty_list_and_not_a_silence() {
+    for (which, capture, _) in REPORT_LISTS {
+        let (client, _) = stub_list("200 OK", emptied_list_body(capture)).await;
+        assert_eq!(
+            fetched_names(which, &client, REPORT_FETCH).await,
+            Some(Vec::new()),
+            "*this cluster has no {which}* and *nobody looked* came back as one answer, and the \
+             pane draws them differently"
+        );
+    }
+}
+
+/// **A server that takes the request and never answers does not hold the startup path open**, for
+/// every one of the five — [`REPORT_FETCH`]'s whole reason, at a deadline a suite can afford.
+///
+/// See [`a_list_that_is_never_answered_does_not_hold_the_startup_path_open`] for why this is a
+/// hang and not a slow answer, and why the listener is held rather than dropped.
+#[tokio::test]
+async fn a_report_list_that_is_never_answered_does_not_hold_the_startup_path_open() {
+    for (which, _, _) in REPORT_LISTS {
+        let (client, held) = never_answers().await;
+        let started = std::time::Instant::now();
+        let read = fetched_names(which, &client, std::time::Duration::from_millis(200)).await;
+        let waited = started.elapsed();
+        held.abort();
+
+        assert_eq!(
+            read, None,
+            "a {which} list nobody answered became an answer"
+        );
+        assert!(
+            waited < std::time::Duration::from_secs(5),
+            "{which} waited {waited:?} on a deadline of 200ms, so nothing is bounding it and a \
+             real run would sit here with the greeting printed and no report behind it"
+        );
+    }
+}
+
+/// **The five wait side by side and not one after another** — [`report_lists`]'s own claim,
+/// measured rather than reasoned about.
+///
+/// **The number is the whole point.** Every one of the five carries its own [`REPORT_FETCH`], so
+/// awaited in a row against a cluster that accepts connections and answers nothing they add up:
+/// the deadline that was put there so the startup path could not hang would hold it for five
+/// times as long instead. Nothing about `tokio::join!` is visible at a call site that reads
+/// correctly either way, which is why this is a test and not a comment.
+///
+/// **The margin is deliberately wide.** Sequential is at least five whole deadlines; concurrent is
+/// one plus what the socket costs. Anything under three is unambiguously the second, and a slow
+/// machine cannot turn one into the other.
+#[tokio::test]
+async fn the_five_lists_wait_side_by_side_and_not_one_after_another() {
+    let deadline = std::time::Duration::from_millis(200);
+    let (client, held) = never_answers().await;
+
+    let started = std::time::Instant::now();
+    let lists = report_lists(&client, deadline).await;
+    let waited = started.elapsed();
+    held.abort();
+
+    assert!(
+        lists.replica_sets.is_none() && lists.disruption_budgets.is_none(),
+        "a list nobody answered became an answer"
+    );
+    assert!(
+        waited < deadline * 3,
+        "five fetches on a {deadline:?} deadline took {waited:?}, which is more than one of them \
+         plus the socket — they are being awaited one after another, and a cluster that answers \
+         nothing now holds the greeting for five deadlines instead of one"
+    );
+    println!("five unanswered lists came back together in {waited:?}");
+}
+
+/// **All five at once, each landing in the field its report reads** — the defect a shared
+/// [`whole_list`] makes possible and nothing else in this file could catch: every one of the six
+/// fetches is one line naming a kind, so a copy-paste that names the wrong one compiles and
+/// answers a plausible list into the wrong field.
+///
+/// **Each path is answered with its own capture**, which is what makes the names distinguishing.
+#[tokio::test]
+async fn every_one_of_the_five_lists_reaches_the_field_its_report_reads() {
+    let (client, asked) = stub_reports().await;
+    let lists = report_lists(&client, REPORT_FETCH).await;
+
+    assert_eq!(
+        (
+            names(&lists.replica_sets, |o| &o.id),
+            names(&lists.services, |o| &o.id),
+            names(&lists.endpoint_slices, |o| &o.id),
+            names(&lists.claims, |o| &o.id),
+            names(&lists.disruption_budgets, |o| &o.id),
+        ),
+        (
+            Some(capture_names("healthy-replicasets")),
+            Some(capture_names("services")),
+            Some(capture_names("endpointslices")),
+            Some(capture_names("persistentvolumeclaims")),
+            Some(capture_names("poddisruptionbudgets")),
+        ),
+        "one of the five landed in the wrong field"
+    );
+
+    let mut asked = asked.lock().expect("the log is never poisoned").clone();
+    asked.sort();
+    let mut expected: Vec<String> = REPORT_LISTS
+        .iter()
+        .map(|(_, _, path)| (*path).to_string())
+        .collect();
+    expected.sort();
+    assert_eq!(
+        asked, expected,
+        "five kinds, five requests — nothing extra was asked for and nothing was asked twice"
+    );
+}
+
+/// **The field each row is actually built from survived the fetch**, not just the name — the
+/// prune line of all five, checked at the one door they come through.
+///
+/// **The names above would pass over five types that decoded to nothing but an id.** Each
+/// assertion here is the one field `rules.rs` says the row cannot be drawn without.
+#[tokio::test]
+async fn what_each_of_the_five_lists_keeps_is_what_its_row_is_drawn_from() {
+    let (client, _) = stub_reports().await;
+    let started = std::time::Instant::now();
+    let lists = report_lists(&client, REPORT_FETCH).await;
+    // Printed rather than asserted: the wall time of five concurrent reads against a loopback
+    // server says nothing a slow machine could not break, and what a reader wants off this run is
+    // *what came back*, per kind (CLAUDE.md § something is run every box).
+    println!(
+        "five lists in {:?}: replica_sets {:?} · services {:?} · endpoint_slices {:?} · claims \
+         {:?} · disruption_budgets {:?}",
+        started.elapsed(),
+        names(&lists.replica_sets, |o| &o.id),
+        names(&lists.services, |o| &o.id),
+        names(&lists.endpoint_slices, |o| &o.id),
+        names(&lists.claims, |o| &o.id),
+        names(&lists.disruption_budgets, |o| &o.id),
+    );
+
+    let sets = lists
+        .replica_sets
+        .expect("the stub answered the ReplicaSets");
+    let set = &sets[0];
+    assert_eq!(
+        (set.desired, set.ready, set.updated),
+        (Some(2), Some(2), Some(2)),
+        "the three counters Waste's *parked at 0 replicas* row is decided by did not survive"
+    );
+    assert_eq!(
+        set.owner.name, "healthy-deploy",
+        "the owner was not resolved to the Deployment the reader deployed"
+    );
+
+    let services = lists.services.expect("the stub answered the Services");
+    let broken = services
+        .iter()
+        .find(|s| s.id.name == "broken-noendpoints")
+        .expect("the capture holds it");
+    assert_eq!(
+        broken.selector,
+        BTreeMap::from([("app".to_string(), "broken-noendpoints".to_string())]),
+        "the selector is the Service half of *matches no pod* and it did not survive"
+    );
+    let default = services
+        .iter()
+        .find(|s| s.id.name == "kubernetes")
+        .expect("every cluster ever built has it");
+    assert!(
+        default.selector.is_empty(),
+        "a Service with no selector has its endpoints managed by hand, and an invented one would \
+         make the report call it broken"
+    );
+
+    let slices = lists
+        .endpoint_slices
+        .expect("the stub answered the EndpointSlices");
+    let empty = slices
+        .iter()
+        .find(|s| s.service.as_deref() == Some("broken-noendpoints"))
+        .expect("the `kubernetes.io/service-name` label is the join and it did not survive");
+    assert_eq!(
+        empty.endpoints, 0,
+        "the slice behind the broken Service holds nothing, which is the whole row"
+    );
+    assert!(
+        slices.iter().any(|s| s.endpoints == 2),
+        "every slice came back empty, so the count is not being read at all"
+    );
+
+    let claims = lists.claims.expect("the stub answered the PVCs");
+    let unused = claims
+        .iter()
+        .find(|c| c.id.name == "broken-unused-disk")
+        .expect("the capture holds it");
+    assert_eq!(
+        (unused.phase.as_deref(), unused.capacity.as_deref()),
+        (Some("Bound"), Some("128Mi")),
+        "the phase keeps the report from billing for a disk that was never provisioned, and the \
+         capacity is the number it bills"
+    );
+
+    let budgets = lists
+        .disruption_budgets
+        .expect("the stub answered the PDBs");
+    let floor = budgets
+        .iter()
+        .find(|b| b.id.name == "broken-pdb-floor")
+        .expect("the capture holds it");
+    assert_eq!(
+        floor.selector.as_ref().map(|s| s.match_labels.clone()),
+        Some(BTreeMap::from([(
+            "app".to_string(),
+            "healthy-deploy".to_string()
+        )])),
+        "a PDB with no selector protects nothing and one with an empty selector protects every \
+         pod in its namespace — the two may not fold together (NOTES § D46)"
+    );
+    assert_eq!(
+        (
+            floor.generation,
+            floor.observed_generation,
+            floor.disruptions_allowed,
+            floor.desired_healthy
+        ),
+        (Some(1), Some(1), Some(0), Some(2)),
+        "the two generations are what say the status is current, and without them a stale one \
+         draws a green light in front of a drain that then hangs"
+    );
+}
+
+/// **What a report fetched reaches the snapshot the rules and reports are handed**, and a store
+/// nobody fetched for still says *nobody looked* — the sibling of
+/// [`a_fetched_certificate_request_list_reaches_the_snapshot_and_an_unfetched_one_does_not`] for
+/// the five filed together.
+#[tokio::test]
+async fn the_five_fetched_lists_reach_the_snapshot_and_an_unfetched_store_says_nobody_looked() {
+    let mut store = bootstrapped();
+    let before = store.snapshot(now()).expect("every initial LIST landed");
+    assert_eq!(
+        (
+            before.replica_sets,
+            before.services,
+            before.endpoint_slices,
+            before.claims,
+            before.disruption_budgets
+        ),
+        (None, None, None, None, None),
+        "a store nobody fetched for claimed to have looked"
+    );
+
+    let (client, _) = stub_reports().await;
+    store.reports_fetched(report_lists(&client, REPORT_FETCH).await);
+    let after = store.snapshot(now()).expect("every initial LIST landed");
+    assert_eq!(
+        (
+            names(&after.replica_sets, |o| &o.id),
+            names(&after.services, |o| &o.id),
+            names(&after.endpoint_slices, |o| &o.id),
+            names(&after.claims, |o| &o.id),
+            names(&after.disruption_budgets, |o| &o.id),
+        ),
+        (
+            Some(capture_names("healthy-replicasets")),
+            Some(capture_names("services")),
+            Some(capture_names("endpointslices")),
+            Some(capture_names("persistentvolumeclaims")),
+            Some(capture_names("poddisruptionbudgets")),
+        ),
+        "a list a report asked for did not reach the snapshot"
+    );
+
+    // **The permanent watch is not this list, and the fetch may not have widened it**
+    // (invariant 6): a ReplicaSet fetched for Waste is not a workload the W-rules run over.
+    assert_eq!(
+        after.workloads.len(),
+        before.workloads.len(),
+        "the ReplicaSet fetch was poured into the watched workloads"
+    );
+
+    store.reports_fetched(ReportLists::default());
+    let refused = store.snapshot(now()).expect("every initial LIST landed");
+    assert_eq!(
+        (
+            refused.replica_sets,
+            refused.services,
+            refused.endpoint_slices,
+            refused.claims,
+            refused.disruption_budgets
+        ),
+        (None, None, None, None, None),
+        "a refusal filed after an answer left the answer standing"
+    );
+}
+
+/// One of the five off a [`ReportLists`], by the name [`REPORT_LISTS`] calls it.
+///
+/// **The sibling of [`fetched_names`] and not a duplicate of it.** That one calls the five
+/// fetches *individually*, which is what lets a test assert that exactly one request went out;
+/// this one reads the value [`report_lists`] returns after all five have gone out. Neither can
+/// stand in for the other.
+fn report_names(lists: &ReportLists, which: &str) -> Option<Vec<String>> {
+    match which {
+        "replica_sets" => names(&lists.replica_sets, |o| &o.id),
+        "services" => names(&lists.services, |o| &o.id),
+        "endpoint_slices" => names(&lists.endpoint_slices, |o| &o.id),
+        "claims" => names(&lists.claims, |o| &o.id),
+        "disruption_budgets" => names(&lists.disruption_budgets, |o| &o.id),
+        _ => panic!("{which} is not one of the five lists"),
+    }
+}
+
+/// **A role that may not list one kind still gets the four beside it** — [`ReportLists`]'s own
+/// claim, against a real per-path `403` and every one of the five positions in turn.
+///
+/// **This is the shape a real cluster produces, not a contrived one.** `list services` at cluster
+/// scope and `list poddisruptionbudgets` are separate grants, so a partial answer is ordinary; and
+/// a `403` on one of five reaching the other four is what keeps the security gate's *a 403
+/// degrades that one feature* true of a fetch that asks five questions at once.
+///
+/// **It also asserts nothing is retried** — five requests for five kinds, which no other test on
+/// the refusal path checks. A refusal re-asked is the retry loop the security gate forbids by name
+/// (NOTES § D151), and the place it would appear is a fetch that treats a `403` as *try again*.
+///
+/// **An earlier version varied the body rather than the status**, and said in its own comment that
+/// a per-path refusal was "not spellable here". It was not spellable with [`stub`] as it stood;
+/// letting the answer decide the status line made it five lines (`tester`'s F5, 2026-08-29). The
+/// weaker test is gone rather than kept beside this one — it asserted a strict subset.
+#[tokio::test]
+async fn a_role_that_may_not_list_one_kind_still_answers_the_four_beside_it() {
+    for (refused, _, refused_path) in REPORT_LISTS {
+        let (client, asked) = stub(None, move |_, path| {
+            if path == refused_path {
+                // **A real status line and a real `Status` body.** `Api::list` goes through
+                // `Client::request`, which turns a non-2xx into `kube::Error::Api` before any
+                // decode is attempted — so what [`whole_list`]'s second `.ok()?` collapses here is
+                // an HTTP refusal and not a body that failed to parse. (That is a different path
+                // from `Client::send`, which hands a refusal back as `Ok` and is why
+                // [`stub_apiserver`] needed the status line first.)
+                return (
+                    path.to_string(),
+                    "403 Forbidden".to_string(),
+                    r#"{"kind":"Status","status":"Failure","code":403}"#.to_string(),
+                );
+            }
+            (path.to_string(), "200 OK".to_string(), report_body(path))
+        })
+        .await;
+
+        let lists = report_lists(&client, REPORT_FETCH).await;
+        for (which, capture, _) in REPORT_LISTS {
+            let expected = (which != refused).then(|| capture_names(capture));
+            assert_eq!(
+                report_names(&lists, which),
+                expected,
+                "with {refused} refused, {which} came back wrong — a 403 on one kind must \
+                 degrade that one row and nothing else"
+            );
+        }
+
+        let asked = asked.lock().expect("the log is never poisoned").clone();
+        assert_eq!(
+            asked.len(),
+            REPORT_LISTS.len(),
+            "five kinds and {} requests with {refused} refused — a refusal that is asked again is \
+             the retry loop the security gate forbids by name (NOTES § D151): {asked:?}",
+            asked.len()
+        );
+    }
+}
+
+/// **A label a user chose is free text and is stripped and bounded on the way in** (invariant 9,
+/// `impl Bounded for ServiceSnapshot`, `impl Bounded for Selector`).
+///
+/// **Three framings, planted separately** (NOTES § D31): the whole value, a substring of one, and
+/// the *key* rather than the value — a selector is the one place in these five types where the map
+/// key is as much the object's author's text as the value is, and a guard that bounded only values
+/// would leave the half a row draws first.
+///
+/// **A `matchExpressions` entry is planted too**, because a PDB's selector is the richer type and
+/// its `values[]` are a `Vec<String>` no `pairs` call reaches.
+#[test]
+fn a_selector_a_user_wrote_is_stripped_and_bounded_on_the_way_in() {
+    use k8s_openapi::api::core::v1::{Service, ServiceSpec};
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, LabelSelectorRequirement};
+
+    let mut service: Service = serde_json::from_value(capture("services")["items"][0].clone())
+        .expect("the committed Service decodes");
+    service.spec = Some(ServiceSpec {
+        selector: Some(std::collections::BTreeMap::from([
+            // Whole value: a bidi override and nothing else, which reverses the row it lands on.
+            ("whole".to_string(), "\u{202e}".to_string()),
+            // Substring: the escape sits inside an otherwise ordinary label.
+            ("middle".to_string(), "web\u{1b}[2Jserver".to_string()),
+            // The key, not the value.
+            ("\u{200b}app".to_string(), "web".to_string()),
+            // Past the cap.
+            ("long".to_string(), "L".repeat(IDENTIFIER + 40)),
+        ])),
+        ..Default::default()
+    });
+
+    let kept: ServiceSnapshot = ingest(service);
+    assert_eq!(
+        kept.selector.get("whole").map(String::as_str),
+        Some(""),
+        "a value that is nothing but a bidi override survived whole: {:?}",
+        kept.selector
+    );
+    assert_eq!(
+        kept.selector.get("middle").map(String::as_str),
+        // **The escape *character* is what goes, and `[2J` is left standing** — [`text`] removes
+        // what a terminal would act on, not the printable text around it, and a guard that
+        // deleted the rest would be editing a label the reader has to recognise.
+        Some("web[2Jserver"),
+        "the escape character inside a label reached the snapshot: {:?}",
+        kept.selector
+    );
+    assert!(
+        kept.selector.contains_key("app") && !kept.selector.contains_key("\u{200b}app"),
+        "a zero-width character in a selector *key* reached the snapshot: {:?}",
+        kept.selector.keys().collect::<Vec<_>>()
+    );
+    let long = kept.selector.get("long").expect("the long label is kept");
+    assert!(
+        // The cap is on what is *kept*; the note [`text`] appends is k8rs's own text and sits
+        // outside it, which is why this is not `<= IDENTIFIER` (`impl Bounded for PodSnapshot`
+        // is capped the same way).
+        long.ends_with(SHORTENED) && long.len() <= IDENTIFIER + SHORTENED.len(),
+        "a label past {IDENTIFIER} bytes was not shortened to the identifier cap: {} bytes",
+        long.len()
+    );
+
+    let mut budget: PodDisruptionBudget =
+        serde_json::from_value(capture("poddisruptionbudgets")["items"][0].clone())
+            .expect("the committed PodDisruptionBudget decodes");
+    budget
+        .spec
+        .get_or_insert_default()
+        .selector
+        .get_or_insert_with(LabelSelector::default)
+        .match_expressions = Some(vec![LabelSelectorRequirement {
+        key: "\u{202e}tier".to_string(),
+        operator: "In\u{1b}[2J".to_string(),
+        values: Some(vec!["web\u{200b}".to_string(), "V".repeat(IDENTIFIER + 40)]),
+    }]);
+
+    let kept: DisruptionBudgetSnapshot = ingest(budget);
+    let requirement = &kept
+        .selector
+        .as_ref()
+        .expect("the selector survived")
+        .match_expressions[0];
+    assert_eq!(
+        (requirement.key.as_str(), requirement.operator.as_str()),
+        // The escape *character* goes and `[2J` stays, for the reason the label above does.
+        ("tier", "In[2J"),
+        "a `matchExpressions` key or operator reached the snapshot unstripped"
+    );
+    assert_eq!(
+        requirement.values[0], "web",
+        "a zero-width character in a selector value reached the snapshot"
+    );
+    assert!(
+        !requirement.operator.contains('\u{1b}'),
+        "an escape character in an operator reached the snapshot"
+    );
+    assert!(
+        requirement.values[1].ends_with(SHORTENED),
+        "a `matchExpressions` value past {IDENTIFIER} bytes was not shortened: {} bytes",
+        requirement.values[1].len()
+    );
+}
+
+/// **Every `String` the five fetched snapshot types carry is named by the ingest guard**, derived
+/// from `rules.rs` rather than typed out here — the sibling of
+/// [`every_string_a_watched_snapshot_type_carries_is_named_by_the_ingest_guard`] and of
+/// [`every_string_a_fetched_certificate_request_carries_is_named_by_the_ingest_guard`], for the
+/// five the walk over the watched types refuses to reach on purpose.
+///
+/// A field added to one of these types and forgotten in `k8s.rs` fails here; the tests above only
+/// prove what the committed captures happen to carry.
+#[test]
+fn every_string_a_fetched_report_list_carries_is_named_by_the_ingest_guard() {
+    let types = declared_types(RULES_SOURCE);
+    let reachable = reachable_from(
+        &types,
+        vec![
+            "WorkloadSnapshot",
+            "ServiceSnapshot",
+            "EndpointSliceSnapshot",
+            "ClaimSnapshot",
+            "DisruptionBudgetSnapshot",
+        ],
+    );
+    for expected in ["ObjectId", "Condition", "Selector", "SelectorRequirement"] {
+        assert!(
+            reachable.contains(expected),
+            "{expected} is not reachable from the five fetched types, so the walk is broken"
+        );
+    }
+
+    let checked = assert_the_guard_names_every_string(&types, &reachable, "a report fetch keeps");
+    println!("fetched-list String fields: {checked:?}");
+    for expected in [
+        "ServiceSnapshot.selector",
+        "EndpointSliceSnapshot.service",
+        "ClaimSnapshot.phase",
+        "ClaimSnapshot.capacity",
+        "Selector.match_labels",
+        "SelectorRequirement.operator",
+    ] {
+        assert!(
+            checked.iter().any(|field| field == expected),
+            "{expected} was not derived from rules.rs, so this guard is reading the wrong \
+             types: {checked:?}"
+        );
+    }
 }
 
 // --- THE SERVER'S OWN CERTIFICATE ---

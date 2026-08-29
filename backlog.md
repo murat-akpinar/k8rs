@@ -1490,6 +1490,100 @@ and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-
   agrees; the one-line `tokio::time::timeout` wrapper is already spelled twice in that file
   ([reports/2026-08-28-c2-c3-against-a-real-api-server.md](reports/2026-08-28-c2-c3-against-a-real-api-server.md) § 4).
 
+### From the typed-lists box and its attack (2026-08-29)
+
+- **Five *not checked* rows name a cause the field cannot know, and two rows beside them
+  already show what the right shape is.** `k8s.rs` § WHAT A REPORT ASKS FOR collapses
+  three different failures into one `None` on purpose — *nobody fetched it*, *this login
+  may not list them*, and *the answer never came* past the deadline — and states that it
+  owes no sentence, so it needs no taxonomy. `analysis.rs` then draws a sentence that
+  picks one of the three and prints it as fact: *"and this login could not read any of
+  them"* (`analysis.rs:1694`, Waste), and the same claim at `:810`, `:1893`, `:2084`
+  and `:2842`. Every one of the five is false on the file-driven path, where there is no
+  login at all — measured by running the binary over `tests/fixtures/*.json`, which
+  prints the Waste paragraph above with the five lists simply never named on argv.
+  **The model to copy is one file over and needs no invention**:
+  `kubelets_waiting_to_join` (`analysis.rs:3233`) draws *"k8rs does not have one"* and
+  its doc comment says exactly why that is the only honest wording —
+  *the field cannot tell them apart, so the sentence says what is missing rather than
+  whose fault it is, and the way out is the one that works either way*. The `ask_for`
+  line is the half that stays right in all three cases and needs no change. **`:821` is
+  the near miss worth keeping in view**: *"k8rs could not read them"* names no login and
+  is nearly right, but *could not read* still asserts an attempt, and on the file path
+  none was made — so the wording that survives every case is `:3233`'s *does not have
+  one*, and that is the one to copy rather than `:821`. **Pre-existing
+  and not the typed-lists box's** — these rows printed identically at HEAD before it and
+  the five fields were `None` on the fixture path both before and after; the box is only
+  what finally got someone to run the panes. `analysis.rs` is frozen (Phase 4), so this
+  is a narrow unfreeze in the phase that has a renderer, bounded the way
+  [D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)
+  bounds the C2 row above — and it is plain-language rule 14 as much as correctness, since
+  the sentence sends a reader to argue with their cluster admin about a permission that
+  was never the problem. Found by `tester`, 2026-08-29.
+
+### From the typed-lists operator review (2026-08-29)
+
+*All six are `k8s-admin`'s, reading the five on-demand report lists as a family
+([D180](NOTES.md#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)).
+The box landed with the ceiling named on screen and in its docs; these are the
+things naming it does not fix.*
+
+- **The lists are read once and never again, and four of the five carry status that
+  moves.** The right refresh is *when a user opens the pane* — on demand, which is
+  what the box's own title says and what invariant 6 permits, unlike the periodic
+  LIST it forbids. There is no pane until Phase 10, so the fetch sits on the
+  startup path and `main.rs` states the read time instead. When a pane exists, the
+  re-read belongs to it: `disruptions_allowed`, `current_healthy`,
+  `desired_healthy` and `observed_generation` are rewritten continuously by the
+  disruption controller, and Drain safety's per-node rows already recompute from a
+  streaming pod list beside them. Until then a PDB applied after connect is
+  invisible to a green light drawn in front of a destructive operation
+  ([D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
+- **The lists are fetched unpaged, and one of the five is the heaviest read in the
+  product.** `ListParams::default()` sends no `limit`, so each is one whole answer
+  the API server builds, transfers and kube deserializes before `ingest` prunes —
+  body and decoded objects alive at once, and the six run concurrently so the peak
+  is the sum. A ReplicaSet carries the whole pod template and `revisionHistoryLimit`
+  defaults to 10, so 1000 Deployments is up to 10 000 template-carrying objects.
+  Paging to completion — kube's own watcher does it at 500, following the `continue`
+  token — is the same whole answer with a bounded working set, and is what
+  `kubectl get -A` does by default. Needs its own tests for a `continue` loop, which
+  is why it is a box and not a line.
+- **The 10s `REPORT_FETCH` bounds a hang correctly and a large answer incorrectly.**
+  It sits *above* kube's retry ladder — 429/503/504 retried fifteen times, base
+  `5ms × 2^i` with jitter, invisible to us
+  ([D148](NOTES.md#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22))
+  — and the first eleven waits alone sum past ten seconds at the floor. So on a
+  large or throttled cluster the most expensive request k8rs makes is issued, the
+  server does all the work, and the answer is discarded at the deadline; the pane
+  then tells the operator to ask for RBAC they already have. A deadline *each*
+  changes nothing. What would: bound the work (paging, above), or make it a
+  no-progress deadline rather than a total one.
+- **Waste counts a Deployment's rollback history as waste.** `replica_sets_parked_at_zero`
+  counts every ReplicaSet with `spec.replicas == 0`, which is exactly what
+  `revisionHistoryLimit` means and what `kubectl rollout undo` restores from. On any
+  cluster that has rolled anything the row prints a four-figure number under
+  *"Things that cost you something for nothing"* with the detail *"Left behind when
+  deployments moved on."* Two outcomes, both bad: the reader stops believing the
+  Waste pane, or the reader deletes their rollback history. Invisible in testing
+  because a fresh kind cluster has never rolled. `analysis.rs` is frozen, so this is
+  a narrow unfreeze in the phase that has a renderer, and it is invariant 13's
+  second half as much as correctness.
+- **`Store::snapshot` deep-clones five immutable lists on every watch event.** The
+  pattern predates this box — pods, nodes and workloads are cloned on the same line
+  — but these five never change after connect, so it is a constant cloned per event,
+  and on a real cluster it is the larger volume. Belongs in the 10 000-pod
+  measurement rather than as a fix on its own, so the reading is understood when it
+  comes in.
+- **Services and EndpointSlices are fetched together but not pinned to one
+  `resourceVersion`.** They are two independent LISTs under `join!`, so a Service
+  created in the window — or one whose slice the controller has not written yet —
+  appears in one and not the other, and the row that reads the pair is
+  `Severity::Critical`. Consistent to within milliseconds today; combined with the
+  no-refresh entry above, a millisecond race becomes a row that stays for the
+  session. `endpoint_slices`' doc already says the pairing is the report's to
+  enforce; what it does not say is that *fetched together* is not *consistent*.
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

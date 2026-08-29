@@ -201,6 +201,7 @@ its line moving with it.
 - [D177](#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28) — the behind half does not only blank, it also under-reports, and a refusal's `Date` is not the cluster's clock
 - [D178](#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28) — C3 lands whole, C2's row cannot be drawn in a frozen pane, and the twelfth crate was already compiled
 - [D179](#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28) — the refusal that kept a mutant alive rested on a dependency `just check` already had
+- [D180](#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29) — the box named six lists and five were real, an empty envelope names no kind, and a sweep that edits in place made a reader measure a moving object
 
 ## Why it exists — where the gap is
 
@@ -15554,3 +15555,170 @@ principle. A test may reach for a binary `just check` already requires; reaching
 does not is the same decision made fresh, and `just check` gains the step in the same change
 or the gap is invisible again. `D169`'s own mutant is still alive — this entry makes it a
 choice nobody has made yet rather than a limit somebody proved.
+
+### D180 — the box named six lists and five were real, an empty envelope names no kind, and a sweep that edits in place made a reader measure a moving object (2026-08-29)
+
+**Four findings, one box.** *The typed lists `analysis.rs` needs* put five
+on-demand lists onto `ClusterSnapshot` — `replica_sets`, `services`,
+`endpoint_slices`, `claims`, `disruption_budgets` — on the shape
+[D178](#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)
+built for the CSR list, generalised into one `whole_list`. What is worth keeping
+is not the five functions.
+
+**The box named six and the sixth was already there.** Deployments are on the
+permanent watch (`watcher(Api::<Deployment>)` beside StatefulSet and DaemonSet,
+into `ClusterSnapshot::workloads`, invariant 6), so a sixth fetch would have been
+a second reader of a field a watch already fills — the *two readers disagreeing*
+class this repo has paid most for. Caught by the brief re-checking the box's
+premise at HEAD, which is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
+rule and cost one command.
+
+**An empty `kind: List` cannot be answered on the file path, and that is a fact
+about the object rather than a gap in the loader.** The question D178 left open
+was whether a capture holding `"items": []` should file `Some(vec![])` — *this
+cluster has none* — instead of `None`, *nobody looked*. Measured: `just fixtures`
+captures `kubectl get "$kind" -A -o json`, and what lands carries `kind: "List"`,
+not `ServiceList` (`scripts/sanitize.jq` records the same independently). So
+`{"apiVersion":"v1","items":[],"kind":"List"}` is byte-identical whichever kind it
+was of. The envelope names no resource kind, `Some(vec![])` filed from it would be
+a guess at which of five fields it belonged to, and keying off the filename is the
+same guess wearing a path. **`None` stands, and the two paths differ because the
+file path was handed less**: a live fetch knows the kind because it asked for it by
+name. Both answers are true of what each was given
+([D129](#d129--the-reports-cannot-see-the-helpers-written-for-them-and-the-freeze-is-about-logic-and-not-visibility-2026-08-20)).
+
+**The one that generalises: a new kind is not landed until it is registered with
+the sweeps that already exist.** `k8s_tests.rs`'s `ingested_dump` dispatches on
+kind and ends `_ => return None`. C3 added an arm for its kind and said why; this
+box added five kinds and no arms, so seventeen committed objects stopped sweeping
+in silence — and **seven individual statements in the new `Bounded` impls could be
+deleted with all 662 tests green**, among them the strip on a Service's *name*, a
+PVC's *capacity* and a PDB condition's *message*. That is invariant 9 and the
+security gate's untrusted-input class, unproven.
+
+**And the fourth finding was the PM's own, and it was wrong — which is the one
+worth keeping.** The PM reported `impl Bounded for Selector` as bounding
+`match_labels` and not `match_expressions`, making `impl Bounded for
+SelectorRequirement` dead code and a live invariant-9 defect. It was not. That line
+was in the tree the whole time. What the PM read was `src/k8s.rs` **mid-mutation**:
+the author was proving the box's strips by deleting one statement at a time *in the
+shared working tree*, ~45s a mutation, and the run was killed by the ten-minute tool
+cap before its restore line ran. The PM's `sed` landed inside mutation #12 — the one
+that deletes exactly `self.match_expressions.bound()` — and read a real file, in a
+real state, that no commit ever held.
+
+**So the one-writer rule covers a sweep that edits in place, and the damage is not
+the tree.** The tree survived: the author restored it and `src/k8s.rs` is
+byte-identical to what the previous round landed. The damage is a *reader* — a
+second party measuring a moving object and concluding something false about it with
+a command and its output to show. That is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
+rule meeting its own edge: *only the object says what it does* assumes the object
+holds still. The rule that follows is the concurrency table's, widened — **a
+mutation sweep is a writer for as long as it runs**, so it runs against a copy with
+its own `CARGO_TARGET_DIR`, and a restore lives in a `try`/`finally` rather than on
+the last line of a script something can kill. The author moved it to a sandbox in
+the same round.
+
+**The guard it produced is kept anyway, because the class was real even though the
+instance was not.** Nothing asked whether a parent holding a `Bounded`-typed field
+calls into it, and no corpus sweep could have: both PDBs in
+`poddisruptionbudgets.json` carry `matchLabels` only, no capture in the corpus puts
+a `matchExpressions` under a `Selector`, and `WorkloadSnapshot` — the only other
+type with a selector-shaped field — carries none. **A corpus sweep is a sampling
+check, and it samples whatever kind happened to produce**; a field no capture
+carries is invisible to it forever, so a strip on such a field is proven
+structurally or it is not proven. `every_bounded_field_of_a_bounded_type_is_reached_by_its_parents_impl`
+now walks the chain — 23 impls, 29 links — and was proven red by removing the very
+line the PM thought was missing.
+
+Why the seven unproven strips got that far:
+
+- **The mutation run cannot see them.** `cargo mutants` replaces whole function
+  bodies, so a dropped *statement* inside a live body is invisible to it
+  ([D104](#d104--the-second-agent-was-re-running-the-first-agents-commands-and-a-tool-does-it-better-2026-08-15)
+  is not the backstop for this class; the corpus sweep is). That is why the author
+  was deleting statements by hand at all.
+- **`assert!(swept > 40)` over seventy-five objects is the derived-list failure
+  `CLAUDE.md` already names** — a threshold far below the real count cannot see a
+  kind going missing. It was not replaced by a bigger number: six of the twelve
+  kinds contribute five objects or fewer, so **no total can see a kind leave**, and
+  what replaced it asserts the *set* of kinds reached, with the total kept only as a
+  corpus-shrink floor.
+- **`bounded_impl()` handed back the impl body with its comments in it**, and the
+  check is `words()` containment, so a doc comment naming a field satisfied the
+  guard the field's own code was supposed to satisfy. Two of the seven survived for
+  that reason alone, and the fix landed at the one shared helper all five call sites
+  read.
+
+**And one measurement.** The five are joined rather than awaited in turn — 201ms
+against 1008ms over five 200ms deadlines — so the worst case on the startup path
+stays one `REPORT_FETCH` however many lists there come to be, instead of one per
+list. `futures-util` was not needed for it, so invariant 10 never came up.
+
+**The operator review found the thing none of the gates were looking for: the
+lists are a photograph on a pane that looks like a video.** `report_lists` runs
+once, before the watches, and four of the five carry *status* the controllers
+rewrite continuously. Drain safety's per-node rows recompute from a streaming pod
+list on every event while `disruptions_allowed`, `current_healthy` and
+`desired_healthy` stay frozen at connect — so the pane prints *this node is ready
+to drain* against budgets that may be ten minutes old, and **before this box that
+path did not exist**, because `disruption_budgets` was always `None` and the whole
+pane folded into one *not checked* row. Turning the row on off a one-shot list is
+what created the green light [D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)
+forbids. `certificate_requests` had got away with the same ceiling because a CSR's
+pending-ness is slow and its staleness *under*-reports; generalising `whole_list`
+was right, and generalising **its refresh policy** to four status-carrying kinds
+was not.
+
+**The ruling, and what makes it a ruling rather than a shrug: the obvious fix is
+forbidden and the right one has no home yet.** A periodic re-fetch is invariant 6
+by name — six cluster-wide LISTs a pass is what *watch, never poll-list* exists to
+stop. A re-read *when a user opens the pane* is on demand, is what the box's own
+title says, and needs a pane, which is Phase 10. `analysis.rs` is frozen, so the
+row cannot say it itself. What was left is honesty, and there was already a
+precedent eight lines away: `Input::skew` and `Input::serving_expiry` are both read
+once at connect and both say so. So `main.rs` prints, above the panes, how old the
+lists are and that they do not refresh — the age through `rules::age`'s one ladder
+([D68](#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13))
+so it cannot drift from the cards beside it, and **stamped before the fetch, not
+after**, because a stamp taken on the way out would call ten-second-old data fresh
+in the exact direction the line exists to prevent. The file path prints nothing: a
+run that prints once and exits is a photograph that looks like one.
+
+**Say plainly what that buys, because the box does not.** The tool now tells you it
+might be wrong; it is not *no longer wrong*. A reader who sees `4 min ago` and
+drains anyway meets the same refused eviction. The refresh is boxed in
+[`backlog.md`](backlog.md) with five other findings from the same review — unpaged
+lists, the deadline sitting above kube's retry ladder, a Waste row that counts a
+Deployment's rollback history as waste, `Store::snapshot`'s per-event clone, and
+Services and EndpointSlices being fetched together without being *consistent*.
+
+**Four of the review's findings were sentences, not code, and that is the part to
+carry forward.** The RBAC comparison was backwards — built-in `view` grants all
+five of these and grants `certificatesigningrequests` in neither `view` nor `edit`,
+so the two refusals are different populations and not ordered. The paging argument
+rested on *a `limit` hands back a page* and *`kubectl get` reads it exactly this
+way*, both false: paging to completion is also a whole answer, § THE INITIAL LIST
+in the same file documents kube doing exactly that, and `kubectl v1.36.3`'s
+`--chunk-size` defaults to **500**, upstream's own wording *Pass 0 to disable* — so
+`kubectl get rs -A` pages and this line sends what `--chunk-size=0` sends. That was
+measured on this machine only after a draft of the correction had claimed there was
+no kubectl here to measure with, and **how that claim was produced is the reusable
+part**: the check was
+`command -v kubectl >/dev/null && kubectl options | grep chunk-size || echo "NOT INSTALLED"`.
+`command -v` succeeded; `--chunk-size` is a `get` flag and not a global option, so
+the `grep` exited 1, the `||` fired, and its author read *his own fallback string*
+back as a fact about the machine. A shell precedence trap producing a confident
+sentence about the environment — the same `||`/`&&` shape `cargo mutants` had caught
+in Rust one file over the same night. **A fallback is not a measurement, and a
+negative result needs the same check a positive one gets.** A new security
+line said the CSR's `spec.request` and `spec.extra` were *never held*, when
+`whole_list` decodes the whole object and prunes afterwards. And *the owner cache
+structurally cannot contain a parked ReplicaSet* was an emptiness claim where only
+a subset claim is true — a ReplicaSet scaled to zero keeps its pods while they
+terminate. **Every one was written by someone being careful, in a file whose other
+paragraphs are measured**, which is the shape [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+describes; what caught them was a reader who owns clusters rather than a gate.
+
