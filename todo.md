@@ -3047,7 +3047,7 @@ public release.
       guarded on the same stale `outcomes.json`. Also closes the same finding's
       backlog entry
       ([D182](NOTES.md#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29))
-- [ ] **A pod can name a node the snapshot does not have, and nothing has ruled
+- [x] **A pod can name a node the snapshot does not have, and nothing has ruled
       on what that means.** Two independently-timed watches produce it
       (invariant 6): a pod delivered before the node LIST has landed, or a node
       deleted between events. Today such a pod is silently invisible to every
@@ -3057,7 +3057,17 @@ public release.
       the driver reads files**, which is why it is boxed here and not in Phase 4:
       the shape arrives with the watch. Rule it, then feed it — one plant, two
       assertions. Found by `tester`'s phase-close audit, 2026-08-22
-      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22))
+      ([D137](NOTES.md#d137--family-d-the-restart-row-got-a-pane-of-its-own-and-a-real-cluster-took-four-claims-away-2026-08-22)).
+      **Ruled and fed 2026-08-29**: the behaviour stands unchanged — a per-node
+      answer cannot hold the pod, a cluster-wide count must, and no card fires
+      for it on purpose — stated at `pods_on`, the one join, and pinned by a
+      plant on both panes the box names
+      ([D183](NOTES.md#d183--a-pod-can-name-a-node-that-is-gone-and-every-per-node-row-is-right-to-be-silent-about-it-2026-08-29)).
+      **The box's premise was half wrong and the ruling's first draft was wrong
+      twice**: the pre-LIST race cannot reach a report (`snapshot()` is withheld
+      until every watch has listed), and a cluster took away both *rule 13 covers
+      this pod* and *the limits count is otherwise stable*
+      ([reports/2026-08-29](reports/2026-08-29-a-pod-whose-node-left.md))
 - [ ] Namespace scoping: `--namespace/-n`, and a 403 on the cluster-wide LIST
       falls back to the context's namespace (then `default`), with the header
       stating which scope is in effect and why. A namespace-scoped user must

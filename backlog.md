@@ -1679,7 +1679,51 @@ It is in `src/`, which `tester` may not write, and it is not a defect in that bo
   four times under the boundary the design property actually needs — so the property
   held on every run that went red. A gate that is red for nothing is one people learn
   to wave through, which is the justfile's own argument for why `just check` is CI.
-  `dev-core`'s file. Found by `tester`, 2026-08-29
+  `dev-core`'s file. Found by `tester`, 2026-08-29.
+  **Re-measured independently 2026-08-29** during the box below: 1 red in 4 full
+  `just check` runs at 956 ms, and 8 isolated runs at 296–608 ms (median ~430 ms)
+  — so the margin is the parallel suite, not the machine, and the entry's numbers
+  hold from a second direction.
+
+### From the pod-whose-node-left box and its two reviews (2026-08-29)
+
+*Three findings from the box that ruled on a pod naming a node the snapshot does
+not have ([D183](NOTES.md#d183--a-pod-can-name-a-node-that-is-gone-and-every-per-node-row-is-right-to-be-silent-about-it-2026-08-29)).
+None is a defect in that box; the two that were are fixed in it. The first is the
+one that changes a number a user reads.*
+
+- **A pod with no `containerStatuses` is counted as *capped* in both dimensions,
+  so Capacity's limits row cannot see the pods most likely to have no limits.**
+  [`capped`](src/analysis.rs) is `of_pod(pod).is_some() || pod.containers.iter().all(...)`
+  and `all` over an empty list is `true`; `PodSnapshot::containers` is built from
+  `status.containerStatuses`, never from the spec. Measured 2026-08-29 against
+  committed captures: `pending`, `unstarted` and `unjudged` — three fixtures whose
+  whole purpose is *no limits* — each move the row by **zero**, while `image`
+  (Pending, one status) does count, so it is not *all Pending pods*. The behaviour
+  is deliberate and documented (`analysis.rs:677`: a pod nobody has looked at is
+  left out rather than guessed at), and a real scale-down was measured taking the
+  row `8 workloads` → `7` for the same reason. **What has never been ruled is what
+  the row should say about a pod whose declarations the snapshot cannot see** —
+  count it, exclude it, or say how many were not readable. A ruling, not a fix,
+  and it changes a user-visible count. `dev-core`'s file. Found by `tester`, and
+  the scale-down half by `k8s-admin`, 2026-08-29
+- **Drain safety's all-clear sentence is cluster-wide but is folded from per-node
+  lines, so it can be false rather than merely incomplete.** *"Nothing on **this
+  cluster** … was started by hand, and nothing on it keeps its own files"*
+  (`analysis.rs:773`) comes from `all_clear` over `snapshot.nodes`, each line
+  through `pods_on`. Measured 2026-08-29: it printed while two pods ran on a
+  machine that had left. A bare hand-started pod with an `emptyDir` on a
+  just-removed node makes it false for the ~50 s window. D183 states the carve-out
+  and declines a row for it — the open question is whether the *sentence* should
+  be narrowed to the nodes it actually read. `dev-core`'s file. Found by
+  `k8s-admin`, 2026-08-29
+- **Three intra-doc links have been unresolved for some time and no gate sees
+  them.** `crate::rules::in_days` (`analysis.rs:3182`), `crate::analysis::capped`
+  (`rules.rs:973`), `Row::NotComputed` (`rules.rs:1812`). `just check` runs clippy
+  and not rustdoc, so `cargo doc --no-deps --document-private-items` is the only
+  thing that reports them — which is either a one-line addition to `just check` or
+  a decision that rustdoc is not a gate. `tester`'s call on the gate, `dev-core`'s
+  on the links. Found by `dev-core`, 2026-08-29
 
 ## Ruled out
 

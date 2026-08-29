@@ -204,6 +204,7 @@ its line moving with it.
 - [D180](#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29) — the box named six lists and five were real, an empty envelope names no kind, and a sweep that edits in place made a reader measure a moving object
 - [D181](#d181--the-metrics-states-are-read-off-the-answer-and-not-off-the-capability-probe-and-a-down-aggregated-backend-answers-503-2026-08-29) — the metrics states are read off the answer and not off the capability probe, and a down aggregated backend answers 503
 - [D182](#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29) — the gate reports a run it did not make, and *stated, not failed* was written about the wrong caller
+- [D183](#d183--a-pod-can-name-a-node-that-is-gone-and-every-per-node-row-is-right-to-be-silent-about-it-2026-08-29) — a pod can name a node that is gone, and every per-node row is right to be silent about it
 
 ## Why it exists — where the gap is
 
@@ -15899,3 +15900,120 @@ as ways to tell this run's report from a stale one.
 **Ceiling:** a caller that passes `--output` gets *this run started nothing* and,
 under `--gate`, a refusal. Loud rather than silent, still wrong, and no caller
 passes it.
+
+### D183 — a pod can name a node that is gone, and every per-node row is right to be silent about it (2026-08-29)
+
+The box ([todo.md](todo.md) § Phase 5) said a pod may name a node the snapshot
+does not have, that such a pod is invisible to every per-node row while still
+counting in Capacity's limits row, and that nobody had chosen this. The
+behaviour is chosen here. It does not change; what changes is that it is stated
+at the join and asserted by a test.
+
+**The box named two producers of the shape and only one of them is reachable.**
+*A pod delivered before the node LIST has landed* cannot reach a rule or a
+report: [`Store::snapshot`](src/k8s.rs) returns `None` until `listed()`, and
+`listed()` is every watch's initial LIST having finished
+([D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)) — the
+whole snapshot is withheld, not the node half of it. What is reachable is a node
+that **leaves after both LISTs landed**: `Event::Delete` drops it from `live` at
+once, while the pods bound to it keep their `spec.nodeName` until their own
+deletes arrive. That is an ordinary autoscaler scale-down and a hand
+`kubectl delete node`, not an edge case. A relist after a reconnect is the same
+shape arriving differently — `complete` is never reset and `live` swaps whole at
+`InitDone`, so a node absent from the new LIST vanishes in one step with the pods
+still naming it.
+
+**And it named two consumers where there are five.**
+[`pods_on`](src/rules.rs) is the only **node → its pods** join in the repo. Its
+callers are Capacity's node rows and Drain safety's rows — the two the box names
+— **and N1, N2 and N5**. So the ruling lands on the join and not on the two
+reports — one join, one answer, the single point of change.
+
+**It is not the only pod → node lookup, and the difference is what the third
+bullet below turns on.** Two others resolve a pod's own `spec.nodeName` against
+the node list without coming through it: rule 13's hand-off check and
+`what_is_blocking_it`'s scan. A reader who takes `pods_on` for *the* join
+concludes that the pod rules inherit this ruling, and they do not.
+
+**The ruling, both halves: a per-node answer cannot hold the pod, and a
+cluster-wide one must.**
+
+- **No per-node row is false.** Each one names a node and sums what is on it,
+  and a pod whose node is gone belongs to no row rather than being missing from
+  one. Silence here is honest. A row standing for the machine that left would be
+  a per-kind invention (invariant 12's shape), and it would print on every
+  scale-down of every cluster that has an autoscaler.
+- **Capacity's limits row counts it, because it is a different question.**
+  *Which of my workloads has no limit* is asked about workloads, not about
+  machines, so a node-scoped denominator there would be the wrong denominator
+  for the question, whatever it did to the number.
+  **Not because the count is otherwise stable — it is not, and the first draft
+  of this entry claimed it was.** `uncapped_workloads` filters on [`finished`],
+  but [`capped`] answers *capped* for a pod with no `containerStatuses` at all
+  (`.all()` over an empty list), deliberately and for the reason spelled there:
+  such a pod's declarations are not in the snapshot, so it is left out rather
+  than guessed at. Three committed captures whose whole point is *no limits*
+  move the row by zero, and measured across a real scale-down the row went
+  `8 workloads` → `7` on its own, because the replacement pods are `Pending`
+  and carry no statuses yet. The row is right; a sentence defending it with a
+  stability it does not have is not.
+- **No card fires for the pod, and that is the ruling rather than an oversight.**
+  The first draft of this entry said the pod was not invisible because rule 13
+  covers it. **That is false, and a cluster said so** — it was reasoned from
+  rule 13's prose instead of its control flow
+  ([reports/2026-08-29](reports/2026-08-29-a-pod-whose-node-left.md) § 3, § 5).
+  A pod whose machine left reads `phase: Running`, `Ready: True`,
+  `state: running` for the whole window, and `placed_but_never_started` returns
+  at `if pod.containers.iter().any(is_running)` — three lines before the node
+  lookup the argument was built on. Rule 14 needs `Pending`, rule 10 needs
+  `PodScheduled: False`, rule 12 needs a `deletionTimestamp`, and every
+  container rule needs a bad container state. The built binary, run one second
+  into the window, printed the two departed pods in the `14 pods` header count
+  and in the limits row, and in no card anywhere.
+
+  **What makes the silence right is the clock and the replacements, not another
+  rule.** The pod GC removed the objects in ~50 s on three runs, so this is a
+  state that ends rather than a population that accumulates; and the durable
+  consequence — the workload being short — arrives on the *replacement* pods,
+  where rule 10 fired with the scheduler's own sentence. A pod that outlives
+  the collector is held by something, which is rule 12, and **its card names
+  the node**. So: the pod that never started is rule 13's, past ten minutes
+  only; the pod that was running is nobody's, on purpose.
+
+**One consumer is not per-node, and the ruling has to say so out loud.** Drain
+safety's all-clear sentence — *"Every node could be drained right now. Nothing on
+**this cluster** is protected by a rule a drain would wait on, nothing on it was
+started by hand, and nothing on it keeps its own files"* — has a cluster as its
+subject and is built by folding the per-node lines, every one of which came
+through `pods_on`. Measured, it printed while two pods ran on a machine that had
+left. A bare hand-started pod with an `emptyDir` on a node an autoscaler has just
+removed makes that sentence **false**, not merely incomplete, for the length of
+the window. It is not worth a row — the window is ~50 s and the cure is the same
+as the disease — but a ruling that says *no per-node row is false* while one
+cluster-wide sentence built from those rows can be is a ruling that stops being
+true one consumer over.
+
+**Two producers the box and the first draft both missed**
+([reports/2026-08-29](reports/2026-08-29-a-pod-whose-node-left.md) § 1, § 2).
+**A hand `kubectl delete node` on a live machine does not heal**: measured, the
+kubelet stayed `active`, the node was still absent six minutes later, and only a
+container restart re-registered it — so this producer is permanent until somebody
+intervenes, and it leaves containers serving on a machine the control plane
+believes is empty. And **a pod bound to a node name that never existed** — a
+`spec.nodeName` typo, a webhook, a custom scheduler binding to a node it read a
+minute ago — arrives with `status.conditions` **empty**, so rule 13 exits at its
+first `?` and rule 14 at two minutes is the only card it can ever have.
+
+**It is not called an orphan.** In `analysis.rs` an orphan is already a pod with
+no controller — Drain safety's *"nothing would restart"* row — and a second
+meaning on the same word in the same file is the divergence
+[D91](#d91--the-tests-split-and-the-product-file-does-not-2026-08-15) is about.
+This shape has no user-facing name because nothing prints it.
+
+**Ceiling:** a cluster whose pod GC is not running accumulates pods no per-node
+row can see, and **there is no signal for it** — that is the cost this ruling
+accepts, and the first draft mis-named it. Rule 13 cannot be the signal: it needs
+`Pending` plus ten minutes, and the pods that accumulate here are `Running`. The
+one card that does fire is rule 12's, on the subset held by a finalizer. If this
+ever needs saying, it is *the pod garbage collector has stopped* — a rule about
+pod GC, over pods whose node is absent, and not a row on Capacity.

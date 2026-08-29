@@ -121,6 +121,49 @@ fn captured_pods() -> Vec<PodSnapshot> {
     .collect()
 }
 
+/// A node name `nodes.json` does not hold — the machine that left. The capture's four are
+/// `k8rs-control-plane`, `k8rs-worker`, `k8rs-worker2` and `k8rs-worker3`, so this is deliberately
+/// not `k8rs-worker4`: a plant one capture away from a real name is one `just fixtures` run away
+/// from testing nothing.
+const NODE_THAT_LEFT: &str = "k8rs-worker-that-left";
+
+/// **The snapshot with a pod bound to a machine that is no longer in it** — [`captured_pod_but`]'s
+/// plant (NOTES § D40) for the one shape no capture can hold, since `just fixtures` photographs a
+/// cluster whose nodes are all present. The plant and the assertion that it *is* still the shape
+/// live here, and not in either of the two modules that read them, because a plant copied into two
+/// modules is the divergence this file exists to stop.
+///
+/// `broken-overhead` is the capture that makes D183 readable off one pod: it asks for real cpu and
+/// memory **and** carries a pod overhead, so a Capacity row that charged it would move by 350m
+/// rather than by nothing; it is owned by nothing, so a Drain safety row that charged it would
+/// gain a band and take the all-clear sentence away; and its limits come off so that Capacity's
+/// limits row has it to count. A name and uid of its own because a second copy of a pod already in
+/// the corpus is the same workload ([`crate::rules::ObjectId::group_key`]) and would move no
+/// count.
+fn with_a_pod_whose_node_left(mut cluster: ClusterSnapshot) -> ClusterSnapshot {
+    let mut pod = captured_pod_but("overhead", |pod| {
+        pod.metadata.name = Some("broken-overhead-elsewhere".to_string());
+        pod.metadata.uid = Some("uid-broken-overhead-elsewhere".to_string());
+        pod.spec
+            .as_mut()
+            .expect("a captured pod has a spec")
+            .node_name = Some(NODE_THAT_LEFT.to_string());
+    });
+    for container in &mut pod.containers {
+        container.cpu_limit = None;
+        container.memory_limit = None;
+    }
+    assert!(
+        !cluster
+            .nodes
+            .iter()
+            .any(|n| Some(n.id.name.as_str()) == pod.node.as_deref()),
+        "the plant is only the shape while no node in the snapshot answers to its name"
+    );
+    cluster.pods.push(pod);
+    cluster
+}
+
 /// The two committed PodDisruptionBudgets — `broken-pdb-floor` at its floor and
 /// `healthy-pdb-room` with a pod to spare (`reports/2026-08-21-family-c-corpus-drain-and-\
 /// capacity.md` § 1).

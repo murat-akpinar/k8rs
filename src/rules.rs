@@ -6577,8 +6577,18 @@ fn node_condition<'a>(node: &'a NodeSnapshot, type_: &str) -> Option<&'a Conditi
     condition(&node.conditions, type_)
 }
 
-/// The pods this node is carrying that are still a going concern — the join N1, N2 and N5 are.
+/// The pods this node is carrying that are still a going concern — **the only node → its pods
+/// join in this product**, and so the single point of change for all five callers it has: N1, N2,
+/// N5, and `analysis.rs`'s Capacity node rows and Drain safety rows. **Not the only pod → node
+/// lookup**: rule 13 ([`placed_but_never_started`]) and [`what_is_blocking_it`] resolve one pod's
+/// own `spec.nodeName` against the node list without coming through here.
 /// A pod that finished is charged to nobody and was not *running* anywhere ([`finished`]).
+///
+/// **A pod naming a node that is not in [`ClusterSnapshot::nodes`] comes back from no call here**,
+/// so it lands in no per-node answer rather than in the wrong one — and a cluster-wide count that
+/// does not come through this join still holds it, which is what Capacity's limits row does. What
+/// produces the shape is a node deleted while the pods bound to it still name it, and **a pod that
+/// was running when that happened gets no card either, on purpose** (NOTES § D183).
 pub(crate) fn pods_on<'a>(
     snapshot: &'a ClusterSnapshot,
     node: &NodeSnapshot,
