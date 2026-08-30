@@ -318,6 +318,249 @@ fn an_init_done_with_no_list_behind_it_publishes_nothing() {
     );
 }
 
+/// A watch failure with one HTTP code on it, as `watcher()` reports a refused initial LIST
+/// (`kube-client-4.2.0/src/client/mod.rs:551-558`).
+fn list_failed(code: u16) -> watcher::Error {
+    watcher::Error::InitialListFailed(refused(code))
+}
+
+/// **The gate's one exception: a watch the cluster refuses has *answered***
+/// (todo.md § Phase 5, NOTES § D28, `PRIOR-ART § B4`).
+///
+/// **The failure this is about, measured before the fix**: a namespaced `Role` cannot grant
+/// `list nodes` — nodes are cluster-scoped — so the node watch is refused for the life of the
+/// process. `listed()` was `still_listing().is_empty()`, a refused watch never sets `complete`,
+/// so `snapshot()` answered `None` for ever and **every rule was silent**, about pods the cluster
+/// was serving perfectly, while `kubectl get pods -n mine` answered instantly beside it. The
+/// screen it showed was *loading*.
+///
+/// **The four kinds that did answer are asserted to be in the snapshot**, not merely that one
+/// escaped: publishing an empty cluster would satisfy `is_some()` and would be the same defect
+/// with a different face.
+///
+/// **And the refusal is still said out loud** — `troubles()` names the kind, so the empty node
+/// list arrives with a line about why it is empty rather than as a cluster with no machines.
+#[tokio::test]
+async fn a_watch_the_cluster_refuses_has_answered_and_the_others_reach_the_rules() {
+    let mut store = all_but("nodes");
+    drive(
+        vec![one_watch::<Node, _>(vec![Err(list_failed(403))], |s| {
+            &mut s.nodes
+        })],
+        &mut store,
+    )
+    .await;
+
+    let snapshot = store
+        .snapshot(now())
+        .expect("a refused watch held the whole tool at `loading` for the life of the process");
+    println!(
+        "refused nodes · pods {} · nodes {} · troubles {:?}",
+        snapshot.pods.len(),
+        snapshot.nodes.len(),
+        store
+            .troubles()
+            .iter()
+            .map(|t| (t.kind.clone(), t.fault()))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !snapshot.pods.is_empty() && !snapshot.workloads.is_empty(),
+        "the gate opened on an empty cluster, which is the same silence wearing a different face"
+    );
+    assert!(
+        snapshot.nodes.is_empty(),
+        "the refused watch published nodes it was never allowed to read"
+    );
+    assert_eq!(
+        trouble_for(&store, ObjectKind::Node).and_then(|trouble| trouble.fault()),
+        Some(Fault::Refused),
+        "the empty node list arrived with nothing said about why it is empty"
+    );
+    assert_eq!(
+        failing_kinds(&store),
+        vec![ObjectKind::Node],
+        "a watch that answered fine was reported as failing beside it"
+    );
+}
+
+/// **A refusal is answered and a blip is not, and this is the line between them**
+/// ([`Fault::standing`], NOTES § D28).
+///
+/// **One watch, two failures, opposite answers** — the same store shape either way, so nothing
+/// but the fault can be what moved the gate. `Unanswered` is where D28's own *do not blank on a
+/// blip* paragraph lives: the retry under it is the fix, and holding the gate for the second it
+/// takes is the right answer.
+#[tokio::test]
+async fn a_transient_failure_holds_the_gate_and_a_refusal_does_not() {
+    for (failure, published, why) in [
+        (
+            list_failed(403),
+            true,
+            "a refusal is durable — nothing but an RBAC edit changes it, so waiting for it is \
+             waiting for a person",
+        ),
+        (
+            list_failed(500),
+            false,
+            "a 5xx is what kube's own retry is for, and blanking nothing is D28's answer to a \
+             blip",
+        ),
+        (
+            watcher::Error::NoResourceVersion,
+            false,
+            "kube re-lists after this one, so the next poll may well answer",
+        ),
+    ] {
+        let mut store = all_but("pods");
+        drive(
+            vec![one_watch::<Pod, _>(vec![Err(failure)], |s| &mut s.pods)],
+            &mut store,
+        )
+        .await;
+        assert_eq!(
+            store.snapshot(now()).is_some(),
+            published,
+            "{why} — and the store said the opposite"
+        );
+    }
+}
+
+/// **A refused watch stops claiming its LIST is moving** (todo.md § Phase 5, NOTES § D150).
+///
+/// **The screen was actively lying, which is worse than the gate being shut.** A refused watch
+/// runs `Err → Init → list() → 403` and every `Init` restamps [`Listing::since`] — so it reported
+/// *nodes, 0 so far, since just now*, several times a second, for ever. D150's separator between
+/// slow and hung is *a hung LIST produces numbers that do not move*, and this one's moved
+/// beautifully while nothing whatever was happening.
+///
+/// **The two calls are asserted together**, because the whole of the fix is that they can no
+/// longer disagree: the kind leaves [`Store::still_listing`] and appears in [`Store::troubles`],
+/// rather than appearing in both and needing a caller to know which one wins.
+#[tokio::test]
+async fn a_refused_watch_is_not_reported_as_a_list_that_is_moving() {
+    let mut store = Store::default();
+    assert_eq!(
+        outstanding_kinds(&store),
+        vec![
+            ObjectKind::Pod,
+            ObjectKind::Node,
+            ObjectKind::Deployment,
+            ObjectKind::StatefulSet,
+            ObjectKind::DaemonSet
+        ],
+        "a store before its first event must report all five as listing, or the assertion below \
+         passes on a call that never says anything"
+    );
+
+    drive(
+        vec![one_watch::<Node, _>(
+            // The `Init` is what stamped `since`, and kube sends one before every refused LIST
+            // (`watcher.rs:521-527`) — so the shape here is the shape a live refusal has.
+            vec![Ok(Event::Init), Err(list_failed(403))],
+            |s| &mut s.nodes,
+        )],
+        &mut store,
+    )
+    .await;
+    println!(
+        "outstanding {:?} · troubles {:?}",
+        outstanding_kinds(&store),
+        store
+            .troubles()
+            .iter()
+            .map(|t| t.kind.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !outstanding_kinds(&store).contains(&ObjectKind::Node),
+        "the refused watch is still reported as a LIST in progress, with a `since` its own retry \
+         loop refreshes several times a second"
+    );
+    assert_eq!(
+        store
+            .troubles()
+            .iter()
+            .map(|t| t.kind.clone())
+            .collect::<Vec<_>>(),
+        vec![ObjectKind::Node],
+        "it left one call and appeared in neither"
+    );
+}
+
+/// **A watch that recovers goes back to being an ordinary watch** — the exception is a state, not
+/// a door that shuts behind the store.
+///
+/// **Without this the fix would be indistinguishable from *give up on a refused kind*.** RBAC
+/// gets edited while k8rs is running, kube's retry is still going, and the next LIST lands: the
+/// nodes have to arrive.
+#[tokio::test]
+async fn a_refusal_that_is_repaired_puts_the_kind_back() {
+    let mut store = all_but("nodes");
+    drive(
+        vec![one_watch::<Node, _>(vec![Err(list_failed(403))], |s| {
+            &mut s.nodes
+        })],
+        &mut store,
+    )
+    .await;
+    assert!(
+        store
+            .snapshot(now())
+            .expect("the refusal is answered")
+            .nodes
+            .is_empty(),
+        "the refused watch had nodes before anybody granted it any"
+    );
+
+    let nodes = items::<Node>("nodes");
+    assert!(!nodes.is_empty(), "the capture must hold nodes");
+    drive(
+        vec![one_watch(listing(nodes.clone()), |s| &mut s.nodes)],
+        &mut store,
+    )
+    .await;
+    let snapshot = store.snapshot(now()).expect("the LIST landed");
+    assert_eq!(
+        snapshot.nodes.len(),
+        nodes.len(),
+        "the role was granted the verb and the nodes never arrived"
+    );
+    // `troubles()` also reports `ended`, and every stream in this file ends when `stream::iter`
+    // runs out — [`failing_kinds`] is the half of it this test is about.
+    assert_eq!(
+        failing_kinds(&store),
+        Vec::new(),
+        "the refusal outlived the LIST that answered it"
+    );
+}
+
+/// **Which faults a retry cannot clear** ([`Fault::standing`]) — every variant, one answer each.
+///
+/// **The list is written out rather than derived**, so a variant added later fails to compile
+/// here as well as in the classifier, and somebody has to say which side of the line it is on.
+/// The question the line answers is *will the retry loop, unaided, make the next attempt go
+/// differently* — and only one fault in the taxonomy is on the yes side of it.
+#[test]
+fn only_a_failure_a_retry_can_clear_holds_the_bootstrap_gate() {
+    for (fault, standing) in [
+        (Fault::Kubeconfig, true),
+        (Fault::NoContext, true),
+        (Fault::BadEntry, true),
+        (Fault::NoCredential, true),
+        (Fault::Expired, true),
+        (Fault::Refused, true),
+        (Fault::Gone, true),
+        (Fault::Unanswered, false),
+    ] {
+        assert_eq!(
+            fault.standing(),
+            standing,
+            "{fault:?} is on the wrong side of *can the retry loop clear this on its own*"
+        );
+    }
+}
+
 // --- ADD, MODIFY, DELETE ---
 
 /// The identity a watch replaces in place is namespace and name. A pod deleted and recreated
@@ -548,17 +791,18 @@ fn nothing_the_store_did_not_read_is_reported_as_read() {
 /// identified answers what it was told*. A single test asserting only the second cannot tell a
 /// field that is wired from a field that is hard-coded to the value the test happened to pick.
 ///
-/// **Three different values, one per field**, so two fields swapped on the way through is a
-/// failure and not a green run: `server_version` and `context` are both `Option<String>` and a
-/// copy-paste between them compiles.
+/// **Four different values, one per field**, so two fields swapped on the way through is a
+/// failure and not a green run: `server_version`, `context` and `namespace_scope` are all
+/// `Option<String>` and a copy-paste between any two of them compiles.
 #[test]
-fn the_three_facts_no_watch_carries_reach_the_snapshot() {
+fn the_facts_no_watch_carries_reach_the_snapshot() {
     let certificate = certificate_bytes("in-the-snapshot");
     let mut store = bootstrapped();
     store.identify(Identity {
         server_version: Some("v1.36.1".to_string()),
         context: Some("kind-k8rs".to_string()),
         client_certificate: Some(certificate.clone()),
+        namespace_scope: Some("k8rs-tests-payments".to_string()),
     });
     let snapshot = store.snapshot(now()).expect("every initial LIST landed");
     assert_eq!(
@@ -3444,6 +3688,8 @@ fn every_watcher_error_answers_for_itself_and_none_of_them_is_a_fallback() {
     };
     let trouble = |failure| Trouble {
         kind: ObjectKind::Pod,
+        // The LIST is what failed on every shape below, so nothing ever listed.
+        listed: false,
         failure,
         ended: false,
     };
@@ -3504,7 +3750,12 @@ fn every_watcher_error_answers_for_itself_and_none_of_them_is_a_fallback() {
 #[tokio::test]
 async fn the_three_things_wrong_with_a_kubeconfig_are_three_different_faults() {
     // **The context**: the file is perfect and does not name what was asked for.
-    let missing = connect_with(kubeconfig("k8rs-tests", "{}"), Some("k8rs-tests-nope")).await;
+    let missing = connect_with(
+        kubeconfig("k8rs-tests", "{}"),
+        Some("k8rs-tests-nope"),
+        None,
+    )
+    .await;
     assert!(
         matches!(
             missing.as_ref().err().map(NotConnected::fault),
@@ -3517,7 +3768,7 @@ async fn the_three_things_wrong_with_a_kubeconfig_are_three_different_faults() {
     // The shape `k8s-admin` measured, and the one whose old sentence was false.
     let certificate = "{client-certificate: /nonexistent/k8rs-tests/client.crt, \
                        client-key: /nonexistent/k8rs-tests/client.key}";
-    let broken = connect_with(kubeconfig("k8rs-tests", certificate), None).await;
+    let broken = connect_with(kubeconfig("k8rs-tests", certificate), None, None).await;
     assert!(
         matches!(
             broken.as_ref().err().map(NotConnected::fault),
@@ -3537,7 +3788,7 @@ async fn the_three_things_wrong_with_a_kubeconfig_are_three_different_faults() {
          users: [{name: k8rs-tests, user: {}}]\n",
     )
     .expect("a kubeconfig this file wrote itself");
-    let headless = connect_with(no_server, None).await;
+    let headless = connect_with(no_server, None, None).await;
     assert!(
         matches!(
             headless.as_ref().err().map(NotConnected::fault),
@@ -6068,10 +6319,17 @@ async fn a_cluster_that_answers_nothing_leaves_five_failing_watches_and_no_snaps
         renewal,
         context,
         namespace,
+        coverage,
         client_certificate,
         skew,
         serving_expiry,
-    } = session(offline()).await;
+    } = session(offline(), Coverage::Cluster).await;
+
+    assert_eq!(
+        coverage,
+        Coverage::Cluster,
+        "a session was handed a scope and answered with another one"
+    );
 
     assert_eq!(
         serving_expiry,
@@ -6267,7 +6525,8 @@ fn authority_data(pem: &[u8]) -> String {
 #[tokio::test]
 async fn a_context_the_kubeconfig_does_not_name_comes_back_as_the_kubeconfigs_own_error() {
     let asked_for = "k8rs-tests-no-such-context";
-    let Err(problem) = connect_with(kubeconfig("k8rs-tests", "{}"), Some(asked_for)).await else {
+    let Err(problem) = connect_with(kubeconfig("k8rs-tests", "{}"), Some(asked_for), None).await
+    else {
         panic!(
             "connecting to a context this kubeconfig does not name did not fail as an error — \
              the only context in it is `k8rs-tests`, so the name asked for was ignored"
@@ -6439,7 +6698,7 @@ fn a_reset_cannot_undo_the_climb_and_the_ramp_is_still_kubes_own() {
 async fn a_credential_plugin_that_never_answers_is_a_client_that_could_not_be_built() {
     let user = "{exec: {apiVersion: client.authentication.k8s.io/v1beta1, \
                 command: /nonexistent/k8rs-tests-no-such-credential-plugin}}";
-    let Err(problem) = connect_with(kubeconfig("k8rs-tests", user), None).await else {
+    let Err(problem) = connect_with(kubeconfig("k8rs-tests", user), None, None).await else {
         panic!(
             "a kubeconfig whose credential plugin is not on the disk built a session — either \
              one was built with no credential, or the failure was swallowed"
@@ -6507,7 +6766,7 @@ async fn the_login_program_reaches_the_session_and_nothing_else_from_that_block_
         "{{exec: {{apiVersion: client.authentication.k8s.io/v1beta1, command: {plugin}, \
          args: ['{credential}']}}}}"
     );
-    let session = connect_with(kubeconfig("k8rs-tests", &user), None)
+    let session = connect_with(kubeconfig("k8rs-tests", &user), None, None)
         .await
         .unwrap_or_else(|_| {
             panic!("{plugin} printed an ExecCredential and no client was built from it")
@@ -6524,6 +6783,7 @@ async fn the_login_program_reaches_the_session_and_nothing_else_from_that_block_
     // leaves the field empty rather than inventing one.
     let plain = connect_with(
         kubeconfig("k8rs-tests", "{token: k8rs-tests-fake-static-token}"),
+        None,
         None,
     )
     .await
@@ -6550,6 +6810,7 @@ async fn the_context_a_session_names_is_the_one_it_connected_with() {
     let ours = connect_with(
         kubeconfig("k8rs-tests", "{token: k8rs-tests-fake-static-token}"),
         None,
+        None,
     )
     .await
     .unwrap_or_else(|_| panic!("a kubeconfig with a static token built no client"));
@@ -6573,7 +6834,7 @@ async fn the_context_a_session_names_is_the_one_it_connected_with() {
          users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
     )
     .expect("a kubeconfig this file wrote itself");
-    let asked = connect_with(two, Some("k8rs-tests-asked-for"))
+    let asked = connect_with(two, Some("k8rs-tests-asked-for"), None)
         .await
         .unwrap_or_else(|_| panic!("a kubeconfig naming two contexts built no client"));
     assert_eq!(
@@ -6942,6 +7203,9 @@ async fn a_session_hands_the_store_what_it_learned_and_a_question_that_failed_is
         renewal: None,
         context: Some("kind-k8rs".to_string()),
         namespace: None,
+        // **Not `namespace`, one line up, and that is the point of the assertion below**: what
+        // reaches the rules is what the watches were built with, never what the kubeconfig said.
+        coverage: Coverage::Refused("k8rs-tests-payments".to_string()),
         client_certificate: Some(certificate.clone()),
         skew: None,
         serving_expiry: Serving::Unread,
@@ -7165,15 +7429,19 @@ fn a_group_list_no_conformant_server_sends_costs_one_round_trip_and_no_panic() {
 /// own stream, and a backoff missing from any one of them names that one.
 #[tokio::test]
 async fn a_refused_watch_of_every_kind_waits_before_it_asks_again() {
-    let waited = futures_util::future::join_all(session(offline()).await.watches.into_iter().map(
-        |watch| async move {
-            let started = std::time::Instant::now();
-            // `Init`, the failed LIST, `Init` again, the failed LIST again — the second
-            // attempt is what the backoff sits in front of (`watcher.rs:519-523`, `:584`).
-            let asked: Vec<Update> = watch.take(4).collect().await;
-            (asked.len(), started.elapsed())
-        },
-    ))
+    let waited = futures_util::future::join_all(
+        session(offline(), Coverage::Cluster)
+            .await
+            .watches
+            .into_iter()
+            .map(|watch| async move {
+                let started = std::time::Instant::now();
+                // `Init`, the failed LIST, `Init` again, the failed LIST again — the second
+                // attempt is what the backoff sits in front of (`watcher.rs:519-523`, `:584`).
+                let asked: Vec<Update> = watch.take(4).collect().await;
+                (asked.len(), started.elapsed())
+            }),
+    )
     .await;
 
     // The order is `watches`' own — pods, nodes, deployments, statefulsets, daemonsets.
@@ -7187,6 +7455,663 @@ async fn a_refused_watch_of_every_kind_waits_before_it_asks_again() {
              one off and a standing 403 on it is a request per round trip"
         );
     }
+}
+
+/// **A kubeconfig's own client certificate reaches the session it authenticated**
+/// (NOTES § D169, § D179) — the field [`connect_with`] fills and nothing on this path could
+/// otherwise prove.
+///
+/// **This kills a mutant that was accepted as a documented limit and should not have been.**
+/// `delete field client_certificate from struct Session expression in connect_with` survived
+/// every run of the gate: no test reached a *successful* `connect_with` carrying one, so
+/// returning `None` there was invisible, and with it C1's whole input — *your access to this
+/// cluster expires in 24 days* — would simply never have been drawn on a real run. D169 accepted
+/// it, D179 measured that the reason for accepting it was already false: `openssl` is a hard
+/// dependency of `just check` (`scripts/certs-test.sh`), so a test that shells to it costs the
+/// gate nothing, and D179's own route was taken for the sibling field and not for this one. It is
+/// taken here because the namespace box edits this struct expression, which puts the mutant back
+/// in the diff — and a mutant that is in the gate is not a mutant to explain away twice.
+///
+/// **A key is generated per run and never committed**, which is the whole reason the committed-PEM
+/// route was shut: `identity_pem` refuses a certificate with no key beside it, rustls refuses a
+/// placeholder that is not one, and a real key in git history is a credential in git history.
+///
+/// **Self-signed is enough here and is not enough for C2**, which is worth the sentence because
+/// [`an_authority_and_leaves`] one region down goes to the trouble of a CA. Nothing *verifies*
+/// this certificate: it is the client identity, handed to rustls as a pair, and the server it
+/// would be shown to does not exist. C2's leaf is verified by webpki, which refuses a CA as an
+/// end entity — that is what makes the two different shapes.
+///
+/// **The cluster is never reached and does not need to be.** `k8rs-tests.invalid` is RFC 6761
+/// reserved, so every call `connect_with` makes fails at the resolver — including the scope probe
+/// ([`coverage`]), which stays [`Coverage::Cluster`] because a name that will not resolve is not
+/// a refusal. What is asserted is the one thing that happens before any of them: a client that
+/// built, and the bytes that built it filed on the session.
+#[tokio::test]
+async fn the_certificate_a_kubeconfig_logs_in_with_reaches_the_session() {
+    let dir = std::env::temp_dir().join(format!(
+        "k8rs-tests-identity-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::create_dir_all(&dir).expect("a directory in the machine's own temp dir");
+    let at = |name: &str| dir.join(name).to_string_lossy().into_owned();
+    openssl(&[
+        "req",
+        "-x509",
+        "-newkey",
+        "ec",
+        "-pkeyopt",
+        "ec_paramgen_curve:prime256v1",
+        "-nodes",
+        "-days",
+        "30",
+        "-subj",
+        "/CN=k8rs-tests-reader",
+        "-keyout",
+        &at("client.key"),
+        "-out",
+        &at("client.crt"),
+    ]);
+    let read = |name: &str| {
+        std::fs::read(at(name)).unwrap_or_else(|e| panic!("openssl wrote no {name}: {e}"))
+    };
+    let certificate = read("client.crt");
+    let key = read("client.key");
+    // Nothing this test wrote outlives it — the key above is a credential for as long as it is on
+    // the disk, and the assertions below run against values already in memory.
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let encoded = |bytes: &[u8]| {
+        serde_json::to_value(k8s_openapi::ByteString(bytes.to_vec()))
+            .expect("bytes re-serialise")
+            .as_str()
+            .expect("a `ByteString` encodes to a string")
+            .to_string()
+    };
+    let user = format!(
+        "{{client-certificate-data: {}, client-key-data: {}}}",
+        encoded(&certificate),
+        encoded(&key)
+    );
+    let session = connect_with(kubeconfig("k8rs-tests", &user), None, None)
+        .await
+        .unwrap_or_else(|_| panic!("a kubeconfig with a real certificate and key built no client"));
+
+    assert_eq!(
+        session.client_certificate.as_deref(),
+        Some(certificate.as_slice()),
+        "the certificate this kubeconfig authenticates with did not reach the session, so C1 has \
+         no input and says nothing about a login that is about to run out"
+    );
+    assert!(
+        !session
+            .client_certificate
+            .as_deref()
+            .expect("the assertion above")
+            .windows(4)
+            .any(|window| window == b"KEY-"),
+        "the private key travelled beside the certificate — a key in our own types is one `{{:?}}` \
+         from a backtrace (invariant 8)"
+    );
+}
+
+// --- HOW MUCH OF THE CLUSTER IS WATCHED ---
+//
+// **The scope is decided once, before a watch exists, and every test here is about that one
+// decision** (NOTES § D5, `PRIOR-ART § B4`). `--namespace` is the reader's answer; a `403` on the
+// cluster-wide pod LIST is the cluster's. Nothing below asks what a *scoped report says* — that
+// is `analysis.rs`'s and was proven a phase ago; what is proven here is that the scope is chosen
+// honestly and reaches the requests.
+
+/// A pod list with nothing in it, which is what a cluster answers a probe that is allowed.
+fn empty_pod_list() -> String {
+    serde_json::json!({
+        "apiVersion": "v1",
+        "kind": "PodList",
+        "metadata": { "resourceVersion": "1" },
+        "items": [],
+    })
+    .to_string()
+}
+
+/// **A real `Status` body, the way an API server refuses a list it will not serve** — code and
+/// reason both, so § WHAT WENT WRONG reads the number rather than kube's parse fallback.
+fn forbidden_body() -> String {
+    serde_json::json!({
+        "apiVersion": "v1",
+        "kind": "Status",
+        "status": "Failure",
+        "reason": "Forbidden",
+        "code": 403,
+        "message": "pods is forbidden: User \"k8rs-tests\" cannot list resource \"pods\" in API \
+                    group \"\" at the cluster scope",
+    })
+    .to_string()
+}
+
+/// **`--namespace` is answered without asking the cluster anything at all.**
+///
+/// **The request count is the assertion**, not just the answer: a probe sent for a reader who has
+/// already said which namespace they want is a round trip before every scoped run, and on a login
+/// that cannot list pods cluster-wide it is a `403` in the audit log of a cluster that did nothing
+/// wrong.
+#[tokio::test]
+async fn a_namespace_that_was_asked_for_costs_no_round_trip() {
+    let (client, asked) = stub_list("200 OK", empty_pod_list()).await;
+    assert_eq!(
+        coverage(
+            &client,
+            Some("k8rs-tests-payments"),
+            Some("k8rs-tests-elsewhere")
+        )
+        .await,
+        Coverage::Asked("k8rs-tests-payments".to_string()),
+        "the flag lost to the context's own namespace, or to the cluster"
+    );
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").len(),
+        0,
+        "a namespace the reader typed was checked against the cluster anyway"
+    );
+}
+
+/// **A cluster that answers the probe is watched whole** — the ordinary run, and the one where
+/// nothing may narrow.
+#[tokio::test]
+async fn a_login_that_may_list_pods_cluster_wide_watches_the_whole_cluster() {
+    let (client, asked) = stub_list("200 OK", empty_pod_list()).await;
+    assert_eq!(
+        coverage(&client, None, Some("k8rs-tests-elsewhere")).await,
+        Coverage::Cluster,
+        "a context that names a namespace narrowed a login that may read every one of them — \
+         which is a filter the reader did not set and cannot see the reason for"
+    );
+    let paths = asked.lock().expect("the log is never poisoned").clone();
+    println!("probe asked {paths:?}");
+    assert_eq!(
+        paths.len(),
+        1,
+        "the probe is one request and one only — it must never become a loop (the security gate)"
+    );
+    assert!(
+        paths[0].starts_with("/api/v1/pods?") && paths[0].contains("limit=1"),
+        "the probe asked {paths:?} — it has to be the cluster-wide pod list, and it has to ask \
+         for one object rather than the cluster's whole pod list"
+    );
+}
+
+/// **A `403` on the cluster-wide pod LIST falls back to the context's namespace** (NOTES § D5).
+/// A namespace-scoped user must get a working tool, not an empty one.
+#[tokio::test]
+async fn a_refused_cluster_wide_list_falls_back_to_the_context_namespace() {
+    let (client, _) = stub_list("403 Forbidden", forbidden_body()).await;
+    assert_eq!(
+        coverage(&client, None, Some("k8rs-tests-mine")).await,
+        Coverage::Refused("k8rs-tests-mine".to_string()),
+        "the login is scoped and k8rs kept watching a cluster it is not allowed to see"
+    );
+}
+
+/// **…and to `default` when the context names no namespace at all — but only after `default` has
+/// been checked** (NOTES § D5, [`FALLBACK_NAMESPACE`]).
+///
+/// **This is where the two namespace readings deliberately differ.** [`kubeconfig_namespace`]
+/// answers `None` for a context with no `namespace:`, because a *screen* opening somewhere the
+/// file never named is a filter with no visible reason. Here there is a reason — the cluster gave
+/// it — it is printed, and the alternative is a tool with nothing in it.
+///
+/// **The guess is probed, and the two answers are two different states.** `default` is a word
+/// this file invented; on the ordinary platform-issued kubeconfig it is the one namespace a
+/// developer's `RoleBinding` does *not* cover, so the unprobed version presented a scope that had
+/// read nothing as if it had worked
+/// (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1).
+#[tokio::test]
+async fn a_refused_list_with_no_namespace_to_fall_back_on_checks_default_before_it_commits() {
+    // `default` answers, so the fallback is real and the run is scoped to it.
+    let (readable, asked) = stub(None, |_, path| {
+        let refused = path.starts_with("/api/v1/pods");
+        (
+            path.to_string(),
+            if refused { "403 Forbidden" } else { "200 OK" }.to_string(),
+            if refused {
+                forbidden_body()
+            } else {
+                empty_pod_list()
+            },
+        )
+    })
+    .await;
+    assert_eq!(
+        coverage(&readable, None, None).await,
+        Coverage::Refused("default".to_string()),
+        "a fallback the cluster answered was not committed to"
+    );
+    let paths = asked.lock().expect("the log is never poisoned").clone();
+    println!("the guess cost {paths:?}");
+    assert_eq!(
+        paths.len(),
+        2,
+        "the cluster-wide question and the guess are two requests and no more — a third is a \
+         loop the security gate forbids: {paths:?}"
+    );
+    assert!(
+        paths[1].starts_with("/api/v1/namespaces/default/pods?") && paths[1].contains("limit=1"),
+        "the guess was not checked where it would be watched: {paths:?}"
+    );
+
+    // `default` is refused too: the run is still pointed there, and the driver is told so.
+    let (refused, _) = stub_list("403 Forbidden", forbidden_body()).await;
+    assert_eq!(
+        coverage(&refused, None, None).await,
+        Coverage::Blind("default".to_string()),
+        "a guess the cluster refused was presented as a working scope, which is how a report \
+         over nothing came to print a header and a health claim"
+    );
+}
+
+/// **The kubeconfig's own namespace is taken at its word and costs no second round trip.**
+///
+/// **The asymmetry is the decision** (the PM's ruling, 2026-08-29): `payments` in the context is a
+/// fact the reader's *file* states and `default` is a word this file invented, so only the
+/// invented one is checked. Measured, the file-stated one works
+/// (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R3) and a probe per scoped startup
+/// would be a request on every namespaced developer's run to confirm what their own file said.
+#[tokio::test]
+async fn a_namespace_the_kubeconfig_named_is_not_probed_a_second_time() {
+    let (client, asked) = stub_list("403 Forbidden", forbidden_body()).await;
+    assert_eq!(
+        coverage(&client, None, Some("k8rs-tests-mine")).await,
+        Coverage::Refused("k8rs-tests-mine".to_string()),
+    );
+    let paths = asked.lock().expect("the log is never poisoned").clone();
+    assert_eq!(
+        paths.len(),
+        1,
+        "the context's own namespace cost a second round trip: {paths:?}"
+    );
+}
+
+/// **Only a refusal narrows the scope** — every other failure leaves the run cluster-wide.
+///
+/// **Narrowing on no evidence is the failure this refuses.** A link that was slow for a second, a
+/// `500` from a middlebox, an expired login: none of them says *this role is namespaced*, and
+/// hiding four fifths of a cluster because of one is a wrong answer nothing on screen would
+/// explain. The watches' own retry is the right answer to all three.
+#[tokio::test]
+async fn nothing_but_a_refusal_narrows_the_scope() {
+    for (status, body) in [
+        ("500 Internal Server Error", "{}".to_string()),
+        ("401 Unauthorized", "{}".to_string()),
+        ("404 Not Found", "{}".to_string()),
+    ] {
+        let (client, _) = stub_list(status, body).await;
+        assert_eq!(
+            coverage(&client, None, Some("k8rs-tests-mine")).await,
+            Coverage::Cluster,
+            "{status} narrowed the run to one namespace, and it is not evidence of a scope"
+        );
+    }
+}
+
+/// **A value that is not a namespace name is refused from either source** ([`namespace_name`],
+/// the security gate's *a name that builds a path* row).
+///
+/// **`Api::namespaced` interpolates straight into `/api/v1/namespaces/{ns}/pods`**, so a `..`
+/// segment is a request for a different collection with the reader's own credentials.
+/// `main.rs` refuses the typed one with a sentence before this is ever called; the kubeconfig's
+/// is checked nowhere else at all — `text` only removes unprintable characters and nothing more.
+///
+/// **Refusing it may never *widen* the run, and that is the half this test was missing**
+/// (`k8s-admin`, 2026-08-29). The asked-for arm dropped an unusable value and fell through to the
+/// cluster-wide probe, so the one thing a broken narrowing check could produce was the widest
+/// scope in the program. Defence whose default is the widest scope is not defence — and it becomes
+/// reachable the moment `main.rs` changes owner at Phase 12.
+#[tokio::test]
+async fn a_namespace_that_is_not_a_name_never_reaches_a_url_and_never_widens_the_run() {
+    let (client, _) = stub_list("403 Forbidden", forbidden_body()).await;
+    // The last four are values [`path_safe`] said yes to and a namespace name does not — measured
+    // against a real API server, each answers `200` with an empty list
+    // (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R10).
+    let refused = [
+        "../secrets",
+        "a/b",
+        "",
+        "kube-system?watch=true",
+        "-n",
+        "PAYMENTS",
+        "foo.bar",
+        "trailing-",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ];
+    for escape in refused {
+        assert_eq!(
+            coverage(&client, None, Some(escape)).await,
+            Coverage::Blind("default".to_string()),
+            "{escape:?} was accepted off a kubeconfig and would have been interpolated into a \
+             URL path"
+        );
+        let (allowed, wanted) = stub_list("200 OK", empty_pod_list()).await;
+        assert_eq!(
+            coverage(&allowed, Some(escape), Some("k8rs-tests-mine")).await,
+            Coverage::Asked("k8rs-tests-mine".to_string()),
+            "{escape:?} as an asked-for namespace widened the run instead of narrowing it"
+        );
+        assert_eq!(
+            wanted.lock().expect("the log is never poisoned").len(),
+            0,
+            "{escape:?} was asked about — a value already refused is not a question for a cluster"
+        );
+    }
+    // The one that *is* a name goes through, which is what keeps the predicate from being a
+    // refusal of everything.
+    let (allowed, _) = stub_list("200 OK", empty_pod_list()).await;
+    assert_eq!(
+        coverage(&allowed, Some("k8rs-tests-payments"), None).await,
+        Coverage::Asked("k8rs-tests-payments".to_string()),
+    );
+}
+
+/// **What a namespace name is, at the boundary in both directions** ([`namespace_name`]).
+///
+/// **The values that were wrongly accepted are measured, not imagined**
+/// (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R10): `PAYMENTS` and `foo.bar`
+/// both passed [`path_safe`], were sent, and were answered `200` with an empty `items` — so the
+/// report over them read *nothing is broken* about a namespace that does not exist. An 8 KiB name
+/// produced an 8 218-byte header line and 8 241-byte request paths, and argv is the first
+/// unbounded source a name has ever come from here (the security gate's *sizes are bounded* row).
+///
+/// **Both directions, because a bound that refuses a legal name is the same defect facing the
+/// other way** — 63 characters is a namespace and 64 is not.
+#[test]
+fn a_namespace_name_is_a_dns_label_and_the_bound_is_the_label_bound() {
+    for name in [
+        "payments",
+        "default",
+        "kube-system",
+        "a",
+        "2048",
+        "team-2",
+        &"a".repeat(NAMESPACE_MAX),
+    ] {
+        assert!(
+            namespace_name(name),
+            "{name:?} is a namespace name and was refused"
+        );
+    }
+    for not in [
+        "",
+        "PAYMENTS",
+        "Payments",
+        "foo.bar",
+        "-leading",
+        "trailing-",
+        "a_b",
+        "a/b",
+        "../secrets",
+        "kube system",
+        "kube-system?watch=true",
+        &"a".repeat(NAMESPACE_MAX + 1),
+    ] {
+        assert!(
+            !namespace_name(not),
+            "{not:?} is not a namespace name and was accepted — a request built from it comes \
+             back 200 with an empty list, and the report over that reads *nothing is broken*"
+        );
+    }
+}
+
+/// **A probe the cluster never answers leaves the run cluster-wide** — [`lists_pods`]'s deadline
+/// arm, which had no test at all.
+///
+/// **The mutation gate cannot see this one, and said so by staying green** (`k8s-admin`,
+/// 2026-08-29). While the deadline and the answer shared an `Err(_) | Ok(Ok(_)) => true` arm, the
+/// mutant that flips it is killed by the 200-answer test and the timeout path is never exercised;
+/// splitting the arm is what made the hole visible, and this is what closes it.
+///
+/// **Narrowing here would be the failure the whole *`false` is only a refusal* rule exists to
+/// prevent**: a link slow for one second would hide four fifths of a cluster, with the watches'
+/// own retry standing right there as the correct answer.
+#[tokio::test]
+async fn a_probe_the_cluster_never_answers_leaves_the_run_cluster_wide() {
+    let (client, held) = never_answers().await;
+    let started = std::time::Instant::now();
+    let allowed = lists_pods(&client, None, std::time::Duration::from_millis(200)).await;
+    let waited = started.elapsed();
+    held.abort();
+
+    assert!(
+        allowed,
+        "a cluster that answered nothing was read as *this login is scoped*, and four fifths of \
+         it would be hidden because a link was slow for a second"
+    );
+    assert!(
+        waited < std::time::Duration::from_secs(5),
+        "the probe waited {waited:?} on a deadline of 200ms — nothing is bounding it, and the \
+         run sits between the client and the first watch with nothing on screen"
+    );
+    println!("an unanswered probe came back in {waited:?}");
+}
+
+/// **The scope reaches the requests** — four of the five watches ask inside the namespace, and
+/// `nodes` cannot and does not.
+///
+/// **All five are asserted, because the property is per watch.** Four namespaced kinds and one
+/// cluster-scoped one is exactly the shape a hand-written `match` per kind gets wrong in one place
+/// and nowhere else, which is why [`scoped`] exists — and a test that only read the pod path would
+/// not see it.
+#[tokio::test]
+async fn a_scoped_session_asks_inside_the_namespace_and_asks_for_nodes_anyway() {
+    let (client, asked) = stub_list("200 OK", empty_pod_list()).await;
+    let watches = session(client, Coverage::Asked("k8rs-tests-payments".to_string()))
+        .await
+        .watches;
+    // `Init`, then the LIST — the first item is emitted before the request goes out
+    // (`watcher.rs:521-527`), so two are needed to see one.
+    futures_util::future::join_all(
+        watches
+            .into_iter()
+            .map(|watch| async move { watch.take(2).collect::<Vec<Update>>().await }),
+    )
+    .await;
+
+    let paths = asked.lock().expect("the log is never poisoned").clone();
+    println!("a scoped session asked {paths:#?}");
+    for wanted in [
+        "/api/v1/namespaces/k8rs-tests-payments/pods?",
+        "/apis/apps/v1/namespaces/k8rs-tests-payments/deployments?",
+        "/apis/apps/v1/namespaces/k8rs-tests-payments/statefulsets?",
+        "/apis/apps/v1/namespaces/k8rs-tests-payments/daemonsets?",
+    ] {
+        assert!(
+            paths.iter().any(|path| path.starts_with(wanted)),
+            "no watch asked {wanted} — the scope did not reach it, so this run reads a cluster \
+             its role refuses and shows nothing. Asked: {paths:#?}"
+        );
+    }
+    assert!(
+        paths.iter().any(|path| path.starts_with("/api/v1/nodes?")),
+        "the node watch was narrowed to a namespace, and there is no such thing as a namespaced \
+         node — the request would 404 for ever. Asked: {paths:#?}"
+    );
+    assert!(
+        !paths
+            .iter()
+            .any(|path| path.contains("namespaces/k8rs-tests-payments/nodes")),
+        "the node watch asked for a namespaced node list. Asked: {paths:#?}"
+    );
+}
+
+/// **A session that was told nothing asks cluster-wide**, which is the state every other test in
+/// this file runs under and the one the committed captures were taken in.
+#[tokio::test]
+async fn an_unscoped_session_asks_across_every_namespace() {
+    let (client, asked) = stub_list("200 OK", empty_pod_list()).await;
+    let watches = session(client, Coverage::Cluster).await.watches;
+    futures_util::future::join_all(
+        watches
+            .into_iter()
+            .map(|watch| async move { watch.take(2).collect::<Vec<Update>>().await }),
+    )
+    .await;
+
+    let paths = asked.lock().expect("the log is never poisoned").clone();
+    println!("an unscoped session asked {paths:#?}");
+    assert!(
+        !paths.iter().any(|path| path.contains("/namespaces/")),
+        "a run nobody scoped sent a namespaced request. Asked: {paths:#?}"
+    );
+    for wanted in [
+        "/api/v1/pods?",
+        "/api/v1/nodes?",
+        "/apis/apps/v1/deployments?",
+        "/apis/apps/v1/statefulsets?",
+        "/apis/apps/v1/daemonsets?",
+    ] {
+        assert!(
+            paths.iter().any(|path| path.starts_with(wanted)),
+            "no watch asked {wanted}. Asked: {paths:#?}"
+        );
+    }
+}
+
+/// **The scope the watches were built with is the scope the rules read** — through
+/// [`Identity::of`] and [`Store::snapshot`], and never through the kubeconfig's own namespace.
+///
+/// **The two are deliberately different values here.** `Session::namespace` is what the context
+/// said and `Session::coverage` is what the watches cover; a snapshot carrying the first would be
+/// telling every rule the run is scoped to a namespace it is not reading.
+#[tokio::test]
+async fn the_scope_the_watches_cover_is_the_scope_the_rules_are_told_about() {
+    for (coverage, scope) in [
+        (Coverage::Cluster, None),
+        (
+            Coverage::Asked("k8rs-tests-asked".to_string()),
+            Some("k8rs-tests-asked"),
+        ),
+        (
+            Coverage::Refused("k8rs-tests-fallback".to_string()),
+            Some("k8rs-tests-fallback"),
+        ),
+    ] {
+        let mut store = bootstrapped();
+        // **`Identity::of` alone, with nothing overridden after it**: this test is about the one
+        // step that carries the scope across, so writing the field in beside it would be the
+        // assertion agreeing with itself.
+        store.identify(Identity::of(&Session {
+            namespace: Some("k8rs-tests-what-the-file-said".to_string()),
+            coverage: coverage.clone(),
+            ..session(offline(), Coverage::Cluster).await
+        }));
+        assert_eq!(
+            store
+                .snapshot(now())
+                .expect("every initial LIST landed")
+                .namespace_scope
+                .as_deref(),
+            scope,
+            "{coverage:?} reached the rules as something else"
+        );
+    }
+}
+
+/// **The whole box, end to end, against a server that refuses exactly one kind** — the ordinary
+/// enterprise developer, whose namespaced `Role` cannot grant `list nodes` because a node is not
+/// in a namespace (NOTES § D5, `PRIOR-ART § B4`).
+///
+/// **Two rows of `analysis.rs` were written for this and were unreachable from any live path**
+/// (`k8s-admin`, 2026-08-26): a refused watch never set `complete`, so the snapshot was withheld
+/// whole rather than published node-less, and *Reading what a node has needs permission to list
+/// nodes* could not be produced by a cluster — only by a hand-built `ClusterSnapshot`. It fires
+/// here off a socket.
+///
+/// **The pods being present is asserted as hard as the nodes being absent.** A gate that opened
+/// on an empty cluster would draw the same row and would be the defect this box closes with a
+/// different face.
+#[tokio::test]
+async fn one_refused_kind_costs_one_report_row_and_not_the_whole_tool() {
+    let pods = serde_json::json!({
+        "apiVersion": "v1",
+        "kind": "PodList",
+        "metadata": { "resourceVersion": "1" },
+        "items": [capture("crashloop")],
+    })
+    .to_string();
+    let (client, _) = stub(None, move |_, path| {
+        if path.starts_with("/api/v1/nodes") {
+            return (
+                path.to_string(),
+                "403 Forbidden".to_string(),
+                forbidden_body(),
+            );
+        }
+        let body = if path.starts_with("/api/v1/pods") {
+            pods.clone()
+        } else {
+            empty_pod_list()
+        };
+        (path.to_string(), "200 OK".to_string(), body)
+    })
+    .await;
+
+    let mut store = Store::default();
+    // **Exactly the items each watch's first answer is made of, and not one more.** `Init` comes
+    // out before the request goes (`watcher.rs:521-527`); after it the pod watch delivers its one
+    // object and an `InitDone`, the three empty lists deliver an `InitDone`, and the refused node
+    // watch delivers the error. Taking a further item off any of them would cost either a backoff
+    // delay or a watch round trip this stub has no reason to answer. The order is `watches`' own
+    // — pods first — and the pod count below is what fails if that ever changes.
+    let watches = session(client, Coverage::Cluster)
+        .await
+        .watches
+        .into_iter()
+        .enumerate()
+        .map(|(which, watch)| watch.take(if which == 0 { 3 } else { 2 }).boxed())
+        .collect();
+    drive(watches, &mut store).await;
+
+    let snapshot = store
+        .snapshot(now())
+        .expect("one refused kind held the whole tool at `loading`");
+    println!(
+        "pods {} · nodes {} · troubles {:?}",
+        snapshot.pods.len(),
+        snapshot.nodes.len(),
+        store
+            .troubles()
+            .iter()
+            .map(|t| (t.kind.clone(), t.fault()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        snapshot.pods.len(),
+        1,
+        "the four kinds this login may read did not reach the rules"
+    );
+    assert!(
+        snapshot.nodes.is_empty(),
+        "the refused watch published nodes anyway"
+    );
+    assert_eq!(
+        trouble_for(&store, ObjectKind::Node).and_then(|trouble| trouble.fault()),
+        Some(Fault::Refused),
+        "the refusal was not named, so the empty node list looks like a cluster with no machines"
+    );
+
+    let capacity = crate::analysis::capacity(&snapshot, &[]);
+    let drawn = format!("{:?}", capacity.rows);
+    println!("capacity rows: {drawn}");
+    assert!(
+        drawn.contains("Reading what a node has needs permission to list nodes"),
+        "the Capacity pane drew numbers over a node list this login cannot read: {drawn}"
+    );
+    let drain = crate::analysis::drain_safety(&snapshot, &[]);
+    let drawn = format!("{:?}", drain.rows);
+    println!("drain rows: {drawn}");
+    assert!(
+        drawn.contains("cannot list the nodes"),
+        "the Drain safety pane answered a per-node question with no nodes: {drawn}"
+    );
 }
 
 // --- THE SIX KUBECONFIG SHAPES, AND THE LIST THE PICKER DRAWS ---
@@ -7295,7 +8220,7 @@ async fn a_kubeconfig_with_no_current_context_is_an_error_and_never_a_panic() {
          contexts: [{name: k8rs-tests, context: {cluster: c, user: u}}]\n\
          users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
     );
-    let Err(problem) = connect_with(file.clone(), None).await else {
+    let Err(problem) = connect_with(file.clone(), None, None).await else {
         panic!(
             "a kubeconfig with no `current-context:` connected to something — either a context \
              was picked for the reader or the file was read as naming one"
@@ -7424,7 +8349,7 @@ async fn several_kubeconfig_paths_merge_into_one_file_and_the_first_one_wins() {
          order of a `KUBECONFIG` the reader may not have written"
     );
 
-    let session = connect_with(merged, Some("k8rs-tests-second"))
+    let session = connect_with(merged, Some("k8rs-tests-second"), None)
         .await
         .unwrap_or_else(|_| panic!("a context out of the merged file built no client"));
     assert_eq!(
@@ -7458,7 +8383,7 @@ async fn a_context_whose_name_contains_a_space_connects_and_survives_whole() {
          users: [{name: u, user: {token: k8rs-tests-fake-static-token}}]\n",
     );
     for asked_for in [None, Some(named)] {
-        let session = connect_with(file.clone(), asked_for)
+        let session = connect_with(file.clone(), asked_for, None)
             .await
             .unwrap_or_else(|_| panic!("a context named `{named}` built no client"));
         assert_eq!(
@@ -7503,7 +8428,7 @@ async fn a_context_that_names_a_namespace_is_the_namespace_k8rs_starts_in() {
     let connected = |asked_for: Option<&'static str>| {
         let file = file.clone();
         async move {
-            connect_with(file, asked_for)
+            connect_with(file, asked_for, None)
                 .await
                 .unwrap_or_else(|_| panic!("a kubeconfig with a static token built no client"))
         }
@@ -8280,7 +9205,7 @@ async fn a_duplicate_context_name_is_drawn_and_cannot_be_opened() {
          the reader wrote about it is still true of the entry"
     );
 
-    let session = connect_with(file, None)
+    let session = connect_with(file, None, None)
         .await
         .unwrap_or_else(|_| panic!("a kubeconfig with a static token built no client"));
     assert_eq!(
@@ -8438,7 +9363,7 @@ async fn every_string_the_picker_draws_is_stripped_and_bounded() {
         "the file spells this context with a bidi override in it, so the key and the drawn name \
          cannot be the same string — this test has stopped covering the thing it is for"
     );
-    let session = connect_with(file.clone(), Some(&listed[0].key))
+    let session = connect_with(file.clone(), Some(&listed[0].key), None)
         .await
         .unwrap_or_else(|_| {
             panic!(
@@ -8494,7 +9419,7 @@ async fn every_string_the_picker_draws_is_stripped_and_bounded() {
         listed[0].key, overlong,
         "the picker's key was shortened with the name it is drawn under"
     );
-    let session = connect_with(file, Some(&listed[0].key))
+    let session = connect_with(file, Some(&listed[0].key), None)
         .await
         .unwrap_or_else(|_| panic!("a row whose name was too long to draw could not be opened"));
     assert!(
@@ -8995,7 +9920,7 @@ async fn a_session_measures_its_skew_off_the_date_the_server_sent() {
             .expect("a timestamp prints");
         let (client, asked) = stub_apiserver("200 OK", Some(&format!("{name}: {date}"))).await;
 
-        let skew = session(client)
+        let skew = session(client, Coverage::Cluster)
             .await
             .skew
             .unwrap_or_else(|| panic!("the stub sent `{name}:` eleven and a half minutes ahead"));
@@ -9050,7 +9975,7 @@ async fn a_refusals_date_is_not_the_clusters_clock() {
     for status in ["403 Forbidden", "500 Internal Server Error"] {
         let (client, _) = stub_apiserver(status, Some(&format!("date: {date}"))).await;
         assert_eq!(
-            session(client).await.skew,
+            session(client, Coverage::Cluster).await.skew,
             None,
             "a `{status}` carried a clock reading into the session — the body was not the \
              cluster answering, and the `Date` on it is whoever refused"
@@ -9101,7 +10026,7 @@ async fn the_shapes_a_server_can_send_that_must_not_become_a_reading() {
     ] {
         let (client, _) = stub_apiserver("200 OK", header.as_deref()).await;
         assert_eq!(
-            session(client).await.skew,
+            session(client, Coverage::Cluster).await.skew,
             None,
             "a reading was taken where there was no evidence for one: {why}"
         );
@@ -9437,9 +10362,11 @@ fn a_condition_a_signer_wrote_is_stripped_and_bounded_on_the_way_in() {
 /// The five on-demand lists, each as the field it fills, the committed `kind: List` capture that
 /// is that kind's answer, and the path exactly one cluster-wide list must go out on.
 ///
-/// **The path is asserted and not only the answer.** `Api::all` is what makes these cluster-wide;
-/// a fetch that went out namespaced would read one namespace on a real cluster and print as a
-/// short list, which is the *small cluster* failure [`whole_list`] refuses paging for.
+/// **The path is asserted and not only the answer.** The path here is the **cluster-wide** one —
+/// what [`Coverage::Cluster`] produces — and a fetch that went out namespaced under it would read
+/// one namespace on a real cluster and print as a short list, which is the *small cluster* failure
+/// [`whole_list`] refuses paging for. The other direction, a run that *is* scoped, is
+/// [`the_five_report_lists_follow_the_scope_and_the_cluster_scoped_one_does_not`].
 const REPORT_LISTS: [(&str, &str, &str); 5] = [
     (
         "replica_sets",
@@ -9530,14 +10457,19 @@ fn names<T>(listed: &Option<Vec<T>>, id: fn(&T) -> &ObjectId) -> Option<Vec<Stri
 async fn fetched_names(
     which: &str,
     client: &Client,
+    coverage: &Coverage,
     deadline: std::time::Duration,
 ) -> Option<Vec<String>> {
     match which {
-        "replica_sets" => names(&replica_sets(client, deadline).await, |o| &o.id),
-        "services" => names(&services(client, deadline).await, |o| &o.id),
-        "endpoint_slices" => names(&endpoint_slices(client, deadline).await, |o| &o.id),
-        "claims" => names(&claims(client, deadline).await, |o| &o.id),
-        "disruption_budgets" => names(&disruption_budgets(client, deadline).await, |o| &o.id),
+        "replica_sets" => names(&replica_sets(client, coverage, deadline).await, |o| &o.id),
+        "services" => names(&services(client, coverage, deadline).await, |o| &o.id),
+        "endpoint_slices" => names(&endpoint_slices(client, coverage, deadline).await, |o| {
+            &o.id
+        }),
+        "claims" => names(&claims(client, coverage, deadline).await, |o| &o.id),
+        "disruption_budgets" => names(&disruption_budgets(client, coverage, deadline).await, |o| {
+            &o.id
+        }),
         _ => panic!("{which} is not one of the five lists"),
     }
 }
@@ -9568,7 +10500,7 @@ async fn the_five_lists_a_cluster_answers_reach_the_snapshot() {
     for (which, capture, path) in REPORT_LISTS {
         let (client, asked) = stub_list("200 OK", list_body(capture)).await;
         assert_eq!(
-            fetched_names(which, &client, REPORT_FETCH).await,
+            fetched_names(which, &client, &Coverage::Cluster, REPORT_FETCH).await,
             Some(capture_names(capture)),
             "{which} did not come back as the list {capture}.json holds"
         );
@@ -9602,7 +10534,7 @@ async fn a_refused_report_list_is_nobody_looked() {
         for (which, _, _) in REPORT_LISTS {
             let (client, _) = stub_list(status, "{}".to_string()).await;
             assert_eq!(
-                fetched_names(which, &client, REPORT_FETCH).await,
+                fetched_names(which, &client, &Coverage::Cluster, REPORT_FETCH).await,
                 None,
                 "a `{status}` became an answer for {which} — the pane would report on a list \
                  nobody read"
@@ -9621,7 +10553,7 @@ async fn a_cluster_with_none_of_them_answers_an_empty_list_and_not_a_silence() {
     for (which, capture, _) in REPORT_LISTS {
         let (client, _) = stub_list("200 OK", emptied_list_body(capture)).await;
         assert_eq!(
-            fetched_names(which, &client, REPORT_FETCH).await,
+            fetched_names(which, &client, &Coverage::Cluster, REPORT_FETCH).await,
             Some(Vec::new()),
             "*this cluster has no {which}* and *nobody looked* came back as one answer, and the \
              pane draws them differently"
@@ -9639,7 +10571,13 @@ async fn a_report_list_that_is_never_answered_does_not_hold_the_startup_path_ope
     for (which, _, _) in REPORT_LISTS {
         let (client, held) = never_answers().await;
         let started = std::time::Instant::now();
-        let read = fetched_names(which, &client, std::time::Duration::from_millis(200)).await;
+        let read = fetched_names(
+            which,
+            &client,
+            &Coverage::Cluster,
+            std::time::Duration::from_millis(200),
+        )
+        .await;
         let waited = started.elapsed();
         held.abort();
 
@@ -9673,7 +10611,7 @@ async fn the_five_lists_wait_side_by_side_and_not_one_after_another() {
     let (client, held) = never_answers().await;
 
     let started = std::time::Instant::now();
-    let lists = report_lists(&client, deadline).await;
+    let lists = report_lists(&client, &Coverage::Cluster, deadline).await;
     let waited = started.elapsed();
     held.abort();
 
@@ -9699,7 +10637,7 @@ async fn the_five_lists_wait_side_by_side_and_not_one_after_another() {
 #[tokio::test]
 async fn every_one_of_the_five_lists_reaches_the_field_its_report_reads() {
     let (client, asked) = stub_reports().await;
-    let lists = report_lists(&client, REPORT_FETCH).await;
+    let lists = report_lists(&client, &Coverage::Cluster, REPORT_FETCH).await;
 
     assert_eq!(
         (
@@ -9741,7 +10679,7 @@ async fn every_one_of_the_five_lists_reaches_the_field_its_report_reads() {
 async fn what_each_of_the_five_lists_keeps_is_what_its_row_is_drawn_from() {
     let (client, _) = stub_reports().await;
     let started = std::time::Instant::now();
-    let lists = report_lists(&client, REPORT_FETCH).await;
+    let lists = report_lists(&client, &Coverage::Cluster, REPORT_FETCH).await;
     // Printed rather than asserted: the wall time of five concurrent reads against a loopback
     // server says nothing a slow machine could not break, and what a reader wants off this run is
     // *what came back*, per kind (CLAUDE.md § something is run every box).
@@ -9868,7 +10806,7 @@ async fn the_five_fetched_lists_reach_the_snapshot_and_an_unfetched_store_says_n
     );
 
     let (client, _) = stub_reports().await;
-    store.reports_fetched(report_lists(&client, REPORT_FETCH).await);
+    store.reports_fetched(report_lists(&client, &Coverage::Cluster, REPORT_FETCH).await);
     let after = store.snapshot(now()).expect("every initial LIST landed");
     assert_eq!(
         (
@@ -9965,7 +10903,7 @@ async fn a_role_that_may_not_list_one_kind_still_answers_the_four_beside_it() {
         })
         .await;
 
-        let lists = report_lists(&client, REPORT_FETCH).await;
+        let lists = report_lists(&client, &Coverage::Cluster, REPORT_FETCH).await;
         for (which, capture, _) in REPORT_LISTS {
             let expected = (which != refused).then(|| capture_names(capture));
             assert_eq!(
@@ -9985,6 +10923,80 @@ async fn a_role_that_may_not_list_one_kind_still_answers_the_four_beside_it() {
             asked.len()
         );
     }
+}
+
+/// **The five namespaced report lists follow the scope, and the cluster-scoped one cannot**
+/// ([`scoped`], the same function the watches use — todo.md § Phase 5).
+///
+/// **The defect this closes was measured against a real `Role`**
+/// (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R9). A developer whose `Role`
+/// granted Services, EndpointSlices, PVCs and PodDisruptionBudgets **in `payments`** was told
+/// *"Ask for permission to list services … across the whole cluster"* — access they do not need
+/// and would be refused, which is `PRIOR-ART § B4` by name. `screens/analysis.md` records the
+/// design the other way round: *Waste runs unchanged when the view is scoped, because every input
+/// it has is namespaced*.
+///
+/// **All five, because the property is per kind.** Five namespaced kinds routed one at a time is
+/// the shape that gets missed in one place and nowhere else, which is the same reason [`scoped`]
+/// exists for the watches.
+///
+/// **And `certificatesigningrequests` must *not* move.** It is cluster-scoped; a namespaced path
+/// for it answers `404` on a real cluster and prints as the silence a refusal prints, which is the
+/// failure that cannot be told from a permission problem.
+#[tokio::test]
+async fn the_five_report_lists_follow_the_scope_and_the_cluster_scoped_one_does_not() {
+    let scope = Coverage::Asked("k8rs-tests-payments".to_string());
+
+    for (which, capture, cluster_wide) in REPORT_LISTS {
+        let (client, asked) = stub_list("200 OK", list_body(capture)).await;
+        assert_eq!(
+            fetched_names(which, &client, &scope, REPORT_FETCH).await,
+            Some(capture_names(capture)),
+            "{which} did not come back as the list {capture}.json holds"
+        );
+        let paths = asked.lock().expect("the log is never poisoned").clone();
+        // The namespaced spelling of the same path: the last segment moves behind
+        // `/namespaces/<ns>`, which is what `Api::namespaced` builds.
+        let (prefix, plural) = cluster_wide
+            .trim_end_matches('?')
+            .rsplit_once('/')
+            .expect("every list path has a plural on the end");
+        let wanted = format!("{prefix}/namespaces/k8rs-tests-payments/{plural}?");
+        assert_eq!(
+            paths,
+            vec![wanted.clone()],
+            "{which} asked {paths:?} under a namespace scope — it has to be {wanted}, or the \
+             reader is told to ask for cluster-wide access they do not need"
+        );
+    }
+
+    // The cluster-scoped one, on the same scope, unmoved.
+    let (client, asked) = stub_list("200 OK", csr_list_body()).await;
+    certificate_requests(&client, REPORT_FETCH)
+        .await
+        .expect("the stub answered the list");
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").clone(),
+        vec!["/apis/certificates.k8s.io/v1/certificatesigningrequests?".to_string()],
+        "the CertificateSigningRequest list was narrowed to a namespace — there is no such thing, \
+         and the request would 404 for ever"
+    );
+
+    // …and all five at once, through the call `main.rs` makes.
+    let (client, asked) = stub_reports().await;
+    let lists = report_lists(&client, &scope, REPORT_FETCH).await;
+    assert!(
+        lists.services.is_none(),
+        "the cluster-wide stub answered a namespaced path, so this test proves nothing"
+    );
+    let paths = asked.lock().expect("the log is never poisoned").clone();
+    println!("a scoped report asked {paths:#?}");
+    assert!(
+        paths
+            .iter()
+            .all(|path| path.contains("/namespaces/k8rs-tests-payments/")),
+        "a report list escaped the scope: {paths:#?}"
+    );
 }
 
 /// **A label a user chose is free text and is stripped and bounded on the way in** (invariant 9,
@@ -11202,11 +12214,23 @@ async fn a_server_that_accepts_and_never_speaks_does_not_hold_the_probe_open() {
         Serving::Unread,
         "a stalled handshake produced a reading"
     );
+    // **The margin is wide on purpose, and it was not wide enough** (`dev-core`, 2026-08-29).
+    // The two behaviours this separates are *one handshake* — measured at 300–689 ms alone over
+    // eight runs — and *twenty*, which is `deadline * 20`. The threshold was `deadline * 4`, which
+    // is 20% of the failing floor, and under a full `cargo test` it went over: 1.017 s, which
+    // **stopped the mutation gate before it tested a single mutant** (`cargo test` failed in the
+    // unmutated tree). `deadline * 10` is half the sequential floor and still fails outright on
+    // the defect — the same reasoning
+    // [`the_five_lists_wait_side_by_side_and_not_one_after_another`] states for its own margin:
+    // *anything under it is unambiguously the second, and a slow machine cannot turn one into the
+    // other*. Nothing about the claim changed; the number that could not tell a loaded machine
+    // from a broken bound did.
     assert!(
-        waited < deadline * 4,
-        "the probe waited {waited:?} on a deadline of {deadline:?} over 20 samples, so the bound \
-         is around one handshake rather than around the loop — and a real run pays it once per \
-         sample before the first screen"
+        waited < deadline * 10,
+        "the probe waited {waited:?} on a deadline of {deadline:?} over 20 samples — the loop \
+         floor is {:?}, so the bound is around the loop rather than around one handshake, and a \
+         real run pays it once per sample before the first screen",
+        deadline * 20
     );
     println!("20 stalled handshakes came back in {waited:?}");
 }
@@ -11239,7 +12263,10 @@ fn bytes_that_are_not_a_certificate_have_no_expiry() {
 /// `main_tests.rs` and this file both use, and the one place a network call could grow unnoticed.
 #[tokio::test]
 async fn a_session_over_a_bare_client_reads_no_serving_certificate() {
-    assert_eq!(session(offline()).await.serving_expiry, Serving::Unread);
+    assert_eq!(
+        session(offline(), Coverage::Cluster).await.serving_expiry,
+        Serving::Unread
+    );
 }
 
 /// **A client kube refuses to build never opens the probe's connection** — F3, and the reason
@@ -11280,6 +12307,7 @@ async fn a_client_that_cannot_be_built_never_opens_the_certificate_probes_connec
     let started = std::time::Instant::now();
     let connected = connect_with(
         kubeconfig_at(&format!("https://{address}"), "k8rs-tests", user),
+        None,
         None,
     )
     .await;
@@ -11573,6 +12601,7 @@ async fn a_completed_handshake_reads_the_expiry_and_connect_with_files_it() {
     let Ok(session) = connect_with(
         kubeconfig_for(&server, &authority_data(&authority), "kubernetes"),
         None,
+        None,
     )
     .await
     else {
@@ -11599,6 +12628,7 @@ async fn a_completed_handshake_reads_the_expiry_and_connect_with_files_it() {
     // control plane would get instead of the warning they need.
     let Ok(lax) = connect_with(
         kubeconfig_for(&server, "insecure-skip-tls-verify: true", "kubernetes"),
+        None,
         None,
     )
     .await
@@ -11767,6 +12797,7 @@ async fn a_server_whose_certificate_has_already_expired_is_a_typed_fact() {
     let Ok(lax) = connect_with(
         kubeconfig_for(&server, "insecure-skip-tls-verify: true", "kubernetes"),
         None,
+        None,
     )
     .await
     else {
@@ -11930,6 +12961,7 @@ async fn the_certificate_probe_never_starts_the_kubeconfigs_login_program() {
 
     let _ = connect_with(
         kubeconfig_at("https://k8rs.invalid", "k8rs-tests", &user),
+        None,
         None,
     )
     .await;

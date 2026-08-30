@@ -83,7 +83,11 @@ fn main() {
                 .build()
             {
                 Ok(runtime) => runtime.block_on(async {
-                    live(k8s::connect(context).await, analysis_wanted(&args)).await
+                    live(
+                        k8s::connect(context, live_namespace(&args)).await,
+                        analysis_wanted(&args),
+                    )
+                    .await
                 }),
                 Err(failed) => runtime_failure(&failed),
             },
@@ -161,7 +165,7 @@ fn runtime_failure(error: &std::io::Error) -> String {
 /// columns and `cargo fmt` will not wrap a string literal — it pulls the whole `const` back onto
 /// one line however this is indented, so the break has to be inside the literal.
 const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   \
-     k8rs --live [--analysis] [--context <name>]\n\
+     k8rs --live [--analysis] [--context <name>] [--namespace <name>]\n\
      Each file holds Kubernetes objects as JSON: one object, or a list of them.\n\
      Without --live this build reads files only — it cannot reach a cluster.";
 
@@ -314,6 +318,40 @@ struct Input {
     /// saying*. [`k8s::CERT_EXPIRY_WARN`] is applied where the sentence is drawn, because the days
     /// left move against `now` and a session outlives the instant it connected at.
     serving_expiry: Option<Timestamp>,
+    /// **The kinds k8rs never got a list of at all** — the header's *blank, never guessed* rule
+    /// ([`header`], `screens/widgets.md` § 1a).
+    ///
+    /// **Never read and stale are two different things and the header must not conflate them**
+    /// ([`k8s::Trouble::listed`], which is where the two are told apart). `nodes` is cluster-scoped
+    /// and cannot be granted by a namespaced `Role`, so *every* successful scoped run printed a
+    /// measured-looking `0 nodes` over a list nobody was allowed to read
+    /// (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R2, § R3, § R5). A watch that
+    /// listed and then went down is the other case, and `widgets.md` is explicit one line further
+    /// down: *stale vitals stay visible*.
+    ///
+    /// **It is a subset of [`Input::watch_trouble`] and never bigger**: [`k8s::Store::snapshot`]
+    /// publishes nothing until every watch has listed *or settled*, and settling is a standing
+    /// failure — so an unlisted watch inside a rendered report always has a line above the cards.
+    ///
+    /// **Always empty on the file-driven path**, for [`Input::skew`]'s reason: a `.json` on disk
+    /// has no watch to have failed. A file that holds no Nodes is *a file with no Nodes*, and the
+    /// header says `0 nodes` for it, correctly.
+    unreadable: Vec<ObjectKind>,
+    /// **Whether any watch feeding this report is in trouble right now** — the guard on the health
+    /// claim ([`health`]).
+    ///
+    /// **Derived from the lines the reader is looking at, not from a second classification.**
+    /// [`live_report`] sets it from the very [`k8s::Trouble`]s it has just turned into the
+    /// watch-trouble lines above the cards, which makes *a trouble line and a health claim never
+    /// appear in the same report* true by construction rather than by two rules agreeing.
+    ///
+    /// **Wider than [`Input::unreadable`] on purpose.** A watch that listed and *then* was refused
+    /// — RBAC narrowed mid-run — still holds its last complete answer, so the counts stay; but a
+    /// pod that broke after the refusal was never seen, and *nothing is broken* over that list is
+    /// the reassuring wrong answer this whole field exists to stop.
+    ///
+    /// **`false` on the file-driven path**, which is why a fixture run keeps its claim.
+    watch_trouble: bool,
 }
 
 /// Read every path into one snapshot, or say which file stopped it.
@@ -358,6 +396,9 @@ fn load(paths: &[String], now: Time) -> Result<Input, String> {
             metrics: None,
         },
         skipped: BTreeMap::new(),
+        // No watch ran, so none of them failed ([`Input::unreadable`]).
+        unreadable: Vec::new(),
+        watch_trouble: false,
     };
     for path in paths {
         // A path is argv, an `io::Error` names the file back, and a `serde_json::Error` quotes
@@ -503,7 +544,19 @@ fn decode<T: DeserializeOwned>(doc: Value, kind: &str) -> Result<T, String> {
 /// order). `sort_by_key` is stable, so `analyze`'s own order survives inside a band; recency
 /// is Phase 10's second key and is deliberately not here.
 fn render(findings: &[Finding], input: &Input) -> String {
-    let mut lines = vec![header(input), String::new()];
+    // **The blank line belongs to whatever follows it and not to the header**, because on the one
+    // report that has nothing to follow — a scope that read nothing ([`health`]) — there is
+    // nothing for it to separate, and a trailing blank before the trailer lines prints two.
+    //
+    // **An empty header is left out rather than drawn as an empty line.** [`header`] has nothing
+    // to say when both vitals were refused and no namespace narrowed the run — reachable when the
+    // scope probe timed out and both watches were then refused — and a blank first line is a
+    // report that looks truncated rather than one that says less.
+    let mut lines: Vec<String> = Vec::new();
+    let head = header(input);
+    if !head.is_empty() {
+        lines.push(head);
+    }
     // **The `Info` band is not drawn here, because this block is Alerts** (NOTES § D87, § D2):
     // `Severity::Info` on a rule already *means* this finding lives in a report rather than in
     // Alerts, which is how N4 and N5 use it and how C1's expiring band reaches the Certificates
@@ -520,14 +573,18 @@ fn render(findings: &[Finding], input: &Input) -> String {
         .filter(|f| f.severity != Severity::Info)
         .collect();
     if order.is_empty() {
-        lines.push("○ nothing is broken".to_string());
+        // **The claim can be absent, which is why this is an `Option` and not a `String`**
+        // ([`health`]): over a watch that read nothing there is no true sentence to put here, and
+        // the trouble lines above have already said so.
+        if let Some(claim) = health(input) {
+            spaced(&mut lines, claim);
+        }
     } else {
         order.sort_by_key(|f| f.severity);
         for finding in &order {
-            lines.push(card(finding, &input.snapshot.now));
-            lines.push(String::new());
+            spaced(&mut lines, card(finding, &input.snapshot.now));
         }
-        lines.push(tally(&order));
+        spaced(&mut lines, tally(&order));
     }
     // **Last, after the findings, and on both paths through the block above**
     // (`screens/once.md` § When your clock and the cluster's disagree): it is *how much of this
@@ -540,14 +597,14 @@ fn render(findings: &[Finding], input: &Input) -> String {
     // sentence qualifies is the times on the cards, and it belongs against them rather than at
     // the bottom of seven whole-cluster reports the reader may never scroll to.
     if let Some(clock) = clock(input.skew) {
-        lines.push(String::new());
-        lines.push(clock);
+        spaced(&mut lines, clock);
     }
     // **Under the clock line, which is the trailer order `screens/once.md` § Stacked with the
     // other trailer lines fixes**: clock first because it qualifies every line above it, cards
     // included; this next, because it is the newest fact and the only open slot; the
-    // check-that-could-not-run line absolutely last, which this file cannot yet draw
-    // ([`Input::skipped`] is empty on every live path).
+    // check-that-could-not-run line absolutely last, which [`check_switched_off`] now draws.
+    // **It never rode on [`Input::skipped`]** — that field is the header's, about kinds a file
+    // held — and this comment said it did until the namespace-scoping box.
     //
     // **Last *of this block*, so `--analysis`'s panes still print under it** — the same placement
     // the clock line above takes and for the same reason (2026-08-28, a choice `screens/once.md`
@@ -559,10 +616,125 @@ fn render(findings: &[Finding], input: &Input) -> String {
     // off a [`k8s::Session`] rather than off a cluster object prints below every card that has one,
     // and reordering for this one would be the second rule that file does not need.
     if let Some(expiry) = serving_certificate(input.serving_expiry, &input.snapshot.now) {
-        lines.push(String::new());
-        lines.push(expiry);
+        spaced(&mut lines, expiry);
+    }
+    // **Absolutely last, under everything including the certificate line**
+    // (`screens/once.md` § Stacked with a check that could not run, and its § Stacked with the
+    // other trailer lines, which fixes the whole order: clock, certificate, this). The comment
+    // above the clock line has claimed this slot since before it could be drawn; this is the box
+    // that fills it (NOTES § D176's *append, do not reorder*).
+    if let Some(off) = check_switched_off(input.snapshot.namespace_scope.as_deref()) {
+        spaced(&mut lines, off);
     }
     lines.join("\n")
+}
+
+/// **One block, one blank line above it — unless there is nothing above it to separate from.**
+///
+/// **Every block in a report is optional now, which is what this exists for.** The header can be
+/// empty ([`header`]), the health claim can be absent ([`health`]), and the three trailer lines
+/// each come and go — so a `push(String::new())` written beside any one of them prints a leading
+/// blank line on the run where everything before it was left out. Five copies of *two lines that
+/// have to agree about emptiness* is five places that gets missed once.
+fn spaced(lines: &mut Vec<String>, line: String) {
+    if !lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines.push(line);
+}
+
+/// **The claim that nothing is wrong, scoped to what was actually read** — or `None` when no true
+/// version of it exists (`screens/states.md` § Nothing broken, and something not checked).
+///
+/// # Why it can be `None`, which is the defect this function exists for
+///
+/// **`nothing is broken` is the strongest claim k8rs makes, and it was being made over a scope
+/// that had returned nothing** (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1,
+/// § R4, § R10). Five measured shapes reached it: a namespaced `Role` whose context names no
+/// namespace, `--namespace` on a namespace the role is refused, `--namespace` on one that does
+/// not exist, a role with `get` and no `list`, and a cluster-wide reader that cannot list nodes.
+/// In four of them the report had already printed `k8rs is not getting pods from this cluster` a
+/// few lines above and then claimed the cluster was healthy — **before this box the tool hung on
+/// *loading*, which was useless; it now says the cluster is fine, which is worse**.
+///
+/// **The rule is: no health claim while any watch feeding it could not be read**
+/// ([`Input::unreadable`], the PM's ruling of 2026-08-29). It is at the root and not per caller,
+/// so all five shapes are covered by one branch — and it is derived from the same
+/// [`k8s::Trouble`]s the lines above the cards are drawn from, which makes *a trouble line and a
+/// health claim never appear together* structural rather than a rule two places have to keep.
+///
+/// **It is deliberately wider than *standing failure*, and that is a choice, not a reading**
+/// ([`Input::watch_trouble`]). A watch that is merely retrying after a blip prints the same line —
+/// *until that works nothing here about them can be trusted* — so a health claim beside it
+/// contradicts the sentence directly above it. Suppressing on the wider set costs a report that
+/// goes quiet for a few seconds; the narrower one buys a report that contradicts itself, and a
+/// watch refused *after* a good LIST keeps a list that can no longer see a pod that broke.
+///
+/// **What replaces the claim is nothing at all, and that is not an omission.** The trouble lines
+/// say what happened, in the vocabulary this report already has; a *sorry, cannot say* line would
+/// be a second sentence about the same fact, and `screens/` specifies no such string
+/// (`screens/once.md` draws only the two states this report had before today).
+///
+/// # The scoped claim
+///
+/// **A genuinely empty read under a scope may still say something, but not about *the cluster***
+/// (`screens/states.md` § Nothing broken, and something not checked: *"the sentence counts what
+/// k8rs looked at, never what the cluster has"*). `--namespace payments` on a login that may read
+/// it, with nothing wrong in it, is a real answer — so it gets `nothing is broken in payments`,
+/// which is that rule at the length `--once`'s one-line claim has. The unscoped run keeps the
+/// sentence it always had.
+///
+/// **The namespace is sanitised here as well as in [`header`]**, because it comes from argv or
+/// from the reader's kubeconfig and this is a second place it reaches a terminal (invariant 9).
+fn health(input: &Input) -> Option<String> {
+    if input.watch_trouble {
+        return None;
+    }
+    Some(match &input.snapshot.namespace_scope {
+        Some(namespace) => format!("○ nothing is broken in {}", sanitize(namespace)),
+        None => "○ nothing is broken".to_string(),
+    })
+}
+
+/// **The one sentence that says this report is less complete than it looks**, or `None` when
+/// every check ran (`screens/once.md` § When a check could not run, `screens/states.md`
+/// § You can only see some namespaces).
+///
+/// **The check is N2** — a node someone started emptying and did not finish — and it is off
+/// because it adds up *every* pod on a node and this run can see one namespace's
+/// (`rules.rs`, which returns `None` the moment `namespace_scope` is `Some`). Singular *one node
+/// check*, because this is the Alerts stream: the second check a namespace scope switches off is
+/// Capacity's overcommit row, and `analysis.rs` says so on that pane rather than here. Each
+/// screen names the check it would have run, so a third disabled check grows one screen by a
+/// sentence instead of growing this line into a list.
+///
+/// **It prints whether or not there are findings**, and that is the whole reason it exists: a
+/// report with cards is no more complete than an empty one when the same check was switched off,
+/// and *nothing is broken* is the strongest claim k8rs makes.
+///
+/// **On stdout, with the findings, unlike every other line this driver writes about itself.**
+/// `k8rs --live > findings.txt` that drops it produces a file claiming a clean cluster with no
+/// note that a check was off, which is the failure the line exists to prevent.
+///
+/// # Three lines are easy to confuse here and this is none of the other two
+///
+/// * The **watch-trouble** line, `▲ k8rs is not getting …` — [`unreadable`]'s, per watch, in this
+///   report's own `● ▲` vocabulary, above the cards, and drawn in no `screens/` file.
+/// * The **header fragment** `N objects no rule reads (…)` — [`Input::skipped`]'s, about kinds a
+///   *file* held that no rule reads, and empty on every live path. A comment in this file used to
+///   say this sentence rode on that field; it never did, and the field is not reachable from a
+///   cluster at all.
+/// * **This one**, which rides on the namespace scope and nothing else.
+///
+/// **It takes the namespace rather than the `Input`**, so both arms are one call away and the
+/// name in the scope cannot leak into a sentence that never names it — both causes print
+/// identically, and the header is where the namespace is said.
+fn check_switched_off(namespace_scope: Option<&str>) -> Option<String> {
+    namespace_scope.map(|_| {
+        "One node check is off: spotting a node someone started emptying and did not finish \
+         needs every pod in the cluster."
+            .to_string()
+    })
 }
 
 /// **The one sentence that says the times in this report cannot be trusted**, or `None` when
@@ -727,6 +899,20 @@ fn in_days(span: SignedDuration) -> String {
 /// What the report covered — the first line, so an empty report cannot be mistaken for a
 /// clean cluster (`screens/once.md` § When nothing is broken).
 ///
+/// **`ns: payments` when this run covers one namespace** and nothing at all when it covers the
+/// cluster, which is the shape `screens/once.md` draws. A report that does not say what it
+/// covered is the one that gets pasted into a ticket as *nothing is broken*.
+///
+/// **A vital nobody was allowed to read is left out, not printed as `0`**
+/// ([`Input::unreadable`], `screens/widgets.md` § 1a). So this line can be `ns: payments` alone,
+/// and on a run where nothing narrowed it and neither watch ever listed it can be **empty** —
+/// which [`render`] leaves out rather than drawing as a blank first line.
+///
+/// **The context is not in it yet.** `screens/once.md`'s header samples all begin `prod-eu · `,
+/// and [`crate::rules::ClusterSnapshot::context`] is filled on every live run — but naming the
+/// cluster is a different fact from naming the scope, this box owns the scope, and a box does not
+/// grow a second header field on its way past (`backlog.md`).
+///
 /// **No workload count, and its removal narrows NOTES § D121 rather than reversing it.** D121
 /// added two things for one purpose — *read nothing* and *found nothing* may not print the same
 /// line — and the second, `N objects no rule reads (Kind, Kind)`, does that job better than the
@@ -737,10 +923,31 @@ fn in_days(span: SignedDuration) -> String {
 /// ([`crate::rules::ObjectId::group_key`]) — and it is said in one place, Capacity's row.
 fn header(input: &Input) -> String {
     let snapshot = &input.snapshot;
-    let mut parts = vec![
-        plural(snapshot.pods.len(), "pod"),
-        plural(snapshot.nodes.len(), "node"),
-    ];
+    let mut parts = Vec::new();
+    // **A vital k8rs was refused is left out, never printed as a measured zero**
+    // (`screens/widgets.md` § 1a: *a vital that cannot be read is blank, never guessed*; the TUI
+    // leaves the left zone empty and this line leaves the fragment out). `nodes` is cluster-scoped
+    // and cannot be granted by a namespaced `Role`, so **every** successful scoped run printed
+    // `0 nodes` until this landed — a number the reader has no way to tell from an empty cluster
+    // (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R2, § R3, § R5).
+    let read = |kind: &ObjectKind| !input.unreadable.contains(kind);
+    // **First, and before the counts, because it says what they are counts *of***
+    // (`screens/once.md` § When a check could not run — the header line gains `ns: payments` "for
+    // the same reason the TUI header does: a report that does not say what it covered cannot be
+    // trusted after it is pasted into a ticket").
+    //
+    // **One line for both causes.** `--namespace` and the 403 fallback produce the same scope and
+    // the same header (`k8s::Coverage`, NOTES § D46); which of the two it was is said once, on
+    // stderr, by the driver that decided it — this is stdout, and stdout is the answer.
+    if let Some(namespace) = &snapshot.namespace_scope {
+        parts.push(format!("ns: {}", sanitize(namespace)));
+    }
+    if read(&ObjectKind::Pod) {
+        parts.push(plural(snapshot.pods.len(), "pod"));
+    }
+    if read(&ObjectKind::Node) {
+        parts.push(plural(snapshot.nodes.len(), "node"));
+    }
     if !input.skipped.is_empty() {
         let kinds: Vec<String> = input.skipped.keys().map(|k| sanitize(k)).collect();
         parts.push(format!(
@@ -1069,6 +1276,42 @@ const LIVE: &str = "--live";
 /// current context is the test cluster.
 const CONTEXT: &str = "--context";
 
+/// **Which namespace `--live` scopes the watches to**, when the run names one (NOTES § D5).
+///
+/// **Unlike [`CONTEXT`] this is the real flag and not scaffolding.** The scope it sets is read by
+/// rules and reports that were written for it — N2 and N5 switch themselves off under one, and
+/// three of the seven panes draw a different title — so what it does outlives this driver even
+/// though the parsing here does not.
+const NAMESPACE: &str = "--namespace";
+
+/// **`kubectl`'s own short spelling of [`NAMESPACE`]**, because the muscle memory is the point:
+/// somebody who types `kubectl get pods -n payments` all day types `-n` here too.
+///
+/// **`-npayments` is neither accepted nor ignored — it is refused** ([`mistyped`]). `kubectl`
+/// takes it, because Go's `pflag` splits a shorthand cluster, and taking it here would make
+/// `-nginx` mean *the namespace `ginx`*, which is a silent wrong scope for a word somebody
+/// plausibly types. The two spellings that *are* accepted are the two [`NAMESPACE`] itself
+/// accepts, so there is one rule and not two.
+///
+/// **Refusing to read it and refusing to accept it are two different things, and only the second
+/// closes the hole** (`k8s-admin` and `tester`, independently, 2026-08-29). This doc argued the
+/// first and stopped there: the word is not a `--` word, so [`mistyped`]'s *is this a flag k8rs
+/// has* check never saw it, and it fell through as a stray positional. Measured, the run went
+/// **cluster-wide** with nothing on screen — the silent wider scope this spelling was rejected to
+/// avoid, arrived at by refusing to read it.
+///
+/// **The `--` check is still the reason `k8rs -x file.json` is a path** and not a usage error,
+/// exactly as it was before this flag existed; what is refused is this one prefix and nothing
+/// else. What *reads* `-n` is [`namespace_arg`], and its value is checked in [`mistyped`] beside
+/// the refusal above.
+///
+/// **What that costs is a file literally named `-notes.json`**, which is now a usage error rather
+/// than a path — the price of the prefix being refused at all. It is worth naming and it is not
+/// worth an escape hatch: a leading `-` already makes a filename unusable with most tools, `./`
+/// in front of it works here as it works everywhere, and Phase 12's real flag parsing is where a
+/// `--` separator belongs.
+const NAMESPACE_SHORT: &str = "-n";
+
 /// **Which cluster this run watches, or `None` when it reads files.**
 ///
 /// Three answers in one: `None` is the file-driven path this driver had before, `Some(None)` is
@@ -1136,6 +1379,81 @@ fn live_context(args: &[String]) -> Option<Option<&str>> {
     Some(None)
 }
 
+/// **What follows `--namespace` or `-n` on this line** — the one parser for both flags and both
+/// of the two spellings each takes, or `None` when neither is on the line at all.
+///
+/// **`Some(None)` is the flag with nothing after it**, which is a real state and not an
+/// impossible one: `k8rs --live -n "$NS"` with `NS` unset is exactly that word at the end of the
+/// line, and it is the commonest way to get here.
+///
+/// **One function, because [`mistyped`] and [`live_namespace`] must not disagree about which word
+/// is the value.** Two parsers over one flag is how a run gets refused for a namespace it is not
+/// about to use, or accepts a word this one would have refused — and the shape is already in this
+/// file once, at [`live_context`], where the *value* checks and the *reading* are split across
+/// two functions and each doc has to explain what the other does not catch.
+///
+/// **Both spellings, for [`live_context`]'s reason**: matching only `--namespace NAME` lets
+/// `--namespace=NAME` fall through to *every namespace*, which is silently the widest possible
+/// scope for a flag whose whole purpose is to narrow one.
+///
+/// **First wins on repeats, which is [`live_context`]'s rule and not `kubectl`'s.** `kubectl` is
+/// last-wins. It is written down rather than argued because an unwritten tie-break is the one
+/// that changes by accident, and Phase 12's real flag parsing is where the two should be made to
+/// agree — with each other and with `kubectl`.
+///
+/// **Nothing here judges the value**; [`mistyped`] does, once, so there is one sentence and one
+/// place it comes from. So this will hand back `Some(Some("--live"))` for
+/// `--namespace --live` — which is refused a moment later, before anything is connected with it.
+///
+/// **One shape it reads oddly on, and it is an edge of an edge**: a *context* literally named
+/// `-n` — `k8rs --live --context -n` — is found here as the short flag with nothing after it, and
+/// the run is refused with a namespace sentence about a namespace nobody typed. Naming a context
+/// `-n` is the sort of thing Phase 12's real parsing settles with a `--`; a check for it here
+/// would be longer than the failure is likely.
+fn namespace_arg(args: &[String]) -> Option<Option<&str>> {
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        // `--namespace=NAME` and `-n=NAME`. Written as a strip per flag rather than two more
+        // literals, so each flag is spelled once in this file.
+        for flag in [NAMESPACE, NAMESPACE_SHORT] {
+            if let Some(attached) = arg
+                .strip_prefix(flag)
+                .and_then(|rest| rest.strip_prefix('='))
+            {
+                return Some(Some(attached));
+            }
+        }
+        if arg == NAMESPACE || arg == NAMESPACE_SHORT {
+            return Some(rest.next().map(String::as_str));
+        }
+    }
+    None
+}
+
+/// **Which namespace this run watches, or `None` for every namespace it is allowed to see**
+/// (NOTES § D5).
+///
+/// **`None` is not *the whole cluster*, it is *do not narrow here***. What happens next is
+/// `k8s.rs`'s: a cluster-wide pod LIST decides, and a `403` on it falls back to the context's
+/// namespace rather than leaving the reader an empty tool (`k8s::Coverage`).
+///
+/// **It is read for a live run only**, like [`live_context`]: a `.json` on disk covers whatever
+/// it covers, and narrowing a file after it has been read would be a filter this driver does not
+/// have.
+///
+/// **Reached only after [`mistyped`] has passed**, which is what makes the value safe to hand on
+/// without a second check here — and why this returns the value rather than a `Result`.
+///
+/// **In file mode the flag and its value are read as paths**, so `k8rs -n payments pod.json`
+/// comes back *`-n`: No such file or directory*. That is exactly what `--context` beside it does
+/// today and it is [`mistyped`]'s own documented limit — a flag that is real but useless in this
+/// mode is accepted rather than refused, and Phase 12's real flag parsing is where an option that
+/// requires a value can say which modes it belongs to. It is written here so the next reader of
+/// this flag does not discover it from the error.
+fn live_namespace(args: &[String]) -> Option<&str> {
+    namespace_arg(args).flatten()
+}
+
 /// **The sentence a word that looks like a flag and is not one gets**, or `None` when every
 /// flag on the line is one this build has.
 ///
@@ -1156,6 +1474,11 @@ fn live_context(args: &[String]) -> Option<Option<&str>> {
 /// **`--analysis` is no longer one of them**: it is honoured in both modes as of NOTES § D169,
 /// so the list that used to name it is one shorter rather than one longer.
 ///
+/// **`--namespace` is checked harder than `--context`, and the paragraph in the body says why**:
+/// its missing value widens the run instead of narrowing it, and its value is the one word on this
+/// line that ends up inside a URL path. All three bad shapes — absent, empty, and something that
+/// is not a namespace name — come out of [`namespace_arg`] and get one sentence here.
+///
 /// **A flag where `--context`'s value should be *is* refused**, and this is where that sentence
 /// lives because [`live_context`] has nowhere to print one. The realistic form is
 /// `k8rs --live --context "$CTX"` with `CTX` unset, and swallowing it watches the current cluster
@@ -1171,12 +1494,72 @@ fn mistyped(args: &[String]) -> Option<String> {
             sanitize(&pair[1])
         ));
     }
+    // **One check for all three ways `--namespace` can be given nothing usable**, and it is
+    // stricter than [`CONTEXT`]'s above on purpose. That flag's missing value falls back to the
+    // kubeconfig's *current* context, which is very often what the reader wanted anyway; this
+    // one's falls back to **every namespace**, which is the opposite of what a flag whose whole
+    // job is to narrow the run was asked for — a silently *wider* scope, and the reader has no
+    // line on screen to notice it by. `--namespace` is also the one flag on this line whose value
+    // is interpolated into a URL path, so *what a namespace may look like* has to be answered
+    // somewhere; it is answered once, by `k8s::namespace_name`, rather than by a second spelling
+    // of the rule here (the security gate's *names build paths* row).
+    //
+    // **`k8s::path_safe` used to stand here and it answers a different question** — *can this go
+    // in a path* — so `PAYMENTS`, `foo.bar` and 8 KiB of `a` all got through, and the API server
+    // answered every one of them `200` with an empty list. A namespace that does not exist and a
+    // namespace with nothing wrong in it then printed the same report
+    // (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R10).
+    match namespace_arg(args) {
+        Some(None) | Some(Some("")) => {
+            return Some(format!(
+                "k8rs: {NAMESPACE} needs the name of a namespace\n{USAGE}"
+            ));
+        }
+        Some(Some(value)) if !k8s::namespace_name(value) => {
+            // **The echo is cut to what a namespace name could have been**
+            // ([`k8s::NAMESPACE_MAX`]). A value is refused here *for* being 8 KiB long, among
+            // other things, and printing 8 KiB back to say so is the same unbounded thing one
+            // line later (the security gate's *sizes are bounded* row). 63 characters is enough
+            // to recognise what was typed.
+            let shown: String = sanitize(value).chars().take(k8s::NAMESPACE_MAX).collect();
+            return Some(format!(
+                "k8rs: {NAMESPACE} needs the name of a namespace, and {shown} is not one — a \
+                 namespace is lowercase letters, digits and dashes, up to \
+                 {} characters\n{USAGE}",
+                k8s::NAMESPACE_MAX
+            ));
+        }
+        Some(Some(_)) | None => {}
+    }
+    // **`-npayments` is refused rather than ignored** (`k8s-admin` and `tester`, both
+    // independently, 2026-08-29). [`NAMESPACE_SHORT`]'s doc argues correctly against *accepting*
+    // the attached short form — `-nginx` would mean the namespace `ginx` — and then the word fell
+    // through as a stray positional, because it is not a `--` word and the check below never sees
+    // it. Measured, the run went **cluster-wide** with no line on screen: the silent wider scope
+    // the flag shape was rejected to avoid, arrived at by refusing to read it.
+    //
+    // **Nothing of the value is echoed**, because there is nothing to echo it for: what is wrong
+    // is the spelling and not the name, and the value is the one word on this line with no bound
+    // on it (the arm above).
+    if args.iter().any(|arg| {
+        arg.strip_prefix(NAMESPACE_SHORT)
+            .is_some_and(|rest| !rest.is_empty() && !rest.starts_with('='))
+    }) {
+        return Some(format!(
+            "k8rs: the namespace has to be separate from {NAMESPACE_SHORT} — write it as \
+             `{NAMESPACE_SHORT} <name>` or `{NAMESPACE_SHORT}=<name>`\n{USAGE}"
+        ));
+    }
     let known = |arg: &String| {
         arg == ANALYSIS
             || arg == LIVE
             || arg == CONTEXT
+            || arg == NAMESPACE
             || arg
                 .strip_prefix(CONTEXT)
+                .is_some_and(|rest| rest.starts_with('='))
+            || arg
+                .strip_prefix(NAMESPACE)
                 .is_some_and(|rest| rest.starts_with('='))
     };
     args.iter()
@@ -1251,11 +1634,23 @@ fn live_report(
     analysis: bool,
     at: &AtConnect,
 ) -> Option<String> {
-    let mut report = unreadable(&store.troubles(), at.renewal);
+    let troubles = store.troubles();
+    // **Read off the same list the lines below are drawn from** ([`Input::unreadable`]): a report
+    // cannot carry a trouble line and a health claim at once, and this is where that is made true
+    // rather than remembered.
+    let never_listed: Vec<ObjectKind> = troubles
+        .iter()
+        .filter(|trouble| !trouble.listed)
+        .map(|trouble| trouble.kind.clone())
+        .collect();
+    let watch_trouble = !troubles.is_empty();
+    let mut report = unreadable(&troubles, at.renewal);
     match store.snapshot(now) {
         Some(snapshot) => {
             let input = Input {
                 snapshot,
+                unreadable: never_listed,
+                watch_trouble,
                 // Nothing was read that no rule reads: a watch carries the five kinds `k8s.rs`
                 // watches and nothing else, so the header's second half has nothing to say.
                 skipped: BTreeMap::new(),
@@ -1642,6 +2037,47 @@ fn certificate_is_why(session: &k8s::Session, now: &Time) -> Option<String> {
     })
 }
 
+/// **Why this run is watching one namespace instead of the cluster**, or `None` when nothing
+/// narrowed it — the sentence the security gate's *a 403 degrades that one feature and names the
+/// missing verb and resource* row is earned with (NOTES § D5, `PRIOR-ART § B4`).
+///
+/// **Only the refused arm has anything to say.** `--namespace payments` is the reader's own
+/// choice, made a second ago, and the header already prints `ns: payments`; a sentence explaining
+/// it back to them is noise. The fallback is the opposite — the reader did not ask for it, may
+/// not know their role is namespaced, and the thing they need is the string to hand to whoever
+/// owns the cluster.
+///
+/// **The frame is [`because`]'s**, so the refusal wears the same words here as it does on a
+/// watch: one place decides how a `k8s::Fault` reads. The fault is
+/// [`k8s::Fault::Refused`] by construction — `k8s::Coverage::Refused` is reachable from nothing
+/// else — rather than by a second classification of an error this function does not hold.
+///
+/// **It does not promise the namespace came from the kubeconfig.** It may be
+/// `k8s::FALLBACK_NAMESPACE` where the context named none, so the sentence names the namespace it
+/// is watching and does not tell the reader where it was read from — which would be wrong half
+/// the time and is not a thing they can act on either way.
+///
+/// **`--namespace` in it is not a shell command and is not run.** It is the flag they would
+/// type, printed the way the usage line prints it.
+fn scoped_because(session: &k8s::Session) -> Option<String> {
+    let refused = |asked: &str| because(k8s::Fault::Refused, asked, session.renewal.as_deref());
+    match &session.coverage {
+        k8s::Coverage::Cluster | k8s::Coverage::Asked(_) => None,
+        k8s::Coverage::Refused(namespace) => Some(format!(
+            "{} — so k8rs is watching one namespace instead: {}. Pass --namespace <name> for a \
+             different one, or ask for cluster-wide read access",
+            refused("`list` pods across the whole cluster"),
+            sanitize(namespace)
+        )),
+        k8s::Coverage::Blind(namespace) => Some(format!(
+            "{} — and this kubeconfig names no namespace, so k8rs tried {} and was refused there \
+             too. Pass --namespace <name> to say which namespace you work in",
+            refused("`list` pods across the whole cluster"),
+            sanitize(namespace)
+        )),
+    }
+}
+
 /// **Watch, and print the report every time it changes** — until the process is killed.
 ///
 /// **It takes what connecting produced rather than doing it**, so a test can hand it a session
@@ -1716,6 +2152,13 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool
     let serving_expiry = session.serving_expiry.until();
     let mut err = std::io::stderr();
     let _ = writeln!(err, "k8rs: watching — {}", greeting(&session).join(" · "));
+    // **The one line that says *why* this run is scoped**, and it is on stderr because the cause
+    // is the connection's story and the header on stdout already says *which*
+    // (`screens/once.md`: both causes print the report identically). A reader who typed
+    // `--namespace` needs no sentence; a reader who did not gets the only one there is.
+    if let Some(narrowed) = scoped_because(&session) {
+        let _ = writeln!(err, "k8rs: {narrowed}");
+    }
     // The one line N4 has never had a server to say it about: a cluster outside the window this
     // build was checked against gets told, and still runs (NOTES § D149).
     if let Ok(version) = &session.version
@@ -1769,7 +2212,7 @@ async fn live(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool
         lists_read_at = wall_clock().ok();
         let (certificates, reports) = tokio::join!(
             k8s::certificate_requests(&session.client, k8s::REPORT_FETCH),
-            k8s::report_lists(&session.client, k8s::REPORT_FETCH),
+            k8s::report_lists(&session.client, &session.coverage, k8s::REPORT_FETCH),
         );
         store.certificates_fetched(certificates);
         store.reports_fetched(reports);

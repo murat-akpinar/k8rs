@@ -1427,6 +1427,9 @@ fn nearly_out(server_version: Option<&str>) -> k8s::Identity {
             std::fs::read(&path)
                 .unwrap_or_else(|e| panic!("certificate {path} does not read: {e}")),
         ),
+        // Every namespace — the scope every test that is not about scoping runs under, and the
+        // one the committed captures were taken with.
+        namespace_scope: None,
     }
 }
 
@@ -1662,6 +1665,239 @@ fn live_is_the_flag_that_names_a_cluster_and_context_names_which_one() {
     );
 }
 
+/// **Which namespace a run watches**, in every spelling of the two flags that say so
+/// (NOTES § D5).
+///
+/// **`None` here is not *the whole cluster*** — it is *do not narrow at this end*, and `k8s.rs`
+/// decides the rest off what the cluster answers a cluster-wide pod list with.
+#[test]
+fn namespace_names_the_one_namespace_this_run_watches_in_either_spelling() {
+    let args = |line: &[&str]| -> Vec<String> { line.iter().map(|a| (*a).to_string()).collect() };
+
+    assert_eq!(live_namespace(&args(&[])), None);
+    assert_eq!(live_namespace(&args(&["--live"])), None);
+    assert_eq!(live_namespace(&args(&["--live", "--analysis"])), None);
+
+    for line in [
+        vec!["--live", "--namespace", "payments"],
+        vec!["--live", "--namespace=payments"],
+        vec!["--live", "-n", "payments"],
+        vec!["--live", "-n=payments"],
+        // Beside every other flag, in either order — the scan is over the whole line.
+        vec![
+            "--live",
+            "--analysis",
+            "--context",
+            "prod",
+            "-n",
+            "payments",
+        ],
+        vec!["-n", "payments", "--live"],
+    ] {
+        assert_eq!(
+            live_namespace(&args(&line)),
+            Some("payments"),
+            "{line:?} did not name the namespace it asked for, so the run is wider than the \
+             reader said"
+        );
+    }
+
+    // First-wins on repeats, [`live_context`]'s rule and not `kubectl`'s last-wins — written
+    // down because an unwritten tie-break is the one that changes by accident.
+    assert_eq!(
+        live_namespace(&args(&["--live", "-n", "a", "--namespace", "b"])),
+        Some("a")
+    );
+    // A longer flag that merely starts the same way is not this one.
+    assert_eq!(
+        live_namespace(&args(&["--live", "--namespaces", "x"])),
+        None
+    );
+    // `-nginx` is deliberately not `-n ginx`: taking the attached shorthand would make a word
+    // somebody plausibly types into a silent wrong scope. **`None` here is not the whole
+    // answer** — a line carrying it never reaches this function, because [`mistyped`] refuses it
+    // first (`a_namespace_joined_to_the_short_flag_is_refused_rather_than_dropped`). Until
+    // 2026-08-29 nothing refused it and the run went cluster-wide, which is the silent wider
+    // scope this spelling was rejected to avoid.
+    assert_eq!(live_namespace(&args(&["--live", "-nginx"])), None);
+    // Nothing after the flag is `None` here, and refused by [`mistyped`] before it is used.
+    assert_eq!(live_namespace(&args(&["--live", "--namespace"])), None);
+}
+
+/// **A `--namespace` with nothing usable after it is refused, and `--context`'s is not**
+/// (NOTES § D5, and [`mistyped`]'s own doc for the difference).
+///
+/// **The three shapes are one sentence apiece and they are the realistic ones.** `-n "$NS"` with
+/// `NS` unset is the flag at the end of a line; `-n ""` is the same variable quoted; a flag in
+/// the value position is `--namespace --analysis`. All three used to leave the run watching
+/// **every** namespace — silently *wider* than the reader asked for, which is the opposite of
+/// what the flag is for and has nothing on screen to notice it by.
+///
+/// **The fourth shape is the one that is not merely wrong but unsafe**: a value with a `/` or a
+/// `..` in it is interpolated into `/api/v1/namespaces/{ns}/pods`.
+#[test]
+fn a_namespace_flag_with_nothing_usable_after_it_is_refused() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    for missing in [
+        vec!["--live", "--namespace"],
+        vec!["--live", "-n"],
+        vec!["--live", "--namespace="],
+        vec!["--live", "-n="],
+    ] {
+        let problem = mistyped(&line(&missing)).unwrap_or_else(|| {
+            panic!("{missing:?} was accepted, so the run watches every namespace instead of one")
+        });
+        assert_eq!(
+            problem,
+            format!("k8rs: --namespace needs the name of a namespace\n{USAGE}"),
+            "{missing:?}"
+        );
+    }
+
+    // **The last six are the shapes `path_safe` accepted and a namespace name does not**
+    // (`k8s::namespace_name`, measured against a real API server on 2026-08-29). `PAYMENTS` and
+    // `foo.bar` both come back `200` with an empty `items`, so the reader was shown
+    // *nothing is broken* over a namespace that does not exist; the 64-character one is the
+    // length bound, and argv is the first unbounded source a name has ever come from here.
+    let too_long = "a".repeat(64);
+    let enormous = "b".repeat(8192);
+    for bad in [
+        vec!["--live", "--namespace", "--analysis"],
+        vec!["--live", "-n", "--live"],
+        vec!["--live", "--namespace=../secrets"],
+        vec!["--live", "-n", "kube system"],
+        vec!["--live", "--namespace", "a/b"],
+        vec!["--live", "--namespace=kube-system?watch=true"],
+        vec!["--live", "--namespace", "PAYMENTS"],
+        vec!["--live", "--namespace", "foo.bar"],
+        vec!["--live", "--namespace", "-leading"],
+        vec!["--live", "--namespace", "trailing-"],
+        vec!["--live", "--namespace", too_long.as_str()],
+        vec!["--live", "--namespace", enormous.as_str()],
+    ] {
+        let problem = mistyped(&line(&bad))
+            .unwrap_or_else(|| panic!("{bad:?} was accepted as a namespace name"));
+        assert!(
+            problem.starts_with("k8rs: --namespace needs the name of a namespace, and ")
+                && problem.contains("is not one")
+                && problem.contains("usage: k8rs "),
+            "{bad:?} → {problem}"
+        );
+        // **What is echoed is bounded** (`k8s::NAMESPACE_MAX`). A value refused *for* being eight
+        // kilobytes long, printed back at eight kilobytes, is the same unbounded thing one line
+        // later (the security gate's *sizes are bounded* row).
+        let first = problem
+            .lines()
+            .next()
+            .expect("the refusal has a first line");
+        // **One sentence plus at most one namespace-name's worth of echo.** The cap is derived
+        // from the bound it is about (`k8s::NAMESPACE_MAX`) rather than picked, so widening the
+        // sentence by a clause does not quietly widen what may be echoed with it.
+        assert!(
+            first.chars().count() <= 200 + k8s::NAMESPACE_MAX,
+            "{bad:?} was echoed back at {} characters: {first:.120}",
+            first.chars().count()
+        );
+        let value = bad.last().expect("every line here ends in its value");
+        assert!(
+            value.chars().count() <= k8s::NAMESPACE_MAX || !first.contains(*value),
+            "a value refused for its length was echoed back whole: {} characters",
+            value.chars().count()
+        );
+    }
+
+    // A control character in the value never reaches the terminal (invariant 9).
+    let crafted = mistyped(&line(&["--live", "--namespace=pay\u{1b}[2Jments"]))
+        .expect("an escape sequence is not a namespace name");
+    println!("{crafted}");
+    assert!(
+        !crafted.contains('\u{1b}'),
+        "an escape sequence in argv reached the terminal: {crafted:?}"
+    );
+
+    // Real namespaces, in every spelling, are not refused — and neither is a line with no
+    // namespace flag on it at all.
+    let longest = "a".repeat(63);
+    for good in [
+        vec!["--live", "--namespace", "payments"],
+        vec!["--live", "--namespace=kube-system"],
+        vec!["--live", "-n", "payments"],
+        vec!["--live", "-n=default"],
+        // Digits are a namespace name and a leading one is legal — `team-2`, `2048`.
+        vec!["--live", "-n", "2048"],
+        // The boundary itself, not one past it: a bound that refused a legal name would be the
+        // same defect facing the other way.
+        vec!["--live", "--namespace", longest.as_str()],
+        vec!["--live"],
+        vec!["--analysis", "pod.json"],
+    ] {
+        assert_eq!(mistyped(&line(&good)), None, "{good:?}");
+    }
+}
+
+/// **A namespace joined to the short flag is refused, not dropped** (`k8s-admin` § R10 and
+/// `tester`, both independently, 2026-08-29).
+///
+/// **The measured failure is the one the flag's own doc rejects the spelling to avoid.**
+/// `k8rs --live -npayments` did not scope anything: the word is not a `--` word, so [`mistyped`]
+/// never looked at it and it fell through as a stray positional — and the run went **cluster-wide
+/// with no line on screen**. Refusing to *read* the attached form and refusing to *accept* it are
+/// two different things, and only the second closes the hole.
+///
+/// **The `=` spellings are not this shape and must stay accepted**, which is the assertion that
+/// keeps the refusal from swallowing the flag it is guarding.
+#[test]
+fn a_namespace_joined_to_the_short_flag_is_refused_rather_than_dropped() {
+    let line = |words: &[&str]| -> Vec<String> { words.iter().map(|w| (*w).to_string()).collect() };
+
+    for attached in [
+        vec!["--live", "-npayments"],
+        // The word the doc names: `-nginx` would silently mean the namespace `ginx`.
+        vec!["--live", "-nginx"],
+        vec!["--live", "-n../secrets"],
+        vec!["-npayments", "--live"],
+    ] {
+        let problem = mistyped(&line(&attached)).unwrap_or_else(|| {
+            panic!("{attached:?} was accepted, so the run is wider than the reader asked for")
+        });
+        assert!(
+            problem.contains("write it as `-n <name>`") && problem.contains("usage: k8rs "),
+            "{attached:?} was refused without naming the spelling that works: {problem}"
+        );
+        // **Nothing of the value is echoed.** What is wrong is the spelling, and the value is the
+        // one word on this line with no bound on it.
+        assert!(
+            !problem.contains("payments") && !problem.contains("ginx"),
+            "{attached:?} echoed the value back: {problem}"
+        );
+    }
+
+    // **A file whose name begins `-n` is now a usage error**, which is the price of refusing the
+    // prefix at all and is written down rather than discovered ([`NAMESPACE_SHORT`]'s doc).
+    assert!(
+        mistyped(&line(&["-notes.json"])).is_some(),
+        "the refusal does not cover a path that begins with the flag, so the doc that says it \
+         does is wrong in the direction that matters"
+    );
+
+    for spelled in [
+        vec!["--live", "-n", "payments"],
+        vec!["--live", "-n=payments"],
+        vec!["--live", "--namespace", "payments"],
+        // Not the short flag at all — a longer flag that merely starts the same way.
+        vec!["--live", "--namespace=payments"],
+        // Nor is a path that does not begin with it.
+        vec!["--analysis", "pod.json"],
+    ] {
+        assert_eq!(
+            mistyped(&line(&spelled)),
+            None,
+            "{spelled:?} was refused by the attached-form check, which is the flag itself"
+        );
+    }
+}
+
 /// **A mistyped flag is a usage error, not a missing file.**
 ///
 /// `k8rs --live=true` used to be read as a path and came back
@@ -1798,7 +2034,7 @@ fn offline() -> kube::Client {
 #[tokio::test]
 async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_recovery() {
     use futures_util::stream::StreamExt;
-    let watches = k8s::session(offline())
+    let watches = k8s::session(offline(), k8s::Coverage::Cluster)
         .await
         .watches
         .into_iter()
@@ -1852,12 +2088,20 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         recovered.starts_with("0 pods · 0 nodes"),
         "a healthy report starts with something other than the report: {recovered:?}"
     );
+    // **And the claim comes back on with them**, which is the half the assertion under `stale`
+    // cannot carry alone: a driver that never said `nothing is broken` at all would satisfy that
+    // one for free, so the population is pinned from both sides ([`health`]).
+    assert!(
+        recovered.contains("○ nothing is broken"),
+        "five watches delivered a complete answer and the cluster was still not called healthy: \
+         {recovered:?}"
+    );
 
     // **And the outage the proof actually watches: one that arrives *after* a good bootstrap.**
     // The store keeps its last complete answer while a watch is down (NOTES § D162), so this is
     // the only shape where both halves are printed at once — the lines on top, the cards they
     // are a warning about underneath, one blank line between.
-    let watches = k8s::session(offline())
+    let watches = k8s::session(offline(), k8s::Coverage::Cluster)
         .await
         .watches
         .into_iter()
@@ -1889,6 +2133,15 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     assert!(
         cards.starts_with("0 pods · 0 nodes"),
         "the cards under the warning are not the report: {cards:?}"
+    );
+    // **A trouble line and a health claim may never stand in one report** ([`health`],
+    // [`Input::watch_trouble`], the PM's ruling of 2026-08-29). [`render`] is fed that flag by
+    // hand everywhere else, so this is the only place it is *derived* from a real store — and
+    // the only place that can catch it being read off the wrong side of `troubles`.
+    assert!(
+        !cards.contains("nothing is broken"),
+        "a report whose first five lines say the cluster could not be read went on to call it \
+         healthy: {stale:?}"
     );
 }
 
@@ -1948,6 +2201,7 @@ fn a_refusal_an_expired_login_and_a_dead_cluster_are_three_different_lines() {
         let lines = unreadable(
             &[k8s::Trouble {
                 kind,
+                listed: false,
                 failure: Some(failure),
                 ended: false,
             }],
@@ -2024,6 +2278,7 @@ fn a_refusal_an_expired_login_and_a_dead_cluster_are_three_different_lines() {
 fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
     let trouble = |kind, ended| k8s::Trouble {
         kind,
+        listed: false,
         failure: None,
         ended,
     };
@@ -2292,6 +2547,10 @@ fn saying(
         // the cluster was asked, and `k8s_tests.rs` § CONNECTING is where they are proven.
         context: None,
         namespace: None,
+        // The startup line this function feeds prints the scope's *why* beside the greeting,
+        // and `Cluster` is the arm that has nothing to say ([`scoped_because`]); the arm that
+        // does is asserted in its own test.
+        coverage: k8s::Coverage::Cluster,
         client_certificate: None,
         // The clock line is stdout's, beside the findings, and this function builds the session
         // the *startup* line is read off — `screens/once.md` § When your clock and the cluster's
@@ -2299,6 +2558,93 @@ fn saying(
         // the same reason.
         skew: None,
         serving_expiry: k8s::Serving::Unread,
+    }
+}
+
+/// **The one sentence that says *why* a run is scoped**, and the two arms that say nothing
+/// (NOTES § D5, `PRIOR-ART § B4`, the security gate's Authorization row).
+///
+/// **The refusal is the only arm with anything to say.** `--namespace payments` is a choice the
+/// reader made a second ago and the header already prints `ns: payments`; explaining it back to
+/// them is noise. The fallback is the opposite — nobody asked for it, the reader may not know
+/// their role is namespaced, and the string they need is the one to hand to whoever owns the
+/// cluster.
+///
+/// **What the security gate asks for is in the assertion**: the missing verb and the resource,
+/// named, and a way out. The frame is [`because`]'s, so this sentence and the one a refused watch
+/// gets cannot come apart.
+#[tokio::test]
+async fn a_run_that_was_scoped_by_a_refusal_says_so_and_one_that_was_asked_does_not() {
+    let scoped = |coverage: k8s::Coverage| k8s::Session {
+        coverage,
+        ..saying(
+            Ok("v1.36.1".to_string()),
+            Err(api_error(403, "Forbidden")),
+            None,
+        )
+    };
+
+    assert_eq!(
+        scoped_because(&scoped(k8s::Coverage::Cluster)),
+        None,
+        "a run that reads the whole cluster explained a scope it does not have"
+    );
+    assert_eq!(
+        scoped_because(&scoped(k8s::Coverage::Asked("payments".to_string()))),
+        None,
+        "a reader who typed --namespace was told what --namespace does"
+    );
+
+    let said = scoped_because(&scoped(k8s::Coverage::Refused("payments".to_string())))
+        .expect("a run nobody asked to narrow narrowed in silence");
+    println!("{said}");
+    assert_eq!(
+        said,
+        "the role this kubeconfig uses needs to `list` pods across the whole cluster — so k8rs \
+         is watching one namespace instead: payments. Pass --namespace <name> for a different \
+         one, or ask for cluster-wide read access"
+    );
+
+    // **The guess that was refused too says so, rather than presenting itself as a scope**
+    // (`k8s::Coverage::Blind`, `reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1).
+    // The old sentence claimed k8rs *is watching* `default` over a namespace it had just been
+    // refused in, and the report under it printed a header and a health claim.
+    let blind = scoped_because(&scoped(k8s::Coverage::Blind("default".to_string())))
+        .expect("a run that could read nothing at all said nothing about it");
+    println!("{blind}");
+    assert_eq!(
+        blind,
+        "the role this kubeconfig uses needs to `list` pods across the whole cluster — and this \
+         kubeconfig names no namespace, so k8rs tried default and was refused there too. Pass \
+         --namespace <name> to say which namespace you work in"
+    );
+    assert!(
+        !blind.contains("is watching one namespace instead"),
+        "a scope that read nothing was presented as one that worked: {blind}"
+    );
+
+    // Invariant 9: the namespace came off argv or a kubeconfig, and neither is ours. Both arms
+    // that print one, because a strip on one of two interpolations is a strip on neither.
+    for crafted in [
+        scoped_because(&scoped(k8s::Coverage::Refused(
+            "pay\u{1b}[2Jments".to_string(),
+        ))),
+        scoped_because(&scoped(k8s::Coverage::Blind(
+            "pay\u{1b}[2Jments".to_string(),
+        ))),
+    ] {
+        let crafted = crafted.expect("both narrowed arms always say something");
+        assert!(
+            !crafted.contains('\u{1b}'),
+            "an escape sequence in a namespace reached the terminal: {crafted:?}"
+        );
+        // The readable part survives: a strip that returned nothing would pass the line above
+        // and leave a sentence naming no namespace at all (CLAUDE.md § a derived list asserts it
+        // found something). `[2J` is printable — only the `ESC` goes.
+        assert!(
+            crafted.contains("pay[2Jments"),
+            "the strip took the namespace with it: {crafted:?}"
+        );
     }
 }
 
@@ -2426,7 +2772,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
 
     // **The context**: the file read perfectly and does not name what was asked for.
     let unloadable = live(
-        k8s::connect_with(yaml("{}"), Some("k8rs-tests-no-such-context")).await,
+        k8s::connect_with(yaml("{}"), Some("k8rs-tests-no-such-context"), None).await,
         false,
     );
     let unloadable = unloadable.await;
@@ -2443,7 +2789,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     // 2026-08-27).
     let moved = "{client-certificate: /nonexistent/k8rs-tests/client.crt, \
                  client-key: /nonexistent/k8rs-tests/client.key}";
-    let entry = live(k8s::connect_with(yaml(moved), None).await, false).await;
+    let entry = live(k8s::connect_with(yaml(moved), None, None).await, false).await;
     println!("{entry}");
     assert!(
         entry.contains("this kubeconfig loaded, and something it points at did not"),
@@ -2461,7 +2807,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     let user = format!(
         "{{exec: {{apiVersion: client.authentication.k8s.io/v1beta1, command: {helper}}}}}"
     );
-    let broken = live(k8s::connect_with(yaml(&user), None).await, false).await;
+    let broken = live(k8s::connect_with(yaml(&user), None, None).await, false).await;
     println!("{broken}");
     assert!(
         broken.contains(&format!("(`{helper}`)")),
@@ -2497,7 +2843,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
 #[tokio::test]
 async fn a_cluster_that_never_answers_prints_nothing_and_says_why_it_stopped() {
     use futures_util::stream::StreamExt;
-    let mut session = k8s::session(offline()).await;
+    let mut session = k8s::session(offline(), k8s::Coverage::Cluster).await;
     session.watches = session
         .watches
         .into_iter()
@@ -2701,7 +3047,7 @@ fn the_clock_line_comes_last_whether_or_not_anything_is_broken() {
 async fn a_measured_clock_reaches_the_live_report_and_sits_under_what_it_qualifies() {
     use futures_util::stream::StreamExt;
     let mut store = listed(Vec::new());
-    let watches = k8s::session(offline())
+    let watches = k8s::session(offline(), k8s::Coverage::Cluster)
         .await
         .watches
         .into_iter()
@@ -2992,6 +3338,200 @@ fn the_certificate_line_comes_after_the_clock_line_whether_or_not_anything_is_br
     );
 }
 
+/// **The report says what it covered, and a namespace-scoped one says which namespace**
+/// (`screens/once.md` § When a check could not run, NOTES § D5).
+///
+/// **The header is where a reader decides whether to trust the rest**, and a report pasted into a
+/// ticket as *nothing is broken* over one namespace of forty is the reason this line exists.
+///
+/// **Both causes print identically**, because the scope is identical: `--namespace` and the 403
+/// fallback are one field by the time a snapshot exists (NOTES § D46), and *why* is said once on
+/// stderr by the driver that decided it ([`scoped_because`]).
+#[test]
+fn a_scoped_report_says_which_namespace_it_covered() {
+    let mut input = read(&["oom.json"]);
+    assert_eq!(
+        header(&input),
+        "1 pod · 0 nodes",
+        "an unscoped report grew a scope clause"
+    );
+
+    input.snapshot.namespace_scope = Some("payments".to_string());
+    assert_eq!(
+        header(&input),
+        "ns: payments · 1 pod · 0 nodes",
+        "the scope is missing, or it landed after the counts it is a count *of*"
+    );
+
+    // Invariant 9: the namespace has been through argv or a kubeconfig, and neither is ours.
+    input.snapshot.namespace_scope = Some("pay\u{1b}[2Jments".to_string());
+    let crafted = header(&input);
+    println!("{crafted}");
+    assert!(
+        !crafted.contains('\u{1b}'),
+        "an escape sequence in a namespace reached the terminal: {crafted:?}"
+    );
+}
+
+/// **`nothing is broken` is never printed over a watch that could not be read** — the blocker
+/// this round exists for (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1, § R4,
+/// § R10; the PM's ruling of 2026-08-29).
+///
+/// **Five measured shapes reached the claim, and four of them printed a trouble line first**: a
+/// namespaced `Role` whose context names no namespace, `--namespace` on a namespace the role is
+/// refused, `--namespace` on one that does not exist, a role with `get` and no `list`, and a
+/// cluster-wide reader that cannot list nodes. **Before the box the tool hung on *loading*, which
+/// was useless; after it the tool said the cluster was healthy, which is worse.**
+///
+/// **The guard is at the root and covers all five with one branch** ([`health`]), and it is read
+/// off the same troubles the lines above the cards are drawn from — so a trouble line and a health
+/// claim cannot appear in one report, by construction.
+///
+/// **A vital that was never read is left out and never printed as a measured zero**
+/// (`screens/widgets.md` § 1a, and [`Input::unreadable`]). `nodes` is cluster-scoped and cannot be
+/// granted by a namespaced `Role`, so `0 nodes` was printed on *every* successful scoped run.
+///
+/// **Stale is not the same as never read**, which is the other half of that rule one line further
+/// down in `widgets.md` — a watch that listed and then went down keeps its count.
+#[test]
+fn a_health_claim_is_never_made_over_a_watch_that_could_not_be_read() {
+    let mut input = read(&["oom.json"]);
+    input.snapshot.pods.clear();
+    input.snapshot.namespace_scope = Some("payments".to_string());
+
+    // The measured shape: the pod and node watches were refused, so neither vital was ever read.
+    input.unreadable = vec![ObjectKind::Pod, ObjectKind::Node];
+    input.watch_trouble = true;
+    let blind = render(&[], &input);
+    println!("{blind}");
+    assert!(
+        !blind.contains("nothing is broken"),
+        "the cluster was called healthy over a scope that read nothing: {blind:?}"
+    );
+    assert!(
+        !blind.contains("0 pods") && !blind.contains("0 nodes"),
+        "a vital nobody was allowed to read was printed as a measured zero: {blind:?}"
+    );
+    assert!(
+        blind.starts_with("ns: payments\n"),
+        "the header stopped saying what the report covered: {blind:?}"
+    );
+
+    // A cluster-wide reader refused only `nodes` — R5's shape. The pod count is real and stays;
+    // the node count is a guess and goes; the claim goes with it.
+    input.unreadable = vec![ObjectKind::Node];
+    input.snapshot.namespace_scope = None;
+    let no_nodes = render(&[], &input);
+    println!("{no_nodes}");
+    assert_eq!(
+        no_nodes, "0 pods",
+        "a run that could not list nodes still printed a node count or a health claim"
+    );
+
+    // **Stale, not unread**: every watch listed and then one went down. `widgets.md` is explicit
+    // — stale vitals stay visible — and the claim goes, because a pod that broke after the watch
+    // stopped was never seen.
+    input.unreadable = Vec::new();
+    let stale = render(&[], &input);
+    println!("{stale}");
+    assert_eq!(
+        stale, "0 pods · 0 nodes",
+        "a stale count was blanked as if it had never been read"
+    );
+
+    // Nothing wrong with any watch: the claim is back, in both scopes.
+    input.watch_trouble = false;
+    assert_eq!(
+        render(&[], &input),
+        "0 pods · 0 nodes\n\n○ nothing is broken"
+    );
+    input.snapshot.namespace_scope = Some("payments".to_string());
+    let scoped = render(&[], &input);
+    println!("{scoped}");
+    assert!(
+        scoped.contains("○ nothing is broken in payments"),
+        "a claim over one namespace was made about the whole cluster: {scoped:?}"
+    );
+
+    // Invariant 9: the namespace reaches the claim as well as the header.
+    input.snapshot.namespace_scope = Some("pay\u{1b}[2Jments".to_string());
+    let crafted = render(&[], &input);
+    assert!(
+        !crafted.contains('\u{1b}') && crafted.contains("in pay[2Jments"),
+        "the namespace reached the claim unstripped, or was stripped away entirely: {crafted:?}"
+    );
+
+    // **Findings do not bring the claim back and never suppressed it**: the guard is on the claim
+    // alone, so a report with cards under an unreadable watch still prints its cards.
+    input.watch_trouble = true;
+    input.unreadable = vec![ObjectKind::Node];
+    let carded = render(
+        &[finding(Severity::Critical, pod_id("payments", "web-0"))],
+        &input,
+    );
+    println!("{carded}");
+    assert!(
+        carded.contains("1 critical") && !carded.contains("nothing is broken"),
+        "the cards or the tally went with the claim: {carded:?}"
+    );
+}
+
+/// **A check that is switched off and says nothing looks exactly like a check that passed**
+/// (`screens/once.md` § When a check could not run, `screens/states.md`
+/// § You can only see some namespaces).
+///
+/// **It prints in both cases and that is the whole point**: a report with findings is no more
+/// complete than an empty one when the same check was off, and `○ nothing is broken` is the
+/// strongest claim k8rs makes.
+///
+/// **Last of the trailer, under the clock line and under the certificate line** — the order
+/// `screens/once.md` § Stacked with the other trailer lines fixes, and the slot [`render`]'s own
+/// comment has reserved for it since before this file could draw it.
+#[test]
+fn a_namespace_scope_says_which_node_check_is_off_and_says_it_last() {
+    const OFF: &str = "One node check is off: spotting a node someone started emptying and did \
+                       not finish needs every pod in the cluster.";
+
+    let mut input = read(&["oom.json"]);
+    assert_eq!(
+        check_switched_off(None),
+        None,
+        "a report that covered the whole cluster said a check was off"
+    );
+    assert!(
+        !render(&[], &input).contains("One node check is off"),
+        "the line was drawn over an unscoped run"
+    );
+
+    input.snapshot.namespace_scope = Some("payments".to_string());
+    let clean = render(&[], &input);
+    println!("{clean}");
+    assert_eq!(
+        clean,
+        format!("ns: payments · 1 pod · 0 nodes\n\n○ nothing is broken in payments\n\n{OFF}"),
+        "`nothing is broken` was printed over a scoped cluster with no note that a check was off"
+    );
+
+    let broken = render(
+        &[finding(Severity::Critical, pod_id("payments", "web-0"))],
+        &input,
+    );
+    assert!(
+        broken.ends_with(&format!("1 critical\n\n{OFF}")),
+        "the line did not follow a tally: {broken}"
+    );
+
+    // Under both of the other two trailer lines, which is the order `screens/once.md` fixes.
+    input.skew = Some(SignedDuration::from_mins(-11));
+    input.serving_expiry = k8s::expiry_of(&der("expiring-client"));
+    let stacked = render(&[], &input);
+    println!("{stacked}");
+    assert!(
+        stacked.ends_with(&format!("{BEHIND}\n\n{EXPIRING}\n\n{OFF}")),
+        "the trailer is not clock, certificate, then the check that could not run: {stacked}"
+    );
+}
+
 /// **It carries no severity and appears in no tally** (NOTES § D178): it names no cluster object,
 /// so there is no band for it to be counted in.
 #[test]
@@ -3116,7 +3656,7 @@ fn three_days_later() -> Time {
 /// identically for `/apis` and for the pods watch
 /// (`reports/2026-08-28-c2-c3-against-a-real-api-server.md` § 3).
 ///
-/// **`k8s::session(offline())` is the shape and not a stand-in.** Its two errors are a real
+/// **`k8s::session(offline(), …)` is the shape and not a stand-in.** Its two errors are a real
 /// resolver failure against a name RFC 6761 reserves, so the `Unanswered` this asserts on is
 /// classified from a genuine error rather than one this file built to be classified.
 ///
@@ -3135,7 +3675,7 @@ async fn an_expired_certificate_on_a_session_that_read_nothing_is_the_message_an
     // byte assertion has to be made where both instants are pinned. Same session shape, and the
     // `Unanswered` on both calls is a real resolver failure rather than one built to be
     // classified.
-    let mut fixed = k8s::session(offline()).await;
+    let mut fixed = k8s::session(offline(), k8s::Coverage::Cluster).await;
     fixed.serving_expiry = k8s::Serving::Expired(expired_at());
     let drawn = certificate_is_why(&fixed, &three_days_later());
     println!("{}", drawn.clone().unwrap_or_default());
@@ -3145,7 +3685,7 @@ async fn an_expired_certificate_on_a_session_that_read_nothing_is_the_message_an
         "the run did not print `screens/states.md`'s sentence"
     );
 
-    let mut session = k8s::session(offline()).await;
+    let mut session = k8s::session(offline(), k8s::Coverage::Cluster).await;
     session.serving_expiry = k8s::Serving::Expired(expired_at());
     session.watches = session
         .watches
@@ -3196,7 +3736,7 @@ async fn a_cluster_that_can_still_be_read_is_never_refused_a_start() {
     let refused = || api_error(403, "Forbidden");
     // **Real `Unanswered`s, taken off a session rather than built to be classified**: a resolver
     // failure against a name RFC 6761 reserves.
-    let dead = k8s::session(offline()).await;
+    let dead = k8s::session(offline(), k8s::Coverage::Cluster).await;
     let (no_version, no_apis) = (dead.version, dead.served);
     let discovered = || {
         Ok(k8s::Served {
@@ -3224,7 +3764,10 @@ async fn a_cluster_that_can_still_be_read_is_never_refused_a_start() {
          certificate has expired, and refused a start it makes today (NOTES § D160)"
     );
     assert_eq!(
-        certificate_is_why(&k8s::session(offline()).await, &three_days_later()),
+        certificate_is_why(
+            &k8s::session(offline(), k8s::Coverage::Cluster).await,
+            &three_days_later()
+        ),
         None,
         "a cluster that is simply not there was told the certificate expired, on a probe that \
          read nothing at all"
@@ -3299,7 +3842,7 @@ fn an_expired_replica_on_a_readable_cluster_draws_the_ordinary_expired_line() {
 #[tokio::test]
 async fn without_a_typed_expiry_the_same_dead_session_still_says_nothing_usable_came_back() {
     use futures_util::stream::StreamExt;
-    let mut session = k8s::session(offline()).await;
+    let mut session = k8s::session(offline(), k8s::Coverage::Cluster).await;
     session.watches = session
         .watches
         .into_iter()

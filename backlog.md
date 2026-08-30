@@ -1681,9 +1681,13 @@ It is in `src/`, which `tester` may not write, and it is not a defect in that bo
   to wave through, which is the justfile's own argument for why `just check` is CI.
   `dev-core`'s file. Found by `tester`, 2026-08-29.
   **Re-measured independently 2026-08-29** during the box below: 1 red in 4 full
-  `just check` runs at 956 ms, and 8 isolated runs at 296–608 ms (median ~430 ms)
-  — so the margin is the parallel suite, not the machine, and the entry's numbers
-  hold from a second direction.
+  `just check` runs at 956 ms, and 8 isolated runs at 296–608 ms (median ~430 ms).
+  **Every number in this entry is now suspect and the entry must be re-measured
+  before it becomes a box.** Both measurements were taken while 32 orphaned busy
+  loops from a load generator were spinning on this machine (load average 33.7,
+  found and killed 2026-08-30) — so the *isolated* runs were not isolated, and
+  whether this test is flaky on a quiet machine is unknown
+  ([D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)).
 
 ### From the pod-whose-node-left box and its two reviews (2026-08-29)
 
@@ -1724,6 +1728,43 @@ one that changes a number a user reads.*
   thing that reports them — which is either a one-line addition to `just check` or
   a decision that rustdoc is not a gate. `tester`'s call on the gate, `dev-core`'s
   on the links. Found by `dev-core`, 2026-08-29
+
+### From the namespace-scoping box and its two reviews (2026-08-30)
+
+*Findings from the box that gave a namespace-scoped login a working tool
+([D184](NOTES.md#d184--the-namespace-box-what-a-real-restricted-role-took-away-and-the-eight-rulings-it-forced-2026-08-30)).
+The blocker and seven rulings were fixed inside it; these are what is left.
+The two `screens/` entries are `tui-designer`'s and were found by measurement
+against a real restricted role.*
+
+- **`screens/states.md:451` claims a namespace the tool cannot know it is
+  showing.** It draws *"k8rs is showing the namespace **your kubeconfig points
+  at**: payments"*, which is false whenever the context names no namespace and
+  k8rs fell back — the ordinary platform-issued kubeconfig. `scoped_because`'s
+  doc explicitly declines to make that claim, so the code is right and the screen
+  is wrong. Three states need separating and only one is drawn: the user **asked**
+  with `--namespace`, k8rs **narrowed** after a refusal, and — new with this box —
+  the fallback was **refused too**. `tui-designer`'s. Found by `k8s-admin`,
+  2026-08-30
+- **`screens/once.md` says the header is the only place the cause shows.** As
+  shipped the header names *which* namespace and stderr carries *why*, and only on
+  the refused arm — a run the user scoped explicitly says nothing, because they
+  already know. The rule *stdout is the findings, stderr is the connection's
+  story* is right for `--once` (`k8rs --once > findings.txt` must not collect
+  connection prose), so the sentence in `once.md` is what has to move.
+  `tui-designer`'s. Found by `tester`, 2026-08-30
+- **`screens/once.md` never draws a header whose node count cannot be read.** It
+  only ever shows `ns: payments · 12 pods · 3 nodes`, which cannot happen for a
+  403-fallback user, because `nodes` is cluster-scoped and no namespaced `Role`
+  can grant it. The code now blanks the vital rather than guessing a zero
+  (D184, ruling 2); the screen file has no drawing of that state, nor of the
+  cluster-wide reader with no node permission, which has no `ns:` fragment and no
+  trailer line at all. `tui-designer`'s. Found by `k8s-admin`, 2026-08-30
+- **A `Role` with `get` but not `list`, and a context naming a namespace that
+  does not exist, both reach the same screen as a refusal.** Measured; the health
+  claim is now suppressed for all of them (D184), but nothing distinguishes *you
+  may not read this* from *there is nothing here* in the sentence the reader gets.
+  A ruling, not a fix. Found by `k8s-admin`, 2026-08-30
 
 ## Ruled out
 

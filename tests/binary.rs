@@ -74,7 +74,10 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
     // first line and not the whole text because the prose below still says `--live` while
     // the synopsis offers no way to reach it.
     let synopsis = stderr.lines().next().expect("the usage has a first line");
-    for named in ["--analysis", "--live", "--context"] {
+    // `--namespace` joined the list when the scoping box landed. It is here for the reason the
+    // three beside it are: the synopsis is the only place a reader learns the flag exists, and
+    // a flag that scopes what the tool reads is the one a reader most needs offered.
+    for named in ["--analysis", "--live", "--context", "--namespace"] {
         assert!(
             synopsis.contains(named),
             "the synopsis does not offer {named}, so nothing tells a reader how to reach \
@@ -173,6 +176,97 @@ fn a_crafted_path_leaves_the_process_with_no_control_character_on_stderr() {
     assert!(
         line.contains("no-such[2Jfixture.json"),
         "the path was stripped away along with the escape: {stderr:?}"
+    );
+}
+
+/// **A `--namespace` that names nothing usable is refused before anything is connected to.**
+///
+/// **The order is the whole assertion, and only a process can show it.** `mistyped` runs before
+/// the mode is chosen, so a bad namespace has to cost a sentence and not a round trip — and the
+/// unit tests in `src/main_tests.rs` call `mistyped` directly, which cannot tell *refused first*
+/// from *refused after a connection was attempted*. `KUBECONFIG` here points at a path that
+/// cannot be one, so a run that reached the connect would say *no cluster to watch*: that
+/// sentence is the canary, and its absence is what proves nothing was dialled.
+///
+/// **All three shapes the flag can be given nothing usable in**, and both spellings of each,
+/// because the flag has two and a refusal that only covers the long one lets the short one
+/// through into a URL (`k8s::path_safe`, the security gate's *names build paths* row):
+/// the word alone at the end of the line, `=` with nothing after it, and a value that is not a
+/// namespace name.
+///
+/// **A missing value is refused rather than ignored, and that is the half worth a process
+/// test.** `k8rs --live -n "$NS"` with `NS` unset is the commonest way here; swallowing it would
+/// watch **every** namespace, which is the opposite of what the reader asked for and has no line
+/// on screen to notice it by.
+#[test]
+fn a_namespace_that_names_nothing_usable_is_refused_before_anything_connects() {
+    for args in [
+        vec!["--live", "--namespace"],
+        vec!["--live", "-n"],
+        vec!["--live", "--namespace="],
+        vec!["--live", "-n="],
+        vec!["--live", "--namespace", "../secrets"],
+        vec!["--live", "-n", "../secrets"],
+        vec!["--live", "--namespace=a/b"],
+        vec!["--live", "-n=.."],
+    ] {
+        let out = k8rs_with_no_kubeconfig(&args);
+
+        assert_eq!(out.status.code(), Some(2), "{args:?} {out:?}");
+        assert!(
+            out.stdout.is_empty(),
+            "{args:?} wrote a report: {:?}",
+            text(out.stdout.clone())
+        );
+        let stderr = text(out.stderr);
+        assert!(
+            stderr.starts_with("k8rs: --namespace needs the name of a namespace"),
+            "{args:?} was not refused for the namespace: {stderr:?}"
+        );
+        assert!(
+            stderr.contains("usage: k8rs "),
+            "{args:?} was refused with no way to see the right spelling: {stderr:?}"
+        );
+        // The canary. `KUBECONFIG` cannot be read, so any run that got as far as connecting
+        // says so — and this refusal has to happen before that.
+        assert!(
+            !stderr.contains("no cluster to watch"),
+            "{args:?} reached the connect before the namespace was checked: {stderr:?}"
+        );
+    }
+}
+
+/// **Invariant 9 at the process boundary for the newest thing argv can put on screen.**
+///
+/// A namespace is echoed back when it is not a name — and *not a name* is exactly the class a
+/// control character lands in, so this sentence is a terminal sink for a value nobody has
+/// stripped before. `sanitize` runs at the interpolation; nothing until now watched what left
+/// the process through it.
+///
+/// **Both halves, for the reason the path test beside it gives**: nothing controlling survives,
+/// **and** the readable part of the value still does. A `sanitize` that returned nothing would
+/// pass the first assertion and leave the reader a sentence naming no namespace at all
+/// (CLAUDE.md § A derived list asserts it found something).
+#[test]
+fn a_crafted_namespace_leaves_the_process_with_no_control_character_on_stderr() {
+    // `ESC`, `CR` and a C1 control — three framings of the class, inside the value rather than
+    // as the whole of one (NOTES § D31). `/` keeps it out of `path_safe` whatever the strip
+    // does, so the arm under test is reached for the same reason on every platform.
+    let crafted = "pay\u{1b}[2J\rments\u{9b}/x";
+
+    let out = k8rs_with_no_kubeconfig(&["--live", "--namespace", crafted]);
+
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let stderr = text(out.stderr);
+    let first = stderr.lines().next().expect("the refusal has a first line");
+    let survivors: Vec<char> = first.chars().filter(|c| c.is_control()).collect();
+    assert!(
+        survivors.is_empty(),
+        "control characters left the process: {survivors:?}\n{stderr:?}"
+    );
+    assert!(
+        first.contains("pay[2Jments/x"),
+        "the namespace was stripped away along with the escape: {stderr:?}"
     );
 }
 

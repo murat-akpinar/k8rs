@@ -121,6 +121,7 @@ use crate::rules::{
     expires_at, minor_version,
 };
 use futures_util::stream::{self, BoxStream, Stream, StreamExt, select_all};
+use k8s_openapi::NamespaceResourceScope;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::certificates::v1::CertificateSigningRequest;
 use k8s_openapi::api::core::v1::{Node, PersistentVolumeClaim, Pod, Service};
@@ -862,6 +863,50 @@ pub enum Fault {
     Unanswered,
 }
 
+impl Fault {
+    /// **Retrying cannot clear this one, so waiting for it is waiting for a person**
+    /// (todo.md § Phase 5, `PRIOR-ART § B4`).
+    ///
+    /// **The one question the bootstrap gate has to ask, and the only place it is answered**
+    /// ([`Watch::settled`]). D28 says a partial list may not be published, and until this
+    /// existed it was read as *nothing may be published while any watch has not listed* — which
+    /// for a watch the cluster **refuses** is forever, because the retry under it never stops
+    /// and never succeeds. A `nodes` watch is cluster-scoped and cannot be granted by a
+    /// namespaced `Role`, so that is the ordinary enterprise developer and not an edge case: the
+    /// tool showed *loading* for the life of the process while `kubectl get pods -n mine`
+    /// answered instantly beside it.
+    ///
+    /// **The line is *will the retry loop, unaided, clear this* and nothing else.** Only
+    /// [`Unanswered`](Fault::Unanswered) is on the other side of it — a socket that died, a
+    /// timeout, a `5xx`, a `429` — and it is exactly the case D28's *do not blank on a blip*
+    /// paragraph was written about: the next poll may well answer, so a watch that is merely
+    /// retrying keeps the gate shut and the driver prints [`Trouble`] lines meanwhile.
+    ///
+    /// **Everything else needs a human before the next attempt can go differently** — RBAC
+    /// edited, a login renewed, a `exec` program repaired, a kubeconfig fixed, a kind that this
+    /// server does not serve. k8rs waiting for it is k8rs waiting for something that is not
+    /// happening on this connection.
+    ///
+    /// **Exhaustive and no `_` arm**, for [`kubeconfig_fault`]'s reason one region up: the
+    /// default a catch-all would pick is *keep the whole tool blank*, and a variant added later
+    /// should stop the build rather than inherit that.
+    pub(crate) fn standing(self) -> bool {
+        match self {
+            Fault::Unanswered => false,
+            // The three kubeconfig faults cannot reach a watch — the client is already built by
+            // then — and they are here because the match is exhaustive, not because a watch can
+            // raise one. Each is still a fact a retry cannot change.
+            Fault::Kubeconfig
+            | Fault::NoContext
+            | Fault::BadEntry
+            | Fault::NoCredential
+            | Fault::Expired
+            | Fault::Refused
+            | Fault::Gone => true,
+        }
+    }
+}
+
 /// **What one `Status` says.**
 ///
 /// **The HTTP code decides and `reason` is the fallback, because each is absent in a shape the
@@ -1047,22 +1092,34 @@ impl Trouble<'_> {
     /// **Why this watch is not delivering**, or `None` for a stream that finished without ever
     /// saying why — the `ended`-with-no-`failure` shape [`Trouble::failure`] names.
     ///
-    /// **Four of `watcher::Error`'s five variants carry a `Status` and three of them wrap it**
-    /// (§ WHAT A THROTTLE LOOKS LIKE): `WatchError` holds one *directly* rather than behind
-    /// `kube::Error::Api`, which is the arm a `403` on the watch verb arrives through after the
-    /// initial LIST has already succeeded.
-    ///
-    /// **`NoResourceVersion` is [`Fault::Unanswered`]** and that is a deliberate collapse: the
-    /// server answered, but with something no watch can be built on, and *k8rs could not read it*
-    /// is the only thing a reader can act on either way.
+    /// **The classification is [`watch_fault`]'s and this is one call of it.** The bootstrap gate
+    /// reads the same error through the same function ([`Watch::settled`]), so a screen and the
+    /// gate can never come to disagree about what one failure meant.
     pub fn fault(&self) -> Option<Fault> {
-        Some(match self.failure? {
-            watcher::Error::InitialListFailed(error)
-            | watcher::Error::WatchStartFailed(error)
-            | watcher::Error::WatchFailed(error) => fault(error),
-            watcher::Error::WatchError(status) => answer(status),
-            watcher::Error::NoResourceVersion => Fault::Unanswered,
-        })
+        self.failure.map(watch_fault)
+    }
+}
+
+/// **What one `watcher::Error` means** — [`Trouble::fault`]'s body, lifted out because
+/// [`Watch::settled`] asks the same question of the same value one region down and § WHAT WENT
+/// WRONG is the *one* place a failure is classified.
+///
+/// **Four of `watcher::Error`'s five variants carry a `Status` and three of them wrap it**
+/// (§ WHAT A THROTTLE LOOKS LIKE): `WatchError` holds one *directly* rather than behind
+/// `kube::Error::Api`, which is the arm a `403` on the watch verb arrives through after the
+/// initial LIST has already succeeded.
+///
+/// **`NoResourceVersion` is [`Fault::Unanswered`]** and that is a deliberate collapse: the server
+/// answered, but with something no watch can be built on, and *k8rs could not read it* is the only
+/// thing a reader can act on either way. It is also the one watch failure
+/// [`Fault::standing`] answers `false` for, which is right: kube re-lists after it.
+fn watch_fault(failure: &watcher::Error) -> Fault {
+    match failure {
+        watcher::Error::InitialListFailed(error)
+        | watcher::Error::WatchStartFailed(error)
+        | watcher::Error::WatchFailed(error) => fault(error),
+        watcher::Error::WatchError(status) => answer(status),
+        watcher::Error::NoResourceVersion => Fault::Unanswered,
     }
 }
 
@@ -1276,12 +1333,53 @@ impl<T: Watched> Watch<T> {
     /// the same as objects the server has sent — a page in flight is invisible here, and no
     /// number in this file can see it.
     fn progress(&self) -> Option<(usize, Option<Time>)> {
-        (!self.complete).then(|| {
+        (!self.complete && !self.settled()).then(|| {
             (
                 self.filling.as_ref().map_or(0, BTreeMap::len),
                 self.last_progress.clone(),
             )
         })
+    }
+
+    /// **This watch has said everything it is going to say without a person intervening**
+    /// (todo.md § Phase 5, `PRIOR-ART § B4`) — the explicit exception NOTES § D28 did not carry.
+    ///
+    /// **It is read by [`Watch::progress`] alone, which is what makes it one change and not
+    /// two.** [`Store::still_listing`] drops a watch this is true of, and [`Store::listed`] is
+    /// derived from that call — so *the screen stops claiming a LIST is moving* and *the gate
+    /// opens* are the same line, and cannot be fixed apart.
+    ///
+    /// **One way to be finished, and it is a standing failure** ([`Fault::standing`]). A refused
+    /// watch runs `Err → Init → list() → 403` forever (§ THE DRIVER), and every `Init` restamps
+    /// [`Listing::since`] — so before this it reported *0 so far, since just now*, several times a
+    /// second, for the life of the process. That is a screen actively lying about progress, and a
+    /// gate that never opened behind it: `snapshot()` answered `None` and every rule was silent,
+    /// including the ones about the four kinds the cluster was serving perfectly.
+    ///
+    /// **What it deliberately does not cover is [`Fault::Unanswered`]**, which is where D28's own
+    /// *do not blank on a blip* paragraph lives: the next poll may answer, the retry is the fix,
+    /// and the driver prints a [`Trouble`] line meanwhile rather than nothing.
+    ///
+    /// **[`Watch::ended`] is not in it either, and that is a decision rather than an oversight.**
+    /// A stream that finished before it listed will also never list, so on the face of it it
+    /// belongs — but it is **unreachable in a running k8rs**: kube's `watcher()` is a
+    /// `stream::unfold` that provably cannot end and [`StandingBackoff`] never closes one
+    /// (§ THE DRIVER). What it *is* reachable from is a test, where `stream::iter` runs out at
+    /// the end of the events the test wrote — so putting it here would open the gate in six
+    /// tests whose whole subject is that D28 keeps it shut, on an artefact of their fixture
+    /// rather than on anything the product does. Closing it needs those fixtures to stop ending,
+    /// which is a box and not a clause (`backlog.md`).
+    ///
+    /// **What the caller then publishes for this kind is an empty list, not a short one.** That
+    /// is a different claim from the partial LIST D28 refuses — a partial one is indistinguishable
+    /// from a small cluster, and this one is announced twice over: [`Store::troubles`] names the
+    /// kind and the verb, and `analysis.rs`'s *Reading what a node has needs permission to list
+    /// nodes* rows draw the same fact where a number would have been.
+    fn settled(&self) -> bool {
+        self.failure
+            .as_ref()
+            .map(watch_fault)
+            .is_some_and(Fault::standing)
     }
 }
 
@@ -1363,6 +1461,19 @@ pub struct Listing {
 pub struct Trouble<'a> {
     /// Which watch.
     pub kind: ObjectKind,
+    /// **Whether this watch ever delivered a complete initial LIST** (`Watch::complete`).
+    ///
+    /// **It is the difference between *stale* and *never read*, which a screen must not
+    /// conflate** (`screens/widgets.md` § 1a: *a vital that cannot be read is blank, never
+    /// guessed*, and one line down, *stale vitals stay visible and say how old they are*). Both
+    /// arrive here as a watch in trouble; only this field tells them apart, and without it the
+    /// header prints a measured `0 nodes` for a refusal and blanks a real count for a blip.
+    ///
+    /// **`false` inside a report means a standing failure, always.** [`Store::snapshot`] answers
+    /// `None` until every watch has listed *or settled*, and settling is a standing failure
+    /// ([`Watch::settled`]) — so a watch that reaches a rendered report unlisted is one the
+    /// cluster refuses, not one that is still working.
+    pub listed: bool,
     /// **The last failure this watch reported and has not recovered from.** `None` beside an
     /// `ended` of `true` is a stream that finished without ever saying why.
     ///
@@ -1411,21 +1522,25 @@ pub struct Trouble<'a> {
     pub ended: bool,
 }
 
-/// **The three facts about a cluster that no watch carries**, handed to the store once
+/// **The four facts about a cluster that no watch carries**, handed to the store once
 /// (NOTES § D169).
 ///
 /// [`Store`] is a store and not a connection: it is fed by five streams and has no client, no
-/// kubeconfig and no way to ask a server anything. These three come from [`connect`] — one from
-/// the API server, two from the reader's own file — so somebody has to carry them across, and
-/// [`Identity::of`] is that one step. Every field is `Option` and `None` is *nobody looked*
-/// (NOTES § D129), which is exactly what a [`Store::default`] that was never identified is.
+/// kubeconfig and no way to ask a server anything. These come from [`connect`] — one from the API
+/// server, two from the reader's own file, and one from what the run was asked for and what the
+/// cluster allowed ([`Coverage`]) — so somebody has to carry them across, and [`Identity::of`] is
+/// that one step. Every field is `Option` and `None` is *nobody looked* (NOTES § D129), which is
+/// exactly what a [`Store::default`] that was never identified is.
 ///
-/// **All three are already stripped and bounded where they were read** — [`session`] for the
-/// version, [`kubeconfig_context`] and [`kubeconfig_certificate`] for the other two — so nothing
-/// here strips a second time. The certificate is bytes and is never printed as text: the only
-/// thing that reads it is `rules.rs`'s PEM parser.
+/// **Each is already stripped and bounded where it was read** — [`session`] for the version,
+/// [`kubeconfig_context`] and [`kubeconfig_certificate`] for the next two — so nothing here strips
+/// a second time. The certificate is bytes and is never printed as text: the only thing that reads
+/// it is `rules.rs`'s PEM parser. **The namespace is the one whose guard is not a strip**: it goes
+/// into a URL as well as onto a screen, so [`coverage`] runs [`namespace_name`] over it and whoever
+/// prints it owes [`text`]'s job separately — `main.rs`'s header does it at the sentence.
 ///
-/// **Taken once at connect and never refreshed, so all three can be stale as well as absent**
+/// **Taken once at connect and never refreshed, so every one of them can be stale as well as
+/// absent**
 /// (`k8s-admin`, 2026-08-28). [`Store::identify`] runs after [`connect`] and the per-watch
 /// reconnect never calls it again (NOTES § D161), so these are frozen for the life of the process.
 /// A control plane upgraded while k8rs is open leaves Versions counting kubelets against the old
@@ -1450,6 +1565,15 @@ pub(crate) struct Identity {
     /// [`crate::rules::ClusterSnapshot::client_certificate`] — C1's PEM bytes, the certificate
     /// alone and never the key ([`kubeconfig_certificate`]).
     pub(crate) client_certificate: Option<Vec<u8>>,
+    /// [`crate::rules::ClusterSnapshot::namespace_scope`] — **how much of the cluster the watches
+    /// above this store are actually covering**, `None` for every namespace.
+    ///
+    /// **It arrives here rather than through a stream for the reason the three above do**: no
+    /// watch carries it. It is decided once, at [`connect_with`], out of `--namespace` and out of
+    /// what the cluster answered a cluster-wide pod LIST with ([`Coverage`]) — and the rules read
+    /// it as one fact, because to a rule *the reader asked for one namespace* and *the cluster
+    /// allows only one* are the same fact (NOTES § D46).
+    pub(crate) namespace_scope: Option<String>,
 }
 
 impl Identity {
@@ -1476,6 +1600,11 @@ impl Identity {
                 .cloned(),
             context: session.context.clone(),
             client_certificate: session.client_certificate.clone(),
+            // **The scope the watches were actually built with, and not the flag that was
+            // typed** ([`Coverage::namespace`]): a `--namespace` that was never honoured, or a
+            // fallback the reader never asked for, would both make this field a claim about
+            // intent rather than about the list the rules are reading.
+            namespace_scope: session.coverage.namespace().map(str::to_string),
         }
     }
 }
@@ -1506,7 +1635,7 @@ pub struct Store {
     /// `Err` is a fetch that did not produce one, kept so the same reference is not asked
     /// about again on the next pass ([`Fault`]).
     owners: BTreeMap<String, Result<WorkloadSnapshot, Fault>>,
-    /// **The three the watches cannot deliver** ([`Identity`]) — empty until [`Store::identify`]
+    /// **The facts the watches cannot deliver** ([`Identity`]) — empty until [`Store::identify`]
     /// is called, which the file driver never does and the live one does once.
     identity: Identity,
     /// **Rule C3's input, filed by [`Store::certificates_fetched`]** — `None` until somebody
@@ -1627,46 +1756,66 @@ impl Store {
     /// it, and either alone is a real state: a watch retrying a 403 has no `ended`, and a stream
     /// that finished cleanly has no `failure`.
     ///
-    /// **The gate is not closed by either** (NOTES § D28, § D162). A watch that ends before it
-    /// lists leaves [`Store::snapshot`] shut already, and one that ends after listing holds a
-    /// real answer that is merely no longer fresh — blanking the screen would replace *stale,
-    /// and it says so* with *nothing, and it does not*.
+    /// **The gate is not closed by either, and since the namespace box a standing refusal does
+    /// not *hold* it either** (NOTES § D28, § D162, todo.md § Phase 5). A watch that ends after
+    /// listing holds a real answer that is merely no longer fresh — blanking the screen would
+    /// replace *stale, and it says so* with *nothing, and it does not*. A watch the cluster
+    /// **refuses** before it lists used to leave [`Store::snapshot`] shut for the life of the
+    /// process; it now counts as answered ([`Watch::settled`]), and this line is the other half of
+    /// that answer — the kind is named here, with its verb and its resource, instead of the whole
+    /// tool showing *loading*. A watch that *ends* before it lists still holds the gate, and
+    /// [`Watch::settled`] says why that one was left alone.
     ///
-    /// # This call wins over [`Store::still_listing`] for the same kind
+    /// # This call and [`Store::still_listing`] can no longer disagree about a kind
     ///
-    /// **A kind reported here is not listing, whatever that call says about it.** A refused watch
-    /// re-`Init`s in a tight loop and every `Init` refreshes [`Listing::since`], so it appears
-    /// there as a LIST that is moving briskly (NOTES § D150 explains why `Init` counts *for that
-    /// question*). A caller joins the two by kind; where both answer, this one is the truth and
-    /// that one is an artefact of the retry. The reasoning is written out at
-    /// [`Store::still_listing`], which is the call that can mislead.
+    /// **A refused watch is reported here and not there.** It re-`Init`s in a tight loop and
+    /// every `Init` refreshes [`Listing::since`], so it used to appear there as a LIST moving
+    /// briskly (NOTES § D150 explains why `Init` counts *for that question*) and callers were
+    /// told to join the two by kind and let this one win. [`Watch::settled`] removes it from that
+    /// call instead, so a screen reading one and not the other is no longer wrong.
     ///
     /// **The words are the caller's**, exactly as for [`Store::still_listing`]: this returns
     /// facts, and invariant 14's plain language is `views.rs`'s.
     pub fn troubles(&self) -> Vec<Trouble<'_>> {
+        // Five rows of four values rather than five `&Watch<_>`: the five watches carry three
+        // different element types, so there is no one reference type to put in an array.
         [
-            (ObjectKind::Pod, &self.pods.failure, self.pods.ended),
-            (ObjectKind::Node, &self.nodes.failure, self.nodes.ended),
+            (
+                ObjectKind::Pod,
+                &self.pods.failure,
+                self.pods.ended,
+                self.pods.complete,
+            ),
+            (
+                ObjectKind::Node,
+                &self.nodes.failure,
+                self.nodes.ended,
+                self.nodes.complete,
+            ),
             (
                 ObjectKind::Deployment,
                 &self.deployments.failure,
                 self.deployments.ended,
+                self.deployments.complete,
             ),
             (
                 ObjectKind::StatefulSet,
                 &self.stateful_sets.failure,
                 self.stateful_sets.ended,
+                self.stateful_sets.complete,
             ),
             (
                 ObjectKind::DaemonSet,
                 &self.daemon_sets.failure,
                 self.daemon_sets.ended,
+                self.daemon_sets.complete,
             ),
         ]
         .into_iter()
-        .filter(|(_, failure, ended)| failure.is_some() || *ended)
-        .map(|(kind, failure, ended)| Trouble {
+        .filter(|(_, failure, ended, _)| failure.is_some() || *ended)
+        .map(|(kind, failure, ended, listed)| Trouble {
             kind,
+            listed,
             failure: failure.as_ref(),
             ended,
         })
@@ -1698,20 +1847,22 @@ impl Store {
     /// to be guessed at. **How the other four behave at size is not measured** and no claim about
     /// it is made here.
     ///
-    /// # A kind in [`Store::troubles`] is not listing, whatever this call says about it
+    /// # A watch that is not coming back is not listing, and this call no longer says it is
     ///
-    /// **These two are siblings and have to be read together, because on one shape this one
-    /// reads healthy and is wrong.** A watch the cluster refuses runs `Err → Init → list() → 403`
-    /// with no backoff (§ THE DRIVER), and `Init` stamps [`Listing::since`] every time round
-    /// (NOTES § D150, deliberately — an `Init` proves the watch *began*). So a permanently
-    /// refused watch reports *pods, 0 so far, since just now*, several times a second, forever:
-    /// D150's separator is *a hung LIST produces numbers that do not move*, and this one's move
-    /// beautifully while nothing whatever is happening.
+    /// **On one shape this used to read healthy and be wrong, and the fix is at the source rather
+    /// than in a rule for callers to remember.** A watch the cluster refuses runs
+    /// `Err → Init → list() → 403` (§ THE DRIVER), and `Init` stamps [`Listing::since`] every
+    /// time round (NOTES § D150, deliberately — an `Init` proves the watch *began*). So a
+    /// permanently refused watch reported *pods, 0 so far, since just now*, several times a
+    /// second, forever: D150's separator is *a hung LIST produces numbers that do not move*, and
+    /// this one's moved beautifully while nothing whatever was happening. [`Watch::settled`] now
+    /// drops it here, so the two calls cannot disagree and no caller has to join them to be
+    /// right.
     ///
-    /// **[`Store::troubles`] is what saves it, and only for a caller who joins them by kind and
-    /// lets `Trouble` win.** Said here and there rather than in one of the two, because a screen
-    /// that reads one of these and not the other is the whole failure — and this is the file's
-    /// own version of the two-rules-one-container defect it has paid most for.
+    /// **A watch that is failing *transiently* is still reported here, and that is the same
+    /// decision rather than a leftover.** `Init` restamping `since` is then true: a LIST really
+    /// is being retried, and it may well land. [`Store::troubles`] names it in parallel, which is
+    /// what tells *this is taking a while* from *this is taking a while and erroring*.
     ///
     /// **The words are the caller's.** This returns facts, not sentences: invariant 14's plain
     /// language is the screen's decision and `views.rs` is not this file's.
@@ -1735,11 +1886,13 @@ impl Store {
         .collect()
     }
 
-    /// Every initial LIST has landed, so there is something honest to publish (NOTES § D28).
+    /// Every initial LIST has landed **or is never going to**, so there is something honest to
+    /// publish (NOTES § D28, and [`Watch::settled`] is the exception D28 did not carry).
     ///
     /// Derived from [`Store::still_listing`] rather than from the five fields a second time: the
     /// gate and the state the screen draws the wait from cannot disagree if only one of them
-    /// reads the flags.
+    /// reads the flags. That is also why the exception is written once, in [`Watch::progress`],
+    /// and not spelled again here — a second copy of it is a gate and a screen coming apart.
     fn listed(&self) -> bool {
         self.still_listing().is_empty()
     }
@@ -1805,9 +1958,11 @@ impl Store {
             server_version: self.identity.server_version.clone(),
             context: self.identity.context.clone(),
             client_certificate: self.identity.client_certificate.clone(),
-            // `None` is every namespace as far as this store knows. The `--namespace` box is
-            // further down Phase 5.
-            namespace_scope: None,
+            // **`None` is every namespace, and it is the store's own field rather than a
+            // guess** ([`Identity::namespace_scope`]). A store nobody identified — the file
+            // driver's, and every test that has no cluster — answers `None`, which is exactly
+            // what a fixture on disk covers.
+            namespace_scope: self.identity.namespace_scope.clone(),
             // **`None` is *nobody looked*, and it is not `Some(vec![])`** (NOTES § D129). None of
             // these is watched (invariant 6); [`Store::reports_fetched`] fills them from
             // [`report_lists`] on a run that draws reports, and each stays `None` when nobody
@@ -1865,24 +2020,37 @@ impl Store {
 // session, and **nothing retries it** — [`Store::unresolved_owners`]'s rule (NOTES § D151): a
 // standing refusal re-asked once a pass is the retry loop the security gate forbids by name.
 //
-// **The five beside it are namespaced kinds read cluster-wide, which is a different refusal with
-// the same answer.** `Api::all` sends `/api/v1/services`, not `/api/v1/namespaces/x/services`, and
-// a request that carries no namespace can only be authorized cluster-wide — so what it needs is
-// `list services` granted by a ClusterRole, which a namespaced Role never provides however many
-// namespaces that Role covers.
+// **The five beside it are namespaced kinds, and on an unscoped run they are read cluster-wide,
+// which is a different refusal with the same answer.** `Api::all` sends `/api/v1/services`, not
+// `/api/v1/namespaces/x/services`, and a request that carries no namespace can only be authorized
+// cluster-wide — so what it needs is `list services` granted by a ClusterRole, which a namespaced
+// Role never provides however many namespaces that Role covers. **On a scoped run they follow the
+// scope instead** and that refusal does not arise; see the paragraph below.
 //
 // **The two refusals are different populations and are not ordered, which an earlier draft here
 // got backwards** (`k8s-admin`, 2026-08-29, against upstream's `viewRules()`). The built-in `view`
 // ClusterRole grants every one of the five this region fetches — `replicasets`, `services`,
 // `endpointslices`, `persistentvolumeclaims`, `poddisruptionbudgets` — and grants
 // `certificatesigningrequests` in neither `view` nor `edit`. So the ordinary cluster-wide
-// read-only principal gets the five and is refused the sixth, while a namespaced Role loses all
-// six. Neither refusal is *likelier*; they are refused by different roles.
+// read-only principal gets the five and is refused the sixth, while a namespaced Role scoped to
+// its own namespace now gets the five there and is still refused the sixth. Neither refusal is
+// *likelier*; they are refused by different roles.
 //
 // It degrades the same way whichever it is: [`ReportLists`] keeps that one field `None`, the pane
-// draws *not checked*, and nothing asks again. **The `--namespace` box is what changes the path,
-// not the grant** — it is further down Phase 5 (`Store::snapshot`'s `namespace_scope`), and until
-// it lands every read here is cluster-wide.
+// draws *not checked*, and nothing asks again.
+//
+// **The five namespaced ones follow the scope, since 2026-08-29** ([`scoped`], the same function
+// the watches use). The paragraph above described the state before the `--namespace` box landed
+// and stayed false for one review round after it: a developer whose `Role` grants Services,
+// EndpointSlices, PVCs and PDBs **in their own namespace** was told *Ask for permission to list
+// services … across the whole cluster* — access they do not need, which is `PRIOR-ART § B4` by
+// name (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R9). `screens/analysis.md`
+// records the design the other way round: *Waste runs unchanged when the view is scoped, because
+// every input it has is namespaced*.
+//
+// **`certificatesigningrequests` is the one that stays cluster-wide**, because it is
+// cluster-scoped and there is no namespaced path to send it down. Its refusal under a namespaced
+// role is unchanged and is still the ordinary case.
 
 /// **How long one fetch on this path gets before it is the same silence a refusal is** — ten
 /// seconds (§ WHAT A REPORT ASKS FOR).
@@ -1906,9 +2074,15 @@ impl Store {
 /// deadline on them is a decision about what k8rs does when a cluster half-answers — which is a
 /// box, not a line. What is true and worth writing down is that the hole is the same one.
 ///
-/// **`pub(crate)` because the one call site is `main.rs`'s**, which is the only difference from
-/// [`SERVING_PROBE`]: the deadline is a parameter for that constant's reason — a bound nothing can
-/// wait out is a bound nothing tests — and the caller that has to be honest about it is the driver.
+/// **The scope probe reuses it rather than inventing a second number** ([`coverage`]). It bounds
+/// the same failure for the same reason — a call between the client and the first watch, with
+/// nothing under it that has a read deadline — and two constants for one hang is two numbers to
+/// keep in step.
+///
+/// **`pub(crate)` because one of its two call sites is `main.rs`'s**, which is the only
+/// difference from [`SERVING_PROBE`]: the deadline is a parameter for that constant's reason — a
+/// bound nothing can wait out is a bound nothing tests — and the caller that has to be honest
+/// about it is the driver.
 pub(crate) const REPORT_FETCH: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// **One list, whole, through the one ingest door, or the silence that is every failure** —
@@ -1960,22 +2134,21 @@ pub(crate) const REPORT_FETCH: std::time::Duration = std::time::Duration::from_s
 /// **Every object goes through [`ingest`] like every other**, which is the strip, the bound and
 /// the prune at once (invariant 9, § THE INGEST GUARD).
 ///
-/// **`Api::all` and not `Api::default_namespaced`**, for every one of the six — a report reads the
-/// cluster, and the namespaced five are read cluster-wide until the `--namespace` box says
-/// otherwise (the region doc, on what that costs in refusals).
-async fn whole_list<K, T>(client: &Client, deadline: std::time::Duration) -> Option<Vec<T>>
+/// **The `Api` is the caller's and not built here**, which is what lets one body serve both the
+/// cluster-scoped kind and the five that follow the scope ([`scoped`], the region doc). Building it
+/// here would need a `Coverage` and a `NamespaceResourceScope` bound that
+/// `certificatesigningrequests` cannot satisfy, and a second copy of this body is the second place
+/// the deadline or the ingest door can be forgotten.
+async fn whole_list<K, T>(api: Api<K>, deadline: std::time::Duration) -> Option<Vec<T>>
 where
     K: Resource + Clone + std::fmt::Debug + k8s_openapi::serde::de::DeserializeOwned + 'static,
     <K as Resource>::DynamicType: Default,
     T: From<K> + Bounded,
 {
-    let listed = tokio::time::timeout(
-        deadline,
-        Api::<K>::all(client.clone()).list(&ListParams::default()),
-    )
-    .await
-    .ok()?
-    .ok()?;
+    let listed = tokio::time::timeout(deadline, api.list(&ListParams::default()))
+        .await
+        .ok()?
+        .ok()?;
     Some(listed.items.into_iter().map(ingest).collect())
 }
 
@@ -1999,7 +2172,7 @@ pub(crate) async fn certificate_requests(
     client: &Client,
     deadline: std::time::Duration,
 ) -> Option<Vec<CertificateRequestSnapshot>> {
-    whole_list::<CertificateSigningRequest, _>(client, deadline).await
+    whole_list::<CertificateSigningRequest, _>(Api::all(client.clone()), deadline).await
 }
 
 /// **Every ReplicaSet the cluster has** — Waste's *parked at 0 replicas* row
@@ -2018,18 +2191,20 @@ pub(crate) async fn certificate_requests(
 /// case; the emptiness one does not, and a wrong reason is what gets repaired into a wrong fix.
 pub(crate) async fn replica_sets(
     client: &Client,
+    coverage: &Coverage,
     deadline: std::time::Duration,
 ) -> Option<Vec<WorkloadSnapshot>> {
-    whole_list::<ReplicaSet, _>(client, deadline).await
+    whole_list::<ReplicaSet, _>(scoped(client.clone(), coverage), deadline).await
 }
 
 /// **Every Service the cluster has** — Waste's *the 503 nobody can explain*, the selector half
 /// ([`crate::rules::ClusterSnapshot::services`]).
 pub(crate) async fn services(
     client: &Client,
+    coverage: &Coverage,
     deadline: std::time::Duration,
 ) -> Option<Vec<ServiceSnapshot>> {
-    whole_list::<Service, _>(client, deadline).await
+    whole_list::<Service, _>(scoped(client.clone(), coverage), deadline).await
 }
 
 /// **Every EndpointSlice the cluster has** — the other half of that row, and the reason it does
@@ -2042,18 +2217,20 @@ pub(crate) async fn services(
 /// together by [`report_lists`] rather than one at a time by whoever remembers.
 pub(crate) async fn endpoint_slices(
     client: &Client,
+    coverage: &Coverage,
     deadline: std::time::Duration,
 ) -> Option<Vec<EndpointSliceSnapshot>> {
-    whole_list::<EndpointSlice, _>(client, deadline).await
+    whole_list::<EndpointSlice, _>(scoped(client.clone(), coverage), deadline).await
 }
 
 /// **Every PersistentVolumeClaim the cluster has** — Waste's *a disk was reserved for it and no
 /// pod ever mounted it* ([`crate::rules::ClusterSnapshot::claims`]).
 pub(crate) async fn claims(
     client: &Client,
+    coverage: &Coverage,
     deadline: std::time::Duration,
 ) -> Option<Vec<ClaimSnapshot>> {
-    whole_list::<PersistentVolumeClaim, _>(client, deadline).await
+    whole_list::<PersistentVolumeClaim, _>(scoped(client.clone(), coverage), deadline).await
 }
 
 /// **Every PodDisruptionBudget the cluster has** — the Drain safety report's whole subject
@@ -2065,9 +2242,10 @@ pub(crate) async fn claims(
 /// empty and the pane draws *not checked*.
 pub(crate) async fn disruption_budgets(
     client: &Client,
+    coverage: &Coverage,
     deadline: std::time::Duration,
 ) -> Option<Vec<DisruptionBudgetSnapshot>> {
-    whole_list::<PodDisruptionBudget, _>(client, deadline).await
+    whole_list::<PodDisruptionBudget, _>(scoped(client.clone(), coverage), deadline).await
 }
 
 /// **The five on-demand lists a report joins, as one value** — what [`report_lists`] answers and
@@ -2118,13 +2296,17 @@ pub(crate) struct ReportLists {
 /// **Once per session, never on a timer** — the region doc's rule, NOTES § D151. A kubelet that
 /// starts waiting to join after this has run is not seen until the next connect, which is the
 /// ceiling [`Identity`] already states for the three facts beside it.
-pub(crate) async fn report_lists(client: &Client, deadline: std::time::Duration) -> ReportLists {
+pub(crate) async fn report_lists(
+    client: &Client,
+    coverage: &Coverage,
+    deadline: std::time::Duration,
+) -> ReportLists {
     let (replica_sets, services, endpoint_slices, claims, disruption_budgets) = tokio::join!(
-        replica_sets(client, deadline),
-        services(client, deadline),
-        endpoint_slices(client, deadline),
-        claims(client, deadline),
-        disruption_budgets(client, deadline),
+        replica_sets(client, coverage, deadline),
+        services(client, coverage, deadline),
+        endpoint_slices(client, coverage, deadline),
+        claims(client, coverage, deadline),
+        disruption_budgets(client, coverage, deadline),
     );
     ReportLists {
         replica_sets,
@@ -3936,10 +4118,14 @@ pub fn capabilities(served: &[(ApiResource, ApiCapabilities)]) -> Option<BTreeSe
 /// word is refused here and the empty *group* is allowed by [`Fetch::table`], because the core
 /// group is spelled `""` and contributes no path segment.
 ///
-/// **The namespace goes through it too**, and for a reason that is about time rather than about
-/// trust: today it is `--namespace`, and the picker further down Phase 5 fills it from the
-/// cluster's own list. A predicate that is applied to every word cannot be the one that was
-/// forgotten when the source changed.
+/// **The namespace goes through it too, and it is the *sink* rather than the check**
+/// ([`namespace_name`], `k8s-admin` 2026-08-29). This predicate answers *can this word go in a
+/// path*, and it says yes to `PAYMENTS`, to `foo.bar` and to eight kilobytes of them — none of
+/// which is a namespace, and all of which the API server answers `200` and an empty list for, so
+/// the reader gets *nothing is broken* over a namespace that does not exist. What a namespace may
+/// look like is [`namespace_name`]'s; this stays where it is, applied to every word that becomes a
+/// segment, because a predicate that is applied to every word cannot be the one that was forgotten
+/// when the source changed.
 ///
 /// **A denylist of `/`, `..`, `?` and `#` was the other way to write this, and it is the wrong
 /// one** — for invariant 1's reason one layer down. Percent-encoding, `;` parameters and whatever
@@ -3952,10 +4138,50 @@ pub fn capabilities(served: &[(ApiResource, ApiCapabilities)]) -> Option<BTreeSe
 /// characters is *offered with its name stripped*, and a runaway plural is *offered shortened*,
 /// and neither survives this predicate afterwards. What a screen should show for a row that cannot
 /// be opened is not this file's to settle alone.
-fn path_safe(word: &str) -> bool {
+pub(crate) fn path_safe(word: &str) -> bool {
     word.starts_with(|character: char| character.is_ascii_alphanumeric())
         && word.chars().all(|character| {
             character.is_ascii_alphanumeric() || character == '-' || character == '.'
+        })
+}
+
+/// **The longest a namespace name can be** — 63, because a namespace name is a DNS-1123 *label*
+/// and that is the label limit (`apimachinery/pkg/util/validation`, `DNS1123LabelMaxLength`).
+///
+/// **`pub(crate)` because `main.rs` bounds what it echoes back with it.** A word refused for being
+/// eight kilobytes long may not be printed at eight kilobytes to say so.
+pub(crate) const NAMESPACE_MAX: usize = 63;
+
+/// **Whether a word is a namespace name** — the check `--namespace` is refused by and the
+/// kubeconfig's own namespace is filtered with (`k8s-admin`, 2026-08-29).
+///
+/// **[`path_safe`] was standing here and it is the wrong predicate**, because it answers a
+/// different question: *can this go in a URL path*. Measured against a real API server, three
+/// values it accepts are not namespaces and none of them fails loudly — `PAYMENTS` and `foo.bar`
+/// both come back `200` with an empty `items`, and an 8 KiB name produces an 8 218-byte header
+/// line and 8 241-byte request paths. **An empty list is the one wrong answer this tool must never
+/// give**, because the report over it reads *nothing is broken*.
+///
+/// **The rule is Kubernetes' own and is not invented here**: a namespace name is a DNS-1123 label
+/// — lowercase alphanumerics and `-`, starting and ending with an alphanumeric, at most
+/// [`NAMESPACE_MAX`] characters (`apimachinery`'s `IsDNS1123Label`, which `ValidateNamespaceName`
+/// is built from). It is deliberately **narrower** than [`path_safe`] in every direction rather
+/// than a superset of it: no dot, no uppercase, and a length.
+///
+/// **argv is the first unbounded source a name has ever come from here.** Every other caller of
+/// [`path_safe`] is handed a string the API server already bounded; `--namespace` is handed
+/// whatever a shell had (the security gate's *sizes are bounded* row).
+pub(crate) fn namespace_name(word: &str) -> bool {
+    !word.is_empty()
+        && word.len() <= NAMESPACE_MAX
+        && word.starts_with(|character: char| {
+            character.is_ascii_lowercase() || character.is_ascii_digit()
+        })
+        && word.ends_with(|character: char| {
+            character.is_ascii_lowercase() || character.is_ascii_digit()
+        })
+        && word.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
         })
 }
 
@@ -4649,6 +4875,229 @@ impl Browsing {
 // cleared and a second stream feeding the same watch would leave a permanent *stopped* banner
 // over a live kind.
 
+/// **The namespace k8rs falls back to when the cluster refuses a cluster-wide pod LIST and the
+/// context names none** (NOTES § D5).
+///
+/// **kubectl's own substitution**, which is what makes it the least surprising answer: kube spells
+/// it in `Config::default_namespace` (`config/mod.rs:318-322`) for exactly this hole. It is
+/// deliberately *not* what [`kubeconfig_namespace`] returns for a context with no `namespace:` —
+/// that one answers `None` on purpose, because a screen opening on a namespace the file never
+/// named is a filter the reader cannot see the reason for. Here there is a reason, it is printed,
+/// and the alternative is a tool with nothing in it.
+const FALLBACK_NAMESPACE: &str = "default";
+
+/// **How much of the cluster this session's watches cover, and why** (NOTES § D5, § D46).
+///
+/// **Three states and not an `Option<String>`, because the reader is owed the cause and the rules
+/// are not.** `--namespace payments` and a `403` on the cluster-wide pod list produce the
+/// identical *scope* — [`crate::rules::ClusterSnapshot::namespace_scope`] carries one field for
+/// both, and every rule and report that branches on it was written that way — but one of them is
+/// something the reader typed a second ago and the other is a permission they may not know they
+/// lack. A screen that cannot tell them apart can only stay silent about the second, which is
+/// `PRIOR-ART § B4` exactly: a denied permission has to degrade one feature *and say so*.
+///
+/// **The two namespaced arms are the same fact to [`Identity::namespace_scope`]**, which is
+/// [`Coverage::namespace`]'s whole job — the collapse happens once, on the way to the rules, and
+/// the cause stays here for whoever draws.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Coverage {
+    /// Every namespace — the ordinary run, and the one the permanent watch was designed for
+    /// (invariant 6, NOTES § D28).
+    Cluster,
+    /// **`--namespace`, or whatever a later namespace picker sets** — the reader's own choice, and
+    /// nothing is wrong.
+    ///
+    /// **It is also where a value that is not a namespace name lands**, narrowed to the context's
+    /// namespace or [`FALLBACK_NAMESPACE`] rather than dropped ([`coverage`]). Unreachable today —
+    /// `main.rs` refuses one with a sentence, exit 2 — and the arm exists so that a defence
+    /// nobody can trip cannot default to the widest scope in the program. It says nothing on
+    /// stderr, which is the only honest thing left: the run is scoped to a namespace, and the
+    /// header names it.
+    Asked(String),
+    /// **The cluster-wide pod LIST came back `403`, so this is the context's namespace — or
+    /// [`FALLBACK_NAMESPACE`] where the context names none and that guess was checked.**
+    ///
+    /// **A namespace-scoped user must get a working tool, not an empty one** (NOTES § D5). This
+    /// is the arm that earns the security gate's *a 403 degrades that one feature* row: the
+    /// feature that degrades is *the whole cluster*, and what replaces it is one namespace rather
+    /// than nothing.
+    Refused(String),
+    /// **Refused cluster-wide *and* in the namespace k8rs had to guess** — the watches still point
+    /// at [`FALLBACK_NAMESPACE`], and nothing they read can be trusted.
+    ///
+    /// **The guess was the defect** (`reports/2026-08-29-namespace-scope-under-a-real-role.md`
+    /// § R1). On the ordinary platform-issued kubeconfig — a namespaced `RoleBinding` and a
+    /// context that names no namespace — `default` is the one namespace the developer is *not*
+    /// granted, so the run k8rs called scoped read nothing at all and said so nowhere. This arm is
+    /// what a probe of the guess turns that into: a sentence, rather than a fallback presented as
+    /// if it had worked.
+    ///
+    /// **It still carries the namespace and the watches still ask there**, which is deliberate.
+    /// Widening back to the cluster would be the widest scope as a failure default; pointing
+    /// nowhere would leave nothing to recover into when the grant arrives, and a grant arriving
+    /// mid-run *is* picked up (§ THE DRIVER, measured at R7). What the reader gets meanwhile is
+    /// five watch-trouble lines and no health claim.
+    Blind(String),
+}
+
+impl Coverage {
+    /// **The one namespace these watches cover, or `None` for all of them** — the collapse
+    /// `rules.rs` reads (NOTES § D46).
+    pub(crate) fn namespace(&self) -> Option<&str> {
+        match self {
+            Coverage::Cluster => None,
+            Coverage::Asked(namespace)
+            | Coverage::Refused(namespace)
+            | Coverage::Blind(namespace) => Some(namespace),
+        }
+    }
+}
+
+/// **What the watches will be built to cover** — `--namespace` if it was given, otherwise
+/// whatever a cluster-wide pod LIST says this login is allowed (NOTES § D5, todo.md § Phase 5).
+///
+/// **One extra round trip at connect, and only on a run that did not name a namespace.** It is a
+/// LIST of **one** pod — `limit=1` — because what is being asked is *am I allowed*, and the
+/// server decides that before it reads a single object. A reader who typed `--namespace` has
+/// already answered the question, so nothing is sent for them.
+///
+/// # Why a probe and not a fallback on the watch itself
+///
+/// **A watch cannot change what it is watching.** `watcher()` is handed an `Api` at construction
+/// and the stream is built once, for the life of the process (§ THE DRIVER — `ended` is never
+/// cleared, so a second stream feeding the same [`Watch`] leaves a permanent *stopped* banner
+/// over a live kind). So *fall back after the 403 arrives* means tearing a watch down and
+/// standing another one up, and the one thing this file must never do is give a watch a second
+/// stream. Deciding before they are built costs one round trip and no machinery at all.
+///
+/// **Only a `403` narrows the scope, and that is the half worth stating.** A timeout, a `5xx`, a
+/// socket that died — [`Fault::Unanswered`] — all leave this at [`Coverage::Cluster`]: narrowing
+/// on no evidence would silently hide four fifths of a cluster because a link was slow for a
+/// second, and the watches' own retry is the right answer to that. A `401` does not narrow
+/// either: the login is expired, not scoped, and every namespace is equally refused.
+///
+/// **It never retries** (the security gate). One LIST, one answer, and whatever comes back the
+/// run continues — there is no loop here and nothing above it asks again.
+///
+/// **So the answer is a photograph, and that is the ceiling rather than an omission** — the same
+/// one [`Identity`] states for the three facts beside it. A role widened while k8rs is running
+/// leaves the run scoped until it is restarted; a role *narrowed* is caught by the watches
+/// themselves, which start failing and say so ([`Store::troubles`]). The refresh belongs to the
+/// phase that has a namespace picker to trigger one from.
+///
+/// **Bounded by [`REPORT_FETCH`]'s ten seconds, reusing that constant rather than inventing a
+/// second number.** The hang it bounds is the same one: nothing under a kube call has a read
+/// deadline (`Config::read_timeout` is `None` in every constructor), and this call sits between
+/// building the client and starting the first watch — so an unbounded one is a tool that has
+/// connected and will never draw. Timing out is [`Fault::Unanswered`] by the paragraph above, so
+/// it stays cluster-wide.
+///
+/// **A namespace that is not a namespace name is refused from either source**
+/// ([`namespace_name`], which replaced [`path_safe`] here on 2026-08-29). The asked-for one is
+/// already refused, with a sentence, where the reader typed it — `main.rs` — so this arm is
+/// defence and not the message; the kubeconfig's is not checked anywhere else, and [`text`] only
+/// removes unprintable characters, so `../secrets` would survive it.
+///
+/// **Defence that fails *narrow*, which is a fix and not a preference** (`k8s-admin`,
+/// 2026-08-29). The arm above used to drop an unusable `--namespace` and fall through to the
+/// probe, so the one thing a broken narrowing check could produce was the **widest** scope in the
+/// program. It now goes to the fallback like any other run that cannot have what it asked for.
+///
+/// # What the probe asks about, and what its answer is taken to cover
+///
+/// **It asks about pods and the answer scopes four kinds** — pods, Deployments, StatefulSets and
+/// DaemonSets ([`watches`]) — plus the five namespaced report lists ([`report_lists`]). That is an
+/// assumption and it is written down rather than left to be discovered (`tester`, 2026-08-29): a
+/// role with cluster-wide `list pods` and namespaced `apps/*` gets [`Coverage::Cluster`], an empty
+/// Deployment set, and no *check is off* line to explain it.
+///
+/// **It is defensible and it is still an assumption.** Every rule the Alerts view runs needs pods;
+/// a probe per kind is four more round trips on every startup for a role nobody has reported, and
+/// the failure it would prevent is already visible — the workload watches under such a role fail
+/// and say so ([`Store::troubles`]), which is what `main.rs` suppresses the health claim on.
+async fn coverage(
+    client: &Client,
+    asked: Option<&str>,
+    context_namespace: Option<&str>,
+) -> Coverage {
+    if let Some(namespace) = asked {
+        return Coverage::Asked(if namespace_name(namespace) {
+            namespace.to_string()
+        } else {
+            context_scope(context_namespace)
+                .unwrap_or(FALLBACK_NAMESPACE)
+                .to_string()
+        });
+    }
+    if lists_pods(client, None, REPORT_FETCH).await {
+        return Coverage::Cluster;
+    }
+    // **The guess is checked and the kubeconfig's own namespace is not**, which is the whole of
+    // the difference between the two arms below. A context that names `payments` is a fact the
+    // reader's own file states; `default` is a word this file invented, and on the ordinary
+    // platform-issued kubeconfig it is the one namespace the developer's `RoleBinding` does not
+    // cover (R1). One extra round trip, on the one path that already sends one, and only when
+    // there was nothing to read a namespace off.
+    //
+    // **A guess the cluster did not answer in time stays [`Coverage::Refused`] and does not become
+    // [`Coverage::Blind`]**, which follows from [`lists_pods`]'s contract rather than being a
+    // second rule: `false` there is a refusal and nothing else. `Blind` says *refused there too*,
+    // and a timeout is not a refusal — claiming one would be the same wrong sentence this arm
+    // exists to stop, facing the other way. The weaker claim is also the one the report corrects
+    // for free: if the watch then fails, `main.rs` prints its trouble line and withholds the
+    // health claim.
+    let Some(named) = context_scope(context_namespace) else {
+        return if lists_pods(client, Some(FALLBACK_NAMESPACE), REPORT_FETCH).await {
+            Coverage::Refused(FALLBACK_NAMESPACE.to_string())
+        } else {
+            Coverage::Blind(FALLBACK_NAMESPACE.to_string())
+        };
+    };
+    Coverage::Refused(named.to_string())
+}
+
+/// **The context's own namespace, when it is one** — `None` both for a context that named none
+/// and for one that named something that is not a namespace name ([`namespace_name`]).
+///
+/// One function because two arms of [`coverage`] reach for it and the second copy of
+/// *filter, then decide what to do with nothing* is where the filter gets dropped.
+fn context_scope(context_namespace: Option<&str>) -> Option<&str> {
+    context_namespace.filter(|namespace| namespace_name(namespace))
+}
+
+/// **Whether this login may list pods** — cluster-wide when `namespace` is `None`, inside one
+/// when it is `Some` — the one question [`coverage`] asks a server.
+///
+/// **`false` is a refusal and nothing else**, which is what keeps the fallback from firing on a
+/// bad minute: every other outcome — an answer, a timeout, a dead socket, an expired login — is
+/// `true`, because none of them is evidence that this view is not allowed.
+/// § WHAT WENT WRONG is what decides which is which, as it is for every other failed call here.
+///
+/// **`deadline` is a parameter for [`SERVING_PROBE`]'s reason** — a bound nothing can wait out is
+/// a bound nothing tests. [`coverage`] passes [`REPORT_FETCH`] at both call sites; only a test
+/// passes anything else, and without that the arm that answers a hang could not be reached inside
+/// a suite (`k8s-admin`, 2026-08-29: the mutation gate cannot see a joint arm the 200-answer test
+/// already kills).
+async fn lists_pods(
+    client: &Client,
+    namespace: Option<&str>,
+    deadline: std::time::Duration,
+) -> bool {
+    let api = match namespace {
+        Some(namespace) => Api::<Pod>::namespaced(client.clone(), namespace),
+        None => Api::<Pod>::all(client.clone()),
+    };
+    let asked = tokio::time::timeout(deadline, api.list(&ListParams::default().limit(1))).await;
+    match asked {
+        Ok(Err(error)) => fault(&error) != Fault::Refused,
+        // An answer: this login may read here.
+        Ok(Ok(_)) => true,
+        // The deadline. A cluster that did not answer in time has said nothing about this login's
+        // scope, and narrowing on that would hide a cluster because a link was slow for a second.
+        Err(_) => true,
+    }
+}
+
 /// **One cluster, connected** — everything a session is built from, and nothing that outlives
 /// it.
 ///
@@ -4705,10 +5154,22 @@ pub(crate) struct Session {
     /// **The namespace that context names for itself**, or `None` for a context that names none
     /// — [`kubeconfig_namespace`] is what reads it, and why the two are not one answer.
     ///
-    /// **It is the namespace k8rs must start in** (`PRIOR-ART § B1`), and it is *not* a filter on
-    /// the permanent watch: Alerts is every namespace at once (invariant 6, NOTES § D28), so what
-    /// this decides is where a screen that has a namespace opens.
+    /// **It is the namespace k8rs must start in** (`PRIOR-ART § B1`), and it is *not* itself the
+    /// filter on the permanent watch: [`Coverage`] is, and this is one of the two things that
+    /// decides it. Alerts is every namespace at once wherever the cluster allows one
+    /// (invariant 6, NOTES § D28); what this decides is where a screen that has a namespace
+    /// opens, and which namespace the 403 fallback lands on.
     pub(crate) namespace: Option<String>,
+    /// **How much of the cluster [`watches`](Session::watches) is actually covering, and why**
+    /// ([`Coverage`], NOTES § D5).
+    ///
+    /// **Not the same field as [`namespace`](Session::namespace) and never derived from it.** That
+    /// one is what the kubeconfig says; this one is what the watches were built with, which is the
+    /// flag when there was one and the cluster's own answer otherwise. They agree on the ordinary
+    /// scoped run and differ on every other — `--namespace` overriding a context that names
+    /// another, a context that names one on a cluster the reader can read whole, a fallback to
+    /// [`FALLBACK_NAMESPACE`] where the context named nothing at all.
+    pub(crate) coverage: Coverage,
     /// **The client certificate this kubeconfig logs in with**, PEM bytes as they sit on disk —
     /// C1's other input ([`kubeconfig_certificate`],
     /// [`crate::rules::ClusterSnapshot::client_certificate`]).
@@ -4872,8 +5333,11 @@ pub(crate) enum NotConnected {
 /// `scripts/security-guard.py`. TLS verification is never
 /// disabled here — a kubeconfig that sets `insecure-skip-tls-verify` is honoured, because it is
 /// the user's own file, and saying so in the header is `views.rs`'s.
-pub(crate) async fn connect(context: Option<&str>) -> Result<Session, NotConnected> {
-    connect_with(kubeconfig()?, context).await
+pub(crate) async fn connect(
+    context: Option<&str>,
+    namespace: Option<&str>,
+) -> Result<Session, NotConnected> {
+    connect_with(kubeconfig()?, context, namespace).await
 }
 
 /// **The reader's kubeconfig, read the one way it is ever read** — `KUBECONFIG`'s paths merged by
@@ -4925,14 +5389,16 @@ pub(crate) fn kubeconfig() -> Result<Kubeconfig, NotConnected> {
 pub(crate) async fn connect_with(
     kubeconfig: Kubeconfig,
     context: Option<&str>,
+    namespace: Option<&str>,
 ) -> Result<Session, NotConnected> {
     // **Read before the kubeconfig is moved into the loader**, which is the only place the
     // *current* context is still legible: `KubeConfigOptions` carries what was asked for, and
     // what was asked for is `None` on the ordinary run.
     let named = kubeconfig_context(&kubeconfig, context);
     // Read here for the same reason and through the same [`wanted`], so the name a session
-    // reports and the namespace it starts in can never come off two different entries.
-    let namespace = kubeconfig_namespace(&kubeconfig, context);
+    // reports and the namespace it starts in can never come off two different entries. It is
+    // also the namespace the 403 fallback lands on ([`coverage`]).
+    let context_namespace = kubeconfig_namespace(&kubeconfig, context);
     let config = Config::from_custom_kubeconfig(
         kubeconfig,
         &KubeConfigOptions {
@@ -4951,20 +5417,17 @@ pub(crate) async fn connect_with(
     // **Not a `?`**: the failure arm needs the login program as much as the success arm does, and
     // a `?` here is exactly how it got lost the first time (`tester`, 2026-08-27).
     //
-    // **`client_certificate` is the one field here no test watches travel, and that is a cost the
-    // PM accepted rather than a thing nobody could do** (NOTES § D169). The straight route is
-    // shut: kube's `identity_pem` refuses a certificate with no key, and rustls refuses a key that
-    // is not one — the committed PEM with a PEM-shaped placeholder beside it came back
+    // **`client_certificate` was the one field here no test watched travel, and it is watched
+    // now** (NOTES § D169, § D179). The straight route is shut: kube's `identity_pem` refuses a
+    // certificate with no key, and rustls refuses a key that is not one — the committed PEM with
+    // a PEM-shaped placeholder beside it came back
     // `RustlsTls(InvalidPrivateKey("failed to parse private key as RSA, ECDSA, or EdDSA"))`, and a
-    // real key may not be committed. **A second route exists and was measured**: an `exec` plugin
-    // emitting an `ExecCredential` whose key is generated during the test — never committed, and
-    // an argument-vector spawn `scripts/security-guard.py` permits — reaches a successful
-    // `connect_with` carrying `Some(_)` (`tester`, 2026-08-28). **It was refused for what it puts
-    // in the gate**: `openssl` on `PATH` inside `cargo test`, and *`just check` is the whole of CI
-    // or it is a lie* — a step that needs a binary not every machine has is the gap that rule
-    // closes. So the read is proven at field level on `AuthInfo` ([`kubeconfig_certificate`]) and
-    // the line below is covered by the live binary alone; the mutation gate reports it MISSED and
-    // that report is correct.
+    // real key may not be committed. So the key is **generated during the test** and nothing is
+    // committed, which D169 accepted as a documented limit and D179 then measured the reason for:
+    // `openssl` is already a hard dependency of `just check` (`scripts/certs-test.sh`), so a test
+    // that shells to it costs the gate nothing. D179 took that route for the field below and not
+    // for this one; the namespace box edits this expression, which put the mutant back in the
+    // diff, and `the_certificate_a_kubeconfig_logs_in_with_reaches_the_session` kills it.
     // **C2's read of the *kubeconfig*, and it happens here because this is where the `Config`
     // still exists** — building the client consumes it, and the probe needs the same CA and
     // `accept_invalid_certs` the client is about to be built with (§ THE SERVER'S OWN CERTIFICATE,
@@ -4992,14 +5455,20 @@ pub(crate) async fn connect_with(
     // NOTES § D133 is about, an honest-looking count over a question nobody asked. The test is the
     // gate here, not the run.
     match Client::try_from(config) {
-        Ok(client) => Ok(Session {
-            renewal,
-            context: named,
-            namespace,
-            client_certificate,
-            serving_expiry: serving_expiry(probe, SERVING_PROBE, SERVING_SAMPLES).await,
-            ..session(client).await
-        }),
+        Ok(client) => {
+            // **Before the watches are built, because a watch cannot change what it watches**
+            // ([`coverage`] carries the whole argument). On a run that named a namespace this
+            // sends nothing at all.
+            let coverage = coverage(&client, namespace, context_namespace.as_deref()).await;
+            Ok(Session {
+                renewal,
+                context: named,
+                namespace: context_namespace,
+                client_certificate,
+                serving_expiry: serving_expiry(probe, SERVING_PROBE, SERVING_SAMPLES).await,
+                ..session(client, coverage).await
+            })
+        }
         Err(failure) => Err(NotConnected::Client { failure, renewal }),
     }
 }
@@ -5721,7 +6190,11 @@ fn renewal(auth: &AuthInfo) -> Option<String> {
 /// **Crate-visible for that reason and no other.** [`connect`] needs a kubeconfig and a test may
 /// not have one, so this is the seam `main.rs`'s live driver is tested through — a session over
 /// a client pointed at a name that cannot resolve is the *cluster is not there* case, whole.
-pub(crate) async fn session(client: Client) -> Session {
+///
+/// **The [`Coverage`] is decided *before* this and handed in**, because deciding it needs a
+/// kubeconfig's namespace as well as a client and because [`watches`] is built here: a session
+/// that chose its own scope would be choosing it from half the inputs.
+pub(crate) async fn session(client: Client, coverage: Coverage) -> Session {
     let version = client.apiserver_version().await.map(|info| {
         // The API server's own text, and the first string in this file that did not arrive
         // through [`ingest`] — the module doc's own note about `server_version` (invariant 9).
@@ -5738,13 +6211,14 @@ pub(crate) async fn session(client: Client) -> Session {
         capabilities: capabilities(&pairs),
         kinds: browsable(pairs),
     });
-    let watches = watches(&client);
+    let watches = watches(&client, &coverage);
     Session {
         client,
         version,
         served,
         watches,
         skew,
+        coverage,
         // **`None` here and filled in by [`connect_with`]**, which is the only caller that has a
         // kubeconfig to read them from. A client is not a file: it carries no context name and no
         // certificate that could be read back off it.
@@ -6058,35 +6532,79 @@ impl Backoff for StandingBackoff {
 ///
 /// **Cloning the client per watch is cloning a handle**, not opening five connections —
 /// [`Session::client`] carries the mechanism and kube's own word for it.
-fn watches(client: &Client) -> Vec<BoxStream<'static, Update>> {
+///
+/// # Four of the five narrow under a namespace scope and nodes does not
+///
+/// **`nodes` is cluster-scoped: there is no such thing as a namespaced node list**, so it is
+/// `Api::all` under every [`Coverage`]. On the login this box exists for — an ordinary
+/// enterprise developer with a namespaced `Role` — that watch is refused, permanently, and
+/// nothing here can change it. What changed is what a refusal costs: [`Watch::settled`] counts it
+/// as answered, so the four kinds the cluster *is* serving reach the rules, `Store::troubles`
+/// names the missing verb and resource, and `analysis.rs` draws its *Reading what a node has
+/// needs permission to list nodes* rows where the numbers would have been.
+///
+/// **The namespace is already a namespace name** ([`namespace_name`]) — [`coverage`] refuses one
+/// that is not, from either source, and narrows rather than widens when it does — so what
+/// `Api::namespaced` interpolates into `/api/v1/namespaces/{ns}/pods` cannot carry a path segment
+/// of its own (the security gate's *names build paths* row).
+fn watches(client: &Client, coverage: &Coverage) -> Vec<BoxStream<'static, Update>> {
     let config = watcher::Config::default().page_size(INITIAL_LIST_PAGE);
     vec![
         updates(
-            watcher(Api::<Pod>::all(client.clone()), config.clone())
+            watcher(scoped::<Pod>(client.clone(), coverage), config.clone())
                 .backoff(StandingBackoff::default()),
             |store| &mut store.pods,
         ),
         updates(
+            // Cluster-scoped, so never narrowed — the paragraph above is the whole reason.
             watcher(Api::<Node>::all(client.clone()), config.clone())
                 .backoff(StandingBackoff::default()),
             |store| &mut store.nodes,
         ),
         updates(
-            watcher(Api::<Deployment>::all(client.clone()), config.clone())
-                .backoff(StandingBackoff::default()),
+            watcher(
+                scoped::<Deployment>(client.clone(), coverage),
+                config.clone(),
+            )
+            .backoff(StandingBackoff::default()),
             |store| &mut store.deployments,
         ),
         updates(
-            watcher(Api::<StatefulSet>::all(client.clone()), config.clone())
-                .backoff(StandingBackoff::default()),
+            watcher(
+                scoped::<StatefulSet>(client.clone(), coverage),
+                config.clone(),
+            )
+            .backoff(StandingBackoff::default()),
             |store| &mut store.stateful_sets,
         ),
         updates(
-            watcher(Api::<DaemonSet>::all(client.clone()), config)
+            watcher(scoped::<DaemonSet>(client.clone(), coverage), config)
                 .backoff(StandingBackoff::default()),
             |store| &mut store.daemon_sets,
         ),
     ]
+}
+
+/// **One namespaced kind's `Api`, cluster-wide or narrowed to what [`Coverage`] covers** — the
+/// only place in [`watches`] that knows about the scope.
+///
+/// **One function and not a `match` per kind**, because five copies of a two-arm match is five
+/// places the scope can be forgotten in one — the shape [`updates`]' single `of` argument already
+/// refused once (NOTES § D162). It is a `fn` rather than a closure because each call is a
+/// different `K` and a closure cannot be generic.
+///
+/// **The bound is what keeps `nodes` out.** `Api::namespaced` is only implemented for
+/// `Resource<Scope = NamespaceResourceScope>`, so a future edit that routed the node watch
+/// through here would not compile rather than build `/api/v1/namespaces/x/nodes`.
+fn scoped<K>(client: Client, coverage: &Coverage) -> Api<K>
+where
+    K: Resource<Scope = NamespaceResourceScope>,
+    K::DynamicType: Default,
+{
+    match coverage.namespace() {
+        Some(namespace) => Api::namespaced(client, namespace),
+        None => Api::all(client),
+    }
 }
 
 // --- CONNECTING END ---

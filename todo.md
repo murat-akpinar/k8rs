@@ -3104,7 +3104,35 @@ public release.
       **The `▲ k8rs is not getting …` watch-trouble line is a third thing and is
       not this one** — per-watch, in the report's own severity vocabulary, in no
       `screens/` file — and the clock box's tests briefly cited it as if it were.
-      Found by `tester`, 2026-08-28
+      Found by `tester`, 2026-08-28.
+      **IN FLIGHT — the code is written and committed, the box stays open for one
+      test.** Landed 2026-08-30 in the commit this line ships with: the gate
+      reopens (`Watch::settled`, `Fault::standing`, `progress()` counting a
+      refused watch as answered), `--namespace`/`-n` with a DNS-1123 predicate and
+      a 63-character bound, the fallback namespace probed rather than assumed, the
+      six report fetches scoped, and the **blocker a real restricted role found** —
+      `nothing is broken` printed over a scope that read nothing — fixed by making
+      the health claim an `Option` and suppressing it while any watch feeding it is
+      in trouble
+      ([D184](NOTES.md#d184--the-namespace-box-what-a-real-restricted-role-took-away-and-the-eight-rulings-it-forced-2026-08-30) ·
+      [reports/2026-08-29](reports/2026-08-29-namespace-scope-under-a-real-role.md)).
+      **`just check` is green (711 unit + 10 binary tests, exit 0). The mutation
+      gate is RED and that is the whole of what is left** — `MISSED
+      src/main.rs:1646:25: delete ! in live_report`, out of 131 mutants with 113
+      caught and 17 unviable (each naming a type). Deleting that `!` turns
+      `never_listed` from *the kinds that never listed* into *the kinds that did*,
+      feeding `Input::unreadable`, and no test objects. The distinction is the one
+      this box is about: a watch that listed once and then broke has **stale**
+      data, a watch that never listed has **none**, and only the second is
+      unreadable. **Done-when:** one test with a store carrying both shapes at
+      once, asserting `unreadable` names the never-listed kind and not the other —
+      proven red by applying that exact mutation, on a copy with its own
+      `CARGO_TARGET_DIR`
+      ([D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)) —
+      then `just check` green and that one mutant re-checked with
+      `bash scripts/mutants.sh --gate --timeout 90 --in-diff <diff>`; the other 130
+      are unchanged and need no re-run. **Then `docs/` for the `--namespace` CLI
+      surface, which is the PM's and is not yet done**, and the box closes
 - [ ] Wire into the same print loop; verify against kind while breaking pods
 - [ ] The **read-only `ClusterRole`** written out in `docs/security.md`, and
       verified by running v0.0.1 against kind under exactly that role and

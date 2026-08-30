@@ -515,7 +515,15 @@ file meanwhile and measured a real state no commit ever held. That is how the PM
 filed a live invariant-9 defect against a line that was there the whole time
 ([D180](NOTES.md#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)).
 So a sweep runs against a copy with its own `CARGO_TARGET_DIR`, and its restore
-lives in a `try`/`finally` and not on a last line. **`just mutants-diff` is already
+lives in a `try`/`finally` and not on a last line. **That holds for every resource
+a run owes cleanup on, not just an edited file**
+([D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)):
+a killed background job, a torn-down cluster, a released lock. A load generator
+whose `kill` sat on the last line spawned 32 busy loops, exceeded the ten-minute
+cap, and left them spinning for twenty-six hours at load average 33 — where they
+became a silent term in every timing number measured beside them. If the only
+thing between the machine and a leak is the script reaching its final statement,
+there is no cleanup. **`just mutants-diff` is already
 this shape** — `scripts/mutants.sh` names its own scratch volume — which is why the
 hand sweeps are the ones that need saying.
 

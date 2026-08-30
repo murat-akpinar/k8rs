@@ -205,6 +205,8 @@ its line moving with it.
 - [D181](#d181--the-metrics-states-are-read-off-the-answer-and-not-off-the-capability-probe-and-a-down-aggregated-backend-answers-503-2026-08-29) — the metrics states are read off the answer and not off the capability probe, and a down aggregated backend answers 503
 - [D182](#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29) — the gate reports a run it did not make, and *stated, not failed* was written about the wrong caller
 - [D183](#d183--a-pod-can-name-a-node-that-is-gone-and-every-per-node-row-is-right-to-be-silent-about-it-2026-08-29) — a pod can name a node that is gone, and every per-node row is right to be silent about it
+- [D184](#d184--the-namespace-box-what-a-real-restricted-role-took-away-and-the-eight-rulings-it-forced-2026-08-30) — the namespace box: what a real restricted role took away, and the eight rulings it forced
+- [D185](#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30) — cleanup on the last line is not cleanup, and the resource is not always a file
 
 ## Why it exists — where the gap is
 
@@ -16017,3 +16019,144 @@ accepts, and the first draft mis-named it. Rule 13 cannot be the signal: it need
 one card that does fire is rule 12's, on the subset held by a finalizer. If this
 ever needs saying, it is *the pod garbage collector has stopped* — a rule about
 pod GC, over pods whose node is absent, and not a row on Capacity.
+
+### D184 — the namespace box: what a real restricted role took away, and the eight rulings it forced (2026-08-30)
+
+Phase 5's namespace-scoping box. The premise it was written from held: a 403 on
+any one watch blanked the whole tool and the screen it showed was *loading*,
+because `listed()` required every watch to have completed an initial LIST and a
+refused watch never does. `nodes` is cluster-scoped and cannot be granted by a
+namespaced `Role`, so this is the ordinary enterprise developer.
+
+**The gate reopened as the box asked** — `Watch::settled()`, `Fault::standing()`
+and a shared `watch_fault()`, with `progress()` becoming
+`(!self.complete && !self.settled())`. The classifier's rule, which is the
+load-bearing choice: *will the retry loop, unaided, make the next attempt go
+differently?* Only `Fault::Unanswered` says yes. It is an exhaustive match with
+no `_`, so a new variant stops the build.
+
+**The cost of a wrong `true` is bounded, and that is why the bet is takeable.**
+`Watch::take` clears `failure` on the first `Apply`, `Delete` or
+`filling`-backed `InitDone`, so a transient fault that was called durable
+un-settles the moment the retry lands. Measured on a real cluster: RBAC granted
+mid-run at 22:04:58, no restart, and the next report printed
+`ns: payments · 3 pods · 2 nodes` with the trouble line gone. So a flapping
+authorization webhook, IAM propagation or an OIDC refresh costs one backoff
+window of an **announced**-incomplete cluster, not a permanent one.
+
+**The blocker, and it is the reason this entry exists.** A real `Role`-limited
+kubeconfig was built and the built binary run under it
+([reports/2026-08-29](reports/2026-08-29-namespace-scope-under-a-real-role.md)).
+With a real `ImagePullBackOff` pod sitting in `payments`, k8rs printed:
+
+```
+ns: default · 0 pods · 0 nodes
+
+○ nothing is broken
+```
+
+**Before the box the tool hung on *loading*, which was useless; after it, it said
+the cluster was healthy, which is worse.** The box's own body cites
+[PRIOR-ART § C2](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens)
+— *loading · empty · denied* — as covered. The collapse had not been removed, it
+had moved: from `loading`+`denied` to `empty`+`denied`. Four more shapes reach
+the same line, including an admin on an empty namespace, where a `200` with an
+empty list means there is not even a trouble line above the claim.
+
+**Ruling: no health claim while any watch feeding it could not be read**, made
+structural in one place (`health()` returning `Option`) rather than remembered by
+each caller — so *a trouble line and a health claim never appear together* is a
+property of the code and not a rule two places have to keep. The claim is also
+scoped now: `nothing is broken in payments` is a real answer about a namespace
+the login may read; `nothing is broken` about a cluster it could not read is not.
+`screens/states.md` already had the principle — *"the sentence counts what k8rs
+looked at, never what the cluster has"* — and the code had drifted from it.
+
+**Seven further rulings, each forced by a measurement rather than by taste:**
+
+1. **The fallback namespace is probed, not assumed.** `default` was a guess, and
+   on the ordinary platform-issued kubeconfig it is the one namespace the
+   developer's `RoleBinding` does *not* cover. It now gets the same `limit=1`
+   LIST before k8rs commits to it.
+2. **A vital that cannot be read is blank, never guessed.** Every successful
+   scoped run printed `0 nodes`, because `nodes` cannot be granted by a
+   namespaced `Role` — a measured zero and an unreadable one rendered the same.
+   `screens/widgets.md` § 86 was already the rule; the code broke it.
+3. **The six on-demand report fetches are scoped.** `screens/analysis.md` records
+   *"Waste runs unchanged when the view is scoped, because every input it has is
+   namespaced"*, and the code disagreed: a developer whose Role grants services
+   in their own namespace was told to *"ask for permission … across the whole
+   cluster"* — [PRIOR-ART § B4](PRIOR-ART.md#b4--a-denied-permission-must-degrade-one-feature-not-the-tool)
+   by name. The four namespaced kinds go through `scoped::<K>()`;
+   `certificatesigningrequests` is cluster-scoped and stays.
+4. **`-n<word>` is refused, not dropped.** `-npayments` was neither accepted nor
+   rejected — it fell through as a stray positional and the run went
+   cluster-wide, which is the silently-wider-scope failure the flag's own doc
+   rejects the joined spelling to avoid. Found independently by both reviewers.
+   The third option — refuse it with a sentence — was never considered and is the
+   one that leaves no hole.
+5. **A namespace name gets its own predicate, and a length bound.** `path_safe`
+   answers *can this go in a URL path*, and it was standing in for *is this a
+   namespace name*: `PAYMENTS`, `foo.bar` and an **8 KiB** name were all accepted,
+   the last producing an 8 218-byte header line and 8 241-byte request paths —
+   the security gate's *Sizes are bounded* row. Argv is the first unbounded source
+   `path_safe` has ever had; its other callers get names the server already
+   bounded. `NAMESPACE_MAX = 63`, DNS-1123.
+6. **`coverage()`'s defensive filter may not fail open.** A value failing the
+   check fell through and *widened* the run to the whole cluster. Defence whose
+   default is the widest scope is not defence. Unreachable today because the argv
+   check runs first — and `main.rs` changes owner at Phase 12.
+7. **The probe asks about pods and the answer scopes four kinds.** A role with
+   cluster-wide `list pods` but namespaced `apps/*` gets `Coverage::Cluster` and
+   an empty Deployment set, announced only by that kind's trouble line.
+   Defensible — the rules take one `namespace_scope` field — and now written down
+   rather than assumed.
+
+**What the gate could not be given: a real 403 in the test suite.** Every refusal
+in `k8s_tests.rs` is a `Status` stub and the binary runs were against a local
+listener. The one real-cluster measurement is the report cited above, and it is
+what found the blocker — reasoning about the shape had not.
+
+**Ceiling:** the coverage decision is a photograph taken at connect, so a role
+widened mid-session stays scoped until restart. Same ceiling as `Identity`, and
+stated in the code.
+
+### D185 — cleanup on the last line is not cleanup, and the resource is not always a file (2026-08-30)
+
+[D180](#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)
+ruled that a sweep's restore belongs in a `try`/`finally` and not on its last
+line, because the ten-minute tool cap kills the shell before it gets there. That
+was written about **files**. The same failure arrived through a resource nobody
+had named, and it ran for twenty-six hours.
+
+On 2026-08-28T22:45Z a subagent proved
+`the_five_lists_wait_side_by_side_and_not_one_after_another` passes because the
+five LISTs are concurrent and not because the machine is fast, by generating load
+and running the test thirty times under it:
+
+```
+for i in $(seq 1 32); do (while :; do :; done) & done
+LOADPIDS=$(jobs -p)
+… 30 test runs …
+kill $LOADPIDS 2>/dev/null      # ← the last line
+```
+
+Thirty runs at 32× load exceeded the cap, the shell was killed, `kill $LOADPIDS`
+never ran, and the thirty-two subshells were reparented to init. Found
+2026-08-30 with the machine at **load average 33.7** and no build running: 32
+orphans, contiguous PIDs, all `PPID 1`, all started in the same second, each
+burning ~33% CPU.
+
+**The rule generalises: any cleanup a run owes goes in a `trap`, whatever the
+resource** — a restored file, a killed background job, a deleted cluster, a
+released lock. If the only thing standing between the machine and a leak is the
+script reaching its final statement, there is no cleanup.
+
+**And it quietly invalidated a measurement.** The
+`a_server_that_accepts_and_never_speaks_does_not_hold_the_probe_open` flake — 956
+ms against an 800 ms ceiling, "1 red in 4 full runs", "8 isolated runs at
+296–608 ms" — was measured on 2026-08-29, while these thirty-two loops were
+running. The *isolated* runs were not isolated. Whether that test is flaky on a
+quiet machine is now unknown and has to be re-measured, which is the second cost
+of a leak that reads as ambient: it does not only slow the box down, it becomes a
+silent term in every number taken while it runs.
