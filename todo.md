@@ -3109,7 +3109,31 @@ public release.
       it belongs to whichever box builds `skipped`, and the
       `▲ k8rs is not getting …` watch-trouble line is a third thing that is not
       either of them
-- [ ] Wire into the same print loop; verify against kind while breaking pods
+- [x] Wire into the same print loop; verify against kind while breaking pods.
+      **The wiring half was already closed by the boxes above it** — `--live`
+      drives `live_report` through `drive_watching` and renders with the same
+      `render` the file path uses, which is what made the panes one flag rather
+      than two renderers
+      ([D169](NOTES.md#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28));
+      a box whose premise an earlier box has already met is
+      [D186](NOTES.md#d186--a-done-when-written-from-a-measurement-its-own-commit-had-already-invalidated-and-the-two-findings-that-outlived-it-2026-08-30)'s
+      shape and is re-checked, not assumed. **Verified against kind 2026-08-30**,
+      four-node `k8rs` cluster, server v1.36.1:
+      `k8rs --live` opens `k8rs: watching — server v1.36.1 · 62 kinds ·
+      {Metrics, DisruptionBudgets}` and draws `41 pods · 4 nodes` with the
+      cluster's real cards. **A pod broken under a running k8rs appears**:
+      `kubectl run` a container that exits 7, and with no restart of k8rs the
+      report gains `● default/live-check-crash · 2s ago · Container keeps
+      crashing … 1 restart · ran for under a second · exit 7`. **And healing it
+      removes it**: a second run watched a crashlooping pod it had already drawn
+      (`4 restarts · exit 7`) get deleted, and redrew `41 pods · 4 nodes` with no
+      card for it and `13 critical, 3 warnings` — against `13 critical, 4
+      warnings` while the broken pod stood, which is the same cluster one
+      finding apart, measured across the two runs rather than inside one. The
+      file path and the live path print the identical card shape, header
+      included.
+      `--live --analysis` draws all seven panes off the same loop, Capacity
+      carrying real usage from the metrics poll (`using 0.143 cpu and 1Gi`)
 - [ ] The **read-only `ClusterRole`** written out in `docs/security.md`, and
       verified by running v0.0.1 against kind under exactly that role and
       nothing more. It ships with the first release because it is what a
