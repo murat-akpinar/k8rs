@@ -2145,6 +2145,251 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     );
 }
 
+/// A loopback server that answers **every** request with a `403` — the failure shape
+/// [`offline`] cannot produce and this test needs.
+///
+/// **`offline`'s unresolvable name is a `Fault::Unanswered`**, which `k8s::Watch::settled`
+/// deliberately leaves out (NOTES § D28's *do not blank on a blip*): the watch stays pending,
+/// [`k8s::Store::snapshot`] answers `None`, and a report with no cards in it cannot show what a
+/// header left out. A refusal is the standing failure that counts as *answered*
+/// ([`k8s::Fault::standing`], NOTES § D184), so it is the one shape where a never-listed watch
+/// and a rendered header exist at the same time.
+///
+/// **The framing is the one `k8s_tests.rs` § THE LEGACY DISCOVERY FALLBACK, AGAINST A SERVER
+/// already runs on** — read until a blank line, answer, keep the connection — written twice
+/// because a test helper cannot cross from one `*_tests` module to another (invariant 11),
+/// exactly as [`offline`] is. A response per read instead would desynchronise on the keepalive
+/// connection kube retries a refused watch over, and a hyper protocol error classifies as
+/// `Unanswered` — the shape this helper exists to avoid.
+///
+/// **What it deliberately does not carry, so nobody reads more fidelity into it than it has:
+/// `details`, and the sentence a real refusal puts in `message`.** A refused `list` sends
+/// `services is forbidden: User "…" cannot list resource "services" in API group "" at the
+/// cluster scope` with `details: {group, kind}` beside it; this sends `forbidden` and no
+/// `details` field at all. Nothing on this path reads either one today, so it costs nothing
+/// here — but the read-only `ClusterRole` box still open in this phase plans to render
+/// `status.message`, and the day it lands this stub prints `forbidden`, this test stays green,
+/// and the sentence the reader would actually be shown is untested (`k8s-admin`, 2026-08-30).
+async fn refusing() -> kube::Client {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                // **The `code` is the field that reaches `Fault::Refused`**: `k8s::answer`
+                // matches on it first and falls through to `reason` only for a code it does not
+                // name. Re-run here with this body, with the `reason` field deleted, and with an
+                // empty body — an empty one is not JSON, so kube's own fallback rebuilds a
+                // `Status` around the HTTP code (`k8s::answer`'s § table) — and all three
+                // classify identically. The `reason` is here because a real API server sends one,
+                // not because this path reads it.
+                let body = r#"{"kind":"Status","apiVersion":"v1","status":"Failure",
+                    "message":"forbidden","reason":"Forbidden","code":403}"#;
+                let sent = format!(
+                    "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                let mut pending = String::new();
+                loop {
+                    let mut chunk = [0_u8; 2048];
+                    match socket.read(&mut chunk).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => pending.push_str(&String::from_utf8_lossy(&chunk[..read])),
+                    }
+                    // A LIST is a GET with no body, so a request ends at the blank line.
+                    while let Some(end) = pending.find("\r\n\r\n") {
+                        pending.drain(..end + 4);
+                        if socket.write_all(sent.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    kube::Client::try_from(kube::config::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing")
+}
+
+/// The five watches driven against [`refusing`] over a store whose successful LISTs — if it has
+/// any; one caller hands in none — have already been handed in, and the report [`live_report`]
+/// then draws.
+///
+/// **The failures are real ones from a real client**, the sentence the reconnect proof one test
+/// up writes about its own — five watches against a listener that refuses everything, driven
+/// through the same pump the binary runs. What the caller hands in by hand is the *successful*
+/// LIST that makes a watch stale rather than blank, which is what [`listed`] does everywhere else
+/// in this module; a failure cannot be poked in at all, because `watcher::Event` has no arm for
+/// one.
+async fn refused_over(store: &mut k8s::Store) -> String {
+    use futures_util::stream::StreamExt;
+    let watches = k8s::session(refusing().await, k8s::Coverage::Cluster)
+        .await
+        .watches
+        .into_iter()
+        // `Ok(Init)` and then the refused initial LIST — kube emits the first without awaiting
+        // anything (`k8s::StandingBackoff` documents the pair), so two is one failure per watch
+        // and no backoff is ever waited on.
+        .map(|watch| watch.take(2).boxed())
+        .collect();
+    k8s::drive_watching(watches, store, |_| {}).await;
+    let mut last = String::new();
+    live_report(store, now(), &mut last, false, &AtConnect::default())
+        .expect("five refused watches are news whatever else the store holds")
+}
+
+/// **A watch that listed once and then broke has stale data; a watch that never listed has
+/// none, and only the second is unreadable** ([`Input::unreadable`], NOTES § D184).
+///
+/// **Both shapes have to stand in one store or the *discrimination* is never asserted, and the
+/// store has to be built both ways round or the discriminator is never told from a coincidence
+/// of it.** Every other test here drives all five watches into the same state, and against a
+/// store like that [`live_report`]'s `never_listed` and its complement differ only in size:
+/// deleting the `!` puts all five in [`Input::unreadable`] and the header comes out empty, which
+/// the neighbour above catches on its `0 pods · 0 nodes`. So the mutation is caught there **as a
+/// blank**, and the thing the field exists to prevent — a count printed for a list nobody read —
+/// is what no store in this file could produce. One arrangement is still not enough: with Pod the
+/// only kind that listed *and* the only kind carrying objects, `!trouble.listed` and
+/// `trouble.kind != Pod` select the same four watches. The mirror — nodes listed, pods never —
+/// is what tells them apart, and it is the only case in this file that reaches
+/// `header`'s `read(&ObjectKind::Pod) == false` *from a store*: the one other test that blanks
+/// the pod vital sets `Input::unreadable` on the value by hand and never goes through
+/// [`live_report`] at all (`tester`, 2026-08-30, D29).
+///
+/// **The counts are the captures' own and are asserted with `==`**, the convention
+/// `a_health_claim_is_never_made_over_a_watch_that_could_not_be_read` already uses two screens
+/// down. A `0` proves nothing here — it is textually what a blanked vital would print — and
+/// `contains` would not have separated the two halves either: `"10 pods".contains("0 pods")` is
+/// true, and `!header.contains("node")` fails on a correct namespace-scoped header
+/// (`ns: node-pool · 1 pod`) and on the context field `header`'s own doc reserves.
+///
+/// **The order is the whole setup, and a cluster reaches it in two steps rather than one.**
+/// `InitDone` clears a watch's failure (`k8s::Watch::take`), so the successful LIST has to land
+/// *before* the refusal. A plain namespaced `Role` is not what produces that: measured against a
+/// real one, it leaves the pod watch healthy and out of `troubles()` altogether, with only
+/// `nodes` in there and `listed: false`
+/// (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R2). What produces it is a
+/// **pods-only** `Role` first, so four kinds are refused before they ever list, and *then* that
+/// `Role` narrowed or the token expiring, so pods refuse on a later re-list. Both steps are
+/// ordinary — a pods-and-logs-only `Role` is common, and Kubernetes does not re-authorize a watch
+/// already in flight, so the refusal can only land on the next one (NOTES § D162).
+#[tokio::test]
+async fn a_watch_that_never_listed_is_unreadable_and_one_that_listed_and_broke_is_merely_stale() {
+    let mut pods_read = k8s::Store::default();
+    pods_read.pod(&now(), Event::Init);
+    for pod in objects::<Pod>("kube-system-pods.json") {
+        pods_read.pod(&now(), Event::InitApply(pod));
+    }
+    pods_read.pod(&now(), Event::InitDone);
+
+    let mut nodes_read = k8s::Store::default();
+    nodes_read.node(&now(), Event::Init);
+    for node in objects::<Node>("nodes.json") {
+        nodes_read.node(&now(), Event::InitApply(node));
+    }
+    nodes_read.node(&now(), Event::InitDone);
+
+    for (mut store, shapes, expected) in [
+        (
+            pods_read,
+            vec![
+                (ObjectKind::Pod, true),
+                (ObjectKind::Node, false),
+                (ObjectKind::Deployment, false),
+                (ObjectKind::StatefulSet, false),
+                (ObjectKind::DaemonSet, false),
+            ],
+            "14 pods",
+        ),
+        (
+            nodes_read,
+            vec![
+                (ObjectKind::Pod, false),
+                (ObjectKind::Node, true),
+                (ObjectKind::Deployment, false),
+                (ObjectKind::StatefulSet, false),
+                (ObjectKind::DaemonSet, false),
+            ],
+            "4 nodes",
+        ),
+    ] {
+        let report = refused_over(&mut store).await;
+        println!("{report}");
+
+        // **The store really is carrying both shapes, and which watch is which**, asserted before
+        // the report is read: without it the header below could be right for the wrong reason.
+        //
+        // **What it does not catch is a stub that stopped refusing.** `troubles()` filters on
+        // `failure.is_some() || ended` and `listed` is `complete`, so neither field can see the
+        // fault class — answering `500` instead of `403` leaves this vector byte-identical
+        // (measured, `tester` 2026-08-30). It is still non-vacuous: an empty `troubles()`, or the
+        // `true` sitting on the wrong row, fails it outright.
+        let held: Vec<(ObjectKind, bool)> = store
+            .troubles()
+            .iter()
+            .map(|trouble| (trouble.kind.clone(), trouble.listed))
+            .collect();
+        println!("{held:?}");
+        assert_eq!(
+            held, shapes,
+            "the store does not hold one listed-then-broken watch beside four that never listed, \
+             so nothing below can tell the two apart"
+        );
+
+        // **This is what catches a stub that stopped refusing**, and it is the reason the panic
+        // is spelled out rather than an `unwrap`: a fault that is not *standing* leaves the four
+        // watches unsettled, [`k8s::Store::snapshot`] answers `None`, and there is no card block
+        // to split off at all.
+        let cards = report
+            .split_once("\n\n")
+            .unwrap_or_else(|| panic!("a refused watch published no snapshot at all: {report:?}"))
+            .1;
+        // **The stale kind keeps its measured count and the never-listed kind is left out** — the
+        // first half is `screens/widgets.md` § 1a's *stale vitals stay visible*, the second is the
+        // defect [`Input::unreadable`] exists for, and one `==` is what asserts both at once.
+        assert_eq!(
+            cards.lines().next().expect("the cards begin with a header"),
+            expected,
+            "a vital was blanked after it had been read, or printed as a measured-looking count \
+             for a list nobody was allowed to read: {cards:?}"
+        );
+    }
+}
+
+/// **A report with nothing but trouble lines in it ends on the last trouble line.**
+///
+/// The shape is a kubeconfig granting none of the five kinds: every watch is refused before it
+/// lists, so no vital may be printed, there are no cards, no health claim may be made, and
+/// [`render`] correctly answers `""`. [`live_report`] pushed that empty block anyway, with a
+/// blank-line separator in front of it, and [`run`]'s own `\n` turned the one trailing newline
+/// into two (`tester`, 2026-08-30) — the exact shape [`render`]'s trailer comment says it
+/// prevents, reintroduced one layer up.
+#[tokio::test]
+async fn a_report_that_is_only_trouble_lines_does_not_end_in_a_blank_line() {
+    let mut store = k8s::Store::default();
+    let report = refused_over(&mut store).await;
+    println!("{report:?}");
+    assert_eq!(
+        report.lines().count(),
+        5,
+        "a report with no readable vital, no card and no claim in it grew a line that is not a \
+         trouble line: {report:?}"
+    );
+    assert!(
+        !report.ends_with('\n'),
+        "a report with no readable vital, no card and no claim in it did not end on its last \
+         trouble line, so [`run`]'s own newline makes two blank ones: {report:?}"
+    );
+}
+
 /// A `Status` the API server would send, wrapped exactly as kube wraps one — the same double
 /// `k8s_tests.rs` § RESOLVING AN OWNER builds, written twice because a test helper cannot cross
 /// from one `*_tests` module to another (invariant 11).

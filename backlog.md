@@ -1766,6 +1766,45 @@ against a real restricted role.*
   may not read this* from *there is nothing here* in the sentence the reader gets.
   A ruling, not a fix. Found by `k8s-admin`, 2026-08-30
 
+### From the namespace box's owed test and its two reviews (2026-08-30)
+
+*Both need a field on a type frozen at an earlier phase close, so both are a
+recorded reversal and a later box rather than a dev round
+([D186](NOTES.md#d186--a-done-when-written-from-a-measurement-its-own-commit-had-already-invalidated-and-the-two-findings-that-outlived-it-2026-08-30)).*
+
+- **`analysis.rs` reads an empty node list as a *permission fact*, and `main.rs`
+  reads the same fact off `Trouble::listed`.** Three panes turn
+  `snapshot.nodes.is_empty()` into a sentence about the reader's RBAC —
+  `analysis.rs:410` *"needs permission to list nodes, and this login does not
+  have it"*, `:808`, `:2837` — while `main.rs:933` derives it from
+  `!input.unreadable.contains(kind)`, which is the real answer.
+  `ClusterSnapshot` carries no field naming a kind whose list could not be read,
+  so `analysis.rs` structurally cannot know and guesses. **Measured on the
+  file-driven path, where there is no login at all:**
+  `k8rs --analysis tests/fixtures/crashloop.json` prints `1 pod · 0 nodes` and
+  then *"this login cannot list the nodes"* three lines below. `[versions]` on
+  the same run gets it right, because it keys on `server_version: None` rather
+  than on emptiness. **This box made it reachable live**: `Fault::standing` opens
+  the gate for `Expired` and `Gone` as well as `Refused`, so a stale EKS/GKE
+  token now draws panes — the top of the report correctly names the renewal
+  program and `[capacity]` below tells the reader to ask for RBAC they already
+  have. [PRIOR-ART § C1](PRIOR-ART.md#c-errors-that-lie) by name. For a genuine
+  403 the pane is correct, so the Authorization row is not violated; the
+  wrong-reason cases are 401 and 404. The fix is a field on `ClusterSnapshot`,
+  frozen at Phase 4 close. Found by `k8s-admin`, 2026-08-30
+- **A stale vital keeps its count and never says how old it is.**
+  `main.rs:339` cites `screens/widgets.md` § 1a as its authority and quotes it as
+  *"stale vitals stay visible"*; the file says *"stay visible **and say how old
+  they are** (`nodes 3/3 (40s ago)`)"*. The header implements the first half.
+  On a real cluster a refused-after-listing pod watch reads `84 pods` and keeps
+  reading `84 pods` for the life of the process — `live_report` only prints on
+  change, so once the refusal is standing nothing reprints at all, and the ▲ line
+  above is the sole staleness marker. It is gone the moment somebody quotes the
+  tail of a `--once` output into a ticket. The data exists
+  (`Watch::last_progress`) but `Trouble` does not carry it, so this is a `k8s.rs`
+  shape question; `screens/once.md` does not draw the state at all, which makes it
+  `tui-designer`'s first. Found by `k8s-admin`, 2026-08-30
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

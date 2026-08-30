@@ -1665,9 +1665,6 @@ fn live_report(
                 serving_expiry: at.serving_expiry,
             };
             let findings = analyze(&input.snapshot);
-            if !report.is_empty() {
-                report.push(String::new());
-            }
             let mut block = render(&findings, &input);
             if analysis {
                 block.push('\n');
@@ -1684,7 +1681,19 @@ fn live_report(
                 }
                 block.push_str(&reports(&input.snapshot, &findings));
             }
-            report.push(block);
+            // **An empty block is not pushed, and neither is the blank line that would have
+            // separated it** — the rule [`render`] states about its own trailer, one layer up and
+            // reintroduced here until 2026-08-30. A kubeconfig granting none of the five kinds
+            // refuses every watch before it lists: the header has no vital it is allowed to
+            // print, there are no cards, no health claim may be made, and `render` correctly
+            // answers `""`. Pushing that ended the report on a blank line and the caller's own
+            // `\n` ([`run`]) made it two.
+            if !block.is_empty() {
+                if !report.is_empty() {
+                    report.push(String::new());
+                }
+                report.push(block);
+            }
         }
         // Still bootstrapping and nothing wrong with it: the silence is the answer.
         None if report.is_empty() => return None,

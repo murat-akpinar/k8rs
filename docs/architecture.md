@@ -1,9 +1,10 @@
 # k8rs Architecture
 
-> Status: design phase — this document describes the agreed architecture
-> before any code exists. Decisions and their rationale live in `../NOTES.md`;
-> the technology choices (language, crates, toolchain) in `tech-stack.md`;
-> this is the buildable summary.
+> Status: partly built. The bottom of the pyramid — `rules.rs`, `analysis.rs`,
+> `k8s.rs` — exists and runs behind a temporary driver; the three views and the
+> write path are still design. Decisions and their rationale live in
+> `../NOTES.md`; the technology choices (language, crates, toolchain) in
+> `tech-stack.md`; this is the buildable summary.
 
 ## Overview
 
@@ -28,6 +29,50 @@ believable — so "this pod has no memory limit" is a Capacity row, not an
 alarm. Alerts findings are also **grouped by owner**: one Deployment with
 three sick pods is one entry carrying a count, never three entries, and a
 DaemonSet on forty nodes is still one.
+
+## The command line
+
+Flags are parsed from `std::env::args` — there is no `clap` while the surface is
+this small ([tech-stack § Deliberately absent](tech-stack.md#deliberately-absent)).
+What this build accepts:
+
+```
+usage: k8rs [--analysis] <file.json>...   |   k8rs --live [--analysis] [--context <name>] [--namespace <name>]
+```
+
+| Flag | What it does |
+|---|---|
+| `<file.json>...` | Read Kubernetes objects from disk — one object per file, or a `kind: List`. Without `--live` this build cannot reach a cluster at all. |
+| `--analysis` | Draw the seven `analysis.rs` panes under the findings. One meaning in both modes ([NOTES § D169](../NOTES.md#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)). |
+| `--live` | Watch the cluster in the kubeconfig's current context instead of reading files. |
+| `--context <name>` | Which context `--live` connects to. **Scaffolding** — the shipped flag is Phase 12's; the spelling matches so the muscle memory transfers. |
+| `--namespace <name>`, `-n <name>` | Narrow the watches to one namespace. **This one is not scaffolding**: the scope it sets is a field on the snapshot that rules and reports were written to read. |
+
+`--namespace` and `-n` each take their value attached with `=` or as the next
+argument — `--namespace payments`, `--namespace=payments`, `-n payments`,
+`-n=payments`. **`-npayments` is refused, not accepted and not ignored.**
+`kubectl` takes it because Go's `pflag` splits a shorthand cluster; taking it
+here would make `-nginx` mean *the namespace `ginx`*, which is a silent wrong
+scope for a word somebody plausibly types. The value must be a DNS-1123 label of
+at most 63 characters, checked before it reaches the API.
+
+**Omitting `--namespace` does not mean *the whole cluster*, it means *do not
+narrow here*.** What happens next is described under
+[Error handling](#error-handling): a cluster-wide pod LIST decides, and a `403`
+on it falls back to the context's own namespace rather than handing back an
+empty tool. Either way the header states the scope that is in effect, because a
+report that does not say what it covered cannot be trusted once it is pasted
+into a ticket.
+
+**`--read-only` and `--once` are specified but not yet built** — `--read-only`
+is described in [security.md § Write safety](security.md#write-safety-model) and
+arrives with the write path, `--once` is the first release's whole surface
+([screens/once.md](../screens/once.md)). No code parses either today.
+
+**`--live` is the temporary driver's**, not a shipped flag: the console watches a
+cluster because that is what it is, and reading objects from a file is the
+scaffolding that let the rules be proven before there was a screen
+([NOTES § D34](../NOTES.md#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)).
 
 ## Data flow
 

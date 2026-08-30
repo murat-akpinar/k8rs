@@ -3068,71 +3068,47 @@ public release.
       until every watch has listed), and a cluster took away both *rule 13 covers
       this pod* and *the limits count is otherwise stable*
       ([reports/2026-08-29](reports/2026-08-29-a-pod-whose-node-left.md))
-- [ ] Namespace scoping: `--namespace/-n`, and a 403 on the cluster-wide LIST
+- [x] Namespace scoping: `--namespace/-n`, and a 403 on the cluster-wide LIST
       falls back to the context's namespace (then `default`), with the header
       stating which scope is in effect and why. A namespace-scoped user must
       get a working tool, not an empty one
       ([NOTES § D5](NOTES.md#d5--namespace-scoping-is-a-v1-requirement-not-a-filter)).
-      **The premise, measured 2026-08-26 and worse than this box assumed: today a
-      403 on any one watch blanks the whole tool, and the screen it shows is
-      *loading*.** `listed()` is `still_listing().is_empty()` and `progress()`
-      answers for any watch with `complete == false`, so a refused kind means
-      `snapshot()` is `None` and **every rule is silent for the life of the
-      process** — while `still_listing()` reports that kind as a LIST whose
-      `since` is *just now*, refreshed by each `Init` of the retry loop. `nodes`
-      is cluster-scoped and cannot be granted by a namespaced `Role`, so this is
-      the ordinary enterprise developer, not an edge case, and `kubectl get pods
-      -n mine` works instantly beside it. It is
+      It is
       [PRIOR-ART § B4](PRIOR-ART.md#b4--a-denied-permission-must-degrade-one-feature-not-the-tool)
       ([k9s#4160](https://github.com/derailed/k9s/pull/4160)) and
-      [§ C2](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens)'s *loading ·
-      empty · denied* collapsed into two. **The ingredient this box needs now
-      exists** — per-watch failure identity landed with the reconnect box
-      ([D162](NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26)) —
-      **and the thing it must reopen is the gate**: `listed()` has to count a
-      refused watch as *answered*, not *pending*, which is the explicit exception
+      [§ C2](PRIOR-ART.md#c2--empty-and-not-loaded-yet-are-different-screens)'s
+      *loading · empty · denied* collapsed into two.
+      **Done 2026-08-30.** The gate reopens — `Watch::settled` and
+      `Fault::standing` count a refused watch as *answered* rather than
+      *pending*, the exception
       [D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)
-      does not yet carry. Found by the operator review of the reconnect box, which
-      is also what makes the Authorization row of the security gate **not
-      tickable until this box closes** — that row is this box's to earn.
-      **And it owns the placement of the *"One node check is off"* line**, which
-      is drawn but not built: `Input::skipped` is `BTreeMap::new()` on the live
-      path, so the string lives in `screens/` and nowhere in `src/`. It goes
-      **below** the clock-skew sentence, not above it
-      ([screens/once.md § Stacked with a check that could not run](screens/once.md#stacked-with-a-check-that-could-not-run) ·
-      [D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)).
-      **The `▲ k8rs is not getting …` watch-trouble line is a third thing and is
-      not this one** — per-watch, in the report's own severity vocabulary, in no
-      `screens/` file — and the clock box's tests briefly cited it as if it were.
-      Found by `tester`, 2026-08-28.
-      **IN FLIGHT — the code is written and committed, the box stays open for one
-      test.** Landed 2026-08-30 in the commit this line ships with: the gate
-      reopens (`Watch::settled`, `Fault::standing`, `progress()` counting a
-      refused watch as answered), `--namespace`/`-n` with a DNS-1123 predicate and
-      a 63-character bound, the fallback namespace probed rather than assumed, the
-      six report fetches scoped, and the **blocker a real restricted role found** —
-      `nothing is broken` printed over a scope that read nothing — fixed by making
-      the health claim an `Option` and suppressing it while any watch feeding it is
-      in trouble
+      did not carry — plus `--namespace`/`-n` behind a DNS-1123 predicate and a
+      63-character bound, the fallback namespace probed rather than assumed, the
+      six report fetches scoped, and the blocker a real restricted role found:
+      `nothing is broken` printed over a scope that read nothing, fixed by making
+      the health claim an `Option`
       ([D184](NOTES.md#d184--the-namespace-box-what-a-real-restricted-role-took-away-and-the-eight-rulings-it-forced-2026-08-30) ·
       [reports/2026-08-29](reports/2026-08-29-namespace-scope-under-a-real-role.md)).
-      **`just check` is green (711 unit + 10 binary tests, exit 0). The mutation
-      gate is RED and that is the whole of what is left** — `MISSED
-      src/main.rs:1646:25: delete ! in live_report`, out of 131 mutants with 113
-      caught and 17 unviable (each naming a type). Deleting that `!` turns
-      `never_listed` from *the kinds that never listed* into *the kinds that did*,
-      feeding `Input::unreadable`, and no test objects. The distinction is the one
-      this box is about: a watch that listed once and then broke has **stale**
-      data, a watch that never listed has **none**, and only the second is
-      unreadable. **Done-when:** one test with a store carrying both shapes at
-      once, asserting `unreadable` names the never-listed kind and not the other —
-      proven red by applying that exact mutation, on a copy with its own
-      `CARGO_TARGET_DIR`
-      ([D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)) —
-      then `just check` green and that one mutant re-checked with
-      `bash scripts/mutants.sh --gate --timeout 90 --in-diff <diff>`; the other 130
-      are unchanged and need no re-run. **Then `docs/` for the `--namespace` CLI
-      surface, which is the PM's and is not yet done**, and the box closes
+      The owed test stands one listed-then-broken watch beside four that never
+      listed, in both directions, because one arrangement cannot tell the
+      discriminator from a coincidence of it — and the box's own done-when named
+      a mutant its own commit had already killed
+      ([D186](NOTES.md#d186--a-done-when-written-from-a-measurement-its-own-commit-had-already-invalidated-and-the-two-findings-that-outlived-it-2026-08-30) ·
+      [reports/2026-08-30](reports/2026-08-30-never-listed-vs-stale-and-the-empty-node-list.md)).
+      **The Authorization row of the security gate is earned in halves and this
+      box earns the first**: *a 403 degrades one feature, names the missing verb
+      and resource, never crashes, never retries in a loop*. The second — *the
+      documented read-only role runs everything but the operations* — is the
+      read-only-`ClusterRole` box below, which has never been run under that role
+      (D186).
+      **What this box did not take**: the *"One node check is off"* line is still
+      drawn and not built (`Input::skipped` is `BTreeMap::new()` on the live
+      path), below the clock-skew sentence and not above it
+      ([screens/once.md § Stacked with a check that could not run](screens/once.md#stacked-with-a-check-that-could-not-run) ·
+      [D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)) —
+      it belongs to whichever box builds `skipped`, and the
+      `▲ k8rs is not getting …` watch-trouble line is a third thing that is not
+      either of them
 - [ ] Wire into the same print loop; verify against kind while breaking pods
 - [ ] The **read-only `ClusterRole`** written out in `docs/security.md`, and
       verified by running v0.0.1 against kind under exactly that role and

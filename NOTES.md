@@ -207,6 +207,7 @@ its line moving with it.
 - [D183](#d183--a-pod-can-name-a-node-that-is-gone-and-every-per-node-row-is-right-to-be-silent-about-it-2026-08-29) — a pod can name a node that is gone, and every per-node row is right to be silent about it
 - [D184](#d184--the-namespace-box-what-a-real-restricted-role-took-away-and-the-eight-rulings-it-forced-2026-08-30) — the namespace box: what a real restricted role took away, and the eight rulings it forced
 - [D185](#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30) — cleanup on the last line is not cleanup, and the resource is not always a file
+- [D186](#d186--a-done-when-written-from-a-measurement-its-own-commit-had-already-invalidated-and-the-two-findings-that-outlived-it-2026-08-30) — a done-when written from a measurement its own commit had already invalidated, and the two findings that outlived it
 
 ## Why it exists — where the gap is
 
@@ -16160,3 +16161,69 @@ running. The *isolated* runs were not isolated. Whether that test is flaky on a
 quiet machine is now unknown and has to be re-measured, which is the second cost
 of a leak that reads as ambient: it does not only slow the box down, it becomes a
 silent term in every number taken while it runs.
+
+### D186 — a done-when written from a measurement its own commit had already invalidated, and the two findings that outlived it (2026-08-30)
+
+The namespace box was left open for one owed test, and its done-when named the
+mutant to kill: `MISSED src/main.rs:1646:25: delete ! in live_report`. **Two
+things were wrong with that line, and each was one command away.**
+
+**The line:col and the prose describe different expressions.** `1643:27` is the
+`!` in `filter(|trouble| !trouble.listed)`, which builds `never_listed`; `1646:25`
+is the `!` in `!troubles.is_empty()`, which sets `watch_trouble`. The box's prose
+argued the first at length — *stale versus none*, which is what the box is
+about — and its line:col named the second.
+
+**And the named mutant was already dead when the box was written.** Applied by
+hand to a clean `HEAD` copy with its own `CARGO_TARGET_DIR`, `1646:25` fails
+`a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_recovery` at
+`src/main_tests.rs:2094` — *"five watches delivered a complete answer and the
+cluster was still not called healthy"*. That assertion is
+[D184](#d184--the-namespace-box-what-a-real-restricted-role-took-away-and-the-eight-rulings-it-forced-2026-08-30)'s
+own: the health claim became an `Option` in the same commit the box's code landed
+in. So the mutation run that produced the `MISSED` predates the fix that closed
+it, and the done-when was transcribed from it without re-measuring. This is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+in the PM's own hand, and the cheap check is the one already written down there:
+**a box's premise is re-checked at HEAD when it is briefed, and a done-when that
+names a measurement is a premise.**
+
+**The test was still owed, for a reason the box did not state.** Deleting the
+`1643:27` `!` *is* caught at HEAD — but only as a **blank header**. Every store in
+`main_tests.rs` drove all five watches into one state, so the mutation put all
+five into `Input::unreadable` and the header rendered empty; no store held two
+shapes at once, and the defect the field exists to prevent — a measured-looking
+`0` printed for a list nobody was allowed to read, with the real count dropped —
+was unreachable. With one listed-then-broken watch beside four that never listed,
+the header swaps from `14 pods` to `0 nodes`, which is the difference between
+*k8rs has no data for nodes* and *this cluster has no nodes*. **A mutant caught by
+the wrong symptom is a mutant the gate counts and the requirement does not.**
+
+**One arrangement could not tell the discriminator from a coincidence of it.**
+In the first store the watch that listed was also the only Pod, so
+`filter(|t| !t.listed)` and `filter(|t| t.kind != ObjectKind::Pod)` produce an
+identical `never_listed`. Measured: the kind-keyed mutation passes on that
+arrangement alone and fails on the mirror (Node listed-then-broken, Pod never
+listed). [D29](#d29--a-guard-is-proven-only-for-the-shapes-it-was-fed-2026-08-12)
+generalises here to **the shapes a discriminator is fed have to disagree with
+every cheaper rule that would pass the first one.**
+
+**The Authorization row of the security gate splits, and only half is this box's.**
+`todo.md` said the row was the namespace box's to earn. Measured against the
+shipped behaviour, *a 403 degrades that one feature, names the missing verb and
+resource, never crashes and never retries in a loop* **holds** — `Fault::standing`
+and `Watch::settled` open the gate for a refused watch, `unreadable()` names the
+verbs a `Role` has to spell, and the backoff plateau was measured at ~43 s between
+denials. *The documented read-only role runs everything except the operations*
+**does not hold yet**: that role has never been run against a cluster under itself
+and nothing more, which is the still-open read-only-`ClusterRole` box's own
+done-when. **The row is earned in two halves by two boxes**, and ticking it whole
+at this box's close would have been false.
+
+Two findings from the review outlived the box and are in
+[`backlog.md`](backlog.md): `analysis.rs` reading an empty node list as a
+permission fact — which disagrees with `main.rs` reading the same fact off
+`Trouble::listed`, and which this box made reachable on a live run — and the stale
+count printed with no age, which `screens/widgets.md` § 1a requires and the header
+does not do. Both need a field on a type frozen at an earlier phase close, so both
+are a recorded reversal and a later box, not a dev round.
