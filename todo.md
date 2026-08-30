@@ -3244,7 +3244,19 @@ public release.
       for the real output rather than checking a box on *this would work*
       ([CLAUDE.md § The boxes no agent can run](CLAUDE.md)). It also needs a
       version bump: `Cargo.toml` still says `0.0.0`, the placeholder published
-      2026-08-12
+      2026-08-12.
+      **And it waits on a `README.md`, which is Phase 13's box** — a Phase 5 box
+      blocked on a later phase, recorded rather than worked around
+      ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
+      crates.io renders the readme under the description; with none the page is
+      one sentence and a version number, and there is no `--help`, so a stranger
+      who runs `cargo install k8rs` meets the usage line only *after* typing the
+      wrong command. The user chose to postpone rather than pull a short README
+      forward (2026-08-30). **The packaging itself is already fixed and ready**:
+      the description no longer claims a TUI this build does not have, and
+      `exclude` no longer ships `reports/`, `backlog.md`, `PRIOR-ART.md` or
+      `.claude/` — measured 145 files / 5.2 MiB before, **90 files / 4.3 MiB**
+      after
 
 **🔒 Security gate:** TLS verification is never disabled by us; if the
 kubeconfig sets `insecure-skip-tls-verify` it is honoured *and surfaced*, not

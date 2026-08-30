@@ -214,6 +214,7 @@ its line moving with it.
 - [D190](#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30) — the screen that ships first promises four things the binary does not do, and nobody had read them against each other
 - [D191](#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30) — the `--once` review round: three blockers, and the one PM ruling a measurement refused
 - [D192](#d192--the-flake-was-a-stub-telling-the-truth-about-the-wrong-thing-and-fixing-it-made-the-neighbouring-test-unable-to-fail-2026-08-30) — the flake was a stub telling the truth about the wrong thing, and fixing it made the neighbouring test unable to fail
+- [D193](#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30) — the crate's own description promised a TUI, and the release stops for a README rather than shipping a blank page
 
 ## Why it exists — where the gap is
 
@@ -16679,3 +16680,52 @@ pane headings, which a trouble line does not disturb. That is the worse state, n
 the better one: the first assertion anybody writes there about *nothing is broken*
 flakes at that rate and looks like a product bug. Fixed in the same turn, with the
 same shape rather than a second mechanism for one fact.
+
+### D193 — the crate's own description promised a TUI, and the release stops for a README rather than shipping a blank page (2026-08-30)
+
+The release box was one command from running when the package was measured
+instead of assumed. Three things came out, and the first is the worst sentence
+this project has written.
+
+**`Cargo.toml`'s `description` read *"The Kubernetes TUI in Rust"*, and there is
+no TUI.** `ratatui` and `crossterm` appear in `Cargo.lock` **zero** times;
+`ui.rs`, `views.rs` and `theme.rs` do not exist; the console is Phase 11, thirty-
+five boxes away. That string is the **most public one this project owns** — it is
+the crates.io front page for everyone who searches *kubernetes tui*, and the one
+line a stranger reads before `cargo install`. It is
+[D190](#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)'s
+class at maximum blast radius: a document describing a phase the binary has not
+reached. **The user hit exactly this confusion three times in one session**,
+asking after each run why no TUI opened — from a repo whose own `CLAUDE.md` calls
+the project *lazygit for Kubernetes* and whose crate line said the TUI was here.
+Someone who reads it on crates.io has nowhere to ask. Rewritten to say what the
+binary does — prints a report and exits — and to name the console as coming.
+
+**The package carried 145 files and 5.2 MiB, and most of it was working
+documents.** `exclude` held `screens/`, `scripts/`, `tmp/`, `docs/` and four
+markdown files; it was written before `reports/`, `backlog.md` and `.claude/`
+existed, so all forty measurement write-ups shipped, along with the five agent
+definitions and a `settings.json` naming internal hosts in its permission list.
+Nothing there is a secret — every one passed the sanitization guard — but a
+public registry keeps what it is given, and a `yank` does not delete. Now 90 files
+and 4.3 MiB. **`tests/` stays in deliberately**: 636K of sanitized captures is
+what lets a consumer run the suite, and the reason to ship it is the reason
+[D53](#d53--a-committed-capture-is-never-edited-to-make-a-test-pass-2026-08-12)
+exists.
+
+**The release is postponed, and the reason is a `README.md` that does not
+exist.** crates.io renders the readme under the description; with none, the page
+is one sentence and a version number, and `cargo install k8rs` leaves a stranger
+with a binary whose only usage line appears **after** they have already typed the
+wrong command — there is no `--help`. The README is Phase 13's box, so the Phase 5
+release box now waits on a later phase. That is recorded rather than worked
+around: the honest options were *pull a short README forward* or *postpone*, and
+the user chose to postpone.
+
+**The general shape, which is why this is an entry and not a commit message.**
+Every check that caught these ran in under a minute — `cargo package --list`,
+`grep ratatui Cargo.lock`, a directory count. None had ever been run, because
+publishing was one box among many and the metadata was written on 2026-08-11,
+before there was a binary to be wrong about. **A field written before the thing it
+describes exists is not reviewed by anybody afterwards**, and `Cargo.toml` gets no
+`screens-check`, no `check-docs` and no operator review.

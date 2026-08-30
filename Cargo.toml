@@ -6,11 +6,28 @@ edition = "2024"
 # `time` release that fixes RUSTSEC-2026-0009 needs 1.88 (NOTES § D86).
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
-description = "The Kubernetes TUI in Rust — says what is broken in your cluster and why, in plain English."
+# **It said "The Kubernetes TUI in Rust" until 2026-08-30 and there is no TUI**
+# (NOTES § D193). This is the most public string this project owns — crates.io's
+# front page for everyone who searches "kubernetes tui" — and it was describing
+# Phase 11 while the binary shipped a headless report. What ships today is the
+# report; the console is named as coming, not as here.
+description = "Says what is broken in your Kubernetes cluster and why, in plain English — a single binary that prints a report and exits. The TUI console is coming."
 repository = "https://github.com/murat-akpinar/k8rs"
 keywords = ["kubernetes", "tui", "k8s", "cluster", "terminal"]
 categories = ["command-line-utilities"]
-exclude = ["screens/", "scripts/", "tmp/", "docs/", "NOTES.md", "REQUIREMENTS.md", "todo.md", "CLAUDE.md"]
+# **Working documents do not go on a public registry, and this list was written
+# before three of them existed** (NOTES § D193). Measured 2026-08-30: without the
+# second line the package carried 145 files and 5.2 MiB, including all 40 of
+# `reports/` and the seven files of `.claude/` — agent definitions and a local
+# permission policy naming internal hosts. `tests/` stays in deliberately, so a
+# consumer can run the suite; the fixtures are sanitized captures and are 636K.
+exclude = [
+    "screens/", "scripts/", "tmp/", "docs/",
+    "NOTES.md", "REQUIREMENTS.md", "todo.md", "CLAUDE.md",
+    "reports/", "backlog.md", "PRIOR-ART.md",
+    ".claude/", ".github/", ".gitignore",
+    "justfile", "deny.toml", "cliff.toml", "clippy.toml",
+]
 
 # Dependencies arrive with the step that uses them (invariant 10): k8s-openapi
 # in Phase 3, kube in Phase 5, ratatui/crossterm in Phase 11.
