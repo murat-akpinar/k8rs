@@ -100,10 +100,13 @@ rules:
   # grant below still works and `/apis` alone answers 403 (NOTES § D160)
   - nonResourceURLs: ["/api", "/apis", "/api/*", "/apis/*", "/version"]
     verbs: ["get"]
-  # `pods/log` and `events` are granted ahead of the code that reads them —
-  # Phase 6's `l` logs view and its per-object events fetch. Nothing reads
-  # either today; they are here so the role a stranger applies for v0.0.1 does
-  # not have to change under them a fortnight later (NOTES § D187)
+  # `pods/log` is read as of 2026-08-30 — `--logs` fetches and follows one
+  # container's log. This grant was measured sufficient for it against a real
+  # cluster: extracted verbatim, bound to a ServiceAccount, `--logs` exits 0
+  # (`k8s-admin`, reports/2026-08-30-the-log-stream-against-a-cluster.md).
+  # `events` is still granted ahead of the code — Phase 6's per-object events
+  # fetch — so the role a stranger applies for v0.0.1 does not have to change
+  # under them a fortnight later (NOTES § D187)
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services", "nodes",
                 "persistentvolumeclaims"]

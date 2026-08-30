@@ -828,3 +828,510 @@ fn analysis_under_once_reaches_stdout_and_plain_once_draws_no_panes() {
 }
 
 // --- ONE REPORT AND OUT END ---
+
+// --- ONE OBJECT'S LOG START ---
+//
+// **The log path's public surface, and the byte shapes no unit test above it can spell.**
+// `src/k8s_tests.rs` proves `read_lines` over a `Feed`, `src/main_tests.rs` proves `logs_run`
+// over a `kube::Client` — both read a function's answer. What neither can see is which of the
+// two streams a line lands on, what the process exits with, and what a *byte sequence* does on
+// the way through: `src/main_tests.rs`'s own log stub takes its body as a `&'static str`, so a
+// line cut in the middle of a multi-byte character, a `\r\n` ending and a body larger than the
+// retained ceiling are shapes only a stub that writes `[u8]` can feed
+// (CLAUDE.md § A check is proven only for the input shapes it was fed, NOTES § D29).
+//
+// **The listener is [`a_cluster_that_answers_with_nothing_in_it`]'s, extended by two paths and
+// not rewritten beside it** — one pod GET and one log GET. Everything else still answers the
+// empty list `k8s::connect` needs, because `--logs` goes through the same connect as `--once`.
+
+/// Every path the log listener was asked for, in the order it was asked.
+///
+/// **The query string is the half that matters.** `--previous` and `--follow` are two switches
+/// whose whole observable effect is a query parameter, and a `kubectl` line that prints one the
+/// request did not carry is invariant 4's record lying — which is only checkable from the side
+/// that receives the request.
+type Asked = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+/// **A listener that answers one pod and one log, and the kubeconfig that points at it.**
+///
+/// **`pieces` are HTTP chunks and that is the point** — one `Transfer-Encoding: chunked` chunk
+/// per piece, so the caller decides where a body boundary falls, the way `src/k8s_tests.rs`'s
+/// `Feed::of` decides where a read boundary falls. No piece at all is a body of zero bytes,
+/// which is a container that has written nothing.
+///
+/// **`pod` names a committed capture** (`tests/fixtures/`), never a hand-written object
+/// (CLAUDE.md § Fixtures come from real cluster captures).
+fn a_cluster_that_answers_one_pod_and_one_log(
+    pod: &str,
+    pieces: Vec<Vec<u8>>,
+) -> (std::path::PathBuf, Asked) {
+    let body = std::fs::read(fixture(&format!("{pod}.json"))).expect("the capture reads");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    // The address the kernel handed back, never a literal one —
+    // `scripts/security-guard.py` § no second outbound path refuses a hardcoded host under
+    // `tests/`, and the stub above is written the same way.
+    let address = listener.local_addr().expect("the port it picked");
+    let asked: Asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = std::sync::Arc::clone(&asked);
+    std::thread::spawn(move || {
+        for socket in listener.incoming() {
+            let Ok(socket) = socket else { return };
+            let body = body.clone();
+            let pieces = pieces.clone();
+            let seen = std::sync::Arc::clone(&seen);
+            std::thread::spawn(move || answer_one_log(socket, &body, &pieces, &seen));
+        }
+    });
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-logstub-{}-{}.kubeconfig.yaml",
+        std::process::id(),
+        address.port()
+    ));
+    std::fs::write(
+        &path,
+        format!(
+            "apiVersion: v1\nkind: Config\ncurrent-context: stub\n\
+             clusters: [{{name: stub, cluster: {{server: 'http://{address}'}}}}]\n\
+             contexts: [{{name: stub, context: {{cluster: stub, user: stub}}}}]\n\
+             users: [{{name: stub, user: {{}}}}]\n"
+        ),
+    )
+    .expect("the stub kubeconfig writes");
+    (path, asked)
+}
+
+/// The three answers [`a_cluster_that_answers_one_pod_and_one_log`] gives, by path.
+fn answer_one_log(mut socket: std::net::TcpStream, pod: &[u8], pieces: &[Vec<u8>], seen: &Asked) {
+    use std::io::{Read, Write};
+    let empty =
+        br#"{"apiVersion":"v1","kind":"List","metadata":{"resourceVersion":"1"},"items":[]}"#;
+    let mut pending = String::new();
+    loop {
+        let mut chunk = [0_u8; 2048];
+        match socket.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => pending.push_str(&String::from_utf8_lossy(&chunk[..read])),
+        }
+        // Every request here is a GET with no body, so one ends at the blank line.
+        while let Some(end) = pending.find("\r\n\r\n") {
+            let request: String = pending.drain(..end + 4).collect();
+            let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
+            seen.lock()
+                .expect("the record is never poisoned")
+                .push(path.clone());
+            // **`/log?` or a path ending in it, never the substring** — a pod named
+            // `catalog` has `/log` inside its own path, and a stub that answered a log for a
+            // pod GET would leave every test below reading a body nothing asked for.
+            let sent = if path.contains("/log?") || path.ends_with("/log") {
+                // **Chunked, so `pieces` survives as body frames** rather than being flattened
+                // into one `content-length` write the client reads back in its own 8 KiB steps.
+                let mut answer = b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\
+                                   transfer-encoding: chunked\r\n\r\n"
+                    .to_vec();
+                // A zero-length chunk *is* the terminator, so an empty piece would end the
+                // body early and every piece after it would vanish without a word. No body at
+                // all is spelled by an empty `pieces`, which is the loop running zero times.
+                for piece in pieces.iter().filter(|piece| !piece.is_empty()) {
+                    answer.extend_from_slice(format!("{:x}\r\n", piece.len()).as_bytes());
+                    answer.extend_from_slice(piece);
+                    answer.extend_from_slice(b"\r\n");
+                }
+                answer.extend_from_slice(b"0\r\n\r\n");
+                answer
+            } else {
+                let body: &[u8] = match path.contains("/pods/") {
+                    true => pod,
+                    false => empty,
+                };
+                let mut answer = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\n\r\n",
+                    body.len()
+                )
+                .into_bytes();
+                answer.extend_from_slice(body);
+                answer
+            };
+            if socket.write_all(&sent).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+/// The capture every test below streams a log for: `default/healthy`, whose snapshot carries an
+/// init container and a regular one — two, so the container block has something to list.
+const POD: &str = "default/healthy";
+
+/// One fetched log, as the two streams and the exit code — the whole of what this file can see.
+fn one_log(pod: &str, pieces: Vec<Vec<u8>>, args: &[&str]) -> (Output, Vec<String>) {
+    let (kubeconfig, asked) = a_cluster_that_answers_one_pod_and_one_log(pod, pieces);
+    let out = k8rs_over_a_stub(&kubeconfig, args);
+    // Removed before the assertions, so a red run leaves nothing behind either.
+    std::fs::remove_file(&kubeconfig).expect("the stub kubeconfig is removed");
+    let seen = asked.lock().expect("the record is never poisoned").clone();
+    (out, seen)
+}
+
+/// **`\r\n` is a line ending too, and a log that stops mid-line still hands that line over.**
+///
+/// **Neither shape had been fed through the binary.** `src/k8s_tests.rs` feeds a last line with
+/// no newline to `read_lines` directly; nothing anywhere feeds a `\r`, which reaches
+/// `k8s::text` as a character that is both unprintable *and* whitespace — the one class that
+/// becomes a space rather than being deleted, and would end every line of a Windows-written
+/// container's log with a trailing one.
+#[test]
+fn a_crlf_log_that_ends_mid_line_is_lines_on_stdout_with_no_carriage_return_left() {
+    let (out, _) = one_log(
+        "healthy",
+        vec![b"connected to postgres\r\nwriting checkpoint\r\npanic: killed here".to_vec()],
+        &["--logs", "--object", POD],
+    );
+
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(
+        text(out.stdout),
+        "connected to postgres\nwriting checkpoint\npanic: killed here\n",
+        "a `\\r\\n` log did not come out as three clean lines — either the carriage return \
+         survived to the screen, or the line a crash is explained by was dropped for having no \
+         newline after it"
+    );
+}
+
+/// **A container that has written nothing is a state and not a hang** (`screens/detail.md` §
+/// No logs yet, `PRIOR-ART § E1`): exit `0`, an empty stdout, and the sentence on stderr.
+///
+/// **Empty stdout is half the assertion.** `k8rs --logs … | wc -l` has to answer `0`, which is
+/// what puts the sentence on the other stream.
+#[test]
+fn a_log_that_delivers_no_bytes_at_all_is_a_state_and_not_a_failure() {
+    let (out, _) = one_log("healthy", Vec::new(), &["--logs", "--object", POD]);
+
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(
+        text(out.stdout),
+        "",
+        "a log with nothing in it put something on stdout, so `k8rs --logs | wc -l` no longer \
+         answers 0 for a container that has written nothing"
+    );
+    let stderr = text(out.stderr);
+    assert!(
+        stderr.contains("k8rs: nothing has been written to this container's log yet"),
+        "a container that has written nothing said nothing about it, which reads as a hang: \
+         {stderr:?}"
+    );
+}
+
+/// The per-line cap `screens/detail.md` § The buffer states, in bytes. **Written here rather
+/// than read off `k8s::FREE_TEXT`**, which this target cannot see and which would in any case
+/// be the implementation asserting itself.
+const CAP: usize = 4096;
+
+/// What a cut says, `screens/detail.md`'s own words.
+const MARKER: &str = "… (shortened by k8rs)";
+
+/// **One byte under the cap, exactly on it, and one byte over** — the boundary in all three
+/// directions.
+///
+/// **4 095 was the unfed one.** `src/k8s_tests.rs` feeds exactly `FREE_TEXT` and `FREE_TEXT + 1`;
+/// a cut written `>=` rather than `>` is caught by the first of those, but a cap read as
+/// `4096 - 1` anywhere on the path is not, and the line under it is the only place that shows.
+#[test]
+fn a_line_at_the_cap_and_one_either_side_is_cut_only_when_it_is_over() {
+    let mut body = Vec::new();
+    for length in [CAP - 1, CAP, CAP + 1] {
+        body.extend_from_slice(&b"a".repeat(length));
+        body.push(b'\n');
+    }
+    let (out, _) = one_log("healthy", vec![body], &["--logs", "--object", POD]);
+
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let lines: Vec<String> = text(out.stdout).lines().map(str::to_string).collect();
+    assert_eq!(
+        lines.len(),
+        3,
+        "three lines went in and {} came out",
+        lines.len()
+    );
+    for (line, length) in lines.iter().zip([CAP - 1, CAP]) {
+        assert_eq!(
+            line.len(),
+            length,
+            "a line of {length} bytes came back {} — the cap is off by one and a line that fitted \
+             was cut",
+            line.len()
+        );
+        assert!(
+            !line.ends_with(MARKER),
+            "a line of {length} bytes was marked as shortened when nothing was lost"
+        );
+    }
+    assert!(
+        lines[2].ends_with(MARKER),
+        "the first byte over the cap was cut without saying so — a debugging tool that quietly \
+         shortens the evidence is lying about what it saw"
+    );
+    assert_eq!(
+        lines[2].len(),
+        CAP + MARKER.len(),
+        "the line over the cap came back {} bytes, so the cut did not land on the cap",
+        lines[2].len()
+    );
+}
+
+/// **k8rs never prints a character the container did not write** — the property `k8s::LINE_READ`'s
+/// four spare bytes exist for, asserted rather than argued.
+///
+/// **A four-byte character starting at byte 4 093 is the one case that reaches it.** The reader
+/// stops holding an unterminated line at `FREE_TEXT + 4`; cut at `FREE_TEXT` instead, exactly
+/// three of that character's four bytes are held, `from_utf8_lossy` turns them into one
+/// replacement character of exactly three bytes, the line therefore does not exceed the cap, the
+/// cut that would have removed it never runs — and `U+FFFD` reaches the screen with k8rs's own
+/// *(shortened by k8rs)* after it. Every other offset either keeps the character whole or has it
+/// truncated away, which is why the author's `FREE_TEXT + 1` line does not show this.
+#[test]
+fn a_character_straddling_the_cut_is_never_replaced_by_one_k8rs_invented() {
+    let mut body = b"a".repeat(CAP - 3);
+    body.extend_from_slice("\u{1f600}".as_bytes());
+    // Past `FREE_TEXT + 4`, so the reader stops holding and the line is marked.
+    body.extend_from_slice(&b"a".repeat(64));
+    body.push(b'\n');
+    let (out, _) = one_log("healthy", vec![body], &["--logs", "--object", POD]);
+
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = text(out.stdout);
+    assert!(
+        !stdout.contains('\u{fffd}'),
+        "k8rs printed a replacement character the container never wrote, so a reader debugging \
+         from this line is reading a byte k8rs invented: {stdout:?}"
+    );
+    assert!(
+        stdout.trim_end().ends_with(MARKER),
+        "the line was cut and did not say so: {stdout:?}"
+    );
+}
+
+/// **A line the strip empties is still a line the container wrote.**
+///
+/// **`screens/detail.md` puts the strip before the bounds** — *control characters are stripped
+/// before any of the three bounds is applied* — so what is bounded is the stripped text and what
+/// is counted is the line. A container that wrote a newline wrote a line, and swallowing it
+/// would silently renumber everything a reader counts against.
+#[test]
+fn a_line_of_nothing_but_characters_that_cannot_print_is_still_a_line() {
+    let (out, _) = one_log(
+        "healthy",
+        // Three framings of the class (NOTES § D31): a line that is *entirely* strippable, a
+        // line whose escape sequence leaves its printable tail behind, and an empty line the
+        // container itself wrote.
+        vec![
+            "before\n\u{1b}\u{7}\u{200b}\u{feff}\n\u{1b}[2J\n\nafter\n"
+                .as_bytes()
+                .to_vec(),
+        ],
+        &["--logs", "--object", POD],
+    );
+
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(
+        text(out.stdout),
+        "before\n\n[2J\n\nafter\n",
+        "a line the strip emptied was swallowed, an escape sequence left something on the screen \
+         that has no printed form, or the container's own empty line was renumbered away"
+    );
+}
+
+/// **A body past the retained ceiling is bounded, and the count above it is exact**
+/// (`screens/detail.md` § When the buffer fills).
+///
+/// **Every number here is derived from the screen and not from a run**: the ceiling is 2 MB, the
+/// lines are 3 000 bytes because that is over the per-line cap's half and well under it, and
+/// `2 097 152 / 3 000` is 699 lines kept — so 800 in is 101 dropped. A ceiling moved in either
+/// direction changes the sentence this asserts.
+///
+/// **800 lines is deliberately far under the 5 000-line bound**, so it is the byte ceiling that
+/// evicts and not the line count — the case `screens/detail.md` says takes over when lines run
+/// long, and the one no test above this file feeds through the binary.
+#[test]
+fn a_body_past_the_retained_ceiling_prints_exactly_what_it_dropped() {
+    const CEILING: usize = 2 * 1024 * 1024;
+    const LONG: usize = 3_000;
+    const SENT: usize = 800;
+    let kept = CEILING / LONG;
+    let dropped = SENT - kept;
+    let mut body = Vec::new();
+    for line in 0..SENT {
+        // Every line the same length, so `kept` is arithmetic and not an estimate.
+        let head = format!("{line:06} ");
+        body.extend_from_slice(head.as_bytes());
+        body.extend_from_slice(&b"x".repeat(LONG - head.len()));
+        body.push(b'\n');
+    }
+    let (out, _) = one_log("healthy", vec![body], &["--logs", "--object", POD]);
+
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = text(out.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(
+        lines.first().copied(),
+        Some(
+            format!("{dropped} lines were dropped from the top to keep this pane bounded.")
+                .as_str()
+        ),
+        "the dropped-lines sentence is not the screen's own, or the count is not exact — the \
+         screen says it is never rounded or bucketed"
+    );
+    assert_eq!(
+        lines.len(),
+        kept + 1,
+        "{SENT} lines of {LONG} bytes left {} lines and one sentence, where {CEILING} bytes buys \
+         {kept}",
+        lines.len() - 1
+    );
+    assert!(
+        lines[1].starts_with(&format!("{:06} ", SENT - kept)),
+        "the oldest surviving line is {:?} — a buffer that dropped from the bottom throws away \
+         the newest lines, which are the ones a reader is watching for",
+        &lines[1][..8.min(lines[1].len())]
+    );
+    assert!(
+        lines
+            .last()
+            .is_some_and(|last| last.starts_with(&format!("{:06} ", SENT - 1))),
+        "the newest line never arrived"
+    );
+    assert!(
+        lines[1..].iter().map(|line| line.len()).sum::<usize>() <= CEILING,
+        "the pane came out over the {CEILING} bytes the screen promises is true in the worst \
+         case as well as the common one"
+    );
+}
+
+/// **A container the pod does not have is refused with the names it does have**, because the
+/// reader's next action is to retype it and the only thing they need is the spelling.
+#[test]
+fn a_container_the_pod_does_not_have_is_refused_with_the_names_it_has() {
+    let (out, asked) = one_log(
+        "healthy",
+        vec![b"never read\n".to_vec()],
+        &["--logs", "--object", POD, "--container", "sidecar-envoy"],
+    );
+
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert_eq!(text(out.stdout), "", "a refused run put a log on stdout");
+    let stderr = text(out.stderr);
+    assert!(
+        stderr
+            .contains("k8rs: this pod has no container named sidecar-envoy — it has migrate, app"),
+        "the refusal did not name what the pod actually has: {stderr:?}"
+    );
+    assert!(
+        !asked.iter().any(|path| path.contains("/log")),
+        "a container that does not exist still reached the cluster as a log request: {asked:?}"
+    );
+}
+
+/// **`--previous` and `--follow` together reach the request *and* the line that teaches it**
+/// (invariant 4: the command log and the real call may not disagree).
+///
+/// **The pair had never been fed through the binary.** `src/k8s_tests.rs` builds a `LogRequest`
+/// with both switches on directly; what that cannot show is that both survive argv, the
+/// no-previous-run fallback and the request builder on one run.
+///
+/// **`crashloop` and not `healthy`**, because its container has restarted: `--previous` on one
+/// that has not is turned off on purpose, and asserting the pair over such a pod would assert
+/// the fallback instead.
+#[test]
+fn previous_and_follow_together_reach_the_request_and_the_kubectl_line() {
+    let (out, asked) = one_log(
+        "crashloop",
+        vec![b"boom\n".to_vec()],
+        &[
+            "--logs",
+            "--object",
+            "default/broken-crashloop",
+            "--previous",
+            "--follow",
+        ],
+    );
+
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stderr = text(out.stderr);
+    assert!(
+        stderr.contains("$ kubectl logs broken-crashloop -n default -c quitter --previous -f"),
+        "the teaching line is not the command a reader could have typed: {stderr:?}"
+    );
+    let log = asked
+        .iter()
+        .find(|path| path.contains("/log"))
+        .unwrap_or_else(|| panic!("no log was ever asked for: {asked:?}"));
+    assert!(
+        log.contains("previous=true") && log.contains("follow=true"),
+        "the request carried neither switch the `kubectl` line above printed, which is the \
+         command log describing a call that was never made: {log:?}"
+    );
+    assert!(
+        !stderr.contains("hasn't restarted"),
+        "a container with restarts was told it had none: {stderr:?}"
+    );
+}
+
+/// **Half an instruction, a name that would leave its path segment, and a name with something in
+/// it that cannot print — all refused before anything is connected to** (the security gate's
+/// *object names are sanitised before they build a filesystem path* row, invariant 9).
+///
+/// **Through the process and not through `mistyped`.** `src/main_tests.rs` asserts the refusals
+/// over the function; what it cannot see is that the sentence lands on stderr with nothing on
+/// stdout, that the exit code is `2`, and — the invariant 9 half — that no control character
+/// survives the trip out. `KUBECONFIG` points at nothing, so a shape that was *not* refused
+/// would fail on the connection instead, with a different sentence.
+#[test]
+fn a_log_run_that_named_something_unusable_is_refused_with_nothing_on_stdout() {
+    for line in [
+        vec!["--logs"],
+        vec!["--object", "default/web"],
+        vec!["--logs", "--object", "../secrets"],
+        vec!["--logs", "--object", "default/../secrets"],
+        vec!["--logs", "--object", "default/web?watch=true"],
+        vec!["--logs", "--object", "a/b/c"],
+        vec!["--logs", "--object", "web/"],
+        vec!["--logs", "--object", "/web"],
+        vec!["--logs", "--object", "de\u{1b}[2Jfault/web"],
+        vec!["--logs", "--object", "default/we\u{202e}b"],
+        vec!["--logs", "--object", "default/web\u{7}"],
+    ] {
+        let out = k8rs_with_no_kubeconfig(&line);
+
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{line:?} was not refused: {out:?}"
+        );
+        assert_eq!(
+            text(out.stdout),
+            "",
+            "{line:?} put something on stdout, so a mistyped log run writes a usage text into \
+             `k8rs --logs > out.txt` and calls it a log"
+        );
+        let stderr = text(out.stderr);
+        assert!(
+            stderr.starts_with("k8rs: ") && stderr.contains("usage: k8rs "),
+            "{line:?} was refused without the usage under it: {stderr:?}"
+        );
+        assert!(
+            !stderr.contains(CONNECT_CANARY),
+            "{line:?} reached a connection before it was refused: {stderr:?}"
+        );
+        let survivors: Vec<char> = stderr
+            .lines()
+            .flat_map(str::chars)
+            .filter(|c| c.is_control())
+            .collect();
+        assert!(
+            survivors.is_empty(),
+            "{line:?} put control characters on stderr: {survivors:?}"
+        );
+    }
+}
+
+// --- ONE OBJECT'S LOG END ---

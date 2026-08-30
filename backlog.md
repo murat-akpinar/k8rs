@@ -1805,6 +1805,19 @@ recorded reversal and a later box rather than a dev round
   shape question; `screens/once.md` does not draw the state at all, which makes it
   `tui-designer`'s first. Found by `k8s-admin`, 2026-08-30
 
+- **The API's own error body reaches stdout as if the container had written
+  it.** `--previous` on a crashlooper whose previous log the runtime has already
+  collected returns HTTP 200 with `unable to retrieve container logs for
+  containerd://<id>` as the body, so `arrived` becomes true and even
+  `nothing_written` stays silent. **`kubectl` does exactly the same**, so this
+  is not a divergence and not a defect in the box — it is the product's stated
+  reason to exist ([invariant 14](CLAUDE.md)) declining to fire on the one
+  sentence a beginner who pressed `⇧p` will read as their own application's
+  output. Needs a screen decision before a code one, so it is `tui-designer`'s
+  first and `screens/detail.md` does not cover it. Found by `k8s-admin` against
+  a live cluster, 2026-08-30
+  ([reports/2026-08-30-the-log-stream-against-a-cluster.md](reports/2026-08-30-the-log-stream-against-a-cluster.md) § 7)
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
