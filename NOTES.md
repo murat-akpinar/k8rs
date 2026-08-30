@@ -210,6 +210,8 @@ its line moving with it.
 - [D186](#d186--a-done-when-written-from-a-measurement-its-own-commit-had-already-invalidated-and-the-two-findings-that-outlived-it-2026-08-30) — a done-when written from a measurement its own commit had already invalidated, and the two findings that outlived it
 - [D187](#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30) — the read-only role under itself: two grants nothing reads, a decision that described code that was never written, and the one sentence that sends an operator to the wrong resource
 - [D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30) — where a `--once` report ends up, and the flag that is the only reader three shipped rules have
+- [D189](#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30) — `--once` is built in Phase 5, a path beside a cluster flag is refused rather than ignored, and the command log the screen promises does not exist
+- [D190](#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30) — the screen that ships first promises four things the binary does not do, and nobody had read them against each other
 
 ## Why it exists — where the gap is
 
@@ -16418,3 +16420,113 @@ naming their own certificate's expiry"*, describing the two certificates "runnin
 out inside the same month". That month is C1's `Info` band, which under D87 draws
 no card anywhere. The clause itself is right and is drawn unconditionally; only the
 reason offered for it named a run that cannot happen. Corrected in the same turn.
+
+### D189 — `--once` is built in Phase 5, a path beside a cluster flag is refused rather than ignored, and the command log the screen promises does not exist (2026-08-30)
+
+Three rulings the release box forced, none of which its own text answered.
+
+**`--once` is built here, in Phase 5, and `screens/once.md`'s Phase 11 sentence is
+the one that is wrong.** The box says *"Release v0.0.1 to crates.io — `k8rs
+--once`, exactly as [screens/once.md](screens/once.md) draws it"*, and the flag
+did not exist: `mistyped()` refused it as an unknown `--` word, `USAGE` did not
+list it, and `docs/architecture.md` said *"No code parses either today."* Four
+documents place it at M1.5 — the milestone table at the head of
+[todo.md](todo.md), [D10](#d10--m1-ships-publicly-as-v001),
+[D17](#d17--the---once-output) and the release box itself. One places it later:
+`screens/once.md` line ~526, *"the temporary driver that stands in for `--once`
+until Phase 11 wires it"*. That sentence was written inside a **measurement** of
+the C2 handshake, describing what stood in for the flag on the day the
+measurement was taken; it is a note about the scaffolding, not a ruling about the
+phase, and it is outvoted four to one.
+
+**What the alternative costs, which is why this was not left to the release
+box.** Shipping v0.0.1 as `--live` publishes the flag this repo has documented
+throughout as *the temporary driver's, not a shipped flag* — to a public registry,
+under a version number crates.io yanks but never deletes. It would turn ~690 lines
+of `screens/once.md` into a specification for something unreleased and force D10
+and D17 to be rewritten around a surface neither chose. The work, measured rather
+than guessed before it was briefed: `live()` already connects, already prints the
+startup-failure sentences, already puts the greeting on stderr and the report on
+stdout. `--once` is that path stopping when the bootstrap gate opens, plus the two
+exit codes, plus the flag through `mistyped`/`USAGE`/`live_context`.
+
+**It is not a box added to a running phase.** The release box's own text requires
+the flag; building it is the box, not a new one beside it — `CLAUDE.md`'s single
+exception, *a defect in the box currently being landed is the same box*.
+
+**A file path beside `--live` or `--once` is refused, where `--live` used to ignore
+it in silence.** `dev-core` changed this while building the flag and flagged it as
+a line the PM might send back, because the brief said `--live` stays as it is. It
+stands. `k8rs --live pod.json` is a reader who believes one of two things is
+happening and gets the other with no sentence, which is the same class as the
+silent-wrong-cluster failure `live_context` already refuses `--context` for — and
+that one cost a real run against the wrong cluster before it was closed. One rule
+for both modes, in `mistyped`, which runs first and can print; `live_context`
+keeps ignoring the path as its second line, the shape the file already uses.
+
+**The command log does not exist, and the screen has been promising it.**
+[screens/once.md § stdout and stderr are split on purpose](screens/once.md#stdout-and-stderr-are-split-on-purpose)
+draws `$ kubectl get pods -A` and `$ kubectl get nodes` on stderr and calls the
+command log *"the teaching device outside the TUI too"*, citing
+[invariant 4](CLAUDE.md). No code in `main.rs` or `k8s.rs` emits either line —
+found by `dev-core` while wiring `--once`, not by any pass over the screen. It is
+not an invariant-4 breach: that invariant governs **mutations**, and this build has
+none. It is a gap between a shipped screen and a shipped binary, it is the first
+thing a stranger reading `screens/once.md` will look for, and it is boxed in
+Phase 6.
+
+### D190 — the screen that ships first promises four things the binary does not do, and nobody had read them against each other (2026-08-30)
+
+`screens/once.md` is the specification the release box measures against — *"`k8rs
+--once`, exactly as [screens/once.md](screens/once.md) draws it"*. Asked to correct
+one stale sentence
+([D189](#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)),
+`tui-designer` swept the whole file against the built binary on a live cluster
+rather than against the spec, and found four more. **None was found by any pass
+that read the file, and none was in anybody's diff** — the class
+[D87](#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14)
+named and this repo keeps paying for. The sweep is the finding; the four are its
+items.
+
+1. **Every sample block draws a cluster name the header has never printed.**
+   `prod-eu · 84 pods · 3 nodes` opens eleven drawings; the binary prints
+   `41 pods · 4 nodes`, or `ns: kube-system · 15 pods · 4 nodes` when scoped, and
+   never a leading name segment. This is not a defect in the code —
+   `main.rs`'s own header doc says the omission is deliberate and deferred
+   ([backlog.md](backlog.md)) — so the **screen** is what moved: the code was ruled
+   on and the drawings were not.
+2. **`○ nothing is broken` is unscoped in all three `--namespace` examples**, and
+   D184 ruled the health claim must carry its scope. The binary prints
+   `○ nothing is broken in kube-system`, measured live. Same shape as 1: a ruling
+   landed in the code and never reached the drawing.
+3. **`§ How wide the report is` specifies a 72-column wrap that has never
+   existed.** No wrap function exists in `main.rs` at all, and evidence lines were
+   measured at **423 characters** on stdout (`awk '{print length}' | sort -rn | head -1` over a real `--live` run, the PM's own). This is the one with a code half:
+   *should* the report wrap, or is a long evidence line correct because the reader
+   pipes it? The section's whole argument — *"72 survives an email quote with room
+   to spare"* — is about a report pasted into a ticket, which is the same audience
+   [D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)
+   just wrote a disclosure line for. Neither half is decided here; the box is.
+4. **`--read-only` is refused, where the screen says it is accepted and does
+   nothing.** Measured: `k8rs --once --read-only` answers *"--read-only is not a
+   flag k8rs has"* and exits 2. Phase 7 owns the flag, so the screen is describing
+   a future build in the present tense on the page that ships first.
+
+**All four are boxed in Phase 6, not fixed here.** Phase 5 has one box open and
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+is the rule that keeps it closable. **None of them blocks v0.0.1**: every one is
+the document being wrong about a binary that behaves sensibly, not the binary
+behaving badly — item 3 is the only one where the code's behaviour is even in
+question, and a long evidence line in a piped report is readable today.
+
+**What this changes about the release box's done-when.** *Exactly as
+`screens/once.md` draws it* is not checkable while four known divergences stand,
+so it is read as: the **shape** the file fixes — findings on stdout, commands and
+errors on stderr, `● ▲ ○` without colour, exit `0` and `2` — and not the sample
+blocks byte for byte. That reading is recorded on the box.
+
+**The method is the transferable part.** The sweep measured the file against a
+running binary on a live cluster; every previous pass over `screens/once.md` read
+it against the design. *The definition says what it is; only the object says what
+it does* — and a screen file is an object's description, which makes it the
+easiest place in this repo for a true sentence to quietly stop being one.

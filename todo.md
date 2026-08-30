@@ -3217,7 +3217,11 @@ public release.
       C1's expiring band still has no trailer line while C2 has one, which is
       boxed in Phase 6, not here
 - [ ] **Release v0.0.1 to crates.io** — `k8rs --once`, exactly as
-      [screens/once.md](screens/once.md) draws it: findings on stdout, the
+      [screens/once.md](screens/once.md) draws it — **read as the shape that file
+      fixes and not its sample blocks byte for byte**, because four known
+      divergences stand and are boxed in Phase 6
+      ([D190](NOTES.md#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30));
+      none of them blocks the release. The shape: findings on stdout, the
       commands and errors on stderr, `● ▲ ○` carrying severity without colour,
       colour only on a tty with `NO_COLOR` unset, exit `0` when it ran and `2`
       when it could not. No binary matrix and no screenshot; `cargo install` is the whole
@@ -3366,6 +3370,41 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       calls the flag *"scaffolding … this goes away with the rest of the
       temporary main"*, which D188 falsified — `--analysis` is part of the
       released surface and outlives the temporary driver
+- [ ] **The command log the screen promises does not exist.**
+      [screens/once.md § stdout and stderr are split on purpose](screens/once.md#stdout-and-stderr-are-split-on-purpose)
+      draws `$ kubectl get pods -A` and `$ kubectl get nodes` on stderr and calls
+      the command log *"the teaching device outside the TUI too"*; no code in
+      `main.rs` or `k8s.rs` emits either line. Found by `dev-core` while wiring
+      `--once`, not by any pass over the screen
+      ([D189](NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)).
+      **Not an invariant-4 breach** — that invariant governs mutations and this
+      build has none — but it is the first thing a stranger who read the screen
+      goes looking for. **Done when** every read k8rs performs on the live path
+      prints its kubectl equivalent on stderr, in the order it was run, and a
+      reader can paste any one of them and get what k8rs got; stdout stays the
+      findings alone, so `k8rs --once > findings.txt` is unchanged. It is a
+      display string and nothing executes it (security gate)
+- [ ] **`screens/once.md` promises four more things the binary does not do**, all
+      found by sweeping the file against a running binary on a live cluster rather
+      than against the design
+      ([D190](NOTES.md#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)).
+      Three are the screen being stale and one has a code half:
+      **(a)** eleven sample blocks open `prod-eu · 84 pods · 3 nodes` and the
+      header has never printed a cluster name — the omission is deliberate in
+      `main.rs` and deferred in `backlog.md`, so the drawings move, not the code;
+      **(b)** `○ nothing is broken` is unscoped in all three `--namespace`
+      examples while D184 ruled the claim carries its scope — measured live as
+      `○ nothing is broken in kube-system`;
+      **(c)** `§ How wide the report is` specifies a 72-column wrap that has never
+      existed — no wrap function is in `main.rs` and evidence lines measured
+      **423 characters** on a real run — and this one is a real question before it is an edit:
+      *should* the report wrap, given D188 just documented that it gets pasted
+      into tickets?
+      **(d)** `--read-only` is refused, where the screen says v0.0.1 accepts it and
+      does nothing — Phase 7 owns the flag, so decide whether the screen describes
+      the future build in the future tense or drops the row until then.
+      **Done when** each of the four is either true of the binary or gone from the
+      screen, and (c) carries a ruling rather than an edit
 
 **🔒 Security gate:** log streams are attacker-controlled text — bounded
 buffer, control characters stripped, no unbounded growth. Secret values are

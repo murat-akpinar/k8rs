@@ -528,7 +528,7 @@ probe as it does for every other call `--once` needs — reading
 `/version`, discovering what the cluster serves, listing pods. Measured
 today, before this box, on a real API server three days past its own
 `notAfter`, with a verifying kubeconfig and the temporary driver that
-stands in for `--once` until Phase 11 wires it: `grep -c "API server's own
+stood in for `--once` before Phase 5 built it: `grep -c "API server's own
 certificate"` over the run is `0`, and instead of a diagnosis the run
 prints the same generic line once for every call that could not
 complete — *"could not read the server version (nothing usable came back
