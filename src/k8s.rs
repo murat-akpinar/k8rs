@@ -114,9 +114,9 @@
 mod tests;
 
 use crate::rules::{
-    CertificateRequestSnapshot, ClaimSnapshot, ClusterSnapshot, Condition, ContainerRole,
-    ContainerSnapshot, ContainerState, DisruptionBudgetSnapshot, EndpointSliceSnapshot, ExitRule,
-    HostPathMount, Metrics, NodeSnapshot, NodeUsage, ObjectId, ObjectKind, PodSnapshot, Selector,
+    CertificateRequestSnapshot, ClaimSnapshot, ClusterSnapshot, Condition, ContainerSnapshot,
+    ContainerState, DisruptionBudgetSnapshot, EndpointSliceSnapshot, ExitRule, HostPathMount,
+    Metrics, NodeSnapshot, NodeUsage, ObjectId, ObjectKind, PodSnapshot, Selector,
     SelectorRequirement, ServiceSnapshot, Taint, Terminated, Toleration, WorkloadSnapshot,
     expires_at, minor_version,
 };
@@ -766,10 +766,14 @@ fn ingest<K, T: From<K> + Bounded>(object: K) -> T {
 // [`Fault::Expired`], read off the reader's own kubeconfig rather than off anything the cluster
 // sent.
 
-/// **What one failed call actually says** — six facts, no sentence and no string.
+/// **What one failed call actually says** — nine facts, no sentence and no string.
 ///
-/// Ordered as the reader meets them: the four that never reached the cluster, then the three the
+/// Ordered as the reader meets them: the four that never reached the cluster, then the four the
 /// cluster answered, then everything that produced no usable answer at all.
+///
+/// **The count is read off the enum and not carried forward.** It said *six* over eight variants
+/// until 2026-08-30 — a figure reasoned about rather than counted, which is the class CLAUDE.md
+/// names — and the edit that added the ninth found it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
     /// **The kubeconfig file itself** — not found, unreadable, or not valid YAML. Nothing was
@@ -824,6 +828,24 @@ pub enum Fault {
     /// which is why it is worth a variant of its own: this is the one code-execution path in the
     /// whole trust model (NOTES § D19).
     NoCredential,
+    /// **The server understood the request and will not act on it** — `400`, `reason: BadRequest`.
+    ///
+    /// **What is wrong is the request k8rs made, and never the connection.** It sat inside
+    /// [`Unanswered`](Fault::Unanswered) until 2026-08-30, which is `PRIOR-ART § C1` in the one
+    /// function whose own doc is about C1: a fault on this side of the wire printed *nothing
+    /// usable came back*, sending a reader to check a network that had just answered. The
+    /// measured shape was `k8rs --logs` on a multi-container `Pending` pod — the request named
+    /// no container because none had been reported, and the API server answered *a container
+    /// name must be specified*.
+    ///
+    /// **A `4xx` and yet nothing for the reader to fix**, which is why it is neither
+    /// [`Refused`](Fault::Refused) nor [`Gone`](Fault::Gone): those two are answered by editing
+    /// a `Role` or a name, and this one is answered by k8rs sending a different request. The
+    /// sentence beside it therefore says so rather than handing the reader an errand.
+    ///
+    /// **[`standing`](Fault::standing) is `true`** — the same bytes sent again get the same
+    /// answer, so a retry loop over it is a loop that cannot end.
+    Rejected,
     /// **A credential reached the server and the server no longer accepts it** — `401`.
     ///
     /// **The ordinary case on EKS, GKE and AKS** (NOTES § D19): those kubeconfigs hold no token,
@@ -902,6 +924,7 @@ impl Fault {
             | Fault::NoContext
             | Fault::BadEntry
             | Fault::NoCredential
+            | Fault::Rejected
             | Fault::Expired
             | Fault::Refused
             | Fault::Gone => true,
@@ -968,12 +991,20 @@ impl Fault {
 /// only something between us and the API server can produce — read as *gone* rather than
 /// *refused*. Nesting removes the tie-break entirely: the transport's own number wins, and the
 /// body's word is read only when there is no number.
+///
+/// **`400` had no arm until 2026-08-30 and fell to [`Fault::Unanswered`]** (`k8s-admin`), which
+/// is `PRIOR-ART § C1` in the function written to close it: a request *this* side got wrong was
+/// reported as a network that answered nothing. The shape that produced it is § ONE CONTAINER'S
+/// LOG's — a log request naming no container against a pod that has several — and it is
+/// [`Fault::Rejected`] now, which is a fact about the request and not about the cluster.
 fn answer(status: &Status) -> Fault {
     match status.code {
+        400 => Fault::Rejected,
         401 => Fault::Expired,
         403 => Fault::Refused,
         404 => Fault::Gone,
         _ => match status.reason.as_str() {
+            reason::BAD_REQUEST => Fault::Rejected,
             reason::UNAUTHORIZED => Fault::Expired,
             reason::FORBIDDEN => Fault::Refused,
             reason::NOT_FOUND => Fault::Gone,
@@ -4840,11 +4871,20 @@ pub(crate) const LOG_LINES: usize = 5_000;
 
 /// **The most of one unterminated line that is ever held**: [`FREE_TEXT`] plus four bytes.
 ///
-/// **The four are what lets [`text`] make the cut rather than this ceiling making it.** That
+/// **The four give [`text`] room to make the cut rather than this ceiling making it.** That
 /// function steps back from the cap to a character boundary — at most three bytes, a UTF-8
 /// character being at most four — and it can only do that over bytes it was given. Cut at exactly
 /// [`FREE_TEXT`], a multi-byte character straddling the ceiling would be a replacement character
 /// this file introduced; cut four later, the step-back lands inside what we hold.
+///
+/// **They are not enough on their own, and this doc claimed they were until 2026-08-30**
+/// (`k8s-admin` and `tester`, independently, with different inputs). [`text`] strips *before* it
+/// bounds, so a held line whose unprintable characters are numerous enough comes back under
+/// [`FREE_TEXT`] and the step-back never runs — and the `U+FFFD` that `from_utf8_lossy` produced
+/// at *this* ceiling reaches stdout. Measured: 4098 `ESC` bytes, then `E2 82` (the first two
+/// bytes of a three-byte character), then 64 `a`s and a newline, printed
+/// `"\u{fffd}… (shortened by k8rs)"`. [`whole`] is what makes the promise true — the ceiling
+/// cuts, and then the byte sequence it cut through is dropped before anything decodes it.
 const LINE_READ: usize = FREE_TEXT + 4;
 
 /// How much of the socket is read at once: 8 KiB.
@@ -4956,12 +4996,53 @@ impl LogLines {
 /// a lie when it was not. Here it was not: the rest of the line was thrown away as it arrived and
 /// nobody knows what was in it, so it is marked.
 fn log_line(raw: &[u8], overran: bool) -> String {
+    // **The bytes the ceiling cut through are dropped, not decoded** ([`whole`], [`LINE_READ`]).
+    // Only where the line was cut: a line that arrived whole and ends mid-character ends that way
+    // because the container wrote it that way, and marking it is the truth.
+    let raw = match overran {
+        true => &raw[..whole(raw)],
+        false => raw,
+    };
     let mut line = String::from_utf8_lossy(raw).into_owned();
     text(&mut line, FREE_TEXT);
     if overran && !line.ends_with(SHORTENED) {
         line.push_str(SHORTENED);
     }
     line
+}
+
+/// **How much of a line [`LINE_READ`] cut can be decoded without inventing a character** — all of
+/// it, less a trailing UTF-8 sequence whose remaining bytes were thrown away as they arrived.
+///
+/// **Only the last three bytes can be that sequence**, a UTF-8 character being at most four, so
+/// the walk is a bounded range and no input can turn it into a hang — [`text`]'s own reasoning
+/// for its step-back.
+///
+/// **What decides is `Utf8Error::error_len`, and it is the standard library's answer rather than
+/// a table of lead bytes written here**: `None` is *the input ended in the middle of a character*
+/// and `Some(_)` is *these bytes are not UTF-8 at all*. Only the first is ours to undo. A byte
+/// the container really wrote that is not UTF-8 stays and becomes `U+FFFD`, which is the honest
+/// report of it.
+///
+/// **So what is decoded can still end in a lead byte, and that is right rather than a miss.**
+/// `[o, k, C2, C2]` comes back as three bytes: the last `C2` is the front of a character whose
+/// rest was thrown away and goes, and the one before it is a lead byte the byte after it proves
+/// is *not* one — genuine garbage, kept and marked. Measured: `from_utf8_lossy` gives two
+/// replacement characters for the four bytes and one for the three
+/// (`what_a_cut_may_throw_away_and_what_it_may_not`, which found this shape rather than being
+/// written for it).
+fn whole(raw: &[u8]) -> usize {
+    for start in (raw.len().saturating_sub(3)..raw.len()).rev() {
+        match std::str::from_utf8(&raw[start..]) {
+            // Whole characters from here to the end: the cut fell on a boundary.
+            Ok(_) => return raw.len(),
+            // The front of a character whose rest never arrived.
+            Err(bad) if bad.error_len().is_none() => return start,
+            // Not UTF-8 at all — keep looking further back, and keep these bytes.
+            Err(_) => {}
+        }
+    }
+    raw.len()
 }
 
 /// As much of `more` as [`LINE_READ`] still has room for, and whether anything was refused.
@@ -5097,12 +5178,33 @@ impl LogRequest {
         }
     }
 
-    /// **The command a reader could have typed for this exact answer** — the teaching device
-    /// (invariant 4, `screens/detail.md`, `screens/once.md` § stdout and stderr are split).
+    /// **The command a reader could have typed to be handed the same log by the same server** —
+    /// the teaching device (invariant 4, `screens/detail.md`, `screens/once.md` § stdout and
+    /// stderr are split).
     ///
     /// **Built from the same fields [`LogRequest::params`] is**, so the line cannot describe a
     /// request that was not sent. It is display text: k8rs does not execute it and nothing in it
     /// is fed back into a process (the security gate).
+    ///
+    /// # What it is equivalent about, measured
+    ///
+    /// **Eleven shapes were pasted and diffed against this line and seven came back identical**,
+    /// including both namespace spellings and `--previous` correctly disappearing on a container
+    /// that has never restarted (`k8s-admin`, 2026-08-30). The three that differ are **not the
+    /// request** — they are what k8rs does to the bytes after the same server sent them:
+    /// [`LOG_LINES`] drops the oldest lines of a long fetch, [`FREE_TEXT`] cuts a long line, and
+    /// [`text`] removes what cannot print.
+    ///
+    /// **So the claim is about the *request*, and this doc said *this exact answer* until
+    /// 2026-08-30.** That was a claim about the bytes, and it was false in three ways at once.
+    /// Each of the three is announced where it happens — [`LogLines::dropped_line`] above the
+    /// content, [`SHORTENED`] inside the line — so no reader is misled about the log; what was
+    /// wrong was only ever asserted here.
+    ///
+    /// **`--tail=5000` is deliberately not printed**, which would make the first of the three
+    /// exact. [`LogRequest::params`] sends no `tailLines`, and a line carrying a parameter the
+    /// request does not is the same record lying that that doc refuses in the other direction —
+    /// and it would be wrong outright for a `--follow`, which retains nothing and drops nothing.
     pub(crate) fn kubectl(&self) -> String {
         let mut line = format!("$ kubectl logs {} -n {}", self.pod, self.namespace);
         if let Some(container) = &self.container {
@@ -5134,12 +5236,135 @@ pub(crate) async fn log_stream(
         .await
 }
 
+/// **The annotation an injector sets so `kubectl logs` lands on the application and not the
+/// proxy** — Istio's, Linkerd's and the Vault agent's, and `kubectl`'s own constant name
+/// (`podcmd.DefaultContainerAnnotationName`).
+const DEFAULT_CONTAINER: &str = "kubectl.kubernetes.io/default-container";
+
+/// **One pod read on demand, and the two things about it a log request needs that
+/// [`PodSnapshot`] does not carry** — which containers the pod *declares*, in the order it
+/// declares them, and which one it asks a log reader to open.
+///
+/// **Both are read off the raw `Pod` here and thrown away with it**, because [`ingest`] is where
+/// they stop existing: [`PodSnapshot::containers`] is built from `status.containerStatuses`,
+/// which **the kubelet sorts by name**, and `metadata.annotations` is not a field the rules name
+/// at all. `rules.rs` says so in as many words — *[`PodSnapshot::containers`] promises no order*
+/// — and § ONE CONTAINER'S LOG's own doc argued the opposite until 2026-08-30, when a cluster
+/// settled it: `spec` `[zeta, alpha]`, `status` `[alpha, zeta]`, `kubectl logs` reading `zeta`
+/// and k8rs reading `alpha` (`k8s-admin`). A pod whose first container does not sort first —
+/// `[web, envoy]` — opened the proxy.
+///
+/// **`PodSnapshot` gains no field and `rules.rs` is not touched.** The order and the annotation
+/// are a *log reader's* question, not a diagnosis input, and the frozen file has no business
+/// carrying either (NOTES § D42).
+///
+/// **No API type leaves this file** (invariant 6's spirit and § THE INGEST GUARD's rule): what
+/// travels is owned `String`s, each through [`text`] with [`IDENTIFIER`] exactly as `ingest`
+/// would have, because a container name is free text from the API like every other (invariant 9).
+pub(crate) struct PodRead {
+    /// The pod as the rules see it — every state, restart count and message on this path.
+    pub(crate) snapshot: PodSnapshot,
+    /// **`spec.containers[]` then `spec.initContainers[]`, in the order the author wrote them** —
+    /// what `kubectl` lists after *Defaulted container "x" out of:*, and what `--container` is
+    /// checked against.
+    ///
+    /// **`spec.ephemeralContainers[]` is deliberately not in it, and that is a gap with a
+    /// price.** `kubectl`'s own `FindContainerByName` searches them, so `--container` naming a
+    /// container somebody attached with `kubectl debug` is refused here and accepted there — and
+    /// the refusal lists containers the pod really does have, so it is short rather than wrong.
+    /// The alternative is worse: NOTES § D46 already ruled such a container out of this build's
+    /// notion of a pod's containers, a second notion of it here is the two-places-disagreeing
+    /// defect this repo pays most for, and the picker would draw a row [`PodSnapshot`] can say
+    /// nothing about beside two it can. **It is the PM's to box or to leave**; nothing in this
+    /// repo records it yet.
+    declared: Vec<String>,
+    /// [`DEFAULT_CONTAINER`]'s value — **and only where it names one of
+    /// [`declared`](Self::declared)**.
+    /// An annotation naming a container the pod does not have falls back rather than failing,
+    /// which is `kubectl` v1.36.3's measured behaviour (`Default container name "ghost" not found
+    /// in pod two`, then it defaults anyway).
+    preferred: Option<String>,
+}
+
+impl PodRead {
+    /// The pod, its declared containers and its preferred one, in the one order they can be read
+    /// in: off the raw object, before [`ingest`] takes it.
+    fn of(pod: Pod) -> Self {
+        let named = |word: &String| {
+            let mut word = word.clone();
+            text(&mut word, IDENTIFIER);
+            word
+        };
+        let spec = pod.spec.as_ref();
+        let declared: Vec<String> = spec
+            .into_iter()
+            .flat_map(|spec| {
+                spec.containers
+                    .iter()
+                    .chain(spec.init_containers.iter().flatten())
+            })
+            .map(|container| named(&container.name))
+            .collect();
+        let preferred = pod
+            .metadata
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.get(DEFAULT_CONTAINER))
+            .map(named)
+            .filter(|asked| declared.contains(asked));
+        Self {
+            snapshot: ingest(pod),
+            declared,
+            preferred,
+        }
+    }
+
+    /// **Which container `kubectl logs` reads when the reader named none** — the annotation where
+    /// there is a usable one, and `spec.containers[0]` otherwise. `kubectl`'s own rule in
+    /// `kubectl`'s own order, **measured against `kubectl` v1.36.3 rather than reasoned from its
+    /// source** (`dev-core`, 2026-08-30, eight shapes against a stub API server).
+    ///
+    /// **`None` is a pod that declares no container at all**, which no cluster serves: the API
+    /// server refuses such a pod (NOTES § D156, ruling 1). So it is the shape of a `Pod` whose
+    /// `spec` did not decode, and the request then names no container and the server decides —
+    /// which is what this file did for every pod before.
+    ///
+    /// **It is *not* the `Pending` pod any more, and that was the defect.** A pod the kubelet has
+    /// not reported on still has a `spec`, so it named no container, the API server answered
+    /// `400`, and the reader was told *nothing usable came back* — a network sentence for a fault
+    /// on this side of the wire, on the everyday injected-pod-that-cannot-schedule
+    /// (`k8s-admin`, 2026-08-30; [`Fault::Rejected`] is the other half of it).
+    pub(crate) fn default_container(&self) -> Option<&str> {
+        self.preferred
+            .as_deref()
+            .or_else(|| self.declared.first().map(String::as_str))
+    }
+
+    /// Every container the pod declares, in `spec` order — the picker's list, and what
+    /// `--container` is checked against.
+    pub(crate) fn declared(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.declared.iter().map(String::as_str)
+    }
+
+    /// The status the kubelet reported for one declared container, or `None` where it has not
+    /// reported on it yet — a `Pending` pod, or a container that has not been created.
+    ///
+    /// **By name and never by index** ([`PodSnapshot::containers`] promises no order), which is
+    /// the whole reason this type exists.
+    pub(crate) fn status(&self, name: &str) -> Option<&ContainerSnapshot> {
+        self.snapshot
+            .containers
+            .iter()
+            .find(|container| container.name == name)
+    }
+}
+
 /// **One pod, read on demand and never watched** — what a log request needs before it can be made
-/// at all: which containers there are, and which of them has a previous run to show.
+/// at all: which containers there are, which one to open, and which of them has a previous run.
 ///
 /// **Through [`ingest`] like every other object** (invariant 9, § THE INGEST GUARD), so what comes
-/// back is a snapshot type and not an API object, and nothing downstream can hold a field the
-/// rules do not name.
+/// back is a snapshot type and not an API object; [`PodRead`] carries the two `spec` facts that
+/// door closes on, as owned strings through the same guard.
 ///
 /// **No deadline of its own.** The caller owns it: `--once` is a command in a pipeline and bounds
 /// its whole run, and a log follow has no ending to be late for.
@@ -5147,28 +5372,11 @@ pub(crate) async fn pod(
     client: &Client,
     namespace: &str,
     name: &str,
-) -> Result<PodSnapshot, kube::Error> {
+) -> Result<PodRead, kube::Error> {
     Api::<Pod>::namespaced(client.clone(), namespace)
         .get(name)
         .await
-        .map(ingest)
-}
-
-/// **Which container `kubectl logs` reads when the reader named none** — the first one the pod
-/// declares, which is `kubectl`'s own rule and therefore the one a reader already has.
-///
-/// **Init containers and sidecars are not it.** [`crate::rules::ContainerSnapshot`]s arrive init
-/// first and regular after (`rules.rs`'s `container_snapshots`), and `kubectl`'s default is
-/// `spec.containers[0]` — so a pod with a migration init container would otherwise default to a
-/// log that stopped before the thing the reader is debugging started.
-///
-/// **`None` is a pod the kubelet has not reported a container for yet**, which is a `Pending` pod
-/// and a real state rather than an error: the request then names no container and the API server
-/// picks, exactly as `kubectl` with no `-c` does.
-pub(crate) fn default_container(pod: &PodSnapshot) -> Option<&ContainerSnapshot> {
-    pod.containers
-        .iter()
-        .find(|container| container.role == ContainerRole::Regular)
+        .map(PodRead::of)
 }
 
 // --- ONE CONTAINER'S LOG END ---

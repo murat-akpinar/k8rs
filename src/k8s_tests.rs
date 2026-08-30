@@ -548,6 +548,7 @@ fn only_a_failure_a_retry_can_clear_holds_the_bootstrap_gate() {
         (Fault::NoContext, true),
         (Fault::BadEntry, true),
         (Fault::NoCredential, true),
+        (Fault::Rejected, true),
         (Fault::Expired, true),
         (Fault::Refused, true),
         (Fault::Gone, true),
@@ -4180,9 +4181,22 @@ fn a_refusal_that_carries_only_a_status_code_is_still_a_refusal() {
          is reported as a dead cluster"
     );
 
+    // **And the same shape at `400`**, which had no arm at all until 2026-08-30 and fell to
+    // `Fault::Unanswered` — *nothing usable came back* for a request this side got wrong, which
+    // is `PRIOR-ART § C1` in the function written to close it (`k8s-admin`).
+    let refused_request =
+        kube::core::Status::failure("", "Failed to parse error data").with_code(400);
+    assert_eq!(
+        fault(&kube::Error::Api(refused_request.boxed())),
+        Fault::Rejected,
+        "a `400` carrying no reason read as a network that answered nothing, so the reader is \
+         sent to check a connection that had just answered"
+    );
+
     // And the other way round: the reason with no code, which is what the API server's own
     // `Status` body carries when `code` is absent.
     for (reason, expected) in [
+        ("BadRequest", Fault::Rejected),
         ("Forbidden", Fault::Refused),
         ("Unauthorized", Fault::Expired),
         ("NotFound", Fault::Gone),
@@ -13424,6 +13438,171 @@ async fn a_line_cut_before_it_was_stripped_still_says_it_was_cut() {
     );
 }
 
+/// **A line the read ceiling cut through never prints a character k8rs invented** —
+/// `screens/detail.md` § The buffer's promise that *a multi-byte one is never split*, which was
+/// measurably false until 2026-08-30 (`k8s-admin` and `tester`, independently, different inputs).
+///
+/// **The input is the measured one.** [`text`] strips first and bounds second, so a held line
+/// that is mostly `ESC` comes back under [`FREE_TEXT`] and the step-back that would have removed
+/// the artefact never runs. 4098 `ESC` bytes take the buffer to within two of [`LINE_READ`],
+/// `E2 82` are the first two bytes of a three-byte character, and the `A9` that would complete it
+/// is thrown away as it arrives — leaving `"\u{fffd}… (shortened by k8rs)"` on stdout, a
+/// replacement character standing for bytes that were perfectly good UTF-8 in the container.
+///
+/// **The mark stays.** What is wrong is the invented character, not the honesty about the cut.
+#[tokio::test]
+async fn a_line_cut_through_a_character_never_prints_one_k8rs_invented() {
+    let mut line = vec![0x1b; LINE_READ - 2];
+    // `E2 82 AC` is `€`; the last byte never reaches [`hold`].
+    line.extend_from_slice(&[0xE2, 0x82, 0xAC]);
+    line.extend(std::iter::repeat_n(b'a', 64));
+    line.push(b'\n');
+    let got = lines_of(Feed::whole(&line)).await;
+
+    assert_eq!(got.len(), 1);
+    assert!(
+        !got[0].contains('\u{fffd}'),
+        "k8rs printed a replacement character for bytes the container wrote as a whole \
+         character: {:?}",
+        got[0]
+    );
+    assert_eq!(
+        got[0], SHORTENED,
+        "the line is no longer *only* the marker, so either the strip or the cut moved and this \
+         test is measuring something else: {:?}",
+        got[0]
+    );
+}
+
+/// **A byte that is not UTF-8 at all keeps its replacement character, cut or not** — the negative
+/// half of the test above, and the reason [`whole`] reads `Utf8Error::error_len` rather than
+/// trimming whatever sits at the end.
+///
+/// **Two shapes, because they are two different facts**: a line the ceiling cut whose last byte
+/// is garbage the container wrote, and a line that arrived *whole* and ends mid-character. Only
+/// the first is k8rs's cut; marking the second would be deleting evidence.
+#[tokio::test]
+async fn a_byte_the_container_wrote_that_is_not_utf8_keeps_its_marker() {
+    let mut cut = vec![0x1b; LINE_READ - 1];
+    cut.push(0xFF);
+    cut.extend(std::iter::repeat_n(b'a', 64));
+    cut.push(b'\n');
+    let got = lines_of(Feed::whole(&cut)).await;
+    assert!(
+        got[0].contains('\u{fffd}'),
+        "a byte that is not UTF-8 at all was trimmed as if k8rs had cut through a character, so \
+         the reader is not told the container wrote garbage: {:?}",
+        got[0]
+    );
+
+    let whole_line = lines_of(Feed::whole(b"ok \xE2\x82\n")).await;
+    assert_eq!(
+        whole_line,
+        vec!["ok \u{fffd}"],
+        "a line that arrived whole and ends mid-character was trimmed, so bytes the container \
+         really wrote vanished with no marker"
+    );
+}
+
+/// **[`whole`] itself, over the four shapes a cut can land on** — because the three above reach it
+/// only through a megabyte of stream, and a bound is only proven for the shapes it was fed
+/// (NOTES § D29).
+#[test]
+fn what_a_cut_line_can_be_decoded_from() {
+    for (raw, expected, why) in [
+        (&b"ok"[..], 2, "a cut on an ASCII boundary keeps everything"),
+        (
+            b"ok\xE2",
+            2,
+            "a lead byte alone is the front of a character",
+        ),
+        (
+            b"ok\xE2\x82",
+            2,
+            "two of three bytes are still the front of one",
+        ),
+        (b"ok\xE2\x82\xAC", 5, "a whole character is not trimmed"),
+        (
+            b"ok\xF0\x9F\x92",
+            2,
+            "three of four bytes are the front of one",
+        ),
+        (
+            b"ok\xF0\x9F\x92\xA9",
+            6,
+            "a whole four-byte character is not trimmed",
+        ),
+        (
+            b"ok\xFF",
+            3,
+            "a byte that is not UTF-8 at all is kept and marked",
+        ),
+        (
+            b"ok\xE2\x82\xAC\xFF",
+            6,
+            "and it is kept after a whole character",
+        ),
+        // Found by `what_a_cut_may_throw_away_and_what_it_may_not` and not by hand: the last byte
+        // is the front of a character and goes, and the one before it is a lead byte that the
+        // byte after it proves is not one — so that one stays and is marked.
+        (
+            b"ok\xC2\xC2",
+            3,
+            "only the trailing lead byte goes, and the one it proves is garbage stays",
+        ),
+        (b"", 0, "nothing to decode and nothing to trim"),
+    ] {
+        assert_eq!(whole(raw), expected, "{why}: {raw:?}");
+    }
+}
+
+/// **[`whole`]'s whole contract, over every two-byte ending there is** — it drops only bytes that
+/// are the front of a character whose rest never arrived, it never drops more than a character's
+/// own three, and it drops nothing at all from a line that already ends on a boundary.
+///
+/// **Written because the table above is a list of shapes somebody thought of, and it found one
+/// that was not on it** (`dev-core`'s own second pass): `[o, k, C2, C2]`. The arm that decides is
+/// `Utf8Error::error_len().is_none()` with no `valid_up_to() == 0` beside it, and the reason that
+/// is safe is an argument about the descending scan rather than something the arm says — so the
+/// argument is checked against every input of the shape it is about rather than left as reasoning
+/// (CLAUDE.md § *the definition says what it is; only the object says what it does*).
+///
+/// **The first draft of this test asserted something stronger and wrong**: that what is decoded
+/// never ends mid-character. `[o, k, C2, C2]` decodes from three bytes and those three *do* end in
+/// a lone `C2` — which is right, because the `C2` after it proves that one is not a lead byte at
+/// all but a byte the container wrote that is not UTF-8. Measured with `rustc`: `from_utf8_lossy`
+/// gives `ok` and two replacement characters for the four bytes and `ok` and one for the three,
+/// and the one that survives stands for a byte that really is undecodable.
+#[test]
+fn what_a_cut_may_throw_away_and_what_it_may_not() {
+    for high in 0..=u8::MAX {
+        for low in 0..=u8::MAX {
+            let raw = [b'o', b'k', high, low];
+            let cut = whole(&raw);
+            assert!(
+                cut >= raw.len() - 3 && cut <= raw.len(),
+                "{raw:?} threw away {} bytes, and only a character's own three can go",
+                raw.len() - cut
+            );
+            let thrown = &raw[cut..];
+            assert!(
+                thrown.is_empty()
+                    || std::str::from_utf8(thrown)
+                        .is_err_and(|bad| bad.error_len().is_none() && bad.valid_up_to() == 0),
+                "{raw:?} threw away {thrown:?}, which is not the front of any character — so \
+                 bytes the container wrote vanished with nothing said about them"
+            );
+            if std::str::from_utf8(&raw).is_ok() {
+                assert_eq!(
+                    cut,
+                    raw.len(),
+                    "{raw:?} is whole UTF-8 and something was thrown away anyway"
+                );
+            }
+        }
+    }
+}
+
 /// **Control characters are stripped out of a log line by the same guard everything else goes
 /// through** (invariant 9, NOTES § D154) — and ordinary text is not touched.
 ///
@@ -13645,18 +13824,27 @@ async fn read_whole(reader: impl AsyncRead) -> Vec<u8> {
 #[tokio::test]
 async fn the_pod_a_cluster_answers_reaches_the_snapshot() {
     let (client, asked) = stub_list("200 OK", capture("healthy-sidecar").to_string()).await;
-    let pod = pod(&client, "default", "healthy-sidecar")
+    let read = pod(&client, "default", "healthy-sidecar")
         .await
         .expect("the stub answered the get");
 
-    assert_eq!(pod.id.name, "healthy-sidecar");
+    assert_eq!(read.snapshot.id.name, "healthy-sidecar");
     assert_eq!(
-        pod.containers
+        read.snapshot
+            .containers
             .iter()
             .map(|container| container.name.as_str())
             .collect::<Vec<_>>(),
         vec!["proxy", "app"],
-        "the containers a picker would draw did not survive the fetch"
+        "the states a picker draws beside each name did not survive the fetch"
+    );
+    // **`spec` order and not `status` order**, off the wire and not off a `From` impl: the two
+    // disagree on this capture, and the picker draws the first (§ WHICH CONTAINER).
+    assert_eq!(
+        read.declared().collect::<Vec<_>>(),
+        vec!["app", "proxy"],
+        "the containers a picker would draw did not survive the fetch in the order the pod \
+         declares them"
     );
     assert_eq!(
         asked.lock().expect("the log is never poisoned").clone(),
@@ -13685,6 +13873,13 @@ async fn a_pod_a_cluster_refuses_comes_back_as_its_own_fault() {
         .to_string()
     };
     for (status, body, expected) in [
+        // **A `400` on this path is the everyday injected-`Pending`-pod**, and it printed
+        // *nothing usable came back* until 2026-08-30 (`k8s-admin`).
+        (
+            "400 Bad Request",
+            refusal(400, "BadRequest"),
+            Fault::Rejected,
+        ),
         ("403 Forbidden", refusal(403, "Forbidden"), Fault::Refused),
         ("404 Not Found", refusal(404, "NotFound"), Fault::Gone),
         (
@@ -13694,8 +13889,12 @@ async fn a_pod_a_cluster_refuses_comes_back_as_its_own_fault() {
         ),
     ] {
         let (client, _) = stub_list(status, body).await;
+        // `map(|_| ())` because `PodRead` derives no `Debug`: it carries a whole `PodSnapshot`,
+        // and a type that is printed whole is a type somebody adds a field to without thinking
+        // about what it prints (the security gate's `Debug` row).
         let failure = pod(&client, "default", "absent")
             .await
+            .map(|_| ())
             .expect_err("the stub refused");
         assert_eq!(
             fault(&failure),
@@ -13706,35 +13905,216 @@ async fn a_pod_a_cluster_refuses_comes_back_as_its_own_fault() {
     }
 }
 
-/// **The default container is the first *regular* one and never an init container or a sidecar** —
-/// `kubectl`'s own rule, which is the one a reader already has.
+// --- WHICH CONTAINER, AND KUBECTL'S OWN RULE FOR IT ---
+//
+// **The rule these tests assert is `kubectl` v1.36.3's, measured and not read off its source**
+// (`dev-core`, 2026-08-30). A stub API server answering one pod and one log, a throwaway
+// kubeconfig, and eight shapes of `kubectl logs` against it:
+//
+// ```text
+// spec [zeta,alpha], no annotation      Defaulted container "zeta" out of: zeta, alpha  →  zeta
+// annotation names zeta, spec [alpha,zeta]                                    (silent)  →  zeta
+// annotation names `ghost`              Default container name "ghost" not found in pod two
+//                                       Defaulted container "alpha" out of: alpha, zeta →  alpha
+// Pending, no containerStatuses         Defaulted container "zeta" out of: zeta, alpha  →  zeta
+// one container + a `ghost` annotation  Default container name "ghost" not found …      →  app
+// annotation names an init container                                          (silent)  →  migrate
+// one container + one init container    Defaulted container "app" out of: app, migrate (init)
+// explicit -c alpha                                                           (silent)  →  alpha
+// ```
+//
+// **Two committed captures already carry the defect's shape and neither was edited** (NOTES
+// § D53): `gang.json` is `spec [trigger, bystander]` against `status [bystander, trigger]`, and
+// `neverrules.json` is `spec [retry, keeper]` against `status [keeper, retry]`. The kubelet sorts
+// `containerStatuses` by name; the author's order survives only in `spec`. **What *is* built here
+// is the annotation** — this repo's kind cluster runs no injector, so no capture has one — and it
+// is added to a decoded capture in memory, exactly as § THE CAPTURES builds a watch stream around
+// objects it does not touch.
+
+/// **The default container is the first the pod *declares*, and never the first by name** —
+/// `kubectl`'s rule, which is the one a reader already has.
 ///
-/// **The order the snapshot arrives in is init-first**, so `containers[0]` would be the migration
-/// job on every pod that has one: a log that stopped before the thing being debugged started.
+/// **Both captures are asserted to still disagree with themselves first**, because a capture
+/// whose two orders have come to match would leave this test passing over nothing.
 #[test]
-fn the_default_container_is_the_first_regular_one_and_never_a_sidecar() {
-    let pod: PodSnapshot = object::<Pod>("healthy-sidecar").into();
+fn the_default_container_is_the_first_declared_and_never_the_first_by_name() {
+    for (capture, declared, by_name) in [
+        ("gang", vec!["trigger", "bystander"], "bystander"),
+        ("neverrules", vec!["retry", "keeper"], "keeper"),
+    ] {
+        let read = PodRead::of(object::<Pod>(capture));
+        assert_eq!(
+            read.snapshot.containers[0].name, by_name,
+            "`{capture}.json`'s two orders no longer disagree, so this test proves nothing"
+        );
+        assert_eq!(
+            read.declared().collect::<Vec<_>>(),
+            declared,
+            "the picker's list is not the order the pod's author wrote"
+        );
+        assert_eq!(
+            read.default_container(),
+            declared.first().copied(),
+            "k8rs opens a container `kubectl logs` would not — on `[web, envoy]` that is the proxy"
+        );
+    }
+}
+
+/// **An init container is declared too, and it comes after the regular ones** — `kubectl`'s own
+/// `out of: app, migrate (init)` order, which is what `screens/detail.md`'s picker draws.
+#[test]
+fn the_init_containers_are_declared_after_the_regular_ones() {
+    let read = PodRead::of(object::<Pod>("healthy-sidecar"));
     assert_eq!(
-        pod.containers[0].name, "proxy",
-        "this capture no longer has a sidecar first, so this test proves nothing"
+        read.snapshot.containers[0].name, "proxy",
+        "this capture no longer has a sidecar first, so half of this test proves nothing"
     );
     assert_eq!(
-        default_container(&pod).map(|container| container.name.as_str()),
+        read.declared().collect::<Vec<_>>(),
+        vec!["app", "proxy"],
+        "the sidecar is listed before the workload, so the picker offers the proxy first"
+    );
+    assert_eq!(
+        read.default_container(),
         Some("app"),
         "the default container is the sidecar, so `k8rs --logs` on this pod reads the proxy"
     );
 }
 
-/// **A pod the kubelet has not reported a container for has no default**, which is a `Pending` pod
-/// and a state rather than an error: the request then names none and the API server picks.
+/// **A `Pending` pod declares its containers before the kubelet has reported on any of them** —
+/// which is what stops the request going out naming none, and the API server answering `400`.
+///
+/// **This was B2's root**: `k8rs --logs` on a multi-container `Pending` pod named no container,
+/// the server refused the request, and the reader was told *nothing usable came back*
+/// (`k8s-admin`, 2026-08-30). `pending.json` is the shape, unedited.
 #[test]
-fn a_pod_with_no_container_reported_yet_has_no_default_container() {
-    let mut pod: PodSnapshot = object::<Pod>("healthy-sidecar").into();
-    pod.containers.clear();
+fn a_pending_pod_declares_its_containers_before_the_kubelet_reports_any() {
+    let read = PodRead::of(object::<Pod>("pending"));
+    assert!(
+        read.snapshot.containers.is_empty(),
+        "`pending.json` no longer has an empty `containerStatuses`, so this test proves nothing"
+    );
     assert_eq!(
-        default_container(&pod).map(|container| container.name.as_str()),
+        read.declared().collect::<Vec<_>>(),
+        vec!["app"],
+        "a pod the kubelet has not reported on declares nothing, so the request names no container"
+    );
+    assert_eq!(read.default_container(), Some("app"));
+    assert_eq!(
+        read.status("app"),
         None,
-        "a pod with no containers reported answered with one anyway"
+        "a status was invented for a container the kubelet has not reported on"
+    );
+}
+
+/// **The `kubectl.kubernetes.io/default-container` annotation wins, and only when it names a
+/// container the pod has** — measured against `kubectl` v1.36.3 in both directions (§ WHICH
+/// CONTAINER).
+///
+/// **`neverback.json` and `keeper`, because the answer has to differ from *both* other rules.**
+/// That capture's `spec` and `status` orders agree, so an annotation naming its first container
+/// would pass whether it was read or not.
+#[test]
+fn the_default_container_annotation_wins_where_it_names_a_container_the_pod_has() {
+    let annotated = |capture: &str, asks_for: &str| {
+        let mut raw: Pod = object::<Pod>(capture);
+        raw.metadata
+            .annotations
+            .get_or_insert_default()
+            .insert(DEFAULT_CONTAINER.to_string(), asks_for.to_string());
+        PodRead::of(raw)
+    };
+
+    let plain = PodRead::of(object::<Pod>("neverback"));
+    assert_eq!(
+        plain.default_container(),
+        Some("broke"),
+        "`neverback.json` no longer declares `broke` first, so this test proves nothing"
+    );
+    assert_eq!(
+        annotated("neverback", "keeper").default_container(),
+        Some("keeper"),
+        "the annotation Istio's injector sets so `kubectl logs` lands on the application and not \
+         the proxy was ignored"
+    );
+    // An init container is one the pod declares, and `kubectl`'s `FindContainerByName` reaches it.
+    assert_eq!(
+        annotated("healthy-sidecar", "proxy").default_container(),
+        Some("proxy"),
+        "an annotation naming an init container fell back, where `kubectl` reads that container"
+    );
+    // Measured: kubectl warns and defaults anyway rather than failing.
+    assert_eq!(
+        annotated("neverback", "ghost").default_container(),
+        Some("broke"),
+        "an annotation naming a container the pod does not have refused the run, where `kubectl` \
+         falls back to the first declared one"
+    );
+    assert_eq!(
+        annotated("neverback", "").default_container(),
+        Some("broke"),
+        "an empty annotation was taken as naming a container"
+    );
+}
+
+/// **A pod that declares no container at all has no default**, and the request then names none —
+/// which is what this file did for every pod before 2026-08-30.
+///
+/// **It is a `Pod` whose `spec` did not decode and not one a cluster serves** — the API server
+/// refuses such a pod (NOTES § D156, ruling 1, measured there against a real one). So the arm is
+/// defensive, and this test says only what the code does with the shape.
+#[test]
+fn a_pod_that_declares_no_container_names_none() {
+    let read = PodRead::of(Pod::default());
+    assert_eq!(read.declared().len(), 0);
+    assert_eq!(read.default_container(), None);
+    assert_eq!(read.status("app"), None);
+}
+
+/// **Every name that leaves this file goes through the ingest guard** (invariant 9) — a container
+/// name and an annotation value are free text from the API like every other field, and both are
+/// about to be printed *and* put in a query string.
+///
+/// **The annotation is matched against the *stripped* declared names**, which is the same `==`
+/// after bounding that `PodSnapshot::reason` documents: an injector's value padded with anything
+/// this guard deletes still finds its container.
+#[test]
+fn the_names_a_pod_read_carries_are_stripped_on_the_way_out() {
+    let mut raw: Pod = object::<Pod>("gang");
+    let spec = raw.spec.as_mut().expect("the capture has a spec");
+    spec.containers[0].name = "tri\u{202e}gger".to_string();
+    spec.containers[1].name = "by\u{7}stander".to_string();
+    raw.metadata.annotations.get_or_insert_default().insert(
+        DEFAULT_CONTAINER.to_string(),
+        "by\u{200b}stander".to_string(),
+    );
+
+    let read = PodRead::of(raw);
+    assert_eq!(
+        read.declared().collect::<Vec<_>>(),
+        vec!["trigger", "bystander"],
+        "something with no printed form reached a name that is about to be drawn and sent"
+    );
+    assert_eq!(
+        read.default_container(),
+        Some("bystander"),
+        "the annotation and the names it is matched against were bounded differently, so an \
+         injector's value with a zero-width character in it finds nothing"
+    );
+}
+
+/// **A name longer than the guard allows is bounded like every other identifier** — the same
+/// [`IDENTIFIER`] cap `ingest` applies, so nothing here is the one unbounded string on the path.
+#[test]
+fn a_container_name_past_the_identifier_cap_is_bounded() {
+    let mut raw: Pod = object::<Pod>("gang");
+    raw.spec.as_mut().expect("a spec").containers[0].name = "a".repeat(IDENTIFIER * 2);
+    let read = PodRead::of(raw);
+    let first = read.declared().next().expect("the pod declares two");
+    assert!(
+        first.len() < IDENTIFIER * 2 && first.ends_with(SHORTENED),
+        "a container name arrived unbounded and unmarked: {} bytes",
+        first.len()
     );
 }
 

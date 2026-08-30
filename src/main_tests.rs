@@ -44,14 +44,6 @@ fn read(names: &[&str]) -> Input {
     load(&paths, now()).unwrap_or_else(|e| panic!("{names:?} did not load: {e}"))
 }
 
-/// A pod capture as the snapshot type the log path reads it as — the same `From` impl `k8s.rs`
-/// ingests one through, so a container list here is the one a live run would have.
-fn pod_capture(name: &str) -> PodSnapshot {
-    serde_json::from_str::<Pod>(&pod_body(name))
-        .unwrap_or_else(|e| panic!("{name} does not decode as a Pod: {e}"))
-        .into()
-}
-
 /// The bytes of a pod capture, for the stub server that has to answer a `get` with them.
 fn pod_body(name: &str) -> String {
     std::fs::read_to_string(fixture(&format!("{name}.json")))
@@ -2754,7 +2746,7 @@ fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
     }
 }
 
-/// **Six faults, six sentences, and no two of them the same** — the second box's whole claim
+/// **Nine faults, nine sentences, and no two of them the same** — the second box's whole claim
 /// (`PRIOR-ART § C1`), checked as a set rather than one at a time.
 ///
 /// **A generic message may never stand in for an error we were handed.** The failure that rule
@@ -2762,13 +2754,29 @@ fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
 /// looks fine in every review and sends a reader to the wrong place at 3am. Two faults collapsing
 /// into one string is what fails here, whichever two.
 ///
-/// **Only two of the six use `asked`, and that is deliberate.** A kubeconfig that would not load
-/// and a login helper that answered nothing happened before anything was asked of any cluster, so
+/// **Only four of the nine use `asked`, and that is deliberate.** The three kubeconfig faults and
+/// a login helper that answered nothing all happened before anything was asked of any cluster, so
 /// a sentence naming a verb and a resource there would be inventing one.
+///
+/// **All nine, and it was seven of nine until 2026-08-30** — `NoContext` and `BadEntry` had never
+/// been in this list, so the one test whose whole claim is *no two collapse* could not have seen
+/// those two collapse (`dev-core`'s own second pass).
 #[test]
 fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
-    use k8s::Fault::{Expired, Gone, Kubeconfig, NoCredential, Refused, Unanswered};
-    let all = [Kubeconfig, NoCredential, Expired, Refused, Gone, Unanswered];
+    use k8s::Fault::{
+        BadEntry, Expired, Gone, Kubeconfig, NoContext, NoCredential, Refused, Rejected, Unanswered,
+    };
+    let all = [
+        Kubeconfig,
+        NoContext,
+        BadEntry,
+        NoCredential,
+        Rejected,
+        Expired,
+        Refused,
+        Gone,
+        Unanswered,
+    ];
 
     // **Every framing a caller can hand `asked`, and not only the one that reads well**
     // (`tester`, 2026-08-27, NOTES § D29). The `Gone` arm was `there is nothing to {asked}`,
@@ -2805,7 +2813,7 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
             // The three arms that read `asked` must actually contain it, whichever framing
             // arrives. That is the cheap half; the grid below is the half that catches a frame
             // that reads wrongly.
-            for fault in [Refused, Gone, Unanswered] {
+            for fault in [Refused, Rejected, Gone, Unanswered] {
                 let line = because(fault, asked, renewal);
                 assert!(
                     line.contains(asked),
@@ -2864,8 +2872,8 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
     assert!(!because(NoCredential, "", None).contains('`'));
 }
 
-/// **The three sentences that carry `asked`, in all four framings a caller can supply, written
-/// out** — twelve literals, because nothing weaker can fail.
+/// **The four sentences that carry `asked`, in all four framings a caller can supply, written
+/// out** — sixteen literals, because nothing weaker can fail.
 ///
 /// **A suffix check does not catch this, and that is measured** (2026-08-27). The broken `Gone`
 /// frame was *there is nothing to {asked}* and the fixed one is *when k8rs tries to {asked}*;
@@ -2883,7 +2891,7 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
 /// and *reach this cluster* from [`live`].
 #[test]
 fn the_three_sentences_that_name_what_was_asked_read_in_all_four_framings() {
-    use k8s::Fault::{Gone, Refused, Unanswered};
+    use k8s::Fault::{Gone, Refused, Rejected, Unanswered};
     let grid = [
         (
             Refused,
@@ -2924,6 +2932,30 @@ fn the_three_sentences_that_name_what_was_asked_read_in_all_four_framings() {
             Gone,
             "reach this cluster",
             "this server says there is no such thing when k8rs tries to reach this cluster",
+        ),
+        (
+            Rejected,
+            "`get /version`",
+            "this cluster would not accept the request k8rs made to `get /version` — that is a \
+             fault in k8rs, and nothing is wrong with the cluster or with this login",
+        ),
+        (
+            Rejected,
+            "`get /apis`",
+            "this cluster would not accept the request k8rs made to `get /apis` — that is a \
+             fault in k8rs, and nothing is wrong with the cluster or with this login",
+        ),
+        (
+            Rejected,
+            "`list` and `watch` pods",
+            "this cluster would not accept the request k8rs made to `list` and `watch` pods — \
+             that is a fault in k8rs, and nothing is wrong with the cluster or with this login",
+        ),
+        (
+            Rejected,
+            "reach this cluster",
+            "this cluster would not accept the request k8rs made to reach this cluster — that is \
+             a fault in k8rs, and nothing is wrong with the cluster or with this login",
         ),
         (
             Unanswered,
@@ -5809,45 +5841,108 @@ fn a_refused_object_is_not_echoed_back_whole() {
     );
 }
 
+/// **One pod, fetched the way [`logs_run`] fetches it** — through [`k8s::pod`] and off a socket,
+/// so what these tests are handed is the shape the pipeline produces and not one assembled here
+/// (NOTES § D29, which is the rule the `stream_ended` test below broke).
+///
+/// **It has to go through the wire because `k8s::PodRead` has no other door**: the `spec` order
+/// and the default-container annotation are read inside `k8s.rs` and nothing outside it may hold
+/// a `Pod` (invariant 6). That is a property worth paying a socket for.
+async fn pod_read(capture: &str) -> k8s::PodRead {
+    let (client, _) = answers("200 OK", pod_body(capture), "").await;
+    k8s::pod(&client, "default", "web")
+        .await
+        .map_err(|failure| k8s::fault(&failure))
+        .expect("the stub answered the get")
+}
+
 /// **The container the log is read from, and the sentence when the reader named one that is not
 /// there** (`screens/detail.md` § Choosing a container).
-#[test]
-fn the_container_is_the_one_named_the_first_regular_one_or_a_sentence() {
-    let pod: PodSnapshot = pod_capture("healthy-sidecar");
+///
+/// **`gang.json` and not `healthy-sidecar`**, because it is the capture whose two orders
+/// disagree: `spec [trigger, bystander]` against `status [bystander, trigger]`. Choosing off the
+/// snapshot opened `bystander` where `kubectl logs` opens `trigger` (`k8s-admin`, 2026-08-30).
+#[tokio::test]
+async fn the_container_is_the_one_named_the_first_declared_one_or_a_sentence() {
+    let pod = pod_read("gang").await;
 
     assert_eq!(
-        which_container(&pod, Some("proxy"))
-            .expect("the pod has a container by that name")
-            .map(|container| container.name.as_str()),
-        Some("proxy"),
+        which_container(&pod, Some("bystander")).expect("the pod has a container by that name"),
+        Some("bystander"),
         "a container the reader named by hand was not the one chosen"
     );
     assert_eq!(
-        which_container(&pod, None)
-            .expect("the pod has a regular container")
-            .map(|container| container.name.as_str()),
-        Some("app"),
-        "the default is the sidecar, so `--logs` on this pod reads the proxy"
+        which_container(&pod, None).expect("the pod declares two containers"),
+        Some("trigger"),
+        "the default is the container that happens to sort first, so `--logs` on `[web, envoy]` \
+         reads the proxy"
     );
     assert_eq!(
         which_container(&pod, Some("typo")).expect_err("no such container"),
-        "k8rs: this pod has no container named typo — it has proxy, app",
+        "k8rs: this pod has no container named typo — it has trigger, bystander",
         "a misspelled container was refused without the list the reader has to retype from, or \
-         the list is not readable as one"
+         the list is not in the order the pod declares them in"
     );
 
-    let mut pending = pod.clone();
-    pending.containers.clear();
+    // **A `Pending` pod is not the no-container case any more, and that was the whole of B2.**
+    // It declares its container in `spec` and the request names it, so the API server is never
+    // asked to guess and never answers `400`.
+    let pending = pod_read("pending").await;
+    assert!(
+        pending.snapshot.containers.is_empty(),
+        "`pending.json` no longer has an empty `containerStatuses`, so this proves nothing"
+    );
     assert_eq!(
         which_container(&pending, None).expect("a pending pod is a state and not an error"),
-        None,
-        "a pod the kubelet has reported no container for was an error instead of a state"
+        Some("app"),
+        "a pod the kubelet has reported no container for named none, so a multi-container one in \
+         the same state is refused by the API server and the reader is told the network failed"
     );
     assert!(
-        which_container(&pending, Some("app"))
-            .expect_err("there is nothing to name")
-            .contains("has not started any container yet"),
-        "a container named on a pod with none got the list-of-none sentence"
+        which_container(&pending, Some("nope"))
+            .expect_err("there is no container by that name")
+            .contains("it has app"),
+        "a misspelled container on a pending pod was refused without the list, which the pod's \
+         own `spec` has"
+    );
+}
+
+/// **A `Pod` that declares no container at all is answered without an empty list** — the arm no
+/// cluster can reach, fed because a sentence nobody has read is a sentence that reads wrongly.
+///
+/// **The body is hand-built and could not be a capture.** The API server refuses a pod that
+/// declares no container (NOTES § D156, ruling 1), so no cluster serves this shape; what makes
+/// the arm exist at all is that `k8s_openapi` types `spec` as an `Option`.
+#[tokio::test]
+async fn a_pod_that_declares_no_container_is_refused_without_an_empty_list() {
+    let (client, _) = answers(
+        "200 OK",
+        r#"{"apiVersion":"v1","kind":"Pod","metadata":{"name":"web","namespace":"default"}}"#
+            .to_string(),
+        "",
+    )
+    .await;
+    let read = k8s::pod(&client, "default", "web")
+        .await
+        .map_err(|failure| k8s::fault(&failure))
+        .expect("the stub answered the get");
+
+    assert_eq!(read.declared().len(), 0);
+    assert_eq!(
+        which_container(&read, None).expect("no container is a state and not an error"),
+        None,
+        "a pod with nothing to name named something"
+    );
+    assert_eq!(
+        which_container(&read, Some("app")).expect_err("there is nothing to name"),
+        "k8rs: this pod declares no container at all, so there is no app to read",
+        "the refusal printed the list-of-none sentence, so a reader gets `it has ` with nothing \
+         after it"
+    );
+    assert_eq!(
+        container_choice(&read, None, None),
+        None,
+        "a pod with nothing to choose from was offered a picker"
     );
 }
 
@@ -5857,52 +5952,90 @@ fn the_container_is_the_one_named_the_first_regular_one_or_a_sentence() {
 /// **Silent on a single-container pod** is the screen's own invariant one layer up: it does not
 /// offer the picker at all, because a key that does nothing is a bug already shipped once here.
 /// **Silent when the reader named one**, because they know.
-#[test]
-fn the_container_block_is_drawn_only_when_there_was_something_to_choose() {
-    let pod: PodSnapshot = pod_capture("healthy-sidecar");
-    let app = which_container(&pod, None).expect("a regular container");
+///
+/// **`neverrules.json` is the capture that can fail this.** Its `spec` is `[retry, keeper]` and
+/// its `status` is `[keeper, retry]`, and the two containers differ in *both* the things drawn
+/// beside a name — `retry` is `done` with one restart, `keeper` is `running` with none. A list
+/// built from `spec` and a status read by *index* would print each container's row against the
+/// other one's name, and every order-blind capture in this repo passes that.
+#[tokio::test]
+async fn the_container_block_is_drawn_only_when_there_was_something_to_choose() {
+    let pod = pod_read("neverrules").await;
+    let chosen = which_container(&pod, None).expect("the pod declares two containers");
 
-    let block = container_choice(&pod, None, app).expect("two containers is something to choose");
+    let block =
+        container_choice(&pod, None, chosen).expect("two containers is something to choose");
     assert_eq!(
         block,
-        "k8rs: this pod has 2 containers — proxy (running), app (running)\n\
-         k8rs: reading app. Name another with `--container <name>`.",
-        "the block a reader gets is not what the container list and the choice say"
+        "k8rs: this pod has 2 containers — retry (done, 1 restart), keeper (running)\n\
+         k8rs: reading retry. Name another with `--container <name>`.",
+        "the block a reader gets is not what the container list and the choice say — a row drawn \
+         against the wrong name is a status read by index"
     );
     assert_eq!(
-        container_choice(&pod, Some("app"), app),
+        container_choice(&pod, Some("retry"), chosen),
         None,
         "the picker was drawn for a reader who had already named a container"
     );
 
-    let mut alone = pod.clone();
-    alone.containers.retain(|container| container.name == "app");
+    let alone = pod_read("crashloop").await;
+    assert_eq!(alone.declared().len(), 1, "`crashloop.json` declares one");
     assert_eq!(
-        container_choice(&alone, None, app),
+        container_choice(&alone, None, Some("quitter")),
         None,
         "a pod with one container was offered a choice, which is a key that does nothing"
     );
     assert_eq!(
         container_choice(&pod, None, None),
         None,
-        "a pod with no container reported was told which one is being read"
+        "a pod that declares no container was told which one is being read"
+    );
+}
+
+/// **A container the kubelet has not reported on is listed with what it is and not with a state
+/// it never had** — the picker's list comes from `spec` now, so a `Pending` pod has rows the
+/// snapshot has nothing to say about.
+#[tokio::test]
+async fn a_container_the_kubelet_has_not_reported_on_says_so_rather_than_guessing() {
+    let pending = pod_read("pending").await;
+    // `pending.json` declares one container, so the picker itself stays silent; `doing` is where
+    // the answer lives and it is asserted directly.
+    assert_eq!(doing(None), "not started");
+    assert_eq!(
+        doing(Some(&ContainerState::Waiting {
+            reason: None,
+            message: None
+        })),
+        "waiting",
+        "a container the kubelet says is waiting was drawn as one it has not reported on"
+    );
+    assert_eq!(
+        container_choice(&pending, None, Some("app")),
+        None,
+        "a single-container pod was offered a picker"
     );
 }
 
 /// **A restart count is shown beside a container that has one**, because that is the signal that
-/// makes `--previous` worth typing (`screens/detail.md`) — and the singular is spelled.
-#[test]
-fn a_container_that_has_restarted_says_so_beside_its_state() {
-    let mut pod: PodSnapshot = pod_capture("healthy-sidecar");
-    pod.containers[0].restarts = 1;
-    pod.containers[1].restarts = 3;
-    let app = pod.containers[1].clone();
-
-    let block = container_choice(&pod, None, Some(&app)).expect("two containers");
+/// makes `--previous` worth typing (`screens/detail.md`) — and both the singular and the plural
+/// are drawn from a committed capture rather than from a count written here.
+#[tokio::test]
+async fn a_container_that_has_restarted_says_so_beside_its_state() {
+    let one = pod_read("neverrules").await;
+    let block = container_choice(&one, None, Some("retry")).expect("two containers");
     assert!(
-        block.contains("proxy (running, 1 restart)") && block.contains("app (running, 3 restarts)"),
-        "the restart counts are missing or mis-pluralised, and they are the whole reason a reader \
-         reaches for --previous: {block:?}"
+        block.contains("retry (done, 1 restart)"),
+        "the singular is missing or mis-pluralised, and it is the whole reason a reader reaches \
+         for --previous: {block:?}"
+    );
+
+    let several = pod_read("gang").await;
+    let block = container_choice(&several, None, Some("trigger")).expect("two containers");
+    assert_eq!(
+        block,
+        "k8rs: this pod has 2 containers — trigger (running, 3 restarts), bystander (running, 3 \
+         restarts)\nk8rs: reading trigger. Name another with `--container <name>`.",
+        "the plural is missing or mis-pluralised: {block:?}"
     );
 }
 
@@ -5911,61 +6044,90 @@ fn a_container_that_has_restarted_says_so_beside_its_state() {
 #[test]
 fn a_containers_state_is_a_word_and_never_the_reason_code() {
     assert_eq!(
-        doing(&ContainerState::Running { started_at: None }),
+        doing(Some(&ContainerState::Running { started_at: None })),
         "running"
     );
     assert_eq!(
-        doing(&ContainerState::Waiting {
+        doing(Some(&ContainerState::Waiting {
             reason: Some("CrashLoopBackOff".to_string()),
             message: None,
-        }),
+        })),
         "waiting",
         "a waiting container printed the API's own reason code where the screen says one word"
     );
     // **The third arm, fed** — `screens/detail.md` draws a finished init container as `done`, and
     // without this the word could be anything.
     assert_eq!(
-        doing(&ContainerState::Terminated(crate::rules::Terminated {
-            reason: Some("Completed".to_string()),
-            exit_code: 0,
-            started_at: None,
-            finished_at: None,
-            message: None,
-        })),
+        doing(Some(&ContainerState::Terminated(
+            crate::rules::Terminated {
+                reason: Some("Completed".to_string()),
+                exit_code: 0,
+                started_at: None,
+                finished_at: None,
+                message: None,
+            }
+        ))),
         "done"
+    );
+    // **The fourth arm is a container the pod declares and the kubelet has not reported on**,
+    // which the picker can reach now that its list comes from `spec` (`k8s::PodRead`).
+    assert_eq!(
+        doing(None),
+        "not started",
+        "a container nobody has reported on was given a state the kubelet never claimed"
     );
 }
 
 /// **`--previous` on a container that never restarted says so and falls back** —
 /// `screens/detail.md`'s own words, and k8rs does not print the API's refusal.
-#[test]
-fn previous_on_a_container_that_never_restarted_says_so_and_falls_back() {
-    let pod: PodSnapshot = pod_capture("healthy-sidecar");
-    let app = which_container(&pod, None).expect("a regular container");
-    assert_eq!(app.map(|container| container.restarts), Some(0));
+///
+/// **The count is looked up by name and not by index.** On `neverrules.json` the two lists are in
+/// opposite orders and the counts differ, so a lookup by position reads the other container's
+/// restarts — and turns `--previous` on where there is nothing to serve, or off where there is.
+#[tokio::test]
+async fn previous_on_a_container_that_never_restarted_says_so_and_falls_back() {
+    let pod = pod_read("neverrules").await;
+    let chosen = which_container(&pod, None).expect("the pod declares two containers");
+    assert_eq!(chosen, Some("retry"));
+    assert_eq!(
+        pod.status("retry").map(|container| container.restarts),
+        Some(1),
+        "`neverrules.json`'s first declared container no longer has a restart, so the negative \
+         half of this test proves nothing"
+    );
+    assert_eq!(
+        no_previous_run(&pod, chosen, true),
+        None,
+        "a container that has restarted was told it has no previous run, which is the one log a \
+         crash loop needs"
+    );
 
     assert_eq!(
-        no_previous_run(app, true).as_deref(),
+        pod.status("keeper").map(|container| container.restarts),
+        Some(0)
+    );
+    assert_eq!(
+        no_previous_run(&pod, Some("keeper"), true).as_deref(),
         Some(
-            "k8rs: app hasn't restarted, so there's no previous run to show. Showing the current \
-             run instead."
+            "k8rs: keeper hasn't restarted, so there's no previous run to show. Showing the \
+             current run instead."
         ),
         "the sentence the screen promises is not the one the driver prints"
     );
     assert_eq!(
-        no_previous_run(app, false),
+        no_previous_run(&pod, Some("keeper"), false),
         None,
         "a run that did not ask for the previous log was told about it anyway"
     );
 
-    let crashed: PodSnapshot = pod_capture("crashloop");
-    let quitter = which_container(&crashed, None).expect("a regular container");
-    assert_eq!(quitter.map(|container| container.restarts), Some(10));
-    assert_eq!(
-        no_previous_run(quitter, true),
-        None,
-        "a container with ten restarts was told it has no previous run, which is the one log a \
-         crash loop needs"
+    // **A container the kubelet has not reported on has not restarted either**, and the fallback
+    // is what keeps `--previous` off a `Pending` pod, where the API server has nothing to serve.
+    let pending = pod_read("pending").await;
+    let unstarted = which_container(&pending, None).expect("a pending pod declares its container");
+    assert_eq!(pending.status("app"), None);
+    assert!(
+        no_previous_run(&pending, unstarted, true).is_some(),
+        "`--previous` on a container that has never run was sent to the cluster"
     );
 }
 
@@ -5976,25 +6138,60 @@ fn previous_on_a_container_that_never_restarted_says_so_and_falls_back() {
 /// container stopped writing, a middlebox timed out, the connection broke — is three facts this
 /// driver cannot tell apart, and one sentence for all three is E1's own failure wearing the other
 /// coat.
-#[test]
-fn a_stream_says_the_pod_is_gone_and_says_nothing_about_any_other_ending() {
-    assert_eq!(
-        stream_ended(Some(k8s::Fault::Gone)),
-        Some("--- stream ended: pod deleted ---"),
-        "a pod deleted mid-follow left the reader wondering whether the connection dropped"
+///
+/// **The shape the pipeline actually produces is a pod that is still there** (NOTES § D29). The
+/// stream ends when the container dies and the object outlives it by its grace period, so the
+/// re-read *succeeds*: measured twice, deleting four seconds into a follow, the pod still carried
+/// a `deletionTimestamp` at t+1 and t+2 at `grace 1s` and at t+1..t+6 at `kubectl`'s default
+/// (`k8s-admin`, 2026-08-30). The version of this test before that hand-built a `Fault::Gone`
+/// nobody had seen the pipeline produce, and the marker had **never fired** on an ordinary
+/// delete — a green gate over an unreachable screen.
+///
+/// **`stuck.json` is a committed capture of exactly that**: a real pod carrying a real
+/// `deletionTimestamp`, read through `k8s::pod` off a socket.
+#[tokio::test]
+async fn a_stream_says_the_pod_is_gone_and_says_nothing_about_any_other_ending() {
+    let deleting = pod_read("stuck").await;
+    assert!(
+        deleting.snapshot.deletion_timestamp.is_some(),
+        "`stuck.json` no longer carries a `deletionTimestamp`, so this test proves nothing"
     );
+    assert_eq!(
+        stream_ended(Some(Ok(&deleting.snapshot))),
+        Some("--- stream ended: pod deleted ---"),
+        "the ordinary delete — the object still there inside its grace period — drew no marker, \
+         so `screens/detail.md`'s deleted-pod screen is unreachable"
+    );
+
+    let alive = pod_read("gang").await;
+    assert!(alive.snapshot.deletion_timestamp.is_none());
+    assert_eq!(
+        stream_ended(Some(Ok(&alive.snapshot))),
+        None,
+        "a stream that ended while the pod is still there claimed the pod was deleted"
+    );
+
+    // The `404` half stays: a re-read late enough that the object has been collected.
+    assert_eq!(
+        stream_ended(Some(Err(k8s::Fault::Gone))),
+        Some("--- stream ended: pod deleted ---"),
+        "a pod already collected by the time of the re-read left the reader wondering whether \
+         the connection dropped"
+    );
+    // And a re-read that did not answer inside its own deadline says nothing at all.
     assert_eq!(
         stream_ended(None),
         None,
-        "a stream that ended while the pod is still there claimed the pod was deleted"
+        "a re-read that timed out was reported as the pod being deleted"
     );
     for other in [
         k8s::Fault::Refused,
         k8s::Fault::Unanswered,
         k8s::Fault::Expired,
+        k8s::Fault::Rejected,
     ] {
         assert_eq!(
-            stream_ended(Some(other)),
+            stream_ended(Some(Err(other))),
             None,
             "a {other:?} on the re-read was reported as the pod being deleted"
         );
@@ -6191,6 +6388,140 @@ async fn a_followed_stream_asks_why_it_ended_and_a_fetch_does_not() {
     assert!(
         !fetched.iter().any(|path| path.contains("follow")),
         "a fetch asked to follow: {fetched:?}"
+    );
+}
+
+/// **A value the echo cannot show as it was judged says so** (invariant 4's *neither record may
+/// lie*, invariant 9, NOTES § D31's framing class one layer up).
+///
+/// **`web` is a perfectly good name**, so a reader shown *"and web is not one"* is sent to fix
+/// something that looks correct (`tester`, 2026-08-30). The check runs on the raw value and has
+/// to; what may not happen is the sentence quietly naming a different string.
+///
+/// **Every arm is fed** (NOTES § D29): unchanged, stripped, cut, both, and nothing left.
+#[test]
+fn a_refused_value_is_echoed_as_what_was_judged_or_says_it_is_not() {
+    assert_eq!(
+        shown("PAYMENTS", k8s::NAMESPACE_MAX),
+        "PAYMENTS",
+        "an ordinary value picked up a clause about a change nobody made"
+    );
+    assert_eq!(
+        shown("we\u{202e}b", k8s::NAME_MAX),
+        "web (with what cannot print removed)",
+        "the reader is sent to fix `web`, which is a name any cluster would accept"
+    );
+    assert_eq!(
+        shown(&"a".repeat(k8s::NAMESPACE_MAX + 1), k8s::NAMESPACE_MAX),
+        format!("{} (shortened by k8rs)", "a".repeat(k8s::NAMESPACE_MAX)),
+        "a value refused for its length echoed at the legal length, which is a legal name"
+    );
+    assert_eq!(
+        shown(
+            &format!("{}\u{7}", "a".repeat(k8s::NAMESPACE_MAX + 1)),
+            k8s::NAMESPACE_MAX
+        ),
+        format!(
+            "{} (with what cannot print removed) (shortened by k8rs)",
+            "a".repeat(k8s::NAMESPACE_MAX)
+        ),
+        "a value that was both stripped and cut admitted to only one of the two"
+    );
+    for nothing in ["", "\u{200b}\u{202e}\u{7}"] {
+        assert_eq!(
+            shown(nothing, k8s::NAMESPACE_MAX),
+            "a value with nothing printable in it",
+            "an empty echo leaves `and  is not one` — a doubled space naming nothing"
+        );
+    }
+
+    // And through the sentence a reader actually gets, so the clause reads as English.
+    let said = mistyped(&argv(&["--logs", "--object", "default/we\u{202e}b"]))
+        .expect("a bidi override is not in a name");
+    println!("{}", said.lines().next().expect("a first line"));
+    assert!(
+        said.contains("and web (with what cannot print removed) is not one"),
+        "{said:?}"
+    );
+    assert!(
+        !said.contains('\u{202e}'),
+        "the override reached the terminal: {said:?}"
+    );
+}
+
+/// **An empty half of `--object` costs the clause rather than printing an empty one**
+/// (invariant 14).
+///
+/// **`--object web/` is a trailing slash off tab completion** and came back *"and  is not one"* —
+/// nothing named, and a doubled space where the value would have been (`k8s-admin`, 2026-08-30).
+/// `--object /web` is the same defect on the other side and was never reported; both are one
+/// check now, because a fix for the reported half only is a second sentence that can drift.
+#[test]
+fn an_empty_half_of_a_selector_is_named_by_its_position_and_not_echoed() {
+    for (line, expected) in [
+        (
+            "web/",
+            "k8rs: --object has nothing after the `/`, so it names no pod — write it as \
+             `<namespace>/<name>`",
+        ),
+        (
+            "/web",
+            "k8rs: --object has nothing before the `/`, so it names no namespace — write it as \
+             `<namespace>/<name>`, or leave the `/` off to use the current namespace",
+        ),
+        (
+            "/",
+            "k8rs: --object has nothing before the `/`, so it names no namespace — write it as \
+             `<namespace>/<name>`, or leave the `/` off to use the current namespace",
+        ),
+    ] {
+        let said = mistyped(&argv(&["--logs", "--object", line])).expect("an empty half");
+        let first = said.lines().next().expect("a first line");
+        println!("{first}");
+        assert_eq!(first, expected, "`--object {line}` names nothing");
+        assert!(said.contains("usage: k8rs "), "{said:?}");
+    }
+
+    // The two halves that *are* there still get their own rules, unchanged.
+    assert!(
+        mistyped(&argv(&["--logs", "--object", "payments/web"])).is_none(),
+        "an ordinary selector was refused"
+    );
+}
+
+/// **A `Pending` pod's log request names the container the pod declares** — B2 end to end, off a
+/// socket, because what the API server answers depends on the query string and nothing below the
+/// request can see it.
+///
+/// **A request naming no container is a `400` on any pod with more than one**, and until
+/// 2026-08-30 that came back *nothing usable came back when k8rs tried to get pods/log* — a
+/// network sentence for a fault on this side of the wire, on the everyday
+/// injected-pod-that-cannot-schedule (`k8s-admin`).
+#[tokio::test]
+async fn a_pending_pods_log_request_names_the_container_the_pod_declares() {
+    let (client, asked) = answers("200 OK", pod_body("pending"), "").await;
+    let ending = logs_run(
+        std::future::ready(Ok(session_over(client, None))),
+        &Asked {
+            namespace: Some("default"),
+            pod: "broken-pending",
+            container: None,
+            previous: false,
+            follow: false,
+        },
+    )
+    .await;
+    assert_eq!(ending, None, "a pending pod's log run failed: {ending:?}");
+
+    let asked = asked.lock().expect("the record is never poisoned").clone();
+    let log = asked
+        .iter()
+        .find(|path| path.contains("/log?"))
+        .unwrap_or_else(|| panic!("no log was asked for: {asked:?}"));
+    assert!(
+        log.contains("container=app"),
+        "the request named no container, so a multi-container pod in this state is answered 400 \
+         and the reader is told the network failed: {log:?}"
     );
 }
 

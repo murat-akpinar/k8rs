@@ -367,7 +367,7 @@ it the first paint reports what it is waiting for
   This bullet said the opposite until 2026-08-27, when a run against a dead port
   was measured and did not exit
   ([NOTES § D167](../NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
-- **Eight distinctions matter to the user, not two, and they get one enum:
+- **Nine distinctions matter to the user, not two, and they get one enum:
   `k8s::Fault`.** *Permission denied vs no connection* was the original pair
   and it was never enough — `Kubeconfig` (the file itself: missing, unreadable,
   not valid YAML) · `NoContext` (the file loaded and names no such context) ·
@@ -381,6 +381,12 @@ it the first paint reports what it is waiting for
   · `Refused` (`403` — the sentence says the **role needs** the verb, never that
   the kubeconfig *is not allowed*: k8rs needs both `list` and `watch` to watch a
   kind and cannot tell from a refusal which one was missing) · `Gone` (`404`) ·
+  `Rejected` (`400` — the server understood the request and will not act on it,
+  so the fault is in the request k8rs made: the sentence says so and hands the
+  reader no errand, because there is nothing on their side to go and fix.
+  Added 2026-08-30, when a multi-container `Pending` pod's log request came back
+  `400` and was read as *nothing usable came back* — a client-side fault
+  printed as a connectivity sentence) ·
   `Unanswered` (everything that did not come back usably — one variant on
   purpose, because from the reader's side they are one fact).
 - **A fallback string is printed only for the case it actually describes**, and

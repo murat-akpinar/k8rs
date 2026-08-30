@@ -3316,8 +3316,11 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
 > strips to nothing. 6 **where the resident set is**, alone. 7 **a wedged watch
 > against a refused one**, alone.
 
-- [ ] `l` logs: fetch and follow, container picker, `--previous` for a
-      crashed container — the single most-typed kubectl command there is
+- [x] `l` logs: fetch and follow, container picker, `--previous` for a
+      crashed container — the single most-typed kubectl command there is.
+      Headless via `--logs --object <[namespace/]pod>`
+      ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) ·
+      [D197](NOTES.md#d197--the-log-streams-review-round-nine-findings-and-the-container-list-that-came-from-the-wrong-half-of-the-object-2026-08-30))
 - [ ] **Per-object events fetch** (`involvedObject` field selector, this object
       only — never the global Events watch). It feeds two consumers: `describe`
       and the events *tab* of Phase 11. Listing it once, here, is the point:
@@ -3326,11 +3329,12 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
 - [ ] `d` describe: object plus those events, assembled from what we now have
 - [ ] `y` YAML view, with Secret values hidden behind an explicit reveal
 - [ ] Control-character stripping on every free-text field from the API
-- [ ] **The log buffer's bound is a number, and a dropped line is counted out
-      loud** — this phase's gate below says "bounded buffer, no unbounded growth"
-      and names no figure, which is how a bound stays unbuilt. Pick the line
-      count, drop the oldest past it, and when lines are dropped because the
-      stream outruns the reader, **say how many on screen**. k9s widened its log
+- [x] **The log buffer's bound is a number, and a dropped line is counted out
+      loud** — 2 MB retained, 5 000 lines, 4 096 bytes per line, whichever is hit
+      first ([screens/detail.md § The buffer](screens/detail.md#the-buffer-2-mb-retained-5000-lines-4096-bytes-per-line)).
+      The gate below said "bounded buffer, no unbounded growth" and named no
+      figure, which is how a bound stays unbuilt. The dropped count is exposed to
+      the caller and said out loud on the surface that has one. k9s widened its log
       channel and added a drop counter in the same change
       ([#3978](https://github.com/derailed/k9s/pull/3978)): silently losing log
       lines in a debugging tool is worse than showing fewer of them. What an

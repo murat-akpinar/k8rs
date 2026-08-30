@@ -218,6 +218,7 @@ its line moving with it.
 - [D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) — the flag that names an object, and D17's threshold read against the binary it was written for
 - [D195](#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30) — the brief that ordered work the working tree already held
 - [D196](#d196--three-hours-of-documents-nobody-was-blocked-on-and-the-gate-the-process-does-not-have-2026-08-30) — three hours of documents nobody was blocked on, and the gate the process does not have
+- [D197](#d197--the-log-streams-review-round-nine-findings-and-the-container-list-that-came-from-the-wrong-half-of-the-object-2026-08-30) — the log stream's review round: nine findings, and the container list that came from the wrong half of the object
 
 ## Why it exists — where the gap is
 
@@ -14429,7 +14430,12 @@ were not invented — each is a shape the code had already been measured on.
 **`k8s::Fault`, eight unit variants, carrying no string.** `Kubeconfig` (the
 file) · `NoContext` · `BadEntry` (the file loaded and something it points at did
 not) · `NoCredential` · `Expired` (`401`) · `Refused` (`403`) · `Gone` (`404`) ·
-`Unanswered`. **It was six for one round**, and the operator review split the
+`Unanswered`. **A ninth arrived 2026-08-30 and the count in this heading is left
+as it was written**: `Rejected` (`400`), because a multi-container `Pending`
+pod's log request came back `400` and `Unanswered` printed a connectivity
+sentence over a fault entirely on k8rs's own side
+([D197](#d197--the-log-streams-review-round-nine-findings-and-the-container-list-that-came-from-the-wrong-half-of-the-object-2026-08-30)).
+**It was six for one round**, and the operator review split the
 first one: `because(Kubeconfig, …)` printed one constant over `KubeconfigError`'s
 **fifteen** variants (`config/mod.rs:33-95`, counted off the enum — this entry
 said nineteen and the brief that ordered the fix said sixteen, neither read off
@@ -16849,3 +16855,108 @@ could not be written without, and the rest is `backlog.md`'s. And *the PM
 reports at the first dispatch, not only at the push*: D98 removed the asking,
 not the saying, and a fifteen-minute checkpoint costs one line where a
 three-hour one costs an afternoon.
+
+### D197 — the log stream's review round: nine findings, and the container list that came from the wrong half of the object (2026-08-30)
+
+Phase 6 family 1 landed green — `just check` exit 0, 178 mutants with **0
+MISSED**, 776 + 23 tests. Then `k8s-admin` ran it against a live kind cluster and
+`tester` fed it the shapes its own tests had not, and between them they returned
+**nine findings, two of them blocking**. Everything below was measured, not
+argued, and the round is the fourth piece of evidence for
+[the family review taking several rounds](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15).
+
+**The two blockers were one defect.** `default_container` read
+`PodSnapshot::containers`, which is built from `status.containerStatuses` — and
+**the kubelet sorts those by name** while `spec.containers` keeps the author's
+order. Measured: a pod whose spec says `[zeta, alpha]` gets `zeta` from
+`kubectl` and `alpha` from k8rs. Any `[web, envoy]` pod opens the proxy's log,
+and the kubectl line k8rs prints then teaches a command that returns something
+else — invariant 4 inverted. The second blocker is the same field seen from the
+other side: a **multi-container `Pending` pod has no statuses at all**, so k8rs
+named no container, the API server answered `400`, `answer()` had no `400` arm,
+and the reader got *"nothing usable came back"* — a connectivity sentence over a
+fault entirely on the client. The printed kubectl line **succeeded** when pasted.
+That is the everyday Istio-injected-pod-that-cannot-schedule case, and it is a
+pod a beginner opens the logs on *because* it is stuck.
+
+**`k8s.rs`'s own doc argued the two orders agreed** — reasoned from
+`container_snapshots`' init-first arrangement — while `rules.rs:699` said in as
+many words that `PodSnapshot::containers` **promises no order**. Two files
+reading one thing and disagreeing, invisible from inside either
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)),
+and neither the author's tests nor a 0-MISSED mutation gate could see it: both
+halves were consistent with themselves.
+
+**The PM ruling that closed all three container findings at once, without
+reopening a frozen file.** `k8s::pod()` fetched a raw `Pod` and `ingest`ed it
+immediately, and *that* is where the spec order and `metadata.annotations` were
+thrown away. So the list is read off the **raw object before `ingest`** and
+returned beside the snapshot, as `PodRead`. `rules.rs` is untouched,
+`PodSnapshot` gains no field, no `k8s_openapi` type leaves the file, and every
+name goes through `text(…, IDENTIFIER)` exactly as `ingest` would have
+(invariant 9). One change, three findings, no plan reopened — which is the shape
+to reach for before unfreezing anything.
+
+**The nine decisions the brief did not decide.** kubectl's rule was **measured
+against kubectl v1.36.3 over a stub API server in eight shapes**, not read off
+its source. (1) The `kubectl.kubernetes.io/default-container` annotation wins
+where it names a container the pod declares, else `spec.containers[0]`.
+(2) The annotation **may name an init container** — kubectl reads it, so k8rs
+does. (3) An annotation naming a container that does not exist **falls back**;
+kubectl warns and k8rs does not, because the picker already prints what it is
+reading. (4) **Ephemeral containers are excluded** from the declared list:
+[D46](#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)
+already ruled a `kubectl debug` container out of this build's notion of a pod's
+containers, and including them here would be a second notion plus a picker row
+`PodSnapshot` can say nothing about — **nothing recorded that until this line**.
+(5) A pod declaring no container at all gets its own sentence rather than the
+now-false *"has not started any container yet"*; **whether the API server even
+accepts such a pod could not be measured**, and the doc and the test both say so
+instead of asserting it. (6) `Fault::Rejected`'s sentence hands the reader **no
+errand**, because it is the one arm where nothing on their side is broken.
+(7) The refusal sentences name the **position** of an empty half rather than
+echoing nothing — `--object web/` printed *"and  is not one"*, with a doubled
+space and nothing named. (8) `shown()` now says what it did to a value it had to
+change, in three clauses, because the check ran on the raw string and the echo on
+the stripped one: `default/we⁠<U+202E>b` was refused with *"web is not one"*, and
+`web` is a perfectly good name —
+[D31](#d31--the-sanitizer-matched-the-whole-string-and-secrets-are-rarely-the-whole-string-2026-08-12)'s
+framing class one layer up. (9) The kubectl line does **not** print
+`--tail=5000`: `LogRequest::params`' own doc forbids a request carrying a
+parameter the line does not, and printing one the request does not carry is the
+same lie reversed — it would be wrong outright for `--follow`, which retains
+nothing. The doc is softened to claim equivalence about the *request*, and names
+the three post-arrival bounds.
+
+**Two pieces of vocabulary now exist that no screen has**, and they are family
+5's to sync, not a new box: the picker's **`not started`** state word (`waiting`
+would be a claim the kubelet has not made), and whether a pod inside its grace
+period should read `--- stream ended: pod deleted ---` at all.
+
+**What the gates caught that the reviews did not, and what a second pass caught
+that the gates did not.** `just mutants-diff` over the fix returned exactly one
+`MISSED` — the *declares no container* guard, unreachable from a cluster and
+therefore untested — and the author's own second pass had found the same hole
+independently in the same hour. Two instruments, one defect, neither redundant.
+The second pass then found three more the gate could not: a doc that said
+*"eight facts"* over nine variants — **the reasoned-not-counted error committed
+in the very edit that fixed one**, which is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+arriving inside its own correction; a test whose entire claim is *no two faults
+collapse into one sentence* that covered **seven of nine**, so the two never in
+it could have collapsed unseen; and a property check written over all 65 536
+two-byte line endings rather than left as an argument, which **failed** on
+`[o, k, C2, C2]` — the code was right and the hand-written assertion was too
+strong, which is the good direction for a check to fail in.
+
+**One reviewer finding was wrong and the author checked rather than took it.**
+`tester` reported four user-visible sentences owned by nobody but `main.rs`;
+three are, and the fourth is drawn at `screens/detail.md:237`. A finding stays an
+estimate until the person acting on it has run it themselves.
+
+**The selector's spelling, which [D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)
+left open:** `--logs` is the verb and `--object <[namespace/]pod>` the target,
+with `--container`, `--previous` and `--follow` beside them. A verb and a target
+rather than `--logs <pod>`, so the next three consumers — the per-object events
+fetch, `describe` and YAML — reuse `--object` instead of spelling *which pod*
+three more ways.

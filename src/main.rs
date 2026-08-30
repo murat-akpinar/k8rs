@@ -56,8 +56,8 @@ use k8s_openapi::jiff::{SignedDuration, Timestamp};
 use k8s_openapi::serde::de::DeserializeOwned;
 use k8s_openapi::serde_json::{self, Value};
 use rules::{
-    ClusterSnapshot, ContainerSnapshot, ContainerState, Finding, ObjectId, ObjectKind, PodSnapshot,
-    Severity, age, analyze,
+    ClusterSnapshot, ContainerState, Finding, ObjectId, ObjectKind, PodSnapshot, Severity, age,
+    analyze,
 };
 use std::collections::BTreeMap;
 
@@ -1547,6 +1547,57 @@ fn live_namespace(args: &[String]) -> Option<&str> {
     namespace_arg(args).flatten()
 }
 
+/// **What a refused value is called in the sentence that refuses it** — stripped, bounded, and
+/// **never silently a different word from the one that was judged**.
+///
+/// **The check runs on what the reader typed and the echo cannot**, which is invariant 9: a value
+/// with a bidi override in it is refused *as typed* and printed with the override gone. Until
+/// 2026-08-30 that left `k8rs --logs --object $'default/we\u{202e}b'` answering *"and web is not
+/// one"* — and `web` is a perfectly good name, so the reader was sent to fix something that looks
+/// correct (`tester`, 2026-08-30). The two records may not lie about which string they mean
+/// (invariant 4), so where the echo is not the value, the echo says so.
+///
+/// **Two facts and two clauses, because a value can be both**: characters removed for having no
+/// printed form, and a cut for length. The cut is not new — a value refused *for* being eight
+/// kilobytes long may not be printed at eight kilobytes to say so (the security gate's *sizes are
+/// bounded* row) — but it was as silent as the strip was, and `--namespace` with 64 `a`s echoed
+/// 63 of them, which is a namespace name.
+///
+/// **Nothing printable left is a clause and not an empty gap.** `--object web/` printed *"and  is
+/// not one"* — a doubled space naming nothing (`k8s-admin`, 2026-08-30). That shape is refused
+/// one layer up now ([`mistyped`] names the empty half), and this arm is what catches every other
+/// door to it: a value that is *entirely* characters with no printed form.
+fn shown(value: &str, most: usize) -> String {
+    let clean = sanitize(value);
+    let cut: String = clean.chars().take(most).collect();
+    if cut.is_empty() {
+        return "a value with nothing printable in it".to_string();
+    }
+    let mut said = cut.clone();
+    if clean.chars().count() != value.chars().count() {
+        said.push_str(" (with what cannot print removed)");
+    }
+    if cut.chars().count() != clean.chars().count() {
+        said.push_str(" (shortened by k8rs)");
+    }
+    said
+}
+
+/// **The sentence a word that was supposed to be a namespace and is not gets**, wherever on the
+/// line it was typed — [`NAMESPACE`]'s value, or the left half of [`OBJECT`]'s.
+///
+/// **One sentence and not two**, because there is one rule (`k8s::namespace_name`) and a second
+/// wording of it is a second thing that can drift from the check. `subject` is what the reader
+/// typed it under, so the sentence still names the flag they have to fix.
+fn not_a_namespace(subject: &str, value: &str) -> String {
+    format!(
+        "k8rs: {subject} needs the name of a namespace, and {} is not one — a namespace is \
+         lowercase letters, digits and dashes, up to {} characters\n{USAGE}",
+        shown(value, k8s::NAMESPACE_MAX),
+        k8s::NAMESPACE_MAX
+    )
+}
+
 /// **The sentence a word that looks like a flag and is not one gets**, or `None` when every
 /// flag on the line is one this build has.
 ///
@@ -1582,25 +1633,6 @@ fn live_namespace(args: &[String]) -> Option<&str> {
 /// `k8rs --live --context "$CTX"` with `CTX` unset, and swallowing it watches the current cluster
 /// in silence (`k8s-admin`, 2026-08-27). Both words are known flags, so it takes the pair rather
 /// than the word: no single-argument check can see it.
-fn shown(value: &str, most: usize) -> String {
-    sanitize(value).chars().take(most).collect()
-}
-
-/// **The sentence a word that was supposed to be a namespace and is not gets**, wherever on the
-/// line it was typed — [`NAMESPACE`]'s value, or the left half of [`OBJECT`]'s.
-///
-/// **One sentence and not two**, because there is one rule (`k8s::namespace_name`) and a second
-/// wording of it is a second thing that can drift from the check. `subject` is what the reader
-/// typed it under, so the sentence still names the flag they have to fix.
-fn not_a_namespace(subject: &str, value: &str) -> String {
-    format!(
-        "k8rs: {subject} needs the name of a namespace, and {} is not one — a namespace is \
-         lowercase letters, digits and dashes, up to {} characters\n{USAGE}",
-        shown(value, k8s::NAMESPACE_MAX),
-        k8s::NAMESPACE_MAX
-    )
-}
-
 fn mistyped(args: &[String]) -> Option<String> {
     if let Some(pair) = args
         .windows(2)
@@ -1691,6 +1723,25 @@ fn mistyped(args: &[String]) -> Option<String> {
         // rule about dots, which is true of nothing (`dev-core`'s own run, 2026-08-30).
         Some(Some(value)) => {
             let (namespace, name) = split_object(value);
+            // **An empty half costs the clause rather than printing an empty one** (invariant 14,
+            // and the `server ` box's shape one file over). `--object web/` — a trailing slash off
+            // tab completion — came back *"and  is not one"*: nothing named, and a doubled space
+            // where the value would have been (`k8s-admin`, 2026-08-30). `--object /web` is the
+            // same defect on the other side. **Nothing is echoed**, because there is nothing to
+            // echo: what is wrong is the shape and the position says it.
+            if namespace.is_some_and(str::is_empty) {
+                return Some(format!(
+                    "k8rs: {OBJECT} has nothing before the `/`, so it names no namespace — write \
+                     it as `<namespace>/<name>`, or leave the `/` off to use the current \
+                     namespace\n{USAGE}"
+                ));
+            }
+            if name.is_empty() {
+                return Some(format!(
+                    "k8rs: {OBJECT} has nothing after the `/`, so it names no pod — write it as \
+                     `<namespace>/<name>`\n{USAGE}"
+                ));
+            }
             if let Some(namespace) = namespace
                 && !k8s::namespace_name(namespace)
             {
@@ -2127,6 +2178,17 @@ fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>) -> String {
         // is about framings). This frame takes all four.
         k8s::Fault::Gone => {
             format!("this server says there is no such thing when k8rs tries to {asked}")
+        }
+        // **The only arm whose fix is in k8rs and not on the reader's side**, so it says so
+        // instead of handing out an errand. A `400` was [`k8s::Fault::Unanswered`] until
+        // 2026-08-30 and printed *nothing usable came back* — a network sentence for a request
+        // this side got wrong, which is `PRIOR-ART § C1` in the box written to close it
+        // (`k8s-admin`; `k8s::Fault::Rejected` carries the measured shape).
+        k8s::Fault::Rejected => {
+            format!(
+                "this cluster would not accept the request k8rs made to {asked} — that is a \
+                     fault in k8rs, and nothing is wrong with the cluster or with this login"
+            )
         }
         k8s::Fault::Unanswered => format!("nothing usable came back when k8rs tried to {asked}"),
     }
@@ -3273,52 +3335,59 @@ async fn on_cluster(args: &[String], context: Option<&str>) -> Option<String> {
 /// **A waiting container's `reason` is not printed here.** It is the jargon this product exists to
 /// translate — `CrashLoopBackOff`, `ImagePullBackOff` — and the card that explains it is the
 /// Alerts view's, not a line above a log.
-fn doing(state: &ContainerState) -> &'static str {
+fn doing(state: Option<&ContainerState>) -> &'static str {
     match state {
-        ContainerState::Running { .. } => "running",
-        ContainerState::Terminated(_) => "done",
-        ContainerState::Waiting { .. } => "waiting",
+        Some(ContainerState::Running { .. }) => "running",
+        Some(ContainerState::Terminated(_)) => "done",
+        Some(ContainerState::Waiting { .. }) => "waiting",
+        // **A container the pod declares and the kubelet has not reported on** — a `Pending`
+        // pod, which the picker can now list because the list comes from `spec` and not from
+        // `status` (`k8s::PodRead`). *waiting* would be a claim the kubelet has not made.
+        None => "not started",
     }
 }
 
 /// **The container the log is read from**, or the sentence saying why there is none
 /// (`screens/detail.md` § Choosing a container).
 ///
-/// **`Ok(None)` is a pod whose containers the kubelet has not reported yet** — a `Pending` pod —
-/// and it is a state rather than an error: the request then names no container and the API server
-/// picks, exactly as `kubectl` with no `-c` does.
+/// **The pod's *declared* containers and never its reported ones** ([`k8s::PodRead`]). The
+/// kubelet sorts `status.containerStatuses` by name and `spec.containers` keeps the author's
+/// order, so choosing off the snapshot opened `alpha` where `kubectl logs` opens `zeta`, and
+/// `[web, envoy]` opened the proxy (`k8s-admin`, 2026-08-30).
+///
+/// **`Ok(None)` is a pod that declares no container at all**, which the API server refuses
+/// (NOTES § D156, ruling 1), so it is a `Pod` whose `spec` did not decode rather than one a
+/// cluster serves: the request then names none and the server picks. A `Pending` pod is **not**
+/// this case any more — it has a `spec` like every other pod.
 ///
 /// **A name that is not one of the pod's is refused with the list**, because the reader's next
 /// action is to retype it and the only thing they need is the spelling.
 fn which_container<'a>(
-    pod: &'a PodSnapshot,
+    read: &'a k8s::PodRead,
     asked: Option<&str>,
-) -> Result<Option<&'a ContainerSnapshot>, String> {
+) -> Result<Option<&'a str>, String> {
     let Some(name) = asked else {
-        return Ok(k8s::default_container(pod));
+        return Ok(read.default_container());
     };
-    match pod.containers.iter().find(|held| held.name == name) {
+    match read.declared().find(|held| *held == name) {
         Some(chosen) => Ok(Some(chosen)),
-        None if pod.containers.is_empty() => Err(format!(
-            "k8rs: this pod has not started any container yet, so there is no {} to read",
+        None if read.declared().len() == 0 => Err(format!(
+            "k8rs: this pod declares no container at all, so there is no {} to read",
             sanitize(name)
         )),
         None => Err(format!(
             "k8rs: this pod has no container named {} — it has {}",
             sanitize(name),
-            container_names(pod)
+            container_names(read)
         )),
     }
 }
 
-/// Every container the pod has, by name, in the order the snapshot carries them — init
-/// containers and sidecars first, then the regular ones (`rules.rs`'s `container_snapshots`).
-fn container_names(pod: &PodSnapshot) -> String {
-    pod.containers
-        .iter()
-        .map(|container| sanitize(&container.name))
-        .collect::<Vec<_>>()
-        .join(", ")
+/// Every container the pod declares, by name, in `spec` order — the regular ones and then the
+/// init containers, which is the order `kubectl` lists them in after *Defaulted container … out
+/// of:* and the order `screens/detail.md`'s picker draws.
+fn container_names(read: &k8s::PodRead) -> String {
+    read.declared().map(sanitize).collect::<Vec<_>>().join(", ")
 }
 
 /// **The headless form of the container picker** — what there was to choose from and what was
@@ -3330,37 +3399,45 @@ fn container_names(pod: &PodSnapshot) -> String {
 ///
 /// **The restart count is beside the containers that have one**, for the screen's reason: that is
 /// exactly the signal that makes [`PREVIOUS`] worth typing.
+///
+/// **The list is the pod's declared one and the state beside each name is looked up by name**
+/// ([`k8s::PodRead::status`]) — one place decides what the pod's containers are, so the picker,
+/// the refusal above it and the request all name the same set in the same order.
 fn container_choice(
-    pod: &PodSnapshot,
+    read: &k8s::PodRead,
     asked: Option<&str>,
-    chosen: Option<&ContainerSnapshot>,
+    chosen: Option<&str>,
 ) -> Option<String> {
     let chosen = chosen?;
-    if asked.is_some() || pod.containers.len() < 2 {
+    if asked.is_some() || read.declared().len() < 2 {
         return None;
     }
-    let listed: Vec<String> = pod
-        .containers
-        .iter()
-        .map(|container| {
+    let listed: Vec<String> = read
+        .declared()
+        .map(|name| {
+            let status = read.status(name);
             // `restartCount` is an `i32` the API server never sets below zero; a negative one
-            // is not a count and is drawn as none rather than as its absolute value.
-            let restarts = match usize::try_from(container.restarts).unwrap_or(0) {
+            // is not a count and is drawn as none rather than as its absolute value. A container
+            // the kubelet has not reported on has no count at all, which is not a zero it chose.
+            let restarts = match status
+                .map(|container| usize::try_from(container.restarts).unwrap_or(0))
+                .unwrap_or(0)
+            {
                 0 => String::new(),
                 counted => format!(", {}", plural(counted, "restart")),
             };
             format!(
                 "{} ({}{restarts})",
-                sanitize(&container.name),
-                doing(&container.state)
+                sanitize(name),
+                doing(status.map(|container| &container.state))
             )
         })
         .collect();
     Some(format!(
         "k8rs: this pod has {} — {}\nk8rs: reading {}. Name another with `{CONTAINER} <name>`.",
-        plural(pod.containers.len(), "container"),
+        plural(read.declared().len(), "container"),
         listed.join(", "),
-        sanitize(&chosen.name)
+        sanitize(chosen)
     ))
 }
 
@@ -3374,35 +3451,57 @@ fn container_choice(
 /// measured is that k8rs stops sending it
 /// (`previous_on_a_container_that_never_restarted_asks_for_the_run_that_exists`). It says so in
 /// one line and falls back to the run that does exist.
-fn no_previous_run(chosen: Option<&ContainerSnapshot>, previous: bool) -> Option<String> {
+///
+/// **A container the kubelet has not reported on has not restarted either**, so it takes the same
+/// line — which is right and is also what stops `--previous` reaching a `Pending` pod, where the
+/// API server has nothing to serve it from.
+fn no_previous_run(read: &k8s::PodRead, chosen: Option<&str>, previous: bool) -> Option<String> {
     let chosen = chosen?;
-    if !previous || chosen.restarts != 0 {
+    let restarts = read
+        .status(chosen)
+        .map_or(0, |container| container.restarts);
+    if !previous || restarts != 0 {
         return None;
     }
     Some(format!(
         "k8rs: {} hasn't restarted, so there's no previous run to show. Showing the current run \
          instead.",
-        sanitize(&chosen.name)
+        sanitize(chosen)
     ))
 }
 
 /// **The marker a followed stream ends with**, or `None` when there is nothing honest to say.
 ///
-/// **`reread` is what the cluster answered when asked for the pod again** — `None` for *it is
-/// still there*, `Some(fault)` for a failure. Only one fault is an answer: the pod is gone, which
-/// is the one case `PRIOR-ART § E1` asks for by name, and saying it is what keeps the reader from
-/// wondering whether the connection dropped.
+/// **`reread` is what the cluster answered when asked for the pod again** — the outer `None` is a
+/// re-read that did not answer inside [`LOG_FETCH`], `Err` a failure, `Ok` the pod itself. Two
+/// shapes are the same answer: a `404`, and a pod that is still there and **carrying a
+/// `deletionTimestamp`**.
+///
+/// **The second is the one that actually happens, and without it this marker never fired at
+/// all.** The stream ends when the container dies; the object outlives it by its grace period, so
+/// the re-read *succeeds* — measured twice, deleting four seconds into a follow: at `grace 1s`
+/// the pod still had a `deletionTimestamp` at t+1 and t+2, at `kubectl`'s default `grace 30s` at
+/// t+1 through t+6, and both runs ended with the last log line, nothing, and exit `0`
+/// (`k8s-admin`, 2026-08-30). So `screens/detail.md`'s deleted-pod mockup and the one case
+/// `PRIOR-ART § E1` names by name were unreachable in the ordinary case, and the test that should
+/// have said so hand-built a `Fault::Gone` the pipeline does not produce (NOTES § D29).
+///
+/// **A pod still terminating is *deleted* and not *being deleted*, on purpose.** The container
+/// whose log this was is already gone — that is why the stream ended — and the difference between
+/// *deleted* and *deleted, object not yet collected* is not one a reader at 3am has an action
+/// for. `screens/detail.md`'s wording is the one printed.
 ///
 /// **Every other ending gets no marker at all**, and that is deliberate rather than unfinished: a
 /// stream that ended while the pod is still there ended because the container stopped writing, a
 /// middlebox timed out, or the connection broke — three different facts this driver cannot tell
 /// apart, and inventing one sentence for all three is the *viewer says one thing* failure E1 is
 /// about, wearing the other coat.
-fn stream_ended(reread: Option<k8s::Fault>) -> Option<&'static str> {
-    match reread {
-        Some(k8s::Fault::Gone) => Some("--- stream ended: pod deleted ---"),
-        _ => None,
-    }
+fn stream_ended(reread: Option<Result<&PodSnapshot, k8s::Fault>>) -> Option<&'static str> {
+    let gone = match reread? {
+        Err(fault) => fault == k8s::Fault::Gone,
+        Ok(pod) => pod.deletion_timestamp.is_some(),
+    };
+    gone.then_some("--- stream ended: pod deleted ---")
 }
 
 /// **The line a log with nothing in it gets, and `None` when something arrived**
@@ -3541,7 +3640,7 @@ async fn logs_run(
         let _ = writeln!(err, "{block}");
     }
     let mut previous = asked.previous;
-    if let Some(sentence) = no_previous_run(chosen, previous) {
+    if let Some(sentence) = no_previous_run(&pod, chosen, previous) {
         let _ = writeln!(err, "{sentence}");
         previous = false;
     }
@@ -3549,13 +3648,7 @@ async fn logs_run(
     // **One value, and both records are built off it** (invariant 4): what goes on the wire is
     // `k8s::LogRequest::params` and what the reader is taught is `k8s::LogRequest::kubectl`, so
     // the line printed here cannot describe a request that was not sent.
-    let request = k8s::LogRequest::new(
-        namespace,
-        asked.pod,
-        chosen.map(|container| container.name.as_str()),
-        previous,
-        asked.follow,
-    );
+    let request = k8s::LogRequest::new(namespace, asked.pod, chosen, previous, asked.follow);
     let _ = writeln!(err, "{}", request.kubectl());
 
     let reader = match k8s::log_stream(&session.client, &request).await {
@@ -3634,14 +3727,20 @@ async fn logs_run(
     // one thing `PRIOR-ART § E1` asks for by name ([`stream_ended`]). A fetch does not ask: it
     // ended because the log ended, which is what a fetch is.
     if request.follow && ending.is_none() {
-        let reread = tokio::time::timeout(
+        // **The pod itself and not only its failure** ([`stream_ended`]): the object outlives the
+        // container by its grace period, so the ordinary delete answers `200` with a
+        // `deletionTimestamp` and never the `404` this used to be the whole of.
+        let answer = tokio::time::timeout(
             LOG_FETCH,
             k8s::pod(&session.client, &request.namespace, &request.pod),
         )
-        .await
-        .ok()
-        .and_then(|answer| answer.err())
-        .map(|failure| k8s::fault(&failure));
+        .await;
+        let reread = answer.as_ref().ok().map(|answer| {
+            answer
+                .as_ref()
+                .map(|read| &read.snapshot)
+                .map_err(k8s::fault)
+        });
         if let Some(marker) = stream_ended(reread) {
             let _ = writeln!(out, "{marker}");
         }

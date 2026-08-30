@@ -1222,7 +1222,7 @@ fn a_container_the_pod_does_not_have_is_refused_with_the_names_it_has() {
     let stderr = text(out.stderr);
     assert!(
         stderr
-            .contains("k8rs: this pod has no container named sidecar-envoy — it has migrate, app"),
+            .contains("k8rs: this pod has no container named sidecar-envoy — it has app, migrate"),
         "the refusal did not name what the pod actually has: {stderr:?}"
     );
     assert!(
