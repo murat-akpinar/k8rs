@@ -12981,3 +12981,795 @@ async fn the_certificate_probe_never_starts_the_kubeconfigs_login_program() {
          has no business logging in, and it is reading a certificate the server shows everybody"
     );
 }
+
+// --- ONE CONTAINER'S LOG ---
+//
+// **Three bounds, and a test per bound in both directions** (`screens/detail.md` § The buffer): a
+// stream that trips each one and a stream that trips none. A buffer whose ceiling is never reached
+// by any test is a ceiling nobody has proved is there, which is what the box this region belongs
+// to was written about — *this phase's gate says "bounded buffer" and names no figure, which is
+// how a bound stays unbuilt*.
+//
+// **The bytes are synthetic and that is not the hand-written-JSON NOTES § D53 refuses.** That rule
+// is about snapshot *fixtures* — a capture of a cluster object, never edited to make a test pass.
+// What is under test here is a pure function over a byte stream, and the shapes it has to answer
+// for — a line longer than the cap, a line that never ends, a line split across two reads — are
+// not shapes any capture in this repo happens to contain. The **request** is exercised against a
+// server ([`stub_list`]), which is where a capture would matter and where one is used.
+
+/// A reader that hands over exactly the pieces it was given, in order — so a test can decide where
+/// a chunk boundary falls.
+///
+/// **Chunk boundaries are the thing worth controlling.** A line split across two reads is the
+/// ordinary case on a real socket and the one an assembler gets wrong, and no `Cursor` over a
+/// `Vec` can produce it: that reader answers every `poll_read` with as much as the buffer holds.
+struct Feed {
+    pieces: std::collections::VecDeque<Vec<u8>>,
+    /// Whether the pieces run out with a connection reset rather than an end of body.
+    breaks: bool,
+}
+
+impl Feed {
+    fn of(pieces: &[&[u8]]) -> Self {
+        Self {
+            pieces: pieces.iter().map(|piece| piece.to_vec()).collect(),
+            breaks: false,
+        }
+    }
+
+    fn whole(bytes: &[u8]) -> Self {
+        Self::of(&[bytes])
+    }
+
+    /// The bytes, and then the failure a severed connection is.
+    fn broken(bytes: &[u8]) -> Self {
+        Self {
+            breaks: true,
+            ..Self::of(&[bytes])
+        }
+    }
+}
+
+impl AsyncRead for Feed {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        into: &mut [u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let breaks = self.breaks;
+        let Some(piece) = self.pieces.front_mut() else {
+            return std::task::Poll::Ready(match breaks {
+                true => Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset)),
+                false => Ok(0),
+            });
+        };
+        let taken = piece.len().min(into.len());
+        into[..taken].copy_from_slice(&piece[..taken]);
+        piece.drain(..taken);
+        if piece.is_empty() {
+            self.pieces.pop_front();
+        }
+        std::task::Poll::Ready(Ok(taken))
+    }
+}
+
+/// Every line [`read_lines`] hands over for these bytes, split where the caller says — and it
+/// asserts the read finished, so a test of the *lines* cannot pass over a stream that broke.
+async fn lines_of(feed: Feed) -> Vec<String> {
+    let mut got = Vec::new();
+    read_lines(feed, |line| {
+        got.push(line);
+        true
+    })
+    .await
+    .expect("this feed never fails a read");
+    got
+}
+
+/// What [`read_lines`] over these bytes leaves in a [`LogLines`].
+async fn held(feed: Feed) -> LogLines {
+    let mut held = LogLines::default();
+    read_lines(feed, |line| {
+        held.push(line);
+        true
+    })
+    .await
+    .expect("this feed never fails a read");
+    held
+}
+
+/// **A stream that trips none of the three bounds keeps every line and drops nothing** — the
+/// negative half every assertion below is only worth anything beside.
+#[tokio::test]
+async fn a_log_inside_every_bound_arrives_whole_and_drops_nothing() {
+    let held = held(Feed::whole(
+        b"starting worker pool\nconnected to postgres\nallocating 240MB cache\n",
+    ))
+    .await;
+
+    assert_eq!(
+        held.lines().collect::<Vec<_>>(),
+        vec![
+            "starting worker pool",
+            "connected to postgres",
+            "allocating 240MB cache"
+        ],
+        "an ordinary log did not come out of the reader as the container wrote it"
+    );
+    assert_eq!(
+        held.dropped(),
+        0,
+        "three short lines evicted something, so a bound is far tighter than the one the screen \
+         states"
+    );
+    assert_eq!(
+        held.dropped_line(),
+        None,
+        "a pane that has dropped nothing drew the dropped-lines line, which the screen says is \
+         shown only once it is true"
+    );
+}
+
+/// **The line count is what evicts when lines are short** — `screens/detail.md`'s common case, and
+/// the first line over [`LOG_LINES`] is the one that proves the ceiling exists at all.
+///
+/// **One over and not a thousand over**, because the assertion is the *boundary*: a buffer that
+/// evicted at 4999 or at 5001 would pass a test that pushed ten thousand lines.
+#[tokio::test]
+async fn the_line_count_evicts_the_oldest_when_the_lines_are_short() {
+    let mut held = LogLines::default();
+    for line in 0..LOG_LINES {
+        held.push(format!("line {line}"));
+    }
+    assert_eq!(
+        held.dropped(),
+        0,
+        "the buffer evicted before it was full — {LOG_LINES} lines is the stated ceiling, not the \
+         first thing over it"
+    );
+    assert_eq!(held.lines().count(), LOG_LINES);
+
+    held.push("one too many".to_string());
+
+    assert_eq!(
+        held.lines().count(),
+        LOG_LINES,
+        "the buffer grew past the line ceiling instead of evicting"
+    );
+    assert_eq!(held.dropped(), 1);
+    assert_eq!(
+        held.lines().next(),
+        Some("line 1"),
+        "the oldest line is not the one that went — a buffer that dropped from the bottom would \
+         throw away the line the reader is watching for"
+    );
+    assert_eq!(
+        held.lines().last(),
+        Some("one too many"),
+        "the newest line never arrived"
+    );
+}
+
+/// **The byte ceiling takes over when the lines run long**, which is the whole reason
+/// `screens/detail.md` names three numbers and calls only one of them load-bearing: 5000 lines
+/// times the 4096-byte per-line cap is ~19.5 MB, a worst case nobody chose.
+///
+/// **The line length is deliberately one that does not divide [`LOG_BYTES`].** At exactly
+/// [`FREE_TEXT`] bytes it does — 512 lines land on 2 MB to the byte — and a buffer that evicted
+/// only when the two were *equal* would then behave identically to one that evicts when they are
+/// *over*, which is how `replace > with ==` survived the gate (`dev-core`, 2026-08-30). One byte
+/// shorter and the total steps over the ceiling instead of onto it.
+///
+/// **Both halves are asserted**: the pane never exceeds [`LOG_BYTES`], and it holds far fewer than
+/// [`LOG_LINES`] lines when it gets there — roughly 500, which is the figure the screen states.
+#[tokio::test]
+async fn the_byte_ceiling_evicts_before_the_line_count_when_the_lines_are_long() {
+    let long = FREE_TEXT - 1;
+    assert_ne!(
+        LOG_BYTES % long,
+        0,
+        "this line length divides the byte ceiling, so a buffer evicting on `==` would pass"
+    );
+    let mut held = LogLines::default();
+    for line in 0..LOG_LINES {
+        held.push("x".repeat(long));
+        assert!(
+            held.bytes <= LOG_BYTES,
+            "the buffer held {} bytes after {line} lines of {long}, over the {LOG_BYTES} the \
+             screen promises is true in the worst case as well as the common one",
+            held.bytes
+        );
+    }
+
+    assert!(
+        held.dropped() > 0,
+        "{LOG_LINES} lines of {long} bytes fitted inside {LOG_BYTES}, which is arithmetic nobody \
+         can do — the byte ceiling is not being applied"
+    );
+    let kept = held.lines().count();
+    assert!(
+        (400..=600).contains(&kept),
+        "{LOG_BYTES} bytes of {long}-byte lines came to {kept} lines, where the screen says \
+         roughly 500 — one of the two numbers has moved without the other"
+    );
+}
+
+/// **A pane that is exactly full has dropped nothing** — the boundary, in the direction the
+/// arithmetic makes reachable.
+///
+/// **[`FREE_TEXT`] divides [`LOG_BYTES`] exactly**, which is what makes this case writable at all:
+/// 512 lines of 4096 bytes is 2 MB to the byte. Without it, a buffer evicting at `>=` rather than
+/// `>` throws away a line while it is still inside the ceiling the screen promises, and every
+/// other test here passes over it (`dev-core`'s run, 2026-08-30).
+#[test]
+fn a_buffer_filled_to_the_byte_has_dropped_nothing() {
+    let lines = LOG_BYTES / FREE_TEXT;
+    assert_eq!(
+        LOG_BYTES % FREE_TEXT,
+        0,
+        "the per-line cap no longer divides the byte ceiling, so this test cannot fill it exactly"
+    );
+    assert!(
+        lines < LOG_LINES,
+        "filling the byte ceiling now takes more lines than the line ceiling allows, so the line \
+         bound would evict first and this test would prove nothing"
+    );
+
+    let mut held = LogLines::default();
+    for _ in 0..lines {
+        held.push("x".repeat(FREE_TEXT));
+    }
+
+    assert_eq!(held.bytes, LOG_BYTES, "the buffer is not exactly full");
+    assert_eq!(
+        held.dropped(),
+        0,
+        "a pane holding exactly the {LOG_BYTES} bytes the screen promises threw a line away, so \
+         the ceiling is one line tighter than it says"
+    );
+    assert_eq!(held.lines().count(), lines);
+}
+
+/// **Nothing has arrived until the first line does, and after a drop something always has**
+/// ([`LogLines::arrived`], `screens/detail.md` § No logs yet).
+#[test]
+fn a_buffer_has_arrived_only_after_its_first_line() {
+    let mut held = LogLines::default();
+    assert!(
+        !held.arrived(),
+        "a buffer with nothing in it says something arrived, so `no logs yet` is never drawn"
+    );
+
+    held.push("connected to postgres".to_string());
+    assert!(
+        held.arrived(),
+        "a buffer holding a line says nothing arrived, so a log that was read prints `no logs yet`"
+    );
+
+    for line in 0..=LOG_LINES {
+        held.push(format!("line {line}"));
+    }
+    assert!(held.dropped() > 0, "this test no longer evicts anything");
+    assert!(
+        held.arrived(),
+        "a buffer that has evicted {} lines says nothing arrived",
+        held.dropped()
+    );
+}
+
+/// **The dropped-lines sentence is `screens/detail.md`'s, word for word, and the verb moves with
+/// the number.**
+///
+/// **`1 line was` and not `1 lines were`** is the screen's own example, and it is the case a
+/// `format!` with an `s` on the end gets wrong — which matters here more than usual, because the
+/// counter passes through 1 on its way to every larger number.
+#[test]
+fn the_dropped_lines_sentence_counts_exactly_and_says_line_before_lines() {
+    let mut held = LogLines::default();
+    for line in 0..=LOG_LINES {
+        held.push(format!("line {line}"));
+    }
+    assert_eq!(
+        held.dropped_line().as_deref(),
+        Some("1 line was dropped from the top to keep this pane bounded."),
+        "the first drop is not the screen's own sentence"
+    );
+
+    held.push("and another".to_string());
+    assert_eq!(
+        held.dropped_line().as_deref(),
+        Some("2 lines were dropped from the top to keep this pane bounded."),
+        "the second drop is not the screen's own sentence"
+    );
+
+    for line in 0..140 {
+        held.push(format!("more {line}"));
+    }
+    assert_eq!(
+        held.dropped_line().as_deref(),
+        Some("142 lines were dropped from the top to keep this pane bounded."),
+        "the count is not exact — the screen says it is never rounded or bucketed"
+    );
+}
+
+/// **A line past the per-line cap is cut and says so; one under it is left alone**
+/// (`screens/detail.md` § A line longer than the cap, NOTES § D146).
+///
+/// **The marker is the ingest guard's own [`SHORTENED`]**, not a second wording: the product has
+/// one way of saying *we shortened this*.
+#[tokio::test]
+async fn a_line_past_the_cap_is_cut_and_marked_and_a_line_under_it_is_not() {
+    let under = "u".repeat(FREE_TEXT);
+    let over = "o".repeat(FREE_TEXT + 1);
+    let got = lines_of(Feed::whole(format!("{under}\n{over}\n").as_bytes())).await;
+
+    assert_eq!(got.len(), 2, "two lines went in and {} came out", got.len());
+    assert_eq!(
+        got[0], under,
+        "a line of exactly {FREE_TEXT} bytes was shortened, so the cap is off by one and every \
+         line at the boundary is marked as cut when nothing was lost"
+    );
+    assert!(
+        got[1].ends_with(SHORTENED),
+        "a line past the cap was cut without saying so — a debugging tool that quietly shortens \
+         the evidence is lying about what it saw"
+    );
+    assert!(
+        got[1].len() <= FREE_TEXT + SHORTENED.len(),
+        "the cut line is {} bytes, so nothing was actually cut",
+        got[1].len()
+    );
+}
+
+/// **A line that never ends comes back cut and marked** — what the *caller* sees.
+///
+/// **This is the weaker half of the pair and it says so.** A reader that held the whole megabyte
+/// and cut it at the end passes this, because [`text`] would cut it either way: proved by deleting
+/// the ceiling in [`hold`] and watching this test stay green (`dev-core`'s red run, 2026-08-30).
+/// The half that can fail on the allocation is
+/// [`a_line_with_no_newline_never_grows_past_the_read_ceiling`], and that is why it exists.
+#[tokio::test]
+async fn a_line_that_never_ends_is_cut_and_marked() {
+    let got = lines_of(Feed::whole(&b"e".repeat(1024 * 1024))).await;
+
+    assert_eq!(
+        got.len(),
+        1,
+        "a megabyte with no newline became {} lines",
+        got.len()
+    );
+    assert!(
+        got[0].ends_with(SHORTENED),
+        "an endless line came back unmarked, so a reader is told a container wrote {} bytes when \
+         it wrote a megabyte",
+        got[0].len()
+    );
+    assert!(
+        got[0].len() <= FREE_TEXT + SHORTENED.len(),
+        "an endless line came back {} bytes long",
+        got[0].len()
+    );
+}
+
+/// **A line that never ends is bounded *as it arrives*, not after** — the security gate's *an
+/// endless log line must not be held whole in memory*.
+///
+/// **[`hold`] is asserted directly, because that is the only place the property is visible.** A
+/// `read_line`-style reader allocates to the newline first and bounds second, and every
+/// observable thing about the line it hands back — its length, its marker — is identical to what
+/// a bounded reader hands back. What differs is the peak allocation, and the only way a test can
+/// see it is to watch the buffer that does the accumulating.
+///
+/// **The `overran` flag is asserted with it**, because it is what carries the fact forward: bytes
+/// thrown away unread are the reason [`log_line`] marks a line the strip left short.
+#[test]
+fn a_line_with_no_newline_never_grows_past_the_read_ceiling() {
+    let mut held = Vec::new();
+    let mut overran = false;
+    for chunk in 0..1024 {
+        hold(&mut held, &[b'e'; 1024], &mut overran);
+        assert!(
+            held.len() <= LINE_READ,
+            "after {} KiB with no newline in it the reader is holding {} bytes, over the \
+             {LINE_READ} it is allowed — a container that writes a gigabyte without a newline \
+             takes the process with it",
+            chunk + 1,
+            held.len()
+        );
+    }
+    assert_eq!(
+        held.len(),
+        LINE_READ,
+        "the reader stopped short of its own ceiling, so a line that would have fitted is cut"
+    );
+    assert!(
+        overran,
+        "a megabyte was thrown away unread and nothing recorded it, so the line comes back \
+         looking like the whole of what the container wrote"
+    );
+
+    let mut short = Vec::new();
+    let mut kept = false;
+    hold(&mut short, b"connected to postgres", &mut kept);
+    assert_eq!(short, b"connected to postgres");
+    assert!(
+        !kept,
+        "an ordinary line was recorded as having been cut, so every line would be marked"
+    );
+}
+
+/// **A line whose bytes past the cap were thrown away is marked even when the strip brings it back
+/// under** — the one place [`text`] alone would answer honestly for a value it had all of, and
+/// dishonestly for one it did not.
+///
+/// **The shape is real**: a container that writes an escape-sequence progress bar and then a
+/// message. Stripped, the kept text is short; unmarked, the reader is told that short text is the
+/// whole line. NOTES § D146 rules that 10 MB of `ESC` stores as `""` *unmarked* — which is right
+/// there, because the whole value was seen and nothing showable was lost. Here it was not seen.
+#[tokio::test]
+async fn a_line_cut_before_it_was_stripped_still_says_it_was_cut() {
+    let mut line = b"\x1b[2K".repeat(FREE_TEXT);
+    line.extend_from_slice(b"the message nobody will see\n");
+    let got = lines_of(Feed::whole(&line)).await;
+
+    assert_eq!(got.len(), 1);
+    assert!(
+        got[0].len() < FREE_TEXT,
+        "the strip did not shrink the line, so this test is not exercising the case it names"
+    );
+    assert!(
+        got[0].ends_with(SHORTENED),
+        "bytes were thrown away unread and the line came back unmarked: {:?}",
+        got[0]
+    );
+}
+
+/// **Control characters are stripped out of a log line by the same guard everything else goes
+/// through** (invariant 9, NOTES § D154) — and ordinary text is not touched.
+///
+/// **A bidi override is the one that matters**: a log line is drawn in the same pane as everything
+/// else, and U+202E reverses every character after it. `char::is_control` does not answer for it,
+/// which is why [`unprintable`] is wider.
+#[tokio::test]
+async fn a_log_line_is_stripped_of_what_cannot_print_and_keeps_what_can() {
+    let got = lines_of(Feed::whole(
+        "connected to prod\u{202e}reversed\u{7}\u{200b} — 3 × 240MB\n".as_bytes(),
+    ))
+    .await;
+
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        got[0], "connected to prodreversed — 3 × 240MB",
+        "a log line reached a caller with something in it that has no printed form, or lost \
+         something that has one"
+    );
+}
+
+/// **A line split across two reads arrives whole**, which is the ordinary case on a real socket
+/// and the one a naive assembler loses half of.
+#[tokio::test]
+async fn a_line_split_across_two_reads_arrives_whole() {
+    let got = lines_of(Feed::of(&[
+        b"connected to ",
+        b"postgres\nallocating ",
+        b"240MB cache\n",
+    ]))
+    .await;
+
+    assert_eq!(
+        got,
+        vec!["connected to postgres", "allocating 240MB cache"],
+        "a line that arrived in two pieces was not put back together"
+    );
+}
+
+/// **A log that ends mid-line still hands that line over**, and one that ends on a newline does
+/// not invent an empty one after it.
+///
+/// **The first half is what a container killed while writing produces**, and it is the line a
+/// crash is most likely to be explained by.
+#[tokio::test]
+async fn the_last_line_arrives_with_or_without_a_newline_after_it() {
+    assert_eq!(
+        lines_of(Feed::whole(b"first\npanic: killed here")).await,
+        vec!["first", "panic: killed here"],
+        "a log that ended mid-line lost the line a crash is explained by"
+    );
+    assert_eq!(
+        lines_of(Feed::whole(b"first\n")).await,
+        vec!["first"],
+        "a log that ended on a newline grew an empty line after it"
+    );
+    assert_eq!(
+        lines_of(Feed::whole(b"first\n\nthird\n")).await,
+        vec!["first", "", "third"],
+        "an empty line the container wrote was swallowed"
+    );
+}
+
+/// **A caller that says stop is obeyed**, which is what makes `k8rs --logs --follow | head` end
+/// rather than drain a socket nobody is listening to.
+#[tokio::test]
+async fn a_caller_that_stops_reading_stops_the_stream() {
+    let mut got = Vec::new();
+    read_lines(Feed::whole(b"one\ntwo\nthree\n"), |line| {
+        got.push(line);
+        false
+    })
+    .await
+    .expect("a caller that stops is not a stream that broke");
+
+    assert_eq!(
+        got,
+        vec!["one"],
+        "the reader kept going after the caller said stop, so a closed pipe would be read to the \
+         end of the container's life"
+    );
+}
+
+/// **A stream that broke is not a stream that ended, and the caller is told which** —
+/// `PRIOR-ART § E1`'s whole subject.
+///
+/// **Both halves.** The lines that did arrive are handed over, because those bytes are real; and
+/// the `Err` comes back, because a log that stopped half way and one that finished are two facts,
+/// and a reader debugging from the second when it was the first is reading a lie.
+#[tokio::test]
+async fn a_stream_that_broke_hands_over_what_arrived_and_says_it_broke() {
+    let mut got = Vec::new();
+    let read = read_lines(
+        Feed::broken(b"connected to postgres\nwriting check"),
+        |line| {
+            got.push(line);
+            true
+        },
+    )
+    .await;
+
+    assert_eq!(
+        got,
+        vec!["connected to postgres", "writing check"],
+        "a stream that broke threw away the lines that had arrived"
+    );
+    assert_eq!(
+        read.expect_err("a connection reset is not a stream ending")
+            .kind(),
+        std::io::ErrorKind::ConnectionReset,
+        "a connection reset came back as a log that finished, so the caller prints half a log and \
+         exits 0"
+    );
+}
+
+/// **What goes on the wire and what the reader is taught come off one value** (invariant 4,
+/// `screens/detail.md`) — so this asserts the request path *and* the `kubectl` line, for the same
+/// [`LogRequest`], in one test.
+///
+/// **The path is the assertion and not just the answer.** A `follow` that never reached the query
+/// string is a `--follow` that fetches and exits, and a `previous` that did not is the log of the
+/// run that is still up — both of which look like a working tool from the outside.
+#[tokio::test]
+async fn a_log_request_reaches_the_cluster_as_the_kubectl_line_says_it_does() {
+    let (client, asked) = stub_list("200 OK", "hello\n".to_string()).await;
+    let request = LogRequest::new("payments", "web-7d9f4", Some("app"), true, true);
+
+    assert_eq!(
+        request.kubectl(),
+        "$ kubectl logs web-7d9f4 -n payments -c app --previous -f",
+        "the teaching line is not the command a reader could have typed"
+    );
+    let got = lines_of(Feed::whole(
+        &read_whole(
+            log_stream(&client, &request)
+                .await
+                .expect("the stub answered"),
+        )
+        .await,
+    ))
+    .await;
+    assert_eq!(got, vec!["hello"], "the body never reached the caller");
+
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").clone(),
+        // The `?&` is kube's own: `Request::logs` builds the target ending in `?` and then hands
+        // it to a `form_urlencoded::Serializer`, which joins with `&` from the first pair on
+        // (`kube-core-4.2.0/src/subresource.rs`). Written as measured rather than as expected,
+        // because a literal tidied by hand here would be a test asserting a request nobody sends.
+        vec![
+            "/api/v1/namespaces/payments/pods/web-7d9f4/log?&container=app&follow=true&\
+             previous=true"
+                .to_string()
+        ],
+        "the request k8rs sent is not the one its own kubectl line describes"
+    );
+}
+
+/// **A fetch of the default container carries neither switch, and the line says so** — the
+/// negative half of the test above, which would otherwise pass with `follow` and `previous`
+/// hard-coded on.
+#[tokio::test]
+async fn a_log_request_with_no_switches_carries_none_of_them() {
+    let (client, asked) = stub_list("200 OK", String::new()).await;
+    let request = LogRequest::new("payments", "web-7d9f4", None, false, false);
+
+    assert_eq!(
+        request.kubectl(),
+        "$ kubectl logs web-7d9f4 -n payments",
+        "the teaching line named a container or a switch the request does not carry"
+    );
+    let _ = log_stream(&client, &request)
+        .await
+        .expect("the stub answered");
+
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").clone(),
+        vec!["/api/v1/namespaces/payments/pods/web-7d9f4/log?".to_string()],
+        "a request with no container and no switches put something in the query string"
+    );
+}
+
+/// **The names a request carries are cleaned once, on the way in** — so the request and the
+/// `kubectl` line beside it cannot describe two different objects (invariant 4, invariant 9).
+#[test]
+fn the_names_a_log_request_carries_are_stripped_before_either_record_is_made() {
+    let request = LogRequest::new(
+        "pay\u{202e}ments",
+        "web\u{7}-7d9f4",
+        Some("a\u{200b}pp"),
+        false,
+        false,
+    );
+
+    assert_eq!(request.namespace, "payments");
+    assert_eq!(request.pod, "web-7d9f4");
+    assert_eq!(request.container.as_deref(), Some("app"));
+    assert_eq!(
+        request.kubectl(),
+        "$ kubectl logs web-7d9f4 -n payments -c app",
+        "something with no printed form reached the line a reader is invited to paste"
+    );
+}
+
+/// Everything a reader hands back, as bytes — the shortest way to put a real body through
+/// [`read_lines`] in a test.
+async fn read_whole(reader: impl AsyncRead) -> Vec<u8> {
+    let mut reader = Box::pin(reader);
+    let mut whole = Vec::new();
+    let mut chunk = [0_u8; 512];
+    while let Ok(read @ 1..) = reader.read(&mut chunk).await {
+        whole.extend_from_slice(&chunk[..read]);
+    }
+    whole
+}
+
+/// **The pod a cluster answers reaches the snapshot through the one ingest door** — the read the
+/// container picker and [`LogRequest`]'s `previous` are both decided off.
+#[tokio::test]
+async fn the_pod_a_cluster_answers_reaches_the_snapshot() {
+    let (client, asked) = stub_list("200 OK", capture("healthy-sidecar").to_string()).await;
+    let pod = pod(&client, "default", "healthy-sidecar")
+        .await
+        .expect("the stub answered the get");
+
+    assert_eq!(pod.id.name, "healthy-sidecar");
+    assert_eq!(
+        pod.containers
+            .iter()
+            .map(|container| container.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["proxy", "app"],
+        "the containers a picker would draw did not survive the fetch"
+    );
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").clone(),
+        vec!["/api/v1/namespaces/default/pods/healthy-sidecar".to_string()],
+        "one namespaced get and nothing else"
+    );
+}
+
+/// **A refused pod is the cluster's own typed error and never a silence**, because the sentence a
+/// reader gets is built off the fault — *the role this kubeconfig uses needs to …* is a different
+/// answer from *there is no pod named that*.
+#[tokio::test]
+async fn a_pod_a_cluster_refuses_comes_back_as_its_own_fault() {
+    // **The body decides and not the status line**, which is what a real API server sends and what
+    // § WHAT WENT WRONG reads: [`answer`] takes the `Status`'s own `code` and `reason`, and the
+    // HTTP status is only the fallback for a body that is not one.
+    let refusal = |code: u16, reason: &str| {
+        serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Status",
+            "status": "Failure",
+            "reason": reason,
+            "code": code,
+            "message": "no",
+        })
+        .to_string()
+    };
+    for (status, body, expected) in [
+        ("403 Forbidden", refusal(403, "Forbidden"), Fault::Refused),
+        ("404 Not Found", refusal(404, "NotFound"), Fault::Gone),
+        (
+            "401 Unauthorized",
+            refusal(401, "Unauthorized"),
+            Fault::Expired,
+        ),
+    ] {
+        let (client, _) = stub_list(status, body).await;
+        let failure = pod(&client, "default", "absent")
+            .await
+            .expect_err("the stub refused");
+        assert_eq!(
+            fault(&failure),
+            expected,
+            "a `{status}` on one named pod is not being read as {expected:?}, so the reader gets \
+             the wrong sentence about what to do next"
+        );
+    }
+}
+
+/// **The default container is the first *regular* one and never an init container or a sidecar** —
+/// `kubectl`'s own rule, which is the one a reader already has.
+///
+/// **The order the snapshot arrives in is init-first**, so `containers[0]` would be the migration
+/// job on every pod that has one: a log that stopped before the thing being debugged started.
+#[test]
+fn the_default_container_is_the_first_regular_one_and_never_a_sidecar() {
+    let pod: PodSnapshot = object::<Pod>("healthy-sidecar").into();
+    assert_eq!(
+        pod.containers[0].name, "proxy",
+        "this capture no longer has a sidecar first, so this test proves nothing"
+    );
+    assert_eq!(
+        default_container(&pod).map(|container| container.name.as_str()),
+        Some("app"),
+        "the default container is the sidecar, so `k8rs --logs` on this pod reads the proxy"
+    );
+}
+
+/// **A pod the kubelet has not reported a container for has no default**, which is a `Pending` pod
+/// and a state rather than an error: the request then names none and the API server picks.
+#[test]
+fn a_pod_with_no_container_reported_yet_has_no_default_container() {
+    let mut pod: PodSnapshot = object::<Pod>("healthy-sidecar").into();
+    pod.containers.clear();
+    assert_eq!(
+        default_container(&pod).map(|container| container.name.as_str()),
+        None,
+        "a pod with no containers reported answered with one anyway"
+    );
+}
+
+/// **A name that would leave its own segment of a URL path is refused, and an ordinary one is
+/// not** (the security gate's *names build paths* row).
+///
+/// **argv is the first unbounded source a name has ever come from here**, which is why the length
+/// is half of this and [`path_safe`] alone is not enough.
+#[test]
+fn a_name_that_would_leave_its_path_segment_is_refused() {
+    for ordinary in [
+        "web-7d9f4",
+        "app",
+        "kube-proxy.v2",
+        "0abc",
+        &"a".repeat(NAME_MAX),
+    ] {
+        assert!(
+            object_name(ordinary),
+            "{ordinary:?} is a name a cluster really has and k8rs refused it"
+        );
+    }
+    for crafted in [
+        "",
+        "../secrets",
+        "web/oops",
+        "web?watch=true",
+        "web#log",
+        "-web",
+        "web name",
+        &"a".repeat(NAME_MAX + 1),
+    ] {
+        assert!(
+            !object_name(crafted),
+            "{crafted:?} was accepted as an object name, so it goes straight into a request path"
+        );
+    }
+}

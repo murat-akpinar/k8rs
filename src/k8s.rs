@@ -114,12 +114,13 @@
 mod tests;
 
 use crate::rules::{
-    CertificateRequestSnapshot, ClaimSnapshot, ClusterSnapshot, Condition, ContainerSnapshot,
-    ContainerState, DisruptionBudgetSnapshot, EndpointSliceSnapshot, ExitRule, HostPathMount,
-    Metrics, NodeSnapshot, NodeUsage, ObjectId, ObjectKind, PodSnapshot, Selector,
+    CertificateRequestSnapshot, ClaimSnapshot, ClusterSnapshot, Condition, ContainerRole,
+    ContainerSnapshot, ContainerState, DisruptionBudgetSnapshot, EndpointSliceSnapshot, ExitRule,
+    HostPathMount, Metrics, NodeSnapshot, NodeUsage, ObjectId, ObjectKind, PodSnapshot, Selector,
     SelectorRequirement, ServiceSnapshot, Taint, Terminated, Toleration, WorkloadSnapshot,
     expires_at, minor_version,
 };
+use futures_util::io::{AsyncBufRead, AsyncRead, AsyncReadExt};
 use futures_util::stream::{self, BoxStream, Stream, StreamExt, select_all};
 use k8s_openapi::NamespaceResourceScope;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
@@ -135,6 +136,7 @@ use k8s_openapi::jiff::{SignedDuration, Timestamp};
 // 10's narrowest possible answer: a crate already in the build, not even needing to be named.
 use k8s_openapi::serde::Deserialize;
 use k8s_openapi::serde_json::Value;
+use kube::api::LogParams;
 use kube::client::{Body, ConfigExt};
 use kube::config::{AuthInfo, Config, KubeConfigOptions, Kubeconfig};
 use kube::core::params::{GetParams, ListParams};
@@ -4190,6 +4192,29 @@ pub(crate) fn namespace_name(word: &str) -> bool {
         })
 }
 
+/// **The longest an object's name can be** — 253, the DNS-1123 *subdomain* limit
+/// (`apimachinery/pkg/util/validation`, `DNS1123SubdomainMaxLength`), which is what a pod name is.
+pub(crate) const NAME_MAX: usize = 253;
+
+/// **Whether a word typed on the command line may become an object's segment of a URL path** —
+/// [`path_safe`] with a length, the way [`namespace_name`] is [`path_safe`]'s rule with one.
+///
+/// **The bound is the half [`path_safe`] does not have.** argv is unbounded, and eight kilobytes
+/// of `a` is `path_safe` and is not a name any cluster has — it is an 8 KiB request path
+/// (`k8s-admin`, 2026-08-29, the reason [`namespace_name`] exists beside [`path_safe`]).
+///
+/// **Deliberately looser than the API's own rule**, which is lowercase-only for a pod and a
+/// DNS-1123 *label* for a container. What this closes is the path hole; a name that is merely not
+/// a name the cluster has comes back `404` and is told plainly, which is a better sentence than
+/// one this file could write.
+///
+/// **It is here and not beside the log request that reads it** (§ ONE CONTAINER'S LOG), because
+/// *what a word may be before it becomes a path segment* is answered in one place in this file
+/// and the other two answers are the two above it.
+pub(crate) fn object_name(word: &str) -> bool {
+    word.len() <= NAME_MAX && path_safe(word)
+}
+
 /// **What the browser asks for**: the `Table` the API server would print for `kubectl get`, with
 /// the plain object list as the negotiated second choice (`screens/resources.md`).
 ///
@@ -4763,6 +4788,391 @@ impl Browsing {
 
 // --- KEEPING A BROWSER VIEW FRESH END ---
 
+// --- ONE CONTAINER'S LOG START ---
+//
+// **The most-typed kubectl command there is, and the only read in this file whose input is a
+// stream that never has to end** (todo.md § Phase 6, `screens/detail.md` § The logs tab).
+// Everything else here decodes an object; this decodes bytes a container wrote, which are
+// attacker-controlled text by the same argument invariant 9 makes about a pod name — with the
+// difference that there is no `resourceVersion` at which they stop arriving.
+//
+// **One sanitizer and not a second.** A log line goes through [`text`] with [`FREE_TEXT`]'s cap
+// exactly as a termination message does, so the strip, the character-boundary step-back and the
+// [`SHORTENED`] marker are the ingest guard's and nothing here re-implements them (NOTES § D146,
+// § D154). `screens/detail.md` left it open whether 4096 should be shared literally or as a
+// same-valued sibling: it is shared literally, because a *second* constant with the same value is
+// how the two come to differ, and the reason the number is right — a census of real captures — is
+// the same reason in both places.
+//
+// **Three bounds, whichever is hit first, and only one of them is load-bearing**
+// (`screens/detail.md` § The buffer): [`LOG_BYTES`] is the ceiling that is true in the common
+// case and the worst one, [`LOG_LINES`] is what actually evicts when lines are short, and
+// [`FREE_TEXT`] cuts one line whatever the other two are doing. **A dropped line is counted out
+// loud** — [`LogLines::dropped_line`] is the sentence, and it is here rather than in a printer
+// because the Phase 11 pane and the temporary driver are two consumers of one number and a
+// second wording is a second thing that can be wrong.
+//
+// **What bounds an *unterminated* line is [`LINE_READ`] and not the buffer.** The security gate's
+// *an endless log line must not be held whole in memory* is about the bytes between two newlines,
+// and a container that writes a gigabyte without one is the shape that pays it: every reader that
+// accumulates until a newline arrives — `read_line`, `read_until`, and anything written the
+// obvious way — allocates the whole gigabyte first and bounds it second. [`read_lines`] stops
+// accumulating at [`LINE_READ`] and throws the rest of that line away as it arrives.
+
+/// **The bytes one open log stream retains: 2 MB** (`screens/detail.md` § The buffer).
+///
+/// **The one figure that is true in the common case and the worst one**, which is why it is the
+/// ceiling to defend rather than [`LOG_LINES`]: a line count multiplied by a per-line cap is a
+/// worst case nobody chose (5000 × 4096 is ~19.5 MB, and that number was a *product* rather than
+/// a decision). It is a **fixed** addition and does not grow with session length — eight minutes
+/// or eight days, the same 2 MB, which is the property `PRIOR-ART § A6` lacked when an unmeasured
+/// log buffer reached 21.5 GB resident over eight days and invoked the node's OOM killer.
+pub(crate) const LOG_BYTES: usize = 2 * 1024 * 1024;
+
+/// **The lines one open log stream retains: 5000, oldest dropped first**
+/// (`screens/detail.md` § The buffer).
+///
+/// **What actually evicts in the ordinary case.** At a generous 256 bytes a line, 5000 lines is
+/// about 1.2 MB — comfortably under [`LOG_BYTES`] and enough to scroll back through a crash's
+/// run-up. Only when lines run long does the byte ceiling take over: stuffed to [`FREE_TEXT`],
+/// 2 MB buys roughly 500 lines and not 5000.
+pub(crate) const LOG_LINES: usize = 5_000;
+
+/// **The most of one unterminated line that is ever held**: [`FREE_TEXT`] plus four bytes.
+///
+/// **The four are what lets [`text`] make the cut rather than this ceiling making it.** That
+/// function steps back from the cap to a character boundary — at most three bytes, a UTF-8
+/// character being at most four — and it can only do that over bytes it was given. Cut at exactly
+/// [`FREE_TEXT`], a multi-byte character straddling the ceiling would be a replacement character
+/// this file introduced; cut four later, the step-back lands inside what we hold.
+const LINE_READ: usize = FREE_TEXT + 4;
+
+/// How much of the socket is read at once: 8 KiB.
+///
+/// **Nothing depends on the number** — a line is assembled across as many of these as it takes,
+/// and [`a_line_split_across_two_reads_arrives_whole`](tests) is what says so. That is also why it
+/// is written as one literal rather than as `8 * 1024`: an arithmetic mutant of a figure no test
+/// can observe survives every run of the gate for ever, and a mutant that cannot be killed is a
+/// gate that stays red for a reason nobody can act on (`dev-core`'s run, 2026-08-30).
+const LOG_READ: usize = 8192;
+
+/// **What one open log stream retains, and what it had to throw away to stay that size**
+/// (`screens/detail.md` § When the buffer fills).
+///
+/// **The drop counter only ever climbs**, for the lifetime of the buffer: a pane that has dropped
+/// nothing says nothing, and one that has dropped a line says so from then on, because the lines
+/// are gone and turning follow off does not bring them back.
+///
+/// **Nothing here strips or cuts.** Lines arrive already through [`text`] ([`read_lines`]); this
+/// type decides only how many of them are kept.
+#[derive(Default)]
+pub(crate) struct LogLines {
+    lines: std::collections::VecDeque<String>,
+    bytes: usize,
+    dropped: usize,
+}
+
+impl LogLines {
+    /// **One line in, and however many out as the two collection bounds need**
+    /// ([`LOG_BYTES`], [`LOG_LINES`]).
+    ///
+    /// **Both are checked after the push and not before**, so the buffer is never left over its
+    /// ceiling waiting for the next line to bring it back under.
+    ///
+    /// **It cannot loop forever on a line larger than [`LOG_BYTES`]** — no such line reaches here,
+    /// because [`read_lines`] caps every one at [`FREE_TEXT`] — and the `else` is there for the
+    /// edit that changes that rather than for an input that can happen.
+    pub(crate) fn push(&mut self, line: String) {
+        self.bytes += line.len();
+        self.lines.push_back(line);
+        while self.lines.len() > LOG_LINES || self.bytes > LOG_BYTES {
+            let Some(gone) = self.lines.pop_front() else {
+                break;
+            };
+            self.bytes -= gone.len();
+            self.dropped += 1;
+        }
+    }
+
+    /// What is retained, oldest first.
+    pub(crate) fn lines(&self) -> impl Iterator<Item = &str> {
+        self.lines.iter().map(String::as_str)
+    }
+
+    /// How many lines have been dropped to stay inside the two collection bounds.
+    pub(crate) fn dropped(&self) -> usize {
+        self.dropped
+    }
+
+    /// **Whether anything has arrived at all** — *no logs yet* is drawn from its opposite
+    /// (`screens/detail.md` § No logs yet, `PRIOR-ART § E1`).
+    ///
+    /// **The drop count needs no term here, and that is a property rather than an oversight**: a
+    /// line is only ever evicted to make room for one that just arrived, so a buffer that has
+    /// dropped something always holds lines. Writing it as `!lines.is_empty() || dropped != 0`
+    /// would be a second condition that can only ever agree with the first.
+    ///
+    /// **The positive question and not `is_empty`, because the negation has to live somewhere a
+    /// test can watch it.** Spelled `!held.is_empty()` at the call site, `delete !` survived the
+    /// whole gate — the driver's only use of it is a line on stderr, and stderr belongs to the
+    /// process (`dev-core`'s run, 2026-08-30). Here,
+    /// [`a_buffer_has_arrived_only_after_its_first_line`](tests) kills it.
+    ///
+    /// **It is here and not counted at the call site** because both surfaces ask it — the pane
+    /// that draws `○ no logs yet` and the driver that prints the same sentence — and a count
+    /// assembled at a call site is a count the other one can assemble differently.
+    pub(crate) fn arrived(&self) -> bool {
+        !self.lines.is_empty()
+    }
+
+    /// **The sentence a reader gets when lines were lost, and `None` when none were**
+    /// (`screens/detail.md` § When the buffer fills, word for word).
+    ///
+    /// **Silent below one drop, exact at and above it** — nothing is shown until it is true, and
+    /// the count is never rounded or bucketed: a beginner counting on this tool to tell the truth
+    /// about what it lost gets the real number.
+    ///
+    /// **Singular is spelled out rather than reached by a plural helper**, because the verb moves
+    /// too — *1 line **was** dropped* against *2 lines **were** dropped* — and a helper that only
+    /// pluralises the noun would print *1 lines were*.
+    pub(crate) fn dropped_line(&self) -> Option<String> {
+        match self.dropped {
+            0 => None,
+            1 => Some("1 line was dropped from the top to keep this pane bounded.".to_string()),
+            dropped => Some(format!(
+                "{dropped} lines were dropped from the top to keep this pane bounded."
+            )),
+        }
+    }
+}
+
+/// **One log line, made safe to hold and safe to print** — the ingest guard's [`text`], and a
+/// marker for the bytes [`read_lines`] refused to hold at all.
+///
+/// **The `overran` half is what keeps the cut honest across a strip.** [`text`] strips first and
+/// bounds second, so a line whose first [`LINE_READ`] bytes are mostly control characters can
+/// come back under [`FREE_TEXT`] and unmarked — which is right when the whole line was seen
+/// (NOTES § D146: 10 MB of `ESC` stores as `""`, unmarked, because nothing showable was lost) and
+/// a lie when it was not. Here it was not: the rest of the line was thrown away as it arrived and
+/// nobody knows what was in it, so it is marked.
+fn log_line(raw: &[u8], overran: bool) -> String {
+    let mut line = String::from_utf8_lossy(raw).into_owned();
+    text(&mut line, FREE_TEXT);
+    if overran && !line.ends_with(SHORTENED) {
+        line.push_str(SHORTENED);
+    }
+    line
+}
+
+/// As much of `more` as [`LINE_READ`] still has room for, and whether anything was refused.
+fn hold(held: &mut Vec<u8>, more: &[u8], overran: &mut bool) {
+    let room = LINE_READ.saturating_sub(held.len()).min(more.len());
+    *overran |= room < more.len();
+    held.extend_from_slice(&more[..room]);
+}
+
+/// **Every line a log stream produces, stripped and capped, handed over one at a time** — the one
+/// reader both surfaces are built on (`screens/detail.md` § Printed instead of drawn).
+///
+/// **`line` returns whether to keep reading**, which is the whole of what a callback needs here
+/// and less than a `Stream` would cost: the pane collects into [`LogLines`] and answers `true`
+/// forever, and a driver printing to stdout answers `false` the moment the write fails — `head`
+/// closing the pipe on a `--follow` run, which without a way to stop would drain a socket nobody
+/// is listening to for as long as the container keeps writing.
+///
+/// **Nothing is buffered between two lines.** A caller that prints and forgets holds no log bytes
+/// at all, which is a stronger property than [`LogLines`]' ceiling rather than a weaker one, and
+/// it is why the headless surface has no dropped-lines count to print.
+///
+/// **A stream that broke and a stream that ended are two different facts and this returns both.**
+/// `PRIOR-ART § E1` is *a stream ends for many reasons and the viewer says one thing*: swallowed,
+/// a connection reset half way through a log prints what arrived and exits `0`, which is a
+/// confident wrong answer about a log the reader is debugging from. `Ok(())` is the server
+/// closing the body, and the *why* of that is answered by asking the cluster about the object
+/// afterwards — the caller's call and not this loop's.
+///
+/// **What arrived before the break is still handed over**, including a last line with no newline
+/// after it: those bytes are real, and the caller says so beside them rather than instead of them.
+///
+/// **The last line is emitted even with no newline after it.** A log that ends mid-line is what a
+/// container killed while writing produces, and dropping it would lose the one line a crash is
+/// most likely to be explained by.
+pub(crate) async fn read_lines(
+    reader: impl AsyncRead,
+    mut line: impl FnMut(String) -> bool,
+) -> std::io::Result<()> {
+    let mut reader = Box::pin(reader);
+    let mut chunk = [0_u8; LOG_READ];
+    let mut held: Vec<u8> = Vec::new();
+    let mut overran = false;
+    let mut broke = None;
+    loop {
+        let read = match reader.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(failed) => {
+                broke = Some(failed);
+                break;
+            }
+        };
+        let mut rest = &chunk[..read];
+        while let Some(end) = rest.iter().position(|byte| *byte == b'\n') {
+            // **`split_at` and not `rest[end + 1..]`**, which is the same slice with the index
+            // arithmetic taken out of it. Mutated to `end - 1`, that expression leaves the
+            // newline in `rest` and the loop never advances — a hang, which the mutation gate
+            // reports as a 90-second `TIMEOUT` rather than as a defect, and a test that hangs is
+            // a test whose failure nobody reads (`dev-core`, 2026-08-30; the same reasoning
+            // `main_tests.rs`'s `watching` gives for its own timeout).
+            let (this, after) = rest.split_at(end);
+            hold(&mut held, this, &mut overran);
+            if !line(log_line(&held, overran)) {
+                return Ok(());
+            }
+            held.clear();
+            overran = false;
+            // `after` begins with the newline `position` just found, so this cannot panic.
+            rest = &after[1..];
+        }
+        hold(&mut held, rest, &mut overran);
+    }
+    if !held.is_empty() {
+        line(log_line(&held, overran));
+    }
+    match broke {
+        Some(failed) => Err(failed),
+        None => Ok(()),
+    }
+}
+
+/// **Which log to read, in one value** — so the request that goes out and the `kubectl` line the
+/// reader is taught cannot disagree about it (invariant 4, `screens/detail.md`).
+///
+/// **The three names are stripped once, here, and never again.** [`text`] runs at construction
+/// rather than at display, because a value sanitised for the screen and a value sent to the
+/// cluster that differ are exactly the two records invariant 4 forbids from lying — and both
+/// records are built off these fields afterwards.
+///
+/// **Stripping is not the check.** A name that is about to become part of a URL path is refused
+/// by [`object_name`] before it gets here; this bounds and cleans what is printed.
+pub(crate) struct LogRequest {
+    pub(crate) namespace: String,
+    pub(crate) pod: String,
+    pub(crate) container: Option<String>,
+    pub(crate) previous: bool,
+    pub(crate) follow: bool,
+}
+
+impl LogRequest {
+    /// [`LogRequest`] with the three names cleaned and bounded on the way in.
+    pub(crate) fn new(
+        namespace: &str,
+        pod: &str,
+        container: Option<&str>,
+        previous: bool,
+        follow: bool,
+    ) -> Self {
+        let named = |word: &str| {
+            let mut word = word.to_string();
+            text(&mut word, IDENTIFIER);
+            word
+        };
+        Self {
+            namespace: named(namespace),
+            pod: named(pod),
+            container: container.map(named),
+            previous,
+            follow,
+        }
+    }
+
+    /// What kube is asked for. **`follow` and `previous` and nothing else**: `tailLines`,
+    /// `sinceSeconds` and `limitBytes` are knobs no screen offers, and a request carrying one the
+    /// `kubectl` line below does not print is invariant 4's record lying.
+    fn params(&self) -> LogParams {
+        LogParams {
+            container: self.container.clone(),
+            follow: self.follow,
+            previous: self.previous,
+            ..LogParams::default()
+        }
+    }
+
+    /// **The command a reader could have typed for this exact answer** — the teaching device
+    /// (invariant 4, `screens/detail.md`, `screens/once.md` § stdout and stderr are split).
+    ///
+    /// **Built from the same fields [`LogRequest::params`] is**, so the line cannot describe a
+    /// request that was not sent. It is display text: k8rs does not execute it and nothing in it
+    /// is fed back into a process (the security gate).
+    pub(crate) fn kubectl(&self) -> String {
+        let mut line = format!("$ kubectl logs {} -n {}", self.pod, self.namespace);
+        if let Some(container) = &self.container {
+            line.push_str(&format!(" -c {container}"));
+        }
+        if self.previous {
+            line.push_str(" --previous");
+        }
+        if self.follow {
+            line.push_str(" -f");
+        }
+        line
+    }
+}
+
+/// **The bytes of one container's log**, following it when asked (invariant 1, which puts
+/// `log_stream` on the allowlist by name).
+///
+/// **The streaming call and never `Api::logs`, for both modes.** That one answers a `String`: the
+/// whole log is on the heap before a bound is applied to it, which is the security gate's *an
+/// endless log line must not be held whole in memory* through the front door, and it cannot follow
+/// at all. One call site, one bound, and a fetch is a follow that ends.
+pub(crate) async fn log_stream(
+    client: &Client,
+    request: &LogRequest,
+) -> Result<impl AsyncBufRead + use<>, kube::Error> {
+    Api::<Pod>::namespaced(client.clone(), &request.namespace)
+        .log_stream(&request.pod, &request.params())
+        .await
+}
+
+/// **One pod, read on demand and never watched** — what a log request needs before it can be made
+/// at all: which containers there are, and which of them has a previous run to show.
+///
+/// **Through [`ingest`] like every other object** (invariant 9, § THE INGEST GUARD), so what comes
+/// back is a snapshot type and not an API object, and nothing downstream can hold a field the
+/// rules do not name.
+///
+/// **No deadline of its own.** The caller owns it: `--once` is a command in a pipeline and bounds
+/// its whole run, and a log follow has no ending to be late for.
+pub(crate) async fn pod(
+    client: &Client,
+    namespace: &str,
+    name: &str,
+) -> Result<PodSnapshot, kube::Error> {
+    Api::<Pod>::namespaced(client.clone(), namespace)
+        .get(name)
+        .await
+        .map(ingest)
+}
+
+/// **Which container `kubectl logs` reads when the reader named none** — the first one the pod
+/// declares, which is `kubectl`'s own rule and therefore the one a reader already has.
+///
+/// **Init containers and sidecars are not it.** [`crate::rules::ContainerSnapshot`]s arrive init
+/// first and regular after (`rules.rs`'s `container_snapshots`), and `kubectl`'s default is
+/// `spec.containers[0]` — so a pod with a migration init container would otherwise default to a
+/// log that stopped before the thing the reader is debugging started.
+///
+/// **`None` is a pod the kubelet has not reported a container for yet**, which is a `Pending` pod
+/// and a real state rather than an error: the request then names no container and the API server
+/// picks, exactly as `kubectl` with no `-c` does.
+pub(crate) fn default_container(pod: &PodSnapshot) -> Option<&ContainerSnapshot> {
+    pod.containers
+        .iter()
+        .find(|container| container.role == ContainerRole::Regular)
+}
+
+// --- ONE CONTAINER'S LOG END ---
+
 // --- CONNECTING START ---
 //
 // **Connecting is a function and not a step in `main`** (NOTES § D16). The Phase 11 `X` switcher
@@ -4889,7 +5299,7 @@ impl Browsing {
 /// that one answers `None` on purpose, because a screen opening on a namespace the file never
 /// named is a filter the reader cannot see the reason for. Here there is a reason, it is printed,
 /// and the alternative is a tool with nothing in it.
-const FALLBACK_NAMESPACE: &str = "default";
+pub(crate) const FALLBACK_NAMESPACE: &str = "default";
 
 /// **How much of the cluster this session's watches cover, and why** (NOTES § D5, § D46).
 ///

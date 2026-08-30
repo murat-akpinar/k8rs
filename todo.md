@@ -3292,6 +3292,30 @@ which adds the remaining read paths to the same file. It freezes there.
 
 Goal: the whole beginner debugging loop, still headless, still read-only.
 
+> **This phase opens with Phase 5's release box still unchecked, and that box is
+> not next.** It needs the maintainer's crates.io credential *and* a `README.md`
+> that belongs to Phase 13; the user chose to postpone rather than pull the
+> README forward, 2026-08-30
+> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
+> Running a later phase over a deliberately open earlier box is
+> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
+> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
+> runs whole — never as a diff of itself — when that box closes**
+> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
+> Nothing else waits on the release: Phase 6's own close still PRs
+> `development` → `main`.
+>
+> **Families, named by their first box.** 1 **the log stream** — `l` logs, the
+> buffer's bound. 2 **one object's own story** — the per-object events fetch,
+> `d` describe, `y` YAML. 3 **one transformation on a string** — the ingest strip
+> and the emit paths that must not add to it. 4 **what a default run prints** —
+> the command log on stderr, C1's trailer line, the blank `server` clause.
+> 5 **the screens read against the binary** — `once.md`'s four, the all-screens
+> sweep, `context.md`'s `shadowed` / `Unreadable`, and the context whose name
+> strips to nothing. 6 **where the resident set is**, alone. 7 **a wedged watch
+> against a refused one**, alone.
+
 - [ ] `l` logs: fetch and follow, container picker, `--previous` for a
       crashed container — the single most-typed kubectl command there is
 - [ ] **Per-object events fetch** (`involvedObject` field selector, this object

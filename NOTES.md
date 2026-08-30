@@ -215,6 +215,8 @@ its line moving with it.
 - [D191](#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30) — the `--once` review round: three blockers, and the one PM ruling a measurement refused
 - [D192](#d192--the-flake-was-a-stub-telling-the-truth-about-the-wrong-thing-and-fixing-it-made-the-neighbouring-test-unable-to-fail-2026-08-30) — the flake was a stub telling the truth about the wrong thing, and fixing it made the neighbouring test unable to fail
 - [D193](#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30) — the crate's own description promised a TUI, and the release stops for a README rather than shipping a blank page
+- [D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) — the flag that names an object, and D17's threshold read against the binary it was written for
+- [D195](#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30) — the brief that ordered work the working tree already held
 
 ## Why it exists — where the gap is
 
@@ -16729,3 +16731,76 @@ publishing was one box among many and the metadata was written on 2026-08-11,
 before there was a binary to be wrong about. **A field written before the thing it
 describes exists is not reviewed by anybody afterwards**, and `Cargo.toml` gets no
 `screens-check`, no `check-docs` and no operator review.
+
+### D194 — the flag that names an object, and D17's threshold read against the binary it was written for (2026-08-30)
+
+Phase 6 is headless: the temporary `main.rs` prints logs, events, `describe`
+and YAML. All four need the same thing first — **a way to say which object** —
+and that is one value on the command line.
+[D17](#d17--the---once-output)'s third item looked like a refusal of exactly
+that: *"Selecting a report needs an argument that takes a value, and that is the
+threshold that pulls `clap` in."*
+
+**That sentence was already untrue of the binary it was written for**, and it
+took one grep to see it. `--context` and `--namespace` both take values, in
+both spellings (`--context=NAME` and `--context NAME`), parsed by hand in
+`live_context` and `namespace_arg` (`src/main.rs`) — and `--context`'s value is
+**validated against a closed set**, the kubeconfig's own contexts, with its own
+sentence at `src/main.rs:1966`. Both are named in
+[invariant 10](CLAUDE.md)'s own list of flags that do *not* need `clap`. So
+*takes a value* was never the threshold; it was a description of the one case in
+front of D17 — picking one of seven reports by name — where the parser owns a
+closed set **and** an error message per member **and** the help text that lists
+them.
+
+**The threshold, restated where it can be checked.** `clap` arrives when the
+driver needs **subcommands, generated help, or a mutual-exclusion table**. It
+does not arrive for a flag carrying one free-form string that the API server
+validates by answering `404`. This is D17 narrowed a second time by its own
+stated reason and on the same evidence as the first —
+[D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)
+did it for `--analysis`, which takes no value; this does it for one that does.
+
+**So the temporary driver may carry one selector naming an object, and it is
+scaffolding.** One, not four: logs, events, `describe` and YAML are four
+consumers of a single answer, and four spellings of *which pod* is how they come
+to disagree. `dev-core` picks the spelling and reports it. It dies with the
+temporary main at Phase 12, which is where `namespace_arg`'s own doc already
+sends the real parsing — *"Phase 12's real flag parsing is where the two should
+be made to agree — with each other and with `kubectl`."*
+
+**One thing this turned up on the way, and it is the same class as
+[D193](#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30):
+invariant 10's flag list had gone stale and nobody reads a list for staleness.**
+`CLAUDE.md` says *"while the flags are `--read-only` / `--context` /
+`--namespace` / `--once`"* — four. The binary ships those four plus `--live` and
+`--analysis`, and D188 put `--analysis` in the **released** surface without the
+invariant being touched. Corrected in the same edit as this entry. A flag list
+inside an invariant is a fact about the code, and it gets no `check-docs` and no
+operator review.
+
+### D195 — the brief that ordered work the working tree already held (2026-08-30)
+
+The PM spent a session on Phase 6's first family and dispatched nothing that
+produced code. It opened the phase in `todo.md`, took `screens/detail.md` from 54
+lines to ~350 through three review rounds, ruled
+[D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30),
+corrected invariant 10's stale flag list — and then briefed `dev-core` to write
+the log read path. **It was already written.** `git status` showed
+`src/k8s.rs`, `src/k8s_tests.rs`, `src/main.rs` and `src/main_tests.rs`
+modified — 2 895 lines, `--logs` / `--object` / `--container` / `--previous`
+built, citing D194 by number. Another session had done it. `just check` exit 0,
+776 + 14 tests.
+
+**The cost is not the documents — several of those rounds found real defects,
+including a bound justified against a budget that is already missed. The cost is
+that the dispatch would have been thrown away**, and its output a merge conflict
+against work that was already green.
+
+**One command catches it and it now sits in step 1's gate: `git status --short`
+before the brief.** A file the brief names that is already modified is somebody's
+turn in flight, not this box. This was already in the PM's memory as *a second
+session writes this repo too — check `git log`/`status` before briefing*; it was
+loaded, in context, and did not fire, which is the argument for a gate in the
+table over a note in a file. **A rule the process does not stop at is not a
+rule.**

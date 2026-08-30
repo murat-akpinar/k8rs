@@ -44,6 +44,20 @@ fn read(names: &[&str]) -> Input {
     load(&paths, now()).unwrap_or_else(|e| panic!("{names:?} did not load: {e}"))
 }
 
+/// A pod capture as the snapshot type the log path reads it as — the same `From` impl `k8s.rs`
+/// ingests one through, so a container list here is the one a live run would have.
+fn pod_capture(name: &str) -> PodSnapshot {
+    serde_json::from_str::<Pod>(&pod_body(name))
+        .unwrap_or_else(|e| panic!("{name} does not decode as a Pod: {e}"))
+        .into()
+}
+
+/// The bytes of a pod capture, for the stub server that has to answer a `get` with them.
+fn pod_body(name: &str) -> String {
+    std::fs::read_to_string(fixture(&format!("{name}.json")))
+        .unwrap_or_else(|e| panic!("{name}.json does not read: {e}"))
+}
+
 /// How many objects a `kind: List` capture actually holds — read out of the file rather than
 /// transcribed, because the count belongs to the cluster that produced it and moves on the
 /// next `just fixtures` (`src/rules_tests.rs` § What the capture itself says).
@@ -4431,8 +4445,12 @@ fn a_file_beside_a_cluster_flag_is_refused_and_a_flags_own_value_is_not_a_file()
             said.contains("pod.json"),
             "the refusal does not name the file that was ignored: {said:?}"
         );
+        // **The sentence names the mode that is on the line**, which is stricter than the
+        // literal that stood here: it read `--once and --live read a cluster` for every mode,
+        // and once `--logs` became a third cluster flag that was a sentence naming two flags
+        // the run did not have (NOTES § D190's class, `dev-core` 2026-08-30).
         assert!(
-            said.starts_with("k8rs: --once and --live read a cluster"),
+            said.starts_with(&format!("k8rs: {mode} reads a cluster")),
             "{said:?}"
         );
         assert!(said.contains("usage: k8rs "), "{said:?}");
@@ -5414,5 +5432,966 @@ fn the_sentence_a_run_out_of_time_prints_carries_the_two_facts_and_no_verdict() 
     assert!(
         empty.contains("check the server address this kubeconfig names"),
         "a run that got nothing at all is left with nothing to do: {empty:?}"
+    );
+}
+
+// --- ONE OBJECT'S LOG ---
+//
+// **The command line is where most of this box's decisions are, so most of this region is about
+// argv** (NOTES § D194): which object, which container, and the two switches. The rest is the
+// four decisions [`logs_run`] makes over a pod it has already fetched — which container, whether
+// there is a previous run, what a followed stream ended for, and what a fetched log looks like on
+// stdout — each a function over values for the reason `main`'s own doc gives.
+//
+// **What is *not* here is the printing**, and it cannot be: "stdout belongs to the process and a
+// test cannot read it back" (§ WATCHING A CLUSTER). [`dump`] is written against a `Write` so that
+// the one part with a shape can be asserted; the rest is `tests/binary.rs`'s.
+
+/// A server that answers the two requests a log run makes — the pod, and the log — with whatever
+/// the caller says.
+///
+/// **A second stub and not the one `k8s_tests.rs` has**, for [`offline`]'s reason: invariant 11
+/// keeps each `mod tests` private to its own product file, so a helper cannot cross. It is
+/// deliberately the smaller thing — one status, two bodies, no request log — because what is under
+/// test here is [`logs_run`]'s answer and not the wire, which is proven one file down.
+async fn answers(status: &'static str, pod: String, log: &'static str) -> (kube::Client, Requests) {
+    answers_that_may_cut_the_log(status, pod, log, false).await
+}
+
+/// [`answers`], and a log body that stops before the `content-length` it declared — a cluster
+/// whose connection was severed part way through streaming one.
+///
+/// **A wrapper rather than a fourth argument at five call sites**, and the same server
+/// underneath: what varies is one header, and two copies of forty lines of HTTP is forty lines
+/// that can come apart (CLAUDE.md § Code phase rules).
+async fn answers_that_may_cut_the_log(
+    status: &'static str,
+    pod: String,
+    log: &'static str,
+    cut: bool,
+) -> (kube::Client, Requests) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let asked: Requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log_of = std::sync::Arc::clone(&asked);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let pod = pod.clone();
+            let log_of = std::sync::Arc::clone(&log_of);
+            tokio::spawn(async move {
+                let mut pending = String::new();
+                loop {
+                    let mut chunk = [0_u8; 2048];
+                    match socket.read(&mut chunk).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => pending.push_str(&String::from_utf8_lossy(&chunk[..read])),
+                    }
+                    while let Some(end) = pending.find("\r\n\r\n") {
+                        let request: String = pending.drain(..end + 4).collect();
+                        log_of
+                            .lock()
+                            .expect("the log is never poisoned")
+                            .push(request.split_whitespace().nth(1).unwrap_or("/").to_string());
+                        let log_asked_for = request.contains("/log?");
+                        let body = match log_asked_for {
+                            true => log.to_string(),
+                            false => pod.clone(),
+                        };
+                        // A body that stops before its declared length is what a severed
+                        // connection looks like to the client, and it is the only way this
+                        // server can produce one.
+                        let declared = match cut && log_asked_for {
+                            true => body.len() + 50,
+                            false => body.len(),
+                        };
+                        let sent = format!(
+                            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n\
+                             content-length: {declared}\r\n\r\n{body}"
+                        );
+                        if socket.write_all(sent.as_bytes()).await.is_err() {
+                            return;
+                        }
+                        if cut && log_asked_for {
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    let client = kube::Client::try_from(kube::config::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing");
+    (client, asked)
+}
+
+/// Every path [`answers`] was asked for, in order.
+type Requests = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+/// A session over a client of the caller's choosing, with a namespace the context names.
+fn session_over(client: kube::Client, namespace: Option<&str>) -> k8s::Session {
+    k8s::Session {
+        client,
+        namespace: namespace.map(str::to_string),
+        ..saying(
+            Ok("v1.36.1".to_string()),
+            Err(api_error(403, "Forbidden")),
+            None,
+        )
+    }
+}
+
+/// The command line, as `main` sees it.
+fn argv(words: &[&str]) -> Vec<String> {
+    words.iter().map(|word| (*word).to_string()).collect()
+}
+
+/// **One selector for four consumers, in both spellings, first wins** (NOTES § D194,
+/// [`value_of`]).
+///
+/// **Both spellings, for `--context`'s reason**: matching only `--object NAME` lets
+/// `--object=NAME` fall through, and a selector that silently selects nothing is worse than one
+/// that refuses. **First wins is written down** because an unwritten tie-break is the one that
+/// changes by accident.
+#[test]
+fn the_object_selector_reads_both_spellings_and_takes_the_first() {
+    assert_eq!(
+        object_arg(&argv(&["--logs", "--object", "payments/web"])),
+        Some(Some("payments/web"))
+    );
+    assert_eq!(
+        object_arg(&argv(&["--logs", "--object=payments/web"])),
+        Some(Some("payments/web"))
+    );
+    assert_eq!(
+        object_arg(&argv(&[
+            "--logs", "--object", "first", "--object", "second"
+        ])),
+        Some(Some("first")),
+        "a repeated selector is not first-wins, so the tie-break is whatever the loop happens to do"
+    );
+    assert_eq!(
+        object_arg(&argv(&["--logs", "--object"])),
+        Some(None),
+        "the flag with nothing after it has to be its own answer, or a refusal cannot tell it \
+         from the flag being absent"
+    );
+    assert_eq!(object_arg(&argv(&["--once"])), None);
+    assert_eq!(
+        container_arg(&argv(&["--container=app"])),
+        Some(Some("app")),
+        "the container flag does not read the spelling every flag beside it reads"
+    );
+}
+
+/// **`--namespace` still reads exactly as it did**, now that it and the two new flags are one
+/// parser ([`value_of`]) — the shapes `tests/binary.rs` refuses, read here as values.
+#[test]
+fn the_namespace_flag_reads_the_same_four_ways_it_always_did() {
+    assert_eq!(
+        namespace_arg(&argv(&["--live", "--namespace", "payments"])),
+        Some(Some("payments"))
+    );
+    assert_eq!(
+        namespace_arg(&argv(&["--live", "--namespace=payments"])),
+        Some(Some("payments"))
+    );
+    assert_eq!(
+        namespace_arg(&argv(&["--live", "-n", "payments"])),
+        Some(Some("payments"))
+    );
+    assert_eq!(
+        namespace_arg(&argv(&["--live", "-n=payments"])),
+        Some(Some("payments"))
+    );
+    assert_eq!(namespace_arg(&argv(&["--live", "-n"])), Some(None));
+    assert_eq!(namespace_arg(&argv(&["--live"])), None);
+}
+
+/// **An object is split on its *first* slash**, so a name with a slash in it stays a name with a
+/// slash in it and is refused rather than quietly read as a shorter one (the security gate's
+/// *names build paths* row).
+#[test]
+fn an_object_is_split_on_the_first_slash_and_not_the_last() {
+    assert_eq!(
+        split_object("payments/web-7d9f4"),
+        (Some("payments"), "web-7d9f4")
+    );
+    assert_eq!(split_object("web-7d9f4"), (None, "web-7d9f4"));
+    assert_eq!(
+        split_object("payments/web/oops"),
+        (Some("payments"), "web/oops"),
+        "splitting on the last slash hands `oops` to the name check and reads a pod nobody named"
+    );
+}
+
+/// **The namespace on the selector beats `--namespace`**, because it is the more specific of the
+/// two things the reader typed — and everything else on the line reaches [`Asked`] as written.
+#[test]
+fn a_log_run_reads_its_object_its_container_and_its_two_switches() {
+    let args = argv(&[
+        "--logs",
+        "--object",
+        "payments/web-7d9f4",
+        "--container",
+        "app",
+        "--previous",
+        "--follow",
+        "--namespace",
+        "elsewhere",
+    ]);
+    let whole = asked(&args).expect("a line with --logs and --object is a log run");
+
+    assert_eq!(whole.namespace, Some("payments"));
+    assert_eq!(whole.pod, "web-7d9f4");
+    assert_eq!(whole.container, Some("app"));
+    assert!(whole.previous);
+    assert!(whole.follow);
+
+    let line = argv(&["--logs", "--object", "web-7d9f4", "--namespace", "payments"]);
+    let bare = asked(&line).expect("a log run");
+    assert_eq!(
+        bare.namespace,
+        Some("payments"),
+        "a selector with no namespace in it did not fall through to --namespace"
+    );
+    assert_eq!(bare.container, None);
+    assert!(!bare.previous);
+    assert!(!bare.follow);
+
+    assert!(
+        asked(&argv(&["--once"])).is_none(),
+        "a run with no --logs on it was read as a log run"
+    );
+}
+
+/// **A log run is a cluster run**, so `--context` reaches it and a path beside it is refused —
+/// both of which [`live_context`] answering `Some` is what buys.
+#[test]
+fn a_log_run_is_a_cluster_run_and_reads_the_context_flag() {
+    assert_eq!(
+        live_context(&argv(&["--logs", "--object", "web", "--context", "prod"])),
+        Some(Some("prod")),
+        "--logs did not reach the context flag, so the reconnect-proof machine cannot point it \
+         anywhere but its current context"
+    );
+    assert_eq!(
+        live_context(&argv(&["--logs", "--object", "web"])),
+        Some(None),
+        "a log run was read as a file run, so it would try to open `--object` as a path"
+    );
+    assert!(
+        mistyped(&argv(&["--logs", "--object", "web", "pod.json"])).is_some(),
+        "a file beside a log run was silently ignored"
+    );
+}
+
+/// **Every shape of the two new flags that names nothing usable is refused before anything
+/// connects** — the same rule `--context` and `--namespace` are already under.
+///
+/// **The value checks matter more here than anywhere else on this line.** `--object`'s value is
+/// *two* words that end up inside a request path, and it is the only place in this build where a
+/// name comes from argv rather than from an API server that already bounded it.
+#[test]
+fn a_log_run_that_names_nothing_usable_is_refused() {
+    for line in [
+        vec!["--logs"],
+        vec!["--logs", "--object"],
+        vec!["--logs", "--object="],
+        vec!["--logs", "--object", ""],
+        vec!["--logs", "--object", "--follow"],
+        vec!["--logs", "--object", "../secrets"],
+        vec!["--logs", "--object", "payments/web/oops"],
+        vec!["--logs", "--object", "PAYMENTS/web"],
+        vec!["--logs", "--object", "payments/web?watch=true"],
+        vec!["--logs", "--object", "web", "--container"],
+        vec!["--logs", "--object", "web", "--container", ""],
+        vec!["--logs", "--object", "web", "--container", "a/b"],
+        vec!["--object", "payments/web"],
+    ] {
+        let refused = mistyped(&argv(&line))
+            .unwrap_or_else(|| panic!("{line:?} was accepted, so k8rs went and asked a cluster"));
+        assert!(
+            refused.starts_with("k8rs: ") && refused.contains("usage: k8rs "),
+            "{line:?} was refused without the usage under it: {refused:?}"
+        );
+    }
+    assert_eq!(
+        mistyped(&argv(&[
+            "--logs",
+            "--object",
+            "payments/web-7d9f4",
+            "--container",
+            "app",
+            "--previous",
+            "--follow",
+        ])),
+        None,
+        "an ordinary log run was refused"
+    );
+    // **A mistyped flag is the more specific complaint about the same line**, so it wins over
+    // *`--logs` and `--object` go together* — which would otherwise tell a reader who typed
+    // `--lgos` to add the flag they had just tried to type.
+    let typo = mistyped(&argv(&["--lgos", "--object", "default/web"]))
+        .expect("a flag k8rs does not have is refused");
+    assert!(
+        typo.starts_with("k8rs: --lgos is not a flag k8rs has"),
+        "{typo:?}"
+    );
+}
+
+/// **The two halves of a selector are two rules, and they get two sentences** — a namespace is a
+/// DNS-1123 *label* and a pod name is a *subdomain*.
+///
+/// **Found by running the binary, not by a test.** `--object PAYMENTS/web` came back *"a name is
+/// letters, digits, dashes and dots, up to 253 characters"*, which is true of nothing that is
+/// wrong with `PAYMENTS`: what is wrong is that a namespace may not be uppercase, and the reader
+/// was sent to check the wrong half (NOTES § D190's class, `dev-core` 2026-08-30).
+#[test]
+fn a_selectors_namespace_and_its_name_are_refused_for_their_own_reasons() {
+    let namespace = mistyped(&argv(&["--logs", "--object", "PAYMENTS/web"]))
+        .expect("an uppercase namespace is not a namespace");
+    assert!(
+        namespace.starts_with("k8rs: the namespace in --object needs the name of a namespace")
+            && namespace.contains("lowercase"),
+        "the left half was refused with the rule for the right half: {namespace:?}"
+    );
+
+    let name = mistyped(&argv(&["--logs", "--object", "payments/web oops"]))
+        .expect("a space is not in a name");
+    assert!(
+        name.starts_with("k8rs: --object names one pod"),
+        "the right half was refused with the rule for the left half: {name:?}"
+    );
+
+    // The namespace sentence is `--namespace`'s own, so the two cannot drift apart.
+    let flag = mistyped(&argv(&["--live", "--namespace", "PAYMENTS"]))
+        .expect("an uppercase namespace is not a namespace");
+    assert_eq!(
+        flag.replace("--namespace needs", "the namespace in --object needs"),
+        namespace.replace("PAYMENTS/web", "PAYMENTS"),
+        "the two places a namespace is refused say two different things about one rule"
+    );
+}
+
+/// **A file beside `--logs` is refused, and the sentence names `--logs`** — not the two flags the
+/// run did not have.
+#[test]
+fn a_file_beside_a_log_run_is_refused_and_the_sentence_names_the_flag_that_is_there() {
+    let said = mistyped(&argv(&["--logs", "--object", "default/web", "pod.json"]))
+        .expect("a file beside a cluster flag is refused");
+    assert!(
+        said.starts_with("k8rs: --logs reads a cluster, so k8rs cannot also read pod.json"),
+        "the refusal named a flag this run does not have: {said:?}"
+    );
+}
+
+/// **A name refused for being enormous is not echoed back at that size** — the security gate's
+/// *sizes are bounded* row, which the `--namespace` refusal beside this one already obeys.
+#[test]
+fn a_refused_object_is_not_echoed_back_whole() {
+    let refused = mistyped(&argv(&["--logs", "--object", &"a".repeat(9000)]))
+        .expect("a name that long is not a name any cluster has");
+    let first = refused
+        .lines()
+        .next()
+        .expect("the refusal has a first line");
+    assert!(
+        first.chars().count() < 500,
+        "the refusal echoed {} characters of a value it refused for being too long",
+        first.chars().count()
+    );
+}
+
+/// **The container the log is read from, and the sentence when the reader named one that is not
+/// there** (`screens/detail.md` § Choosing a container).
+#[test]
+fn the_container_is_the_one_named_the_first_regular_one_or_a_sentence() {
+    let pod: PodSnapshot = pod_capture("healthy-sidecar");
+
+    assert_eq!(
+        which_container(&pod, Some("proxy"))
+            .expect("the pod has a container by that name")
+            .map(|container| container.name.as_str()),
+        Some("proxy"),
+        "a container the reader named by hand was not the one chosen"
+    );
+    assert_eq!(
+        which_container(&pod, None)
+            .expect("the pod has a regular container")
+            .map(|container| container.name.as_str()),
+        Some("app"),
+        "the default is the sidecar, so `--logs` on this pod reads the proxy"
+    );
+    assert_eq!(
+        which_container(&pod, Some("typo")).expect_err("no such container"),
+        "k8rs: this pod has no container named typo — it has proxy, app",
+        "a misspelled container was refused without the list the reader has to retype from, or \
+         the list is not readable as one"
+    );
+
+    let mut pending = pod.clone();
+    pending.containers.clear();
+    assert_eq!(
+        which_container(&pending, None).expect("a pending pod is a state and not an error"),
+        None,
+        "a pod the kubelet has reported no container for was an error instead of a state"
+    );
+    assert!(
+        which_container(&pending, Some("app"))
+            .expect_err("there is nothing to name")
+            .contains("has not started any container yet"),
+        "a container named on a pod with none got the list-of-none sentence"
+    );
+}
+
+/// **The headless picker: what there was to choose from, and what was chosen** — and it is silent
+/// in the two cases the screen is silent in.
+///
+/// **Silent on a single-container pod** is the screen's own invariant one layer up: it does not
+/// offer the picker at all, because a key that does nothing is a bug already shipped once here.
+/// **Silent when the reader named one**, because they know.
+#[test]
+fn the_container_block_is_drawn_only_when_there_was_something_to_choose() {
+    let pod: PodSnapshot = pod_capture("healthy-sidecar");
+    let app = which_container(&pod, None).expect("a regular container");
+
+    let block = container_choice(&pod, None, app).expect("two containers is something to choose");
+    assert_eq!(
+        block,
+        "k8rs: this pod has 2 containers — proxy (running), app (running)\n\
+         k8rs: reading app. Name another with `--container <name>`.",
+        "the block a reader gets is not what the container list and the choice say"
+    );
+    assert_eq!(
+        container_choice(&pod, Some("app"), app),
+        None,
+        "the picker was drawn for a reader who had already named a container"
+    );
+
+    let mut alone = pod.clone();
+    alone.containers.retain(|container| container.name == "app");
+    assert_eq!(
+        container_choice(&alone, None, app),
+        None,
+        "a pod with one container was offered a choice, which is a key that does nothing"
+    );
+    assert_eq!(
+        container_choice(&pod, None, None),
+        None,
+        "a pod with no container reported was told which one is being read"
+    );
+}
+
+/// **A restart count is shown beside a container that has one**, because that is the signal that
+/// makes `--previous` worth typing (`screens/detail.md`) — and the singular is spelled.
+#[test]
+fn a_container_that_has_restarted_says_so_beside_its_state() {
+    let mut pod: PodSnapshot = pod_capture("healthy-sidecar");
+    pod.containers[0].restarts = 1;
+    pod.containers[1].restarts = 3;
+    let app = pod.containers[1].clone();
+
+    let block = container_choice(&pod, None, Some(&app)).expect("two containers");
+    assert!(
+        block.contains("proxy (running, 1 restart)") && block.contains("app (running, 3 restarts)"),
+        "the restart counts are missing or mis-pluralised, and they are the whole reason a reader \
+         reaches for --previous: {block:?}"
+    );
+}
+
+/// **What a container is doing, in a word a beginner reads** (invariant 14) — never the API's own
+/// `reason`, which is the jargon this product exists to translate.
+#[test]
+fn a_containers_state_is_a_word_and_never_the_reason_code() {
+    assert_eq!(
+        doing(&ContainerState::Running { started_at: None }),
+        "running"
+    );
+    assert_eq!(
+        doing(&ContainerState::Waiting {
+            reason: Some("CrashLoopBackOff".to_string()),
+            message: None,
+        }),
+        "waiting",
+        "a waiting container printed the API's own reason code where the screen says one word"
+    );
+    // **The third arm, fed** — `screens/detail.md` draws a finished init container as `done`, and
+    // without this the word could be anything.
+    assert_eq!(
+        doing(&ContainerState::Terminated(crate::rules::Terminated {
+            reason: Some("Completed".to_string()),
+            exit_code: 0,
+            started_at: None,
+            finished_at: None,
+            message: None,
+        })),
+        "done"
+    );
+}
+
+/// **`--previous` on a container that never restarted says so and falls back** —
+/// `screens/detail.md`'s own words, and k8rs does not print the API's refusal.
+#[test]
+fn previous_on_a_container_that_never_restarted_says_so_and_falls_back() {
+    let pod: PodSnapshot = pod_capture("healthy-sidecar");
+    let app = which_container(&pod, None).expect("a regular container");
+    assert_eq!(app.map(|container| container.restarts), Some(0));
+
+    assert_eq!(
+        no_previous_run(app, true).as_deref(),
+        Some(
+            "k8rs: app hasn't restarted, so there's no previous run to show. Showing the current \
+             run instead."
+        ),
+        "the sentence the screen promises is not the one the driver prints"
+    );
+    assert_eq!(
+        no_previous_run(app, false),
+        None,
+        "a run that did not ask for the previous log was told about it anyway"
+    );
+
+    let crashed: PodSnapshot = pod_capture("crashloop");
+    let quitter = which_container(&crashed, None).expect("a regular container");
+    assert_eq!(quitter.map(|container| container.restarts), Some(10));
+    assert_eq!(
+        no_previous_run(quitter, true),
+        None,
+        "a container with ten restarts was told it has no previous run, which is the one log a \
+         crash loop needs"
+    );
+}
+
+/// **Why a followed stream ended is answered only where there is an honest answer**
+/// (`PRIOR-ART § E1`, `screens/detail.md`).
+///
+/// **The deleted pod is the one case the screen asks for by name.** Every other ending — the
+/// container stopped writing, a middlebox timed out, the connection broke — is three facts this
+/// driver cannot tell apart, and one sentence for all three is E1's own failure wearing the other
+/// coat.
+#[test]
+fn a_stream_says_the_pod_is_gone_and_says_nothing_about_any_other_ending() {
+    assert_eq!(
+        stream_ended(Some(k8s::Fault::Gone)),
+        Some("--- stream ended: pod deleted ---"),
+        "a pod deleted mid-follow left the reader wondering whether the connection dropped"
+    );
+    assert_eq!(
+        stream_ended(None),
+        None,
+        "a stream that ended while the pod is still there claimed the pod was deleted"
+    );
+    for other in [
+        k8s::Fault::Refused,
+        k8s::Fault::Unanswered,
+        k8s::Fault::Expired,
+    ] {
+        assert_eq!(
+            stream_ended(Some(other)),
+            None,
+            "a {other:?} on the re-read was reported as the pod being deleted"
+        );
+    }
+}
+
+/// **A fetched log is the dropped-lines sentence and then the lines**, in that order, because that
+/// is literally where the gap is (`screens/detail.md` § When the buffer fills).
+///
+/// **The sentence is payload and goes to stdout with the lines** — a reader piping this somewhere
+/// needs to know it arrived short (`screens/once.md` § stdout and stderr are split on purpose).
+#[test]
+fn a_fetched_log_prints_what_was_lost_above_what_was_kept() {
+    let mut held = k8s::LogLines::default();
+    held.push("connected to postgres".to_string());
+    held.push("allocating 240MB cache".to_string());
+
+    let mut out = Vec::new();
+    dump(&held, &mut out).expect("a Vec never refuses a write");
+    assert_eq!(
+        String::from_utf8(out).expect("k8rs writes UTF-8"),
+        "connected to postgres\nallocating 240MB cache\n",
+        "a pane that dropped nothing printed something about dropping"
+    );
+
+    let mut lost = k8s::LogLines::default();
+    for line in 0..=k8s::LOG_LINES {
+        lost.push(format!("line {line}"));
+    }
+    let mut out = Vec::new();
+    dump(&lost, &mut out).expect("a Vec never refuses a write");
+    let printed = String::from_utf8(out).expect("k8rs writes UTF-8");
+    assert_eq!(
+        printed.lines().next(),
+        Some("1 line was dropped from the top to keep this pane bounded."),
+        "the dropped-lines sentence is missing or is not at the top of the content"
+    );
+    assert_eq!(
+        printed.lines().nth(1),
+        Some("line 1"),
+        "the sentence is there and the lines under it are not"
+    );
+}
+
+/// **A kubeconfig that will not connect ends a log run the same way it ends a watch** — one
+/// sentence, exit `2`, nothing on stdout.
+#[tokio::test]
+async fn a_log_run_that_cannot_connect_says_so_and_never_asks_for_a_log() {
+    let refused = logs_run(
+        std::future::ready(Err(k8s::NotConnected::Kubeconfig(
+            kube::config::KubeconfigError::CurrentContextNotSet,
+        ))),
+        &Asked {
+            namespace: Some("payments"),
+            pod: "web-7d9f4",
+            container: None,
+            previous: false,
+            follow: false,
+        },
+    )
+    .await
+    .expect("a run that could not connect has no happy ending");
+
+    assert!(
+        refused.starts_with("k8rs: no cluster to watch — "),
+        "a log run over a kubeconfig that will not load said something else: {refused:?}"
+    );
+}
+
+/// **The three answers a cluster can give about the pod, and the three different sentences they
+/// get** — this is where a log run ends before a single log byte is asked for.
+///
+/// **A `404` on one named object gets its own sentence and not [`because`]'s.** That function's
+/// `Gone` arm is written for a *kind* the server does not serve — *there is no such thing when
+/// k8rs tries to …* — which is true and unhelpful about a pod name somebody just typed.
+#[tokio::test]
+async fn a_pod_that_is_not_there_and_a_pod_that_is_refused_get_different_sentences() {
+    let about = |pod| Asked {
+        namespace: Some("payments"),
+        pod,
+        container: None,
+        previous: false,
+        follow: false,
+    };
+    let status = |code: u16, reason: &str| {
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "Status", "status": "Failure",
+            "reason": reason, "code": code, "message": "no",
+        })
+        .to_string()
+    };
+
+    let gone = session_over(
+        answers("404 Not Found", status(404, "NotFound"), "")
+            .await
+            .0,
+        None,
+    );
+    assert_eq!(
+        logs_run(std::future::ready(Ok(gone)), &about("web-7d9f4")).await,
+        Some(
+            "k8rs: there is no pod named web-7d9f4 in payments — check the name and the namespace"
+                .to_string()
+        ),
+        "a pod that is not there was reported as something other than a pod that is not there"
+    );
+
+    let refused = session_over(
+        answers("403 Forbidden", status(403, "Forbidden"), "")
+            .await
+            .0,
+        None,
+    );
+    let sentence = logs_run(std::future::ready(Ok(refused)), &about("web-7d9f4"))
+        .await
+        .expect("a refused pod ends the run");
+    assert!(
+        sentence.contains(
+            "the role this kubeconfig uses needs to get the pod web-7d9f4 in \
+                           payments"
+        ),
+        "a refusal did not name the verb and the object the reader has to ask for: {sentence:?}"
+    );
+
+    let answering = session_over(
+        answers("200 OK", pod_body("healthy-sidecar"), "hello\n")
+            .await
+            .0,
+        None,
+    );
+    assert_eq!(
+        logs_run(std::future::ready(Ok(answering)), &about("healthy-sidecar")).await,
+        None,
+        "a log that was read and printed did not end the run happily, so `k8rs --logs` exits 2 \
+         on a working cluster"
+    );
+}
+
+/// **A followed stream asks the cluster why it ended and a fetch does not** — which is the whole
+/// of `PRIOR-ART § E1`'s *offer resume*, and the only part of it a unit test can see.
+///
+/// **Counted requests, because the marker itself goes to stdout** and "stdout belongs to the
+/// process and a test cannot read it back" (§ WATCHING A CLUSTER). A follow is three requests —
+/// the pod, the log, the pod again — and a fetch is two: a fetch ended because the log ended,
+/// which is what a fetch is, so asking would be a round trip for an answer nobody needs.
+#[tokio::test]
+async fn a_followed_stream_asks_why_it_ended_and_a_fetch_does_not() {
+    let ran = |follow| async move {
+        let (client, asked) = answers("200 OK", pod_body("healthy-sidecar"), "hello\n").await;
+        assert_eq!(
+            logs_run(
+                std::future::ready(Ok(session_over(client, None))),
+                &Asked {
+                    namespace: Some("default"),
+                    pod: "healthy-sidecar",
+                    container: Some("app"),
+                    previous: false,
+                    follow,
+                }
+            )
+            .await,
+            None
+        );
+        asked.lock().expect("the log is never poisoned").clone()
+    };
+
+    let followed = ran(true).await;
+    assert_eq!(
+        followed
+            .iter()
+            .filter(|path| path.contains("/log?"))
+            .count(),
+        1,
+        "a follow asked for the log more than once: {followed:?}"
+    );
+    assert!(
+        followed.last().is_some_and(|last| !last.contains("/log?")),
+        "a followed stream that ended never asked the cluster whether the pod is still there, so \
+         a pod deleted mid-follow reads as a dropped connection: {followed:?}"
+    );
+    assert!(
+        followed.iter().any(|path| path.contains("follow=true")),
+        "`--follow` did not reach the request: {followed:?}"
+    );
+
+    let fetched = ran(false).await;
+    assert_eq!(
+        fetched.len(),
+        followed.len() - 1,
+        "a fetch asked the cluster the same number of questions a follow does, so either the \
+         re-read is missing from one or it is a round trip the other does not need: \
+         {fetched:?} against {followed:?}"
+    );
+    assert!(
+        !fetched.iter().any(|path| path.contains("follow")),
+        "a fetch asked to follow: {fetched:?}"
+    );
+}
+
+/// **A container that has written nothing says so, and one that has written something does not**
+/// (`screens/detail.md` § No logs yet, `PRIOR-ART § E1`).
+///
+/// **A `bool` and not a count**, which is what this function exists to make testable: the two arms
+/// of [`logs_run`] used to compare a counter to zero, and every arithmetic mutant of that counter
+/// survived the gate because nothing readable depends on the number (`dev-core`, 2026-08-30).
+#[test]
+fn a_log_with_nothing_in_it_is_a_state_and_a_log_with_something_is_not() {
+    assert_eq!(
+        nothing_written(false),
+        Some("k8rs: nothing has been written to this container's log yet"),
+        "a container that has produced nothing was left looking like a hang"
+    );
+    assert_eq!(
+        nothing_written(true),
+        None,
+        "a log that arrived was reported as empty"
+    );
+}
+
+/// **A log that stopped arriving is not a log that ended** — `PRIOR-ART § E1`, on the driver's
+/// side of it.
+///
+/// **The exit code is the assertion.** What arrived is on stdout either way; what differs is
+/// whether `k8rs --logs … > half.txt && grep -q panic half.txt || echo clean` is told the file is
+/// the whole log. Swallowed, this run exits `0` with half a log in it.
+#[tokio::test]
+async fn a_log_that_stopped_arriving_is_not_reported_as_a_log_that_ended() {
+    let (client, _) = answers_that_may_cut_the_log(
+        "200 OK",
+        pod_body("healthy-sidecar"),
+        "connected to postgres\n",
+        true,
+    )
+    .await;
+    let cut = logs_run(
+        std::future::ready(Ok(session_over(client, None))),
+        &Asked {
+            namespace: Some("default"),
+            pod: "healthy-sidecar",
+            container: Some("app"),
+            previous: false,
+            follow: false,
+        },
+    )
+    .await
+    .expect("a log that stopped arriving does not end the run happily");
+
+    assert!(
+        cut.starts_with(
+            "k8rs: the log stopped arriving before it ended, so what is above is not all of it — "
+        ),
+        "{cut:?}"
+    );
+}
+
+/// **A namespace that is not a namespace never reaches a request, wherever it came from** — the
+/// security gate's *names build paths* row.
+///
+/// **The kubeconfig is the source that nothing else checks.** [`mistyped`] refuses `--object`'s
+/// namespace and `--namespace`'s; `k8s::kubeconfig_namespace` strips and bounds the context's own
+/// and never asks whether it is a namespace, so `namespace: ../secrets` in the reader's own file
+/// is the one way a word that is not a name reaches this path.
+#[tokio::test]
+async fn a_namespace_that_is_not_a_namespace_never_reaches_a_request() {
+    let (client, asked) = answers("200 OK", pod_body("healthy-sidecar"), "hello\n").await;
+    let crafted = session_over(client, Some("../secrets"));
+
+    let refused = logs_run(
+        std::future::ready(Ok(crafted)),
+        &Asked {
+            namespace: None,
+            pod: "healthy-sidecar",
+            container: Some("app"),
+            previous: false,
+            follow: false,
+        },
+    )
+    .await
+    .expect("a namespace that is not one ends the run");
+
+    assert!(
+        refused.starts_with("k8rs: ../secrets is not a namespace"),
+        "{refused:?}"
+    );
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").len(),
+        0,
+        "a request went out with `../secrets` in its path"
+    );
+}
+
+/// **The fallback reaches the *request*, and not only the sentence beside it** — the whole point of
+/// saying *there's no previous run* is that k8rs then asks for the one that exists.
+///
+/// **Proved on the wire, because nothing else can prove it.** [`no_previous_run`] is the sentence
+/// and it is asserted on its own above; deleting the `previous = false` line that follows it in
+/// [`logs_run`] left that test green (`dev-core`'s red run, 2026-08-30) while the request went out
+/// with `previous=true` and a real cluster answered `400`. This reads the query string.
+#[tokio::test]
+async fn previous_on_a_container_that_never_restarted_asks_for_the_run_that_exists() {
+    let (client, asked) = answers("200 OK", pod_body("healthy-sidecar"), "hello\n").await;
+    let run = |previous| Asked {
+        namespace: Some("default"),
+        pod: "healthy-sidecar",
+        container: Some("app"),
+        previous,
+        follow: false,
+    };
+
+    assert_eq!(
+        logs_run(
+            std::future::ready(Ok(session_over(client.clone(), None))),
+            &run(true)
+        )
+        .await,
+        None,
+        "the run did not end happily"
+    );
+    let log_request = |asked: &Requests| {
+        asked
+            .lock()
+            .expect("the log is never poisoned")
+            .iter()
+            .find(|path| path.contains("/log?"))
+            .cloned()
+            .expect("a log run asks for a log")
+    };
+    assert!(
+        !log_request(&asked).contains("previous"),
+        "`--previous` on a container with no restarts still went out as `previous=true`, so the \
+         cluster answers 400 about a request the reader was just told k8rs would not make: {}",
+        log_request(&asked)
+    );
+
+    // The negative half: a container that *has* restarted keeps the switch, or the fallback above
+    // is a `--previous` that never works.
+    let (crashed, crashed_asked) = answers("200 OK", pod_body("crashloop"), "boom\n").await;
+    assert_eq!(
+        logs_run(
+            std::future::ready(Ok(session_over(crashed, None))),
+            &Asked {
+                namespace: Some("default"),
+                pod: "broken-crashloop",
+                container: Some("quitter"),
+                previous: true,
+                follow: false,
+            }
+        )
+        .await,
+        None
+    );
+    assert!(
+        log_request(&crashed_asked).contains("previous=true"),
+        "`--previous` on a container with ten restarts was dropped, so the one log a crash loop \
+         needs is unreachable: {}",
+        log_request(&crashed_asked)
+    );
+}
+
+/// **A run that named no namespace anywhere looks where `kubectl logs` would look** — the
+/// context's own namespace, and `default` under that.
+#[tokio::test]
+async fn a_log_run_with_no_namespace_falls_back_to_the_context_and_then_to_default() {
+    let status = serde_json::json!({
+        "apiVersion": "v1", "kind": "Status", "status": "Failure",
+        "reason": "NotFound", "code": 404, "message": "no",
+    })
+    .to_string();
+    let bare = |namespace| Asked {
+        namespace,
+        pod: "web-7d9f4",
+        container: None,
+        previous: false,
+        follow: false,
+    };
+
+    let context = session_over(
+        answers("404 Not Found", status.clone(), "").await.0,
+        Some("from-the-context"),
+    );
+    assert_eq!(
+        logs_run(std::future::ready(Ok(context)), &bare(None)).await,
+        Some(
+            "k8rs: there is no pod named web-7d9f4 in from-the-context — check the name and the \
+             namespace"
+                .to_string()
+        ),
+        "a run that named no namespace ignored the one its own context names"
+    );
+
+    let neither = session_over(answers("404 Not Found", status, "").await.0, None);
+    assert_eq!(
+        logs_run(std::future::ready(Ok(neither)), &bare(None)).await,
+        Some(
+            "k8rs: there is no pod named web-7d9f4 in default — check the name and the namespace"
+                .to_string()
+        ),
+        "a run with no namespace anywhere did not look where `kubectl logs` looks"
     );
 }
