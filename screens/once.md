@@ -307,11 +307,16 @@ invariant 14 calls noise before it calls information.
 `— not your kubeconfig's —`.** C1 and C2 can print on the same run — a
 kubeconfig certificate and the server's own certificate running out inside
 the same month is not a rare coincidence, since one team's renewal habit
-often misses both — and a reader who has just read a card naming *their
-own* certificate's expiry needs one clause telling them this is a second,
-different certificate, not the same fact printed twice. The clause stays in
-every drawing of this sentence, not only the run where a C1 card happens to
-share the page.
+often misses both — and a reader who has just read *their own* certificate's
+expiry elsewhere on the page needs one clause telling them this is a second,
+different certificate, not the same fact printed twice. Where that reading
+sits depends on which of C1's two bands fired: **expired** is a card, same
+page as this sentence; **expiring** is a Certificates-pane row, printed in
+the same run under `--analysis`
+([NOTES § D87](../NOTES.md#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14) ·
+[NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
+Either way, the clause stays in every drawing of this sentence,
+unconditionally.
 
 **The sentence describes what this run saw, not what the cluster has.**
 "An API server" usually means one process, but a control plane can run
@@ -662,16 +667,24 @@ ever enters raw mode — one text, both paths
 
 ## What `--once` does not do
 
+**Not on this list any more: the seven analysis reports.** `--once --analysis`
+prints them — same seven panes as the console, after the findings — because
+three shipped rules have no other reader: N4, N5 and C1's expiring band
+return `Severity::Info` and nothing else, and the card block above never
+draws that band. It is not the default: the default is the findings, and
+seven whole-cluster panes stacked under three cards would bury the thing the
+run exists to show
+([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
+
 | Not offered | Why |
 |---|---|
-| Analysis reports (capacity, drain safety, waste, posture, restarts, certificates, versions) | Choosing *which* report needs an argument, and an argument that takes a value is the threshold that would pull `clap` in ([docs/tech-stack](../docs/tech-stack.md)). The reports are a console feature; `--once` answers one question. |
 | `-o json` / `-o yaml` | Nobody has asked. It is one function over `Vec<Finding>` when someone does, and inventing an output schema now means maintaining it forever ([NOTES § Out of scope](../NOTES.md#out-of-scope-the-most-important-section)). |
 | `--watch` | That is the TUI. |
 
-`--context` and `--namespace` apply unchanged. `--read-only` is accepted and
-does nothing in v0.0.1 — there is no write path in the release that ships this,
-and a flag that errors because the danger it guards has not been built yet
-teaches the wrong lesson.
+`--context`, `--namespace` and `--analysis` apply unchanged. `--read-only` is
+accepted and does nothing in v0.0.1 — there is no write path in the release
+that ships this, and a flag that errors because the danger it guards has not
+been built yet teaches the wrong lesson.
 
 ## The rule that matters most here
 

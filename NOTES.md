@@ -209,6 +209,7 @@ its line moving with it.
 - [D185](#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30) — cleanup on the last line is not cleanup, and the resource is not always a file
 - [D186](#d186--a-done-when-written-from-a-measurement-its-own-commit-had-already-invalidated-and-the-two-findings-that-outlived-it-2026-08-30) — a done-when written from a measurement its own commit had already invalidated, and the two findings that outlived it
 - [D187](#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30) — the read-only role under itself: two grants nothing reads, a decision that described code that was never written, and the one sentence that sends an operator to the wrong resource
+- [D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30) — where a `--once` report ends up, and the flag that is the only reader three shipped rules have
 
 ## Why it exists — where the gap is
 
@@ -797,7 +798,13 @@ output any stranger sees ([D10](#d10--m1-ships-publicly-as-v001)). Designed in
 3. **No analysis reports in `--once`.** Selecting a report needs an argument
    that takes a value, and that is the threshold that pulls `clap` in
    ([invariant 10](CLAUDE.md)). `--once` answers one question; the reports are
-   a console feature.
+   a console feature. *(Narrowed on 2026-08-30 by its own literal terms: what
+   this refused is a **value-taking** argument, and `--analysis` takes no value
+   and selects nothing — it prints all seven or none. `--once --analysis` prints
+   them, the default still does not, and the `clap` threshold is still not
+   crossed. Three rules return `Severity::Info` and nothing else, and the card
+   block does not draw that band —
+   [D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30).)*
 
 It is the Alerts view with the frame removed — same rules, same strings, same
 owner grouping, same order. Two renderers over one `rules.rs`; if they can
@@ -16318,3 +16325,96 @@ line carries the verb.
 `ops.rs` unreachable, keys unbound* is not tickable and must not be inherited as
 proven: `src/ops.rs` does not exist and `--read-only` is not a flag this build
 accepts. That is Phase 7, not a defect.
+
+### D188 — where a `--once` report ends up, and the flag that is the only reader three shipped rules have (2026-08-30)
+
+Phase 5's documentation box, and it is two questions with one file between them:
+what a report *is* once it leaves the terminal, and how much of what `analyze`
+returned ever reaches one.
+
+**Where the output ends up — the line [D37](#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12) owed this box.**
+D37 ruled that a controller's message is shown **verbatim**, and named the cost it
+was accepting rather than hiding it: a validating webhook that echoes the object it
+rejected — several in the wild do — puts an env value inside a status message, and
+`Finding::evidence` carries that message whole. On the terminal that is no worse
+than `kubectl describe`. What D37 could not settle from where it stood is that **a
+report has a destination its reader chooses**: `k8rs --once > findings.txt`, a CI
+job's log, a paste into a ticket. That is where a webhook's echo reaches an
+audience wider than the person who typed the command, and the reader is the only
+one who knows it is about to.
+
+**It is a documented line and not a filter**, which is D37's ruling carried out
+rather than a new one: k8rs never fetches a Secret and never renders an env value
+it went looking for, and refusing to show what `kubectl` already shows is not a
+security control — it is a tool that lies by omission. The line lands in
+[docs/security.md § Data displayed and stored](docs/security.md#data-displayed-and-stored),
+beside the rules it qualifies, because that is where a reader outside this repo
+looks for *what does this thing put on my screen*.
+
+**Whether `--once` prints the reports: yes, under `--analysis`, and not otherwise.**
+
+[D17](#d17--the---once-output)'s third item said *no analysis reports in `--once`*,
+and it gave its reason: **selecting** a report needs an argument that takes a
+value, and that is the threshold that pulls `clap` in
+([invariant 10](CLAUDE.md)). Read literally, what that refused is a value-taking
+argument — not the reports. `--analysis` takes no value and selects nothing; it
+prints all seven or none of them. The threshold D17 named is not crossed, so D17 is
+**narrowed by its own stated reason** rather than reversed against it, and the
+`clap` row in [docs/tech-stack.md § Deliberately absent](docs/tech-stack.md#deliberately-absent)
+stands unchanged.
+
+**Not the default**, because the default output is Alerts. Seven whole-cluster
+panes stacked under three cards buries the thing the run exists to show — the same
+argument `main.rs`'s own `ANALYSIS` doc already makes about `k8rs pod.json`, and
+the one [screens/once.md § What `--once` does not do](screens/once.md#what---once-does-not-do)
+now carries in place of the row that refused the reports outright.
+
+**And it has to be reachable at all, because three shipped rules have no other
+reader.** N4 (*this machine's kubelet is too far behind the control plane*), N5
+(*this node has promised more than it has*) and C1's **expiring** band (*your
+kubeconfig certificate expires in N days*) return `Severity::Info` and nothing
+else; `main.rs` filters `Info` out of the card block because
+[D87](#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14)
+says an `Info` finding *means* a report rather than Alerts; and D87's stated
+alerting mechanism for it — the sidebar badge — belongs to a view Phase 11 has not
+built. Refuse the flag and v0.0.1 ships three rules whose output nothing prints.
+
+**Measured rather than argued**, both directions, against the four-node `k8rs` kind
+cluster on 2026-08-30, server v1.36.1. With the flag, `k8rs --live --analysis`
+drew `[versions]  Control plane v1.36.1 · 4 of 4 kubelets match` — N4's pane
+answering — and `[certificates]  Nothing here expires soon, and no machine is
+waiting to be let in.` — C1's. Without it, `k8rs --live` over the same cluster
+matched **zero** lines for either sentence and for the pane headings themselves;
+the report ends at `13 critical, 3 warnings`. Neither is a card in either run.
+
+**What this box found and deliberately did not take.** C2 — a certificate *the API
+server presented* — reaches a default run with no flag at all, as a trailer line
+under the cards
+([screens/once.md § When the API server's own certificate is running out](screens/once.md#when-the-api-servers-own-certificate-is-running-out)).
+C1 — the reader's **own** kubeconfig certificate, the one credential on that page
+they can renew without asking anybody — does not, because it is a `Finding` in the
+`Info` band and the trailer is not a band. So the default report tells a reader the
+control plane's credential is running out and stays silent about theirs. That is
+backwards, it is a change to the driver rather than to a document, and it is boxed
+in **Phase 6** rather than added to this running one
+([D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)).
+It is not a blocker on the release: `--analysis` is a reader for it, one word away.
+
+**A second sentence this ruling falsifies, in code and therefore not the PM's to
+fix.** `main.rs`'s `ANALYSIS` doc calls the flag *"scaffolding like the driver
+itself … Phase 9 draws them in panes and this goes away with the rest of the
+temporary main"*. After this ruling `--analysis` is part of the released surface
+and outlives the temporary driver; a headless report of the seven panes is exactly
+what a console with panes does **not** replace. The correction rides with the
+Phase 6 box named in the paragraph above rather than earning a dispatch of its own —
+[D87](#d87--c1-has-two-bands-and-they-belong-on-two-screens-d2-only-ever-ruled-on-one-of-them-2026-08-14)
+named this class and it is the same one: the sentences a decision falsifies are
+never in its diff.
+
+**One sentence in `screens/once.md` was already false of the shipped build**, found
+by reading the file this box was editing. Its C2 disambiguation paragraph justifies
+the clause `— not your kubeconfig's —` with *"a reader who has just read a **card**
+naming their own certificate's expiry"*, describing the two certificates "running
+out inside the same month". That month is C1's `Info` band, which under D87 draws
+no card anywhere. The clause itself is right and is drawn unconditionally; only the
+reason offered for it named a run that cannot happen. Corrected in the same turn.

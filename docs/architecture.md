@@ -69,6 +69,14 @@ is described in [security.md § Write safety](security.md#write-safety-model) an
 arrives with the write path, `--once` is the first release's whole surface
 ([screens/once.md](../screens/once.md)). No code parses either today.
 
+**When `--once` is built it takes `--analysis`, and that is the whole of the
+first release's surface**: `k8rs --once [--analysis] [--context <name>]
+[--namespace <name>]`. The panes are not the default — the default is the findings, and seven
+whole-cluster reports stacked under three cards buries them — but they are one
+word away, because three rules return `Severity::Info` and nothing else and the
+card block does not draw that band
+([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
+
 **`--live` is the temporary driver's**, not a shipped flag: the console watches a
 cluster because that is what it is, and reading objects from a file is the
 scaffolding that let the rules be proven before there was a screen

@@ -3173,7 +3173,7 @@ public release.
       Phase 11 and does not exist yet, and the 2026-08-22 measurement behind that
       claim stands
       ([reports/2026-08-22-browser-rows-table-watch-and-refresh.md](reports/2026-08-22-browser-rows-table-watch-and-refresh.md))
-- [ ] **Say in the docs where `--once` output ends up.** Findings carry
+- [x] **Say in the docs where `--once` output ends up.** Findings carry
       controller messages verbatim, and a validating webhook can echo the
       object it rejected — env values included — into one. On the terminal
       that is no worse than `kubectl describe`; redirected into a CI log or
@@ -3187,7 +3187,35 @@ public release.
       stated alerting mechanism for it is the **sidebar badge**, which no
       driver has until Phase 11. So C1's expiry, N4 and N5 reach a `--once`
       reader only if `--once` prints the panes. Decide it here, where the
-      shipped surface is decided, not in the driver
+      shipped surface is decided, not in the driver.
+      **Both halves done 2026-08-30,
+      [D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30).**
+      The line is a bullet in
+      [docs/security.md § Data displayed and stored](docs/security.md#data-displayed-and-stored),
+      beside the rules it qualifies: a report has a destination its reader
+      chooses, and redirecting it is a decision about who sees what the
+      cluster's controllers wrote into a status. Not a blanked field, which is
+      D37's ruling carried out rather than a new one.
+      **The ruling: `--once` prints the seven panes under `--analysis`, and not
+      otherwise.** D17's third item refused a **value-taking** argument, not the
+      reports — `--analysis` takes no value and selects nothing, so the `clap`
+      threshold it named is not crossed and D17 is narrowed by its own stated
+      reason, at source. Not the default, because seven whole-cluster panes
+      under three cards bury the findings; not refusable either, because N4, N5
+      and C1's expiring band return `Severity::Info` and nothing else and the
+      card block does not draw that band. **Measured both ways against the
+      four-node `k8rs` kind cluster, server v1.36.1**: `--live --analysis` drew
+      `[versions]  Control plane v1.36.1 · 4 of 4 kubelets match` and
+      `[certificates]  Nothing here expires soon, and no machine is waiting to
+      be let in.`; plain `--live` over the same cluster matched **zero** lines
+      for either sentence or for the pane headings, ending at `13 critical, 3
+      warnings`.
+      **Two sentences the ruling falsified, neither of them in its diff** — the
+      `screens/once.md` row that refused the reports, and a C2 paragraph
+      justifying `— not your kubeconfig's —` with a C1 *card* that D87's `Info`
+      band never draws; both fixed in the same turn. **What it did not take**:
+      C1's expiring band still has no trailer line while C2 has one, which is
+      boxed in Phase 6, not here
 - [ ] **Release v0.0.1 to crates.io** — `k8rs --once`, exactly as
       [screens/once.md](screens/once.md) draws it: findings on stdout, the
       commands and errors on stderr, `● ▲ ○` carrying severity without colour,
@@ -3320,6 +3348,24 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       of every emit path with exactly one transformation on it — the documented
       ingest strip — and nothing the renderer added
       ([PRIOR-ART § D1](PRIOR-ART.md#d1--cluster-data-as-markup))
+- [ ] **The reader is told the control plane's credential is running out and not
+      told their own is.** C2 — a certificate *the API server presented* —
+      reaches a default run with no flag at all, as a trailer line under the
+      cards; C1's **expiring** band — the reader's own kubeconfig certificate,
+      the one credential on that page they can renew without asking anybody —
+      does not, because it is a `Finding` in the `Info` band and the trailer is
+      not a band. Measured 2026-08-30: `k8rs --live` matches zero lines for it,
+      `k8rs --live --analysis` draws it as a Certificates-pane row
+      ([D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
+      **Done when** a kubeconfig certificate inside `CERT_EXPIRY_WARN` puts one
+      trailer line on a default run, in the trailer order
+      [screens/once.md § Stacked with the other trailer lines](screens/once.md#stacked-with-the-other-trailer-lines)
+      fixes, without drawing a card and without printing twice under
+      `--analysis` — and `screens/once.md` draws the state before the driver
+      does. **Carries one sentence with it**: `main.rs`'s `ANALYSIS` doc still
+      calls the flag *"scaffolding … this goes away with the rest of the
+      temporary main"*, which D188 falsified — `--analysis` is part of the
+      released surface and outlives the temporary driver
 
 **🔒 Security gate:** log streams are attacker-controlled text — bounded
 buffer, control characters stripped, no unbounded growth. Secret values are

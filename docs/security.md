@@ -353,6 +353,18 @@ about a decade of daily use. A rotator would be more code than the log.
   and their sizes; revealing a value requires an explicit second action, and a
   revealed value never enters the command log, the audit log, or the YAML
   shown by `y`.
+- **A report is a document, and its reader chooses where it goes.** A finding
+  carries the controller's message **verbatim**
+  ([NOTES § D37](../NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)),
+  and a validating webhook that echoes back the object it rejected — several in
+  the wild do — can put an env value inside one. On a terminal that is no worse
+  than `kubectl describe`, which the same reader can already run; redirected into
+  a CI log with `k8rs --once > findings.txt`, or pasted into a ticket, it reaches
+  everyone who can read that log. k8rs does not blank the field — refusing to show
+  what `kubectl` shows is a tool lying by omission, not a security control — so
+  **a `--once` report carries whatever this cluster's controllers wrote into a
+  status, and redirecting it is a decision about who sees that**
+  ([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
 - **The edit temp file is treated as a leak surface.** A full object YAML can
   carry Secret data, environment values and tokens. It is written to the
   user's own temp directory with mode 0600 and removed on exit *and* on panic.
