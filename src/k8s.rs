@@ -2342,9 +2342,10 @@ pub(crate) async fn report_lists(
 // **It shipped stopping on [`crate::rules::Metrics::NotInstalled`] and
 // [`crate::rules::Metrics::Denied`], and that was a defect** (`k8s-admin`, 2026-08-29;
 // NOTES § D181 carries the cost table). Those two arms draw *"Install metrics-server if you want
-// it"* and *"Ask for read access to node metrics"* — and ended the poll in the same tick. The
-// operator does exactly what the screen asked, and the screen keeps saying the thing they just
-// fixed until k8rs is restarted, with nothing on it hinting that a restart is what is needed.
+// it"* and *"Ask for permission to list nodes in the metrics.k8s.io API group"* — and ended the
+// poll in the same tick. The operator does exactly what the screen asked, and the screen keeps
+// saying the thing they just fixed until k8rs is restarted, with nothing on it hinting that a
+// restart is what is needed.
 // **A pane that instructs an action has to be able to observe that action.** It is D181's own
 // argument from the other side: probe-gating was refused for printing *install metrics-server* at
 // a cluster that had one, and this version could not even self-correct.
@@ -2436,8 +2437,12 @@ pub(crate) async fn report_lists(
 //
 // **A `401` is [`crate::rules::Metrics::Silent`] and not `Denied`**, which is a choice between two
 // wrong sentences rather than a right one. An expired login is not a missing permission, so *ask
-// for read access to node metrics* would send the reader to their cluster administrator over a
-// `kubectl` login they can renew themselves; *did not answer* is at least true of what happened.
+// for permission to list nodes in the metrics.k8s.io API group* would send the reader to their
+// cluster administrator over a `kubectl` login they can renew themselves. **Since NOTES § D187
+// that arm names an RBAC verb, a resource and an API group, which makes it a sharper example and
+// not a weaker one**: the vaguer wording sent the reader somewhere unhelpful, and this one hands
+// their administrator an exact Role rule to add — one that changes nothing, because a `401` is
+// not an RBAC answer at all. *Did not answer* is at least true of what happened.
 // The reader is not left with only this: every watch is failing at the same moment and
 // `main.rs`'s `unreadable` names the expired credential and the program to renew it with.
 

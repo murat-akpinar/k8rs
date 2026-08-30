@@ -1210,11 +1210,7 @@ fn every_way_the_probe_can_fail_draws_its_own_way_out_and_no_two_are_the_same() 
             Some(Metrics::Silent),
             "Check that its pods are running",
         ),
-        (
-            "denied",
-            Some(Metrics::Denied),
-            "read access to node metrics",
-        ),
+        ("denied", Some(Metrics::Denied), "metrics.k8s.io"),
     ] {
         let cluster = ClusterSnapshot {
             metrics,
@@ -1319,6 +1315,28 @@ fn the_node_section_being_off_takes_the_metrics_row_with_it_however_the_probe_we
                 .iter()
                 .any(|s| s.contains("metrics-server") || s.starts_with("using ")),
             "{name}: no metrics row at all, and no measurement either"
+        );
+    }
+}
+
+#[test]
+fn the_denied_metrics_row_names_the_group_that_is_the_only_thing_telling_the_two_nodes_apart() {
+    // **The one `ask_for` where the resource plural alone misleads** (NOTES § D187). Every other
+    // one names a resource that exists in exactly one group; `nodes` exists in two, the reader
+    // very likely already holds the core one, and the group is the whole of the difference. The
+    // requirement is that a reader can write the Role rule off this line — verb, resource, group —
+    // not that the sentence matches a literal.
+    let cluster = ClusterSnapshot {
+        metrics: Some(Metrics::Denied),
+        ..corpus()
+    };
+    let report = super::capacity(&cluster, &[]);
+    let (_, ask_for) = not_computed(&report)[0];
+    println!("denied → {ask_for}");
+    for token in ["list", "nodes", "metrics.k8s.io"] {
+        assert!(
+            ask_for.contains(token),
+            "the Role rule cannot be written without `{token}`: {ask_for}"
         );
     }
 }

@@ -3134,21 +3134,44 @@ public release.
       included.
       `--live --analysis` draws all seven panes off the same loop, Capacity
       carrying real usage from the metrics poll (`using 0.143 cpu and 1Gi`)
-- [ ] The **read-only `ClusterRole`** written out in `docs/security.md`, and
+- [x] The **read-only `ClusterRole`** written out in `docs/security.md`, and
       verified by running v0.0.1 against kind under exactly that role and
       nothing more. It ships with the first release because it is what a
       stranger needs in order to run the thing at all; the admin role follows
-      in Phase 7 with the writes it exists for. **Measured 2026-08-22 and it
-      does not cover the browser today**: `k8rs-readonly` names 15 resources
-      and discovery offers 42 on a bare kind cluster, every CRD on a real one,
-      so most rows 403 — and the role has no `nonResourceURLs: ["/api",
-      "/apis"]` rule at all, which usually works only because `system:discovery`
-      is bound to `system:authenticated` by default. The browser's verbs are
-      `list` + `watch` per resource plus non-resource `get` on `/api` and
-      `/apis`. The server already names the verb, resource, group and namespace
-      in `status.message`; rendering it satisfies the gate's *names the missing
-      verb* literally, and swallowing it into *could not load resources* is
-      [PRIOR-ART § C](PRIOR-ART.md#c-errors-that-lie) by name
+      in Phase 7 with the writes it exists for.
+      **Done 2026-08-30, and *nothing more* was made literally true.** A
+      ServiceAccount bound to nothing but `k8rs-readonly` drew byte-identical
+      output to the admin kubeconfig — `62 kinds · {Metrics, DisruptionBudgets}`,
+      `41 pods · 4 nodes`, `13 critical, 3 warnings`, all seven panes, **zero
+      refusals** — with 3400 lines of findings on stdout and one connection line
+      on stderr. A ServiceAccount is in `system:authenticated`, so the run alone
+      could not show the role's own `nonResourceURLs` rule was what answered
+      discovery, and deleting `system:discovery` to find out is a destructive
+      cluster-wide action that was refused and stays refused; a
+      `SubjectAccessReview` taking `groups` as a field, and an impersonated
+      identity that suppresses the auto-added group, settled it without editing
+      anything. **Two grants came out** — `configmaps`, and `batch: ["jobs"]`,
+      which [D39](NOTES.md#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)
+      issued in 2026-08-12 for a CronJob grouping whose three stated effects all
+      describe code that was never written; D39 is corrected at source, because
+      fixing the YAML alone leaves the decision saying the grant is required.
+      `pods/log` and `events` stay, each now naming the Phase 6 box it waits on.
+      **The one blocker was a sentence**: nine of ten permission-shaped lines in
+      `analysis.rs` name the verb and the resource plural, and the tenth said
+      *"Ask for read access to node metrics"* — which maps to no API resource,
+      where the obvious guess is a permission the reader already has. Fixed under
+      a narrow, recorded reversal of `analysis.rs`'s freeze
+      ([D187](NOTES.md#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30) ·
+      [reports/2026-08-30](reports/2026-08-30-the-read-only-clusterrole-under-itself.md)).
+      **The Authorization row of the security gate is now earned in both halves**
+      — the 403-degradation half by the namespace box, this half here — **except
+      its `--read-only` bullet, which is not tickable and must not be inherited
+      as proven**: `ops.rs` does not exist and `--read-only` is not a flag this
+      build accepts. That is Phase 7.
+      **What this box did not cover**: the browser, whose rows need `list` +
+      `watch` on every discovered kind rather than the 15 this role names — it is
+      Phase 11 and does not exist yet, and the 2026-08-22 measurement behind that
+      claim stands
       ([reports/2026-08-22-browser-rows-table-watch-and-refresh.md](reports/2026-08-22-browser-rows-table-watch-and-refresh.md))
 - [ ] **Say in the docs where `--once` output ends up.** Findings carry
       controller messages verbatim, and a validating webhook can echo the

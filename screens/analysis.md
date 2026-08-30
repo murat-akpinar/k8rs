@@ -214,7 +214,7 @@ guessed wrong on one count (next bullet):
 | k8rs has not asked *(every cluster, through the whole of Phase 4 — this is `Metrics: None`, not a fifth wording choice)* | *"What each node is actually using is not shown. That number comes from metrics-server, and k8rs does not read it."* → *"Nothing to ask for — the numbers above are complete without it."* |
 | no metrics-server installed | *"What each node is actually using is not shown. That number comes from metrics-server, and this cluster does not have it installed."* → *"Install metrics-server if you want it — the numbers above are complete without it."* |
 | metrics-server installed but not answering | *"metrics-server is installed here but did not answer."* → *"Check that its pods are running."* |
-| you may read nodes but not what they are using (a 403 on the metrics API) | *"You are not allowed to read what each node is using."* → *"Ask for read access to node metrics."* |
+| you may read nodes but not what they are using (a 403 on the metrics API) | *"You are not allowed to read what each node is using."* → *"Ask for permission to list nodes in the metrics.k8s.io API group."* |
 | the node section itself did not run — one namespace only, or no permission to list nodes | **no metrics row at all.** The section is one `NotComputed` and that is the whole of it (rule 7 above). A usage number with nothing to compare it against is [PRIOR-ART § F2](../PRIOR-ART.md#f2--a-number-that-cannot-be-defended)'s number with no denominator |
 
 **The middle two rows are not one sentence with a swapped clause — they are

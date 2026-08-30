@@ -100,21 +100,19 @@ rules:
   # grant below still works and `/apis` alone answers 403 (NOTES § D160)
   - nonResourceURLs: ["/api", "/apis", "/api/*", "/apis/*", "/version"]
     verbs: ["get"]
+  # `pods/log` and `events` are granted ahead of the code that reads them —
+  # Phase 6's `l` logs view and its per-object events fetch. Nothing reads
+  # either today; they are here so the role a stranger applies for v0.0.1 does
+  # not have to change under them a fortnight later (NOTES § D187)
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services", "nodes",
-                "persistentvolumeclaims", "configmaps"]
+                "persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
-    verbs: ["get", "list", "watch"]
-  # a CronJob's pods are owned by a Job, and only the Job names the CronJob.
-  # `cronjobs` itself is deliberately absent: the Job's ownerReference already
-  # carries the CronJob's kind, name and uid, so nothing reads the object
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
     verbs: ["get", "list", "watch"]
   # rule C3 — the pending certificate signing requests nobody approved
   - apiGroups: ["certificates.k8s.io"]
@@ -138,13 +136,18 @@ rules:
   #     verbs: ["get", "list", "watch"]
 ```
 
-`batch` is here because of what a pod carries and what it does not. A CronJob's
-pod names its Job in `ownerReferences` and says nothing about the CronJob above
-it, so grouping the pods of a five-minute schedule onto one card requires a GET
-on the Job. Without the verb that GET is a 403, every tick files under its own
-Job name, and the card churn lands on the user running the least-privileged
-role — the one least equipped to explain it. The degradation is named, not
-silent: the finding files under the Job and says the CronJob could not be read.
+**Every rule above is reachable by code that exists, and that is checked rather
+than assumed.** The role was run against kind under itself on 2026-08-30 — including under an
+identity outside `system:authenticated`, so the default `system:discovery`
+binding could not apply and the `nonResourceURLs` rule above is what answered
+discovery — and it drew every finding and all seven analysis panes with zero
+refusals ([NOTES § D187](../NOTES.md#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)).
+Two grants came out in that audit: `configmaps`, which nothing has ever read —
+rule 4 reads the kubelet's *message*, which names the missing object without
+needing access to it — and `batch: ["jobs"]`, granted in 2026-08-12 for a
+CronJob grouping that was described in NOTES and never written. `pods/log` and
+`events` are the two that stayed ahead of their code, and the comment above
+them says so.
 
 Admin — the above plus the operations:
 

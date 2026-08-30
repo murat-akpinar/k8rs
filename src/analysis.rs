@@ -566,7 +566,7 @@ fn live_usage_row(metrics: Option<&Metrics>) -> Option<Row> {
         ),
         Some(Metrics::Denied) => (
             "You are not allowed to read what each node is using.",
-            "Ask for read access to node metrics.",
+            "Ask for permission to list nodes in the metrics.k8s.io API group.",
         ),
     };
     Some(Row::NotComputed {

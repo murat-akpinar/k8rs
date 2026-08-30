@@ -208,6 +208,7 @@ its line moving with it.
 - [D184](#d184--the-namespace-box-what-a-real-restricted-role-took-away-and-the-eight-rulings-it-forced-2026-08-30) — the namespace box: what a real restricted role took away, and the eight rulings it forced
 - [D185](#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30) — cleanup on the last line is not cleanup, and the resource is not always a file
 - [D186](#d186--a-done-when-written-from-a-measurement-its-own-commit-had-already-invalidated-and-the-two-findings-that-outlived-it-2026-08-30) — a done-when written from a measurement its own commit had already invalidated, and the two findings that outlived it
+- [D187](#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30) — the read-only role under itself: two grants nothing reads, a decision that described code that was never written, and the one sentence that sends an operator to the wrong resource
 
 ## Why it exists — where the gap is
 
@@ -1782,12 +1783,19 @@ needs a GET on the Job — and `k8rs-readonly` granted `""`, `apps`, `policy` an
 `metrics.k8s.io`, with no `batch`. Under the role the docs tell people to use,
 every tick would file under its own Job name: the churn the variant was added
 to prevent, delivered to the user least equipped to explain it.
-[docs/security.md](docs/security.md#rbac) now grants `batch: jobs` read verbs,
-and the 403 degrades by name — the finding files under the Job and says the
-CronJob could not be read. `cronjobs` is deliberately not granted: the Job's
-ownerReference already carries the CronJob's kind, name and uid, so nothing
-reads the object, and a role whose entire argument is least privilege does not
-get to carry a resource it never GETs. Auditing that block found two more of
+[docs/security.md](docs/security.md#rbac) granted `batch: jobs` read verbs for
+that, and **the three things this paragraph then said about the result were
+never true of any code that shipped** — measured at HEAD on 2026-08-30 and
+reversed in
+[D187](#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30).
+There is no GET on a Job (`owner_uid` returns `None` for every owner kind that
+is not a `ReplicaSet`), no CronJob grouping (`ObjectKind::CronJob` is
+constructed and matched by nothing), and no *the CronJob could not be read*
+finding (no such string exists). The grant is out. `cronjobs` was never granted
+and that part stands, for the reason given: the Job's ownerReference already
+carries the CronJob's kind, name and uid, and a role whose entire argument is
+least privilege does not get to carry a resource it never GETs — **which is the
+same sentence that condemns `batch: jobs`, one line after it was written.** Auditing that block found two more of
 the same class, both fixed in the same edit — `certificates.k8s.io` for rule C3
 and `discovery.k8s.io/endpointslices` for the waste report, each a Phase 5 box
 with its fixture already committed, each a 403 waiting for the user who
@@ -16227,3 +16235,86 @@ permission fact — which disagrees with `main.rs` reading the same fact off
 count printed with no age, which `screens/widgets.md` § 1a requires and the header
 does not do. Both need a field on a type frozen at an earlier phase close, so both
 are a recorded reversal and a later box, not a dev round.
+
+### D187 — the read-only role under itself: two grants nothing reads, a decision that described code that was never written, and the one sentence that sends an operator to the wrong resource (2026-08-30)
+
+The role in [docs/security.md](docs/security.md#rbac) had been written, audited
+and revised for two weeks and had **never been run under itself**. Running it
+settled the box and produced three findings, one of which required breaking a
+freeze.
+
+**Under itself, it works, and "under itself" was made literally true.** A
+ServiceAccount bound to nothing but `k8rs-readonly` produced byte-identical
+output to the admin kubeconfig — `62 kinds · {Metrics, DisruptionBudgets}`,
+`41 pods · 4 nodes`, `13 critical, 3 warnings`, all seven panes, **zero
+refusals** — with the split `screens/once.md` specifies: 3400 lines of findings
+on stdout, one connection line on stderr. Writes and Secrets are refused by real
+attempt, not by `can-i`, which **lies here**: `kubectl auth can-i list pods
+--all-namespaces` answers `no` for a grant that plainly works, and answers `yes`
+without the flag.
+
+**The `system:discovery` hole was closed without deleting anything.** A
+ServiceAccount is in `system:authenticated`, which the default binding grants
+discovery to, so the obvious experiment — delete the binding — is what proves
+the role's own `nonResourceURLs` rule is load-bearing, and it is a destructive
+cluster-wide action that was refused and stays refused. Two non-destructive
+routes settled it instead: a `SubjectAccessReview` takes `groups` as a *field*,
+so the role can be asked about alone and the authorizer names the binding that
+allowed it (`/api`, `/apis`, `/apis/apps/v1`, `/version` all true via
+`k8rs-reader-binding`, all **false** with the rule removed); and an impersonated
+identity that names its groups explicitly suppresses the auto-added
+`system:authenticated`, under which the binary drew everything with zero
+refusals. **A refused destructive experiment is not the end of a measurement —
+it is the start of looking for the non-destructive one that answers the same
+question.**
+
+**Two grants came out, and the interesting one had a decision behind it.**
+`configmaps` is read by nothing — rule 4 reads the kubelet's *message*, which
+names the missing object without needing access to it. `batch: ["jobs"]` was
+granted by [D39](#d39--a-node-owns-pods-and-three-more-things-the-shape-could-not-say-2026-08-12)
+on 2026-08-12 for a CronJob grouping, and **all three things D39 said about the
+result describe code that was never written**: `owner_uid` returns `None` for
+every owner kind that is not a `ReplicaSet`, so a Job owner cannot reach a fetch;
+`ObjectKind::CronJob` is constructed at `rules.rs:1908` and matched by nothing;
+and no *"the CronJob could not be read"* string exists. J1/J2 are in the **v0.2**
+rule set, two milestones out. D39 is corrected at source rather than contradicted
+here, because the failure mode is precise: fix the YAML alone and the next reader
+finds the decision still saying the grant is required, and puts it back. **A
+grant is removed by editing the decision that issued it.**
+
+**`pods/log` and `events` stayed, and the comment is the point.** Nothing reads
+either today, but Phase 6's *first two* boxes are the `l` logs view and the
+per-object events fetch. Removing them costs two doc edits in each direction
+inside a fortnight; that is the side of the churn trade where churn wins. What
+the file lacked was any marker distinguishing *granted and used* from *granted
+and waiting*, which is how four such grants accumulated unnoticed — so each now
+names the box it is waiting on.
+
+**The freeze on `analysis.rs` yields for one string, and this is the record of
+it.** Ten permission-shaped `ask_for` lines exist in that file. Nine name the
+RBAC verb and the API resource plural — *"Ask for permission to list
+poddisruptionbudgets across the whole cluster"*. The tenth said **"Ask for read
+access to node metrics."** *Node metrics* maps to no API resource name, and the
+obvious guess is `nodes` in the core group — a permission the reader very likely
+already has, and **not** this one, which is `nodes` in `metrics.k8s.io`. The
+group is the only thing that separates them, and the one sentence that needed to
+say it was the one that declined to. So the single case where the resource name
+actively misleads was the case the plain-language wording covered. It now reads
+**"Ask for permission to list nodes in the metrics.k8s.io API group."** — `list`
+and not `get`, because `node_usage` sends exactly one `list`.
+
+`analysis.rs` froze at Phase 4 close, and CLAUDE.md says a later phase needing a
+frozen file changed is a stop and a recorded reversal. **This is the reversal,
+and it is deliberately narrow**: one user-visible string, no signature, no field,
+no new type — and the thing that forced it is the Authorization row of the
+security gate itself, which says a 403 *"names the missing verb + resource"* and
+which this box exists to earn. A frozen file does not get to ship a sentence the
+gate above it forbids. Invariant 14 is not the counter-argument: the family
+already splits the two jobs, and the *reason* line — *"You are not allowed to
+read what each node is using."* — keeps the plain language while the `ask_for`
+line carries the verb.
+
+**One thing the row still may not claim.** *`--read-only` is structurally true —
+`ops.rs` unreachable, keys unbound* is not tickable and must not be inherited as
+proven: `src/ops.rs` does not exist and `--read-only` is not a flag this build
+accepts. That is Phase 7, not a defect.
