@@ -174,8 +174,16 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     `serde_json`, `serde_yaml_ng`, `x509-parser`, `similar`, `futures-util`,
     `tokio-rustls`.
     `similar` arrives only in v0.4 with `edit` — approved is not the same as
-    present. No `clap` while the flags are `--read-only` / `--context` /
-    `--namespace` / `--once`; no `tracing` until debugging demands it
+    present. **No `clap`**, and the threshold is not *a flag that takes a
+    value* — `--context` and `--namespace` take one each, `--context`'s against
+    a closed set, both parsed by hand. It is **subcommands, generated help, or a
+    mutual-exclusion table**
+    ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
+    The binary ships six flags, not the four this line named until 2026-08-30:
+    `--read-only` `--context` `--namespace` `--once` — plus `--live`, the
+    temporary driver's, and `--analysis`, which
+    [D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)
+    put in the **released** surface. No `tracing` until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
     **The eleventh was a reversal and is the shape to argue from**
     ([D143](NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)):
@@ -560,7 +568,7 @@ gives sixteen boxes of work one changelog line and no way back to box eleven.
 
 | # | Step | Who | Gate to pass |
 |---|---|---|---|
-| 1 | Read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking |
+| 1 | **`git status --short` first**, then read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking — **and no file the brief names is already modified** ([D195](NOTES.md#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30)) |
 | 2 | Screen spec, **only if a screen changes** | `tui-designer` | the mockup covers every state, not just the happy one |
 | 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
 | 4 | Prove the tests can fail | the author, before reporting | `just mutants-diff` over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
@@ -667,6 +675,11 @@ decision, and the PM writes it into `NOTES.md` before committing.
 
 ### Where a leak would actually happen — the PM checks these by hand
 
+- **A brief dispatched over a dirty tree.** A modified file the brief names is
+  somebody's turn already in flight — another session, or a box that landed
+  while the PM was writing documents. The whole dispatch is then wasted and its
+  output is a merge nobody asked for. It costs one command and it is step 1's
+  gate now ([D195](NOTES.md#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30)).
 - A box checked for work that was written but never *run*.
 - A test that has only ever been green — step 4's mutation run skipped because
   the diff looked small. It is `--in-diff` and it costs a minute.
