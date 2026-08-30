@@ -51,6 +51,17 @@ whoever is writing — a dev at step 3 as much as the PM at step 7:
   doc comment, a box, a report: they link `D##`, they do not restate it. The
   second copy is the one that goes stale, and it is never the one that gets
   fixed.
+- **The box is the code, and the turn makes one dispatch.** What the PM writes
+  before it is what the brief could not be written without — a blocking ruling,
+  a screen the code must match. Nothing else. A stale list, a wrong number, a
+  contradiction noticed on the way is
+  [`backlog.md`](backlog.md)'s ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)),
+  not this turn's edit. Three hours once went into documents nobody was blocked
+  on, each defensible on its own, while the code sat finished and uncommitted in
+  the working tree
+  ([D196](NOTES.md#d196--three-hours-of-documents-nobody-was-blocked-on-and-the-gate-the-process-does-not-have-2026-08-30)).
+  The three rules above bound what goes *into* a document; this one bounds
+  whether it is written *now*.
 - **`NOTES.md`'s index is part of the entry.** A new `### D##` heading lands
   with its line in [§ Decision index](NOTES.md#decision-index) in the same edit.
   `scripts/check-docs.py` fails on a line whose anchor stopped resolving, so a
@@ -456,6 +467,13 @@ the user is not in the room.** The PM picks the next family, briefs it, runs the
 cycle, lands it, and starts the next — no "shall I continue", no question
 [`todo.md`](todo.md) already answers. **Nothing else loosens**, and the person who
 could have caught a skipped gate has left, so a gate skipped now is never found.
+
+**But the PM reports at the first dispatch, not only at the push** — one line:
+the box, what had to be ruled before it, what is running now.
+[D98](NOTES.md#d98--the-user-leaves-the-room-and-the-pm-stops-asking-2026-08-15)
+removed the *asking*, not the *saying*. A box that has been running three hours
+is otherwise invisible until the user asks what happened to their afternoon
+([D196](NOTES.md#d196--three-hours-of-documents-nobody-was-blocked-on-and-the-gate-the-process-does-not-have-2026-08-30)).
 The only stops: the section below, a red build, and any reversal of a design
 decision — written into [NOTES.md](NOTES.md) before it is acted on.
 

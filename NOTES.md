@@ -217,6 +217,7 @@ its line moving with it.
 - [D193](#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30) — the crate's own description promised a TUI, and the release stops for a README rather than shipping a blank page
 - [D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) — the flag that names an object, and D17's threshold read against the binary it was written for
 - [D195](#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30) — the brief that ordered work the working tree already held
+- [D196](#d196--three-hours-of-documents-nobody-was-blocked-on-and-the-gate-the-process-does-not-have-2026-08-30) — three hours of documents nobody was blocked on, and the gate the process does not have
 
 ## Why it exists — where the gap is
 
@@ -16804,3 +16805,47 @@ session writes this repo too — check `git log`/`status` before briefing*; it w
 loaded, in context, and did not fire, which is the argument for a gate in the
 table over a note in a file. **A rule the process does not stop at is not a
 rule.**
+
+### D196 — three hours of documents nobody was blocked on, and the gate the process does not have (2026-08-30)
+
+The user asked why they had been stuck for three hours.
+[D195](#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30)
+answers the last five minutes of it — the brief was written for code the tree
+already held. It does not answer the other two and a half hours, and this entry
+does.
+
+**What the PM actually did, in order.** Opened Phase 6 in `todo.md` with a
+24-line head note and a seven-family list. Sent `screens/detail.md` to
+`tui-designer`, then reviewed it through **three** round trips. Ruled
+[D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30).
+Corrected invariant 10's stale flag list in `CLAUDE.md`. *Then* briefed
+`dev-core`. **Not one of those steps could produce a line of product code**, and
+the box was *print a pod's logs*.
+
+**Every one of them was defensible on its own, which is the whole problem.** The
+review rounds found real defects — a buffer bound justified against a 50 MB
+figure that is a prohibition rather than a budget, a citation pointing at the
+wrong decision, "characters" where the code counts bytes, and one invented
+percentage that was the PM's own. D194 was genuinely blocking: the driver had no
+way to name an object. The invariant-10 correction was true. **Defensible is not
+the same as *now*.** The flag list had been stale for days and would have been
+stale tomorrow; it belonged in [`backlog.md`](backlog.md), which exists for
+exactly this ([D108](#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)).
+
+**The structural hole:
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+already found this once and its fix did not reach here.** D103's three rules
+bound what goes *into* `todo.md` and `NOTES.md`. None of them asks whether the
+PM should be writing a document *at this moment*, so the one role with no
+ownership row over `src/` is also the one role whose output nothing bounds. The
+process has gates for correctness and **not one for cost**: every gate it owns
+can only add a step, so there is no signal that a box has gone wrong until a
+human notices the afternoon is gone.
+
+**Two rules, both in `CLAUDE.md` where the process stops rather than in a note
+nobody re-reads** (D195's lesson, one entry earlier). *The box is the code, and
+the turn makes one dispatch* — everything else the PM writes is what the brief
+could not be written without, and the rest is `backlog.md`'s. And *the PM
+reports at the first dispatch, not only at the push*: D98 removed the asking,
+not the saying, and a fifteen-minute checkpoint costs one line where a
+three-hour one costs an afternoon.
