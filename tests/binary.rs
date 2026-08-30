@@ -86,7 +86,18 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
     }
 }
 
-/// **`--live` with nothing to connect to: exit 2, stderr, and an empty stdout.**
+/// **The sentence a run that got as far as connecting prints**, and the canary every
+/// *refused before anything was dialled* assertion in this file rests on
+/// ([`a_namespace_that_names_nothing_usable_is_refused_before_anything_connects`]).
+///
+/// **It is a `const` so the two halves cannot drift apart.** The negative assertions are only
+/// worth anything while this text is what a connect failure actually says; reworded in
+/// `src/main.rs` and spelled out by hand here, every one of them passes over a binary that
+/// dialled the cluster first. Named once, and proved producible in the same test that relies on
+/// its absence.
+const CONNECT_CANARY: &str = "no cluster to watch";
+
+/// **Neither cluster mode can start without a kubeconfig: exit 2, stderr, and an empty stdout.**
 ///
 /// The unit test over `live` can assert only the sentence it returns — "stdout belongs to the
 /// process and a test cannot read it back" (`src/main_tests.rs` § WATCHING A CLUSTER). This is
@@ -98,13 +109,23 @@ fn no_arguments_is_the_usage_on_stderr_in_three_lines_and_exit_2() {
 /// is the next box of Phase 5 and it will rewrite this sentence; what may not change is the
 /// stream, the exit code and the empty stdout.
 #[test]
-fn live_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty() {
-    let out = k8rs_with_no_kubeconfig(&["--live"]);
+fn a_cluster_mode_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty() {
+    // **`--once` is asserted beside `--live` because only one of the two has an exit code to
+    // get wrong.** `--live` returns a sentence and `main` exits 2 whatever the sentence says;
+    // `--once` returns `Option`, and the mode that can answer *it reported* is the mode that can
+    // answer it about a cluster it never reached (`screens/once.md` § Exit codes).
+    for mode in ["--live", "--once"] {
+        let out = k8rs_with_no_kubeconfig(&[mode]);
 
-    assert_eq!(out.status.code(), Some(2), "{out:?}");
-    assert!(out.stdout.is_empty(), "{:?}", text(out.stdout.clone()));
-    let stderr = text(out.stderr);
-    assert!(stderr.starts_with("k8rs: "), "{stderr:?}");
+        assert_eq!(out.status.code(), Some(2), "{mode}: {out:?}");
+        assert!(
+            out.stdout.is_empty(),
+            "{mode} wrote a diagnostic where a report goes: {:?}",
+            text(out.stdout.clone())
+        );
+        let stderr = text(out.stderr);
+        assert!(stderr.starts_with("k8rs: "), "{mode}: {stderr:?}");
+    }
 }
 
 /// **A committed capture: exit 0, the report on stdout, and stderr empty.**
@@ -200,6 +221,21 @@ fn a_crafted_path_leaves_the_process_with_no_control_character_on_stderr() {
 /// on screen to notice it by.
 #[test]
 fn a_namespace_that_names_nothing_usable_is_refused_before_anything_connects() {
+    // **The canary is proved producible first, or the negative below is vacuous.** Every
+    // assertion in the loop rests on *this exact sentence* being what a run that reached the
+    // connect says; reword it and the `!contains` goes silently true for every case at once,
+    // which is the shape `write-guard.py`'s `CANARIES` exists to refuse (CLAUDE.md § A derived
+    // list asserts it found something). `--once` is asserted beside `--live` because the two
+    // share one `live()` and one sentence, and a mode that grew a second one would show here.
+    for mode in ["--live", "--once"] {
+        let reached = text(k8rs_with_no_kubeconfig(&[mode]).stderr);
+        assert!(
+            reached.contains(CONNECT_CANARY),
+            "{mode} that reached the connect no longer says {CONNECT_CANARY:?}, so every \
+             `!contains` below proves nothing: {reached:?}"
+        );
+    }
+
     for args in [
         vec!["--live", "--namespace"],
         vec!["--live", "-n"],
@@ -209,6 +245,12 @@ fn a_namespace_that_names_nothing_usable_is_refused_before_anything_connects() {
         vec!["--live", "-n", "../secrets"],
         vec!["--live", "--namespace=a/b"],
         vec!["--live", "-n=.."],
+        // **`--once` goes through the same gate, and only a process can show it.** The unit
+        // tests call `mistyped` directly, which cannot tell *refused first* from *refused after
+        // a connection was attempted* — and `--once` is the mode whose whole promise is that it
+        // ends, so a run that dialled first would still exit 2 and look identical here.
+        vec!["--once", "--namespace"],
+        vec!["--once", "-n", "../secrets"],
     ] {
         let out = k8rs_with_no_kubeconfig(&args);
 
@@ -230,7 +272,7 @@ fn a_namespace_that_names_nothing_usable_is_refused_before_anything_connects() {
         // The canary. `KUBECONFIG` cannot be read, so any run that got as far as connecting
         // says so — and this refusal has to happen before that.
         assert!(
-            !stderr.contains("no cluster to watch"),
+            !stderr.contains(CONNECT_CANARY),
             "{args:?} reached the connect before the namespace was checked: {stderr:?}"
         );
     }
@@ -444,3 +486,345 @@ fn a_crafted_name_leaves_the_process_with_no_control_character_on_stdout() {
         "the name was stripped away along with the escape: {stdout:?}"
     );
 }
+
+// --- ONE REPORT AND OUT START ---
+//
+// **The half `src/main_tests.rs` § ONE REPORT AND OUT says is not its own.** That module can
+// read what `live` *returned*; it cannot read the process's own stdout, so *which stream the
+// report lands on*, *what the process exits with* and — the one this box's whole title is about
+// — *how many reports come out* are only observable from here.
+//
+// **A listener rather than a cluster, so `just check` stays the whole of CI.** CI has no
+// kubernetes, and a test that needs one is a step that silently does not run. What `--once`
+// needs to reach the bootstrap gate is five LISTs that answer, and what those need is
+// `std::net` and no dependency at all.
+
+/// A listener that answers every LIST with an empty one — every request except the watch, which
+/// is [`Watches`]'s subject — and the kubeconfig that points at it. **The `resourceVersion` is
+/// load-bearing**: an answer with none is `k8s::Fault::Unanswered`
+/// (`src/main_tests.rs`'s own stub says the same about itself), which keeps the bootstrap gate
+/// shut and would test the deadline instead of the report.
+///
+/// **`items: []` for every kind, because an `ObjectList` with no items is shape-compatible with
+/// all five** — the same reasoning `src/main_tests.rs`'s own stub is written under, and it is
+/// written twice because a helper cannot cross from `tests/` into a private `mod tests`.
+///
+/// **[`Watches`] is what the caller picks and it is the only thing that varies**, because the
+/// watch kube opens after each initial LIST is where every difference between these tests lives.
+fn a_cluster_that_answers_with_nothing_in_it(watches: Watches) -> std::path::PathBuf {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    // **The address the kernel handed back, never a literal one.** `scripts/security-guard.py`
+    // § no second outbound path refuses a hardcoded host in any URL under `tests/`, and it is
+    // right to: a loopback URL spelled out in a source file is indistinguishable from a dev
+    // leftover. `src/main_tests.rs`'s own stub is written the same way.
+    let address = listener.local_addr().expect("the port it picked");
+    std::thread::spawn(move || {
+        for socket in listener.incoming() {
+            let Ok(socket) = socket else { return };
+            std::thread::spawn(move || answer_empty_lists(socket, watches));
+        }
+    });
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-stub-{}-{}.kubeconfig.yaml",
+        std::process::id(),
+        address.port()
+    ));
+    std::fs::write(
+        &path,
+        format!(
+            "apiVersion: v1\nkind: Config\ncurrent-context: stub\n\
+             clusters: [{{name: stub, cluster: {{server: 'http://{address}'}}}}]\n\
+             contexts: [{{name: stub, context: {{cluster: stub, user: stub}}}}]\n\
+             users: [{{name: stub, user: {{}}}}]\n"
+        ),
+    )
+    .expect("the stub kubeconfig writes");
+    path
+}
+
+/// What the stub does with the watch kube opens after each initial LIST.
+///
+/// **It is a parameter and not a constant because the two tests over this listener want opposite
+/// clusters**, and one stub answering both was how a flake and a vacuous test shipped together
+/// (`tester`, 2026-08-30 — the numbers are on each variant). Both are things a real API server
+/// does; neither is a model of one.
+///
+/// **What is gone from here is the third behaviour, which was not a cluster at all**: answering
+/// `watch=true` with the `List` body above. That is not a watch stream, so kube classifies it as
+/// a watch failure — and the doc that shipped it said the failure landed too late to matter,
+/// *"by then all five have listed"*. **Both halves of that sentence were measured false**, one
+/// variable changed between two runs of a request-logging listener with this one's wire
+/// behaviour (`tester`'s scratchpad, not a committed file): in three runs of six the pods
+/// watch was answered *before* the fifth LIST was, and in the other three all five had listed
+/// first and the trouble line came out anyway — because a socket answered is not a store updated.
+/// Answering: 6 runs, 6 reports carrying *k8rs is not getting pods from this cluster*. Held open:
+/// 3 runs, 3 clean reports.
+#[derive(Clone, Copy)]
+enum Watches {
+    /// **Accepted and never answered, which is what a real watch over a cluster where nothing is
+    /// happening does.** The request is read, dropped, and the socket left blocked on its next
+    /// `read` until the process exits — not refused, because a refusal is a `k8s::Fault` too and
+    /// would print its own trouble line.
+    ///
+    /// **This is the flake fix.** [`a_once_run_over_a_cluster_that_answers_is_the_report_on_stdout_and_exit_0`]
+    /// went 5 red in 20 runs against a listener that answered the watch, and 0 red in 30 after —
+    /// which is what unblocked `just mutants-diff`, whose unmutated baseline has to be green.
+    HeldOpen,
+    /// **Accepted and then cut, which is what a real one does when the connection goes** — a
+    /// restarted API server, a dropped VPN, an idle NAT entry. kube records the failure, backs
+    /// off and re-lists (`src/k8s.rs` § THE DRIVER), so the store keeps changing after the
+    /// bootstrap gate has opened.
+    ///
+    /// **That is the only thing [`a_once_run_prints_one_report_and_not_a_second_one`] can count,
+    /// and [`HeldOpen`](Watches::HeldOpen) leaves it nothing to count.** Over a cluster where
+    /// nothing happens, the update that opens the gate is the last update there is, so a binary
+    /// with `--once`'s latch *deleted* still prints exactly one report — measured, 20 runs of
+    /// that test over an unlatched binary, 20 green, 100 invocations, no red. A test that cannot
+    /// fail is the thing this file exists to refuse (CLAUDE.md § Tests must not lie), so the
+    /// cluster it runs against is one where something is still arriving.
+    Cut,
+}
+
+fn answer_empty_lists(mut socket: std::net::TcpStream, watches: Watches) {
+    use std::io::{Read, Write};
+    let body = r#"{"apiVersion":"v1","kind":"List","metadata":{"resourceVersion":"1"},"items":[]}"#;
+    let answer = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let mut pending = String::new();
+    loop {
+        let mut chunk = [0_u8; 2048];
+        match socket.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => pending.push_str(&String::from_utf8_lossy(&chunk[..read])),
+        }
+        // A LIST is a GET with no body, so a request ends at the blank line.
+        while let Some(end) = pending.find("\r\n\r\n") {
+            let head = pending[..end].to_string();
+            pending.replace_range(..end + 4, "");
+            // The watch, and what happens to it is [`Watches`]'s whole subject. Nothing is
+            // written back either way, so hyper never puts a second request on this connection
+            // and the loop below stays a queue.
+            if head.contains("watch=true") {
+                match watches {
+                    Watches::HeldOpen => continue,
+                    // Dropping the `TcpStream` closes it, which is the cut.
+                    Watches::Cut => return,
+                }
+            }
+            if socket.write_all(answer.as_bytes()).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+/// Run the built binary against [`a_cluster_that_answers_with_nothing_in_it`].
+fn k8rs_over_a_stub(kubeconfig: &std::path::Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_k8rs"))
+        .args(args)
+        .env("KUBECONFIG", kubeconfig)
+        .output()
+        .expect("the built binary runs")
+}
+
+/// The header every report opens with over a cluster with nothing in it. **Counting it is how
+/// *one report* is asserted at all** — a second report is a second header, and nothing else in
+/// the output is unique per report.
+const EMPTY_CLUSTER_HEADER: &str = "0 pods · 0 nodes";
+
+/// **`--once` over a cluster that answers: exit `0`, the report on stdout, the connection's own
+/// story on stderr** (NOTES § D17, `screens/once.md` § stdout and stderr are split on purpose).
+///
+/// **It also proves the run ends without anything killing it.** The watches under it never stop
+/// — kube's `watcher()` cannot finish and `k8s::StandingBackoff` never gives up — so a `--live`
+/// in its place hangs until the harness gives up, and the only thing that can return this
+/// process is the stopping point `--once` added.
+///
+/// **The stream split is asserted in both directions**, which is what `k8rs --once >
+/// findings.txt` rests on: the report may not leak onto stderr, and the greeting may not leak
+/// into the file.
+#[test]
+fn a_once_run_over_a_cluster_that_answers_is_the_report_on_stdout_and_exit_0() {
+    let kubeconfig = a_cluster_that_answers_with_nothing_in_it(Watches::HeldOpen);
+
+    let out = k8rs_over_a_stub(&kubeconfig, &["--once"]);
+
+    std::fs::remove_file(&kubeconfig).expect("the stub kubeconfig is removed");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = text(out.stdout);
+    let stderr = text(out.stderr);
+    assert!(
+        stdout.contains(EMPTY_CLUSTER_HEADER),
+        "the report is not on stdout, so `k8rs --once > findings.txt` writes an empty \
+         file: {stdout:?} / {stderr:?}"
+    );
+    assert!(
+        stdout.contains("nothing is broken"),
+        "a cluster with nothing in it got no health claim, which is the one thing an empty \
+         report may not do: {stdout:?}"
+    );
+    // **One trailing newline, not two.** The blank line between reports belongs to `--live`,
+    // which has a successor to separate; `--once` does not (`screens/once.md` § What it prints
+    // ends at the tally), and a redirected report that ends on two leaves a blank line at the
+    // foot of `findings.txt`. The file-driven half of the same claim is pinned by the
+    // whole-report literal in [`a_healthy_capture_is_the_report_on_stdout_and_exit_0`]; this
+    // half was proved once with `od -c` on a real run and asserted nowhere.
+    assert!(
+        stdout.ends_with('\n') && !stdout.ends_with("\n\n"),
+        "the report does not end at exactly one newline: {stdout:?}"
+    );
+    assert!(
+        stderr.starts_with("k8rs: watching — "),
+        "the connection's own story is not on stderr: {stderr:?}"
+    );
+    assert!(
+        !stderr.contains(EMPTY_CLUSTER_HEADER),
+        "the report reached stderr as well, so a reader redirecting one stream gets it \
+         twice: {stderr:?}"
+    );
+}
+
+/// **`--once` prints exactly one report.** That is the whole of the flag: *connect, print one
+/// report, exit* (NOTES § D17, `screens/once.md`) — and `src/main.rs`'s own closure says it in
+/// those words, *"so it is skipped whole, and `--once` prints exactly one thing"*.
+///
+/// **No unit test can see this and that is why it is here.** `live` returns `Option<String>` and
+/// answers `None` for *it reported*, which is the same `None` for one report as for four; the
+/// count only exists on the process's stdout.
+///
+/// **Counted by the header line, because a report cannot be told from a report any other way.**
+/// The tally is absent on an empty cluster and the trouble lines differ per pass; the header is
+/// on every report and on nothing else.
+///
+/// **[`Watches::Cut`] and not [`Watches::HeldOpen`], because over a cluster where nothing is
+/// arriving this test cannot fail at all** — 20 runs of it against a binary with the latch
+/// deleted came back 20 green (`tester`, 2026-08-30). The update that opens the gate is the last
+/// one there is, so there is no second report to suppress and nothing to count. `Cut` keeps
+/// failures and re-lists arriving behind the gate, which is the traffic the latch exists to
+/// swallow.
+///
+/// **[`ATTEMPTS`] runs and not one, because the failure this catches is a race** — whether the
+/// updates that produce a second report land in the same poll as the one that opened the gate is
+/// the machine's timing, not the program's. Measured over `Cut` against an unlatched binary, one
+/// invocation each: see [`ATTEMPTS`] for the rate the count is set from. A test whose red is a
+/// coin flip is the shape CLAUDE.md § Tests must not lie refuses, so the coin is flipped until
+/// the odds are not a question — and a run that is correct is correct every time, so this costs
+/// a fixed binary nothing but the spawns.
+#[test]
+fn a_once_run_prints_one_report_and_not_a_second_one() {
+    let kubeconfig = a_cluster_that_answers_with_nothing_in_it(Watches::Cut);
+
+    let reports: Vec<usize> = (0..ATTEMPTS)
+        .map(|_| {
+            text(k8rs_over_a_stub(&kubeconfig, &["--once"]).stdout)
+                .matches(EMPTY_CLUSTER_HEADER)
+                .count()
+        })
+        .collect();
+
+    std::fs::remove_file(&kubeconfig).expect("the stub kubeconfig is removed");
+    // Not `iter().all(..)`: the counts are the evidence, and a bare `false` would say only that
+    // one of five runs was wrong without saying which or by how much.
+    assert_eq!(
+        reports,
+        vec![1; ATTEMPTS],
+        "a --once run printed a number of reports that is not one, so a reader piping it to a \
+         file or to `jq` gets several answers to a question they asked once — reports per run"
+    );
+}
+
+/// How many times [`a_once_run_prints_one_report_and_not_a_second_one`] runs the binary.
+///
+/// **Set from a measured miss rate and not a guessed one** (`tester`, 2026-08-30). This constant
+/// was temporarily `1` against a binary with `--once`'s latch deleted, over
+/// [`Watches::Cut`]: 40 runs, 29 red, **11 missed — 27.5%**. Eight independent invocations miss
+/// together about one time in thirty thousand; at the five this was set to before the stub was
+/// fixed it was one in six hundred. The extra three cost three process spawns, and a binary that
+/// is correct prints one report every time — 200 invocations of the shipped binary over this
+/// listener, 25 runs of this file's whole suite at eight attempts each, came back `1` every
+/// time — so nothing here is paid twice.
+const ATTEMPTS: usize = 8;
+
+/// **A `--once` report that could not be written is exit `2` and a sentence — never a truncated
+/// report claiming success** (NOTES § D17; the file-driven half is
+/// [`a_write_that_fails_any_other_way_is_exit_2_and_says_why`]).
+///
+/// **The wiring is the thing under test, and it is different from the file path's.** There the
+/// failed write is `main`'s own `match`; here it happens inside a watch observer that returns
+/// `()`, so the sentence has to travel back out of an aborted future before `main` can exit on
+/// it. A unit test cannot reach it: the write it would have to fail is the process's own stdout.
+///
+/// `/dev/full` is the kernel returning a real `ENOSPC`, so nothing here invents the error shape
+/// (NOTES § D29).
+#[test]
+fn a_once_report_that_could_not_be_written_is_exit_2_and_says_why() {
+    let full = std::fs::File::options()
+        .write(true)
+        .open("/dev/full")
+        .expect("/dev/full is not on this machine, and nothing else is a real ENOSPC");
+    let enospc = std::io::Error::from_raw_os_error(28);
+    assert_eq!(
+        enospc.kind(),
+        std::io::ErrorKind::StorageFull,
+        "ENOSPC is 28 here, or this test is describing the other arm"
+    );
+    let kubeconfig = a_cluster_that_answers_with_nothing_in_it(Watches::HeldOpen);
+
+    let out = Command::new(env!("CARGO_BIN_EXE_k8rs"))
+        .arg("--once")
+        .env("KUBECONFIG", &kubeconfig)
+        .stdout(full)
+        .stderr(Stdio::piped())
+        .output()
+        .expect("the built binary runs");
+
+    std::fs::remove_file(&kubeconfig).expect("the stub kubeconfig is removed");
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let stderr = text(out.stderr);
+    assert!(
+        stderr.contains(&format!("k8rs: the report could not be written — {enospc}")),
+        "a report that arrived cut in half exited without saying so: {stderr:?}"
+    );
+}
+
+/// **`--once --analysis` puts the seven panes on stdout, and `--once` alone puts none there**
+/// (NOTES § D188).
+///
+/// **The unit test beside this one asserts the panes over a store, through `live_report`.** That
+/// is the arrangement of the seven; what it cannot show is that the flag survives the trip
+/// through `live` and lands on the same stream as the cards — and on the one store that unit
+/// test uses, a real `--once` run never reaches `live_report` at all, because every watch is
+/// refused and the run ends at *this cluster did not show k8rs its pods*.
+///
+/// **The headings and not the contents.** A cluster with nothing in it fills no pane with
+/// anything; what the flag decides is whether they are drawn.
+#[test]
+fn analysis_under_once_reaches_stdout_and_plain_once_draws_no_panes() {
+    let kubeconfig = a_cluster_that_answers_with_nothing_in_it(Watches::HeldOpen);
+
+    let with = k8rs_over_a_stub(&kubeconfig, &["--once", "--analysis"]);
+    let without = k8rs_over_a_stub(&kubeconfig, &["--once"]);
+
+    std::fs::remove_file(&kubeconfig).expect("the stub kubeconfig is removed");
+    assert_eq!(with.status.code(), Some(0), "{with:?}");
+    let panes = text(with.stdout);
+    let plain = text(without.stdout);
+    // Three of the seven, one per reason they exist: the pane N4 answers in, the one C1's
+    // expiring band answers in, and one that is neither.
+    for heading in ["[versions]", "[certificates]", "[capacity]"] {
+        assert!(
+            panes.contains(heading),
+            "{heading} did not reach stdout under --once --analysis, so the three rules whose \
+             only reader these panes are print nowhere: {panes:?}"
+        );
+        assert!(
+            !plain.contains(heading),
+            "the {heading} pane was drawn without --analysis, which buries the cards the run \
+             exists to show: {plain:?}"
+        );
+    }
+}
+
+// --- ONE REPORT AND OUT END ---

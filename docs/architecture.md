@@ -37,15 +37,17 @@ this small ([tech-stack § Deliberately absent](tech-stack.md#deliberately-absen
 What this build accepts:
 
 ```
-usage: k8rs [--analysis] <file.json>...   |   k8rs --live [--analysis] [--context <name>] [--namespace <name>]
+usage: k8rs [--analysis] <file.json>...   |   k8rs --once|--live [--analysis] [--context <name>] [--namespace <name>]
 ```
 
 | Flag | What it does |
 |---|---|
-| `<file.json>...` | Read Kubernetes objects from disk — one object per file, or a `kind: List`. Without `--live` this build cannot reach a cluster at all. |
+| `<file.json>...` | Read Kubernetes objects from disk — one object per file, or a `kind: List`. Without `--once` or `--live` this build reads files only — it cannot reach a cluster. |
 | `--analysis` | Draw the seven `analysis.rs` panes under the findings. One meaning in both modes ([NOTES § D169](../NOTES.md#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)). |
-| `--live` | Watch the cluster in the kubeconfig's current context instead of reading files. |
-| `--context <name>` | Which context `--live` connects to. **Scaffolding** — the shipped flag is Phase 12's; the spelling matches so the muscle memory transfers. |
+| `--once` | Connect, print one report, exit — `0` when it ran and reported, `2` when it could not run. **The released surface**: this is what v0.0.1 ships ([NOTES § D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). The whole run is bounded — it does not wait forever on a cluster that never answers. |
+| `--live` | Watch the cluster and redraw whenever the answer changes, forever. **The temporary driver's**, not a shipped flag: a watch that reconnects on its own is provable no other way. |
+| `--read-only` | Accepted and does nothing. There is no write path in this build to disable — `ops.rs` does not exist — so the guarantee holds by there being nothing to guard. **Phase 7 must make it load-bearing**; a flag that silently means nothing once there is something to guard is the failure this is one phase away from. |
+| `--context <name>` | Which context `--once`/`--live` connects to. **Scaffolding** — the shipped flag is Phase 12's; the spelling matches so the muscle memory transfers. A `--context` with nothing usable after it is **refused**, not silently answered with the current context ([D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). |
 | `--namespace <name>`, `-n <name>` | Narrow the watches to one namespace. **This one is not scaffolding**: the scope it sets is a field on the snapshot that rules and reports were written to read. |
 
 `--namespace` and `-n` each take their value attached with `=` or as the next
@@ -64,17 +66,16 @@ empty tool. Either way the header states the scope that is in effect, because a
 report that does not say what it covered cannot be trusted once it is pasted
 into a ticket.
 
-**`--read-only` and `--once` are specified but not yet built** — `--read-only`
-is described in [security.md § Write safety](security.md#write-safety-model) and
-arrives with the write path, `--once` is the first release's whole surface
-([screens/once.md](../screens/once.md)). No code parses either today.
+**`--once` is built and `--read-only` is accepted as a no-op**; both were
+*"specified but not yet built"* until 2026-08-30. `--read-only` is described in
+[security.md § Write safety](security.md#write-safety-model) and becomes
+load-bearing with the write path in Phase 7.
 
-**When `--once` is built it takes `--analysis`, and that is the whole of the
-first release's surface**: `k8rs --once [--analysis] [--context <name>]
-[--namespace <name>]`. The panes are not the default — the default is the findings, and seven
-whole-cluster reports stacked under three cards buries them — but they are one
-word away, because three rules return `Severity::Info` and nothing else and the
-card block does not draw that band
+**The panes are not the default under `--once`, and they are one word away.**
+The default is the findings; seven whole-cluster reports stacked under three cards
+buries them. But three rules return `Severity::Info` and nothing else, and the
+card block does not draw that band, so without `--analysis` they would ship with
+no reader at all
 ([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
 
 **`--live` is the temporary driver's**, not a shipped flag: the console watches a

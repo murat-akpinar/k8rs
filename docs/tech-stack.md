@@ -89,7 +89,7 @@ system trust store on disk.
 
 | Not used | Until |
 |---|---|
-| `clap` | a flag needs validation, or a shipped subcommand appears. The flags are parsed from `std::env::args` — today `--analysis`, `--live`, `--context` and `--namespace`/`-n` ([architecture § The command line](architecture.md#the-command-line)); `--read-only` and `--once` are specified and not yet built. (The `k8rs ops …` driver used to prove the writes headlessly is scaffolding in the temporary main and never ships.) |
+| `clap` | a flag needs validation, or a shipped subcommand appears. The flags are parsed from `std::env::args` — today `--once`, `--live`, `--analysis`, `--read-only`, `--context` and `--namespace`/`-n` ([architecture § The command line](architecture.md#the-command-line)). Six flags, none taking a value except two that take a name, is still not a reason for `clap` — and `--analysis` is deliberately valueless, which is what let `--once` print the reports without crossing the threshold D17 named ([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)). (The `k8rs ops …` driver used to prove the writes headlessly is scaffolding in the temporary main and never ships.) |
 | `tracing` | debugging genuinely demands it |
 | `tempfile` | `std::env::temp_dir()` plus an explicit 0600 create covers the edit buffer |
 | theme loader (TOML, hot-reload) | never, most likely — `theme.rs` is 10 constants (YAGNI) |

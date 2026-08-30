@@ -1630,8 +1630,12 @@ fn live_is_the_flag_that_names_a_cluster_and_context_names_which_one() {
         live_context(&args(&["--live", "--context=kind-k8rs"])),
         Some(Some("kind-k8rs"))
     );
-    // A `--context` with nothing after it is the current context, not a crash.
+    // **A `--context` with nothing after it is the current context here, and never reaches
+    // here.** [`mistyped`] refuses it before this function is called (2026-08-30), so what this
+    // asserts is that the second line still holds if the first one is ever moved: this function
+    // alone answers *no context was named*, not *the context named `--live`*.
     assert_eq!(live_context(&args(&["--live", "--context"])), Some(None));
+    assert!(mistyped(&args(&["--live", "--context"])).is_some());
     // **A flag is never a context name.** Both of these used to come back as the context called
     // `--live` / `--analysis`, and the truth arrived later as a kubeconfig error about a name
     // nobody typed.
@@ -1947,10 +1951,17 @@ fn a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error() {
             "{problem}"
         );
     }
-    // An `=` says the value was meant, and `--context` with nothing after it is the current
-    // context on purpose — neither is this mistake.
+    // An `=` says the value was meant, so it is not this mistake. **`--context` with nothing
+    // after it is now its own refusal** and no longer the current context — the sentence differs
+    // by one clause, which is what this asserts
+    // ([`the_flags_this_build_accepts_and_the_ones_it_now_names_instead_of_dropping`]).
     assert_eq!(mistyped(&line(&["--live", "--context=--analysis"])), None);
-    assert_eq!(mistyped(&line(&["--live", "--context"])), None);
+    assert_eq!(
+        mistyped(&line(&["--live", "--context"])),
+        Some(format!(
+            "k8rs: --context needs the name of a context\n{USAGE}"
+        ))
+    );
 
     // Every flag this build has, in both modes, and in both spellings — none of them is a typo.
     for good in [
@@ -2006,6 +2017,29 @@ fn a_runtime_that_would_not_start_says_what_the_machine_said() {
         "an escape sequence in an io error's own text reached the terminal (invariant 9): \
          {crafted:?}"
     );
+}
+
+/// **[`live`] under `--live`, which is the mode that has no happy ending** — the sentence it came
+/// back with.
+///
+/// **The `expect` is an assertion and not a convenience.** `None` is *`--once` ran and reported*,
+/// and `--live` reaching it would mean the mode that must never stop had stopped with an exit
+/// code of `0` — every test below would then have failed on the unwrap rather than passing on a
+/// sentence nobody read.
+///
+/// **And the timeout is an assertion too.** `--live` has no deadline of its own by design
+/// (NOTES § D150), so every caller cuts its streams with `take` to make the run end at all — a
+/// change that merges one uncut stream into the pump makes all three of them hang instead of
+/// fail, which the mutation gate reported as a 90-second `TIMEOUT` rather than a defect
+/// (2026-08-30). A test that hangs is a test whose failure nobody reads.
+async fn watching(connected: Result<k8s::Session, k8s::NotConnected>, analysis: bool) -> String {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        live(connected, analysis, None),
+    )
+    .await
+    .expect("--live never came back, and every caller here cuts its streams so that it must")
+    .expect("--live has no ending that is not a sentence")
 }
 
 /// A client pointed at a name RFC 6761 reserves so that it can never resolve — the same double
@@ -2170,6 +2204,144 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
 /// here — but the read-only `ClusterRole` box still open in this phase plans to render
 /// `status.message`, and the day it lands this stub prints `forbidden`, this test stays green,
 /// and the sentence the reader would actually be shown is untested (`k8s-admin`, 2026-08-30).
+/// **A server that answers every request with an empty list** — the shortest cluster that lets
+/// all five watches finish their initial LIST, so the bootstrap gate opens and there is a report
+/// (NOTES § D28).
+///
+/// **It is [`refusing`]'s opposite and is written beside it for that reason.** That one proves
+/// what `--once` does when the cluster will not show it anything; this one proves what it does
+/// when the cluster shows it everything there is, which is nothing. Between them they are the two
+/// exit codes.
+///
+/// **One body for all five kinds, because an `ObjectList` with no items is shape-compatible with
+/// every one of them** — `items` is what kube decodes, and `[]` decodes into `Vec<Pod>` and
+/// `Vec<Node>` alike. The `resourceVersion` is there because a watch answer with none is
+/// `Fault::Unanswered` (`k8s::Fault`), which would keep the gate shut and test the wrong thing.
+///
+/// **The watch kube opens after each initial LIST is accepted and never answered**, which is what
+/// a real watch over a cluster where nothing is happening does. Not refused: a refusal is a
+/// `k8s::Fault` of its own and would print its own trouble line.
+///
+/// **Answering that watch with the `List` body above — which this stub did until 2026-08-30 — is
+/// not a watch stream, so kube records a watch failure and the report grows a `▲ k8rs is not
+/// getting pods from this cluster` line.** The doc here used to say the failure landed too late to
+/// matter, *"by then `InitDone` has landed on all five, the gate is open, and `--once` has
+/// stopped"*, and `tester` measured both halves of that false against a request-logging listener
+/// with this stub's wire behaviour: in three runs of six the pods watch was answered **before** the
+/// fifth LIST was — `40.75ms WATCH pods` against `40.82ms LIST daemonsets` — so which side of the
+/// gate it lands on is the machine's timing and not a property of the design; and in the other
+/// three all five had listed first and the trouble line came out anyway, because **a socket
+/// answered is not a store updated**. The same shape flaked `tests/binary.rs` 5 runs in 20.
+///
+/// **In *this* module it was not that race, and what it was is worse.** The two numbers above are
+/// a whole process running uncut streams; here the streams are cut, so the failure never landed
+/// *at all* — 10 runs of both tests over this client with the watch answered, 0 trouble lines
+/// (`dev-core`, 2026-08-30, on a copy of the tree). It was one event away the whole time:
+/// [`driven`] reading a third event instead of two turned every run into **all five** watches
+/// carrying *"▲ k8rs is not getting … nothing usable came back when k8rs tried to `list` and
+/// `watch` …"* — deterministically, not at some rate — and
+/// `analysis_under_once_puts_the_panes_under_the_cards_and_without_it_there_are_none` still passed
+/// over that report, because what it asserts is pane headings. **A stub that models a broken
+/// cluster and a suite that cannot see it is the loaded gun**, and the next test written here is
+/// what pulls the trigger.
+///
+/// **The mechanism is `tests/binary.rs` § `Watches::HeldOpen`'s and deliberately not a second one**
+/// — written twice only because a helper cannot cross from a private `mod tests` into `tests/`
+/// (invariant 11), the same reason the body above is. What that file carries and this one does not
+/// is its `Cut` variant, and the reason is the cost of the fix: a held-open watch has **no** third
+/// event, so a test here that reads past `InitDone` — one counting reports, one waiting for a
+/// re-list — hangs instead of failing. Nothing here reads that far today. The first one that needs
+/// to takes `Cut` with it rather than reverting this.
+async fn emptied() -> kube::Client {
+    empty_lists_from(None).await
+}
+
+/// [`emptied`], with one URL held back and counted — the shape a metrics-server slower than the
+/// pod LIST has (`reports/2026-08-30-once-flag-against-a-live-cluster.md` § 4d).
+///
+/// **`held` is matched against the whole request head**, so a caller passes the path fragment it
+/// wants delayed and nothing here has to parse HTTP. It is the request head and not the body
+/// because every call on this path is a `GET`.
+///
+/// **The counter is how *not sending a request* is asserted at all.** A poll merged into the
+/// watch loop and a fetch awaited at connect produce the same report; what tells them apart is
+/// that one of them asks twice. Nothing else about a request k8rs did not need is visible from
+/// inside the process.
+async fn emptied_but_slow_on(
+    held: &'static str,
+    by: std::time::Duration,
+) -> (kube::Client, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let client = empty_lists_from(Some((held, by, std::sync::Arc::clone(&asked)))).await;
+    (client, asked)
+}
+
+async fn empty_lists_from(
+    held: Option<(
+        &'static str,
+        std::time::Duration,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    )>,
+) -> kube::Client {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let held = held.clone();
+            tokio::spawn(async move {
+                let body = r#"{"apiVersion":"v1","kind":"List",
+                    "metadata":{"resourceVersion":"1"},"items":[]}"#;
+                let sent = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                let mut pending = String::new();
+                loop {
+                    let mut chunk = [0_u8; 2048];
+                    match socket.read(&mut chunk).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => pending.push_str(&String::from_utf8_lossy(&chunk[..read])),
+                    }
+                    // A LIST is a GET with no body, so a request ends at the blank line.
+                    while let Some(end) = pending.find("\r\n\r\n") {
+                        let head: String = pending.drain(..end + 4).collect();
+                        // **The watch, accepted and never answered** — [`emptied`]'s doc carries
+                        // the measurement that put this here. Nothing is written back, so hyper
+                        // never puts a second request on this connection and the loop stays a
+                        // queue; the socket blocks on its next `read` until the process exits.
+                        //
+                        // **Before the delay below, so a watch is never counted as one of the
+                        // requests k8rs chose to send.** [`emptied_but_slow_on`]'s counter is
+                        // there to tell a fetch from a poll, and a watch is neither.
+                        if head.contains("watch=true") {
+                            continue;
+                        }
+                        if let Some((held, by, counted)) = held.as_ref()
+                            && head.contains(held)
+                        {
+                            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            tokio::time::sleep(*by).await;
+                        }
+                        if socket.write_all(sent.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    kube::Client::try_from(kube::config::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing")
+}
+
 async fn refusing() -> kube::Client {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -2830,18 +3002,21 @@ async fn a_run_that_was_scoped_by_a_refusal_says_so_and_one_that_was_asked_does_
     };
 
     assert_eq!(
-        scoped_because(&scoped(k8s::Coverage::Cluster)),
+        scoped_because(&scoped(k8s::Coverage::Cluster), false),
         None,
         "a run that reads the whole cluster explained a scope it does not have"
     );
     assert_eq!(
-        scoped_because(&scoped(k8s::Coverage::Asked("payments".to_string()))),
+        scoped_because(&scoped(k8s::Coverage::Asked("payments".to_string())), false),
         None,
         "a reader who typed --namespace was told what --namespace does"
     );
 
-    let said = scoped_because(&scoped(k8s::Coverage::Refused("payments".to_string())))
-        .expect("a run nobody asked to narrow narrowed in silence");
+    let said = scoped_because(
+        &scoped(k8s::Coverage::Refused("payments".to_string())),
+        false,
+    )
+    .expect("a run nobody asked to narrow narrowed in silence");
     println!("{said}");
     assert_eq!(
         said,
@@ -2854,7 +3029,7 @@ async fn a_run_that_was_scoped_by_a_refusal_says_so_and_one_that_was_asked_does_
     // (`k8s::Coverage::Blind`, `reports/2026-08-29-namespace-scope-under-a-real-role.md` § R1).
     // The old sentence claimed k8rs *is watching* `default` over a namespace it had just been
     // refused in, and the report under it printed a header and a health claim.
-    let blind = scoped_because(&scoped(k8s::Coverage::Blind("default".to_string())))
+    let blind = scoped_because(&scoped(k8s::Coverage::Blind("default".to_string())), false)
         .expect("a run that could read nothing at all said nothing about it");
     println!("{blind}");
     assert_eq!(
@@ -2868,15 +3043,37 @@ async fn a_run_that_was_scoped_by_a_refusal_says_so_and_one_that_was_asked_does_
         "a scope that read nothing was presented as one that worked: {blind}"
     );
 
+    // **And under `--once` that one arm goes quiet, because [`pods_unread`] is about to say it
+    // with the scope and the action in it** (`k8s-admin`, 2026-08-30). Measured, the reader got
+    // one fact in two sentences with two different verb sets: `list` pods across the whole
+    // cluster here, `list` and `watch` pods there. **Only that arm** — `Refused` is the run that
+    // works, so this is the only line explaining the header, and losing it loses the sentence.
+    assert_eq!(
+        scoped_because(&scoped(k8s::Coverage::Blind("default".to_string())), true),
+        None,
+        "a --once run that ends on the refusal said it here first, in different words"
+    );
+    assert_eq!(
+        scoped_because(
+            &scoped(k8s::Coverage::Refused("payments".to_string())),
+            true
+        ),
+        Some(said.clone()),
+        "a --once run that reports fine lost the only line saying why its header names one \
+         namespace"
+    );
+
     // Invariant 9: the namespace came off argv or a kubeconfig, and neither is ours. Both arms
     // that print one, because a strip on one of two interpolations is a strip on neither.
     for crafted in [
-        scoped_because(&scoped(k8s::Coverage::Refused(
-            "pay\u{1b}[2Jments".to_string(),
-        ))),
-        scoped_because(&scoped(k8s::Coverage::Blind(
-            "pay\u{1b}[2Jments".to_string(),
-        ))),
+        scoped_because(
+            &scoped(k8s::Coverage::Refused("pay\u{1b}[2Jments".to_string())),
+            false,
+        ),
+        scoped_because(
+            &scoped(k8s::Coverage::Blind("pay\u{1b}[2Jments".to_string())),
+            false,
+        ),
     ] {
         let crafted = crafted.expect("both narrowed arms always say something");
         assert!(
@@ -3016,7 +3213,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     };
 
     // **The context**: the file read perfectly and does not name what was asked for.
-    let unloadable = live(
+    let unloadable = watching(
         k8s::connect_with(yaml("{}"), Some("k8rs-tests-no-such-context"), None).await,
         false,
     );
@@ -3034,7 +3231,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     // 2026-08-27).
     let moved = "{client-certificate: /nonexistent/k8rs-tests/client.crt, \
                  client-key: /nonexistent/k8rs-tests/client.key}";
-    let entry = live(k8s::connect_with(yaml(moved), None, None).await, false).await;
+    let entry = watching(k8s::connect_with(yaml(moved), None, None).await, false).await;
     println!("{entry}");
     assert!(
         entry.contains("this kubeconfig loaded, and something it points at did not"),
@@ -3052,7 +3249,7 @@ async fn a_connection_that_never_happened_says_which_way_it_failed() {
     let user = format!(
         "{{exec: {{apiVersion: client.authentication.k8s.io/v1beta1, command: {helper}}}}}"
     );
-    let broken = live(k8s::connect_with(yaml(&user), None, None).await, false).await;
+    let broken = watching(k8s::connect_with(yaml(&user), None, None).await, false).await;
     println!("{broken}");
     assert!(
         broken.contains(&format!("(`{helper}`)")),
@@ -3095,7 +3292,7 @@ async fn a_cluster_that_never_answers_prints_nothing_and_says_why_it_stopped() {
         .map(|watch| watch.take(2).boxed())
         .collect();
 
-    let stopped = live(Ok(session), false).await;
+    let stopped = watching(Ok(session), false).await;
 
     assert!(
         stopped.contains("every watch has stopped"),
@@ -3941,7 +4138,7 @@ async fn an_expired_certificate_on_a_session_that_read_nothing_is_the_message_an
     // **`live` reads the real clock, so what is asserted here is that the run *stops* here** —
     // the greeting below this point is the wall. The date is pinned; the age beside it is
     // whatever today makes it, and [`CERTIFICATE_IS_WHY`] above already holds every word.
-    let said = live(Ok(session), false).await;
+    let said = watching(Ok(session), false).await;
     println!("{said}");
     assert!(
         said.starts_with("k8rs: the certificate the API server presented expired ")
@@ -4094,7 +4291,7 @@ async fn without_a_typed_expiry_the_same_dead_session_still_says_nothing_usable_
         .map(|watch| watch.take(2).boxed())
         .collect();
 
-    let said = live(Ok(session), false).await;
+    let said = watching(Ok(session), false).await;
     println!("{said}");
     assert!(
         !said.contains("the certificate the API server presented expired"),
@@ -4136,5 +4333,1086 @@ fn a_served_certificate_past_the_cap_is_not_read_and_one_at_the_cap_is() {
         None,
         "a certificate one byte past the cap was copied, base64-encoded and parsed — the value \
          is whatever the server chose to send"
+    );
+}
+
+// --- ONE REPORT AND OUT ---
+//
+// **`--once` is the shape v0.0.1 ships** (NOTES § D10, § D17, `screens/once.md`): connect, print
+// one report, exit — `0` if it ran and reported whether or not anything was broken, `2` if it
+// could not run, and never `1`.
+//
+// **What is asserted here is the ending and the argv, because stdout belongs to the process.**
+// `live` writes the report with `writeln!(std::io::stdout(), …)`, which the harness does not
+// capture, so a test can read what `live` *returned* and what [`live_report`] would have drawn
+// over the same store — the split § WATCHING A CLUSTER above already works under. The two
+// process-level halves — which stream the report lands on, and what the process exits with — are
+// `tests/binary.rs`'s.
+
+/// **`--once` is a cluster flag, and every flag that qualifies one applies to it unchanged.**
+///
+/// **`--live` is asserted beside it in each case**, because the failure this guards is not *the
+/// flag does nothing* — it is *the flag does something slightly different*, and one mode's answer
+/// read on its own cannot show that. `--context` and `--namespace` come out of the same two
+/// functions for both, which is the point: there is one cluster path and `--once` is a stopping
+/// point on it, not a second one (`screens/once.md` § What `--once` does not do).
+#[test]
+fn once_reaches_the_cluster_path_and_carries_context_and_namespace_the_way_live_does() {
+    let args = |line: &[&str]| -> Vec<String> { line.iter().map(|a| (*a).to_string()).collect() };
+
+    assert!(once_wanted(&args(&["--once"])));
+    assert!(once_wanted(&args(&["--analysis", "--once"])));
+    assert!(!once_wanted(&args(&["--live"])));
+    assert!(!once_wanted(&args(&["pod.json"])));
+    // Not a prefix match: a word that merely starts like the flag is not the flag.
+    assert!(!once_wanted(&args(&["--once=true"])));
+
+    // The file-driven path is untouched: no cluster flag, no cluster.
+    assert_eq!(live_context(&args(&["pod.json"])), None);
+    assert_eq!(live_context(&args(&["--analysis", "pod.json"])), None);
+
+    for mode in ["--once", "--live"] {
+        assert_eq!(
+            live_context(&args(&[mode])),
+            Some(None),
+            "{mode} did not reach the cluster path"
+        );
+        assert_eq!(
+            live_context(&args(&[mode, "--context", "kind-k8rs"])),
+            Some(Some("kind-k8rs")),
+            "{mode} dropped the context it was pointed at"
+        );
+        assert_eq!(
+            live_context(&args(&[mode, "--context=kind-k8rs"])),
+            Some(Some("kind-k8rs")),
+            "{mode} dropped an attached context"
+        );
+        for spelling in [
+            vec![mode, "--namespace", "payments"],
+            vec![mode, "--namespace=payments"],
+            vec![mode, "-n", "payments"],
+            vec![mode, "-n=payments"],
+        ] {
+            assert_eq!(
+                live_namespace(&args(&spelling)),
+                Some("payments"),
+                "{spelling:?} did not scope the run"
+            );
+        }
+    }
+    // Both together is a cluster run with a stopping point, not a usage error and not a file run.
+    assert_eq!(live_context(&args(&["--once", "--live"])), Some(None));
+    assert!(once_wanted(&args(&["--once", "--live"])));
+}
+
+/// **Every refusal `--live` gets for a bad line, `--once` gets too — and a file beside either is
+/// now one of them.**
+///
+/// **The file is the case this box added.** `k8rs --once pod.json` used to read the cluster and
+/// say nothing whatever about the file the reader had named ([`live_context`] answers the cluster
+/// and drops the path), which is the silent-wrong-input shape [`mistyped`] already refuses three
+/// other ways round. It is refused for `--live` as well, because it is one rule about one
+/// ambiguity.
+///
+/// **The negatives are the half that makes it a test.** A value that follows `--context`,
+/// `--namespace` or `-n` is that flag's and not a file, and the file-driven path — which has no
+/// cluster flag on it at all — must still read every path it is given.
+#[test]
+fn a_file_beside_a_cluster_flag_is_refused_and_a_flags_own_value_is_not_a_file() {
+    let args = |line: &[&str]| -> Vec<String> { line.iter().map(|a| (*a).to_string()).collect() };
+    let refused = |line: &[&str]| mistyped(&args(line));
+
+    for mode in ["--once", "--live"] {
+        let said = refused(&[mode, "pod.json"]).unwrap_or_else(|| {
+            panic!("{mode} beside a file was accepted, so the file was read by nothing")
+        });
+        println!("{said}");
+        assert!(
+            said.contains("pod.json"),
+            "the refusal does not name the file that was ignored: {said:?}"
+        );
+        assert!(
+            said.starts_with("k8rs: --once and --live read a cluster"),
+            "{said:?}"
+        );
+        assert!(said.contains("usage: k8rs "), "{said:?}");
+        // The path is refused wherever on the line it sits, including in front of the flag.
+        assert!(refused(&["pod.json", mode]).is_some(), "{mode}");
+        assert!(
+            refused(&[mode, "--analysis", "a.json", "b.json"]).is_some(),
+            "{mode}"
+        );
+
+        // A value is not a file. All four spellings, because the two that attach the value with
+        // `=` are one word and the two that do not are two, and only the second shape can be
+        // mistaken for a path.
+        for line in [
+            vec![mode],
+            vec![mode, "--analysis"],
+            vec![mode, "--context", "kind-k8rs"],
+            vec![mode, "--context=kind-k8rs"],
+            vec![mode, "--namespace", "payments"],
+            vec![mode, "--namespace=payments"],
+            vec![mode, "-n", "payments"],
+            vec![mode, "-n=payments"],
+            vec![mode, "--context", "kind-k8rs", "-n", "payments"],
+        ] {
+            assert_eq!(
+                refused(&line),
+                None,
+                "{line:?} was refused, and every word in it is a flag or a flag's own value"
+            );
+        }
+    }
+
+    // **A typo is the more specific complaint about the same line**, so it is the one printed.
+    let typo = refused(&["--once", "--anaylsis", "pod.json"])
+        .expect("a word that starts like a flag and is not one is a usage error");
+    println!("{typo}");
+    assert!(
+        typo.contains("--anaylsis is not a flag k8rs has"),
+        "a mistyped flag beside a file was reported as the file: {typo:?}"
+    );
+
+    // **The file-driven path is untouched**: with no cluster flag there is no ambiguity, and
+    // every one of these is a path this build still reads.
+    for line in [
+        vec!["pod.json"],
+        vec!["--analysis", "pod.json"],
+        vec!["a.json", "b.json"],
+    ] {
+        assert_eq!(mistyped(&args(&line)), None, "{line:?}");
+    }
+    // `--once` itself is a flag k8rs has, which is what the unknown-flag arm would deny it —
+    // and `--once=true` is not, for [`LIVE`]'s reason: an `=` form nothing accepts used to fall
+    // through as a path and come back `--live=true: No such file or directory`.
+    assert_eq!(mistyped(&args(&["--once"])), None);
+    let attached = mistyped(&args(&["--once=true"])).expect("--once takes no value");
+    println!("{attached}");
+    assert!(
+        attached.starts_with("k8rs: --once=true is not a flag k8rs has"),
+        "{attached:?}"
+    );
+}
+
+/// **Three shapes of the flag line that were wrong in the same way: a word this build says
+/// nothing about** (`k8s-admin`, `reports/2026-08-30-once-flag-against-a-live-cluster.md` § 6).
+///
+/// **`--read-only` is accepted and does nothing** (`screens/once.md` § What `--once` does not do,
+/// which says exactly that of the version this build ships). It was refused with exit `2`, so a
+/// reader following the screen spec learned k8rs has no such flag and would learn otherwise a
+/// release later. [`READ_ONLY`]'s doc carries what Phase 7 owes it.
+///
+/// **`--context` with nothing usable after it is refused, in both modes.** `k8rs --once
+/// --context` exited **0** on the current cluster while `k8rs --once --namespace` exits `2` ten
+/// lines away in the same function — so `k8rs --once --context "$CTX" && kubectl apply -f prod/`
+/// with `CTX` unset was a green light about the wrong cluster, silently, which is the class this
+/// file already refuses `--context --live` for.
+///
+/// **`-o json` said two false things in one sentence.** *"--once and --live read a cluster, so
+/// k8rs cannot also read json"*: `-o` was skipped without a word — the unknown-flag check only
+/// tests `--` words — and `json` fell through as a stray positional. `screens/once.md` lists
+/// `-o json` by name as a shape readers will try.
+///
+/// **Both modes for all three**, because each is one rule about one line and a rule that held for
+/// one of two modes is the second rule this driver would then have (NOTES § D189).
+#[test]
+fn the_flags_this_build_accepts_and_the_ones_it_now_names_instead_of_dropping() {
+    let args = |line: &[&str]| -> Vec<String> { line.iter().map(|a| (*a).to_string()).collect() };
+    let refused = |line: &[&str]| mistyped(&args(line));
+
+    for mode in ["--once", "--live"] {
+        // **Accepted**, and it reaches the cluster path unchanged: there is no write path for it
+        // to guard yet and refusing it teaches the wrong thing.
+        assert_eq!(
+            refused(&[mode, "--read-only"]),
+            None,
+            "{mode} --read-only is refused, and `screens/once.md` says v0.0.1 accepts it"
+        );
+        assert_eq!(live_context(&args(&[mode, "--read-only"])), Some(None));
+        assert_eq!(
+            refused(&[mode, "--read-only", "--analysis", "-n", "payments"]),
+            None,
+            "{mode}"
+        );
+
+        // **`--context` with nothing usable after it.** Three spellings of nothing, and the one
+        // shape an `=` says was meant is not one of them.
+        for nothing in [
+            vec![mode, "--context"],
+            vec![mode, "--context", ""],
+            vec![mode, "--context="],
+        ] {
+            let said = refused(&nothing).unwrap_or_else(|| {
+                panic!(
+                    "{nothing:?} was accepted, so this run connects to whatever cluster the \
+                        kubeconfig is currently pointing at and says nothing about it"
+                )
+            });
+            println!("{said}");
+            assert!(
+                said.starts_with("k8rs: --context needs the name of a context"),
+                "{nothing:?}: {said:?}"
+            );
+            assert!(said.contains("usage: k8rs "), "{said:?}");
+        }
+        assert_eq!(
+            refused(&[mode, "--context=--live"]),
+            None,
+            "{mode} --context=--live is refused, and an `=` says the value was meant \
+             (`live_context`)"
+        );
+        assert_eq!(refused(&[mode, "--context", "kind-k8rs"]), None, "{mode}");
+
+        // **A one-dash word this build does not have is named, not dropped.**
+        let output = refused(&[mode, "-o", "json"])
+            .expect("-o is not a flag k8rs has and a run that drops it says nothing true");
+        println!("{output}");
+        assert!(
+            output.starts_with("k8rs: -o is not a flag k8rs has"),
+            "{output:?}"
+        );
+        assert!(
+            !output.contains("cannot also read json"),
+            "the value of a flag k8rs does not have was reported as a file the reader named: \
+             {output:?}"
+        );
+        // The two one-dash words that *are* real stay real, and the one refused for its own
+        // reason keeps its own sentence.
+        assert_eq!(refused(&[mode, "-n=payments"]), None, "{mode}");
+        assert_eq!(refused(&[mode, "-n", "payments"]), None, "{mode}");
+        let attached = refused(&[mode, "-npayments"]).expect("-npayments is refused");
+        assert!(
+            attached.contains("has to be separate from -n"),
+            "{attached:?}"
+        );
+    }
+
+    // **The file-driven path is untouched.** With no cluster flag there is no ambiguity, and
+    // `k8rs -x file.json` stays a path exactly as `NAMESPACE_SHORT`'s doc promises.
+    assert_eq!(mistyped(&args(&["-x", "pod.json"])), None);
+    assert_eq!(mistyped(&args(&["-o", "pod.json"])), None);
+}
+
+/// **A `--once` run that reached the cluster and printed a report ends at exit `0` — whether or
+/// not anything was broken** (NOTES § D17, `screens/once.md` § Exit codes).
+///
+/// **A cluster with nothing in it is the case that separates the two halves of that sentence.**
+/// Findings do not change the exit code, so *nothing broken* and *thirteen things broken* end the
+/// same way — and a driver that only ever reported on a broken cluster would never have run this
+/// line. `k8rs` is a report, not a linter: a beginner who sees `$?` = 1 concludes the tool failed.
+///
+/// **It also proves the run *ends*.** The watches under it never stop — kube's `watcher()` cannot
+/// finish and `k8s::StandingBackoff` never gives up — so nothing but the stopping point this box
+/// added can return this call, and a `--live` in its place hangs until the harness kills it. That
+/// is why the streams are **not** cut with `take` the way § WATCHING A CLUSTER's cut theirs.
+///
+/// **The deadline is ten seconds and is not what is being measured** — five empty lists off a
+/// loopback listener land in milliseconds. It is here so a machine under load reports a wrong
+/// sentence rather than hanging a CI run.
+///
+/// **`None` on its own does not say a report was printed, so it is not asserted on its own**
+/// (`tester`, 2026-08-30). It is the same `None` for one report, for six and for none at all —
+/// stdout belongs to the process — which left the box's own title unasserted here and green over
+/// a binary that printed six. **How many** is `tests/binary.rs`'s, which counts headers on a real
+/// stdout. **That there is one at all** is this test's, and it is proved by driving the same
+/// listener and asking [`live_report`] what the store it leaves behind renders: `None` plus *this
+/// store is a report* is *this run printed a report*, and the third case is excluded.
+#[tokio::test]
+async fn a_once_run_that_reported_ends_by_itself_and_has_no_sentence_to_return() {
+    let session = k8s::session(emptied().await, k8s::Coverage::Cluster).await;
+
+    let ending = live(Ok(session), false, Some(in_a_moment(10_000))).await;
+
+    assert_eq!(
+        ending, None,
+        "a --once run that printed a report came back with a sentence, which `main` turns into \
+         exit 2 — a report on stdout and a failure code is the tool calling its own answer a \
+         failure"
+    );
+    // **The half `None` cannot carry**: the same five watches, driven here, and what the run
+    // would have handed `writeln!`.
+    let store = driven(emptied().await).await;
+    let printed = live_report(
+        &store,
+        now(),
+        &mut String::new(),
+        false,
+        &AtConnect::default(),
+    )
+    .expect("the store a --once run reaches is a report, or `None` above means it printed none");
+    println!("{printed}");
+    assert!(
+        printed.contains("0 pods · 0 nodes"),
+        "the run ended without a sentence and over a store that renders no header, which is a \
+         --once that reported nothing and exited 0: {printed:?}"
+    );
+}
+
+/// A budget of `n` milliseconds starting now — [`live`]'s parameter since [`ONCE_DEADLINE`]
+/// became the moment the **whole run** has to be over by rather than a fresh window for the watch
+/// loop ([`cluster_run`], [`Budget`]).
+fn in_a_moment(milliseconds: u64) -> Budget {
+    let whole = std::time::Duration::from_millis(milliseconds);
+    Budget {
+        whole,
+        ends_at: tokio::time::Instant::now() + whole,
+    }
+}
+
+/// The store five watches leave behind once their initial LISTs have landed or settled — what
+/// [`live`]'s own closure is handed, built the one way a test can reach it.
+///
+/// **`take(2)` is what ends streams that cannot end.** kube's `watcher()` retries forever, so an
+/// uncut stream would leave `k8s::drive_watching` running until the harness gave up; two events
+/// is `Init` plus `InitDone` for a list with nothing in it, and a refusal's `Err` plus the `Init`
+/// that follows it.
+///
+/// **It is also what hid the stub defect [`emptied`]'s doc records**: over that listener before
+/// 2026-08-30, event three of every watch was a failure, and this cut stopped one event short of
+/// it every time.
+async fn driven(client: kube::Client) -> k8s::Store {
+    use futures_util::stream::StreamExt;
+    let watches = k8s::session(client, k8s::Coverage::Cluster)
+        .await
+        .watches
+        .into_iter()
+        .map(|watch| watch.take(2).boxed())
+        .collect();
+    let mut store = k8s::Store::default();
+    k8s::drive_watching(watches, &mut store, |_| {}).await;
+    assert!(
+        store.still_listing().is_empty(),
+        "the bootstrap gate did not open, so this store is not the one a --once run reports over"
+    );
+    store
+}
+
+/// **A cluster that will not show k8rs its pods is exit `2` and one sentence, not a report**
+/// (`screens/once.md` § Exit codes puts *not allowed to list pods* in the `2` row; § When the
+/// certificate is why nothing came back: *one specific sentence and a non-zero exit, never a list
+/// of every symptom*).
+///
+/// **Measured before it was written.** Against a real cluster reached with a credential it would
+/// not accept, this printed five `▲ k8rs is not getting … from this cluster` lines **on stdout**
+/// and exited **0** — so `k8rs --once && echo all good` printed *all good* about a cluster k8rs
+/// had never been shown, and `k8rs --once > findings.txt` left a file of symptoms where a report
+/// belongs (`dev-core`, 2026-08-30, against `kind-k8rs`).
+///
+/// **Pods and not any refused watch**, which is the half that keeps the ordinary run working: a
+/// namespaced `Role` cannot grant cluster-scoped `nodes`, so `nodes` is refused on a run that is
+/// otherwise perfectly good (`reports/2026-08-29-namespace-scope-under-a-real-role.md` § R2), and
+/// an exit `2` for that would fail every scoped run there is. [`pods_refused`] is where that line
+/// is drawn and the test beside this one is where it is asserted.
+#[tokio::test]
+async fn a_once_run_that_was_never_shown_a_pod_is_one_sentence_and_not_a_wall_of_symptoms() {
+    let session = k8s::session(refusing().await, k8s::Coverage::Cluster).await;
+
+    let refused = live(Ok(session), false, Some(in_a_moment(10_000)))
+        .await
+        .expect("a cluster that refused the pod watch has no report and must say so");
+
+    println!("{refused}");
+    assert!(
+        refused.starts_with(
+            "k8rs: this cluster did not show k8rs its pods, and every finding starts there"
+        ),
+        "{refused:?}"
+    );
+    // **The verb and the resource**, which is what the security gate requires of a refusal and
+    // what a reader puts in a `Role`.
+    assert!(
+        refused.contains("`list` and `watch` pods"),
+        "the sentence does not name what k8rs was refused, so there is nothing to go and grant: \
+         {refused:?}"
+    );
+    // **One kind, not five.** The four other refused watches are not walked through one at a
+    // time — that is `--live`'s screen and the thing `--once` exists not to print.
+    for other in ["nodes", "Deployments", "StatefulSets", "DaemonSets"] {
+        assert!(
+            !refused.contains(other),
+            "the refusal listed {other} as well, which is the wall of symptoms `--once` exists \
+             not to print: {refused:?}"
+        );
+    }
+}
+
+/// **Which refusal ends a `--once` run and which one is just a line above the cards.**
+///
+/// **The discrimination is the whole test, so both sides are built from one store each and the
+/// two stores differ only in which watch listed.** Pods refused is the run that has nothing to
+/// report; nodes refused with pods read is the ordinary namespaced-`Role` run, which reports and
+/// exits `0` with `analysis.rs`'s *needs permission to list nodes* rows where the numbers would
+/// be. A predicate that keyed on *any* unlisted watch passes the first and fails the second.
+///
+/// **A watch that listed and then broke is not a refusal either** — `k8s::Trouble::listed` is the
+/// field that tells stale from never-read, and stale pods are still a report.
+#[test]
+fn only_a_pod_watch_that_never_listed_ends_the_run_and_a_stale_one_does_not() {
+    let trouble = |kind: ObjectKind, listed: bool| k8s::Trouble {
+        kind,
+        listed,
+        ended: false,
+        failure: None,
+    };
+
+    let stops = pods_unread(
+        &[trouble(ObjectKind::Pod, false)],
+        &k8s::Coverage::Cluster,
+        None,
+    )
+    .expect("a pod watch that never listed is the end of the run");
+    println!("{stops}");
+    assert!(stops.contains("nothing to report"), "{stops:?}");
+    // `failure: None` is the stream that ended without saying why — [`unreadable`]'s clause, so
+    // the two cannot drift into two ways of saying one thing.
+    assert!(
+        stops.ends_with("nothing was ever said about why"),
+        "{stops:?}"
+    );
+    // **And it invents no next step for it** — the fallback [`because`] refuses, in the one arm
+    // that has no typed fault to build one from.
+    assert!(!stops.contains("Ask whoever"), "{stops:?}");
+
+    for reported in [
+        vec![trouble(ObjectKind::Node, false)],
+        vec![trouble(ObjectKind::Deployment, false)],
+        vec![
+            trouble(ObjectKind::Node, false),
+            trouble(ObjectKind::DaemonSet, false),
+        ],
+        // Pods listed once and then broke: stale, and stale is a report.
+        vec![trouble(ObjectKind::Pod, true)],
+        vec![
+            trouble(ObjectKind::Pod, true),
+            trouble(ObjectKind::Node, false),
+        ],
+        vec![],
+    ] {
+        assert_eq!(
+            pods_unread(&reported, &k8s::Coverage::Cluster, None),
+            None,
+            "a run whose pods were read was ended anyway: {:?}",
+            reported
+                .iter()
+                .map(|t| (&t.kind, t.listed))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// **The block a run with no pods ends on: what k8rs asked for, what happened, and what to do —
+/// and the scope is in the first of those** (`screens/states.md` § Before the TUI ever starts,
+/// `screens/once.md` § Exit codes: *one text, both paths*).
+///
+/// **The shape is copied and three of its parts are not** (`k8s-admin`, 2026-08-30). That block
+/// says *ask for one of the two roles in the README* and there is no README until Phase 13, so
+/// `docs/security.md`'s `k8rs-readonly` is what is named. It offers `--namespace <name>` as the
+/// way out, which is a door a reader who typed `--namespace` has already walked through, so the
+/// action is chosen per scope. And **the scope has to be in the sentence**: measured under
+/// `--namespace kube-system`, the namespace appeared nowhere in the whole run, and without it the
+/// reader cannot tell whether to ask for a `Role` or a `ClusterRole` — which is the entire
+/// content of the request they are about to make.
+///
+/// **Four scopes and two faults, because the pipeline produces all of them** (NOTES § D29). A
+/// `403` cluster-wide is the plain case; a `403` inside a namespace is the ordinary scoped run;
+/// `k8s::Coverage::Blind` is the namespace k8rs had to *guess* and was refused in, where telling
+/// the reader to pass `--namespace` is the action rather than a spent door; and
+/// `k8s::Fault::Unanswered` is the unreachable cluster the deadline now routes here.
+#[test]
+fn the_block_a_run_with_no_pods_ends_on_names_the_scope_and_a_next_step_that_fits_it() {
+    // The two real `watcher::Error`s the classifier reads, built the way § WATCHING A CLUSTER
+    // builds them: a `403` off a `Status`, and a transport failure that answered nothing.
+    let refused = watcher::Error::InitialListFailed(api_error(403, "Forbidden"));
+    let dark = watcher::Error::WatchFailed(kube::Error::Service(Box::new(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "timed out",
+    ))));
+    fn unread(failure: &watcher::Error) -> Vec<k8s::Trouble<'_>> {
+        vec![k8s::Trouble {
+            kind: ObjectKind::Pod,
+            listed: false,
+            ended: false,
+            failure: Some(failure),
+        }]
+    }
+
+    let wide = pods_unread(&unread(&refused), &k8s::Coverage::Cluster, None)
+        .expect("a pod watch that never listed ends the run");
+    println!("{wide}");
+    assert!(
+        wide.contains("What k8rs asked for: pods across the whole cluster"),
+        "the block does not say where k8rs looked, so the reader cannot tell whether to ask for \
+         a Role or a ClusterRole: {wide:?}"
+    );
+    assert!(
+        wide.contains(
+            "What happened: the role this kubeconfig uses needs to `list` and `watch` \
+                       pods"
+        ),
+        "{wide:?}"
+    );
+    assert!(
+        wide.contains("`k8rs-readonly` in the k8rs docs") && wide.contains("--namespace <name>"),
+        "a cluster-wide refusal is offered neither the role nor the narrower run: {wide:?}"
+    );
+    // **The README is not cited**, because there is not one until Phase 13.
+    assert!(!wide.contains("README"), "{wide:?}");
+
+    let scoped = pods_unread(
+        &unread(&refused),
+        &k8s::Coverage::Asked("kube-system".to_string()),
+        None,
+    )
+    .expect("a pod watch that never listed ends the run");
+    println!("{scoped}");
+    assert!(
+        scoped.contains("What k8rs asked for: pods in the namespace kube-system"),
+        "the namespace that was refused is named nowhere, which is what the reader has to put in \
+         the request: {scoped:?}"
+    );
+    assert!(
+        scoped.contains("read pods in kube-system"),
+        "the action names no namespace either: {scoped:?}"
+    );
+    // **The spent door.** A reader who typed `--namespace` is not told to type it.
+    assert!(
+        !scoped.contains("--namespace <name>"),
+        "a reader who already scoped the run was offered scoping it: {scoped:?}"
+    );
+
+    // **`Blind` is the arm where that door is *not* spent** — the namespace was k8rs's guess.
+    let blind = pods_unread(
+        &unread(&refused),
+        &k8s::Coverage::Blind("default".to_string()),
+        None,
+    )
+    .expect("a pod watch that never listed ends the run");
+    println!("{blind}");
+    assert!(
+        blind.contains("k8rs had to guess default") && blind.contains("--namespace <name>"),
+        "the one scope the reader did not choose was told to choose a different one: {blind:?}"
+    );
+
+    // **Nothing answered is not a permission problem and is not given a role to ask for.**
+    let unreachable = pods_unread(&unread(&dark), &k8s::Coverage::Cluster, None)
+        .expect("a pod watch that never listed ends the run");
+    println!("{unreachable}");
+    assert!(
+        unreachable.contains("What happened: nothing usable came back"),
+        "{unreachable:?}"
+    );
+    assert!(
+        unreachable.contains("Check the server address"),
+        "an unreachable cluster is given no address to check: {unreachable:?}"
+    );
+    assert!(
+        !unreachable.contains("k8rs-readonly"),
+        "a cluster nobody could reach was blamed on RBAC: {unreachable:?}"
+    );
+}
+
+/// **`--once` cannot run without a cluster either, and it says the same sentence `--live` does.**
+///
+/// **One text for both modes** (`screens/once.md` § Exit codes: *failures print the same
+/// plain-language stderr messages the TUI prints before it ever enters raw mode — one text, both
+/// paths*). The assertion is `assert_eq!` against the `--live` answer rather than a substring,
+/// because a second sentence for the same fault is exactly what would go unnoticed.
+///
+/// **Three startup failures, not one**, and they are the three a kubeconfig can produce before
+/// anything is sent: a context that is not in the file, an entry pointing at a certificate that
+/// is not on disk, and a login program that is not installed. Each is a different `k8s::Fault`,
+/// so a mode that swallowed one would still pass on the others.
+#[tokio::test]
+async fn a_once_run_that_could_not_start_returns_the_same_sentence_live_returns() {
+    let yaml = |user: &str| {
+        kube::config::Kubeconfig::from_yaml(&format!(
+            "apiVersion: v1\nkind: Config\n\
+             current-context: demo\n\
+             clusters: [{{name: demo, cluster: {{server: 'https://k8rs-tests.invalid:6443'}}}}]\n\
+             contexts: [{{name: demo, context: {{cluster: demo, user: demo}}}}]\n\
+             users: [{{name: demo, user: {user}}}]\n"
+        ))
+        .expect("a kubeconfig this file wrote itself")
+    };
+    let helper = "/nonexistent/k8rs-tests-no-such-credential-plugin";
+    let plugin = format!(
+        "{{exec: {{apiVersion: client.authentication.k8s.io/v1beta1, command: {helper}}}}}"
+    );
+    let moved = "{client-certificate: /nonexistent/k8rs-tests/client.crt, \
+                 client-key: /nonexistent/k8rs-tests/client.key}";
+
+    for (what, context, user) in [
+        ("a context that is not in the file", Some("no-such"), "{}"),
+        ("an entry that points at nothing", None, moved),
+        ("a login program that is not there", None, plugin.as_str()),
+    ] {
+        let once = live(
+            k8s::connect_with(yaml(user), context, None).await,
+            false,
+            Some(in_a_moment(10_000)),
+        )
+        .await
+        .unwrap_or_else(|| panic!("{what}: --once exited 0 over a cluster it never reached"));
+        println!("{once}");
+        assert!(
+            once.starts_with("k8rs: no cluster to watch — "),
+            "{what}: {once:?}"
+        );
+        assert_eq!(
+            Some(once),
+            live(
+                k8s::connect_with(yaml(user), context, None).await,
+                false,
+                None
+            )
+            .await,
+            "{what}: --once and --live say two different things about one fault"
+        );
+    }
+}
+
+/// **A cluster nobody can reach is told apart from a slow one, and the deadline is where that
+/// used to stop being true** (`k8s-admin`,
+/// `reports/2026-08-30-once-flag-against-a-live-cluster.md` § 5, `PRIOR-ART § C1`).
+///
+/// **Measured before it was written.** Against an endpoint with nothing listening, `--once` spent
+/// thirty seconds, wrote nothing to stdout and said *this cluster has not finished answering
+/// after 30 seconds … Run it again: counts that have moved mean it is slow* — while
+/// `k8s::Store::troubles` held `k8s::Fault::Unanswered` on all five watches and `--live` over the
+/// identical endpoint printed the typed line inside the first second. The deadline arm read
+/// `k8s::Store::still_listing` and never the troubles, so the one actionable thing k8rs held —
+/// *check the address* — was the one thing it did not say.
+///
+/// **It is not a refusal and that is why the gate never opens.** A `403` *settles* the watch and
+/// the gate opens without it (the test above); `Unanswered` is D28's *do not blank on a blip* —
+/// the retry may well work, so nothing settles, `k8s::Store::snapshot` answers `None` forever and
+/// a `--once` with no deadline would sit there until somebody killed it.
+///
+/// **The deadline is what is being measured here**, so it is short: 300 ms against a name RFC
+/// 6761 reserves so that it can never resolve. The streams are uncut for the reason the test
+/// above leaves them uncut — a `take` would end them and test the wrong ending.
+///
+/// **What it must not do is print a report.** Nothing is on stdout, because a bootstrap that has
+/// not landed is a partial list and a partial list reads exactly like a small healthy cluster
+/// (NOTES § D28).
+#[tokio::test]
+async fn a_cluster_that_answers_nothing_names_the_fault_instead_of_calling_it_slow() {
+    let session = k8s::session(offline(), k8s::Coverage::Cluster).await;
+
+    let gave_up = live(Ok(session), false, Some(in_a_moment(300)))
+        .await
+        .expect("a run that never got an answer has nothing to report and must say so");
+
+    println!("{gave_up}");
+    assert!(
+        gave_up.starts_with(
+            "k8rs: this cluster did not show k8rs its pods, and every finding starts there"
+        ),
+        "a cluster nothing answered for was reported as one that is merely taking a while, and \
+         the typed fault k8rs was holding never reached the reader: {gave_up:?}"
+    );
+    assert!(
+        gave_up.contains("What happened: nothing usable came back"),
+        "the reason is not the one the store held: {gave_up:?}"
+    );
+    assert!(
+        gave_up.contains("Check the server address"),
+        "the reader is left with no address to check, which is the one action this failure has: \
+         {gave_up:?}"
+    );
+    // **Neither of the two sentences it is not.** A refusal is a role to ask for and a slow
+    // cluster is a run to repeat; this is a third thing and may borrow the words of neither.
+    assert!(
+        !gave_up.contains("has not finished answering"),
+        "a cluster nobody could reach was called slow: {gave_up:?}"
+    );
+    assert!(
+        !gave_up.contains("k8rs-readonly"),
+        "a cluster nobody could reach was blamed on RBAC: {gave_up:?}"
+    );
+    assert!(
+        !gave_up.contains("every watch has stopped"),
+        "a run that timed out was reported as a run whose watches ended, and they are two \
+         different things to go and look at: {gave_up:?}"
+    );
+}
+
+/// **A LIST that is genuinely just slow keeps the sentence D150 wrote for it** — the negative
+/// half of the test above, and what stops *name the typed fault first* from swallowing the case
+/// it was not for.
+///
+/// **Only the pod LIST is held**, which is `reports/2026-08-30…` § 4a exactly: it was accepted
+/// and never answered, so no failure is recorded, `k8s::Store::troubles` is empty and there is
+/// nothing typed to report. What is left is the two numbers and the one action that separates
+/// *slow* from *hung*, which is the split NOTES § D150 refuses to make for the reader.
+///
+/// **The rest of the cluster answers, and it has to.** A listener that held *everything* would
+/// hang inside `k8s::session` before this deadline exists to be tested — the shape
+/// [`cluster_run`] bounds and this test does not — so the connection is fast and one URL is slow,
+/// which is also the only way `still_listing` names one kind rather than five.
+#[tokio::test]
+async fn a_list_that_is_only_slow_still_gets_the_two_facts_and_no_verdict() {
+    let (client, _) = emptied_but_slow_on("/api/v1/pods", std::time::Duration::from_secs(30)).await;
+
+    let gave_up = live(
+        Ok(k8s::session(client, k8s::Coverage::Cluster).await),
+        false,
+        Some(in_a_moment(500)),
+    )
+    .await
+    .expect("a run whose LISTs never landed has nothing to report and must say so");
+
+    println!("{gave_up}");
+    // **The frame, not the number.** The budget here is a fraction of a second so the test is
+    // one; that the seconds are the caller's is [`too_slow`]'s own test, over [`ONCE_DEADLINE`].
+    assert!(
+        gave_up.starts_with("k8rs: this cluster has not finished answering after"),
+        "a LIST with no failure behind it was reported as something k8rs had a typed error for: \
+         {gave_up:?}"
+    );
+    assert!(
+        gave_up.contains("still reading pods (0 read so far)"),
+        "the counts D150 hands the reader are missing: {gave_up:?}"
+    );
+    // **And `0 read so far` carries no age**: `k8s::Listing::since` is stamped by the `Init` that
+    // opens the watch, so there is no *last one* for the clause to be about.
+    assert!(
+        !gave_up.contains("the last one"),
+        "a LIST that has read nothing claimed a last one, which is a screen lying about progress \
+         (`k8s::Watch::settled`, invariant 14): {gave_up:?}"
+    );
+}
+
+/// **`--once --analysis` prints the seven panes under the cards, and `--once` alone does not**
+/// (NOTES § D188).
+///
+/// **It is the only reader three shipped rules have.** N4, N5 and C1's expiring band return
+/// `Severity::Info` and nothing else, and [`render`]'s card block filters that band out — so
+/// without this flag those three rules run on every live report and reach no screen at all.
+///
+/// **Asserted over the store a `--once` run actually leaves behind**, and the store it was
+/// asserted over until 2026-08-30 was not one (`tester`). That one was driven against
+/// [`refusing`], where a real `--once` returns at [`pods_unread`] before [`live_report`] is
+/// called at all — so the doc said `--once` and the test proved `--live --analysis`. It is
+/// [`emptied`] now, which is the listener the run that reaches the panes actually has under it.
+/// The pane text is the assertion because it is the thing the flag decides; the stream it lands
+/// on is `tests/binary.rs`'s half.
+#[tokio::test]
+async fn analysis_under_once_puts_the_panes_under_the_cards_and_without_it_there_are_none() {
+    let store = driven(emptied().await).await;
+
+    let panes = live_report(
+        &store,
+        now(),
+        &mut String::new(),
+        true,
+        &AtConnect::default(),
+    )
+    .expect("a cluster with nothing in it is still a report");
+    println!("{panes}");
+    let plain = live_report(
+        &store,
+        now(),
+        &mut String::new(),
+        false,
+        &AtConnect::default(),
+    )
+    .expect("a cluster with nothing in it is a report with or without the flag");
+
+    assert_ne!(
+        panes, plain,
+        "--analysis changed nothing about the report, so the flag is not read on this path"
+    );
+    for heading in ["[versions]", "[capacity]", "[certificates]"] {
+        assert!(
+            panes.contains(heading),
+            "the {heading} pane is missing under --analysis: {panes}"
+        );
+        assert!(
+            !plain.contains(heading),
+            "the {heading} pane was drawn without --analysis, which buries the cards the run \
+             exists to show: {plain}"
+        );
+    }
+}
+
+/// **`--once --analysis` waits for what each node is using; `--live` polls for it** (NOTES § D188,
+/// `reports/2026-08-30-once-flag-against-a-live-cluster.md` § 4d).
+///
+/// **Measured before it was written.** With `/apis/metrics.k8s.io` three seconds slower than the
+/// pod LIST, `--once --analysis` printed *"What each node is actually using is not shown. That
+/// number comes from metrics-server, and k8rs does not read it. Nothing to ask for"* — in the
+/// same run whose greeting on stderr said `{Metrics, DisruptionBudgets}`, so k8rs's own discovery
+/// had found the API it was telling the reader it does not read. Without the delay the same
+/// command printed the `using …` rows. The poll is a sixth stream merged into the watch loop and
+/// the loop's stopping point is the *five watches'* gate, which does not cover it; `--live`
+/// reprints a moment later and `--once` has no moment later.
+///
+/// **What is asserted is the wait, because the number itself is on the process's stdout.** The
+/// mode that stops must not return before the metrics endpoint has answered — that is exactly the
+/// race, stated as a thing a test can see. The negative is the same listener with no `--analysis`
+/// at all, which must not wait for a number no pane will draw.
+#[tokio::test]
+async fn once_waits_for_what_each_node_is_using_and_asks_for_it_exactly_once() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let held = std::time::Duration::from_millis(400);
+    let slow = || emptied_but_slow_on("/apis/metrics.k8s.io", held);
+
+    let (client, asked) = slow().await;
+    let started = tokio::time::Instant::now();
+    let ending = live(
+        Ok(k8s::session(client, k8s::Coverage::Cluster).await),
+        true,
+        Some(in_a_moment(10_000)),
+    )
+    .await;
+    let waited = started.elapsed();
+
+    assert_eq!(ending, None, "the --analysis run did not reach its report");
+    assert!(
+        waited >= held,
+        "--once --analysis ended in {waited:?}, before the {held:?} metrics answer could land — \
+         so Capacity printed `k8rs does not read it` about an API k8rs had already asked for, \
+         and this mode has no later pass to correct it"
+    );
+    // **Once, not twice.** The poll stream is *not* merged under this mode, and the only way that
+    // shows from inside the process is the request k8rs did not send: a poll whose first tick is
+    // immediate would ask a second time for a number the fetch above already has.
+    assert_eq!(
+        asked.load(SeqCst),
+        1,
+        "--once asked metrics-server {} times; the fetch at connect and the poll merged into the \
+         watch loop are both running",
+        asked.load(SeqCst)
+    );
+
+    // **The negative: no `--analysis`, no pane, nothing to ask for.** It is also what makes the
+    // wait above a fact about the flag rather than about a listener that is slow at everything —
+    // the same connection, built the same way, comes back well inside the delay.
+    let (client, unasked) = slow().await;
+    let started = tokio::time::Instant::now();
+    let ending = live(
+        Ok(k8s::session(client, k8s::Coverage::Cluster).await),
+        false,
+        Some(in_a_moment(10_000)),
+    )
+    .await;
+    let plain = started.elapsed();
+
+    assert_eq!(ending, None, "the plain run did not reach its report");
+    assert!(
+        plain < held,
+        "a --once with no --analysis waited {plain:?} for metrics-server, which draws no pane it \
+         could go in"
+    );
+    assert_eq!(
+        unasked.load(SeqCst),
+        0,
+        "a run that draws no Capacity pane asked metrics-server for the numbers anyway"
+    );
+}
+
+/// **Which mode asks metrics-server for the numbers on a timer, and which asks once**
+/// ([`polls_node_usage`], NOTES § D181, § D188).
+///
+/// **The requirement and not the expression.** `--live` redraws for as long as it runs, so a
+/// metrics-server that is restarting, being installed, or being granted the verb starts showing
+/// up without the reader touching anything — that is what the poll is for, and it is the row a
+/// deleted `!` would silently take away. `--once` has no later pass, so it reads the same number
+/// once at connect instead ([`once_waits_for_what_each_node_is_using_and_asks_for_it_exactly_once`]
+/// measures that half against a listener). Neither mode asks at all without the flag, because
+/// nothing would draw the answer.
+///
+/// **It is a function so that a test can reach it**: the poll stream cannot end, so a test that
+/// drove `--live --analysis` to a conclusion would be waiting for one that cannot come. The
+/// mutation gate is what said so — the condition spelled inline had no assertion behind it.
+#[test]
+fn only_a_run_that_keeps_redrawing_asks_metrics_server_again() {
+    assert!(
+        polls_node_usage(true, false),
+        "--live --analysis stopped polling, so a metrics-server that comes back, is installed, \
+         or is granted the verb never shows up on a screen somebody is watching (NOTES § D181)"
+    );
+    assert!(
+        !polls_node_usage(true, true),
+        "--once --analysis merged a poll into a loop it stops before the second tick of, and it \
+         already read the number once at connect"
+    );
+    assert!(
+        !polls_node_usage(false, false),
+        "--live with no --analysis asks metrics-server every thirty seconds for a pane it does \
+         not draw"
+    );
+    assert!(
+        !polls_node_usage(false, true),
+        "--once with no --analysis asks for a number nothing prints"
+    );
+}
+
+/// **[`ONCE_DEADLINE`] bounds the run and not the watch loop inside it** ([`cluster_run`],
+/// `reports/2026-08-30-once-flag-against-a-live-cluster.md` § 5).
+///
+/// **Measured before it was written**: an unroutable endpoint took **140 seconds** and one that
+/// accepted TCP and then said nothing was still going at 75, because `k8s::connect` sits ahead of
+/// the deadline and kube's `read_timeout` default is `None`. A connection that never finishes is
+/// the whole of that shape, so it is what is handed over here — `std::future::pending`, which
+/// needs no address and cannot resolve, race or depend on a network.
+///
+/// **The sentence is [`too_slow`]'s empty arm**, which had no way to be reached until this call
+/// existed: there is no store, so no kind to name and no count to compare on a second run.
+///
+/// **`--live` is asserted to have no such bound**, which is the half that keeps this a `--once`
+/// decision: a screen somebody is looking at may wait forever (NOTES § D150), so the same
+/// pending connection is still pending when the test stops waiting for it.
+#[tokio::test]
+async fn a_connection_that_never_finishes_ends_a_once_run_and_leaves_live_waiting() {
+    let never = || std::future::pending::<Result<k8s::Session, k8s::NotConnected>>();
+
+    let budget = std::time::Duration::from_millis(200);
+
+    let gave_up = tokio::time::timeout(budget * 10, cluster_run(never(), false, Some(budget)))
+        .await
+        .expect("--once did not come back inside ten times its own budget, so it bounds nothing")
+        .expect("a run that never reached the cluster has nothing to report and must say so");
+
+    println!("{gave_up}");
+    assert!(
+        gave_up.starts_with("k8rs: this cluster has not finished answering after"),
+        "{gave_up:?}"
+    );
+    assert!(
+        gave_up.contains("check the server address this kubeconfig names"),
+        "a run that never connected is left with nothing to do: {gave_up:?}"
+    );
+    assert!(
+        !gave_up.contains("still reading"),
+        "a run with no store named a kind it was reading: {gave_up:?}"
+    );
+
+    assert!(
+        tokio::time::timeout(budget * 10, cluster_run(never(), false, None))
+            .await
+            .is_err(),
+        "--live gave up on a connection, and a screen somebody is watching may wait (D150)"
+    );
+}
+
+/// **What a run that ran out of time says: the two facts, and no verdict** (NOTES § D150).
+///
+/// **`k8s.rs` refuses to pick a threshold between *slow* and *hung*** — any number that called
+/// the twentieth round trip of a 10 000-pod cluster a hang would call a working cluster broken —
+/// so this sentence may not contain one either. What it carries is how much each unfinished LIST
+/// has decoded and when the last of it arrived, which is what moves for a slow cluster and does
+/// not for a dead one, plus the one action that tells them apart.
+///
+/// **The number of seconds is the caller's**, so the sentence cannot drift from the deadline that
+/// produced it.
+///
+/// **Four shapes, because the pipeline produces four** (NOTES § D29): a LIST with a count and a
+/// stamp, a LIST with a stamp and nothing read, a machine whose clock would not read, and a list
+/// with nothing in it at all — which is [`cluster_run`]'s deadline, not [`live`]'s.
+///
+/// **`0 read so far, the last one 30s ago` was the ordinary reading and it was a lie**
+/// (`k8s-admin` and `tester`, independently, 2026-08-30). `k8s::Listing::since` is stamped by the
+/// `Init` that *opens* the watch, so a whole first round trip reports `0` beside a moving age —
+/// measured on an unreachable cluster as `12s, 12s, 10s, 12s, 10s`, five numbers walking forward
+/// while nothing arrived, pointing D150's *counts that have moved mean it is slow* separator at
+/// the wrong answer. *One* has nothing to bind to when nothing came (invariant 14), so the clause
+/// is gone in that shape and kept in the other.
+#[test]
+fn the_sentence_a_run_out_of_time_prints_carries_the_two_facts_and_no_verdict() {
+    let waited = ONCE_DEADLINE;
+    let listing = |kind: ObjectKind, so_far: usize, since: Option<Time>| k8s::Listing {
+        kind,
+        so_far,
+        since,
+    };
+
+    let ordinary = too_slow(
+        &[
+            listing(ObjectKind::Pod, 4500, Some(four_minutes_ago())),
+            listing(ObjectKind::DaemonSet, 0, Some(now())),
+        ],
+        Some(now()),
+        waited,
+    );
+    println!("{ordinary}");
+    assert!(
+        ordinary.starts_with("k8rs: this cluster has not finished answering after 30 seconds"),
+        "the sentence does not say how long it waited, so the reader cannot tell a slow run from \
+         a wrong flag: {ordinary:?}"
+    );
+    assert!(
+        ordinary.contains("still reading pods (4500 read so far, the last one 4 min ago)"),
+        "the count and the age are what separate slow from hung, and one of them is missing: \
+         {ordinary:?}"
+    );
+    // **A stamped LIST that has read nothing keeps the count and loses the age.** The `Init` that
+    // opened the watch is not a *last one*.
+    assert!(
+        ordinary.contains("DaemonSets (0 read so far)"),
+        "only the first unfinished LIST was named: {ordinary:?}"
+    );
+    assert!(
+        !ordinary.contains("DaemonSets (0 read so far, the last one"),
+        "a LIST that has read nothing claimed a last one, which is the age that moves while \
+         nothing arrives: {ordinary:?}"
+    );
+    assert!(
+        ordinary.contains("Run it again"),
+        "the sentence gives the reader nothing to do: {ordinary:?}"
+    );
+    // **No verdict.** The words `k8s.rs` declined to say about a cluster it cannot measure.
+    for verdict in ["hung", "broken", "dead", "too slow", "timed out"] {
+        assert!(
+            !ordinary.contains(verdict),
+            "the sentence calls the cluster {verdict}, which is the threshold k8s.rs refuses to \
+             invent: {ordinary:?}"
+        );
+    }
+
+    // **A clock that would not read costs the age and keeps the counts** — no reading is printed
+    // as no reading, never as a guess.
+    let clockless = too_slow(
+        &[listing(ObjectKind::Pod, 4500, Some(four_minutes_ago()))],
+        None,
+        waited,
+    );
+    println!("{clockless}");
+    assert!(
+        clockless.contains("still reading pods (4500 read so far)"),
+        "{clockless:?}"
+    );
+    assert!(
+        !clockless.contains("ago"),
+        "an age was printed for a machine that could not read its own clock: {clockless:?}"
+    );
+
+    // **A LIST with no stamp at all** — `Listing::since` is `None` before the loop's first poll.
+    let unstamped = too_slow(&[listing(ObjectKind::Node, 0, None)], Some(now()), waited);
+    println!("{unstamped}");
+    assert!(
+        unstamped.contains("still reading nodes (0 read so far)"),
+        "{unstamped:?}"
+    );
+
+    // **Nothing still listing is [`cluster_run`]'s deadline** — the connection itself ran out of
+    // budget, so there is no store, no kind and no count. *Run it again and see whether the
+    // counts moved* is advice about numbers that were never printed, so that arm says the one
+    // thing that is both true and actionable instead.
+    let empty = too_slow(&[], Some(now()), waited);
+    println!("{empty}");
+    assert!(
+        !empty.contains("still reading"),
+        "the sentence claims to be reading something and names nothing: {empty:?}"
+    );
+    assert!(
+        !empty.contains("counts that have moved"),
+        "a run that printed no counts told the reader to compare them: {empty:?}"
+    );
+    assert!(
+        empty.contains("check the server address this kubeconfig names"),
+        "a run that got nothing at all is left with nothing to do: {empty:?}"
     );
 }

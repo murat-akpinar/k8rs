@@ -620,16 +620,109 @@ k8rs: the certificate the API server presented expired 3 days ago
   balancer, trying again may reach one that still works.
 ```
 
+**A permission refusal and a cluster that never answers share one shape**,
+because both leave k8rs with no pods to build a report from — and every
+finding starts there — and the reader needing the same three answers: what
+k8rs asked for, what happened, and what to do next
+([`pods_unread`](../src/main.rs)). The function was `pods_refused` until this
+box; it is `pods_unread` now because a refusal is only one of the two faults
+that reach it
+([NOTES § D191](../NOTES.md#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30)).
+**Two blocks, not one with two fillings** — a denied role and a cluster that
+never answers are different problems with different next actions, and this
+page already draws one block per distinct failure rather than folding
+lookalikes together (the four in this section, and the "you can only see
+some namespaces" banner below it).
+
+**Every block below leads with the same header before anything else, and it
+is not redrawn at full width here** — `pods_unread` builds it with one
+`format!` call and nothing in `main.rs` wraps it: *"k8rs: this cluster did
+not show k8rs its pods, and every finding starts there, so there is nothing
+to report."* Measured, that is 108 columns — past this page's frame and the
+80-column terminal both draw — so it is named once, here, instead of
+redrawn overwide in every block that follows.
+
 ```
 $ k8rs
-k8rs: your user is not allowed to list pods in this cluster.
-
-  Missing permission: list pods (cluster-wide)
-  Your kubeconfig context: prod-eu, user: dev@example.com
-
-  Ask for one of the two roles in the README, or run k8rs
-  against a single namespace:  k8rs --namespace <name>
+  What k8rs asked for: pods in the namespace default
+  What happened: the role this kubeconfig uses needs to `list` and `watch` pods
 ```
+
+Measured against a real cluster and a kubeconfig with no RBAC grants at all,
+no `--namespace` given, and a context that names no namespace either — the
+plain `k8rs` a beginner types first, against a cluster where nobody has
+granted them anything yet. k8rs tries the whole cluster first, is refused,
+then guesses the namespace `default` and tries that too — refused there as
+well — which is why the scope line already reads `in the namespace default`
+rather than `across the whole cluster`.
+
+**Only the closing sentence changes with how the refusal was scoped** — the
+first two lines and the shape are fixed, and the scope is always named
+because that is the one fact that decides whether the reader goes and asks
+for a `Role` or a `ClusterRole`:
+
+- **No `--namespace`, and the guessed one above was refused too** (drawn
+  above) — the next step is to say which namespace: *"This kubeconfig names
+  no namespace, so k8rs had to guess default and was refused there too. Say
+  which namespace you work in: `--namespace <name>`."*
+- **`--namespace kube-system`, or a context that already names one, refused
+  in that one namespace** — measured the same way, against the same
+  identity, header and "What happened" unchanged from above:
+  ```
+  $ k8rs --namespace kube-system
+    What k8rs asked for: pods in the namespace kube-system
+  ```
+  and the closing sentence, also one unwrapped line, this one 178 columns:
+  *"Ask whoever runs this cluster for a role that may read pods in
+  kube-system — the same rules as `k8rs-readonly` in the k8rs docs, granted
+  in one namespace instead of all of them."* `--namespace <name>` is not
+  offered here — the reader already used that door, so the next step is the
+  role to ask for instead.
+- **Refused cluster-wide with nothing to fall back to guessing** — `list`
+  succeeds and the persistent watch's `watch` verb specifically does not, an
+  easy RBAC gap to leave open by hand: *"Ask whoever runs this cluster for a
+  role that may read pods in every namespace — `k8rs-readonly` in the k8rs
+  docs is that role — or run k8rs in one namespace you can read:
+  `--namespace <name>`."* This is the one case where offering `--namespace`
+  is still useful, because the reader has not typed it yet. Read off
+  [`pods_unread`](../src/main.rs) rather than measured live — the cluster
+  used for this box has no `Role` shaped that way and building one is a
+  write this review does not make.
+
+A cluster that never answers reads through the same shape. Not reproduced
+live in this review — that needs a listener which completes the handshake
+and then blocks, and building one was outside a read-only pass over a shared
+cluster — but read off [`pods_unread`](../src/main.rs) and
+[`because`](../src/main.rs)'s `Unanswered` arm byte for byte, and it is the
+shape [NOTES § D191](../NOTES.md#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30)
+names as blocker 2, an endpoint that accepts the connection and then says
+nothing — the same header as above, then:
+
+```
+$ k8rs
+  What k8rs asked for: pods across the whole cluster
+```
+
+"What happened" differs from the two refusals above and, like them, prints
+as one unwrapped line, 84 columns: *"What happened: nothing usable came
+back when k8rs tried to `list` and `watch` pods."* So does the closing
+sentence, also 84: *"Check the server address this kubeconfig names, and
+that this machine can reach it."*
+
+Three things about the block this replaced were wrong, and the PM ruled each
+([NOTES § D191](../NOTES.md#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30)):
+**there is no README** until Phase 13, so the role is named where it
+actually lives — [docs/security.md § RBAC](../docs/security.md#rbac)'s
+`k8rs-readonly`. **`--namespace <name>` is a spent door** for a reader who
+already typed it, so the next step differs by scope instead of repeating one
+line for everyone. **The scope is always in the sentence** now, whole
+cluster or the exact namespace, rather than missing entirely under
+`--namespace kube-system` the way it used to. **The old block's `Your
+kubeconfig context: prod-eu, user: dev@example.com` line is gone and not
+replaced**: `pods_unread` never had that string to print — this stage runs
+before the header exists to read it from — and a line the binary cannot
+produce is a promise the screen cannot keep
+([NOTES § D190](../NOTES.md#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)).
 
 ## Rules that hold across every state on this page
 

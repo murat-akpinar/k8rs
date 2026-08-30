@@ -663,7 +663,11 @@ is ever actually asked for, has somewhere to go without moving what `0` means.
 
 Failures print the same plain-language stderr messages the TUI prints before it
 ever enters raw mode — one text, both paths
-([states.md](states.md#before-the-tui-ever-starts)).
+([states.md](states.md#before-the-tui-ever-starts)). That page's *not allowed
+to list pods* block now answers for the *unreachable cluster* row above too,
+for the shape where the cluster accepted the connection and then never
+answered — one function, `pods_unread`, prints both, because either way k8rs
+ends the run with no pods and the reader needs the same three answers.
 
 ## What `--once` does not do
 

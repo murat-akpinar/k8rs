@@ -212,6 +212,8 @@ its line moving with it.
 - [D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30) — where a `--once` report ends up, and the flag that is the only reader three shipped rules have
 - [D189](#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30) — `--once` is built in Phase 5, a path beside a cluster flag is refused rather than ignored, and the command log the screen promises does not exist
 - [D190](#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30) — the screen that ships first promises four things the binary does not do, and nobody had read them against each other
+- [D191](#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30) — the `--once` review round: three blockers, and the one PM ruling a measurement refused
+- [D192](#d192--the-flake-was-a-stub-telling-the-truth-about-the-wrong-thing-and-fixing-it-made-the-neighbouring-test-unable-to-fail-2026-08-30) — the flake was a stub telling the truth about the wrong thing, and fixing it made the neighbouring test unable to fail
 
 ## Why it exists — where the gap is
 
@@ -16530,3 +16532,150 @@ running binary on a live cluster; every previous pass over `screens/once.md` rea
 it against the design. *The definition says what it is; only the object says what
 it does* — and a screen file is an object's description, which makes it the
 easiest place in this repo for a true sentence to quietly stop being one.
+
+### D191 — the `--once` review round: three blockers, and the one PM ruling a measurement refused (2026-08-30)
+
+`tester` and `k8s-admin` reported on the same diff. Between them: a red build, two
+blocking operator findings, and — the entry's reason for existing — **a ruling of
+mine that `dev-core` drove and disproved**.
+
+**The blockers, all three of which shipped output an operator could act wrongly
+on.**
+
+1. **`--once` printed more than one report.** `stop.abort()` sets a flag
+   `Abortable` reads on its *next* poll, and `drive_watching`'s loop has no yield
+   point between iterations, so every update already ready in that poll still
+   reached the observer and wrote another report. Both reviewers found it
+   independently and from opposite directions — `tester` measured `[1, 2, 6, 6,
+   2]` reports over five runs against a stub; `k8s-admin` read it off
+   `futures-util`'s own doc. **Against the real cluster it printed one report
+   40/40 times**, which is why neither the author's run nor any earlier pass saw
+   it. Closed with a latch.
+2. **An unreachable cluster was reported as a slow one.** `too_slow` read
+   `still_listing()` and never `troubles()`, so a dead address burned 30 s, printed
+   nothing on stdout, and said *"Run it again: counts that have moved mean it is
+   slow"* — while the store held `Fault::Unanswered` on all five watches and
+   `--live` over the identical endpoint said so in the first second. `because`'s
+   own doc claimed this was structurally impossible: *"every site on the cluster
+   path … routes through here, so there is nowhere on it for a fallback to grow."*
+   It was a site on that path that did not route through it. `PRIOR-ART § C1` on a
+   new site.
+3. **`--once --analysis` claimed the cluster had no readable metrics** whenever
+   metrics-server answered slower than the pod LIST: the stop condition is the five
+   watches' gate and the metrics poll is a sixth stream it does not cover. `--live`
+   reprints later; `--once` has no later. The same run's stderr said `{Metrics,
+   DisruptionBudgets}` — k8rs's discovery finding the API in the run that told the
+   operator *"k8rs does not read it. Nothing to ask for"*.
+   [D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)
+   had just made `--analysis` released surface, so it was a shipped wrong claim.
+
+**The ruling that did not survive, and it is the useful part.** `k8s-admin`
+measured that a `403` on nodes gives a full report and exit `0` while a nodes
+endpoint that accepts and never answers gives zero bytes and exit `2` — *"a
+transient wedge producing less than a permanent refusal is backwards"*. I ruled
+from that: **on the deadline, if pods listed, print the report you have and exit
+0.** `dev-core` drove it rather than implementing it:
+
+```
+still_listing = [("Node", 0)]   troubles = []
+snapshot = None                 live_report = None      pods_unread = None
+```
+
+**A wedged watch records no failure at all**, so it is not a `Trouble`, so the gate
+never opens and there is no snapshot to print. *"Print the report you have"*
+prints **zero bytes and exits 0** — which turns `k8rs --once && deploy` green on a
+run that read nothing, strictly worse than the exit 2 it replaced. Making the two
+symmetric means publishing a partial snapshot, which is `k8s::Store`'s decision and
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)'s, not a
+`main.rs` change. Boxed against `k8s.rs`; the limit is named in `live`'s doc with
+the measurement beside it.
+
+**What I actually did wrong is worth naming precisely, because it is not *ruled
+without evidence*.** I had evidence — a good measurement, from a careful
+reviewer, of exactly the two runs in question. What that measurement showed was
+the **symptom**: two exit codes and two stdout sizes. My ruling turned on the
+**mechanism** — *there is a report sitting in the store, so print it* — and the
+measurement said nothing about that. A reviewer's finding is an observation of
+behaviour; a ruling about how to change the behaviour needs the object the change
+acts on, and I did not go and look at it.
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
+sentence covers it and I read it as being about numbers: *the definition says what
+it is; only the object says what it does* — and **a finding is a definition too**.
+
+**One brief-named mechanism the author was right to refuse.** For blocker 2 I named
+`unreadable(&store.troubles(), …)`, the line `--live` already prints. `dev-core`
+used a single `pods_unread` block instead, because five identical `▲` lines is the
+wall of symptoms `--once` exists not to print (`screens/once.md`: *one specific
+sentence and a non-zero exit, never a list of every symptom*). It is the same
+`because` clause and no new string. Accepted. The function is renamed from
+`pods_refused`, because it now fires for `Unanswered` too and a name saying
+*refused* would be the stale second copy.
+
+**The mutation gate could not run at all, and the reason was in a test.**
+`tests/binary.rs` carried a race that reddened one run in six — measured 2/12 by
+the PM and 3/20 by `dev-core`, and **3/20 with the product fix removed**, which is
+what proved it pre-existing rather than a symptom. `cargo-mutants` files a failing
+*baseline* as a stopped run, so the whole gate was blocked by somebody else's flake
+until it was fixed. Run against a stabilised copy it was clean — 76 mutants, 74
+caught, 2 unviable, both naming a type
+([D133](#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)) —
+and it found two defects nobody would have: an inline `if` that made
+`scoped_because`'s new argument untested, and a predicate that had to be extracted
+before anything could assert it.
+
+### D192 — the flake was a stub telling the truth about the wrong thing, and fixing it made the neighbouring test unable to fail (2026-08-30)
+
+`tests/binary.rs` carried a race that reddened **5 runs in 20** and blocked the
+whole box: `cargo-mutants` files a failing *baseline* as a stopped run, so nobody
+could run the mutation gate on the real tree at all until it was fixed. Three
+people measured three different rates — 2/12 (PM), 3/20 (`dev-core`), 5/20
+(`tester`) — which is what a scheduling race looks like and is why the *rate* is
+this machine's and only the *direction* transfers.
+
+**The cause, and the sentence that hid it.** The stub answered `?watch=true` with
+a `content-length` List. kube records that as a failure, and whether the failure
+lands before or after the bootstrap gate opens is a coin flip. The stub's own doc
+asserted it could not matter — *"by then all five have listed, the gate is open"* —
+and `tester` disproved it **twice**, with a request-logging listener and
+timestamps rather than by reading: in half the runs the pods watch was answered
+*before* the fifth LIST (`40.75ms WATCH pods` against `40.82ms LIST daemonsets`),
+and in the other half all five **had** listed and the trouble line came out anyway,
+because **a socket answered is not a store updated**. The sentence was wrong about
+the ordering and would not have saved the test where the ordering held.
+
+**Then the fix made the neighbouring test vacuous, and this is the entry's
+point.** Holding the watch open — read the request, drop it, leave the socket
+blocked, which is what a real watch with nothing to send does — took the flake to
+**30/30 green, twice**. But over a cluster where nothing ever arrives, *the update
+that opens the gate is the last update there is*. So
+`a_once_run_prints_one_report_and_not_a_second_one` — the test written that same
+day to catch
+[D191](#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30)'s
+first blocker — passed **20/20, a hundred invocations, zero red**, against a binary
+with the `--once` latch deleted. It could no longer fail at all.
+
+**A flake is fixed by removing a stimulus, and the stimulus may be what the test
+next door was living on.** Nothing about the second test changed; nothing in its
+own file changed; it went from proving the box's headline claim to proving nothing,
+because a *fixture* it shared got quieter. Caught only because
+[D26](#d26--a-green-build-that-proves-nothing-2026-08-12) was obeyed literally —
+the product was broken again *after* the flake fix, not only before it. **The red
+that matters is the one you re-run after every change to the harness**, not the one
+you saw once at the start. The stub now takes a parameter, and that test runs
+against a watch that is **accepted and then cut** — what a restarted API server or
+a dropped VPN does — which keeps failures and re-lists arriving behind the gate.
+
+**The retry count was re-measured rather than carried.** The test retries because
+the defect is probabilistic, and `ATTEMPTS = 5` had been chosen against a rate that
+the harness change destroyed. Re-measured against the unlatched binary over the new
+shape: **11 misses in 40 single attempts, 27.5%** — so five attempts miss one run
+in 636, and **eight** miss one in ~30,600. A retry count inherited across a change
+to what it is retrying is a number that means nothing.
+
+**The same stub and the same false sentence sit in `src/main_tests.rs`**
+(`emptied()`), and it is *not* flaking — measured, 15 consecutive whole-suite runs,
+729 tests, zero failures — because every assertion over it keys on the header or on
+pane headings, which a trouble line does not disturb. That is the worse state, not
+the better one: the first assertion anybody writes there about *nothing is broken*
+flakes at that rate and looks like a product bug. Fixed in the same turn, with the
+same shape rather than a second mechanism for one fact.

@@ -2856,7 +2856,7 @@ public release.
       ```
 
       Held by tests either side of the binary:
-      `tests/binary.rs::live_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty`
+      `tests/binary.rs::a_cluster_mode_with_no_kubeconfig_is_exit_2_on_stderr_and_leaves_stdout_empty`
       for the stream and the code, and `Fault::NoContext` in `src/k8s_tests.rs`
       for the second sentence
       ([D172](NOTES.md#d172--three-kubeconfig-boxes-one-that-was-already-done-and-why-these-fixtures-are-hand-written-2026-08-28))
@@ -3227,7 +3227,24 @@ public release.
       when it could not. No binary matrix and no screenshot; `cargo install` is the whole
       distribution at this stage. Ships the one thing nothing else does, months
       before the TUI, while the rules are still cheap to change
-      ([NOTES § D10](NOTES.md#d10--m1-ships-publicly-as-v001))
+      ([NOTES § D10](NOTES.md#d10--m1-ships-publicly-as-v001)).
+      **The flag is built and this box is still open, on purpose.** `--once`
+      landed 2026-08-30 after two review rounds
+      ([D189](NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30) ·
+      [D191](NOTES.md#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30) ·
+      [D192](NOTES.md#d192--the-flake-was-a-stub-telling-the-truth-about-the-wrong-thing-and-fixing-it-made-the-neighbouring-test-unable-to-fail-2026-08-30)):
+      measured against the four-node `k8rs` kind cluster, `k8rs --once` exits `0`
+      with exactly one report in 40 of 40 runs, `--analysis` draws the seven panes
+      with real metrics, `--context` with nothing after it and `-o json` are
+      refused, an unreachable address is bounded at 30 s instead of 140, and a
+      refused pod watch exits `2` naming the verb, the resource, the scope and the
+      next step.
+      **What is left is the publish, and no agent can run it** — it needs the
+      maintainer's crates.io credential, so the PM prints the command and waits
+      for the real output rather than checking a box on *this would work*
+      ([CLAUDE.md § The boxes no agent can run](CLAUDE.md)). It also needs a
+      version bump: `Cargo.toml` still says `0.0.0`, the placeholder published
+      2026-08-12
 
 **🔒 Security gate:** TLS verification is never disabled by us; if the
 kubeconfig sets `insecure-skip-tls-verify` it is honoured *and surfaced*, not
@@ -3399,12 +3416,60 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       existed — no wrap function is in `main.rs` and evidence lines measured
       **423 characters** on a real run — and this one is a real question before it is an edit:
       *should* the report wrap, given D188 just documented that it gets pasted
-      into tickets?
+      into tickets? **The refusal block is a second instance and it arrived after
+      the box was written** — `pods_unread` builds each sentence with one
+      `format!`, so the block a refused operator reads prints its header at **108
+      columns** and its closing sentence at **145, 178 and 84** in the three
+      coverage shapes (measured 2026-08-30 with `screens-check.py`'s own
+      `unicodedata` width function, not `len()`). `screens/states.md` now names
+      those widths in prose because no fence at 80 columns can honestly draw
+      them, which is the workaround and not the answer;
       **(d)** `--read-only` is refused, where the screen says v0.0.1 accepts it and
       does nothing — Phase 7 owns the flag, so decide whether the screen describes
       the future build in the future tense or drops the row until then.
       **Done when** each of the four is either true of the binary or gone from the
-      screen, and (c) carries a ruling rather than an edit
+      screen, and (c) carries a ruling rather than an edit.
+      **(d) is settled already and does not wait for this box** — `--read-only` is
+      accepted as a no-op as of 2026-08-30, which is what the screen says v0.0.1
+      does; the row that stays open here is only whether the screen should say
+      *why* it does nothing ([D191](NOTES.md#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30)).
+      **And the class is not confined to `once.md`, which is the finding that
+      widens this box.** Syncing the refusal block turned up two more in the same
+      shape, both found by reading a screen against the binary rather than against
+      the design: `screens/states.md:591–607` draws *"no kubeconfig found"* and
+      *"cannot reach the cluster at …"* blocks matching **no string `main.rs`
+      prints** — the real prefix is `k8rs: no cluster to watch — {reason}` — and
+      `screens/context.md:349,388` still carries `Missing permission: list pods
+      (cluster-wide)` and `User: dev@example.com`, the unscoped-permission line
+      and the identity the binary cannot print, both of which were just corrected
+      one file over. **Done when** every screen file has been read against the
+      built binary once, not only `once.md`, and each divergence is either true or
+      gone
+- [ ] **`server ` with nothing after it, and a dangling double space.**
+      `greeting()` (`src/main.rs`) is `format!("server {}", sanitize(version))`
+      with no empty guard, so a `/version` that answers `200` without
+      `gitVersion` prints `k8rs: watching — server  · could not list what this
+      cluster serves …`. Confirmed in `dev-core`'s own runs 2026-08-30; reachable
+      behind a proxy or gateway that drops the field, and a real kube-apiserver
+      always sets it. **Done when** an absent *or blank* `gitVersion` costs the
+      clause rather than printing an empty one — the blank case is fed by no test
+      today, which is why this is a box and not a shrug
+- [ ] **A wedged watch costs the whole report where a refused one costs two
+      rules**, and closing it is a `k8s.rs` change nobody has granted. Measured: a
+      `403` on nodes gives a full report, 41 pods, thirteen findings, exit `0`; a
+      nodes endpoint that accepts and never answers gives **zero bytes** and exit
+      `2` after the deadline — a transient wedge producing less than a permanent
+      refusal, so `k8rs --once && deploy` flips on which failure mode the cluster
+      is in. **The obvious fix does not work and this is why the box exists**: a
+      wedged watch records no failure at all (`still_listing = [("Node", 0)]`,
+      `troubles = []`), so the gate never opens and there is no snapshot — *print
+      the report you have* prints zero bytes and exits `0`, which is strictly worse
+      ([D191](NOTES.md#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30)).
+      Symmetry needs a **partial snapshot**, which is `k8s::Store`'s decision and
+      [D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)'s.
+      **Done when** the two failure modes cost the same, or a recorded decision
+      says why they must not — and either way `live`'s doc stops naming it as an
+      unclosed limit
 
 **🔒 Security gate:** log streams are attacker-controlled text — bounded
 buffer, control characters stripped, no unbounded growth. Secret values are
