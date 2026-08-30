@@ -164,6 +164,7 @@
 - *(ui)* Draw the clock-skew states, and split the sentence the two halves cannot share ([e718aa0](https://github.com/murat-akpinar/k8rs/commit/e718aa03bdac6f7c7279f8d3e9b3f72330692d2b)) — The header row is one line and the sentence is 97 characters, so it carries a pointer and the banner carries the sentence. Behind the cluster age blanks and ahead of it age lies, so they get two sentences rather than one hedge; D55's wording was the ahead half's and is corrected in place.
 - Retract half a ruling the code had already answered ([63c9287](https://github.com/murat-akpinar/k8rs/commit/63c92875085c4b4bf553745f53302020405190e1)) — `tally()` has emitted only the non-empty severity bands since Phase 4, so the `1 critical` the clock-skew mockups drew was backed all along. The ruling that called it unbacked read `screens/` and not `main.rs`. The sidebar badge stays open — that renderer does not exist yet.
 - *(docs)* Point the typed-lists box at the fetch shape C3 built for it ([b48e2a8](https://github.com/murat-akpinar/k8rs/commit/b48e2a8ec8d2e995604bb4adf2bd949158978b85))
+- *(docs)* Say where a --once report ends up, and rule that --analysis ships with it ([3667dd3](https://github.com/murat-akpinar/k8rs/commit/3667dd35823510f8f0456e5a55e150ef80d39232)) — Two halves of one Phase 5 box, recorded as NOTES D188.
 
 ### ⚡ Performance
 
