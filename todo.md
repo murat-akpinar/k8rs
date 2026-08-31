@@ -3321,6 +3321,12 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
 > sweep, `context.md`'s `shadowed` / `Unreadable`, and the context whose name
 > strips to nothing. 6 **where the resident set is**, alone. 7 **a wedged watch
 > against a refused one**, alone.
+>
+> **Families 1, 2 and 3 are closed (2026-08-30, 2026-08-31, 2026-08-31).** The
+> first unchecked box below belongs to **family 5**, not family 4 — the boxes do
+> not sit in family order in this file, because a family is what a turn briefs
+> together and the file's order is the order they were found in. Read this list,
+> not the line numbers, before batching a turn.
 
 - [x] `l` logs: fetch and follow, container picker, `--previous` for a
       crashed container — the single most-typed kubectl command there is.
