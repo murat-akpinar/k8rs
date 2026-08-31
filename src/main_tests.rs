@@ -8118,3 +8118,162 @@ fn the_yaml_teaching_line_asks_for_the_document_that_was_printed() {
         "$ kubectl get node k8rs-worker2 -o yaml --show-managed-fields"
     );
 }
+
+// --- ONE LINE, OUT OF EVERY PATH TEXT LEAVES BY ---
+//
+// **Sanitising for the screen and emitting for a consumer are two different jobs, and this is the
+// second one** (todo.md § Phase 6, `PRIOR-ART § D1`). The strip is proven elsewhere — this asks the
+// other question: does anything a *printer* did to a value survive into what leaves the process?
+// A wrap, a pad, a cut, a second strip: the reader who redirects `--logs` to a file or pipes
+// `--once` into `grep` gets whatever the pane did, and none of it is in the object.
+//
+// **The paths were enumerated off `main.rs`'s writes rather than off a list, and the first count
+// here was wrong** — *four places* against a measured **seven `writeln!` and one `write!`**
+// (`k8s-admin`, 2026-08-31): the file-driven report, the live report, the log dump's
+// dropped-lines sentence *and* its lines, the `--follow` arm, [`stream_ended`]'s end-of-stream
+// marker, the describe block, and the document. Plus the `k8rs: …` sentence every failing run
+// ends on and the `$ kubectl …` line invariant 4 owes.
+//
+// **Two of those eight carry no cluster text and are named rather than fed**: [`stream_ended`]'s
+// marker and the dropped-lines sentence are `&'static str` this file wrote, which is what
+// `LogLines::dropped_line`'s own doc is about. `--yaml` is proven in `k8s_tests.rs`, where the
+// tree it re-reads as lives; every other one is here.
+//
+// **Two of them cannot be a `contains`, and are asserted whole instead**: the followed log line and
+// the fetched one *are* the payload, so an addition anywhere on the line is a byte the container
+// did not write.
+
+/// **A line as a cluster wrote it**: an `ESC` at the front, brackets that are data and not markup,
+/// a bidi override late in the sentence, and **163 characters** — 165 bytes — with a space either
+/// side of column 80 and of column 120. (The count is the constant's own, measured, not the length
+/// of the sentence it reads as: `AFTER_ONE_STRIP` is 161 after the two characters are removed, and
+/// the sibling in `k8s_tests.rs` is a different string at 158.)
+const FROM_THE_CLUSTER: &str = "\u{1b}[2Jallocating 240MB of cache [accounts] for the accounts \
+                                table, which is one sentence long enough to cross both an 80 \
+                                column and a 120 column bo\u{202e}undary twice over";
+
+/// **The same line after the one transformation this repo documents** — the ingest strip, which
+/// removes a character with no printed form of its own and changes nothing else (NOTES § D146,
+/// § D154).
+///
+/// **Written out rather than computed**, so it says what the requirement is and not what the code
+/// returned (CLAUDE.md § Tests must not lie). Neither planted character is whitespace, so `text`'s
+/// substitution and `sanitize`'s removal produce this same string — which is
+/// `sanitize_cannot_act_on_anything_the_ingest_strip_left`'s subject, one file down.
+const AFTER_ONE_STRIP: &str = "[2Jallocating 240MB of cache [accounts] for the accounts table, \
+                               which is one sentence long enough to cross both an 80 column and a \
+                               120 column boundary twice over";
+
+/// **One line, out of every path text leaves k8rs by, carrying exactly one transformation.**
+///
+/// **This is not a guard waiting for a subject, and calling it one is how it gets deleted as noise
+/// in Phase 11** (`k8s-admin`, 2026-08-31). It fires on four things, three of which exist today:
+/// a value cut short, a value padded from the inside, a value stripped a second time, and a value
+/// folded across lines. Only the last has no producer yet — `column` pads to a width and never
+/// cuts, and `serde_yaml_ng`'s emitter does not fold a long scalar (measured: a 155-character
+/// scalar comes back on one line, `dev-core` 2026-08-31) — and it is fed its own boundary anyway,
+/// so it needs nothing added on the day one arrives.
+///
+/// **Three of the four were run**, each against a planted producer: `card` wrapping the evidence
+/// at 80 columns, `raw_and_message` cutting at 100 characters, and `dump` padding every line to a
+/// column width. Each fails naming its own path.
+///
+
+#[tokio::test]
+async fn one_line_comes_out_of_every_emit_path_with_one_transformation_on_it() {
+    assert!(
+        FROM_THE_CLUSTER.chars().count() > 130,
+        "the line does not reach a second wrap boundary, so this guard is not fed what it is for"
+    );
+
+    // **`--once`**, through the report the file-driven run and the live run both print.
+    let mut broken = finding(Severity::Critical, pod_id("payments", "web"));
+    broken.evidence = FROM_THE_CLUSTER.to_string();
+    let once = render(&[broken], &nothing_read());
+
+    // **`--analysis`**, where Posture prints a `hostPath` as a row's whole text rather than as a
+    // value inside a sentence — the framing that has no delimiter to hide a cut behind.
+    let mut input = read(&["healthy-hostpath.json", "nodes.json"]);
+    input.snapshot.pods[0].host_path_mounts[0].path = FROM_THE_CLUSTER.to_string();
+    let analysis = reports(&input.snapshot, &analyze(&input.snapshot));
+
+    // **`--logs`**, both arms, through the one reader that produces a line for either
+    // (`k8s::read_lines`).
+    let mut held = k8s::LogLines::default();
+    let mut followed = Vec::new();
+    // **`LogSocket::over` and not the bytes**, because `k8s::log_stream` hands back a socket
+    // nothing outside `k8s.rs` can decode itself and this constructor is `#[cfg(test)]` — the
+    // hole a review found by rewriting the `--follow` arm to read the stream by hand
+    // (`k8s-admin`, 2026-08-31).
+    k8s::read_lines(k8s::LogSocket::over(FROM_THE_CLUSTER.as_bytes()), |line| {
+        followed.push(line.clone());
+        held.push(line);
+        true
+    })
+    .await
+    .expect("a slice never fails a read");
+    let mut fetched = Vec::new();
+    dump(&held, &mut fetched).expect("a Vec never refuses a write");
+    let fetched = String::from_utf8(fetched).expect("k8rs writes UTF-8");
+
+    // **`--describe`**, where a controller's sentence is the second line of an event's block.
+    let pod = pod_read("healthy").await;
+    let described = described(
+        &pod,
+        Some(&k8s::Happened {
+            lines: vec![happening(
+                Some("2026-08-30T21:35:41Z"),
+                "Unhealthy",
+                FROM_THE_CLUSTER,
+            )],
+            cut: false,
+        }),
+        &now(),
+    );
+
+    for (path, printed) in [
+        ("--once", &once),
+        ("--analysis", &analysis),
+        ("--logs (fetched)", &fetched),
+        ("--describe", &described),
+        // **The `k8rs: …` sentence every failing run ends on**, spelled once by `about`.
+        (
+            "the stderr sentence",
+            &about("pod", FROM_THE_CLUSTER, Some("payments")),
+        ),
+        // **The command log, which is the one line a reader copies and runs** (invariant 4).
+        //
+        // **In the `qualified` slot and not the `name` one, which is where this was wrong.**
+        // `--object`'s name goes through `k8s::object_name` before any of this, so a name can
+        // never carry an `ESC` and feeding one there tested a case production forbids;
+        // `qualified` is built from `Browsable::kind` and `Browsable::group`, which are the
+        // cluster's words (`k8s-admin`, 2026-08-31). `Fetch::table` now refuses a kind that is
+        // not `path_safe`, so this slot is guarded upstream too — and this assertion is about
+        // what the *printer* does to whatever reaches it, which is a different question and the
+        // one the box asked.
+        (
+            "the kubectl line",
+            &kubectl_get(FROM_THE_CLUSTER, "web", Some("payments")),
+        ),
+    ] {
+        println!("--- {path} ---\n{printed}");
+        assert!(
+            printed.contains(AFTER_ONE_STRIP),
+            "{path} did not carry the line out whole: something wrapped it, cut it, padded inside \
+             it or stripped it a second time — {printed:?}"
+        );
+    }
+
+    // **The two log arms are the payload itself**, so they are asserted whole rather than found
+    // inside something.
+    assert_eq!(
+        followed,
+        vec![AFTER_ONE_STRIP.to_string()],
+        "the followed log line is not the container's line with one strip on it"
+    );
+    assert_eq!(
+        fetched,
+        format!("{AFTER_ONE_STRIP}\n"),
+        "the fetched log is not the container's line with one strip and the newline that ends it"
+    );
+}

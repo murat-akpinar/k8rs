@@ -1856,6 +1856,44 @@ recorded reversal and a later box rather than a dev round
   hides. It is a convention the invariant already mandates, not a judgement call,
   so it needs no ruling — only a turn of its own with nothing else in it.
 
+- **`insecure-skip-tls-verify` is honoured and shown nowhere, and no headless
+  surface has an equivalent.** Measured 2026-08-31 on the fixture cluster: one
+  kubeconfig with the CA dropped and the flag set produced output **byte-identical**
+  to the verified run — `k8rs: watching — server v1.36.1 · 62 kinds …`, same 41
+  pods, same 4 nodes — and `grep -rn "\.insecure\b" src/*.rs` outside the tests
+  returns nothing. The flag is carried on a context-picker row
+  ([D174](NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28))
+  that Phase 11 has not drawn. **The security gate's row is *honoured and
+  surfaced*, and it is the one no script can check** — so it has been passing by
+  hand on a half that does not exist. The answer is a screen decision before a
+  Rust one (what `--once`, `--describe` and `--yaml` say about a connection whose
+  certificate was not verified), so it is `tui-designer`'s first
+  ([reports/2026-08-31-one-transformation-on-a-string-operator-review.md](reports/2026-08-31-one-transformation-on-a-string-operator-review.md) § 6)
+
+- **`Happened::cut` can be true with nothing cut.** `cut` is
+  `continue_.is_some()`, and measured against the fixture cluster a token comes
+  back whenever the page **exactly fills** the limit and the collection has more
+  keys, whether or not any of them match the selector: `limit=2 items=2
+  continue=yes`, `limit=4 items=4 continue=yes` (the object has exactly 4 events),
+  `limit=6 items=4 continue=no`. So an object with exactly `EVENTS_KEPT` events
+  prints *"there are more, and these are not the newest"* over a complete list —
+  a heading that is a claim, and false. A nit today: the busiest object measured
+  has 8 events, because the kubelet aggregates repeats into `count`
+  ([D199](NOTES.md#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31)).
+  Worth knowing before Phase 11's events tab reuses the fetch
+  ([reports/2026-08-31-one-transformation-on-a-string-operator-review.md](reports/2026-08-31-one-transformation-on-a-string-operator-review.md) § 8)
+
+- **The file path and the cluster path print different lines for the same
+  object, and no test says so.** `k8s::text` **substitutes** a space for an
+  unprintable whitespace character ([D146](NOTES.md#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22));
+  `main.rs`'s `sanitize` **removes** it. A controller message reading
+  `secret "prod" not found\nand a second line` comes out of the fixture path as
+  `…not foundand a second line` — the exact gluing D146 gives as its reason for
+  substituting. The disposal difference is documented on both functions, so this
+  is a named divergence rather than a contradiction; what is missing is that
+  nothing pins it, and it disappears on its own when `sanitize` does at Phase 12
+  ([reports/2026-08-31-one-transformation-on-a-string-operator-review.md](reports/2026-08-31-one-transformation-on-a-string-operator-review.md) § 5)
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

@@ -299,6 +299,32 @@ fn wall_clock() -> Result<Time, String> {
 /// own line breaks and printed three sentences as one. A `\n` *from the cluster* still dies
 /// here, and must — it would forge a second card. Phase 5's ingest strip supersedes this by
 /// applying the same rule one layer earlier, cleaning the text as it arrives.
+///
+/// **It is a no-op on anything `k8s::text` produced, and it is the only strip several live inputs
+/// ever meet.** Two claims, both measured, and neither of them is *the live path does not need
+/// this* — a first draft of this paragraph said that and it was false
+/// (`k8s-admin`, 2026-08-31).
+///
+/// **No-op on ingested text**: [`k8s::text`] removes or substitutes for every character
+/// [`k8s::unprintable`] answers for, so a value that came off the API holds nothing left for a
+/// second pass to find — 18 717 strings of every committed capture through both, 0 changed
+/// (`k8s_tests.rs`'s `sanitize_cannot_act_on_anything_the_ingest_strip_left`). That is the box's
+/// question answered: one string, one transformation.
+///
+/// **And the only strip for two live sources, which is why it stays.** A `.json` on disk builds
+/// its snapshot straight off `rules.rs`'s `From` impls and never meets `k8s.rs`. **And argv never
+/// meets it either, on any path** — a flag, a path or a namespace the reader typed is not an API
+/// object, so a `--namespace` carrying an `ESC` reaches [`shown`] and a mistyped flag reaches
+/// [`mistyped`] with this as the one thing between them and the terminal
+/// (`a_crafted_path_comes_back_out_of_the_error_with_nothing_unprintable_left`,
+/// `a_word_that_starts_like_a_flag_and_is_not_one_is_a_usage_error`,
+/// `a_namespace_flag_with_nothing_usable_after_it_is_refused`). Deleting this prints a bidi
+/// override to a terminal on a live cluster run, not only on the fixture path.
+///
+/// **Which is also why it may not be applied to a document.** `k8s::clean` deliberately keeps
+/// `\n`, `\t` and `\r` (NOTES § D198) and this removes all three, so it is the one place
+/// `sanitize` *would* be a second transformation — the reason `--yaml` writes what
+/// `k8s::Document::yaml` returned straight to stdout with nothing in between.
 fn sanitize(text: &str) -> String {
     text.chars().filter(|c| !k8s::unprintable(*c)).collect()
 }
@@ -4524,10 +4550,17 @@ fn which_kind<'a>(kinds: &'a [k8s::Browsable], word: &str) -> Result<&'a k8s::Br
     Ok(only)
 }
 
-/// **The command a reader could have typed to be handed the same document by the same server** —
-/// the teaching device, and a function for [`k8s::LogRequest::kubectl`]'s reason: `live` writes it
-/// to stderr and a test cannot read the process's own stream back, which is what left it unproven
+/// **The command a reader could have typed to ask the same server for the same object** — the
+/// teaching device, and a function for [`k8s::LogRequest::kubectl`]'s reason: `live` writes it to
+/// stderr and a test cannot read the process's own stream back, which is what left it unproven
 /// while it was inline.
+///
+/// **The *request* and not *the same bytes back*, which is the narrowing
+/// [`k8s::LogRequest::kubectl`] took on 2026-08-30 and this line needed too.** Measured on
+/// `kube-system/coredns`: 43 lines each, every key and every value present both ways, and two
+/// differences that are the printer's — `kubectl get -o yaml` alphabetises where this pane keeps
+/// the API's own order, and it quotes a timestamp this pane leaves bare (`k8s-admin`,
+/// 2026-08-31). Same object, not the same file.
 ///
 /// **`--show-managed-fields`, because without it the printed line does not produce what was
 /// printed** (invariant 4: neither record may lie). `kubectl` has hidden `managedFields` from

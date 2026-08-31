@@ -3343,7 +3343,10 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       surface has no pane
       ([D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31) ·
       [D199](NOTES.md#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31))
-- [ ] Control-character stripping on every free-text field from the API
+- [x] Control-character stripping on every free-text field from the API — and
+      the guard that proves it is one, for every read path rather than the six it
+      covered when it was written
+      ([D200](NOTES.md#d200--the-box-that-proved-its-own-thesis-against-itself-three-guards-that-could-not-fail-and-a-cluster-word-on-a-line-the-user-runs-2026-08-31))
 - [x] **The log buffer's bound is a number, and a dropped line is counted out
       loud** — 2 MB retained, 5 000 lines, 4 096 bytes per line, whichever is hit
       first ([screens/detail.md § The buffer](screens/detail.md#the-buffer-2-mb-retained-5000-lines-4096-bytes-per-line)).
@@ -3403,7 +3406,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       measured; and the same comment cites the `< 50MB` budget as the thing a
       page has to fit inside, which is now a citation of something known not to
       hold
-- [ ] **Sanitising for the screen and emitting for a consumer are two different
+- [x] **Sanitising for the screen and emitting for a consumer are two different
       functions** — the box above strips control characters on the way in, which
       is half of it. Whatever the *display* does to a string has to be undone
       before that text leaves k8rs through `y`, a copy, a saved file or `--once`.
@@ -3423,7 +3426,12 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       carrying control characters, brackets and a wrap-width boundary comes out
       of every emit path with exactly one transformation on it — the documented
       ingest strip — and nothing the renderer added
-      ([PRIOR-ART § D1](PRIOR-ART.md#d1--cluster-data-as-markup))
+      ([PRIOR-ART § D1](PRIOR-ART.md#d1--cluster-data-as-markup)).
+      **The wrap-width half of that sentence had no subject and the box closed
+      anyway**: nothing on any emit path folds a line — `column` pads and never
+      cuts — so what landed is the assertion that goes red the first turn a
+      renderer does, beside the three failures it can already catch
+      ([D200](NOTES.md#d200--the-box-that-proved-its-own-thesis-against-itself-three-guards-that-could-not-fail-and-a-cluster-word-on-a-line-the-user-runs-2026-08-31))
 - [ ] **The reader is told the control plane's credential is running out and not
       told their own is.** C2 — a certificate *the API server presented* —
       reaches a default run with no flag at all, as a trailer line under the
