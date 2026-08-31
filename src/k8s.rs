@@ -126,6 +126,9 @@ use k8s_openapi::NamespaceResourceScope;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::certificates::v1::CertificateSigningRequest;
 use k8s_openapi::api::core::v1::{Node, PersistentVolumeClaim, Pod, Service};
+// Aliased because `kube::runtime::watcher::Event` is already `Event` here and the two are
+// unrelated: that one is a step in a stream, this one is the object a cluster stores.
+use k8s_openapi::api::core::v1::Event as ClusterEvent;
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{APIGroupList, Time};
@@ -5380,6 +5383,582 @@ pub(crate) async fn pod(
 }
 
 // --- ONE CONTAINER'S LOG END ---
+
+// --- ONE OBJECT'S OWN STORY START ---
+//
+// **Two reads about one object the reader named, and neither of them is the watch store**
+// (`screens/detail.md` § The describe tab, § The yaml tab). The store is pruned to the fields
+// `rules.rs` names (invariant 6), so a `describe` or a `yaml` built from it would show a partial
+// object and call it the object; both verbs re-read, exactly as § ONE CONTAINER'S LOG does, and
+// pay one round trip for it.
+//
+// **The events fetch is built here rather than in Phase 11 because this file freezes at the end
+// of Phase 6.** `describe` needs it today and the events *tab* needs it later; a second version
+// of *this object's events* is the two-places-disagreeing defect this repo pays most for
+// (invariant 11's own reasoning, one layer up). One function, two callers, one order — newest
+// first — settled once, here.
+//
+// **It is a per-object fetch and never the global Events watch** (invariant 6). Watching Events
+// cluster-wide means holding every event in the cluster to answer one object's question, and the
+// permanent watch is Pods, Nodes and the three workload kinds and nothing else. What narrows it
+// is an `involvedObject` field selector, which the API server indexes.
+//
+// **Two shapes, and they read the object two different ways on purpose** (the brief's ruling 3,
+// and it is not an accident to be tidied away). [`events`] and the pod behind `describe` decode
+// into typed structs, because what they need is four named fields. [`document`] decodes into an
+// **untyped tree**, because deserialising into `k8s_openapi::api::core::v1::Pod` and serialising
+// it again silently drops every field this `k8s-openapi` does not know — a newer server's, a
+// mutating webhook's — and a YAML pane that quietly deletes fields is a record that lies
+// (invariant 4's spirit). The whole point of that pane is that it is what `kubectl get -o yaml`
+// shows, so it may not go through a struct.
+//
+// **The tree is `serde_yaml_ng::Value` and not `serde_json::Value`, for one measured reason.**
+// `serde_json::Map` is a `BTreeMap` unless `preserve_order` is on, so a round trip through it
+// alphabetises every key — `apiVersion`, `kind`, `metadata`, `spec`, `status` would come back
+// in an order no API server ever sent, and *key order is the API's, never alphabetised* is that
+// pane's whole contract with a reader who already knows what `kubectl get -o yaml` looks like.
+// `serde_yaml_ng::Mapping` is an `IndexMap` (`mapping.rs:14-16`), so it keeps the order the JSON
+// arrived in.
+//
+// **Every string in either shape goes through the ingest guard** (§ THE INGEST GUARD,
+// invariant 9). An event's `message` and `reason` are written by whoever can make a controller
+// emit; a Secret's *keys* are chosen by whoever created it; an annotation value is free text a
+// webhook wrote. `screens/detail.md` § Free text that carried control characters is the same rule
+// stated for the screen.
+//
+// **A bound each, and they are two different bounds because the two inputs are different
+// shapes.** The events list is bounded server-side ([`EVENTS_KEPT`]) and says so when it is cut.
+// One object is *not* bounded here, deliberately: `screens/detail.md` § A very large object says
+// its size is already bounded by what the API server accepts for a single object, a ceiling this
+// product does not own and does not police a second time.
+
+/// **The most events one object's fetch will read: 500**, asked for as a server-side `limit` so
+/// the rest are never sent, never decoded and never held (the security gate's *sizes are bounded*
+/// row — *an object with 40 000 events must not be held whole*).
+///
+/// **Measured rather than guessed, the way [`LOG_LINES`] was.** On the kind test cluster, after
+/// eight days of pods crash-looping continuously, the busiest object in the cluster had **8**
+/// distinct `Event` objects (`kubectl get events -A`, grouped by `involvedObject`, 2026-08-31).
+/// That is the shape of the input: the kubelet *aggregates* a repeat into `count` on one existing
+/// event rather than creating another — the same object carried `count: 26787` against those 8 —
+/// so a real object's distinct-event count is single digits and 500 is two orders above it.
+///
+/// **What it is not is a display cap.** `screens/detail.md` § More events than the pane says the
+/// drawn pane does not cap and scrolls like every other pane; this is the read, one layer down,
+/// and the two are not the same number wearing two hats.
+///
+/// **The cut costs the *newest first* claim and that is why it is said out loud**
+/// ([`Happened::cut`]). A `limit` returns the server's own order — etcd key order — and not the
+/// newest, so sorting what came back gives the newest *of an arbitrary 500*. There is no
+/// server-side sort for events to ask for instead, and reading them all to sort honestly is the
+/// thing this bound exists to refuse.
+pub(crate) const EVENTS_KEPT: u32 = 500;
+
+/// **One thing that happened to one object**, as `describe` and the Phase 11 events tab both need
+/// it (`screens/detail.md` § The describe tab).
+///
+/// **Five fields.** `type` and `source` are on the wire and are not carried: a field with no
+/// reader is one nobody can prove ([`Browsable`] drops discovery's `shortNames` under the same
+/// rule), and **this file freezes after Phase 6** (NOTES § D116), so the box that wants one raises
+/// it before then. [`count`](Self::count) and [`first`](Self::first) joined *because* of that
+/// freeze — the events tab cannot reach back in here for them (`k8s-admin`, 2026-08-31).
+///
+/// **It derives `Debug` where [`Session`] deliberately does not**, for [`Listing`]'s reason: a
+/// timestamp, a reason and a controller's message never touched a credential.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Happening {
+    /// **When it last happened, and never when the `Event` object was created.** The two are days
+    /// apart on a crash loop: measured on the kind cluster, one event carried
+    /// `creationTimestamp: 2026-08-26T16:37:23Z` and `lastTimestamp: 2026-08-30T21:35:41Z`
+    /// against `count: 26787` — so a list ordered by creation puts a thing that happened a minute
+    /// ago four days down the page.
+    ///
+    /// **Four sources in one field, in the order the API fills them.** `lastTimestamp` is what
+    /// the legacy `core/v1` path sets and what the measured cluster carried;
+    /// **`series.lastObservedTime` comes next and it is not optional** — for an
+    /// `events.k8s.io/v1` Event with a series, `core/v1` serves `lastTimestamp: null`, puts the
+    /// **first** occurrence in `eventTime` and the **last** in `series.lastObservedTime`, so a
+    /// chain that reads `eventTime` next dates a repeating event at its first occurrence. Measured
+    /// with two occurrences seven days apart, that put *6 days ago* at the bottom of a list
+    /// `kubectl describe` sorts first (`k8s-admin`, 2026-08-31) — this field's own reason for
+    /// existing, one source short. `eventTime` then covers a modern event with no series at all,
+    /// and `metadata.creationTimestamp` is the last resort. `None` is an event with none of the
+    /// four, which draws no age at all rather than one this file invented.
+    pub(crate) at: Option<Time>,
+    /// The API's own word — `Unhealthy`, `BackOff`, `Pulled`. **Kept raw and never printed raw**:
+    /// [`Happening::plainly`] is what a screen says, and the word is here because the Phase 11
+    /// tab's fuller table has to key on something.
+    pub(crate) reason: String,
+    /// The controller's own sentence. **A status field and not a payload** (NOTES § D37), which
+    /// is what makes it printable at all — and it is free text, so it is stripped like every
+    /// other (§ THE INGEST GUARD) — **as a cell**, which is the whole of why [`clean`] exists
+    /// separately for the document path (NOTES § D198). An event's message is drawn as one row
+    /// among others, and a `\n` in it would open a second row that looks like a second event, so
+    /// [`text`]'s substitution is the correct behaviour here and the wrong one there.
+    pub(crate) message: String,
+    /// **How many times this happened**, and `None` for an event that carries no count at all.
+    ///
+    /// **This is where the information is, and one line without it is a different diagnosis.**
+    /// The kubelet does not create an Event per occurrence; it bumps `count` on the one it
+    /// already has, which is why distinct events stay single-digit and [`EVENTS_KEPT`] is
+    /// generous — measured on the fixture cluster, 8 distinct events carrying a maximum `count`
+    /// of 27 639 (`k8s-admin`, 2026-08-31). *The health check failed 3 minutes ago* and *it has
+    /// failed 2 383 times over four days* are different things to do about one pod.
+    ///
+    /// **Both spellings, because the two Event APIs disagree about where it lives**:
+    /// `core/v1` puts it in `count` and the `events.k8s.io` shape puts it in `series.count`.
+    pub(crate) count: Option<i32>,
+    /// **When it was first seen**, so the span the count happened over can be drawn beside it.
+    /// The count alone is *a lot*, of unknown recency; the span alone is *still going*, of
+    /// unknown severity (`screens/detail.md` § A repeated event).
+    pub(crate) first: Option<Time>,
+}
+
+impl Happening {
+    /// **What a reader is shown, in plain language** (invariant 14, `screens/detail.md`: *every
+    /// event reason is plain language, never the raw API word*).
+    ///
+    /// **It is here and not in a printer, for [`LogLines::dropped_line`]'s reason**: `describe`
+    /// and the Phase 11 events tab are two consumers of one answer, and a second wording is a
+    /// second thing that can be wrong. `screens/detail.md` says so in as many words — *without
+    /// describe and the events tab inventing two different translations of the same reason
+    /// later*.
+    ///
+    /// **The table is the four reasons `screens/detail.md` commits to and no fifth**, because
+    /// the full vocabulary is Phase 11's box and a translation invented here is one that file
+    /// then has to agree with.
+    ///
+    /// **The message is never replaced, only preceded** (NOTES § D198). A sentence that stands
+    /// *instead of* the controller's own can be measurably false — `Pulled` used to read *the
+    /// image finished downloading*, which is a lie every time a cached image under
+    /// `IfNotPresent` emits it with *"Container image … already present on machine"* — or can
+    /// delete the one fact the diagnosis turns on: `Unhealthy` is the reason word for a liveness
+    /// probe **and** a readiness probe, and only the message says whether the container is being
+    /// killed or merely taken out of the Service (`k8s-admin`, 2026-08-31).
+    ///
+    /// **`BackOff` has no phrase and that was always right.** One reason word covers two facts —
+    /// `Back-off restarting failed container …` and `Back-off pulling image "…"` — so no single
+    /// phrase is true of both. What changed is that this is now the ordinary case rather than a
+    /// carve-out: every reason the table does not name prints as its own raw word beside its
+    /// message, and nothing is invented.
+    ///
+    /// **`None` is *say nothing extra*** — the caller draws the raw word and the message on their
+    /// own line, which it does for every reason either way.
+    pub(crate) fn plainly(&self) -> Option<&'static str> {
+        match self.reason.as_str() {
+            "Scheduled" => Some("kubernetes placed this pod on a node"),
+            "Pulling" => Some("the container started pulling its image"),
+            "Pulled" => Some("the image is ready"),
+            "Killing" => Some("the container is being stopped"),
+            "Unhealthy" => Some("the health check failed"),
+            _ => None,
+        }
+    }
+}
+
+/// **Everything one object's events fetch answered**, and whether that was all of them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Happened {
+    /// **Newest first** — the one order both consumers get, settled here (the region above).
+    pub(crate) lines: Vec<Happening>,
+    /// **Whether the cluster had more than [`EVENTS_KEPT`] and the read stopped there.**
+    ///
+    /// **It is a `bool` and not a count, because the count is not knowable.** `remainingItemCount`
+    /// is documented as unset whenever the request carried a label or field selector, and this
+    /// request always carries one — so what the server tells us is `metadata.continue`, which
+    /// says *there is more* and never *how much*. A number invented for the sentence would be the
+    /// class NOTES § D190 is named for.
+    pub(crate) cut: bool,
+}
+
+/// **One object's own events, newest first, bounded** — `describe`'s second read, and the events
+/// tab's only one (`screens/detail.md`).
+///
+/// **The selector names this object and nothing else** — `involvedObject.name`,
+/// `involvedObject.kind`, and `involvedObject.uid` where the caller has one. The namespace is the
+/// request's, not a selector term, because a namespaced `Api` already scopes it. **The uid is the
+/// term that matters most and is the one a caller can lack**: without it a pod deleted and
+/// recreated under the same name shows the dead one's events as its own, which is `kubectl
+/// describe`'s own reason for sending it (`client-go`'s `events.Search` builds the same four).
+///
+/// **Nothing here is interpolated into a path.** `ListParams::fields` becomes a query parameter
+/// that kube percent-encodes, and the three values are an object name argv already refused unless
+/// it was [`object_name`], a kind word from discovery, and a uid the API server wrote.
+///
+/// **The selector's own delimiters are the thing to watch, not the URL's.** A `,` or an `=` inside
+/// one of the three values would *add a term* to the field selector rather than escape anything —
+/// percent-encoding keeps it out of the URL's grammar and not out of the selector's, which the
+/// API server parses after decoding. None of the three can carry one: [`object_name`] allows
+/// alphanumerics, `-` and `.` and nothing else, a discovery kind is PascalCase, and a uid is a
+/// hyphenated hex UUID. **A caller that ever passes a word from somewhere else has to check it
+/// first**, and there is no such caller today.
+///
+/// **`namespace` is the request's and is the object's own for every kind `describe` reads.** A
+/// cluster-scoped object's events live in a namespace of the cluster's choosing — `default` for a
+/// Node — so the Phase 11 tab that opens one has a question this signature can answer and this
+/// build has no caller for.
+///
+/// **`Err` is the caller's news and is never swallowed.** A `403` on events is a feature that
+/// degrades — `screens/detail.md` gives it exit `2` and a sentence — and it is deliberately *not*
+/// retried, which is [`Store::unresolved_owners`]'s rule and holds here for its reason
+/// (NOTES § D151).
+pub(crate) async fn events(
+    client: &Client,
+    namespace: &str,
+    kind: &str,
+    name: &str,
+    uid: Option<&str>,
+) -> Result<Happened, kube::Error> {
+    let mut selector = format!("involvedObject.kind={kind},involvedObject.name={name}");
+    if let Some(uid) = uid {
+        selector.push_str(&format!(",involvedObject.uid={uid}"));
+    }
+    let asked = ListParams::default().fields(&selector).limit(EVENTS_KEPT);
+    let answered = Api::<ClusterEvent>::namespaced(client.clone(), namespace)
+        .list(&asked)
+        .await?;
+    let cut = answered.metadata.continue_.is_some();
+    let mut lines: Vec<Happening> = answered.items.into_iter().map(happening).collect();
+    // **Reversed before the sort, and that is the whole of finding 9.** A legacy event's
+    // `lastTimestamp` has *second* resolution, so an ordinary pod startup stamps Scheduled,
+    // Pulled, Created and Started in the same second; the sort below is stable, so those four
+    // keep the order the server listed them in, which for one object is etcd key order — time
+    // **ascending**. On a young pod that is the entire list, printed in the exact reverse of what
+    // the heading promises (`k8s-admin`, 2026-08-31). Reversing first makes a tie fall newest
+    // first, which is what the heading says and what `kubectl describe` shows.
+    lines.reverse();
+    // **Newest first, and the sort is stable** — two events stamped the same second keep the
+    // order the line above gave them rather than swapping between two runs of the same command.
+    // An event with no stamp at all sorts to the bottom, which is where *we do not know when* has
+    // to go on a list whose whole promise is an order.
+    lines.sort_by(|one, two| {
+        two.at
+            .as_ref()
+            .map(|at| at.0)
+            .cmp(&one.at.as_ref().map(|at| at.0))
+    });
+    Ok(Happened { lines, cut })
+}
+
+/// One `Event` off the wire, through the ingest guard (§ THE INGEST GUARD).
+///
+/// **A message is [`FREE_TEXT`] and a reason is an [`IDENTIFIER`]**, which is that guard's own
+/// rule read off what the value is drawn as: one is a sentence, the other a word compared with
+/// `==`.
+fn happening(event: ClusterEvent) -> Happening {
+    let mut reason = event.reason.unwrap_or_default();
+    let mut message = event.message.unwrap_or_default();
+    text(&mut reason, IDENTIFIER);
+    text(&mut message, FREE_TEXT);
+    let series = event.series;
+    Happening {
+        at: event
+            .last_timestamp
+            .or_else(|| {
+                series
+                    .as_ref()
+                    .and_then(|series| series.last_observed_time.as_ref())
+                    .map(|at| Time(at.0))
+            })
+            .or_else(|| event.event_time.map(|at| Time(at.0)))
+            .or_else(|| event.metadata.creation_timestamp.clone()),
+        reason,
+        message,
+        count: event
+            .count
+            .or_else(|| series.as_ref().and_then(|s| s.count)),
+        // **`firstTimestamp` and not `eventTime`**, even though the modern shape puts the first
+        // occurrence there: `eventTime` is already read above as a *last* stamp for an event with
+        // no series, and one field cannot honestly be both. A modern event with a series and no
+        // `firstTimestamp` draws the count without a span rather than a span this file guessed.
+        first: event.first_timestamp.or(event.metadata.creation_timestamp),
+    }
+}
+
+/// **One object exactly as the API server returned it**, ready to be printed as YAML — the yaml
+/// tab's whole subject (`screens/detail.md` § The yaml tab).
+///
+/// **No `Debug`, and it is [`Session`]'s reason wearing a different coat.** A `Secret`'s values
+/// are masked by [`document`] before this type exists, so what it wraps carries no secret — but
+/// the security gate asks that a secret never reach *a `Debug` or a panic message*, and a wrapper
+/// that cannot be `{:?}`-ed at all is that promise made by the compiler rather than by a rule
+/// somebody has to keep. Everything a reader needs is [`Document::yaml`].
+pub(crate) struct Document(serde_yaml_ng::Value);
+
+impl Document {
+    /// The document, as YAML, in the API's own key order (the region above).
+    ///
+    /// **`Err` carries the emitter's own reason and nothing of the object**: the tree is masked
+    /// and stripped before this type is built, so there is no secret in scope to interpolate, and
+    /// the caller strips the string like any other outside text.
+    pub(crate) fn yaml(&self) -> Result<String, String> {
+        serde_yaml_ng::to_string(&self.0).map_err(|failed| failed.to_string())
+    }
+}
+
+/// **The one kind whose values are masked**, spelled once because [`mask`] now compares it twice —
+/// against the kind the caller resolved before the request, and against the kind the answer claims
+/// to be.
+const SECRET: &str = "Secret";
+
+/// **How many bytes a base64 value decodes to** — the number a masked Secret value is reported at
+/// instead of the value (`screens/detail.md` § A Secret, values hidden behind an explicit reveal).
+///
+/// **Nothing is ever base64-decoded on this path, and that is the point rather than an
+/// optimisation.** The decoded length of canonical base64 is arithmetic — three bytes out per
+/// four characters in, padding excluded — so the plaintext is never materialised anywhere a
+/// formatter, a `Debug` or a panic could find it. It also settles the security gate's *a value
+/// that is not valid UTF-8 after base64 decode is never printed as text* for free: nothing here
+/// decodes, so nothing here can print bytes.
+///
+/// **Only the base64 alphabet is counted**, so a value a webhook wrapped at 76 columns is
+/// measured rather than inflated by its newlines.
+fn decoded_bytes(value: &str) -> usize {
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/')
+        .count()
+        * 3
+        / 4
+}
+
+/// `1172` as `1,172` — the mockup's own spelling, so a four-figure Secret value reads as one
+/// (`screens/detail.md`).
+pub(crate) fn grouped(count: usize) -> String {
+    let digits = count.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+/// **A Secret's values, replaced by their sizes, before anything else in this file touches the
+/// tree** (the security gate: *the redaction happens before the value is anywhere a formatter can
+/// find it, not at print time*).
+///
+/// **`data` and `stringData` both.** The API server clears `stringData` on write and never serves
+/// it back, so the second is defensive — but it is the *write* field, a mutating webhook can put
+/// one back, and two words is a cheaper answer than being right about what a cluster cannot do.
+/// Its values are plaintext rather than base64, so its sizes are the string's own.
+///
+/// **And `metadata.annotations`, because a Secret routinely keeps a second copy of itself there**
+/// (NOTES § D198). `kubectl apply -f secret.yaml` writes the whole applied body, `data` included,
+/// into `last-applied-configuration`; applied through `stringData` it is **plaintext**. Measured:
+/// that annotation's own bytes decode to the same values the block below prints as
+/// `<hidden — 8 bytes>` (`k8s-admin`, 2026-08-31). Masking one copy and not the other is worse
+/// than masking neither, because `<hidden>` is what tells a reader the document is safe to paste
+/// into a ticket.
+///
+/// **Every annotation key, not a denylist of the one `kubectl` writes.** Every GitOps controller
+/// that reconciles a Secret writes its own reconstruction under its own key, so a list of names
+/// catches nothing the day a different controller manages the object — invariant 1's
+/// allowlist-not-denylist reasoning, one layer up. **Labels stay visible**: they are validated to
+/// 63 characters, nothing writes a Secret's body into one, and the review found none — a residual
+/// named rather than silently accepted.
+///
+/// **Keyed on the document's own `kind` and on nothing that looks like a secret.**
+/// REQUIREMENTS.md calls a *this field looks like a secret* detector YAGNI by name; `data` on a
+/// `Secret` is a named, structural field of a specific kind, which is why it gets a rule and a
+/// Pod's literal env values do not (`screens/detail.md`, NOTES § D37).
+fn mask(document: &mut serde_yaml_ng::Value, requested: &str) {
+    // **The union of what was asked for and what came back, so both directions fail closed.**
+    // Reading the document's own `kind` alone is a **control** field steering a redaction, taken
+    // from the same answer it is deciding about — and the security gate's *free text from the API
+    // is untrusted* row is weaker than what this needs: a key that is absent, renamed or answered
+    // differently by an aggregated API server or a proxy prints the Secret whole and says nothing.
+    // No conforming server does that today, which is exactly why nobody would ever notice it.
+    // **Reading only the request would be the opposite hole**: a CRD whose own Kind is `Secret`
+    // is masked today and has to stay masked, and the request for it names something else.
+    if requested != SECRET
+        && document.get("kind").and_then(serde_yaml_ng::Value::as_str) != Some(SECRET)
+    {
+        return;
+    }
+    // **An annotation is not base64 and is not assumed to be one.** `last-applied-configuration`
+    // is JSON, and through `stringData` it is plaintext JSON, so the honest size is the string's
+    // own bytes — `decoded_bytes` over it would report three quarters of a number that means
+    // nothing.
+    let hide = |held: &mut serde_yaml_ng::Value, base64: bool| {
+        let bytes = match held.as_str() {
+            Some(value) if base64 => decoded_bytes(value),
+            Some(value) => value.len(),
+            // A value that is not a string is not something this file can size, and it is
+            // hidden anyway: what may not happen is that it survives.
+            None => 0,
+        };
+        *held = serde_yaml_ng::Value::String(format!("<hidden — {} bytes>", grouped(bytes)));
+    };
+    for (path, base64) in [
+        (&["data"][..], true),
+        (&["stringData"][..], false),
+        (&["metadata", "annotations"][..], false),
+    ] {
+        let mut at = Some(&mut *document);
+        for step in path {
+            at = at.and_then(|value| value.get_mut(*step));
+        }
+        let Some(serde_yaml_ng::Value::Mapping(held)) = at else {
+            continue;
+        };
+        for (_, value) in held.iter_mut() {
+            hide(value, base64);
+        }
+    }
+}
+
+/// **Every string in the tree, keys and values, through [`text`]** — invariant 9 over an object
+/// nothing else in this file has a struct for.
+///
+/// **Unbounded on purpose**, which is the one place this file hands [`text`] no real cap:
+/// `screens/detail.md` § A very large object rules the document out of the log buffer's ceiling,
+/// because one GET of one object is already bounded by what the API server will accept for a
+/// single object. What is *not* skipped is the strip — a bidi override in an annotation would
+/// otherwise reach a terminal that obeys it.
+///
+/// **A newline and a tab survive here and nowhere else** (NOTES § D198), which is why this is not
+/// [`text`]. That function turns an unprintable character that is whitespace into one space
+/// (NOTES § D146) — right for a **cell**, where a newline breaks the layout the card is drawn in,
+/// and wrong for a **document**, where the payload *is* the text and a newline prints as exactly
+/// what it is. Measured before the fix: `kubectl get cm coredns -n kube-system -o yaml` is 33
+/// lines and this pane printed **20**, its whole `Corefile` on one — redirect that to a file,
+/// re-apply it, and you have shipped a different config (`k8s-admin`, 2026-08-31).
+///
+/// **One predicate and not a second copy of the guard.** What decides is still [`unprintable`],
+/// the one spelling this crate has; what this adds is the two characters a *document* reads as
+/// printing correctly. `ESC`, `U+202E` and `U+200B` do not print as themselves in a cell or in a
+/// document, so both surfaces still remove them.
+///
+/// **Removed and never substituted**, which is [`crate::main::sanitize`]'s disposal rather than
+/// [`text`]'s: a space where a `U+200B` was is a character the API did not send, and in a document
+/// that is a byte a reader may be about to diff.
+///
+/// **The recursion is bounded by the decode and not by anything here**, which is what keeps a
+/// deeply nested CRD from being a stack overflow: `serde_json`'s deserializer refuses past 128
+/// levels with `RecursionLimitExceeded` (its `disable_recursion_limit` feature is not enabled),
+/// so no tree this function is ever handed is deeper than that, and neither is the one
+/// [`Document::yaml`] walks on the way out.
+fn clean(value: &mut serde_yaml_ng::Value) {
+    match value {
+        serde_yaml_ng::Value::String(held) => {
+            held.retain(|character| !unprintable(character) || document_break(character));
+        }
+        serde_yaml_ng::Value::Sequence(held) => held.iter_mut().for_each(clean),
+        // A `Mapping` cannot have a key edited in place any more than a `BTreeMap` can
+        // ([`pairs`]), so it is rebuilt. **Two keys that clean to the same text become one entry
+        // and the first wins**, which is that function's rule and the same loss.
+        serde_yaml_ng::Value::Mapping(held) => {
+            let mut cleaned = serde_yaml_ng::Mapping::new();
+            for (mut key, mut inner) in std::mem::take(held) {
+                clean(&mut key);
+                clean(&mut inner);
+                cleaned.entry(key).or_insert(inner);
+            }
+            *held = cleaned;
+        }
+        _ => {}
+    }
+}
+
+/// **The two characters a document keeps that a cell does not** (NOTES § D198, [`clean`]).
+///
+/// **It is a second *judgement* over one predicate, not a second predicate.** [`unprintable`]
+/// still decides what has no printed form of its own; this decides which surface is asking, and
+/// the answer is three characters long because they are the ones that lay out a document instead
+/// of driving a terminal.
+///
+/// **`\r` is here because a CRLF value is the object too, and it was the case nobody fed.** A
+/// ConfigMap made from a Windows-authored file holds `line one\r\nline two\r\n`; dropping the
+/// `\r` prints a document whose bytes differ from the one the reader is looking at, which is the
+/// whole of what NOTES § D198's second blocker was about, surviving one character to the side
+/// (the PM's own pass over the landed tree, 2026-08-31).
+///
+/// **It is safe because the emitter escapes it rather than emitting it, and that was measured
+/// rather than assumed.** A bare CR moves a terminal's cursor to column 0 and overwrites the line
+/// above — genuinely unlike `\n` — so this would be a real invariant-9 hazard if the value reached
+/// a screen raw. `serde_yaml_ng` writes a scalar containing one as double-quoted and escaped, the
+/// same thing it does for `\t` and the same thing `kubectl` does:
+///
+/// ```text
+/// "line one\r\nline two\r\n"     — CRLF, quoted, escaped, byte-faithful
+/// "over\rwritten"                  — a bare CR, escaped, never a cursor move
+/// ```
+///
+/// So what is retained here is a byte in the *value*, and what reaches the terminal is the two
+/// characters `\` and `r` (`dev-core`, 2026-08-31).
+fn document_break(character: char) -> bool {
+    character == '\n' || character == '\t' || character == '\r'
+}
+
+/// **One object of any kind, read fresh and untyped** — the yaml tab's read
+/// (`screens/detail.md` § The yaml tab).
+///
+/// **[`Fetch`] builds the path and not this function**, so the group, the version, the plural and
+/// the namespace all go through [`path_safe`] on the way (§ THE BROWSER'S ROWS) and a
+/// cluster-scoped kind drops its namespace by the same line the browser's tables do. The `Accept`
+/// is [`Fetch::plain`]'s: a `Table` is a printed list and this wants the object.
+///
+/// **The mask runs before this function returns**, so no caller ever holds an unmasked Secret —
+/// which is what makes [`Document`]'s missing `Debug` worth having.
+///
+/// **`requested` is the [`Browsable::kind`] the caller resolved before the request was built**, and
+/// it is here because it is the half of the masking decision that is *not* attacker-supplied: the
+/// answer's own `kind` is a field the server chose ([`mask`]).
+///
+/// **No deadline of its own**, for [`pod`]'s reason: the caller owns it.
+pub(crate) async fn document(
+    client: &Client,
+    fetch: &Fetch,
+    name: &str,
+    requested: &str,
+) -> Result<Document, kube::Error> {
+    let asked = Request::new(&fetch.path)
+        .get(name, &GetParams::default())
+        .map_err(kube::Error::BuildRequest)?;
+    let mut value: serde_yaml_ng::Value = client.request(asked).await?;
+    mask(&mut value, requested);
+    clean(&mut value);
+    Ok(Document(value))
+}
+
+/// **Which kind the cluster serves under a word the reader typed**, resolved through the answer
+/// discovery already gave (invariant 12, `screens/detail.md` § Printed instead of drawn — yaml).
+///
+/// **Two spellings, both `kubectl`'s.** A bare word is matched against the resource's own plural
+/// and against its `kind` lowercased — so `secrets` and `secret`, `pods` and `pod`, with no
+/// singular list written down here: discovery's `singularResource` is unreachable through
+/// `kube::discovery` (§ EVERY KIND THE CLUSTER SERVES) and the PascalCase kind lowercased is the
+/// same word for every built-in and every CRD. A dotted word is `<plural>.<group>`, split on the
+/// **first** dot, so `events.events.k8s.io` names the group `events.k8s.io` and `events.` names
+/// the core group — the empty group being how the core one is spelled everywhere in this file.
+///
+/// **A resource plural cannot contain a dot**, which is what makes the first dot the right one:
+/// it is a DNS *label* on any cluster that accepted the CRD.
+///
+/// **Several is an answer and not an error**, because it is one the caller has to spell: `events`
+/// is served by `core/v1` and by `events.k8s.io/v1`, they are different resources, and
+/// [`browsable`] keeps both (§ EVERY KIND THE CLUSTER SERVES).
+pub(crate) fn kind_named<'a>(kinds: &'a [Browsable], word: &str) -> Vec<&'a Browsable> {
+    // **Matched in lower case, because `kubectl get Pod` works and a reader who types the kind
+    // the way every manifest spells it is not making a spelling mistake.** A resource plural and
+    // an API group are both lower case by rule — a DNS label and a DNS subdomain — so nothing
+    // this can match is lost by it, and the *echo* in the two refusals stays what was typed.
+    let word = word.to_lowercase();
+    let (plural, group) = match word.split_once('.') {
+        Some((plural, group)) => (plural, Some(group)),
+        None => (word.as_str(), None),
+    };
+    kinds
+        .iter()
+        .filter(|kind| kind.plural == plural || kind.kind.to_lowercase() == plural)
+        .filter(|kind| group.is_none_or(|group| kind.group == group))
+        .collect()
+}
+
+// --- ONE OBJECT'S OWN STORY END ---
 
 // --- CONNECTING START ---
 //

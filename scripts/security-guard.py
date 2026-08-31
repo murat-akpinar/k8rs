@@ -130,6 +130,32 @@ TOKEN_TYPES = (
 )
 TOKEN_TYPE = re.compile("|".join(rf"\b(?:{t})" for t in TOKEN_TYPES))
 
+# The *other* thing a `{:?}` can print, and TOKEN_TYPES cannot reach it: an
+# object the **cluster** considers secret. `k8s.rs`'s `Document` wraps one whole
+# unpruned API object — a Secret's `data` among them — and holds no name on the
+# list above, so a `#[derive(Debug)]` added to it tomorrow is a green build
+# (measured against this guard, `tester`, 2026-08-31: it reports `Session` and
+# says nothing at all about `Document`).
+#
+# It is a *second* list and not three more entries in the one above, because the
+# FAIL sentence is the whole value of a guard at 3am and the two sentences are
+# not the same one: nothing in `Document` is a bearer token, and a message that
+# names one is the class NOTES § D190 is about.
+#
+# **The type and not the name.** A canary list of type *names* would go quiet
+# the day the type is renamed; matching the untyped-tree type means any future
+# wrapper around a raw API document is caught the day it is written, with no
+# list to remember to extend. `serde_yaml_ng::Value` is exactly one field in
+# this tree today (`struct Document(serde_yaml_ng::Value)`, src/k8s.rs) — which
+# is precisely when to write the assertion.
+#
+# `serde_json::Value` is deliberately **not** here. `k8s.rs` imports it bare
+# (`use k8s_openapi::serde_json::Value`) and a `\bValue\b` clause would match
+# every `Value` in the tree including ones that are not documents; the masked,
+# order-preserving tree the yaml pane holds is the yaml one, and that is the one
+# with a Secret in it.
+PAYLOAD_TYPE = re.compile(r"\bserde_yaml_ng\s*::\s*Value\b")
+
 # --- shared scanning ------------------------------------------------------
 
 RAW_STR = re.compile(r'r(#*)"')
@@ -638,19 +664,62 @@ def check_token_debug(files: list[Path], root: Path) -> tuple[list[str], str]:
     def holds(name: str, pattern: re.Pattern) -> bool:
         return any(pattern.search(ty) for _, _, held, _ in decls[name] for ty in held)
 
-    tainted = {n for n in decls if holds(n, TOKEN_TYPE)}
-    # A field of a tainted type taints its owner, to a fixpoint: the leak is one
-    # `{:?}` away however many types deep the client sits.
-    while True:
-        grown = tainted | {
-            n for n in decls
-            if any(holds(n, re.compile(rf"\b{t}\b")) for t in tainted)
-        }
-        if grown == tainted:
-            break
-        tainted = grown
+    def spreads(seed: re.Pattern) -> set[str]:
+        """Every type that holds `seed`, and every type that holds one of those.
+
+        A field of a tainted type taints its owner, to a fixpoint: the leak is
+        one `{:?}` away however many types deep the held thing sits. One
+        function and not two copies, because the token walk and the payload walk
+        are the same walk over the same `decls` and a second copy is the one
+        that stops matching the first (CLAUDE.md § Code phase rules).
+        """
+        tainted = {n for n in decls if holds(n, seed)}
+        while True:
+            grown = tainted | {
+                n for n in decls
+                if any(holds(n, re.compile(rf"\b{t}\b")) for t in tainted)
+            }
+            if grown == tainted:
+                break
+            tainted = grown
+        return tainted
+
+    tainted = spreads(TOKEN_TYPE)
+    # The cluster's secrets rather than the user's credential, and reported
+    # apart from them so the sentence is true of what it names (PAYLOAD_TYPE).
+    # `- tainted` because a type that holds both is already reported above and
+    # two FAILs on one line teaches people to read neither.
+    # Walked once and read twice — the count below and the canary are two
+    # questions about one answer, and two calls is the pair that drifts.
+    payload = spreads(PAYLOAD_TYPE)
+    carries_payload = payload - tainted
 
     problems = []
+    for n in sorted(carries_payload):
+        for kw, where, _, dbg in decls[n]:
+            if dbg:
+                problems.append(
+                    f"{where}  {kw} {n} holds a whole unpruned API object and "
+                    f"derives Debug — remove the derive. A `{{:?}}` on this "
+                    f"prints a Secret's `data` into a log line or a panic "
+                    f"message; with no Debug at all a stray one is a compile "
+                    f"error instead, which is what src/k8s.rs § ONE OBJECT'S "
+                    f"OWN STORY says this type's missing derive buys "
+                    f"(§ Data displayed and stored)")
+    # A derived list asserts it found something (CLAUDE.md § Code phase rules):
+    # *extracted nothing* and *nothing to extract* print the same OK line, so a
+    # `PAYLOAD_TYPE` that stops matching — the type renamed, the field moved
+    # behind an alias this scan cannot follow — must be a FAIL and not a pass.
+    #
+    # `decls and` because the empty-tree canary below already says the parser
+    # broke, and two FAILs for one cause is what the message above refuses to do
+    # per type — the same rule applied to the check as a whole.
+    if decls and not payload:
+        problems.append(
+            "no type in this tree holds an untyped API document, so the "
+            "payload half of this check just passed on nothing — either "
+            "`k8s.rs`'s `Document` is gone (say so here) or `PAYLOAD_TYPE` no "
+            "longer matches the field that holds one")
     for n in sorted(tainted):
         sites = decls[n]
         elsewhere = ""
@@ -697,7 +766,8 @@ def check_token_debug(files: list[Path], root: Path) -> tuple[list[str], str]:
     return problems, (
         f"{kinds['struct']} structs, {kinds['enum']} enums, {kinds['type']} "
         f"aliases ({parsed} of {naive} declarations parsed), {len(tainted)} can "
-        f"hold a token — and this check is a *derived* `Debug` on a declaration "
+        f"hold a token and {len(carries_payload)} an unpruned API object — and "
+        f"this check is a *derived* `Debug` on a declaration "
         f"it parses, nothing more: a `{{}}`/`{{:?}}`/`.to_string()` on a kube "
         f"error or a Config, a hand-written Debug that formats one whole, a "
         f"`use kube::Client as Kc` rename, a generic default or a generic never "
@@ -803,6 +873,23 @@ def self_test() -> None:
         (fake / "src" / "main.rs").write_text(
             '//! See https://kube.rs/docs — a citation, not a connection.\n'
             '/* https://k8s.io/docs is one too */\n'
+            # The payload half's negative, and it has to live in the clean tree
+            # rather than in a plant: `PAYLOAD_TYPE` matching nothing is a FAIL
+            # (a derived list asserts it found something), so a fake tree with
+            # no untyped-document holder in it can never be the baseline. It is
+            # in main.rs and not k8s.rs because every plant below overwrites
+            # k8s.rs whole and only appends to this file.
+            #
+            # **Above `Fine` and not below it**, and that ordering is load
+            # bearing: plant 4v deliberately breaks `DECL` so that `body_at`
+            # starts one bracket late, and with this line last the mis-scan
+            # handed `Fine` *this* struct's field — printing "struct Fine holds
+            # a whole unpruned API object", a sentence that is false of the type
+            # it names, in the middle of a self-test whose whole job is to be
+            # read. Declared first, the mis-scan lands on `Fine`'s own body and
+            # `Fine`'s on `fn main`'s, and 4v prints only the count line it is
+            # actually about.
+            'struct Document(serde_yaml_ng::Value);\n'
             '#[derive(Debug)]\n'
             'struct Fine { name: String }\n'
             'fn main() {\n'
@@ -1094,7 +1181,12 @@ def self_test() -> None:
         # fired the canary instead of the rule, and a canary line reads exactly
         # like a catch. A tree that declares only enums is now a legitimate one.
         (fake / "src" / "main.rs").write_text("fn main() {}\n")
-        (fake / "src" / "k8s.rs").write_text("pub enum Only { A, B }\n")
+        # The variant carries the untyped document so this tree still satisfies
+        # the payload canary below — which is *also* the only plant that proves
+        # the payload walk reads an enum's variant payloads and not just a
+        # struct's fields. It derives no Debug, so it is still a green tree.
+        (fake / "src" / "k8s.rs").write_text(
+            "pub enum Only { A(serde_yaml_ng::Value), B }\n")
         assert not only("token hygiene"), only("token hygiene")
         (fake / "src" / "k8s.rs").write_text("fn nothing_at_all() {}\n")
         planted["nothing declares a type at all (canary)"] = only("token hygiene")
@@ -1368,6 +1460,55 @@ def self_test() -> None:
             "}\n"
         )
         assert not only("token hygiene"), only("token hygiene")
+
+        # 4w — the *other* thing a `{:?}` prints, and the whole reason
+        # `PAYLOAD_TYPE` exists beside `TOKEN_TYPES`: an object the cluster
+        # considers secret. `k8s.rs`'s `Document` wraps one whole unpruned API
+        # object, a Secret's `data` among them, and holds no name on the token
+        # list — so before this the check reported `Session` and said nothing at
+        # all about a `#[derive(Debug)]` on `Document` (`tester`, 2026-08-31).
+        # The owner is planted too, because a `{:?}` on the pane that holds the
+        # document prints the document.
+        (fake / "src" / "main.rs").write_text(main)
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub(crate) struct Document(serde_yaml_ng::Value);\n"
+            "#[derive(Debug)]\n"
+            "pub struct Pane { doc: Document }\n"
+        )
+        planted["a derived Debug over a whole unpruned API object"] = \
+            only("token hygiene")
+        for want in ("struct Document holds a whole unpruned API object",
+                     "struct Pane holds a whole unpruned API object"):
+            assert any(want in p for p in
+                       planted["a derived Debug over a whole unpruned API object"]), \
+                (want, planted["a derived Debug over a whole unpruned API object"])
+        # …and the sentence has to be the payload one and not the token one, or
+        # a FAIL at 3am sends somebody hunting a bearer token that is not there
+        # (NOTES § D190).
+        assert not any("bearer token" in p for p in
+                       planted["a derived Debug over a whole unpruned API object"]), \
+            planted["a derived Debug over a whole unpruned API object"]
+
+        # …and the same type without the derive, which is what k8s.rs ships.
+        (fake / "src" / "k8s.rs").write_text(
+            "pub(crate) struct Document(serde_yaml_ng::Value);\n"
+        )
+        assert not only("token hygiene"), only("token hygiene")
+
+        # 4x — the payload half's own canary. *Extracted nothing* and *nothing
+        # to extract* print the same OK line, so a `PAYLOAD_TYPE` that stops
+        # matching — the type renamed, the field moved behind an alias — must be
+        # a FAIL. `main.rs` carries the only other holder in this fake tree, so
+        # emptying both is what "the pattern found nothing" looks like.
+        (fake / "src" / "main.rs").write_text("fn main() {}\n")
+        (fake / "src" / "k8s.rs").write_text("pub struct Plain { name: String }\n")
+        planted["nothing holds an untyped API document (canary)"] = \
+            only("token hygiene")
+        assert any("passed on nothing" in p for p in
+                   planted["nothing holds an untyped API document (canary)"]), \
+            planted["nothing holds an untyped API document (canary)"]
+        (fake / "src" / "main.rs").write_text(main)
         (fake / "src" / "k8s.rs").unlink()
 
         # 5 — every door into the in-cluster environment. `infer` and

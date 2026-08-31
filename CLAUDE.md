@@ -190,11 +190,23 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     a closed set, both parsed by hand. It is **subcommands, generated help, or a
     mutual-exclusion table**
     ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
-    The binary ships six flags, not the four this line named until 2026-08-30:
-    `--read-only` `--context` `--namespace` `--once` — plus `--live`, the
-    temporary driver's, and `--analysis`, which
-    [D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)
-    put in the **released** surface. No `tracing` until debugging demands it
+    **The flag list here is a fact about the code, it gets no `check-docs` and no
+    operator review, and it has now gone stale twice** — four when the binary had
+    six (fixed 2026-08-30, [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)),
+    six when it had fourteen (fixed 2026-08-31). **Counted, not recalled:**
+    `grep -oE '^const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs`. Two groups, and
+    the split is the point:
+    **released** — `--read-only` `--context` `--namespace` `--once` `--analysis`
+    (the last put there by
+    [D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30));
+    **temporary driver's, and gone at Phase 12** — `--live`, plus the verbs and
+    the selector that name one object: `--logs` `--describe` `--yaml`, `--object`
+    `--kind` `--container` `--previous` `--follow`
+    ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) ·
+    [D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
+    `--namespace` also answers to `-n`. **Nine of these fourteen are scaffolding,
+    which is why the count alone was never the thing to defend** — the threshold
+    below is. No `tracing` until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
     **The eleventh was a reversal and is the shape to argue from**
     ([D143](NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)):

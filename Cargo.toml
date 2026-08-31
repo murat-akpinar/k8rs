@@ -135,6 +135,41 @@ futures-util = { version = "0.3.34", default-features = false, features = [
 # review.
 tokio-rustls = { version = "0.26.4", default-features = false }
 
+# **The seventh of the approved twelve to arrive, and the first that is not
+# free** — approved is not the same as present (invariant 10). Counted, not
+# guessed: this section holds `k8s-openapi`, `x509-parser`, `kube`, `tokio`,
+# `futures-util`, `tokio-rustls` and now this one; `serde_json` is still only a
+# `[dev-dependencies]` line because the product reads k8s-openapi's re-export.
+# This is the box that finally needs it:
+# `y` prints an object as YAML, and a Secret's values are masked *before* it is
+# printed. That ordering is the whole reason a crate is named here rather than a
+# text transformation applied to the server's own `Accept: application/yaml`
+# answer: masking by editing YAML text means parsing YAML to find the values,
+# which is the crate again with the failure modes moved into our file. So the
+# object is read as JSON, the values are replaced in the tree, and the tree is
+# serialised once.
+#
+# **Unlike the eleventh and twelfth crates, this one adds compiled code** —
+# measured, `Cargo.lock` goes **213 → 218 packages**: `serde_yaml_ng`,
+# `unsafe-libyaml`, `indexmap`, `hashbrown` and `ryu`. It is named on invariant 10's list, so it
+# needs no reversal, but the list said nothing about its cost and now this line
+# does. `cargo deny check advisories licenses sources bans` is green with it in
+# (2026-08-31).
+#
+# **`unsafe-libyaml` is the name that stops a reader, so it is answered here.**
+# It is a transliteration of libyaml *into Rust*, not a binding to the C library
+# — checked in the vendored source rather than taken from the name: no
+# `build.rs`, no `.c` or `.h` file, no `links` key and no `[build-dependencies]`,
+# so nothing outside the crates.io graph is compiled or linked, which is what
+# `sources ok` above is asserting. It carries `unsafe` blocks and that is real;
+# what bounds the exposure is the *direction* k8rs uses it in. **k8rs never
+# hands this crate a string to parse.** The one YAML a cluster's operator points
+# us at — the kubeconfig — is read by `kube`'s own dependency and never by this
+# one, and no API server answer is YAML: § THE BROWSER'S ROWS asks for JSON and
+# so does everything else. Serialising is the only direction, so a parser
+# advisory is a hazard on a path this build does not have.
+serde_yaml_ng = "0.10.0"
+
 [dev-dependencies]
 # **Named because our test code uses them, not because the build lacked them**
 # ([NOTES § D165](NOTES.md)) — the shape D143 argued for `futures-util`. Measured

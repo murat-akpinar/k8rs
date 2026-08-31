@@ -104,9 +104,12 @@ rules:
   # container's log. This grant was measured sufficient for it against a real
   # cluster: extracted verbatim, bound to a ServiceAccount, `--logs` exits 0
   # (`k8s-admin`, reports/2026-08-30-the-log-stream-against-a-cluster.md).
-  # `events` is still granted ahead of the code — Phase 6's per-object events
-  # fetch — so the role a stranger applies for v0.0.1 does not have to change
-  # under them a fortnight later (NOTES § D187)
+  # `events` was granted ahead of the code (NOTES § D187) and **the code caught
+  # up on 2026-08-31**: `--describe` reads this object's events through an
+  # `involvedObject` field selector, and `k8s-admin` measured the refusal under a
+  # role without it — stdout byte-identical to a pod with no events, the
+  # difference carried by exit `2` and one sentence naming the missing verb and
+  # resource (NOTES § D198)
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services", "nodes",
                 "persistentvolumeclaims"]
@@ -351,11 +354,30 @@ about a decade of daily use. A rotator would be more code than the log.
 
 ## Data displayed and stored
 
-- Environment variable **values are never displayed**.
+- Environment variable **values are never displayed** *by a finding, a card or
+  any surface k8rs composes*. **The `y` YAML pane is the stated exception**, and
+  it is one because of what that pane is: the object as the API server sent it,
+  which is the only claim it makes and the only one that makes it useful. A pane
+  that quietly dropped an ordinary field would be lying about being a copy —
+  `kubectl get -o yaml`, which the reader can already run, shows the same line.
+  The rule bites where k8rs goes and *fetches* a value on its own initiative and
+  puts it somewhere the reader did not ask for
+  ([NOTES § D37](../NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12) ·
+  [§ D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)),
+  and `managedFields` is on the pane for the same reason.
 - **Secret contents are hidden by default.** Viewing a Secret shows its keys
   and their sizes; revealing a value requires an explicit second action, and a
   revealed value never enters the command log, the audit log, or the YAML
-  shown by `y`.
+  shown by `y`. **A Secret keeps more than one copy of itself, so hiding by
+  position is not enough**: `kubectl apply` writes the whole applied body —
+  `data` map included, and *plaintext* when it was applied through `stringData`
+  — into `metadata.annotations`, so on a Secret every annotation value is hidden
+  behind its size too, and the keys stay drawn
+  ([NOTES § D198](../NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
+  Labels stay visible: 63 characters, and nothing writes a Secret's body into
+  one. **The headless `--yaml` has no reveal at all** — a reveal is a keypress on
+  a drawn pane — so on that surface a Secret's values are unreachable, not merely
+  hidden.
 - **A report is a document, and its reader chooses where it goes.** A finding
   carries the controller's message **verbatim**
   ([NOTES § D37](../NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)),

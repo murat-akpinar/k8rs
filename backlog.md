@@ -1013,8 +1013,10 @@ stop being cheap.***
 
 - **The read-only role's over-grant is the other half of a box that is already
   open.** `docs/security.md` grants cluster-wide `list configmaps` and
-  `list events`; no product code reads either, and the test suite uses `ConfigMap`
-  as its example of *a kind nothing reads*. `list configmaps` cluster-wide is not
+  `list events`. **`list events` stopped being an over-grant on 2026-08-31** —
+  `--describe` reads them (NOTES § D198) — so what is left of this entry is
+  `list configmaps`, which no product code reads and which the test suite still
+  uses as its example of *a kind nothing reads*. `list configmaps` cluster-wide is not
   neutral — they routinely hold what should have been Secrets. Named here only so
   it is not lost: it belongs to **Phase 5's own unchecked `ClusterRole` box**,
   which already carries the under-grant half.
@@ -1817,6 +1819,42 @@ recorded reversal and a later box rather than a dev round
   first and `screens/detail.md` does not cover it. Found by `k8s-admin` against
   a live cluster, 2026-08-30
   ([reports/2026-08-30-the-log-stream-against-a-cluster.md](reports/2026-08-30-the-log-stream-against-a-cluster.md) § 7)
+
+- **The teaching line lands before the read on `--yaml` and after it on `--logs`
+  and `--describe`, so a mistyped name teaches the command on one verb and
+  nothing on the other two.** Measured on a live cluster, 2026-08-31: `--yaml`
+  prints `$ kubectl get …` and *then* 404s, which is the more useful of the two
+  because a 404 is exactly when a beginner wants the command; `--logs` set the
+  other precedent and `--describe` matched it. Both are defensible, which is why
+  this is a ruling and not a defect — and why it is here rather than in the box:
+  making them agree edits a **landed** box's behaviour and its tests. **The same
+  entry carries its second half**: no verb puts `--context` on the printed line,
+  so a reader who ran with `--context prod` and pastes it hits their current
+  context instead. Pre-existing on `--logs`; this family tripled the number of
+  verbs that print one, which is what makes it worth a line
+  ([reports/2026-08-31-describe-and-yaml-against-a-cluster.md](reports/2026-08-31-describe-and-yaml-against-a-cluster.md) § 12)
+
+- **What `--describe` still does not say, ranked, and each item needs a decode
+  that does not exist yet.** The three cheap ones — a terminated container's
+  reason and exit code, a waiting container's reason, and the pod's own
+  `status.reason` — were fixed in the box (NOTES § D198). These four were not,
+  because each needs a field added to a snapshot type rather than a field already
+  decoded being printed: the **node** the pod is on, the **image** a container
+  runs, the last run's **`finishedAt`**, and **`status.message`** — which for
+  `broken-evicted` is the entire sentence *"Pod ephemeral local storage usage
+  exceeds the total limit of containers 8Mi"* and is deliberately absent from the
+  snapshot per [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22).
+  Ranked in that order by what would have changed a diagnosis at 3am
+  ([reports/2026-08-31-describe-and-yaml-against-a-cluster.md](reports/2026-08-31-describe-and-yaml-against-a-cluster.md) § 4)
+
+- **`main_tests.rs` is 7 700 lines and invariant 11 already says what to do about
+  it.** The file splits into `src/main_tests/` with one `#[path]` module per
+  `// --- … START ---` region of `main.rs`, exactly as `rules_tests.rs` did on
+  2026-08-15 ([D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)).
+  **Refused during Phase 6 family 2, deliberately**: a 7 000-line mechanical move
+  landing in the same commit as a security-relevant redaction path is how a defect
+  hides. It is a convention the invariant already mandates, not a judgement call,
+  so it needs no ruling — only a turn of its own with nothing else in it.
 
 ## Ruled out
 

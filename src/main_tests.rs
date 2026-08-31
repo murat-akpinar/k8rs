@@ -5479,8 +5479,8 @@ fn the_sentence_a_run_out_of_time_prints_carries_the_two_facts_and_no_verdict() 
 // test cannot read it back" (§ WATCHING A CLUSTER). [`dump`] is written against a `Write` so that
 // the one part with a shape can be asserted; the rest is `tests/binary.rs`'s.
 
-/// A server that answers the two requests a log run makes — the pod, and the log — with whatever
-/// the caller says.
+/// A server that answers the requests a run about one object makes — the pod, its log, and its
+/// events — with whatever the caller says.
 ///
 /// **A second stub and not the one `k8s_tests.rs` has**, for [`offline`]'s reason: invariant 11
 /// keeps each `mod tests` private to its own product file, so a helper cannot cross. It is
@@ -5488,6 +5488,36 @@ fn the_sentence_a_run_out_of_time_prints_carries_the_two_facts_and_no_verdict() 
 /// test here is [`logs_run`]'s answer and not the wire, which is proven one file down.
 async fn answers(status: &'static str, pod: String, log: &'static str) -> (kube::Client, Requests) {
     answers_that_may_cut_the_log(status, pod, log, false).await
+}
+
+/// [`answers`], with the whole of the events answer the caller's — **its status as well as its
+/// body, and `None` for a server that never answers that path at all**.
+///
+/// **The status has to travel with the body, and one status for the whole server is the defect
+/// this replaces.** `screens/detail.md` puts the entire difference between *this pod has no
+/// events* and *k8rs could not find out* in the exit code, and with a single status no test could
+/// spell *the pod read was served and the events read was refused* — so all three of
+/// [`describe_run`]'s endings were unreachable and the claim could have rotted in silence
+/// (`tester`, 2026-08-31). `k8s_tests.rs`'s own `stub` made the same change on 2026-08-29 for the
+/// same reason, and its doc is where that is argued.
+///
+/// **`None` is *accepted and never answered*, which is not the same as refused or closed.** A
+/// dropped socket is a connection error; a held one is a cluster that took the request and said
+/// nothing, which is the only thing that reaches [`describe_run`]'s timeout arm.
+async fn answers_with_events(
+    pod: String,
+    events: Option<(&'static str, String)>,
+) -> (kube::Client, Requests) {
+    served("200 OK", pod, "", events, false).await
+}
+
+/// The empty `EventList` [`answers`] hands back when the caller did not choose one.
+fn no_event_list() -> String {
+    serde_json::json!({
+        "apiVersion": "v1", "kind": "EventList",
+        "metadata": { "resourceVersion": "1" }, "items": [],
+    })
+    .to_string()
 }
 
 /// [`answers`], and a log body that stops before the `content-length` it declared — a cluster
@@ -5502,6 +5532,21 @@ async fn answers_that_may_cut_the_log(
     log: &'static str,
     cut: bool,
 ) -> (kube::Client, Requests) {
+    served(status, pod, log, Some((status, no_event_list())), cut).await
+}
+
+/// The one server the three wrappers above are, and the only place this file writes HTTP.
+///
+/// **`events` carries its own status because the events path is the one that has to disagree with
+/// the others** ([`answers_with_events`]), and `None` there is a request that is read, logged and
+/// then never answered.
+async fn served(
+    status: &'static str,
+    pod: String,
+    log: &'static str,
+    events: Option<(&'static str, String)>,
+    cut: bool,
+) -> (kube::Client, Requests) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -5512,6 +5557,7 @@ async fn answers_that_may_cut_the_log(
     tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
             let pod = pod.clone();
+            let events = events.clone();
             let log_of = std::sync::Arc::clone(&log_of);
             tokio::spawn(async move {
                 let mut pending = String::new();
@@ -5528,9 +5574,19 @@ async fn answers_that_may_cut_the_log(
                             .expect("the log is never poisoned")
                             .push(request.split_whitespace().nth(1).unwrap_or("/").to_string());
                         let log_asked_for = request.contains("/log?");
-                        let body = match log_asked_for {
-                            true => log.to_string(),
-                            false => pod.clone(),
+                        let (status, body) = if log_asked_for {
+                            (status, log.to_string())
+                        } else if request.contains("/events?") {
+                            match &events {
+                                Some((status, body)) => (*status, body.clone()),
+                                // **Held open and never written to.** Returning would drop the
+                                // socket, which is a connection error and not a wait; parking the
+                                // task keeps the connection alive with no answer on it, which is
+                                // the shape a deadline exists for.
+                                None => std::future::pending().await,
+                            }
+                        } else {
+                            (status, pod.clone())
                         };
                         // A body that stops before its declared length is what a severed
                         // connection looks like to the client, and it is the only way this
@@ -5681,7 +5737,7 @@ fn a_log_run_reads_its_object_its_container_and_its_two_switches() {
     let whole = asked(&args).expect("a line with --logs and --object is a log run");
 
     assert_eq!(whole.namespace, Some("payments"));
-    assert_eq!(whole.pod, "web-7d9f4");
+    assert_eq!(whole.name, "web-7d9f4");
     assert_eq!(whole.container, Some("app"));
     assert!(whole.previous);
     assert!(whole.follow);
@@ -6245,9 +6301,11 @@ async fn a_log_run_that_cannot_connect_says_so_and_never_asks_for_a_log() {
             kube::config::KubeconfigError::CurrentContextNotSet,
         ))),
         &Asked {
+            verb: Verb::Logs,
             namespace: Some("payments"),
-            pod: "web-7d9f4",
+            name: "web-7d9f4",
             container: None,
+            kind: None,
             previous: false,
             follow: false,
         },
@@ -6269,9 +6327,11 @@ async fn a_log_run_that_cannot_connect_says_so_and_never_asks_for_a_log() {
 /// k8rs tries to …* — which is true and unhelpful about a pod name somebody just typed.
 #[tokio::test]
 async fn a_pod_that_is_not_there_and_a_pod_that_is_refused_get_different_sentences() {
-    let about = |pod| Asked {
+    let about = |name| Asked {
+        verb: Verb::Logs,
         namespace: Some("payments"),
-        pod,
+        name,
+        kind: None,
         container: None,
         previous: false,
         follow: false,
@@ -6345,9 +6405,11 @@ async fn a_followed_stream_asks_why_it_ended_and_a_fetch_does_not() {
             logs_run(
                 std::future::ready(Ok(session_over(client, None))),
                 &Asked {
+                    verb: Verb::Logs,
                     namespace: Some("default"),
-                    pod: "healthy-sidecar",
+                    name: "healthy-sidecar",
                     container: Some("app"),
+                    kind: None,
                     previous: false,
                     follow,
                 }
@@ -6503,9 +6565,11 @@ async fn a_pending_pods_log_request_names_the_container_the_pod_declares() {
     let ending = logs_run(
         std::future::ready(Ok(session_over(client, None))),
         &Asked {
+            verb: Verb::Logs,
             namespace: Some("default"),
-            pod: "broken-pending",
+            name: "broken-pending",
             container: None,
+            kind: None,
             previous: false,
             follow: false,
         },
@@ -6563,9 +6627,11 @@ async fn a_log_that_stopped_arriving_is_not_reported_as_a_log_that_ended() {
     let cut = logs_run(
         std::future::ready(Ok(session_over(client, None))),
         &Asked {
+            verb: Verb::Logs,
             namespace: Some("default"),
-            pod: "healthy-sidecar",
+            name: "healthy-sidecar",
             container: Some("app"),
+            kind: None,
             previous: false,
             follow: false,
         },
@@ -6596,9 +6662,11 @@ async fn a_namespace_that_is_not_a_namespace_never_reaches_a_request() {
     let refused = logs_run(
         std::future::ready(Ok(crafted)),
         &Asked {
+            verb: Verb::Logs,
             namespace: None,
-            pod: "healthy-sidecar",
+            name: "healthy-sidecar",
             container: Some("app"),
+            kind: None,
             previous: false,
             follow: false,
         },
@@ -6628,8 +6696,10 @@ async fn a_namespace_that_is_not_a_namespace_never_reaches_a_request() {
 async fn previous_on_a_container_that_never_restarted_asks_for_the_run_that_exists() {
     let (client, asked) = answers("200 OK", pod_body("healthy-sidecar"), "hello\n").await;
     let run = |previous| Asked {
+        verb: Verb::Logs,
         namespace: Some("default"),
-        pod: "healthy-sidecar",
+        name: "healthy-sidecar",
+        kind: None,
         container: Some("app"),
         previous,
         follow: false,
@@ -6667,8 +6737,10 @@ async fn previous_on_a_container_that_never_restarted_asks_for_the_run_that_exis
         logs_run(
             std::future::ready(Ok(session_over(crashed, None))),
             &Asked {
+                verb: Verb::Logs,
                 namespace: Some("default"),
-                pod: "broken-crashloop",
+                name: "broken-crashloop",
+                kind: None,
                 container: Some("quitter"),
                 previous: true,
                 follow: false,
@@ -6695,8 +6767,10 @@ async fn a_log_run_with_no_namespace_falls_back_to_the_context_and_then_to_defau
     })
     .to_string();
     let bare = |namespace| Asked {
+        verb: Verb::Logs,
         namespace,
-        pod: "web-7d9f4",
+        name: "web-7d9f4",
+        kind: None,
         container: None,
         previous: false,
         follow: false,
@@ -6724,5 +6798,1323 @@ async fn a_log_run_with_no_namespace_falls_back_to_the_context_and_then_to_defau
                 .to_string()
         ),
         "a run with no namespace anywhere did not look where `kubectl logs` looks"
+    );
+}
+
+// --- ONE OBJECT'S OWN STORY ---
+//
+// **Most of this box is argv and one printed block**, so most of this region is [`mistyped`] and
+// [`described`] — the two places every decision `--describe` and `--yaml` make can be read by a
+// test. The wire is `k8s_tests.rs`'s and the run itself is `tests/binary.rs`'s: stdout belongs to
+// the process and a test cannot read it back (§ WATCHING A CLUSTER).
+//
+// **The one assertion that is a *pair* is the exit code**, because `screens/detail.md` puts the
+// whole difference between *this pod has no events* and *k8rs could not find out* there — both
+// print byte-identical stdout, so a test that reads only the block cannot tell them apart and
+// neither can a reader.
+
+/// A pod read the three describe tests share.
+async fn described_pod(capture: &str) -> k8s::PodRead {
+    pod_read(capture).await
+}
+
+/// One event, as `k8s::events` hands it over.
+fn happening(at: Option<&str>, reason: &str, message: &str) -> k8s::Happening {
+    repeatedly(at, reason, message, None, None)
+}
+
+/// [`happening`], with the two fields a repeated event carries — `count` and when it was first
+/// seen (`screens/detail.md` § A repeated event).
+fn repeatedly(
+    at: Option<&str>,
+    reason: &str,
+    message: &str,
+    count: Option<i32>,
+    first: Option<&str>,
+) -> k8s::Happening {
+    let stamp = |at: &str| Time(at.parse().expect("a fixed timestamp"));
+    k8s::Happening {
+        at: at.map(stamp),
+        reason: reason.to_string(),
+        message: message.to_string(),
+        count,
+        first: first.map(stamp),
+    }
+}
+
+/// **The three verbs are one flag each, and a line carrying two is refused rather than ranked**
+/// (the box's ruling 7, `screens/detail.md`'s one open question).
+///
+/// **`--once --live` stays ranked and that is the contrast**: those two are two *breadths* of one
+/// read and the narrower is obviously meant, where three verbs are equally narrow — so picking one
+/// prints a payload the reader did not ask for and gives no sign of it.
+///
+/// **The sentence names the ones that collided**, which is the whole of what a reader has to fix.
+#[test]
+fn two_verbs_over_one_object_are_refused_and_the_sentence_names_them() {
+    let refused = mistyped(&argv(&["--logs", "--yaml", "--object", "default/web"]))
+        .expect("two verbs over one object is a usage error");
+    assert!(
+        refused.starts_with("k8rs: --logs and --yaml each print a different thing"),
+        "{refused:?}"
+    );
+    // **The first line only** — [`USAGE`] under it names all three by design, so a `contains`
+    // over the whole message could never fail.
+    assert!(
+        !refused
+            .lines()
+            .next()
+            .is_some_and(|first| first.contains("--describe")),
+        "the sentence named a flag that is not on the line: {refused:?}"
+    );
+
+    // **All three pairs and not the one that happened to be written**, which is NOTES § D29's
+    // rule about the shapes a guard was fed: only `--logs --yaml` and the triple were covered
+    // (`tester`, 2026-08-31).
+    for (line, named) in [
+        (
+            ["--logs", "--describe"],
+            "k8rs: --logs and --describe each print",
+        ),
+        (
+            ["--describe", "--yaml"],
+            "k8rs: --describe and --yaml each print",
+        ),
+    ] {
+        let mut words = line.to_vec();
+        words.extend(["--object", "default/web"]);
+        let refused = mistyped(&argv(&words)).expect("two verbs over one object is a usage error");
+        assert!(refused.starts_with(named), "{words:?}: {refused:?}");
+    }
+
+    let three = mistyped(&argv(&[
+        "--logs",
+        "--describe",
+        "--yaml",
+        "--object",
+        "default/web",
+    ]))
+    .expect("three verbs over one object is a usage error");
+    assert!(
+        three.starts_with("k8rs: --logs, --describe and --yaml each print"),
+        "{three:?}"
+    );
+
+    // **The contrast, and it is asserted rather than described**: two breadths of one read are
+    // still accepted, so this refusal is about verbs and not about *two flags*.
+    assert_eq!(mistyped(&argv(&["--once", "--live"])), None);
+    for one in [["--logs"], ["--describe"], ["--yaml"]] {
+        let mut line = one.to_vec();
+        line.extend(["--object", "default/web"]);
+        assert_eq!(
+            mistyped(&argv(&line)),
+            None,
+            "{line:?} was refused, and it names one verb"
+        );
+    }
+}
+
+/// **Every shape of `--kind` that names nothing usable is refused before anything connects** — the
+/// same three-shapes-of-nothing rule `--context` and `--namespace` are already under.
+///
+/// **`--describe --kind` naming anything but a pod is refused too, and offline** — the sentence
+/// names the one value it takes, so there is nothing a cluster could add to it
+/// (`screens/detail.md`).
+///
+/// **The pairing sentence names the verb that is on the line**, which is the defect NOTES § D190
+/// is about wearing the third verb's coat: *`--logs` and `--object` go together* is a message that
+/// is not true of a run with no `--logs` on it.
+#[test]
+fn the_kind_flag_is_refused_for_nothing_and_for_a_describe_that_is_not_a_pod() {
+    for line in [
+        vec!["--yaml", "--object", "default/web", "--kind"],
+        vec!["--yaml", "--object", "default/web", "--kind="],
+        vec!["--yaml", "--object", "default/web", "--kind", ""],
+    ] {
+        let refused = mistyped(&argv(&line))
+            .unwrap_or_else(|| panic!("{line:?} was accepted, so k8rs went and asked a cluster"));
+        assert!(
+            refused.starts_with("k8rs: --kind needs the name of a kind")
+                && refused.contains("usage: k8rs "),
+            "{line:?}: {refused:?}"
+        );
+    }
+
+    let described = mistyped(&argv(&[
+        "--describe",
+        "--object",
+        "default/web",
+        "--kind",
+        "secret",
+    ]))
+    .expect("--describe reads a pod and nothing else");
+    assert!(
+        described.starts_with(
+            "k8rs: --describe only knows how to read a pod right now — containers and events \
+             don't mean the same thing on a Secret. --kind pod is the only value it accepts"
+        ),
+        "{described:?}"
+    );
+    // **Both spellings of the flag are real**, for [`CONTEXT`]'s reason: matching only
+    // `--kind NAME` lets `--kind=NAME` fall through to the default kind, which for `--yaml` is a
+    // pod — a selector that silently selects the wrong thing.
+    for spelled in [
+        vec!["--describe", "--object", "default/web", "--kind", "pod"],
+        vec!["--describe", "--object", "default/web", "--kind=pod"],
+        vec!["--yaml", "--object", "default/web", "--kind=secret"],
+    ] {
+        assert_eq!(
+            mistyped(&argv(&spelled)),
+            None,
+            "{spelled:?} was refused, and every flag on it is one k8rs has"
+        );
+    }
+    // **`--kind` beside a verb that does not read it is accepted rather than refused**, which is
+    // `--context` without `--live`'s own documented rule: it cannot point the run at something the
+    // reader did not name.
+    assert_eq!(
+        mistyped(&argv(&[
+            "--logs",
+            "--object",
+            "default/web",
+            "--kind",
+            "secret"
+        ])),
+        None
+    );
+
+    for verb in ["--describe", "--yaml"] {
+        let alone = mistyped(&argv(&[verb])).expect("a verb with no object is half an instruction");
+        assert!(
+            alone.starts_with(&format!("k8rs: {verb} and --object go together")),
+            "the sentence named a flag this run does not have: {alone:?}"
+        );
+    }
+}
+
+/// **All three verbs reach the cluster path and all three read `--context`** — a run read as a
+/// file run would try to open `--object` as a path.
+///
+/// **A file beside any of them is refused and the sentence names the verb that is there**, which
+/// is the same NOTES § D190 shape the pairing sentence above is under.
+#[test]
+fn the_two_new_verbs_are_cluster_runs_and_a_file_beside_one_names_it() {
+    for verb in ["--describe", "--yaml"] {
+        assert_eq!(
+            live_context(&argv(&[verb, "--object", "web", "--context", "prod"])),
+            Some(Some("prod")),
+            "{verb} did not reach the context flag"
+        );
+        assert_eq!(live_context(&argv(&[verb, "--object", "web"])), Some(None));
+        let said = mistyped(&argv(&[verb, "--object", "default/web", "pod.json"]))
+            .expect("a file beside a cluster flag is refused");
+        assert!(
+            said.starts_with(&format!(
+                "k8rs: {verb} reads a cluster, so k8rs cannot also read pod.json"
+            )),
+            "{said:?}"
+        );
+    }
+}
+
+/// **Which of the three a line asked for, and what it asked it about** — [`asked`] over all three
+/// verbs, and the kind that only one of them reads.
+#[test]
+fn a_line_names_one_verb_one_object_and_at_most_one_kind() {
+    let read = |words: &[&str]| {
+        let args = argv(words);
+        let asked = asked(&args).expect("a verb beside an object is a run");
+        (
+            asked.verb,
+            asked.namespace.map(str::to_string),
+            asked.name.to_string(),
+            asked.kind.map(str::to_string),
+        )
+    };
+    assert_eq!(
+        read(&["--describe", "--object", "payments/web"]),
+        (
+            Verb::Describe,
+            Some("payments".to_string()),
+            "web".to_string(),
+            None
+        )
+    );
+    assert_eq!(
+        read(&["--yaml", "--object", "db", "--kind", "secret"]),
+        (
+            Verb::Yaml,
+            None,
+            "db".to_string(),
+            Some("secret".to_string())
+        )
+    );
+    assert_eq!(
+        read(&["--logs", "--object", "web"]).0,
+        Verb::Logs,
+        "the verb a log run is read as changed"
+    );
+    // **A line with no verb is not a run about an object at all**, whatever else is on it.
+    assert!(asked(&argv(&["--once"])).is_none());
+}
+
+/// **One joiner, and the separator before the last item is the caller's** — the two sentences that
+/// use it do not agree on the comma, and *"--logs, and --yaml"* is not English.
+#[test]
+fn a_list_of_things_reads_as_a_sentence() {
+    assert_eq!(joined(&[] as &[String], " and "), "");
+    assert_eq!(joined(&["one"], " and "), "one");
+    assert_eq!(joined(&["one", "two"], " and "), "one and two");
+    assert_eq!(joined(&["one", "two"], ", and "), "one, and two");
+    assert_eq!(
+        joined(&["one", "two", "three"], ", or "),
+        "one, two, or three"
+    );
+}
+
+/// **The block `--describe` puts on stdout: the identity line, the containers, and the events**
+/// (`screens/detail.md` § Printed instead of drawn — describe).
+///
+/// **The containers block is the picker's own list**, so the order is declared-then-init, the word
+/// is [`doing`]'s, and a restart count appears only where there is one — the same rule
+/// [`container_choice`] draws it by, because a second wording for one fact is the drift this file
+/// keeps refusing.
+///
+/// **The age is [`age`]'s ladder** and not a second spelling of it, so `created 4 min ago` is the
+/// same string a card's right edge draws.
+#[tokio::test]
+async fn the_described_block_is_the_pod_its_containers_and_its_events() {
+    // **`healthy-retry` and not `healthy-sidecar`, because it is the capture that reaches every
+    // arm of the row** — two declared containers so the padding has something to align, one
+    // regular and one init so the order rule is `spec` and not `status`, one `running` and one
+    // `done` so both state words are drawn, and `restartCount` 0 beside 3 so the restart clause
+    // is proven *and* proven absent. The sidecar capture carries `0` on both, so the
+    // `", {} restarts"` arm ran in no test at all until this one (`tester`, 2026-08-31).
+    let pod = described_pod("healthy-retry").await;
+    let happened = k8s::Happened {
+        lines: vec![
+            happening(Some("2026-08-22T23:56:00Z"), "Unhealthy", "probe failed"),
+            happening(Some("2026-08-19T00:00:00Z"), "Evicted", "the node was full"),
+        ],
+        cut: false,
+    };
+    let block = described(&pod, Some(&happened), &now());
+    println!("{block}");
+
+    // **The second line of each event is the raw word and the controller's message, always**
+    // (NOTES § D198). `Unhealthy` keeps its phrase *and* its message, because the same reason word
+    // covers a liveness probe and a readiness probe and only the message says which; `Evicted` has
+    // no phrase in the events table, so its row is the age alone over the raw word and the
+    // message — never an invented sentence.
+    //
+    // **The whole block and not a line at a time.** `starts_with("Pod · ")` plus
+    // `contains(" · created ")` is satisfied by a line with the state word dropped entirely, and
+    // `starts_with("  {name}")` is satisfied by a row with the state and the restart count gone —
+    // which is everything the row is *for* (`tester`, 2026-08-31). Every character here is
+    // derived: `Running` lowercased, `2026-08-20T22:42:55Z` against [`now`] on the ladder's
+    // 48-hour rung, `spec` order, [`doing`]'s two words, the widest name plus three, and the
+    // widest age plus two. **A re-capture that moves any of them reddens this on purpose.**
+    assert_eq!(
+        block,
+        "Pod · running · created 2 days ago\n\
+         \n\
+         containers:\n\
+         \x20\x20app           running\n\
+         \x20\x20wait-for-db   done, 3 restarts\n\
+         \n\
+         events (newest first):\n\
+         \x20\x204 min ago   the health check failed\n\
+         \x20\x20\x20\x20(Unhealthy) probe failed\n\
+         \x20\x204 days ago\n\
+         \x20\x20\x20\x20(Evicted) the node was full"
+    );
+}
+
+/// **No events prints no heading, and a read that failed prints byte-identical stdout to a read
+/// that found nothing** — which is exactly why the exit code carries that difference
+/// (`screens/detail.md`: *the only thing that can carry the difference*).
+#[tokio::test]
+async fn a_pod_with_no_events_and_one_whose_events_could_not_be_read_print_the_same_block() {
+    let pod = described_pod("healthy-sidecar").await;
+    let nothing = described(&pod, None, &now());
+    let empty = described(&pod, Some(&k8s::Happened::default()), &now());
+
+    assert_eq!(
+        nothing, empty,
+        "a failed events read and an empty one print different stdout, so the exit code is no \
+         longer the only thing telling them apart"
+    );
+    assert!(
+        !nothing.contains("events"),
+        "an empty events section was dressed up with a heading over nothing: {nothing:?}"
+    );
+}
+
+/// **A read that found no events says why on stderr, and one that found some says nothing** —
+/// `screens/detail.md` § No events at all, whose whole point is the *second* sentence: *nothing
+/// left* and *nothing happened* are different facts wearing the same empty list, and only one of
+/// them is true of a pod that has been up for a week.
+#[tokio::test]
+async fn a_read_that_found_no_events_says_why_and_one_that_found_some_says_nothing() {
+    let said = no_events(&k8s::Happened::default()).expect("an empty list has something to say");
+    assert!(
+        said.contains("Kubernetes only keeps events for a while") && said.contains("none are left"),
+        "the sentence says the list is empty without saying why it can be: {said:?}"
+    );
+    assert_eq!(
+        no_events(&k8s::Happened {
+            lines: vec![happening(None, "Pulled", "")],
+            cut: false,
+        }),
+        None,
+        "a pod whose events were printed was told it has none"
+    );
+}
+
+/// **A cut list withdraws the *newest first* claim in the heading, because that is where the claim
+/// is** (`k8s::Happened::cut`, `k8s::EVENTS_KEPT`).
+///
+/// A `limit` returns the cluster's own order and not the newest, so a list that was cut is neither
+/// all of them nor the newest of them — and the words that promise otherwise are the words that
+/// have to go.
+#[tokio::test]
+async fn a_cut_events_list_stops_claiming_to_be_the_newest() {
+    let pod = described_pod("healthy-sidecar").await;
+    let cut = described(
+        &pod,
+        Some(&k8s::Happened {
+            lines: vec![happening(Some("2026-08-22T23:56:00Z"), "Unhealthy", "no")],
+            cut: true,
+        }),
+        &now(),
+    );
+    println!("{cut}");
+
+    assert!(
+        !cut.contains("newest first"),
+        "a list the server had more of still called itself the newest: {cut:?}"
+    );
+    assert!(
+        cut.contains("there are more, and these are not the newest"),
+        "a cut list said nothing about being cut: {cut:?}"
+    );
+}
+
+/// **An unknown kind is a spelling mistake and an ambiguous one names both spellings** — the two
+/// sentences `screens/detail.md` writes, over the one ambiguity a cluster really has.
+///
+/// **`events` is that ambiguity**: `core/v1` and `events.k8s.io/v1` are different resources and
+/// `browsable()` keeps both, so a bare word cannot pick one without silently reading the wrong
+/// thing.
+#[test]
+fn a_kind_no_cluster_serves_and_one_two_resources_answer_to_get_their_own_sentences() {
+    let kinds = [
+        k8s::Browsable {
+            group: String::new(),
+            version: "v1".to_string(),
+            kind: "Event".to_string(),
+            plural: "events".to_string(),
+            namespaced: true,
+            verbs: vec!["list".to_string()],
+        },
+        k8s::Browsable {
+            group: "events.k8s.io".to_string(),
+            version: "v1".to_string(),
+            kind: "Event".to_string(),
+            plural: "events".to_string(),
+            namespaced: true,
+            verbs: vec!["list".to_string()],
+        },
+    ];
+
+    let unknown = which_kind(&kinds, "widget").expect_err("no cluster serves widgets");
+    assert_eq!(
+        unknown,
+        "k8rs: this cluster does not serve a kind named widget — check the spelling"
+    );
+
+    let both = which_kind(&kinds, "events").expect_err("two resources answer to `events`");
+    assert_eq!(
+        both,
+        "k8rs: --kind events matches two things this cluster serves — the original one, and the \
+         one events.k8s.io adds. Say which: --kind 'events.' for the original one, or --kind \
+         'events.events.k8s.io' for the other"
+    );
+
+    assert_eq!(
+        which_kind(&kinds, "events.")
+            .expect("the trailing dot names the core group")
+            .group,
+        ""
+    );
+
+    // **A name refused for being enormous is echoed at the length the *requirement* names, and
+    // `< 500` was a comfort figure that a cap of 400 also passed** (`tester`, 2026-08-31). The
+    // security gate's row is *the echo is cut to what a name could have been*, so the number is
+    // [`k8s::NAME_MAX`] and it is read off the constant rather than transcribed — both directions,
+    // because a cap of ten satisfies an upper bound and tells the reader nothing.
+    let huge = which_kind(&kinds, &"a".repeat(9000)).expect_err("no cluster serves that");
+    assert!(
+        !huge.contains(&"a".repeat(k8s::NAME_MAX + 1)),
+        "the echo is longer than a kind's name could ever be: {} characters",
+        huge.chars().count()
+    );
+    assert!(
+        huge.contains(&"a".repeat(k8s::NAME_MAX)),
+        "the echo was cut shorter than a name may be, so a reader cannot recognise what they \
+         typed: {huge:?}"
+    );
+}
+
+/// **The count in the ambiguity sentence is a word as far as a cluster plausibly goes and a digit
+/// past that** — `screens/detail.md` writes *"matches two things"*, and the arms above and below it
+/// had no test at all until this one (`tester`, 2026-08-31).
+///
+/// **`for the other` is the two-item shape and only that**, because *the other* naming two things
+/// is not a sentence — so the three-item form spells out what each choice is for.
+#[test]
+fn the_number_of_things_a_kind_word_matches_is_a_word_until_it_stops_being_readable_as_one() {
+    let serving = |groups: &[&str]| -> Vec<k8s::Browsable> {
+        groups
+            .iter()
+            .map(|group| k8s::Browsable {
+                group: (*group).to_string(),
+                version: "v1".to_string(),
+                kind: "Widget".to_string(),
+                plural: "widgets".to_string(),
+                namespaced: true,
+                verbs: vec!["list".to_string()],
+            })
+            .collect()
+    };
+    let said = |groups: &[&str]| {
+        which_kind(&serving(groups), "widgets").expect_err("more than one thing answers to it")
+    };
+
+    let three = said(&["", "a.io", "b.io"]);
+    println!("{three}");
+    assert!(
+        three.starts_with(
+            "k8rs: --kind widgets matches three things this cluster serves — the original one, \
+             the one a.io adds, and the one b.io adds. Say which: --kind 'widgets.' for the \
+             original one, --kind 'widgets.a.io' for the one a.io adds, or --kind 'widgets.b.io' \
+             for the one b.io adds"
+        ),
+        "{three:?}"
+    );
+    assert!(
+        !three.contains("for the other"),
+        "three things were offered with *the other* naming two of them: {three:?}"
+    );
+
+    // **Four is where the word gives way to the digit**, which is the arm the comment beside it
+    // used to claim started at three.
+    let four = said(&["", "a.io", "b.io", "c.io"]);
+    assert!(
+        four.starts_with("k8rs: --kind widgets matches 4 things this cluster serves"),
+        "{four:?}"
+    );
+}
+
+/// **`--describe` reads the pod, then that pod's events, and nothing else** — two round trips, one
+/// `kubectl` line (invariant 4: the command log shows the *equivalent* command, not the two calls
+/// underneath it).
+///
+/// **The uid is on the events request**, which is what stops a pod deleted and recreated under one
+/// name inheriting the dead one's events.
+#[tokio::test]
+async fn a_describe_run_reads_the_pod_then_its_own_events() {
+    let (client, asked) = answers_with_events(
+        pod_body("healthy-sidecar"),
+        Some((
+            "200 OK",
+            serde_json::json!({
+            "apiVersion": "v1", "kind": "EventList",
+            "metadata": { "resourceVersion": "1" },
+            "items": [{
+                "apiVersion": "v1", "kind": "Event",
+                "metadata": { "name": "web.1", "namespace": "default",
+                              "creationTimestamp": "2026-08-22T23:56:00Z" },
+                "involvedObject": { "kind": "Pod", "name": "healthy-sidecar" },
+                "reason": "Unhealthy", "message": "probe failed", "type": "Warning",
+                "lastTimestamp": "2026-08-22T23:56:00Z",
+            }],
+            })
+            .to_string(),
+        )),
+    )
+    .await;
+    let ended = describe_run(
+        std::future::ready(Ok(session_over(client, None))),
+        &Asked {
+            verb: Verb::Describe,
+            namespace: Some("default"),
+            name: "healthy-sidecar",
+            kind: None,
+            container: None,
+            previous: false,
+            follow: false,
+        },
+        &now(),
+        OBJECT_READ,
+    )
+    .await;
+    let paths = asked.lock().expect("the log is never poisoned").clone();
+    println!("{paths:?}");
+
+    assert_eq!(
+        ended, None,
+        "a describe over a cluster that answered did not exit 0: {ended:?}"
+    );
+    assert_eq!(paths.len(), 2, "describe made {} requests", paths.len());
+    assert_eq!(paths[0], "/api/v1/namespaces/default/pods/healthy-sidecar");
+    assert!(
+        paths[1].starts_with("/api/v1/namespaces/default/events?")
+            && paths[1].contains("involvedObject.name%3Dhealthy-sidecar")
+            && paths[1].contains("involvedObject.kind%3DPod"),
+        "the events fetch did not name this object: {:?}",
+        paths[1]
+    );
+    assert!(
+        paths[1].contains("involvedObject.uid%3D"),
+        "the events fetch carried no uid, so a recreated pod inherits the dead one's events: {:?}",
+        paths[1]
+    );
+}
+
+/// **The three endings a describe can have once the pod has been read, told apart by the exit code
+/// and by nothing else** — `screens/detail.md` calls that code *the only thing that can carry the
+/// difference*, because all three print the identical block on stdout.
+///
+/// **None of the three was reachable until [`served`] let the events path have its own status**
+/// (`tester`, 2026-08-31): one status for the whole server cannot spell *the pod was served and
+/// the events were refused*, so the family's central claim had no test under it at all.
+///
+/// **The refusal names the missing verb and the resource**, which the security gate asks of every
+/// `403`, and it is [`because`]'s own frame so it cannot drift from the one a refused watch gets.
+///
+/// **The timeout arm runs against a server that takes the request and never answers**, which is
+/// the only shape that reaches it — a dropped socket is a connection error and lands in the arm
+/// above. The deadline is the test's for [`describe_run`]'s stated reason.
+///
+/// **What the first arm pins is the exit code and not the sentence beside it**, and the limit is
+/// worth stating rather than discovering: [`NO_EVENTS`] goes to stderr, which belongs to the
+/// process (§ WATCHING A CLUSTER), so a reversion that printed the wrong line here would still
+/// pass. The words are pinned one test up, by
+/// [`a_read_that_found_no_events_says_why_and_one_that_found_some_says_nothing`] over
+/// [`no_events`]; what is proven here is that a read which succeeded and found nothing ends the
+/// run *happily*, which is the half `screens/detail.md` says only the code can carry.
+#[tokio::test]
+async fn the_three_endings_of_a_describe_are_told_apart_by_the_exit_code() {
+    let about = |name| Asked {
+        verb: Verb::Describe,
+        namespace: Some("default"),
+        name,
+        kind: None,
+        container: None,
+        previous: false,
+        follow: false,
+    };
+    let ran = |events, deadline| async move {
+        let (client, asked) = answers_with_events(pod_body("healthy-sidecar"), events).await;
+        let ended = describe_run(
+            std::future::ready(Ok(session_over(client, None))),
+            &about("healthy-sidecar"),
+            &now(),
+            deadline,
+        )
+        .await;
+        let paths = asked.lock().expect("the log is never poisoned").len();
+        (ended, paths)
+    };
+
+    // **A read that succeeded and found nothing is exit `0`** — the calm half of the pair, and
+    // the events were really asked for, which is what the second request says.
+    assert_eq!(
+        ran(Some(("200 OK", no_event_list())), OBJECT_READ).await,
+        (None, 2),
+        "a pod whose events were read and were empty did not end happily, so `k8rs --describe` \
+         exits 2 on a healthy pod"
+    );
+
+    // **A read that was refused is exit `2`, with the verb and the resource named.**
+    let refused = serde_json::json!({
+        "apiVersion": "v1", "kind": "Status", "status": "Failure",
+        "reason": "Forbidden", "code": 403, "message": "no",
+    })
+    .to_string();
+    assert_eq!(
+        ran(Some(("403 Forbidden", refused)), OBJECT_READ).await,
+        (
+            Some("k8rs: the role this kubeconfig uses needs to list events in default".to_string()),
+            2
+        ),
+        "a refused events read did not name the verb and the resource the reader has to be granted"
+    );
+
+    // **A read that never finished is exit `2` as well, and says so as a wait rather than as a
+    // refusal.** 50ms and not [`OBJECT_READ`]: ten real seconds here is ten more on every one of
+    // the mutation gate's runs.
+    let deadline = std::time::Duration::from_millis(50);
+    assert_eq!(
+        ran(None, deadline).await,
+        (
+            Some(format!(
+                "k8rs: this cluster has not answered for the events of the pod \
+                 healthy-sidecar in default after {} seconds",
+                deadline.as_secs()
+            )),
+            2
+        ),
+        "a cluster that took the events request and never answered was reported as something \
+         other than a wait"
+    );
+}
+
+/// **A pod that is not there ends a describe before the events are asked for**, with the same
+/// sentence a log run gives — one wording, because it is one read.
+#[tokio::test]
+async fn a_describe_of_a_pod_that_is_not_there_asks_for_no_events() {
+    let status = serde_json::json!({
+        "apiVersion": "v1", "kind": "Status", "status": "Failure",
+        "reason": "NotFound", "code": 404, "message": "no",
+    })
+    .to_string();
+    let (client, asked) = answers("404 Not Found", status, "").await;
+    let ended = describe_run(
+        std::future::ready(Ok(session_over(client, None))),
+        &Asked {
+            verb: Verb::Describe,
+            namespace: Some("payments"),
+            name: "ghost",
+            kind: None,
+            container: None,
+            previous: false,
+            follow: false,
+        },
+        &now(),
+        OBJECT_READ,
+    )
+    .await;
+
+    assert_eq!(
+        ended,
+        Some(
+            "k8rs: there is no pod named ghost in payments — check the name and the namespace"
+                .to_string()
+        )
+    );
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").len(),
+        1,
+        "the events were asked for over a pod that is not there"
+    );
+}
+
+/// **A kind that lives in no namespace is not sent to check one** — *check the name and the
+/// namespace* is advice about a word that is not on the line for `--kind node`, and advice a
+/// reader cannot act on is a sentence that should not have been printed.
+#[test]
+fn a_cluster_scoped_kind_is_named_without_a_namespace_it_does_not_have() {
+    let status = serde_json::json!({
+        "apiVersion": "v1", "kind": "Status", "status": "Failure",
+        "reason": "NotFound", "code": 404, "message": "no",
+    })
+    .to_string();
+    let gone: kube::Error = kube::Error::Api(Box::new(
+        serde_json::from_str(&status).expect("a Status this file wrote"),
+    ));
+
+    assert_eq!(
+        read_failed(&gone, "node", "ghost", None, None),
+        "k8rs: there is no node named ghost — check the name"
+    );
+    assert_eq!(
+        read_failed(&gone, "secret", "ghost", Some("payments"), None),
+        "k8rs: there is no secret named ghost in payments — check the name and the namespace"
+    );
+    assert_eq!(
+        no_answer("node", "ghost", None, 10),
+        "k8rs: this cluster has not answered for the node ghost after 10 seconds"
+    );
+    assert_eq!(
+        no_answer("pod", "web", Some("payments"), 10),
+        "k8rs: this cluster has not answered for the pod web in payments after 10 seconds"
+    );
+}
+
+/// A session whose discovery answer is the caller's, over a client of the caller's choosing —
+/// [`session_over`] with the half `--yaml` reads and the log verbs do not.
+fn serving(client: kube::Client, kinds: Vec<k8s::Browsable>) -> k8s::Session {
+    k8s::Session {
+        client,
+        namespace: None,
+        ..saying(
+            Ok("v1.36.1".to_string()),
+            Ok(k8s::Served {
+                kinds,
+                capabilities: None,
+            }),
+            None,
+        )
+    }
+}
+
+/// One kind, as discovery described it and `k8s::browsable` kept it.
+fn browsable(group: &str, kind: &str, plural: &str, namespaced: bool) -> k8s::Browsable {
+    k8s::Browsable {
+        group: group.to_string(),
+        version: "v1".to_string(),
+        kind: kind.to_string(),
+        plural: plural.to_string(),
+        namespaced,
+        verbs: vec!["list".to_string()],
+    }
+}
+
+/// **`--yaml` reads the one object `--kind` and `--object` name, and reads it once** — one round
+/// trip, no watch, no `Table` (`screens/detail.md` § The yaml tab).
+///
+/// **The path is the assertion, because the document itself is stdout's** and a test cannot read
+/// the process's own stream back (§ WATCHING A CLUSTER). What the document *says* — the masking,
+/// the key order, the strip — is `k8s_tests.rs`'s, over the same function.
+#[tokio::test]
+async fn a_yaml_run_reads_the_one_object_its_kind_names() {
+    let secret = serde_json::json!({
+        "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+        "metadata": { "name": "db-credentials", "namespace": "payments" },
+        "data": { "username": "YWRtaW4=" },
+    })
+    .to_string();
+    let (client, asked) = answers("200 OK", secret, "").await;
+    let ended = yaml_run(
+        std::future::ready(Ok(serving(
+            client,
+            vec![browsable("", "Secret", "secrets", true)],
+        ))),
+        &Asked {
+            verb: Verb::Yaml,
+            namespace: Some("payments"),
+            name: "db-credentials",
+            kind: Some("secret"),
+            container: None,
+            previous: false,
+            follow: false,
+        },
+    )
+    .await;
+    let paths = asked.lock().expect("the log is never poisoned").clone();
+
+    assert_eq!(
+        ended, None,
+        "a yaml run over a cluster that answered: {ended:?}"
+    );
+    assert_eq!(
+        paths,
+        ["/api/v1/namespaces/payments/secrets/db-credentials"],
+        "the document was read from somewhere else, or read more than once"
+    );
+}
+
+/// **A kind that lives in no namespace is read without one, and its `kubectl` line has no `-n`** —
+/// `k8s::Fetch::table`'s own rule, reached from here so the two cannot disagree.
+///
+/// **The path is again the assertion**: `/api/v1/nodes/k8rs-worker2` and not
+/// `/api/v1/namespaces/default/nodes/…`, which is a path no server answers.
+#[tokio::test]
+async fn a_cluster_scoped_kind_is_read_without_a_namespace() {
+    let node = serde_json::json!({
+        "apiVersion": "v1", "kind": "Node", "metadata": { "name": "worker" },
+    })
+    .to_string();
+    let (client, asked) = answers("200 OK", node, "").await;
+    let ended = yaml_run(
+        std::future::ready(Ok(serving(
+            client,
+            vec![browsable("", "Node", "nodes", false)],
+        ))),
+        &Asked {
+            verb: Verb::Yaml,
+            namespace: Some("payments"),
+            name: "worker",
+            kind: Some("node"),
+            container: None,
+            previous: false,
+            follow: false,
+        },
+    )
+    .await;
+
+    assert_eq!(ended, None, "{ended:?}");
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").clone(),
+        ["/api/v1/nodes/worker"],
+        "a cluster-scoped kind was read under a namespace, which is a path no server answers"
+    );
+}
+
+/// **A cluster that would not say what it serves cannot be asked which kind `--kind` means, and
+/// the sentence names that refusal rather than the object** — the same `get /apis` clause
+/// [`greeting`] prints, because it is the same refusal on the same path (NOTES § D160).
+///
+/// **Nothing is read.** A run that cannot resolve the kind has no path to ask for, so the refusal
+/// arrives before a single request — which is what the empty request log below says.
+#[tokio::test]
+async fn a_yaml_run_over_a_cluster_that_would_not_say_what_it_serves_reads_nothing() {
+    let (client, asked) = answers("200 OK", "{}".to_string(), "").await;
+    let refused = yaml_run(
+        std::future::ready(Ok(k8s::Session {
+            client,
+            namespace: None,
+            ..saying(
+                Ok("v1.36.1".to_string()),
+                Err(api_error(403, "Forbidden")),
+                None,
+            )
+        })),
+        &Asked {
+            verb: Verb::Yaml,
+            namespace: Some("payments"),
+            name: "db-credentials",
+            kind: Some("secret"),
+            container: None,
+            previous: false,
+            follow: false,
+        },
+    )
+    .await
+    .expect("a run that cannot resolve its kind ends");
+
+    assert!(
+        refused.starts_with(
+            "k8rs: this cluster would not say what kinds it serves, so k8rs cannot tell which \
+             one --kind means — "
+        ) && refused.contains("get /apis"),
+        "the refusal did not name the call that was refused: {refused:?}"
+    );
+    assert!(
+        asked.lock().expect("the log is never poisoned").is_empty(),
+        "a run that could not resolve its kind still went and asked for an object"
+    );
+}
+
+/// **A kind the cluster does not serve ends the run before anything is asked for**, with
+/// [`which_kind`]'s sentence — the seam between the two is what this proves, since that function's
+/// own words are asserted beside it.
+#[tokio::test]
+async fn a_yaml_run_for_a_kind_no_cluster_serves_asks_for_nothing() {
+    let (client, asked) = answers("200 OK", "{}".to_string(), "").await;
+    let refused = yaml_run(
+        std::future::ready(Ok(serving(
+            client,
+            vec![browsable("", "Pod", "pods", true)],
+        ))),
+        &Asked {
+            verb: Verb::Yaml,
+            namespace: Some("payments"),
+            name: "x",
+            kind: Some("widget"),
+            container: None,
+            previous: false,
+            follow: false,
+        },
+    )
+    .await
+    .expect("a kind nothing serves ends the run");
+
+    assert_eq!(
+        refused,
+        "k8rs: this cluster does not serve a kind named widget — check the spelling"
+    );
+    assert!(
+        asked.lock().expect("the log is never poisoned").is_empty(),
+        "a run that could not resolve its kind still went and asked for an object"
+    );
+}
+
+/// **`--kind` defaults to a pod**, so `--yaml --object payments/web` reads the pod — the default
+/// the flag's own doc states, proven at the seam rather than only at [`k8s::kind_named`].
+#[tokio::test]
+async fn a_yaml_run_with_no_kind_reads_a_pod() {
+    let pod = serde_json::json!({
+        "apiVersion": "v1", "kind": "Pod", "metadata": { "name": "web", "namespace": "payments" },
+    })
+    .to_string();
+    let (client, asked) = answers("200 OK", pod, "").await;
+    assert_eq!(
+        yaml_run(
+            std::future::ready(Ok(serving(
+                client,
+                vec![
+                    browsable("", "Pod", "pods", true),
+                    browsable("", "Secret", "secrets", true),
+                ],
+            ))),
+            &Asked {
+                verb: Verb::Yaml,
+                namespace: Some("payments"),
+                name: "web",
+                kind: None,
+                container: None,
+                previous: false,
+                follow: false,
+            },
+        )
+        .await,
+        None
+    );
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").clone(),
+        ["/api/v1/namespaces/payments/pods/web"],
+        "a run that named no kind read something other than a pod"
+    );
+}
+
+/// **What a container's row says, state by state** — the four the picker already had, and the two
+/// diagnoses describe adds because there is no card in the same output to carry them
+/// (`screens/detail.md` § The describe tab, `k8s-admin` 2026-08-31).
+///
+/// **`done` for a clean exit and `failed` for anything else** is the finding: three containers
+/// that exited 1, 0 and 255 all printed `done`, and `done` is a false statement about the third.
+///
+/// **`waiting` printed alike for three different problems** is the other half — `ImagePullBackOff`,
+/// `CrashLoopBackOff` and `CreateContainerConfigError` are one word to the old code and three
+/// different things to do.
+#[test]
+fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
+    let stopped = |reason: Option<&str>, exit_code| {
+        container_state(Some(&ContainerState::Terminated(rules::Terminated {
+            reason: reason.map(str::to_string),
+            exit_code,
+            started_at: None,
+            finished_at: None,
+            message: None,
+        })))
+    };
+    let waiting = |reason: Option<&str>| {
+        container_state(Some(&ContainerState::Waiting {
+            reason: reason.map(str::to_string),
+            message: None,
+        }))
+    };
+
+    // **A clean exit is the healthy case and keeps the calm word**, with no second line at all.
+    assert_eq!(stopped(Some("Completed"), 0), ("done".to_string(), None));
+    assert_eq!(stopped(None, 0), ("done".to_string(), None));
+
+    // **The one translated reason is invariant 14's own worked example**, and the exit code is
+    // there whether or not a phrase was.
+    assert_eq!(
+        stopped(Some("OOMKilled"), 137),
+        (
+            "failed".to_string(),
+            Some("container exceeded its memory limit — exit 137".to_string())
+        )
+    );
+    // **Everything else falls through to the exit code alone, never a guessed word** — both
+    // shapes `k8s-admin` measured on one pod.
+    assert_eq!(
+        stopped(Some("Error"), 1),
+        ("failed".to_string(), Some("exit 1".to_string()))
+    );
+    assert_eq!(
+        stopped(None, 255),
+        ("failed".to_string(), Some("exit 255".to_string()))
+    );
+
+    // **A waiting container says which problem it is**, in a phrase derived from the card
+    // `rules.rs` already draws for the same state.
+    for (reason, said) in [
+        ("CrashLoopBackOff", "keeps crashing and restarting"),
+        ("ImagePullBackOff", "cannot get its image"),
+        ("ErrImagePull", "cannot get its image"),
+        (
+            "CreateContainerConfigError",
+            "needs a ConfigMap or Secret that does not exist",
+        ),
+    ] {
+        assert_eq!(
+            waiting(Some(reason)),
+            (said.to_string(), None),
+            "{reason} still prints one generic word"
+        );
+    }
+    // **A momentary sandbox is not dressed up as a problem**, and a reason no table names falls
+    // through to its own raw word rather than to a guess.
+    assert_eq!(
+        waiting(Some("ContainerCreating")),
+        ("not started".to_string(), None)
+    );
+    assert_eq!(
+        waiting(Some("PodInitializing")),
+        ("not started".to_string(), None)
+    );
+    assert_eq!(
+        waiting(Some("InvalidImageName")),
+        ("InvalidImageName".to_string(), None)
+    );
+    assert_eq!(waiting(None), ("waiting".to_string(), None));
+
+    assert_eq!(
+        container_state(Some(&ContainerState::Running { started_at: None })),
+        ("running".to_string(), None)
+    );
+    assert_eq!(container_state(None), ("not started".to_string(), None));
+
+    // **The log picker's own wording is untouched** — [`doing`]'s doc argues correctly that the
+    // jargon card is one keypress away *there*, and this is a second reader of one state rather
+    // than a second spelling of one sentence.
+    assert_eq!(
+        doing(Some(&ContainerState::Waiting {
+            reason: Some("CrashLoopBackOff".to_string()),
+            message: None
+        })),
+        "waiting"
+    );
+    assert_eq!(
+        doing(Some(&ContainerState::Terminated(rules::Terminated {
+            reason: Some("OOMKilled".to_string()),
+            exit_code: 137,
+            started_at: None,
+            finished_at: None,
+            message: None
+        }))),
+        "done"
+    );
+}
+
+/// **A pod carrying `status.reason` says why, and one without it prints exactly what it did
+/// before** (`screens/detail.md` § The pod's own reason).
+///
+/// **Measured, not imagined**: a pod carrying `reason: Evicted` printed `Pod · failed · created 8
+/// days ago` and never said why — a `Failed` that tells a reader nothing any other `Failed` would
+/// not (`k8s-admin`, 2026-08-31).
+///
+/// **`status.message` is not on the snapshot and this build cannot print it**, so `(Evicted)`
+/// stands alone under the phrase. That is the honest half rather than a sentence invented to fill
+/// the line, and it is the PM's boxed snapshot field that completes it.
+#[tokio::test]
+async fn a_pod_with_a_reason_of_its_own_says_why_under_the_identity_line() {
+    let mut pod = described_pod("healthy-retry").await;
+    assert!(
+        !described(&pod, None, &now()).contains('('),
+        "a pod with no status.reason grew a reason block"
+    );
+
+    pod.snapshot.reason = Some("Evicted".to_string());
+    let block = described(&pod, None, &now());
+    println!("{block}");
+    let lines: Vec<&str> = block.lines().collect();
+    assert_eq!(lines[0], "Pod · running · created 2 days ago");
+    assert_eq!(lines[1], "removed by the node to take back room");
+    assert_eq!(lines[2], "(Evicted)");
+
+    // **Anything the table does not name falls through to its raw word beside the message**, the
+    // same safe fallback every table on this surface uses.
+    pod.snapshot.reason = Some("NodeAffinity".to_string());
+    let other = described(&pod, None, &now());
+    assert_eq!(other.lines().nth(1), Some("(NodeAffinity)"), "{other:?}");
+}
+
+/// **An event that happened more than once says how many times and over how long**
+/// (`screens/detail.md` § A repeated event, NOTES § D198's `count` half).
+///
+/// **The count is where the information is.** *The health check failed 4 minutes ago* and *it has
+/// failed 2,383 times since 4 days ago* are different diagnoses of one pod, and the kubelet bumps
+/// `count` on one Event rather than creating another — which is why distinct events stay
+/// single-digit and this line is the only place the number can appear.
+///
+/// **Exact and comma-grouped, never rounded**, through the one separator `k8s::grouped` is.
+#[tokio::test]
+async fn an_event_that_happened_many_times_says_how_many_and_over_how_long() {
+    let pod = described_pod("healthy-retry").await;
+    let block = |line| {
+        described(
+            &pod,
+            Some(&k8s::Happened {
+                lines: vec![line],
+                cut: false,
+            }),
+            &now(),
+        )
+    };
+
+    let many = block(repeatedly(
+        Some("2026-08-22T23:56:00Z"),
+        "Unhealthy",
+        "Readiness probe failed: HTTP probe failed with statuscode: 503",
+        Some(2_383),
+        Some("2026-08-19T00:00:00Z"),
+    ));
+    println!("{many}");
+    let tail: Vec<&str> = many.lines().rev().take(3).collect();
+    assert_eq!(
+        tail,
+        [
+            "    happened 2,383 times since 4 days ago",
+            "    (Unhealthy) Readiness probe failed: HTTP probe failed with statuscode: 503",
+            "  4 min ago  the health check failed",
+        ],
+        "the repeated line is missing, unrounded, or not under the message"
+    );
+
+    // **Two is the boundary the screen's rule sits on** — *the line only appears when `count` is
+    // more than one* — and it was the one number no case fed, so `< 2` and `<= 2` were the same
+    // test until this ran (`dev-core`'s gate, 2026-08-31).
+    let twice = block(repeatedly(
+        Some("2026-08-22T23:56:00Z"),
+        "Unhealthy",
+        "probe failed",
+        Some(2),
+        Some("2026-08-19T00:00:00Z"),
+    ));
+    assert!(
+        twice.contains("    happened 2 times since 4 days ago"),
+        "a thing that happened twice was reported as happening once: {twice:?}"
+    );
+
+    // **Silent at one and silent with no count at all** — a thing that happened once needs no
+    // sentence saying it happened once.
+    for once in [Some(1), None] {
+        let single = block(repeatedly(
+            Some("2026-08-22T23:56:00Z"),
+            "Unhealthy",
+            "probe failed",
+            once,
+            Some("2026-08-19T00:00:00Z"),
+        ));
+        assert!(
+            !single.contains("happened"),
+            "an event with count {once:?} claimed to have repeated: {single:?}"
+        );
+    }
+
+    // **The count without a span is still worth printing**, because it is the half that says
+    // *how bad*; a span this file guessed would not be.
+    let undated = block(repeatedly(
+        Some("2026-08-22T23:56:00Z"),
+        "Unhealthy",
+        "probe failed",
+        Some(12),
+        None,
+    ));
+    assert!(
+        undated.contains("    happened 12 times\n") || undated.ends_with("    happened 12 times"),
+        "an event with no first stamp lost its count, or grew a span from nowhere: {undated:?}"
+    );
+}
+
+/// **An event the API let through with no reason, no message or no stamp still draws a row a
+/// reader can read** — the shapes `Event`'s own schema allows, all three of which this file will
+/// meet the first time a controller emits a sparse one.
+///
+/// **`()` in front of a message is a word invented out of a field that was not there**, and a row
+/// of spaces above the message is what padding a blank age to the column width produces. Both are
+/// unhappy-path shapes rather than measured ones: nothing on the fixture cluster emitted them,
+/// which is why they are pinned here rather than left to be found.
+#[tokio::test]
+async fn a_sparse_event_draws_no_empty_brackets_and_no_blank_row() {
+    let pod = described_pod("healthy-retry").await;
+    let block = |line| {
+        described(
+            &pod,
+            Some(&k8s::Happened {
+                lines: vec![line],
+                cut: false,
+            }),
+            &now(),
+        )
+    };
+
+    let nameless = block(happening(
+        Some("2026-08-22T23:56:00Z"),
+        "",
+        "the node was full",
+    ));
+    println!("{nameless}");
+    assert!(
+        nameless.ends_with("    the node was full") && !nameless.contains("()"),
+        "an event with no reason drew empty brackets: {nameless:?}"
+    );
+
+    // **No stamp and no phrase leaves nothing for the first line**, so there is no first line —
+    // never a row of spaces.
+    let bare = block(happening(None, "FailedMount", "secret not found"));
+    println!("{bare}");
+    let tail: Vec<&str> = bare.lines().rev().take(2).collect();
+    assert_eq!(
+        tail,
+        [
+            "    (FailedMount) secret not found",
+            "events (newest first):"
+        ],
+        "an undated event with no phrase drew a blank row above its message"
+    );
+
+    // **A stamp with no phrase keeps the age and nothing else**, with no padding left hanging.
+    let dated = block(happening(
+        Some("2026-08-22T23:56:00Z"),
+        "FailedMount",
+        "secret not found",
+    ));
+    assert!(
+        dated.contains("\n  4 min ago\n    (FailedMount) secret not found"),
+        "the age line was padded past its own text: {dated:?}"
+    );
+}
+
+/// **One flag, one notion of what `pod` is spelled as** — `k8s::kind_named` lowercases and matches
+/// the plural as well as the kind, so a raw `!= "pod"` in [`mistyped`] refused
+/// `--describe --kind pods`: the spelling `kubectl get pods` teaches, turned down with a sentence
+/// about Secrets (`k8s-admin`, 2026-08-31).
+#[test]
+fn describe_accepts_every_spelling_of_pod_that_the_kind_resolver_would() {
+    for spelled in ["pod", "pods", "Pod", "PODS"] {
+        assert_eq!(
+            mistyped(&argv(&[
+                "--describe",
+                "--object",
+                "default/web",
+                "--kind",
+                spelled
+            ])),
+            None,
+            "--describe refused {spelled:?}, which --yaml accepts and kubectl teaches"
+        );
+    }
+    for wrong in ["secret", "secrets", "podmetrics"] {
+        let refused = mistyped(&argv(&[
+            "--describe",
+            "--object",
+            "default/web",
+            "--kind",
+            wrong,
+        ]))
+        .unwrap_or_else(|| panic!("--describe accepted {wrong:?}"));
+        assert!(
+            refused.starts_with("k8rs: --describe only knows how to read a pod right now"),
+            "{wrong:?}: {refused:?}"
+        );
+    }
+}
+
+/// **The printed line produces what was printed** (invariant 4). `kubectl` has hidden
+/// `managedFields` from `get -o yaml` since v1.21 and this pane does not, so without
+/// `--show-managed-fields` the teaching line describes a *different, shorter* document — measured
+/// at 95 of a pod's 246 lines, 39% of it (`k8s-admin`, 2026-08-31).
+///
+/// **A function rather than a `writeln!` inline**, for `k8s::LogRequest::kubectl`'s reason: stderr
+/// belongs to the process and a test cannot read it back, which is what left this unproven.
+#[test]
+fn the_yaml_teaching_line_asks_for_the_document_that_was_printed() {
+    assert_eq!(
+        kubectl_get("secret", "db-credentials", Some("payments")),
+        "$ kubectl get secret db-credentials -n payments -o yaml --show-managed-fields"
+    );
+    // **A kind that lives in no namespace carries no `-n`**, the same rule every other sentence
+    // about one object on this surface follows.
+    assert_eq!(
+        kubectl_get("node", "k8rs-worker2", None),
+        "$ kubectl get node k8rs-worker2 -o yaml --show-managed-fields"
     );
 }

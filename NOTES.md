@@ -219,6 +219,8 @@ its line moving with it.
 - [D195](#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30) — the brief that ordered work the working tree already held
 - [D196](#d196--three-hours-of-documents-nobody-was-blocked-on-and-the-gate-the-process-does-not-have-2026-08-30) — three hours of documents nobody was blocked on, and the gate the process does not have
 - [D197](#d197--the-log-streams-review-round-nine-findings-and-the-container-list-that-came-from-the-wrong-half-of-the-object-2026-08-30) — the log stream's review round: nine findings, and the container list that came from the wrong half of the object
+- [D198](#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31) — the two reversals the operator review forced: a Secret keeps a second copy of itself, and the strip that made `--yaml` not the object
+- [D199](#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31) — one object's own story: the flag that exists so a redaction has a caller, and the bound that costs a claim
 
 ## Why it exists — where the gap is
 
@@ -16960,3 +16962,155 @@ with `--container`, `--previous` and `--follow` beside them. A verb and a target
 rather than `--logs <pod>`, so the next three consumers — the per-object events
 fetch, `describe` and YAML — reuse `--object` instead of spelling *which pod*
 three more ways.
+
+### D198 — the two reversals the operator review forced: a Secret keeps a second copy of itself, and the strip that made `--yaml` not the object (2026-08-31)
+
+Phase 6 family 2 — the per-object events fetch, `--describe` and `--yaml` — went
+into review green: `just check` exit 0, 135 mutants with **0 MISSED**, 824 + 23
+tests, `tester`'s six test defects already fixed, and the Secret masking
+confirmed against a live API server by the PM
+(`hunter22` → `<hidden — 8 bytes>`, `admin` → `<hidden — 5 bytes>`, no plaintext
+and no base64 on stdout). `k8s-admin` then read the family against a cluster and
+returned **twelve findings, two blocking**. Both blockers are reversals rather
+than bugs, which is why they are written here before they are acted on.
+
+**Blocker 1 — masking by position hides one copy of a Secret and a Secret
+routinely keeps two.** `mask()` redacted `data` and `stringData`, both top level.
+`kubectl apply -f secret.yaml` — the ordinary way a Secret is created — writes
+the entire applied body, `data` map included, into
+`metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]`.
+Measured: the base64 in that annotation decodes to the same values the block
+below it prints as `<hidden — 8 bytes>`, and a Secret applied through
+`stringData` leaks **plaintext**, not even base64. `kubectl get secret -o yaml`
+shows the same annotation, so this is not worse than kubectl *in bytes* — it is
+worse in what it promises, because k8rs is the tool that prints `<hidden>` and
+thereby tells a reader the document is safe to paste into a ticket. The security
+gate's *"Secret values … never enter … the YAML shown by `y`"* was false as
+written.
+
+**The ruling: on a Secret, `metadata.annotations` is masked whole** — every key
+still drawn, every value replaced by its size — alongside `data` and
+`stringData`. Not a denylist of one annotation key: `last-applied-configuration`
+is merely the copy that ships in the box, and every GitOps controller that
+reconciles a Secret writes its own. A denylist of annotation keys is the shape
+invariant 1 already refuses for exactly this reason. Labels stay visible: they
+are validated to 63 characters, nothing writes a Secret's body into one, and the
+review found none — a residual named rather than silently accepted.
+
+**Blocker 2 — `--yaml` was not the object, and this reverses
+`screens/detail.md` § Free text that carried control characters.** `clean()`
+routed every string through `text(held, usize::MAX)`, and `text` turns an
+unprintable character that is whitespace into one space
+([D146](#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22)). A newline is
+control. Measured on the fixture cluster: `kubectl get cm coredns -n kube-system
+-o yaml` is 33 lines, `k8rs --yaml` on the same object is **20**, and the
+20-line `Corefile` comes out as one. Anyone who redirects that into a file and
+re-applies it ships a different config — which is
+[PRIOR-ART § D1](PRIOR-ART.md#d1--cluster-data-as-markup)'s second lesson
+arriving early, in the box below the one that was going to fix it.
+
+**The ruling: on the document path, `\n` and `\t` survive and everything else
+`unprintable` answers for does not.** Invariant 9 is not the reason to keep the
+old behaviour — a newline in a YAML pane makes a new line, it does not drive the
+terminal; `ESC`, `U+202E` and `U+200B` were verified still stripped in the same
+run. **`text()` itself does not change**, because every card on every other
+screen is a cell where a newline really would break the layout: what changes is
+that the document path gets its own predicate over the *one* spelling of
+*unprintable*, not a second copy of the guard.
+
+**Read against D146 this is that entry's own rule applied to a surface it did
+not have.** D146's invariant is *"no character that prints as itself is ever
+changed or removed"*, and it turned `\n` into a space because in a **cell** a
+newline does not print as itself — it breaks the layout the card is drawn in.
+A document is the other case: the payload *is* the text, `\n` prints as exactly
+what it is, and the same sentence therefore forbids the substitution. So this
+narrows D146 by its own stated reason rather than contradicting it — the same
+move [D194](#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)
+made on D17 — and the reason D146 did not make it is that in August the only
+surface was a card. `main.rs`'s `sanitize`, which D146 already exempted, keeps
+removing. The screen decision this reverses
+was reasoned from an annotation with a zero-width character in it and was never
+read against a ConfigMap — the class
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+names, arriving in a screen file rather than a code one.
+
+**A third reversal rides along, and it is the same class as blocker 2: four
+plain-language sentences were drawn before anyone read what a cluster sends.**
+`Happening::plainly` translated `Pulled` to *"the image finished downloading"* —
+measured false on the common path, because a cached image under `IfNotPresent`
+emits `Pulled` with the message *"Container image … already present on machine"*
+and nothing was downloaded. Worse, `Unhealthy` became *"the health check
+failed"*, and **readiness and liveness are the same reason word**: the
+difference is whether the container is being killed or merely taken out of the
+Service, which is the fork the whole diagnosis turns on. `Scheduled` deleted the
+node name and `Pulling` deleted the image. **The ruling: translate the reason
+word and keep the controller's message beside it**, which is what
+`kubectl describe` does and what
+[D37](#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)
+already permits. The earlier ruling that `BackOff` gets **no** sentence stands
+and is strengthened by the same evidence — one reason word covering two facts
+(*back-off restarting* and *back-off pulling*) cannot have one sentence, and the
+fall-through was never where the misleading was: it was in the four words the
+table already covered, where the raw message is strictly more informative than
+the sentence replacing it.
+
+
+### D199 — one object's own story: the flag that exists so a redaction has a caller, and the bound that costs a claim (2026-08-31)
+
+The decisions Phase 6 family 2 made that no document had settled. Each is one
+paragraph here and cited from the code; none of them is restated there.
+
+**`--yaml` takes a `--kind`, and it exists because a redaction with no reachable
+caller cannot be run.** `--object` is `[namespace/]name` and every other verb on
+the temporary driver reads a pod, so the first draft kept `--yaml` pod-only —
+and the Secret masking would then have shipped into a file that **freezes at the
+end of this phase** with unit tests as its only evidence. This repo's rule is
+that something is *run* every box, and an unproven redaction is exactly the code
+that must not ship unproven. `--kind` resolves through the discovery machinery
+§ EVERY KIND THE CLUSTER SERVES already had, so invariant 12 holds and no second
+notion of *a kind* was written. It accepts `<plural>` and `kubectl`'s own
+`<plural>.<group>`; a bare word matching two resources is refused **with the two
+spellings that resolve it**, because a refusal with no next step is a dead end
+and this product's thesis is that every error names one. `--object`'s parse did
+not change: one reader, three verbs. It bought exactly what it was for — the
+mask was then run against a live `kubectl apply`-created Secret and the
+annotation copy came back `<hidden — 191 bytes>` with zero plaintext on stdout.
+
+**`--describe` reads a typed pod, `--yaml` reads an untyped tree, and the two
+differing is required rather than accidental.** Deserialising into
+`k8s_openapi::api::core::v1::Pod` and re-serialising silently drops every field
+this `k8s-openapi` does not know — a newer server's, a mutating webhook's — so a
+YAML pane built that way is a record that lies about being a copy. The tree is
+`serde_yaml_ng::Value` and not `serde_json::Value` for a measured reason:
+`serde_json::Map` is a `BTreeMap` without `preserve_order`, so a round trip
+alphabetises every key and *key order is the API's* dies.
+
+**Two verbs on one line are refused, not tie-broken.** `--once --live` has a
+natural winner because they are two *breadths* of one read and the narrower is
+obviously meant; `--logs`, `--describe` and `--yaml` are equally narrow, so
+picking one prints a payload the reader did not ask for and gives no sign of it.
+
+**`EVENTS_KEPT` is 500, and the bound costs the *newest first* claim.** Measured
+rather than chosen: after eight days of continuous crash-looping the busiest
+object on the fixture cluster had **8** distinct `Event` objects, because the
+kubelet aggregates a repeat into `count` on one existing event — `count: 27 639`
+against those 8. 500 is two orders above the observed input. What it costs is
+the ordering: a `limit` returns the server's own order, there is no server-side
+sort for events, and `remainingItemCount` is unset on any request carrying a
+field selector — measured, not read off the docs — so a cut list can say *there
+is more* and never *how much*, and one object's events are keyed by name in
+etcd, which makes a cut list the **oldest** 500. The heading therefore withdraws
+the claim when it cuts rather than printing a promise the data does not keep.
+
+**The stamp a repeated event sorts by is `series.lastObservedTime`, and the
+`Event` kind is really two.** `core/v1` serves a modern `events.k8s.io/v1` Event
+with `lastTimestamp: null`, `eventTime` = the **first** occurrence, and
+`series.lastObservedTime` = the last, so a chain that stopped at `eventTime` put
+a thing that happened seconds ago six days down a list headed *newest first* —
+the exact failure that chain's own doc says it exists to prevent, one field
+short. And legacy events carry **second**-resolution stamps, so a normal pod
+startup ties four events in one second; the sort is stable, ties keep the
+server's order, and the server's order for one object is etcd key order, which
+is time *ascending* — the precise reverse of the heading, for the commonest
+block there is. Both were found by running it, neither by reading it.
+

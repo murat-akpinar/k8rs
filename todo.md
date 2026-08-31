@@ -3327,13 +3327,22 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       Headless via `--logs --object <[namespace/]pod>`
       ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) ·
       [D197](NOTES.md#d197--the-log-streams-review-round-nine-findings-and-the-container-list-that-came-from-the-wrong-half-of-the-object-2026-08-30))
-- [ ] **Per-object events fetch** (`involvedObject` field selector, this object
+- [x] **Per-object events fetch** (`involvedObject` field selector, this object
       only — never the global Events watch). It feeds two consumers: `describe`
       and the events *tab* of Phase 11. Listing it once, here, is the point:
       `k8s.rs` freezes at the end of this phase, and the tab would otherwise
       have to reach back into it
-- [ ] `d` describe: object plus those events, assembled from what we now have
-- [ ] `y` YAML view, with Secret values hidden behind an explicit reveal
+      ([D199](NOTES.md#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31))
+- [x] `d` describe: object plus those events, assembled from what we now have.
+      Headless via `--describe --object <[namespace/]pod>`
+      ([D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31) ·
+      [D199](NOTES.md#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31))
+- [x] `y` YAML view, with Secret values hidden behind an explicit reveal.
+      Headless via `--yaml --object <[namespace/]name> [--kind <plural[.group]>]`,
+      which redacts unconditionally because a reveal is a keypress and this
+      surface has no pane
+      ([D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31) ·
+      [D199](NOTES.md#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31))
 - [ ] Control-character stripping on every free-text field from the API
 - [x] **The log buffer's bound is a number, and a dropped line is counted out
       loud** — 2 MB retained, 5 000 lines, 4 096 bytes per line, whichever is hit

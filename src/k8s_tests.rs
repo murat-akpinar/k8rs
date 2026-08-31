@@ -14153,3 +14153,1115 @@ fn a_name_that_would_leave_its_path_segment_is_refused() {
         );
     }
 }
+
+// --- ONE OBJECT'S OWN STORY ---
+//
+// **Two reads and four transforms**, and the tests split the same way: what the wire is asked for
+// and what comes back (`events`, `document`, against the stub server this file already has), and
+// then the four pure functions the answers go through — the plain-language table, the Secret
+// mask, the strip, and the kind word.
+//
+// **The mask's negative is the assertion that matters and it is written as a search for the
+// plaintext**, not as an equality against the masked text: an equality passes over a document that
+// carries the value *twice*, and the security gate's row is that the value never reaches stdout at
+// all.
+
+/// One `Event` as an API server sends it — the legacy `core/v1` shape the kind cluster produced,
+/// `eventTime: null` and all (measured 2026-08-31).
+fn event(reason: &str, message: &str, last: Option<&str>) -> Value {
+    dated(reason, message, last, Some("2026-08-18T00:00:00Z"))
+}
+
+/// [`event`] with the `metadata.creationTimestamp` chosen too — the third of the three stamps
+/// `Happening::at` falls through, and the only one a real API server always writes.
+fn dated(reason: &str, message: &str, last: Option<&str>, created: Option<&str>) -> Value {
+    serde_json::json!({
+        "apiVersion": "v1",
+        "kind": "Event",
+        "metadata": { "name": format!("web.{reason}"), "namespace": "payments",
+                      "creationTimestamp": created },
+        "involvedObject": { "kind": "Pod", "name": "web", "namespace": "payments" },
+        "reason": reason,
+        "message": message,
+        "count": 3,
+        "eventTime": null,
+        "firstTimestamp": "2026-08-20T00:00:00Z",
+        "lastTimestamp": last,
+        "type": "Warning",
+    })
+}
+
+/// An `EventList` the way a `list` answers, with a `continue` token when the server had more.
+fn event_list(items: Vec<Value>, more: bool) -> String {
+    let mut metadata = serde_json::json!({ "resourceVersion": "1" });
+    if more {
+        metadata["continue"] = serde_json::json!("token");
+    }
+    serde_json::json!({
+        "apiVersion": "v1", "kind": "EventList", "metadata": metadata, "items": items,
+    })
+    .to_string()
+}
+
+/// **The order is the fetch's own and is settled here, once, for both consumers** — newest by
+/// `lastTimestamp`, which is *not* the order the server listed them in and *not* the order
+/// `metadata.creationTimestamp` gives.
+///
+/// **The two stamps really do disagree, measured**: on the kind cluster one event carried
+/// `creationTimestamp: 2026-08-26T16:37:23Z` and `lastTimestamp: 2026-08-30T21:35:41Z` against
+/// `count: 26787`, so a list ordered by creation puts a thing that happened a minute ago four days
+/// down the page. The fixture below is that shape — the oldest-created event is the newest thing
+/// that happened.
+#[tokio::test]
+async fn one_objects_events_come_back_newest_first_whatever_order_the_server_listed_them_in() {
+    let (client, _) = stub_list(
+        "200 OK",
+        event_list(
+            vec![
+                event("Pulled", "b", Some("2026-08-20T10:00:00Z")),
+                event("Unhealthy", "a", Some("2026-08-22T10:00:00Z")),
+                event("Scheduled", "c", Some("2026-08-19T10:00:00Z")),
+            ],
+            false,
+        ),
+    )
+    .await;
+    let happened = events(&client, "payments", "Pod", "web", None)
+        .await
+        .expect("the server answered");
+
+    assert_eq!(
+        happened
+            .lines
+            .iter()
+            .map(|line| line.reason.as_str())
+            .collect::<Vec<_>>(),
+        ["Unhealthy", "Pulled", "Scheduled"],
+        "the list is not newest first, so `events (newest first):` is a heading that lies"
+    );
+    assert!(!happened.cut, "a whole list claimed it was cut");
+}
+
+/// **All three stamps are read, in the API's own order, and an event with none of them sorts last
+/// rather than being dropped.**
+///
+/// **`metadata.creationTimestamp` is the one a real API server always writes**, so the middle
+/// event below is the reachable shape of *no `lastTimestamp`* and the last one — no stamp at all —
+/// is only reachable from a server that sent none. *We do not know when* still has to go
+/// somewhere on a list whose whole promise is an order, and the bottom is where it says the least.
+#[tokio::test]
+async fn all_three_stamps_are_read_and_an_event_with_none_goes_last() {
+    let (client, _) = stub_list(
+        "200 OK",
+        event_list(
+            vec![
+                dated("Undated", "c", None, None),
+                dated("Created", "b", None, Some("2026-08-19T00:00:00Z")),
+                dated("Pulled", "a", Some("2026-08-22T10:00:00Z"), None),
+            ],
+            false,
+        ),
+    )
+    .await;
+    let happened = events(&client, "payments", "Pod", "web", None)
+        .await
+        .expect("the server answered");
+
+    assert_eq!(
+        happened
+            .lines
+            .iter()
+            .map(|line| line.reason.as_str())
+            .collect::<Vec<_>>(),
+        ["Pulled", "Created", "Undated"],
+        "an event with no stamp was dropped or sorted above one that has a time, or the \
+         creationTimestamp fallback never ran"
+    );
+    assert!(
+        happened.lines[1].at.is_some() && happened.lines[2].at.is_none(),
+        "the second stamp source was not read, or the third invented one"
+    );
+}
+
+/// **A cut list says so, and the count is deliberately not in the answer.**
+/// `remainingItemCount` is unset on any request carrying a field selector — and this request
+/// always carries one — so `metadata.continue` is the whole of what the server tells us.
+#[tokio::test]
+async fn a_list_the_server_had_more_of_says_so() {
+    let (client, _) = stub_list(
+        "200 OK",
+        event_list(
+            vec![event("Pulled", "b", Some("2026-08-19T10:00:00Z"))],
+            true,
+        ),
+    )
+    .await;
+    assert!(
+        events(&client, "payments", "Pod", "web", None)
+            .await
+            .expect("the server answered")
+            .cut,
+        "a list the server had more of said it was all of them"
+    );
+}
+
+/// **The selector names this object and nothing else, and the read is bounded on the server** —
+/// the security gate's *sizes are bounded* row, paid where the 40 000 events would otherwise be
+/// sent.
+///
+/// **The uid is the term that stops a recreated pod inheriting the dead one's events**, and it is
+/// the one term a caller can lack — so both shapes are asked for.
+#[tokio::test]
+async fn the_events_request_names_the_object_and_stops_at_the_bound() {
+    for uid in [Some("f4a61d08"), None] {
+        let (client, asked) = stub_list("200 OK", event_list(vec![], false)).await;
+        events(&client, "payments", "Pod", "web", uid)
+            .await
+            .expect("the server answered");
+        let path = asked.lock().expect("the log is never poisoned")[0].clone();
+
+        assert!(
+            path.starts_with("/api/v1/namespaces/payments/events?"),
+            "the fetch left the namespace or the kind: {path:?}"
+        );
+        for term in [
+            "involvedObject.kind%3DPod",
+            "involvedObject.name%3Dweb",
+            &format!("limit={EVENTS_KEPT}"),
+        ] {
+            assert!(
+                path.contains(term),
+                "the request does not carry {term}: {path:?}"
+            );
+        }
+        assert_eq!(
+            path.contains("involvedObject.uid%3Df4a61d08"),
+            uid.is_some(),
+            "the uid term is on the request the caller did not give one for, or missing from the \
+             one it did: {path:?}"
+        );
+    }
+}
+
+/// **Every reason the mockups name reads as the mockup's own sentence, and everything else reads
+/// as the controller's own words** (`screens/detail.md` § The describe tab, NOTES § D37).
+///
+/// **`BackOff` is in the second group and the reason is measured.** One reason word covers two
+/// different facts on a real cluster — `Back-off restarting failed container batch in pod …` and
+/// `Back-off pulling image "registry.invalid/does-not-exist:v9"`, both taken from the kind
+/// cluster on 2026-08-31 — so the mockup's *restarting the container* is false of the second, and
+/// the message is what tells them apart. The negative below is the assertion: no reason gets a
+/// sentence this table did not put there.
+#[test]
+fn a_reason_the_screen_names_gets_its_phrase_and_no_reason_loses_its_message() {
+    let said = |reason: &str| {
+        Happening {
+            at: None,
+            reason: reason.to_string(),
+            message: "the controller's own words".to_string(),
+            count: None,
+            first: None,
+        }
+        .plainly()
+    };
+
+    // **The table `screens/detail.md` draws, and every phrase in it *precedes* the message
+    // rather than replacing it** (NOTES § D198) — which is why `Pulled` is now *the image is
+    // ready* and not *the image finished downloading*: the second is false every time a cached
+    // image under `IfNotPresent` emits it.
+    for (reason, phrase) in [
+        ("Scheduled", "kubernetes placed this pod on a node"),
+        ("Pulling", "the container started pulling its image"),
+        ("Pulled", "the image is ready"),
+        ("Killing", "the container is being stopped"),
+        ("Unhealthy", "the health check failed"),
+    ] {
+        assert_eq!(
+            said(reason),
+            Some(phrase),
+            "{reason} does not read as the phrase screens/detail.md draws for it"
+        );
+    }
+    // **Nothing outside the table gets a phrase**, and `BackOff` is the measured reason why: one
+    // word covers *back-off restarting* and *back-off pulling*, and no phrase is true of both.
+    for reason in [
+        "BackOff",
+        "Created",
+        "Started",
+        "Evicted",
+        "FailedMount",
+        "",
+    ] {
+        assert_eq!(
+            said(reason),
+            None,
+            "{reason:?} was given a phrase this build has not measured"
+        );
+    }
+}
+
+/// **An event's `message` and `reason` are free text from a controller and go through the ingest
+/// guard like every other string** (invariant 9, `screens/detail.md` § Free text that carried
+/// control characters).
+///
+/// **A bidi override is the shape, not a `\n`**: `char::is_control` does not answer for U+202E, so
+/// a guard that only stripped control characters would let a controller reverse the sentence a
+/// reader acts on (NOTES § D154).
+#[tokio::test]
+async fn an_events_words_are_stripped_before_anything_can_draw_them() {
+    let (client, _) = stub_list(
+        "200 OK",
+        event_list(
+            vec![event(
+                "Unheal\u{202e}thy",
+                "secret \"prod\u{202e}terces\" not found",
+                Some("2026-08-19T10:00:00Z"),
+            )],
+            false,
+        ),
+    )
+    .await;
+    let happened = events(&client, "payments", "Pod", "web", None)
+        .await
+        .expect("the server answered");
+
+    assert_eq!(happened.lines[0].reason, "Unhealthy");
+    assert_eq!(
+        happened.lines[0].message, "secret \"prodterces\" not found",
+        "a control character survived into the message a pane draws"
+    );
+}
+
+/// **The size a masked Secret value reports is the size it decodes to, and it is arithmetic** —
+/// nothing on this path base64-decodes, so the plaintext is never materialised anywhere a
+/// formatter, a `Debug` or a panic could find it (the security gate).
+///
+/// **The cases are the four padding shapes plus the wrapped one**, because the count is
+/// `n * 3 / 4` over the alphabet and each padding length is a different remainder.
+#[test]
+fn a_base64_value_is_sized_without_ever_being_decoded() {
+    for (encoded, plain) in [
+        ("", 0),
+        ("YQ==", 1),
+        ("YWI=", 2),
+        ("YWJj", 3),
+        ("YWRtaW4=", 5),
+        ("aHVudGVyMjJodW50ZXIyMg==", 16),
+        // **The two characters outside `[A-Za-z0-9]`, because the filter names them separately
+        // and a test fed only alphanumerics cannot tell the three clauses apart** — measured: an
+        // `&&` in place of either `||` survived the whole mutation gate until these two shapes
+        // were fed (`dev-core`'s run, 2026-08-31; NOTES § D29's rule, in its own words).
+        ("aGk+Lw==", 4),
+        ("//8=", 2),
+    ] {
+        assert_eq!(
+            decoded_bytes(encoded),
+            plain,
+            "{encoded:?} was sized as something other than the {plain} bytes it decodes to"
+        );
+    }
+    // **Newlines are not counted**, so a value a webhook wrapped at 76 columns is measured rather
+    // than inflated by the wrapping.
+    assert_eq!(decoded_bytes("YWJj\nYWJj\n"), 6);
+}
+
+/// **The mockup's own grouping** — `<hidden — 1,172 bytes>` and not `1172`
+/// (`screens/detail.md` § A Secret, values hidden behind an explicit reveal).
+#[test]
+fn a_size_is_grouped_the_way_the_screen_draws_it() {
+    for (count, said) in [
+        (0, "0"),
+        (8, "8"),
+        (999, "999"),
+        (1_172, "1,172"),
+        (1_000_000, "1,000,000"),
+    ] {
+        assert_eq!(grouped(count), said);
+    }
+}
+
+/// **A Secret's values are replaced by their sizes before anything can print them** — the box's
+/// ruling 6, and the security gate's *secret values never reach stdout, the command log, or an
+/// error message*.
+///
+/// **The assertion is a search for the plaintext and not an equality against the masked text**: an
+/// equality passes over a document that carries the value a second time somewhere else, and what
+/// the gate asks is that the value is nowhere.
+///
+/// **`stringData` is masked too.** The API server clears it on write and never serves it back, so
+/// it is the defensive half — a mutating webhook can put one back, and its values are plaintext
+/// rather than base64.
+#[tokio::test]
+async fn a_secrets_values_are_replaced_by_their_sizes_and_are_nowhere_in_what_is_printed() {
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+            "metadata": { "name": "db-credentials", "namespace": "payments" },
+            "data": { "username": "YWRtaW4=", "password": "aHVudGVyMjI=" },
+            "stringData": { "leaked-back": "hunter22" },
+        })
+        .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/payments/secrets".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "db-credentials",
+        "Secret",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a Secret is a document that serialises");
+    println!("{printed}");
+
+    // **Two of these four can fail today and two are canaries, and saying which is the point.**
+    // The two base64 values and `hunter22` are in the input document — `hunter22` as
+    // `stringData.leaked-back`, which is plaintext on the wire — so each is a needle the mask
+    // really has to remove. **`admin` is the plaintext of `YWRtaW4=` and is in no input**, so it
+    // is structurally unable to fail while nothing on this path decodes: it is here as the guard
+    // against a decode ever being added, and it is named as one rather than left to look like an
+    // assertion that passes on its merits (CLAUDE.md § A derived list asserts it found something;
+    // `tester`, 2026-08-31).
+    for secret in ["YWRtaW4=", "aHVudGVyMjI=", "admin", "hunter22"] {
+        assert!(
+            !printed.contains(secret),
+            "{secret:?} reached the document a reader is shown: {printed:?}"
+        );
+    }
+    assert!(
+        printed.contains("username: <hidden — 5 bytes>")
+            && printed.contains("password: <hidden — 8 bytes>")
+            && printed.contains("leaked-back: <hidden — 8 bytes>"),
+        "a value was hidden without its size, or a field was left unmasked: {printed:?}"
+    );
+    // **The keys stay**, because the reader needs to know what is in there — which is also why
+    // they go through the strip: a key is chosen by whoever created the Secret.
+    assert!(printed.contains("name: db-credentials"));
+}
+
+/// **Only a Secret is masked**, because `data` is a named, structural field of a specific kind and
+/// not a heuristic over free text — the masking engine REQUIREMENTS.md calls YAGNI by name.
+///
+/// **A ConfigMap's `data` is the shape that proves it**: same field name, same position, and
+/// `kubectl get -o yaml` shows it, so hiding it would be this pane diverging from the command it
+/// teaches (NOTES § D37).
+#[tokio::test]
+async fn a_data_block_on_anything_but_a_secret_is_shown_as_the_api_sent_it() {
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "ConfigMap",
+            "metadata": { "name": "settings", "namespace": "payments" },
+            "data": { "log-level": "debug" },
+        })
+        .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/payments/configmaps".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "settings",
+        "ConfigMap",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a ConfigMap is a document that serialises");
+    println!("{printed}");
+
+    assert!(
+        printed.contains("log-level: debug"),
+        "a ConfigMap's own data was masked, so this pane no longer shows what kubectl shows: \
+         {printed:?}"
+    );
+}
+
+/// **The document keeps the API's key order and every field no struct in this build knows** — the
+/// box's ruling 2, which is the whole reason this read is untyped.
+///
+/// **The fixture is the shape a newer server produces**: `spec.somethingNewer` is not a field
+/// `k8s-openapi 0.28` has, so a round trip through `k8s_openapi::api::core::v1::Pod` would delete
+/// it silently and the pane would be a record that lies (invariant 4's spirit).
+///
+/// **Order is asserted against the *sent* order and not against a sorted one.** `serde_json::Map`
+/// is a `BTreeMap` without `preserve_order`, so a tree built through it alphabetises — `kind`
+/// before `metadata` before `spec` is what a check for that looks like, and the fixture below is
+/// deliberately sent in an order alphabetising would change.
+#[tokio::test]
+async fn a_document_keeps_the_servers_own_key_order_and_the_fields_no_struct_here_knows() {
+    let (client, _) = stub_list(
+        "200 OK",
+        // Written as text rather than through `json!`, because `json!` builds a
+        // `serde_json::Value` and that is the very type whose key order this test is about.
+        r#"{"kind":"Pod","apiVersion":"v1","metadata":{"name":"web","namespace":"payments"},
+            "spec":{"containers":[{"name":"app"}],"somethingNewer":{"nested":true}},
+            "status":{"phase":"Running"}}"#
+            .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/payments/pods".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "web",
+        "Pod",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a pod is a document that serialises");
+    println!("{printed}");
+
+    let keys: Vec<&str> = printed
+        .lines()
+        .filter(|line| !line.starts_with(' ') && !line.starts_with('-'))
+        .filter_map(|line| line.split(':').next())
+        .collect();
+    assert_eq!(
+        keys,
+        ["kind", "apiVersion", "metadata", "spec", "status"],
+        "the document came back in an order the server did not send — alphabetised is what a \
+         round trip through serde_json::Map looks like: {printed:?}"
+    );
+    // **The document ends with exactly one newline** — `serde_yaml_ng` writes it, so a printer
+    // that adds a second leaves a blank line at the end of a file a reader may be diffing.
+    assert!(
+        printed.ends_with('\n') && !printed.ends_with("\n\n"),
+        "the document does not end in exactly one newline: {:?}",
+        &printed[printed.len().saturating_sub(20)..]
+    );
+    assert!(
+        printed.contains("somethingNewer"),
+        "a field this build's k8s-openapi does not know was dropped, which is the pane quietly \
+         deleting fields: {printed:?}"
+    );
+}
+
+/// **Every string in the document, keys and values, goes through the ingest guard**
+/// (invariant 9, `screens/detail.md` § Free text that carried control characters).
+///
+/// **Three framings, because a guard is proven only for the framings it was fed** (NOTES § D31):
+/// an annotation *value*, an annotation *key*, and a string inside a list. A bidi override is the
+/// character, for [`an_events_words_are_stripped_before_anything_can_draw_them`]'s reason.
+#[tokio::test]
+async fn nothing_unprintable_survives_into_the_document() {
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "Pod",
+            "metadata": {
+                "name": "web",
+                "annotations": {
+                    "note": "deploy\u{200d}ed by ci",
+                    "ci\u{202e}key": "value",
+                },
+                "finalizers": ["kubernetes.io/pv\u{200b}-protection"],
+            },
+        })
+        .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/payments/pods".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "web",
+        "Pod",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a pod is a document that serialises");
+    println!("{printed}");
+
+    // **The emitter's own newlines are the one exception, and they are `unprintable` too** —
+    // `char::is_control` answers for `\n`. Every other one would have had to come from the
+    // cluster, because [`text`] removes a `\n` the API sent (NOTES § D146).
+    assert!(
+        !printed.chars().any(|c| unprintable(c) && c != '\n'),
+        "a character with no printed form reached the document: {printed:?}"
+    );
+    for kept in ["deployed by ci", "cikey", "kubernetes.io/pv-protection"] {
+        assert!(
+            printed.contains(kept),
+            "{kept:?} is not in the document, so the strip removed more than the character: \
+             {printed:?}"
+        );
+    }
+}
+
+/// **Two keys that clean to the same text become one entry and the first in the mapping's order
+/// keeps its value** — the one place this guard loses something instead of shortening it, and the
+/// same loss [`pairs`] already carries for a label map.
+///
+/// **It is reachable and is not a curiosity.** `ci` and `ci\u{200b}` are two annotation keys a
+/// cluster will happily hold and the strip makes one; without a test the behaviour was recorded
+/// in a doc comment and pinned by nothing (`tester`, 2026-08-31).
+#[tokio::test]
+async fn two_keys_that_strip_to_the_same_word_collapse_and_the_first_one_wins() {
+    let (client, _) = stub_list(
+        "200 OK",
+        // Written as text rather than through `json!`, because `json!` builds a
+        // `serde_json::Value` and that type would reorder the two keys before they are sent.
+        "{\"kind\":\"Pod\",\"apiVersion\":\"v1\",\"metadata\":{\"name\":\"web\",\
+         \"annotations\":{\"ci\":\"first\",\"ci\u{200b}\":\"second\"}}}"
+            .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/payments/pods".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "web",
+        "Pod",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a pod is a document that serialises");
+    println!("{printed}");
+
+    assert!(
+        printed.contains("ci: first"),
+        "the second key's value won, or the two did not collapse at all: {printed:?}"
+    );
+    assert!(
+        !printed.contains("second"),
+        "both keys survived, so a zero-width character still tells two annotations apart on \
+         screen: {printed:?}"
+    );
+}
+
+/// **A kind word resolves through discovery's own answer and through nothing written down here**
+/// (invariant 12, `screens/detail.md` § Printed instead of drawn — yaml).
+///
+/// **Four spellings and they are `kubectl`'s**: the plural, the kind lowercased (which is the
+/// singular for every built-in and every CRD, and is where it comes from since
+/// `kube::discovery` drops `singularResource`), either of those in any case, and the dotted
+/// `<plural>.<group>` form. `events.` — a trailing dot and nothing after it — is the core group,
+/// which is spelled `""` everywhere in this file.
+///
+/// **The ambiguity is real and is `events`**: `core/v1` and `events.k8s.io/v1` both serve it,
+/// they are different resources, and [`browsable`] keeps both.
+#[test]
+fn a_kind_word_resolves_by_plural_by_singular_and_by_group() {
+    let kinds = [
+        browsed("", "v1", "Pod", "pods", Scope::Namespaced),
+        browsed("", "v1", "Secret", "secrets", Scope::Namespaced),
+        browsed("", "v1", "Node", "nodes", Scope::Cluster),
+        browsed("", "v1", "Event", "events", Scope::Namespaced),
+        browsed("events.k8s.io", "v1", "Event", "events", Scope::Namespaced),
+    ];
+    let named = |word: &str| {
+        kind_named(&kinds, word)
+            .iter()
+            .map(|kind| format!("{}/{}", kind.group, kind.plural))
+            .collect::<Vec<_>>()
+    };
+
+    for word in ["secret", "secrets", "Secret", "SECRETS"] {
+        assert_eq!(named(word), ["/secrets"], "{word} did not name the Secret");
+    }
+    assert_eq!(named("nodes"), ["/nodes"]);
+    assert_eq!(
+        named("events"),
+        ["/events", "events.k8s.io/events"],
+        "a word two resources answer to came back as one, so the reader is silently given the \
+         wrong one"
+    );
+    assert_eq!(
+        named("events."),
+        ["/events"],
+        "the trailing dot did not name the core group"
+    );
+    assert_eq!(named("events.events.k8s.io"), ["events.k8s.io/events"]);
+    assert_eq!(
+        named("widgets"),
+        Vec::<String>::new(),
+        "a kind this cluster does not serve was resolved to one it does"
+    );
+    // **The group half is matched whole**, so a prefix of a real group names nothing rather than
+    // the resource that group serves.
+    assert_eq!(named("events.events"), Vec::<String>::new());
+}
+
+/// **A Secret keeps a second copy of itself in `metadata.annotations`, and both are masked**
+/// (NOTES § D198). `kubectl apply -f secret.yaml` writes the whole applied body, `data` included,
+/// into `last-applied-configuration`; applied through `stringData` it is **plaintext**, not even
+/// base64. Measured on a real cluster: that annotation decodes to the same values the block below
+/// prints as `<hidden — 8 bytes>` (`k8s-admin`, 2026-08-31).
+///
+/// **The test that should have caught this is one line up and could not: the input it was fed had
+/// no `metadata.annotations` at all.** That is NOTES § D29 in its purest form — a guard is proven
+/// only for the shapes it was fed — so this feeds the two shapes the real pipeline hands it: the
+/// base64-in-base64 body `apply` writes, and the plaintext one `stringData` writes.
+///
+/// **Every annotation key, not a denylist of the one `kubectl` happens to write**, which is
+/// invariant 1's allowlist-not-denylist reasoning one layer up: the second key below is a
+/// controller's own reconstruction under its own name, and a mask keyed on names catches nothing
+/// the day a different controller manages the object.
+#[tokio::test]
+async fn a_secrets_second_copy_of_itself_in_its_annotations_is_masked_too() {
+    // The applied body `kubectl apply` stores verbatim — base64 inside JSON inside an annotation.
+    let applied = serde_json::json!({
+        "apiVersion": "v1", "kind": "Secret",
+        "metadata": { "name": "db-credentials", "namespace": "payments" },
+        "data": { "username": "YWRtaW4=", "password": "aHVudGVyMjI=" },
+    })
+    .to_string();
+    // The same thing written through `stringData`, which stores the **plaintext**.
+    let plainly = serde_json::json!({
+        "apiVersion": "v1", "kind": "Secret",
+        "metadata": { "name": "db-credentials", "namespace": "payments" },
+        "stringData": { "username": "admin", "password": "hunter22" },
+    })
+    .to_string();
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+            "metadata": {
+                "name": "db-credentials",
+                "namespace": "payments",
+                "labels": { "app": "payments" },
+                "annotations": {
+                    "kubectl.kubernetes.io/last-applied-configuration": applied,
+                    "argocd.argoproj.io/last-applied": plainly,
+                },
+            },
+            "data": { "username": "YWRtaW4=", "password": "aHVudGVyMjI=" },
+        })
+        .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/payments/secrets".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "db-credentials",
+        "Secret",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a Secret is a document that serialises");
+    println!("{printed}");
+
+    // **Every needle here can fail** — each is really in the document that was fed in, the two
+    // base64 values twice over and the two plaintexts inside the second annotation.
+    for secret in ["YWRtaW4=", "aHVudGVyMjI=", "admin\"", "hunter22"] {
+        assert!(
+            !printed.contains(secret),
+            "{secret:?} reached the document a reader is shown: {printed:?}"
+        );
+    }
+    // **The key stays, so a reader can see that something is stored there and go looking with
+    // `kubectl`** — only the value is replaced by its size.
+    assert!(
+        printed.contains("kubectl.kubernetes.io/last-applied-configuration: <hidden — ")
+            && printed.contains("argocd.argoproj.io/last-applied: <hidden — "),
+        "an annotation key was dropped, or its value was left whole: {printed:?}"
+    );
+    // **Labels stay visible**: they are validated to 63 characters, nothing writes a Secret's body
+    // into one, and hiding them would cost a reader the only metadata they can act on.
+    assert!(
+        printed.contains("app: payments"),
+        "a label was masked, which no measurement asked for: {printed:?}"
+    );
+}
+
+/// **An annotation on anything that is not a Secret is shown as the API sent it** — the mask is
+/// keyed on the document's own `kind`, not on a field name that looks sensitive.
+#[tokio::test]
+async fn annotations_on_anything_but_a_secret_are_left_alone() {
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "ConfigMap",
+            "metadata": {
+                "name": "settings", "namespace": "payments",
+                "annotations": { "note": "deployed by ci" },
+            },
+            "data": { "log-level": "debug" },
+        })
+        .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/payments/configmaps".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "settings",
+        "ConfigMap",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a ConfigMap is a document that serialises");
+    println!("{printed}");
+
+    assert!(
+        printed.contains("note: deployed by ci") && printed.contains("log-level: debug"),
+        "a ConfigMap's own annotation or data was masked, so this pane no longer shows what \
+         kubectl shows: {printed:?}"
+    );
+}
+
+/// **A multi-line value comes out as the many lines it is, and `--yaml` is the object again**
+/// (NOTES § D198). Measured before the fix: `kubectl get cm coredns -n kube-system -o yaml` is 33
+/// lines and this path printed **20**, the whole 20-line `Corefile` on one — redirect that to a
+/// file, re-apply it, and you have shipped a different config (`k8s-admin`, 2026-08-31).
+///
+/// **`\n` and `\t` survive and nothing else does.** `ESC`, `U+202E` and `U+200B` are still
+/// stripped, which is the half that keeps invariant 9 true: they do not print as themselves in a
+/// document any more than they do in a cell.
+#[tokio::test]
+async fn a_multi_line_value_stays_many_lines_and_the_terminal_drivers_still_go() {
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "ConfigMap",
+            "metadata": { "name": "coredns", "namespace": "kube-system" },
+            "data": {
+                "Corefile": ".:53 {\n    errors\n    health\n    ready\n}\n",
+                "tabbed": "one\tfield\ttwo",
+                "hostile": "esc\u{1b}[31m bidi\u{202e} zero\u{200b}width",
+            },
+        })
+        .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/kube-system/configmaps".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "coredns",
+        "ConfigMap",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a ConfigMap is a document that serialises");
+    println!("{printed}");
+
+    // **The Corefile is five lines of its own inside the document**, not one line with the
+    // newlines turned into spaces.
+    for line in [".:53 {", "errors", "health", "ready", "}"] {
+        assert!(
+            printed.lines().any(|drawn| drawn.trim() == line),
+            "{line:?} is not a line of its own, so the value was collapsed: {printed:?}"
+        );
+    }
+    assert!(
+        !printed.contains(".:53 {     errors"),
+        "the newlines became spaces, which is the defect: {printed:?}"
+    );
+    // **A tab survives the strip and the emitter then escapes it**, which is `serde_yaml_ng`'s
+    // choice and not this file's: YAML forbids a tab in indentation, so a scalar containing one is
+    // written double-quoted with `\t` in it — and reads back as the tab the cluster sent, which is
+    // the whole of what *the document is the object* asks for. The assertion is on the escape
+    // because that is what a tab looks like once it is in a YAML document.
+    assert!(
+        printed.contains(r#"tabbed: "one\tfield\ttwo""#),
+        "a tab inside a value was removed rather than escaped, so the value no longer reads back \
+         as what the cluster sent: {printed:?}"
+    );
+
+    // **The three that drive a terminal still go**, silently, with nothing marking the cut.
+    for driver in ['\u{1b}', '\u{202e}', '\u{200b}'] {
+        assert!(
+            !printed.contains(driver),
+            "{driver:?} survived into the document, so invariant 9 is off on this path: \
+             {printed:?}"
+        );
+    }
+    assert!(
+        printed.contains("esc[31m bidi zero"),
+        "the strip removed more than the characters with no printed form: {printed:?}"
+    );
+}
+
+/// **A repeating modern event is dated by its *last* occurrence and sorts where it belongs**
+/// (`k8s-admin`, 2026-08-31). For an `events.k8s.io/v1` Event with a series, `core/v1` serves
+/// `lastTimestamp: null`, `eventTime` = the **first** occurrence and `series.lastObservedTime` =
+/// the **last** — so a chain that read `eventTime` next put a thing that happened a minute ago at
+/// the bottom of a list whose heading promises the newest first.
+///
+/// **`count` comes off the series too**, because the modern shape puts it there.
+#[tokio::test]
+async fn a_repeating_modern_event_is_dated_by_its_last_occurrence_and_not_its_first() {
+    let modern = serde_json::json!({
+        "apiVersion": "v1", "kind": "Event",
+        "metadata": { "name": "web.series", "namespace": "payments",
+                      "creationTimestamp": "2026-08-15T00:00:00Z" },
+        "involvedObject": { "kind": "Pod", "name": "web" },
+        "reason": "Unhealthy", "message": "probe failed", "type": "Warning",
+        "lastTimestamp": null,
+        "eventTime": "2026-08-15T00:00:00Z",
+        "series": { "count": 99, "lastObservedTime": "2026-08-22T10:00:00Z" },
+    });
+    let (client, _) = stub_list(
+        "200 OK",
+        event_list(
+            vec![
+                modern,
+                event("Pulled", "cached", Some("2026-08-19T10:00:00Z")),
+            ],
+            false,
+        ),
+    )
+    .await;
+    let happened = events(&client, "payments", "Pod", "web", None)
+        .await
+        .expect("the server answered");
+
+    assert_eq!(
+        happened
+            .lines
+            .iter()
+            .map(|line| line.reason.as_str())
+            .collect::<Vec<_>>(),
+        ["Unhealthy", "Pulled"],
+        "the series' last occurrence was not read, so a repeating event is dated at its first and \
+         sinks to the bottom of a newest-first list"
+    );
+    assert_eq!(
+        happened.lines[0].count,
+        Some(99),
+        "series.count was not read"
+    );
+    assert_eq!(
+        happened.lines[0].first.as_ref().map(|at| at.0.to_string()),
+        Some("2026-08-15T00:00:00Z".to_string()),
+        "the first-seen stamp is not the one the span is measured from"
+    );
+}
+
+/// **`count` comes off `core/v1`'s own field where there is one**, which is the legacy shape and
+/// the commonest — the kubelet bumps it rather than creating another Event, which is why distinct
+/// events stay single-digit while one carries 27 639 (`k8s-admin`, 2026-08-31).
+#[tokio::test]
+async fn a_legacy_events_count_and_first_stamp_are_carried() {
+    let (client, _) = stub_list(
+        "200 OK",
+        event_list(
+            vec![event(
+                "Unhealthy",
+                "probe failed",
+                Some("2026-08-22T10:00:00Z"),
+            )],
+            false,
+        ),
+    )
+    .await;
+    let happened = events(&client, "payments", "Pod", "web", None)
+        .await
+        .expect("the server answered");
+
+    assert_eq!(happened.lines[0].count, Some(3), "count was dropped");
+    assert_eq!(
+        happened.lines[0].first.as_ref().map(|at| at.0.to_string()),
+        Some("2026-08-20T00:00:00Z".to_string()),
+        "firstTimestamp was dropped, so a repeated event has no span to be measured over"
+    );
+}
+
+/// **A young pod's whole event block is one second wide, and it still comes out newest first**
+/// (`k8s-admin`, 2026-08-31). A legacy `lastTimestamp` has second resolution, so an ordinary
+/// startup stamps Scheduled, Pulled, Created and Started in the same second; the sort is stable,
+/// so those four keep the order the server listed them in, which for one object is etcd key order
+/// — time **ascending**, the exact reverse of what the heading promises.
+///
+/// **This is the commonest event block there is**, not an edge case: every pod that started in the
+/// last hour has one.
+#[tokio::test]
+async fn events_stamped_in_the_same_second_still_come_out_newest_first() {
+    let same = Some("2026-08-22T10:00:00Z");
+    let (client, _) = stub_list(
+        "200 OK",
+        event_list(
+            vec![
+                event("Scheduled", "placed", same),
+                event("Pulled", "ready", same),
+                event("Created", "made", same),
+                event("Started", "up", same),
+            ],
+            false,
+        ),
+    )
+    .await;
+    let happened = events(&client, "payments", "Pod", "web", None)
+        .await
+        .expect("the server answered");
+
+    assert_eq!(
+        happened
+            .lines
+            .iter()
+            .map(|line| line.reason.as_str())
+            .collect::<Vec<_>>(),
+        ["Started", "Created", "Pulled", "Scheduled"],
+        "four events stamped in one second came out in the server's own order, which is time \
+         ascending — the exact reverse of `events (newest first)`"
+    );
+}
+
+/// **The masking decision fails closed in both directions, because half of it is a field the
+/// server chose** (the PM's pass over the landed tree, 2026-08-31).
+///
+/// **Reading only the document's own `kind` is a control field steering a redaction.** It is worse
+/// than the security gate's *free text from the API is untrusted* row, not better: the answer
+/// decides whether the answer is redacted. Absent, renamed, or answered differently by an
+/// aggregated API server or a proxy — anything a kubeconfig can be pointed at — and the Secret
+/// prints whole with nothing saying so. No conforming server does that today, which is precisely
+/// why it would never be noticed.
+///
+/// **Reading only the request is the opposite hole**, which is why this is a union and not a
+/// replacement: a CRD whose own Kind is `Secret` was masked before this change and has to stay
+/// masked, and the request that fetched it names something else entirely.
+#[tokio::test]
+async fn a_secret_is_masked_whether_the_request_or_the_answer_says_so() {
+    let printed = |body: serde_json::Value, requested: &'static str| async move {
+        let (client, _) = stub_list("200 OK", body.to_string()).await;
+        document(
+            &client,
+            &Fetch {
+                path: "/api/v1/namespaces/payments/secrets".to_string(),
+                accept: PLAIN_ACCEPT,
+            },
+            "db-credentials",
+            requested,
+        )
+        .await
+        .expect("the server answered")
+        .yaml()
+        .expect("a document that serialises")
+    };
+
+    // **The answer's `kind` is gone and the request says Secret** — a server that answered without
+    // the field, which is the shape the old check failed open on.
+    let stripped = printed(
+        serde_json::json!({
+            "apiVersion": "v1",
+            "metadata": { "name": "db-credentials", "namespace": "payments" },
+            "data": { "password": "aHVudGVyMjI=" },
+        }),
+        "Secret",
+    )
+    .await;
+    println!("{stripped}");
+    assert!(
+        !stripped.contains("aHVudGVyMjI=") && stripped.contains("password: <hidden — 8 bytes>"),
+        "a Secret whose answer carried no `kind` printed its values whole: {stripped:?}"
+    );
+
+    // **The answer's `kind` says Secret and the request does not** — a CRD of somebody's own that
+    // calls itself `Secret`, which the check before this one caught and this one must not lose.
+    let crd = printed(
+        serde_json::json!({
+            "apiVersion": "vault.example.com/v1", "kind": "Secret",
+            "metadata": { "name": "db-credentials", "namespace": "payments" },
+            "data": { "password": "aHVudGVyMjI=" },
+        }),
+        "SealedSecret",
+    )
+    .await;
+    println!("{crd}");
+    assert!(
+        !crd.contains("aHVudGVyMjI=") && crd.contains("password: <hidden — 8 bytes>"),
+        "a kind that calls itself Secret stopped being masked: {crd:?}"
+    );
+
+    // **Neither says so, so nothing is masked** — the mask is still a named field of a named kind
+    // and not a detector over anything that looks sensitive.
+    let neither = printed(
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "ConfigMap",
+            "metadata": { "name": "db-credentials", "namespace": "payments" },
+            "data": { "password": "aHVudGVyMjI=" },
+        }),
+        "ConfigMap",
+    )
+    .await;
+    assert!(
+        neither.contains("password: aHVudGVyMjI="),
+        "a ConfigMap's own data was masked, so this pane no longer shows what kubectl shows: \
+         {neither:?}"
+    );
+}
+
+/// **A CRLF value comes out byte-faithful, and that is the case NOTES § D198's second blocker did
+/// not cover** — dropping the `\r` prints a document whose bytes differ from the object, which is
+/// exactly what that blocker was about, surviving one character to the side (the PM's pass,
+/// 2026-08-31, on a ConfigMap made from a Windows-authored file).
+///
+/// **The `\r` is retained and the emitter escapes it, which is what makes retaining it safe** — a
+/// bare CR would move a terminal's cursor to column 0 and overwrite the line above, genuinely
+/// unlike `\n`. Measured rather than assumed: `serde_yaml_ng` writes a scalar containing one as
+/// double-quoted with `\r` in it, the same as `\t` and the same as `kubectl`. So this asserts the
+/// **escape**, because that is what a CR looks like once it is in a YAML document — and asserts
+/// that no raw CR reaches the text a terminal would draw.
+#[tokio::test]
+async fn a_windows_line_ending_survives_as_the_bytes_the_cluster_holds() {
+    let (client, _) = stub_list(
+        "200 OK",
+        serde_json::json!({
+            "apiVersion": "v1", "kind": "ConfigMap",
+            "metadata": { "name": "win", "namespace": "payments" },
+            "data": { "win.conf": "line one\r\nline two\r\n", "bare": "over\rwritten" },
+        })
+        .to_string(),
+    )
+    .await;
+    let printed = document(
+        &client,
+        &Fetch {
+            path: "/api/v1/namespaces/payments/configmaps".to_string(),
+            accept: PLAIN_ACCEPT,
+        },
+        "win",
+        "ConfigMap",
+    )
+    .await
+    .expect("the server answered")
+    .yaml()
+    .expect("a ConfigMap is a document that serialises");
+    println!("{printed}");
+
+    assert!(
+        printed.contains(r#"win.conf: "line one\r\nline two\r\n""#),
+        "the carriage returns were dropped, so re-applying this document ships different bytes \
+         than the object holds: {printed:?}"
+    );
+    assert!(
+        printed.contains(r#"bare: "over\rwritten""#),
+        "a bare CR was dropped: {printed:?}"
+    );
+    // **Nothing a terminal obeys reaches the screen.** What is retained is a byte in the value;
+    // what is drawn is the two characters `\` and `r`.
+    assert!(
+        !printed.contains('\r'),
+        "a raw carriage return reached the document, which moves the cursor to column 0 and \
+         overwrites the line above it: {printed:?}"
+    );
+}
