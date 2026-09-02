@@ -179,6 +179,7 @@
 - *(docs)* Rule that the --once report does not wrap ([5451911](https://github.com/murat-akpinar/k8rs/commit/545191113f07b6d84b3c838a8b49834ba78b1e37)) — screens/once.md specifies a fixed 72-column wrap that no code has ever implemented. Measured against the live k8rs cluster the report runs to 423 characters on its longest line, so the claim is either built or deleted.
 - *(ui)* Give context.md words for the three rows the code already hands it ([1bd1e3d](https://github.com/murat-akpinar/k8rs/commit/1bd1e3d62c82c0191255dca41f854cb6ea3e45d8)) — A name that strips to nothing, a context defined twice and a server address k8rs will not guess at all reach contexts() today and none had a rendering. Nothing draws Choice yet, which is why settling them now is cheap.
 - *(ui)* Read the screens against the binary and delete a state that never existed ([89e3b22](https://github.com/murat-akpinar/k8rs/commit/89e3b225c911093b8cb9a919b52f7154cbf6c941)) — screens/states.md drew 'cannot reach the cluster at <address>' with VPN advice for weeks. Building a client from a kubeconfig makes no network call, so a dead address never fails at connect — the session opens and the failure surfaces on the first request. No code emits that sentence.
+- *(docs)* Route the next session to family 6, not the closed family 5 ([011a018](https://github.com/murat-akpinar/k8rs/commit/011a018c69d1995a8ff4dc8f1c322050b5a14c37))
 
 ### ⚡ Performance
 
