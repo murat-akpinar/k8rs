@@ -174,6 +174,9 @@
 - *(docs)* Check the working tree before briefing ([6b7c1b3](https://github.com/murat-akpinar/k8rs/commit/6b7c1b31fc84e90050cfea4fbd7229772fc77bd2)) — A brief was written for the log read path that the working tree already held, green, from another session. git status --short is step 1's gate now (NOTES § D195).
 - *(docs)* The box is the code, and the turn makes one dispatch ([bdf1255](https://github.com/murat-akpinar/k8rs/commit/bdf1255b745f7808d09068b1e64e446771fe419b)) — Three hours went into documents nobody was blocked on — a phase head note, three review rounds on a screen five phases from its renderer, a ruling, an invariant correction — before anything that could produce a line of code, while the code sat finished in the working tree.
 - *(docs)* Send the next session past the box that cannot move ([1f89b8d](https://github.com/murat-akpinar/k8rs/commit/1f89b8df1a96cabc673b525871158f45e5b6889b))
+- *(docs)* Say which family the next box belongs to ([51126b2](https://github.com/murat-akpinar/k8rs/commit/51126b2e3892cb80a52cfa183b2140cf07e613cf))
+- *(docs)* Rule that the --once report does not wrap ([5451911](https://github.com/murat-akpinar/k8rs/commit/545191113f07b6d84b3c838a8b49834ba78b1e37)) — screens/once.md specifies a fixed 72-column wrap that no code has ever implemented. Measured against the live k8rs cluster the report runs to 423 characters on its longest line, so the claim is either built or deleted.
+- *(ui)* Give context.md words for the three rows the code already hands it ([1bd1e3d](https://github.com/murat-akpinar/k8rs/commit/1bd1e3d62c82c0191255dca41f854cb6ea3e45d8)) — A name that strips to nothing, a context defined twice and a server address k8rs will not guess at all reach contexts() today and none had a rendering. Nothing draws Choice yet, which is why settling them now is cheap.
 
 ### ⚡ Performance
 
