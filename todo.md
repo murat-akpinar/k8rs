@@ -3380,7 +3380,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       one** — what a row with no drawable name looks like, and what the header
       says — so it is `tui-designer` then `dev-core`, and it is in time only
       while `k8s.rs` is still open
-- [ ] **`screens/context.md` does not know about `shadowed` or `Unreadable`, and
+- [x] **`screens/context.md` does not know about `shadowed` or `Unreadable`, and
       the code now hands it both.** `grep shadowed screens/context.md` returns
       nothing, so as specified a duplicate-named context is an ordinary
       cursor-reachable row: the reader lands on it, reads *its* address, presses
@@ -3395,6 +3395,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       reachable at all, and the sentence that says *two contexts in your file
       have this name; the first one is the one that opens* — which is the one
       kubectl never gets to say, because client-go refuses the whole file
+      ([D202](NOTES.md#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02))
 - [ ] **Where the 58 752 KiB at 1 000 pods actually is.** `REQUIREMENTS.md`'s
       memory budget is measured and unmet, and the measurement could not name the
       cause — it ruled out a per-object storage cost and located the *moment*

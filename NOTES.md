@@ -223,6 +223,7 @@ its line moving with it.
 - [D199](#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31) — one object's own story: the flag that exists so a redaction has a caller, and the bound that costs a claim
 - [D200](#d200--the-box-that-proved-its-own-thesis-against-itself-three-guards-that-could-not-fail-and-a-cluster-word-on-a-line-the-user-runs-2026-08-31) — the box that proved its own thesis against itself: three guards that could not fail, and a cluster word on a line the user runs
 - [D201](#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31) — the report does not wrap, and the screen loses the section that said it does
+- [D202](#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02) — the three context rows nothing draws yet, and the placeholder that is allowed to collide
 
 ## Why it exists — where the gap is
 
@@ -17267,3 +17268,76 @@ and 84, 145 and 178 at its closing sentence across the three coverage shapes, so
 can honestly draw them. Under a wrap ruling that would have been a gap waiting
 on the wrap; without one it is the file being accurate about output that is
 deliberately unfolded.
+
+### D202 — the three context rows nothing draws yet, and the placeholder that is allowed to collide (2026-09-02)
+
+Phase 6, family 5. `screens/context.md` had words for five unhappy states and
+the code had been handing it three more since the kubeconfig family landed
+([D173](#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28) ·
+[D174](#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28) ·
+[D175](#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28)).
+Nothing draws `Choice` — the picker is Phase 11 — so none of this was a live
+defect, and that is exactly why it was cheap to settle now instead of under a
+renderer. Four rulings, all `tui-designer`'s, recorded here because the brief
+did not decide them and `dev-core` implements against them next.
+
+**A name that strips to nothing draws `(unnamed)`, in the row and in the
+header.** `contexts()` keeps the stripped-empty `String` while
+`kubeconfig_context()` collapses it to `None`, so the header said *no context*
+about the very context the run was on. One placeholder in both places is what
+stops the header and the picker disagreeing about whether a context is in use,
+and it is deliberately **not** the *no context chosen yet* wording, which means
+something else: no cluster picked at all, rather than one picked whose name
+cannot be printed.
+
+**And `(unnamed)` is allowed to collide, which is the ruling rather than the
+oversight.** `name: "(unnamed)"` is a legal context name and renders
+identically — `(current)` is safe only because it lives in a badge column no
+disk text reaches, and this word sits in the name slot where disk text does.
+No literal is collision-proof, so the file states the collision instead of
+hunting a safer word: what survives it is **correctness, not
+distinguishability**. `Choice::key` keeps the file's own spelling for both
+rows, so `⏎` on either opens the entry that row actually is. The first draft
+claimed the row *"cannot be mistaken"* for a real one, which is a promise the
+screen cannot keep; it was found in the PM's pass and removed.
+
+**A shadowed row is cursor-reachable, and `⏎` on it leaves the picker open.**
+Skipping it would hide the only thing the row exists for — a duplicate the
+reader can see nowhere else, because `kubectl` refuses the whole file rather
+than reporting it. It keeps its real address and tag: blanking them would
+reuse `⚠ cluster undefined`, which is a different fact, and that reuse is what
+[D174](#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28)'s
+second reversal already threw out. **It is inert differently from `(current)`,
+and the difference is the point**: `⏎` on `(current)` *closes* the picker,
+because confirming your own context means the picker's job is done, while
+closing on a shadowed row would eject the reader from the one screen that
+explains the problem — and would read either as a connection that just happened
+or as a broken key. The first report said only *"`⏎` does nothing"*, which
+leaves an implementer choosing between those two behaviours; the PM's pass sent
+it back for the distinction.
+
+**`Address::Unreadable` draws an ordinary row that keeps its TLS badge.** It is
+not `⚠ cluster undefined` — there is a connection to make and `⏎` opens it
+normally; what is withheld is a *line the reader can trust*, because guessing
+between two readings of an ambiguous authority is worse than showing nothing
+when the server line's whole job is answering *am I about to touch production*.
+The badge slot is the detail easiest to get wrong: `⚠ TLS not verified` still
+renders on a row whose address is not shown, because kube connects with the raw
+string whatever the screen can draw, and a row whose address is unreadable can
+be the one that most needs the warning.
+
+**The refusal dialog quotes `pods_unread`'s own two strings and wraps rather
+than shortening them.** `screens/context.md` had carried
+`Missing permission: list pods (cluster-wide)` and a `User: dev@example.com`
+line the binary cannot produce. The identity line is gone for
+[D190](#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)'s
+reason — a line the binary cannot fill is a promise the screen cannot keep.
+The scope line was first rewritten as `everywhere`, which fit the 54-column
+interior and matched nothing: `main.rs:3109-3110` has exactly two strings,
+`across the whole cluster` and `in the namespace {ns}`. **The same fact worded
+two ways across two surfaces is this repo's most expensive defect class**, so
+the detail line wraps onto a second line and quotes the binary verbatim
+instead. Caught in the PM's pass, from the agent's own report naming the
+convention it had then not followed — which is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+with the object one `grep` away.

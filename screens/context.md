@@ -346,8 +346,8 @@ stderr message. Mid-session, k8rs stays on the context the user chose:
 │    │  You switched to staging, but your user is not       │        │
 │    │  allowed to list pods there.                         │        │
 │    │                                                      │        │
-│    │    Missing permission: list pods (cluster-wide)      │        │
-│    │    User: dev@example.com                             │        │
+│    │    Missing permission: list pods                     │        │
+│    │    across the whole cluster                          │        │
 │    │                                                      │        │
 │    │  Nothing is wrong with prod-eu — X takes you back,   │        │
 │    │  or ask for read access to staging.                  │        │
@@ -370,6 +370,27 @@ stderr message. Mid-session, k8rs stays on the context the user chose:
 - Unreachable, 403 and "the context names a cluster the file does not define"
   are three different sentences, not one "connection failed".
 - Never a dead end: the way out is on the screen, and it is the same key.
+- **The scope line quotes `pods_unread`'s own two strings, not a third
+  wording.** `main.rs:3109-3110` has exactly two: `across the whole cluster`
+  and `in the namespace {ns}`. Staging here has no namespace of its own, so
+  the detail line wraps across two lines instead of shortening the phrase:
+
+  ```
+      Missing permission: list pods
+      across the whole cluster
+  ```
+
+  A context whose kubeconfig names a namespace reads `in the namespace
+  payments` on the second line instead — the exact string `pods_unread`
+  formats, never a shortened stand-in for it. The wrap, not a new word, is
+  what buys back the room the 54-column interior does not have for the
+  phrase on one line.
+- **No `User:` line.** k8rs never reads a display name for the identity a
+  kubeconfig authenticates as — there is no field here to print, honest or
+  otherwise, the same reasoning that dropped the equivalent line from the
+  `--once` report
+  ([NOTES § D190](../NOTES.md#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)).
+  A line the binary cannot produce is a promise this screen cannot keep.
 
 ### The same failure, from the startup picker
 
@@ -385,8 +406,8 @@ bound yet, so it cannot be the way back:
 │    │  You picked staging, but your user is not            │        │
 │    │  allowed to list pods there.                         │        │
 │    │                                                      │        │
-│    │    Missing permission: list pods (cluster-wide)      │        │
-│    │    User: dev@example.com                             │        │
+│    │    Missing permission: list pods                     │        │
+│    │    across the whole cluster                          │        │
 │    │                                                      │        │
 │    │  Nothing has connected yet — esc takes you back      │        │
 │    │  to the list to try a different cluster.             │        │
@@ -413,7 +434,7 @@ bound yet, so it cannot be the way back:
 
 ## Unhappy states
 
-The five this screen has to answer for, and where each is decided:
+The eight this screen has to answer for, and where each is decided:
 
 1. **Exactly one context.** Startup: does not open, connects straight
    through, no message ([§ Opening at startup](#opening-at-startup)). `X`
@@ -424,7 +445,10 @@ The five this screen has to answer for, and where each is decided:
    Stripped before it is drawn, same as any other untrusted disk-file text
    ([§ The tag column](#the-tag-column)).
 4. **A context whose cluster the file does not define.** Below.
-5. **`--once`, or stdin that is not a terminal.** Never opens,
+5. **A context whose name strips to nothing.** Below.
+6. **A context defined twice.** Below.
+7. **A server address k8rs will not guess at.** Below.
+8. **`--once`, or stdin that is not a terminal.** Never opens,
    `current-context` connects silently
    ([§ Opening at startup](#opening-at-startup)).
 
@@ -453,6 +477,142 @@ were not in the list:
   ([states.md § Before the TUI ever starts](states.md#before-the-tui-ever-starts));
   whether it should stay that way or fall into this screen's dimmed-row
   treatment is a call for whoever wires discovery, not a mockup.
+
+### A context whose name strips to nothing
+
+`name: ""`, or a name made only of characters invariant 9 strips: a context
+that is really in the file but has nothing left to put in the name slot once
+the same clean-up every other name goes through has run
+([NOTES § D173](../NOTES.md#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28)).
+Nothing here opens the wrong cluster — `Choice::key` keeps the file's own
+spelling, so `⏎` still lands on the right entry — but a screen that prints
+nothing where a name belongs reads as *no context*, and if this is the row
+`current-context` points at, the header would say that about the very
+cluster the run is already on.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│    (unnamed)                                     (current) │
+└────────────────────────────────────────────────────────────┘
+```
+
+- **`(unnamed)` can collide with a real context name, and that is
+  accepted, not solved.** `(current)` is safe because it lives in a badge
+  column no disk text ever reaches; `(unnamed)` sits in the name slot,
+  where disk text does reach, and `name: "(unnamed)"` is a legal context
+  name that would render identically. No literal word is collision-proof,
+  so this is not a search for a safer one. What survives the collision is
+  correctness, not distinguishability: `Choice::key` keeps the file's own
+  spelling for both rows, so each still opens its own entry — a reader who
+  has one real context named `(unnamed)` and one whose name stripped to
+  nothing cannot tell the two rows apart by name alone, but pressing `⏎`
+  on either one still opens the cluster that row actually is.
+- **The row is drawn like any other, not dimmed.** This is not the *cluster
+  undefined* treatment above — that row is hidden from the cursor because
+  there is nowhere for `⏎` to go. Here `⏎` goes somewhere fine; the row
+  simply has no name to print. Its tag, server line and badges all behave
+  exactly as they would for a named row.
+- **The header carries the same word.** `ctx: (unnamed) · live · admin` —
+  never the *no context chosen yet* wording reserved for
+  [§ Opening at startup](#opening-at-startup). That sentence means no
+  cluster has been picked; this context has been picked, k8rs just cannot
+  put its name on screen. One placeholder, drawn in both places, so the
+  header and the picker cannot disagree about whether a context is in use.
+
+### A context defined twice
+
+Two entries in the kubeconfig share a name — `Choice::shadowed`. Every
+lookup that opens a context by name — kube's own loader, `--context`, this
+picker's `⏎` — finds the *first* match, so the second entry can never be
+the one that opens
+([NOTES § D174](../NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28)).
+`kubectl` refuses a kubeconfig shaped like this outright; k8rs is the only
+tool left in the reader's terminal willing to open the file, which is why it
+owes them the sentence kubectl never gets the chance to say:
+
+```
+┌────────────────────────────────────────────────────────────┐
+│    prod-eu                                ⚠ duplicate name │
+└────────────────────────────────────────────────────────────┘
+```
+
+- **The cursor can land on it.** It is drawn dim — the same signal
+  *cluster undefined* uses for "not a normal choice" — but `↑` / `↓` do not
+  skip it. Skipping it would hide the one thing this row is for: telling the
+  reader their file has a duplicate they cannot see anywhere else. Its own
+  address and tag are real and are never blanked — they describe the entry
+  actually written at this position, even though `⏎` cannot reach it as
+  itself. (Its namespace is real too, kept for the same reason, even though
+  this screen has nowhere to print one yet.)
+- **`⏎` on it changes nothing and the picker stays open** — not the
+  `(current)` row's behaviour, even though both are places `⏎` is
+  deliberately inert. `⏎` on `(current)` *closes* the picker, because
+  landing there and confirming means "yes, stay on this cluster" — the
+  picker's job is done. Closing here would do the opposite: it would eject
+  the reader from the one screen explaining a kubeconfig problem they still
+  need to act on, and either read as a connection that just happened or as
+  the picker being broken. So the picker stays open, no popup fires — the
+  sentence explaining why is already on screen the moment the row is
+  selected — and the reader is left free to move to the real entry above or
+  press `esc` when they are done reading.
+- **Selecting it replaces the address line, not the badge.** The badge says
+  *what* — `⚠ duplicate name` — and the line below the list says *why*, in
+  place of the usual `name → address`:
+
+  ```
+  prod-eu  —  another context earlier in this file is also named
+              prod-eu. That one is what ⏎ opens, not this row.
+  ```
+
+- **Never `⚠ cluster undefined`.** That badge means there is nothing here to
+  connect to; this entry defines a cluster perfectly well — it is simply not
+  the one a lookup by this name will ever reach. Telling those two facts
+  apart is the whole reason this row keeps its data instead of going blank.
+- **The badge slot is never shared here.** A shadowed row's own `current`
+  and `insecure` are always false, whatever the entry itself would otherwise
+  earn ([NOTES § D175](../NOTES.md#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28)) —
+  `⚠ duplicate name` never has to compete with `(current)` or
+  `⚠ TLS not verified` for the space.
+
+### A server address k8rs will not guess at
+
+The context names a cluster, the cluster has a `server:` line, and k8rs
+still will not put an address on screen — `Address::Unreadable`: the
+authority does not parse as a plausible `host[:port]`, or nothing printable
+survives invariant 9's strip
+([NOTES § D175](../NOTES.md#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28)).
+`kube` still connects with the raw string, so this row is not broken and not
+`⚠ cluster undefined` — that badge means there is no connection to make, and
+this row makes one perfectly well. What is missing is a line the reader can
+trust: guessing between two readings of an ambiguous address is worse than
+showing nothing, because the whole job of the server line is answering *am I
+about to touch production*.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│    weird-proxy                          ⚠ TLS not verified │
+└────────────────────────────────────────────────────────────┘
+```
+
+- **The row looks ordinary until it is selected.** No tag is derived — that
+  needs a host to match against, and there is none here — but a written tag
+  still shows if the context has one, exactly as it would for any other row.
+- **The badge slot is unaffected, which is the detail easiest to get
+  wrong.** `⚠ TLS not verified` still appears when the cluster sets
+  `insecure-skip-tls-verify`, because kube connects with the raw `server:`
+  string whatever this screen can draw, and that is exactly the connection
+  the warning is about. A row whose address is not shown can still be the
+  one that most needs it.
+- **Selecting it replaces the address in the server line** — the same slot
+  the row above reuses — with a sentence instead of a guess:
+
+  ```
+  weird-proxy  —  k8rs found a server address here it cannot read
+                  safely, so nothing is shown instead of a guess.
+  ```
+
+- `⏎` opens it normally. Nothing about connecting to this entry is
+  degraded — the only thing missing is a line to read before doing it.
 
 ## Rules this screen adds
 
