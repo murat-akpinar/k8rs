@@ -222,6 +222,7 @@ its line moving with it.
 - [D198](#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31) — the two reversals the operator review forced: a Secret keeps a second copy of itself, and the strip that made `--yaml` not the object
 - [D199](#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31) — one object's own story: the flag that exists so a redaction has a caller, and the bound that costs a claim
 - [D200](#d200--the-box-that-proved-its-own-thesis-against-itself-three-guards-that-could-not-fail-and-a-cluster-word-on-a-line-the-user-runs-2026-08-31) — the box that proved its own thesis against itself: three guards that could not fail, and a cluster word on a line the user runs
+- [D201](#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31) — the report does not wrap, and the screen loses the section that said it does
 
 ## Why it exists — where the gap is
 
@@ -17192,3 +17193,77 @@ and the sentence drawn from it was not, which is
 in the one direction that is hardest to see: not a claim nobody measured, but a
 claim measured over one set and stated over a larger one.
 
+
+### D201 — the report does not wrap, and the screen loses the section that said it does (2026-08-31)
+
+[Phase 6's `once.md` box](todo.md) asks for a ruling and not an edit on its item
+**(c)**: `screens/once.md § How wide the report is` specifies a fixed 72-column
+wrap that has never existed. Measured at HEAD against the **live four-node
+`k8rs` kind cluster** (server v1.36.1, 41 pods — not a fixture; `--once` reads
+whatever the current context points at), `k8rs --once` prints **174 lines, 116
+of them wider than 72, the longest 423 characters**, and `grep -rn "fn wrap"
+src/` returns nothing. So the question is live in both directions: build the
+wrap, or delete the claim.
+
+**The counts drift and the shape does not, which is the part worth writing
+down.** An earlier run the same day over the same cluster gave 66 lines and 36
+over 72 — the findings a live cluster produces move as its pods degrade, so the
+line *count* is a reading and not a constant. What did not move across any run
+is the longest line at **423 characters** and the fact that most body lines
+clear 72. The ruling below rests on those two, never on a count.
+
+**It is deleted, and the report stays unfolded.** Four reasons, in the order
+they decide it:
+
+**A hard wrap breaks the only contract stdout has.** `--once` writes a
+line-oriented stream, and
+[D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)
+is the entry that named its destinations: `k8rs --once > findings.txt`, a CI
+job's log, a paste into a ticket. Every one of those is read with a
+line-oriented tool. Today `k8rs --once | grep ImagePullBackOff` returns the
+evidence line whole; folded at 72 it returns a fragment, and the rest of the
+sentence is a separate record that matches nothing. A tool that emits a stream
+and then folds it has made its own output unusable by the tools its documented
+destinations are read with.
+
+**Every destination already wraps, and none of them can unwrap.** A terminal
+soft-wraps at *its* width, which is the right width and is not 72; a GitHub
+comment soft-wraps its paragraphs and gives a fenced block a horizontal
+scrollbar; a mail client reflows. What no reader can do is undo a fold that is
+already in the bytes. That asymmetry is the one
+[`once.md` § How wide the report is](screens/once.md) already argued from, a
+few paragraphs down in the same section, when it refused truncation: *a renderer that cut text it could
+not restore would be the lie.* A fold is the same irreversibility with the text
+kept, and the section talked itself out of its own heading.
+
+**Its stated reason argues the other way once it is read literally.** The claim
+was that *a report whose line breaks depend on the window it was produced in
+looks different every time it is pasted*. True — and the report that satisfies
+it is the one carrying **no** line breaks of its own, because then the reader's
+viewer decides and the bytes are identical everywhere. Fixed-72 is not the
+neutral choice; it is one more window's width, frozen into the file, and wrong
+in every window that is not 72. This is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
+quiet half — a reason read correctly and concluded from backwards.
+
+**And it is not free.** A correct fold is width-aware, not `len()`-aware — this
+repo already knows the difference, which is why `scripts/screens-check.py`
+measures with `unicodedata` — and it must not break inside a resource name, a
+`·` run or a `→` trailer. No approved crate does it (`textwrap` is not among the
+twelve, [invariant 10](CLAUDE.md)), so it is hand-written product code in a file
+that is about to freeze, bought for an output that is worse afterwards.
+
+**What the section keeps.** The two-column body indent is real and stays — it is
+structure, not width. The *nothing here is truncated* half is a genuine decision
+and keeps its reasoning, including the console's three-line cap with `…`, which
+is unaffected: that renderer has `⏎` behind it and this one has no second
+screen. The heading loses its width half and becomes what the file actually
+rules on — nothing in the report is cut, and nothing in it is folded.
+
+**One consequence is already on the ground, and it is now the answer rather than
+a workaround.** The refused-operator block measures 108 columns at its header
+and 84, 145 and 178 at its closing sentence across the three coverage shapes, so
+`screens/states.md` describes those widths in prose because no 80-column fence
+can honestly draw them. Under a wrap ruling that would have been a gap waiting
+on the wrap; without one it is the file being accurate about output that is
+deliberately unfolded.
