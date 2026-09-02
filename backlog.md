@@ -1958,6 +1958,49 @@ recorded reversal and a later box rather than a dev round
   example. Needs the same ruling as the live-banner entry above — what a live
   banner owes a reader — and the two should be ruled together
 
+- **The memory budget is reachable from inside the binary, and the profile that
+  found it recorded the route as blocked when it is not.**
+  [NOTES § D204](NOTES.md#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03)
+  measured `arena_max=1` with `mmap_threshold` named putting steady `VmRSS` at
+  **45 312 / 45 584 KiB — 46.4 MB, under the `< 50MB` line** — with no data
+  structure touched. **State both figures or the claim is a unit trick**: peak
+  `VmHWM` under the same tunables is 50 444 KiB, which is 49.3 MiB but **51.6 MB
+  decimal and still over**. D171 tested the budget *"over on either reading of
+  the unit"* precisely because peak and steady were then the same value, and
+  these tunables are what break that identity — so the ruling this entry asks
+  for has to include *which figure the budget is against*. `GLIBC_TUNABLES` is read before `main`, so the in-process
+  equivalent is `mallopt(3)`; the report called that blocked on a `libc` crate
+  (invariant 10) and **it is not** — a bare `extern "C"` declaration links
+  against the glibc already in the build and names no crate — **measured, not
+  argued**: a cold reviewer compiled the three `mallopt` calls with no crate and
+  `nm -D` showed `U mallopt@GLIBC_2.2.5`, all three returning success. **But
+  "not the code" is wrong twice.** It needs `unsafe`, and `src/` contains no
+  `unsafe` block at all today, so the first one in an eight-file codebase whose
+  security gate runs on every diff is itself a ruling; and the three parameters
+  are glibc-private magic negatives with no Rust binding to check them against,
+  so a wrong `-8` silently sets `M_ARENA_TEST` instead. Four things need ruling,
+  and the fourth is the code: whether tuning the
+  allocator to meet a budget is meeting it or hiding it; that the win is
+  **host-dependent**, since arena count follows core count, so a machine with
+  fewer cores may already be under the line and a bigger one still over; and
+  that `k8s.rs` freezes at the end of Phase 6 while `main.rs` does not, so the
+  call has a home either way
+
+- **8–14 MB of the resident set is still unnamed, and the instant the peak is
+  taken at decides how much.** The other half of D204: the slopes are `per pod`
+  from two instruments that agree, but naming the field needs stack-trace
+  allocation profiling and neither `heaptrack` nor `valgrind` is installed on
+  the dev machine. A 6.7× expansion between the pruned JSON and the in-memory
+  `PodSnapshot` is either the price of typed storage or a fixable defect, and
+  which it is cannot be argued from the number alone — so this is a
+  *measurement* waiting on a tool, not a design question waiting on an opinion.
+  **Most of it has since been answered and this entry is what is left**: the
+  store is 2 701 bytes per pod, the decoded `Pod` behind it 17 956, and one page
+  of 500 is 18–24 MB scaled live — leaving **8–14 MB unnamed**, plus the question
+  of whether the page buffer is live at the same instant as the published
+  snapshot, which is source-reading today and needs a cluster
+  ([D204](NOTES.md#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03))
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

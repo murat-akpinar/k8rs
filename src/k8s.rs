@@ -3038,21 +3038,52 @@ impl Store {
 // for a `continue` token the API server has already compacted, not a rare one, and it is what
 // makes `Event::Init` clearing `filling` load-bearing rather than defensive.
 //
-// **What source-reading cannot answer is what a page costs.** That is a round trip against a
-// real API server, and this file has never met one. The arithmetic below is the half that can
-// be decided without a cluster; where the paint budget stops holding is the other half.
+// **What source-reading cannot answer is what a page costs**, and that is three questions with
+// three different answers. **On the wire** took a cluster and has had one (NOTES § D171). **In
+// memory** took none: the store and the whole decoded object are both measured on the committed
+// captures, and the page a decoded object sits in is scaled from there to a live pod by two
+// measured rates (`k8s_tests.rs` § WHAT A POD COSTS IN MEMORY). **Where the paint budget stops
+// holding** is the one still open, and it is a round trip nothing here has made.
 
 /// Objects per page of an initial LIST: **500** — the number kube also defaults to, chosen here
 /// rather than inherited, and sent by the `connect()` box below this one (NOTES § D147).
 ///
 /// **The binding constraint is memory, not round trips.** kube buffers a whole page of decoded
 /// objects before it emits the first `InitApply` (`watcher.rs:574`), so one page per watch sits
-/// on top of the store for as long as that page takes to drain. Measured over the 55 pod objects
-/// in the committed captures, the median is 3708 bytes of JSON and the largest 5662 — **with
-/// `managedFields` already stripped by the sanitizer**, so a live object is larger by an amount
-/// only a cluster can say. A 500-object page is therefore ~1.9 MB at the median and a 5000-object
-/// one ~19 MB, against the `< 50MB RSS at ~1000 pods` (`REQUIREMENTS.md`) that the store itself
-/// also has to fit inside.
+/// on top of the store for as long as that page takes to drain. **Three numbers bound one page,
+/// and none of them is another:**
+///
+/// - **On the wire, served whole.** **One** generated pod is 7451 bytes as the API server serves
+///   it, `managedFields` and all (NOTES § D171) — one pod, so it carries no spread, and a page
+///   of it is ~3.7 MB. **The spread is the 57 pods in the committed captures**: median 3708
+///   bytes, largest 5662, smallest 1493 — **with `managedFields` already stripped by the
+///   sanitizer**, so those three are a floor and the generated pod is the only figure here that
+///   includes what a live object carries. What the two rows together say is that one pod is not
+///   one number.
+/// - **In the page buffer**, which holds whole decoded `Pod`s and not the pruned struct this file
+///   keeps — the term that decides this constant, and it now has a number. One decoded `Pod` is
+///   2416 bytes of struct plus a median 15540 of heap: **17956 all in, 6.43× the `PodSnapshot`
+///   it is pruned into**, so a page of 500 is **~9 MB on the captures**. Scaled to D171's live
+///   7451-byte pod it is **18–24 MB**: 36733 bytes per pod spreading one measured rate over the
+///   whole object, 47420 pricing `managedFields` separately at the `serde_json::Value` rate it
+///   really decodes into. **Both live figures are a capture measurement times a measured rate,
+///   never a measurement of a live page.**
+/// - **In the store**, the same sweep: one stored pod is 1032 bytes of `PodSnapshot` plus a
+///   median 1669 bytes of heap — **2701 all in, less than the wire median above**, not more.
+///   The prune works; what costs is the object it prunes *out of*. [`Store::snapshot`]
+///   deep-copies the lot, so a published snapshot is a second copy on top, and that one measures
+///   3028 bytes per pod over the same captures — larger only because a slope is a mean and the
+///   figure above it is a median.
+///
+/// The `< 50MB RSS at ~1000 pods` this was weighed against is a stated target, itself measured
+/// and unmet (`REQUIREMENTS.md`, NOTES § D204). **Whoever sizes this constant is sizing the
+/// transient, not the store**: the two store copies come to 5729 bytes per pod, and of the
+/// ~31.6 MB of D204's peak they do not account for, one page is 18–24 MB and the rest is
+/// unnamed. **Whether even that much is *added* to the snapshot's own peak is the one thing left
+/// unmeasured, and it is read off the source rather than measured** — `watcher.rs:547` pops the
+/// buffer as `filling` fills and it is empty by `InitDone`, [`Store::snapshot`] runs only after
+/// all five of them, and `memusage` reports a maximum rather than a total. So the two may be
+/// consecutive peaks rather than one sum, and which it is takes the cluster.
 ///
 /// **And at the size the budget is stated at, a larger page buys almost nothing.** ~1000 pods is
 /// two round trips at 500 and one at 1000, and the one it saves is bought by doubling the
@@ -3060,8 +3091,10 @@ impl Store {
 /// twenty sequential round trips a 10 000-pod cluster costs at this size are real, and **neither
 /// number is a measured crossing point**: NOTES § D115 says in as many words that ~1000 and
 /// 10 000 are the sizes the budget and `PRIOR-ART § A2` were *written* at. Which page size is
-/// faster, and at what cluster size the paint budget stops holding, are one measurement against a
-/// real API server, and nothing in this file has met one.
+/// faster, and at what cluster size the paint budget stops holding, are one measurement each
+/// against a real API server, and neither has been made. **The sweep does settle that this
+/// constant is the memory lever** — one page is three to four times the whole store beneath it
+/// at ~1000 pods — but which way to move it is that same unmade measurement. Named, not pulled.
 const INITIAL_LIST_PAGE: u32 = 500;
 
 // **Where the number is applied is the `connect()` box, not this one.** `page_size` reaches
@@ -3193,7 +3226,7 @@ const INITIAL_LIST_PAGE: u32 = 500;
 // **What source-reading cannot settle**, stated because the box asked for a number: whether any
 // real API server ever throttles a five-watch client at all, what its Priority-and-Fairness
 // `Retry-After` actually says, and whether its 429 body carries `retry_after_seconds` as well as
-// the header. Those are one cluster measurement, and nothing in this file has met one.
+// the header. Those are one cluster measurement, and none of the three has been made.
 
 // --- WHAT A THROTTLE LOOKS LIKE END ---
 
@@ -3547,8 +3580,8 @@ pub(crate) async fn drive_watching(
 // is per version.** A group serving `v1` and `v1beta1` costs two, and a cluster with CRDs on it
 // is the ordinary case rather than the exotic one. **The calls are also sequential** —
 // `for g in api_groups.groups { … .await? }` (`mod.rs:118-124`) — so they are `ΣV(g)` waits one
-// after another on the path that draws the first screen. **How long one round trip takes is not
-// measured here and cannot be**: this file has never met an API server, and `G` itself is a
+// after another on the path that draws the first screen. **How long one round trip takes has not
+// been measured**: nothing has yet timed discovery against a real API server, and `G` itself is a
 // number only a cluster can say.
 //
 // **So the sidebar is built from `run_aggregated()`, and a fallback under it is not

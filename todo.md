@@ -3322,13 +3322,13 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
 > strips to nothing. 6 **where the resident set is**, alone. 7 **a wedged watch
 > against a refused one**, alone.
 >
-> **Families 1, 2, 3 and 5 are closed** (2026-08-30, 2026-08-31, 2026-08-31,
-> 2026-09-02). The first unchecked box below belongs to **family 6** — *where
-> the resident set is* — and it runs **alone**, not batched. Family 4's three
-> boxes sit *after* it in the file: the boxes do not sit in family order here,
-> because a family is what a turn briefs together and the file's order is the
-> order they were found in. Read this list, not the line numbers, before
-> batching a turn.
+> **Families 1, 2, 3, 5 and 6 are closed** (2026-08-30, 2026-08-31, 2026-08-31,
+> 2026-09-02, 2026-09-03). The first unchecked box below belongs to **family
+> 4** — *what a default run prints* — and its three boxes are one turn. They sit
+> *after* the closed family-6 box in the file: the boxes do not sit in family
+> order here, because a family is what a turn briefs together and the file's
+> order is the order they were found in. Read this list, not the line numbers,
+> before batching a turn.
 >
 > **Family 5 was briefed as two dispatches, not one**, after a first attempt at
 > all three at once died on a budget limit having written nothing. Both halves
@@ -3407,7 +3407,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       have this name; the first one is the one that opens* — which is the one
       kubectl never gets to say, because client-go refuses the whole file
       ([D202](NOTES.md#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02))
-- [ ] **Where the 58 752 KiB at 1 000 pods actually is.** `REQUIREMENTS.md`'s
+- [x] **Where the 58 752 KiB at 1 000 pods actually is.** `REQUIREMENTS.md`'s
       memory budget is measured and unmet, and the measurement could not name the
       cause — it ruled out a per-object storage cost and located the *moment*
       (the initial LIST), which is as far as `VmRSS` can see
@@ -3423,7 +3423,17 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       object is larger by an amount only a cluster can say — it is **~3.7 MB**,
       measured; and the same comment cites the `< 50MB` budget as the thing a
       page has to fit inside, which is now a citation of something known not to
-      hold
+      hold.
+      **Done 2026-09-03
+      ([D204](NOTES.md#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03)).**
+      The store was the wrong suspect: a stored pod costs 2 701 bytes, *less* than
+      the 3 708 it arrives in, and both copies the process holds are under 20 % of
+      the slope. The memory is in the object the snapshot is pruned out of — a
+      decoded `Pod` at 6.43× its pruned form, buffered **500 at a time** — which
+      also supplies the model D171 declined to fit. `REQUIREMENTS.md` keeps
+      `< 50MB` and now carries the cause; the ~8–14 MB residual and the
+      `arena_max` lead are [`backlog.md`](backlog.md)'s, not a box in a running
+      phase
 - [x] **Sanitising for the screen and emitting for a consumer are two different
       functions** — the box above strips control characters on the way in, which
       is half of it. Whatever the *display* does to a string has to be undone

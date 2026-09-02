@@ -225,6 +225,7 @@ its line moving with it.
 - [D201](#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31) — the report does not wrap, and the screen loses the section that said it does
 - [D202](#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02) — the three context rows nothing draws yet, and the placeholder that is allowed to collide
 - [D203](#d203--the-screens-read-against-the-binary-a-failure-state-that-never-existed-and-the-two-files-that-had-to-stop-contradicting-each-other-2026-09-02) — the screens read against the binary: a failure state that never existed, and the two files that had to stop contradicting each other
+- [D204](#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03) — the resident set named by an instrument: the store is cheaper than the wire, and the memory is in a page of 500 whole pods
 
 ## Why it exists — where the gap is
 
@@ -17490,3 +17491,120 @@ lines, one per watch, and **no next action at all**. The screen now says the
 banner is what draws; the missing errand is a product gap in `main.rs` and is
 [`backlog.md`](backlog.md)'s, together with the 403 that
 `unreadable()` gives the identical treatment.
+
+### D204 — the resident set named by an instrument: the store is cheaper than the wire, and the memory is in a page of 500 whole pods (2026-09-03)
+
+[D171](#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28)
+measured 58 752 KiB at 1 011 pods, ruled out a per-object storage cost, located
+the *moment* — inside the initial LIST — and stopped, because `VmRSS` cannot see
+further. It has been profiled
+([reports/2026-09-02-where-the-resident-set-is-at-1000-pods.md](reports/2026-09-02-where-the-resident-set-is-at-1000-pods.md)),
+and then the profile's own headline turned out to be wrong, which is the more
+useful half of this entry.
+
+**No dependency was added and no compiled product code changed** — `k8s.rs`
+gained numbers in a doc comment and nothing else. Two instruments, both
+already here. `memusage` — glibc 2.44's own `LD_PRELOAD` heap profiler — with
+`/proc/<pid>/smaps` for what is not heap and `GLIBC_TUNABLES` as a
+counterfactual; and, for the part a cluster cannot see, a counting
+`#[global_allocator]` over `std::alloc::System`, **25 lines of `std` declared
+under `#[cfg(test)]`** in `k8s_tests.rs` § WHAT A POD COSTS IN MEMORY. The
+shipped binary is bit-identical — `nm -C target/debug/k8rs | grep -ci Counting`
+answers `0`. There is no valgrind, no heaptrack and no perf on this host, so
+invariant 10 was never approached.
+
+**Every term of the peak at 1 011 pods**, against a measured 60.7–63.3 MB:
+
+| term | bytes | instrument |
+|---|---|---|
+| peak live heap | 37.4 MB | `memusage heap peak`, 0.02 % over three runs |
+| binary + shared libraries + stacks | 10.6 MB | `smaps` |
+| glibc arena slack | 8.0–10.5 MB | the `arena_max=1` counterfactual |
+| glibc chunk overhead | ~3.3 MB | **an estimate, not a reading** — see below |
+| **accounted** | **59.3–61.8 MB** | ~1.4 MB is unattributed and stays so |
+
+**The store is not where the memory is, and the first draft of this entry said
+it was.** A stored `PodSnapshot` costs **2 701 bytes all in at the median of the
+57 committed captures** — 1 032 of struct plus 1 669 of heap — which is *less*
+than the 3 708 bytes it arrived in. The prune works. `Store::snapshot` deep-copies
+the lot, so a published snapshot is a second copy at **3 028 bytes per pod**, and
+both copies together are **5 729 bytes per pod: under 20 % of the ~30 KB slope
+D171 measured.** Four fifths of it is something else.
+
+**It is the object the snapshot was pruned *out of*.** kube buffers a whole page
+of decoded objects before it emits the first `InitApply` (`watcher.rs:574`), and
+`INITIAL_LIST_PAGE` is **500**. One decoded `Pod` is **17 956 bytes all in,
+6.43× the `PodSnapshot` it prunes into**; a page of 500 is **~9 MB on the
+sanitized captures and 18–24 MB scaled to a live pod** by two routes that share a
+term but not a mechanism. **Both live figures are a capture measurement times a
+measured rate, never a measurement of a live page**, and the captures are a floor
+because `sanitize.jq` strips `managedFields` and every annotation.
+
+That page is **58–75 % of the 31.6 MB the store leaves unaccounted** — and that
+subtraction holds only if both store copies are live at the instant of peak,
+which is the open question below. If the peak falls during the last page instead,
+the store's term there is nearer 500 × 2 701 = 1.35 MB and the gap to explain is
+*larger*, not smaller. The page is the dominant term on either reading; only its
+share moves.
+
+**And it explains the thing D171 could not.** D171 got two per-pod slopes that
+disagreed — **82.5 KiB** between 11 and 111 pods against **7.52 KiB** between 111
+and 10 011 — said the marginal falls as the count rises, and deliberately fitted
+no model. (Its third figure, 25.8 KiB, is per *workload object* and belongs to a
+leg where pod count is fixed; the three read as one falling curve and are not
+one, which is a unit slip worth not repeating.) A page buffer capped at 500 *is*
+the model: below 500 it holds one entry per pod and is charged to the marginal in
+full; at and above it stops growing and drops out of the marginal altogether.
+**Whoever sizes `INITIAL_LIST_PAGE` is sizing the resident set**, which is what
+that constant's own note has claimed since it was written and could not until
+now show.
+
+**What is still unmeasured, stated because three claims in this box were caught
+being reasoned instead of measured.** Whether the page buffer is even *added* to
+the published snapshot's peak is **source-reading, not measurement**:
+`watcher.rs:547` pops the buffer as `filling` fills and it is empty by
+`InitDone`, `Store::snapshot` runs only after all five, and `memusage` reports a
+maximum rather than a total — so the two may be consecutive peaks rather than one
+sum, and only a cluster can say. **8–14 MB of live heap is unnamed** whichever
+way that falls. The **~3.3 MB chunk-overhead row is an extrapolation**: the 9 %
+rate is measured over the whole cumulative allocation stream, 59 % of which is
+≤ 15-byte allocations that are overwhelmingly short-lived, and nothing measured
+the *live* set's size distribution. The **resting** live heap is bounded by
+subtraction and not read — `mallinfo2()` would give it, but `ptrace_scope=1` and
+no libc symbol table defeated three `gdb` attempts. And **the number is
+host-dependent**: arena count follows core count, and the profile ran with the
+fixture cluster up beside the review cluster, which is a contention confounder on
+the arena term specifically.
+
+**Two mechanisms were killed by measuring them**, which is the half of a profile
+that has no other way of being said. *One arena per tokio worker*: `taskset` from
+13 threads to 2 recovers ~2 000 KiB, not ~10 000. *Per-chunk overhead on many
+tiny allocations*: 59 % of the 559 920 allocations request ≤ 15 bytes and each takes a
+32-byte chunk, but over the whole mix that is 9 % more bytes than requested, not
+40 %.
+
+**The budget is not moved, for the reason D171 gave.** A target edited to match
+what the code returned is a test asserting what the implementation happens to
+return. `REQUIREMENTS.md` keeps `< 50MB` and now carries the cause.
+
+**How this entry got its own headline wrong, because that is the transferable
+part.** Its first draft said the ~30 KB slope was *"a fact about our own snapshot
+types rather than about kube or the allocator"*. Every number under it was
+correct and re-derived exactly; the **label** on them was reasoned from
+consistency, and it excluded by name two mechanisms nothing had measured. A
+**cold** `k8s-admin` — one that had not produced the measurement — caught it by
+reading `Store::snapshot`'s clone in the source, and one `#[cfg(test)]` allocator
+settled it in a single turn. The same review caught `REQUIREMENTS.md` attributing
+the whole 60 % to the pod store when the report's own arithmetic said ~50 %, and
+the chunk-overhead estimate wearing a measurement's label. **Three rounds of this
+box went to one failure repeating itself**: a number measured correctly and then
+described from reasoning
+([D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+is the same lesson, and it did not stop it). What stopped it was a reviewer who
+did not produce the number and an instrument that does not care what anyone
+expects.
+
+**The leads this opens are not boxes, because a box is never added to an open
+phase** ([`backlog.md`](backlog.md)): the ~8–14 MB residual with the instant-of-peak
+question under it, and `arena_max`, which measured **45 312 / 45 584 KiB steady —
+under the 50 MB line** — with no data structure touched.

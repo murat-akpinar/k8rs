@@ -16374,3 +16374,539 @@ async fn what_yaml_prints_re_reads_as_the_tree_the_strip_left_and_nothing_else()
         "no line is over 120 characters, so this guard was never fed the boundary it is for"
     );
 }
+
+// --- WHAT A POD COSTS IN MEMORY ---
+//
+// **A resident-set slope is a fact about the process, not about a struct**, and the note above
+// `INITIAL_LIST_PAGE` was reading one as the other. The ~30 KB per pod NOTES § D204 measured is
+// `VmHWM` against pod count, taken at the instant the first snapshot is published — and at that
+// instant [`Store::snapshot`] has just deep-copied every pod it holds (§ RESOLVING AN OWNER,
+// [`Store::with_owner`]), so the figure covers **two** complete copies plus whatever the
+// allocator is holding back from the kernel. What one `PodSnapshot` costs is a different number,
+// and it is measured here rather than reasoned about.
+//
+// **The instrument is a counting allocator, and it is `#[cfg(test)]`** — it is compiled into the
+// test binary and into nothing else, so the shipped binary is unchanged and no product file
+// gains an allocator. It needs no dependency (invariant 10): `std::alloc::GlobalAlloc` over
+// `System` and one thread-local counter.
+//
+// **Per thread, not per process**, because the harness runs tests in parallel and a global
+// counter would be measuring every other test in this binary at the same time. The pair is
+// const-initialised and has no destructor, so reading it allocates nothing and the allocator
+// cannot recurse into itself. What that costs is that a block freed on a thread other than the
+// one that allocated it lands on the wrong counter; nothing measured below crosses a thread.
+
+thread_local! {
+    /// Live bytes and peak live bytes since the last [`measured`] call, on this thread.
+    static HEAP: std::cell::Cell<(isize, isize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+fn charge(delta: isize) {
+    let _ = HEAP.try_with(|heap| {
+        let (live, peak) = heap.get();
+        let live = live + delta;
+        heap.set((live, peak.max(live)));
+    });
+}
+
+struct Counting;
+
+// SAFETY: every method forwards to `System`, which is a correct allocator, and hands back
+// exactly the pointer `System` returned. The bookkeeping between reads no memory and touches
+// only a `Cell`.
+unsafe impl std::alloc::GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let block = unsafe { std::alloc::System.alloc(layout) };
+        if !block.is_null() {
+            charge(layout.size() as isize);
+        }
+        block
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let block = unsafe { std::alloc::System.alloc_zeroed(layout) };
+        if !block.is_null() {
+            charge(layout.size() as isize);
+        }
+        block
+    }
+
+    /// **Forwarded rather than left to the trait default**, which is `alloc` + copy + `dealloc`:
+    /// every `Vec` growth in this binary would stop being a `realloc`, and the whole suite would
+    /// pay for an instrument two tests read.
+    unsafe fn realloc(
+        &self,
+        block: *mut u8,
+        layout: std::alloc::Layout,
+        new_size: usize,
+    ) -> *mut u8 {
+        let moved = unsafe { std::alloc::System.realloc(block, layout, new_size) };
+        if !moved.is_null() {
+            charge(new_size as isize - layout.size() as isize);
+        }
+        moved
+    }
+
+    unsafe fn dealloc(&self, block: *mut u8, layout: std::alloc::Layout) {
+        charge(-(layout.size() as isize));
+        unsafe { std::alloc::System.dealloc(block, layout) }
+    }
+}
+
+#[global_allocator]
+static COUNTING: Counting = Counting;
+
+/// Runs `build` and answers **the heap its result still holds** and **the peak live heap reached
+/// while it ran**, in bytes, on this thread.
+///
+/// The result is handed back rather than dropped: a value the caller keeps is the retention being
+/// measured, and dropping it inside would answer zero every time.
+fn measured<T>(build: impl FnOnce() -> T) -> (T, isize, isize) {
+    HEAP.with(|heap| heap.set((0, 0)));
+    let built = build();
+    let (live, peak) = HEAP.with(|heap| heap.get());
+    (built, live, peak)
+}
+
+/// Every captured Pod in the repo, with the bytes it arrived in — the spread the note above
+/// `INITIAL_LIST_PAGE` quotes, derived here rather than typed.
+fn captured_pods() -> Vec<(String, usize, Pod)> {
+    let pods: Vec<_> = every_captured_object()
+        .into_iter()
+        .filter(|(_, kind, _)| kind == "Pod")
+        .map(|(file, _, document)| {
+            let wire = serde_json::to_vec(&document)
+                .expect("a capture re-serialises")
+                .len();
+            let pod: Pod = serde_json::from_value(document)
+                .unwrap_or_else(|e| panic!("a Pod in {file} does not decode: {e}"));
+            let name = format!("{file}/{}", pod.metadata.name.clone().unwrap_or_default());
+            (name, wire, pod)
+        })
+        .collect();
+    assert!(
+        pods.len() > 50,
+        "only {} captured pods were found, so this sweep is reading the wrong place",
+        pods.len()
+    );
+    pods
+}
+
+/// **Whether [`K8S_SOURCE`] quotes this figure**, as a whole number and not as a run of digits
+/// inside a larger one — `57` must not be answered by `watcher.rs:574`.
+fn quoted_in_k8s(figure: isize) -> bool {
+    let needle = figure.to_string();
+    K8S_SOURCE.match_indices(&needle).any(|(at, _)| {
+        let before = K8S_SOURCE[..at].chars().next_back();
+        let after = K8S_SOURCE[at + needle.len()..].chars().next();
+        !before.is_some_and(|char| char.is_ascii_digit())
+            && !after.is_some_and(|char| char.is_ascii_digit())
+    })
+}
+
+/// Every figure the note above `INITIAL_LIST_PAGE` quotes off this sweep, checked back against
+/// the source.
+///
+/// **The count it quoted before this sweep existed had already drifted**, from the 55 pods the
+/// captures held when it was written to the 57 they hold now, and nothing went red. A figure
+/// measured here and typed there is two copies of one fact; this is the second one being read.
+fn the_note_quotes(figures: &[(&str, isize)]) {
+    for &(what, figure) in figures {
+        assert!(
+            quoted_in_k8s(figure),
+            "{what} is {figure}, and the note above INITIAL_LIST_PAGE does not say so"
+        );
+    }
+}
+
+/// **The heap one value holds**, measured by cloning it.
+///
+/// Every field of the three types handed to this is owned — nothing sits behind a shared
+/// pointer — so the heap a copy allocates is the heap the original holds, and for a
+/// [`PodSnapshot`] it is literally the call [`Store::with_owner`] makes once per pod.
+///
+/// **It answers a floor, and the same floor for everything it is given.** `String::clone` and
+/// `Vec::clone` allocate exactly `len`, so a copy never carries spare capacity the decode may
+/// have left behind. That makes every figure below comparable with every other one, which a
+/// measurement of the originals would not be: `serde_json::from_value` can *move* a `String` out
+/// of the tree it is decoding and keep its capacity, `from_str` allocates it exactly, and the two
+/// would answer differently for one identical pod.
+fn heap_of<T: Clone>(value: &T) -> isize {
+    let (copy, retained, _) = measured(|| value.clone());
+    drop(copy);
+    retained
+}
+
+/// The heap one stored pod holds, per capture, smallest first.
+fn retained_per_pod() -> Vec<(isize, usize, String)> {
+    let mut rows: Vec<(isize, usize, String)> = captured_pods()
+        .into_iter()
+        .map(|(name, wire, pod)| (heap_of(&ingest::<Pod, PodSnapshot>(pod)), wire, name))
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// **What one pod costs in memory, against what it costs on the wire.**
+///
+/// The bound is derived from the budget rather than from the output: `< 50MB RSS at ~1000 pods`
+/// (`REQUIREMENTS.md`) is 50 KB of *whole process* per pod, the process holds two copies of each
+/// while a snapshot is alive, and kube's page buffer, the findings and the terminal are all
+/// inside the same 50 MB. A `PodSnapshot` costing more than the JSON it was pruned out of would
+/// be the thing to explain; 8 KiB is above the largest capture's own wire size with room, and far
+/// below the ~30 KB per pod NOTES § D204 read off the resident set.
+#[test]
+fn a_pod_snapshot_costs_about_what_the_pruned_object_costs_on_the_wire() {
+    println!(
+        "size_of::<PodSnapshot>() = {} bytes, size_of::<ContainerSnapshot>() = {} bytes",
+        size_of::<PodSnapshot>(),
+        size_of::<ContainerSnapshot>()
+    );
+
+    let flat = size_of::<PodSnapshot>() as isize;
+    let rows = retained_per_pod();
+    let smallest = rows.first().expect("the sweep found pods");
+    let largest = rows.last().expect("the sweep found pods");
+    println!(
+        "{} captured pods: heap held, median {} bytes, smallest {} ({}), largest {} ({})",
+        rows.len(),
+        rows[rows.len() / 2].0,
+        smallest.0,
+        smallest.2,
+        largest.0,
+        largest.2
+    );
+    println!(
+        "so one stored pod costs {} bytes all in at the median and {} at the largest",
+        flat + rows[rows.len() / 2].0,
+        flat + largest.0
+    );
+    let mut wires: Vec<usize> = rows.iter().map(|(_, wire, _)| *wire).collect();
+    wires.sort_unstable();
+    println!(
+        "the same pods on the wire: median {} bytes, smallest {} bytes, largest {} bytes",
+        wires[wires.len() / 2],
+        wires.first().expect("the sweep found pods"),
+        wires.last().expect("the sweep found pods")
+    );
+    for (retained, wire, name) in rows.iter().rev().take(3) {
+        println!("  {name}: {retained} bytes held, {wire} bytes on the wire");
+    }
+
+    // **The flat struct is counted with the heap and not beside it**: it is 1032 bytes and the
+    // median pod's heap is 1669, so a bound written against the heap alone would be missing
+    // nearly half of what a pod in that `Vec` actually costs.
+    assert!(
+        flat + largest.0 < 8 * 1024,
+        "the largest captured pod costs {} bytes in memory, which is more than the whole-process \
+         budget leaves room for two copies of ({})",
+        flat + largest.0,
+        largest.2
+    );
+    assert!(
+        smallest.0 > 0,
+        "a PodSnapshot was measured as holding no heap at all, so the counter is not counting"
+    );
+
+    the_note_quotes(&[
+        ("the number of captured pods", rows.len() as isize),
+        (
+            "the median pod on the wire",
+            wires[wires.len() / 2] as isize,
+        ),
+        (
+            "the largest pod on the wire",
+            *wires.last().expect("the sweep found pods") as isize,
+        ),
+        (
+            "the smallest pod on the wire",
+            *wires.first().expect("the sweep found pods") as isize,
+        ),
+        ("size_of::<PodSnapshot>()", flat),
+        ("the median heap a stored pod holds", rows[rows.len() / 2].0),
+        (
+            "one stored pod, all in, at the median",
+            flat + rows[rows.len() / 2].0,
+        ),
+    ]);
+}
+
+/// **What [`Store::snapshot`] costs per pod, which is the second copy** — measured as a slope, so
+/// the nodes, the workloads and the `Vec` header all cancel and only the per-pod term is left.
+///
+/// **The bound is the mechanism and not the output**: the published pods are a `Vec`, so one pod
+/// is one `size_of::<PodSnapshot>()` inline plus the heap [`Store::with_owner`]'s `clone` copies,
+/// and a slope that is not those two added means the snapshot is not one deep copy per pod. The
+/// tolerance is there for the names — the keys below are varied to make N distinct entries, so
+/// the copies are a digit or two wider than the captures they came from — and for nothing else.
+#[test]
+fn the_published_snapshot_holds_a_second_copy_of_every_pod() {
+    let flat = size_of::<PodSnapshot>() as isize;
+    let rows = retained_per_pod();
+    let mean: isize = rows.iter().map(|(held, _, _)| held).sum::<isize>() / rows.len() as isize;
+
+    // **The objects are the captures and only the *key* is varied**, which is the same
+    // stream-synthesis this file opens with: a store is keyed by namespace and name, so one
+    // capture listed twice collapses, and the question needs N distinct entries rather than N
+    // distinct pods.
+    let captured = captured_pods();
+    let store_of = |repeats: usize| {
+        let mut objects: Vec<Pod> = Vec::new();
+        for repeat in 0..repeats {
+            for (_, _, pod) in &captured {
+                let mut copy = pod.clone();
+                copy.metadata.name = Some(format!(
+                    "{}-{repeat}",
+                    pod.metadata.name.clone().unwrap_or_default()
+                ));
+                objects.push(copy);
+            }
+        }
+        let mut store = Store::default();
+        list(&mut store, Store::pod, objects);
+        list(&mut store, Store::node, Vec::<Node>::new());
+        list(&mut store, Store::deployment, Vec::<Deployment>::new());
+        list(&mut store, Store::stateful_set, Vec::<StatefulSet>::new());
+        list(&mut store, Store::daemon_set, Vec::<DaemonSet>::new());
+        (repeats * captured.len(), store)
+    };
+
+    let (few, small) = store_of(5);
+    let (many, large) = store_of(10);
+    let (small_snapshot, small_held, small_peak) =
+        measured(|| small.snapshot(now()).expect("every list has landed"));
+    let (large_snapshot, large_held, large_peak) =
+        measured(|| large.snapshot(now()).expect("every list has landed"));
+    assert_eq!(small_snapshot.pods.len(), few, "the small store lost pods");
+    assert_eq!(large_snapshot.pods.len(), many, "the large store lost pods");
+
+    let slope = (large_held - small_held) / (many - few) as isize;
+    let peak_slope = (large_peak - small_peak) / (many - few) as isize;
+    println!(
+        "Store::snapshot() at {few} pods holds {small_held} bytes (peak {small_peak}), at {many} \
+         pods {large_held} bytes (peak {large_peak})"
+    );
+    println!(
+        "so one published pod costs {slope} bytes held ({peak_slope} at peak), against {flat} \
+         bytes of struct plus a mean single-pod clone of {mean} bytes over {} captures",
+        rows.len()
+    );
+
+    let expected = flat + mean;
+    assert!(
+        slope > expected * 9 / 10 && slope < expected * 11 / 10,
+        "one published pod costs {slope} bytes, but one struct plus one clone of its heap is \
+         {expected}, so the snapshot is not one deep copy per pod"
+    );
+
+    the_note_quotes(&[("what one published pod costs", slope)]);
+}
+
+// **What kube's page buffer holds is not what the store holds.** `INITIAL_LIST_PAGE` is 500 and
+// kube decodes a whole page of objects before it emits the first `InitApply`
+// (`watcher.rs:574`) — and what it decodes is a full `k8s_openapi::api::core::v1::Pod`, the
+// object [`PodSnapshot`] is a subset of, not the subset. The two measurements above answer what
+// the store costs; this one answers what sits on top of it while a page drains, which is the
+// term NOTES § D204 could not name and the note above `INITIAL_LIST_PAGE` still calls unmeasured.
+//
+// **The captures under-state a live object and the direction is known.** `scripts/sanitize.jq`
+// deletes `managedFields` and every annotation before a capture is committed, and D171 measured
+// one live pod at 7451 bytes served of which 2853 — 38.3 % — was `managedFields` alone
+// (`reports/2026-08-28-ten-thousand-pod-resident-set.md`). So every figure below is a floor, and
+// the test scales it rather than asserting past it: `ManagedFieldsEntry::fields_v1` is
+// `FieldsV1(pub serde_json::Value)`, so those bytes decode into a `Value` tree, and what a
+// `Value` tree costs per byte of its own JSON is measurable off the captures that are here.
+
+/// The heap one **decoded, unpruned** `Pod` holds beside the [`PodSnapshot`] it prunes down to —
+/// one row per capture, smallest decoded first.
+fn decoded_beside_stored() -> Vec<(isize, isize, usize, String)> {
+    let mut rows: Vec<(isize, isize, usize, String)> = captured_pods()
+        .into_iter()
+        .map(|(name, wire, pod)| {
+            let decoded = heap_of(&pod);
+            (
+                decoded,
+                heap_of(&ingest::<Pod, PodSnapshot>(pod)),
+                wire,
+                name,
+            )
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// **What one page of `INITIAL_LIST_PAGE` costs, and what the prune buys.**
+///
+/// Three bounds, each derived from something other than this test's own output:
+///
+/// - **A decode is not a prune.** Every field a `PodSnapshot` holds came out of the decoded
+///   `Pod`, and the ingest path only ever drops — so no capture may cost *less* decoded than
+///   stored. A row that did would mean the two are not the same object, and the ratio printed
+///   below would be measuring nothing.
+/// - **A decode is not a compression either**, which is also the instrument's own liveness
+///   check: a counter that has stopped counting answers zero heap for every pod, and the bound
+///   above would still pass on `size_of::<Pod>()` alone.
+/// - **One page must fit inside the whole-process budget.** `< 50MB RSS at ~1000 pods`
+///   (`REQUIREMENTS.md`) is the ceiling the store, the findings, the terminal *and* this buffer
+///   all share. A page that does not fit it alone would make `INITIAL_LIST_PAGE` the thing that
+///   breaks the budget before a single pod is stored, which is a fact about the constant and not
+///   about a fixture.
+#[test]
+fn one_page_of_decoded_pods_is_what_sits_on_top_of_the_store() {
+    let rows = decoded_beside_stored();
+    let page = INITIAL_LIST_PAGE as isize;
+    let flat_decoded = size_of::<Pod>() as isize;
+    let flat_stored = size_of::<PodSnapshot>() as isize;
+    let median = &rows[rows.len() / 2];
+    let smallest = rows.first().expect("the sweep found pods");
+    let largest = rows.last().expect("the sweep found pods");
+
+    println!(
+        "size_of::<Pod>() = {flat_decoded} bytes, size_of::<PodSnapshot>() = {flat_stored} bytes"
+    );
+    println!(
+        "{} captured pods, decoded whole: heap held, median {} bytes, smallest {} ({}), largest \
+         {} ({})",
+        rows.len(),
+        median.0,
+        smallest.0,
+        smallest.3,
+        largest.0,
+        largest.3
+    );
+    let all_in = |heap: isize| flat_decoded + heap;
+    println!(
+        "so one decoded pod costs {} bytes all in at the median, {} at the smallest, {} at the \
+         largest",
+        all_in(median.0),
+        all_in(smallest.0),
+        all_in(largest.0)
+    );
+
+    // **The ratio is taken per pod and then medianed, not as one median over another.** A
+    // capture that decodes large and prunes small would vanish inside a ratio of two medians.
+    let mut ratios: Vec<isize> = rows
+        .iter()
+        .map(|(decoded, stored, _, _)| all_in(*decoded) * 100 / (flat_stored + stored))
+        .collect();
+    ratios.sort_unstable();
+    println!(
+        "against the PodSnapshot pruned out of it, that is {}.{}x its own stored form at the \
+         median ratio (lowest {}.{}x, highest {}.{}x — that is the spread of the ratio, not the \
+         smallest and largest pod)",
+        ratios[ratios.len() / 2] / 100,
+        ratios[ratios.len() / 2] % 100,
+        ratios[0] / 100,
+        ratios[0] % 100,
+        ratios[ratios.len() - 1] / 100,
+        ratios[ratios.len() - 1] % 100,
+    );
+    println!(
+        "one page of {page} therefore costs {} bytes ({}.{} MB) at the median capture, {}.{} MB \
+         at the largest",
+        page * all_in(median.0),
+        page * all_in(median.0) / 1_000_000,
+        page * all_in(median.0) % 1_000_000 / 100_000,
+        page * all_in(largest.0) / 1_000_000,
+        page * all_in(largest.0) % 1_000_000 / 100_000,
+    );
+
+    // **The scaling, measured rather than asserted — twice, by two routes that share a term but
+    // not a mechanism.** D171's live pod is 7451 bytes served, of which 2853 is `managedFields`
+    // (`reports/2026-08-28-ten-thousand-pod-resident-set.md`), so 4598 is the part a sanitized
+    // capture still carries.
+    //
+    // **Route one spreads one measured rate over the whole object**: how much heap a captured pod
+    // costs per byte of its own JSON, applied to all 7451 — which prices `managedFields` at what
+    // the rest of a pod costs.
+    let mut per_wire_byte: Vec<isize> = rows
+        .iter()
+        .map(|(decoded, _, wire, _)| all_in(*decoded) * 100 / *wire as isize)
+        .collect();
+    per_wire_byte.sort_unstable();
+    let pod_rate = per_wire_byte[per_wire_byte.len() / 2];
+    println!(
+        "a captured pod costs {}.{}x its own wire bytes in memory at the median, so D171's \
+         7451-byte live pod is ~{} bytes and a page of {page} is ~{}.{} MB",
+        pod_rate / 100,
+        pod_rate % 100,
+        pod_rate * 7451 / 100,
+        page * (pod_rate * 7451 / 100) / 1_000_000,
+        page * (pod_rate * 7451 / 100) % 1_000_000 / 100_000,
+    );
+
+    // **Route two prices the two halves separately**, because `ManagedFieldsEntry::fields_v1` is
+    // `FieldsV1(pub serde_json::Value)` and a `Value` tree is not priced like a typed struct: a
+    // `serde_json::Map` is a `BTreeMap`, whose smallest node is allocated whole. The rate is
+    // measured over every captured object of every kind, not only pods, which is what
+    // [`every_captured_object`] sweeps.
+    //
+    // **Which route lands higher is read off the output, not argued from the construction.** The
+    // two bracket the figure, and neither is a measurement of a live pod's memory — that needs a
+    // cluster this file has never met.
+    let mut per_kilobyte: Vec<isize> = every_captured_object()
+        .into_iter()
+        .map(|(file, _, document)| {
+            let wire = serde_json::to_vec(&document)
+                .expect("a capture re-serialises")
+                .len() as isize;
+            assert!(wire > 0, "{file} re-serialised to nothing");
+            heap_of(&document) * 1024 / wire
+        })
+        .collect();
+    per_kilobyte.sort_unstable();
+    let value_rate = per_kilobyte[per_kilobyte.len() / 2];
+    let split = (7451 - 2853) * pod_rate / 100 + 2853 * value_rate / 1024;
+    println!(
+        "a serde_json::Value tree costs {value_rate} bytes of heap per 1024 bytes of its own \
+         JSON at the median capture, so priced in halves — 4598 bytes at the pod rate plus 2853 \
+         of managedFields at the Value rate — the same live pod is ~{split} bytes and a page of \
+         {page} is ~{}.{} MB",
+        page * split / 1_000_000,
+        page * split % 1_000_000 / 100_000,
+    );
+
+    for (decoded, stored, wire, name) in rows.iter().rev().take(3) {
+        println!(
+            "  {name}: {} bytes decoded, {} bytes stored, {wire} bytes on the wire",
+            all_in(*decoded),
+            flat_stored + stored
+        );
+    }
+
+    for (decoded, stored, wire, name) in &rows {
+        assert!(
+            all_in(*decoded) > flat_stored + stored,
+            "{name} costs {} bytes decoded and {} bytes stored, so the prune added memory",
+            all_in(*decoded),
+            flat_stored + stored
+        );
+        assert!(
+            *decoded > *wire as isize,
+            "{name} arrived in {wire} bytes of JSON and decodes into {decoded} bytes of heap, so \
+             either decoding compressed it or the allocator counter is not counting"
+        );
+    }
+    assert!(
+        page * all_in(largest.0) < 50 * 1024 * 1024,
+        "a page of {page} of the largest captured pod is {} bytes, and the whole process is held \
+         to 50MB at ~1000 pods",
+        page * all_in(largest.0)
+    );
+
+    // **Every figure this sweep put into the note, read back out of it.** The note quotes the
+    // two live-scaled numbers as well, which are the ones with no cluster behind them and so the
+    // ones most likely to be edited by hand later.
+    //
+    // **`5729` is in the note and is deliberately not pinned here**: it is `2701 + 3028`, one
+    // from each of the two tests above, and both halves are already pinned there. Nothing is
+    // gained by plumbing a second test's slope in to re-add it.
+    the_note_quotes(&[
+        ("size_of::<Pod>()", flat_decoded),
+        ("the median heap a decoded pod holds", median.0),
+        ("one decoded pod, all in, at the median", all_in(median.0)),
+        ("one live pod at the flat pod rate", pod_rate * 7451 / 100),
+        ("one live pod priced in halves", split),
+    ]);
+}
