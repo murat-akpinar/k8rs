@@ -184,6 +184,7 @@
 ### ⚡ Performance
 
 - *(rules)* Join EndpointSlices to Services once instead of per Service ([b75271b](https://github.com/murat-akpinar/k8rs/commit/b75271b1090704c25668319c050ddcddd5ec42a8)) — The Waste pane walked every EndpointSlice for every Service, and MOST_ROWS_PER_SECTION caps the rows drawn rather than the objects visited, so the cost grew about 4x per doubling of the Service count. It is now one pass into a map keyed on (namespace, kubernetes.io/service-name); after the change the same input grows linearly.
+- *(k8s)* Name where the resident set goes, and correct the page arithmetic ([1bf0a31](https://github.com/murat-akpinar/k8rs/commit/1bf0a3145fd616c129573e96f06bbac30f552899)) — The 58 752 KiB at 1 011 pods is profiled rather than reasoned about. glibc's own memusage plus a counting #[cfg(test)] global allocator, no dependency and no compiled product change.
 
 ### 🧪 Testing
 
