@@ -3322,11 +3322,21 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
 > strips to nothing. 6 **where the resident set is**, alone. 7 **a wedged watch
 > against a refused one**, alone.
 >
-> **Families 1, 2 and 3 are closed (2026-08-30, 2026-08-31, 2026-08-31).** The
-> first unchecked box below belongs to **family 5**, not family 4 — the boxes do
-> not sit in family order in this file, because a family is what a turn briefs
-> together and the file's order is the order they were found in. Read this list,
-> not the line numbers, before batching a turn.
+> **Families 1, 2, 3 and 5 are closed** (2026-08-30, 2026-08-31, 2026-08-31,
+> 2026-09-02). The first unchecked box below belongs to **family 6** — *where
+> the resident set is* — and it runs **alone**, not batched. Family 4's three
+> boxes sit *after* it in the file: the boxes do not sit in family order here,
+> because a family is what a turn briefs together and the file's order is the
+> order they were found in. Read this list, not the line numbers, before
+> batching a turn.
+>
+> **Family 5 was briefed as two dispatches, not one**, after a first attempt at
+> all three at once died on a budget limit having written nothing. Both halves
+> were still reviewed together, which is what
+> [D103](NOTES.md#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+> actually asks for
+> ([D202](NOTES.md#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02) ·
+> [D203](NOTES.md#d203--the-screens-read-against-the-binary-a-failure-state-that-never-existed-and-the-two-files-that-had-to-stop-contradicting-each-other-2026-09-02)).
 
 - [x] `l` logs: fetch and follow, container picker, `--previous` for a
       crashed container — the single most-typed kubectl command there is.
