@@ -6461,9 +6461,21 @@ pub(crate) struct Session {
     /// ([`kubeconfig_context`]). It is C1's object name
     /// ([`crate::rules::ClusterSnapshot::context`]).
     ///
-    /// `None` only for a session built from a client rather than a file, and for a kubeconfig
-    /// whose current context is empty — the state C1 already says nothing about
-    /// (NOTES § D51).
+    /// **`None` is the state C1 says nothing about** (NOTES § D51), and **three different
+    /// things arrive at it — only the third is `(unnamed)`**
+    /// (NOTES § D202): no kubeconfig at all ([`session`]), no context *resolved* — [`wanted`]
+    /// answering `None` because `current-context:` is absent, names an entry the file does not
+    /// define, or names one with no `context:` body — and a context resolved whose name strips
+    /// to nothing.
+    ///
+    /// **[`Choice::name`]'s `None` is that third state alone, so this field is a strict superset
+    /// and a renderer needs both facts before it picks a word.** `(unnamed)` belongs to the
+    /// third; the first two are `screens/context.md`'s *no context chosen yet*, which means no
+    /// cluster has been picked rather than one whose name cannot be printed. Collapsing them
+    /// draws `ctx: (unnamed)` over a run that is on no context — the same header/picker
+    /// disagreement D202 closed, through the other door. What [`drawable`] guarantees is
+    /// narrower and is the guarantee that was missing: asked about **one entry**, this and
+    /// [`Choice::name`] answer the same thing.
     pub(crate) context: Option<String>,
     /// **The namespace that context names for itself**, or `None` for a context that names none
     /// — [`kubeconfig_namespace`] is what reads it, and why the two are not one answer.
@@ -6787,6 +6799,26 @@ pub(crate) async fn connect_with(
     }
 }
 
+/// **One string off the kubeconfig, cleaned, bounded, and `None` when nothing is left to draw** —
+/// the rule [`kubeconfig_context`], [`contexts`], [`namespace_of`], [`written_tag`] and
+/// [`renewal`] all answer with, written once (invariant 9, NOTES § D154).
+///
+/// **It is one function because it was five copies and two of them came apart** (NOTES § D202).
+/// [`kubeconfig_context`] collapsed a name that strips to nothing to `None` while [`Choice::name`]
+/// kept the empty `String`, so a header said *no context* about the very context the run was on
+/// while the picker drew a blank row marked `(current)`. Prose beside each copy said they agreed;
+/// only one call site can.
+///
+/// **What a screen draws for `None` is `screens/context.md`'s and never this file's.**
+/// `(unnamed)` is a rendering decision, and putting it here would make it a *`Finding`'s object
+/// name* — C1 would report an expiring certificate about a cluster called `(unnamed)`, and the
+/// state NOTES § D51 says C1 is silent about would have been given something to say. It is the
+/// split invariant 5 already makes between a timestamp and *"4 min ago"*.
+fn drawable(mut value: String) -> Option<String> {
+    text(&mut value, IDENTIFIER);
+    (!value.is_empty()).then_some(value)
+}
+
 /// **Which context this session is on**, cleaned and bounded — the name the reader gave, or the
 /// one their file already had.
 ///
@@ -6804,10 +6836,11 @@ pub(crate) async fn connect_with(
 /// NOTES § D154): a kubeconfig is written by tooling as often as by hand, and a bidi override in
 /// a context name reverses the card it is printed on. Empty becomes `None` — C1 with no context
 /// says nothing, which is the state NOTES § D51 already describes.
+///
+/// **The placeholder a screen puts in its place is not this function's** — [`drawable`], which
+/// [`Choice::name`] answers with too, says why.
 fn kubeconfig_context(kubeconfig: &Kubeconfig, asked_for: Option<&str>) -> Option<String> {
-    let mut name = wanted(kubeconfig, asked_for)?.name.clone();
-    text(&mut name, IDENTIFIER);
-    (!name.is_empty()).then_some(name)
+    drawable(wanted(kubeconfig, asked_for)?.name.clone())
 }
 
 /// **The context entry this run is on** — the one place `--context` beats `current-context`, and
@@ -6875,9 +6908,7 @@ fn kubeconfig_namespace(kubeconfig: &Kubeconfig, asked_for: Option<&str>) -> Opt
 /// Two callers and one read, so the namespace a session starts in and the namespace its row shows
 /// cannot come out differently.
 fn namespace_of(context: Option<&kube::config::Context>) -> Option<String> {
-    let mut namespace = context?.namespace.clone()?;
-    text(&mut namespace, IDENTIFIER);
-    (!namespace.is_empty()).then_some(namespace)
+    drawable(context?.namespace.clone()?)
 }
 
 /// **One context in the reader's kubeconfig, as the startup picker draws it** (NOTES § D116).
@@ -6892,10 +6923,19 @@ fn namespace_of(context: Option<&kube::config::Context>) -> Option<String> {
 /// [`Tag`] below carries one and says why it may.
 #[derive(Clone)]
 pub(crate) struct Choice {
-    /// **The context's name as it is drawn**, stripped and bounded through the same [`text`] call
-    /// [`kubeconfig_context`] makes, so the name on this row and the name a [`Session`] reports
-    /// are one string by construction.
-    pub(crate) name: String,
+    /// **The context's name as it is drawn, or `None` when nothing of it survives the strip** —
+    /// [`drawable`], the same call [`kubeconfig_context`] makes, so the name on this row and the
+    /// name a [`Session`] reports are one answer by construction.
+    ///
+    /// **It was a `String`, and that shape *was* the two readers disagreeing** (NOTES § D202):
+    /// an empty one here while [`kubeconfig_context`] answered `None` beside it. [`drawable`]
+    /// carries the rest of that story.
+    ///
+    /// **`screens/context.md` draws this `None` as `(unnamed)`, and that word is allowed to
+    /// collide with a context genuinely named it** (NOTES § D202) — what the collision may not
+    /// cost is correctness, and it does not: [`key`](Choice::key) keeps each row's own spelling,
+    /// so `⏎` opens the entry that row actually is.
+    pub(crate) name: Option<String>,
     /// **The same name as the *file* spells it — what [`connect`] must be handed to open this
     /// row**, and the one field here that is never drawn.
     ///
@@ -7098,8 +7138,6 @@ pub(crate) fn contexts(kubeconfig: &Kubeconfig, asked_for: Option<&str>) -> Vec<
                     }
                 },
             };
-            let mut name = named.name.clone();
-            text(&mut name, IDENTIFIER);
             let tag = match written_tag(context) {
                 Some(written) => Tag::Written(written),
                 // **A written tag is never a second opinion on a derived one and never the other
@@ -7125,7 +7163,7 @@ pub(crate) fn contexts(kubeconfig: &Kubeconfig, asked_for: Option<&str>) -> Vec<
                 key: named.name.clone(),
                 shadowed,
                 tag,
-                name,
+                name: drawable(named.name.clone()),
                 server,
             }
         })
@@ -7143,17 +7181,17 @@ pub(crate) fn contexts(kubeconfig: &Kubeconfig, asked_for: Option<&str>) -> Vec<
 /// **Empty is `None`** for [`kubeconfig_context`]'s reason: a blank column is the ordinary case,
 /// and a tag that is present and says nothing is worse than one that is absent.
 fn written_tag(context: Option<&kube::config::Context>) -> Option<String> {
-    let mut tag = context?
-        .extensions
-        .as_ref()?
-        .iter()
-        .find(|extension| extension.name == "k8rs")?
-        .extension
-        .get("tag")?
-        .as_str()?
-        .to_string();
-    text(&mut tag, IDENTIFIER);
-    (!tag.is_empty()).then_some(tag)
+    drawable(
+        context?
+            .extensions
+            .as_ref()?
+            .iter()
+            .find(|extension| extension.name == "k8rs")?
+            .extension
+            .get("tag")?
+            .as_str()?
+            .to_string(),
+    )
 }
 
 /// **The provider a server host gives away — never an environment, and never a *place***
@@ -7487,11 +7525,11 @@ pub(crate) const CERTIFICATE_BYTES: u64 = 64 * 1024;
 /// API server, so it is not *untrusted* in that sense — but a kubeconfig is written by tooling as
 /// often as by hand, and a `command` carrying a bidi override would rewrite the line it is
 /// printed in. An empty one becomes `None`, because a sentence with an empty pair of backticks
-/// in it is worse than one that names no program at all.
+/// in it is worse than one that names no program at all — [`drawable`], the one call every
+/// kubeconfig string in this file goes through, and for one round this was a fifth hand-written
+/// copy of it (`k8s-admin`, 2026-09-02).
 fn renewal(auth: &AuthInfo) -> Option<String> {
-    let mut command = auth.exec.as_ref()?.command.clone()?;
-    text(&mut command, IDENTIFIER);
-    (!command.is_empty()).then_some(command)
+    drawable(auth.exec.as_ref()?.command.clone()?)
 }
 
 /// **Everything [`connect`] does once it has a client** — split off so it can be proven against

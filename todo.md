@@ -3367,7 +3367,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       killer, which then killed the pods it was there to watch
       ([#871](https://github.com/derailed/k9s/issues/871) ·
       [PRIOR-ART § A6](PRIOR-ART.md#a6--unbounded-memory-in-the-field-for-8-days))
-- [ ] **A context whose name strips to nothing is two readers disagreeing, and
+- [x] **A context whose name strips to nothing is two readers disagreeing, and
       the screen has no answer for it.** `name: ""`, or a name made only of
       characters invariant 9 removes: `kubeconfig_context` collapses it to
       `None` while the namespace beside it is real, so the header says *no
@@ -3380,6 +3380,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       one** — what a row with no drawable name looks like, and what the header
       says — so it is `tui-designer` then `dev-core`, and it is in time only
       while `k8s.rs` is still open
+      ([D202](NOTES.md#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02))
 - [x] **`screens/context.md` does not know about `shadowed` or `Unreadable`, and
       the code now hands it both.** `grep shadowed screens/context.md` returns
       nothing, so as specified a duplicate-named context is an ordinary

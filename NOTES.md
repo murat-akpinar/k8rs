@@ -17341,3 +17341,56 @@ instead. Caught in the PM's pass, from the agent's own report naming the
 convention it had then not followed — which is
 [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
 with the object one `grep` away.
+
+**The Rust shape the screen ruling needed, and the helper it turned out to be
+hiding.** `Choice::name` becomes `Option<String>`, because
+[`Session::context`](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)
+is already `Option<String>` and fixed there by C1 — so that *is* the only shape
+the other reader can agree in, and anything else (a sentinel string, a `bool`
+beside it) hands the renderer two rules. The empty→`None` rule moves into one
+`drawable(String) -> Option<String>`, and the count is the finding: it was
+**five** hand-written copies of `strip; bound; empty→None`, not the two the box
+named — `kubeconfig_context`, `contexts`, `namespace_of`, `written_tag` and
+`renewal` — and prose beside two of them *already claimed they agreed*
+(`written_tag`: *"Empty is `None` for `kubeconfig_context`'s reason"`;
+`Identity::of`: *"the same way `renewal` and `kubeconfig_context` answer it"*)
+while one of the five had drifted anyway. Only a call site cannot drift. The
+fifth was found by the operator review, after the first pass had reached past
+the box for two of them and stopped short of the third.
+
+**`(unnamed)` is never in `src/`, and that is the load-bearing half.**
+`Session::context` feeds `ClusterSnapshot::context`, which is **C1's object
+name**, so a placeholder in the *data* would make a rule report an expiring
+certificate about a cluster called `(unnamed)` and would give C1 something to
+say in the state [D51](#d51--the-third-review-of-the-same-contract-and-the-sentence-that-would-have-rebuilt-the-bug-it-closed-2026-08-12)
+says it is silent about. It is invariant 5's split — `Finding` carries a
+timestamp, the renderer says *"4 min ago"*.
+
+**And the doc that came with it was wrong in the direction the code was
+right.** The first draft told `Session::context`'s reader that its `None` and
+`Choice::name`'s were *"the identical `None`"*, settled once. They are not:
+`Choice::name`'s `None` means one thing, while three states arrive at
+`Session::context`'s — no kubeconfig at all, no context *resolved*, and a name
+that strips to nothing — and only the third is `(unnamed)`. A renderer
+following that sentence writes `unwrap_or("(unnamed)")` and draws a context
+name over a run that is on **no context**, which is
+[D174](#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28)'s
+header/picker disagreement arriving through the other door. Inert today only
+because kube's loader fails before that `None` can reach a `Session` — an
+accident of which error fires first, and `wanted`'s own doc says it stops being
+inert the moment the Phase 11 picker calls `contexts` without connecting. The
+guarantee `drawable` actually buys is the narrow one, and the doc now says it:
+*asked about one entry, the two readers answer the same thing.*
+
+**One assertion was written, proven unable to fail, and deleted.** The author
+added a second assertion that a shadowed placeholder row's key selects row 0 —
+the `⏎` consequence — then tried five separate mutations to make it fail
+(`shadowed` forced false, the `!shadowed` guard dropped from `Choice::current`,
+`current` compared on drawn names, `wanted` searching in reverse, `wanted`
+ignoring `asked_for`). Every one of them lands on the triple assertion above it
+first, which runs earlier and reads the same fields, so the key assertion never
+executed. Both entries are named `""`, so first-wins and last-wins select the
+same *name* and it could not tell them apart. It was deleted rather than kept
+as decoration — [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)
+applied by the author to the author's own test, which is the direction it is
+hardest to apply.

@@ -8708,9 +8708,13 @@ async fn several_kubeconfig_paths_merge_into_one_file_and_the_first_one_wins() {
     assert_eq!(
         listed
             .iter()
-            .map(|choice| choice.name.as_str())
+            .map(|choice| choice.name.as_deref())
             .collect::<Vec<_>>(),
-        ["k8rs-tests-first", "k8rs-tests-shared", "k8rs-tests-second"],
+        [
+            Some("k8rs-tests-first"),
+            Some("k8rs-tests-shared"),
+            Some("k8rs-tests-second")
+        ],
         "the merged list is not both files in order with the duplicate name appearing once — a \
          picker that lost the second file's contexts is a reader who cannot reach half their \
          clusters"
@@ -8779,8 +8783,8 @@ async fn a_context_whose_name_contains_a_space_connects_and_survives_whole() {
         );
     }
     assert_eq!(
-        contexts(&file, None)[0].name,
-        named,
+        contexts(&file, None)[0].name.as_deref(),
+        Some(named),
         "the picker's row for a spaced name is not that name, so the row the reader picks is not \
          the context they get"
     );
@@ -8946,15 +8950,15 @@ fn every_context_the_file_names_is_listed_the_way_the_picker_draws_it() {
     assert_eq!(
         listed
             .iter()
-            .map(|choice| choice.name.as_str())
+            .map(|choice| choice.name.as_deref())
             .collect::<Vec<_>>(),
         [
-            "k8rs-tests-one",
-            "k8rs-tests-two",
-            "k8rs-tests-three",
-            "k8rs-tests-headless",
-            "kind-k8rs-tests-undefined",
-            "k8rs-tests-bare"
+            Some("k8rs-tests-one"),
+            Some("k8rs-tests-two"),
+            Some("k8rs-tests-three"),
+            Some("k8rs-tests-headless"),
+            Some("kind-k8rs-tests-undefined"),
+            Some("k8rs-tests-bare")
         ],
         "the list is not every context in the file, in the file's own order"
     );
@@ -9349,8 +9353,8 @@ fn a_tag_is_derived_off_what_the_file_says_and_never_off_the_strip() {
     // Assembled, not written whole, for the reason in this test's doc comment.
     let drawn = format!("https://{}", "amazonaws.com");
     assert_eq!(
-        (listed[1].name.as_str(), &listed[1].tag),
-        ("kind-k8rs", &Tag::Blank),
+        (listed[1].name.as_deref(), &listed[1].tag),
+        (Some("kind-k8rs"), &Tag::Blank),
         "a context name that is only kind's once a zero-width character is taken out of it was \
          tagged `~local` — the same strip inventing the same match, on the other argument"
     );
@@ -9393,7 +9397,7 @@ fn the_row_the_picker_marks_is_the_context_the_run_is_on() {
         let marked = contexts(&file, asked_for)
             .into_iter()
             .find(|choice| choice.current)
-            .map(|choice| choice.name);
+            .and_then(|choice| choice.name);
         assert_eq!(
             (
                 kubeconfig_context(&file, asked_for).as_deref(),
@@ -9404,6 +9408,152 @@ fn the_row_the_picker_marks_is_the_context_the_run_is_on() {
              the reader is told they are on one cluster while the cursor sits on another"
         );
     }
+}
+
+/// **A name that strips to nothing is one answer in both readers, and the key still opens the
+/// row** (NOTES § D202, deferred out of NOTES § D173's family).
+///
+/// **The defect was two shapes for one fact.** [`contexts`] kept the stripped-empty `String` in
+/// [`Choice::name`] while [`kubeconfig_context`] collapsed the identical case to `None`, so a
+/// renderer reading both naturally drew a blank row marked `(current)` *and* a header saying
+/// *no context* — about the very context the run was on. Both are [`drawable`] now, so a screen
+/// has one rule to follow and `screens/context.md` spends one word, `(unnamed)`, on it.
+///
+/// **Three shapes strip to nothing and all three are in the file** (NOTES § D29): `name: ""`, a
+/// name made only of characters [`text`] *removes*, and one made only of characters it turns into
+/// a pending space. [`text`] has two arms for an unprintable character and `char::is_whitespace`
+/// picks between them, so `\u{200b}\u{202e}` and `\n` are two different routes to the same
+/// empty string — and a guard is proven only for the shapes it was fed, not for the outcome they
+/// happen to share.
+///
+/// **The healthy row is the negative half** — it must keep answering exactly what it answered
+/// before, in both readers, or this is a change to every context and not to the broken one.
+///
+/// **And a placeholder row can be a duplicate**, which is the shape the two rulings meet in: a
+/// name that strips to nothing *and* is shadowed (NOTES § D174). It is asserted below the loop
+/// rather than inside it, because a shadowed row is correctly not the one its own key selects.
+///
+/// **And `(unnamed)` is a legal context name**, which NOTES § D202 rules is a collision the
+/// screen accepts rather than hunts a safer word for: what it must not cost is *correctness*.
+/// So the row that is genuinely named it, and the two rows that merely draw as it, are asserted
+/// to be three distinct entries that [`Choice::key`] still opens — the file's own spelling,
+/// never a cleaned one, which is what makes `⏎` land on the entry the row actually is.
+#[test]
+fn a_context_name_that_strips_to_nothing_is_one_answer_in_both_readers() {
+    let file = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: \"\"\n\
+         clusters: [{name: c, cluster: {server: 'https://k8rs-tests.invalid:6443'}}]\n\
+         contexts:\n\
+         - {name: \"\", context: {cluster: c, user: u}}\n\
+         - {name: \"\\u200b\\u202e\", context: {cluster: c, user: u}}\n\
+         - {name: \"\\n\", context: {cluster: c, user: u}}\n\
+         - {name: \"(unnamed)\", context: {cluster: c, user: u}}\n\
+         - {name: k8rs-tests-plain, context: {cluster: c, user: u}}\n\
+         users: [{name: u, user: {}}]\n",
+    );
+    let listed = contexts(&file, None);
+    for choice in &listed {
+        println!(
+            "name {:?} · key {:?} · current {}",
+            choice.name, choice.key, choice.current
+        );
+    }
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.name.as_deref())
+            .collect::<Vec<_>>(),
+        [
+            None,
+            None,
+            None,
+            Some("(unnamed)"),
+            Some("k8rs-tests-plain")
+        ],
+        "a row whose name strips to nothing is not `None`, so the picker draws a blank name and \
+         the screen has no state to spend `(unnamed)` on"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| choice.key.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "",
+            "\u{200b}\u{202e}",
+            "\n",
+            "(unnamed)",
+            "k8rs-tests-plain"
+        ],
+        "a row's key is not the file's own spelling, so `⏎` on it opens a context the kubeconfig \
+         is not keyed by — or nothing at all"
+    );
+
+    // **The whole box in one loop**: the header's reader and the picker's reader, asked about the
+    // same entry, over every shape in the file. Either alone can be right while the pair is wrong,
+    // which is how this shipped.
+    for (at, choice) in listed.iter().enumerate() {
+        assert_eq!(
+            kubeconfig_context(&file, Some(&choice.key)),
+            choice.name,
+            "row {at} and the header disagree about the same context — one draws a name and the \
+             other says there is none"
+        );
+        let marked = contexts(&file, Some(&choice.key))
+            .into_iter()
+            .position(|row| row.current);
+        assert_eq!(
+            marked,
+            Some(at),
+            "row {at}'s key did not select row {at} — `⏎` on a row whose name cannot be drawn \
+             opens some other reader's cluster, which is the one thing the placeholder may not \
+             cost (NOTES § D202)"
+        );
+    }
+    assert_eq!(
+        (
+            kubeconfig_context(&file, None),
+            listed[0].current,
+            listed[0].name.as_deref()
+        ),
+        (None, true, None),
+        "the context the file is actually on is the empty-named one, and the header and the \
+         marked row do not both say so"
+    );
+
+    // **The placeholder meeting NOTES § D174's duplicate** — two entries both named `""`, which
+    // is outside the loop above because a shadowed row is *correctly* not the one its own key
+    // selects: every lookup is a `find` and stops at the first entry (`file_loader.rs:63-82`),
+    // so this row's `⏎` opens the row above it. **One assertion and not two**: a second one
+    // spelling that selection out could not fail without this one failing first, and every
+    // mutation of `shadowed`, of `current` and of `wanted` was tried against it.
+    let twice = wrote(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: \"\"\n\
+         contexts:\n\
+         - {name: \"\", context: {cluster: c, user: u}}\n\
+         - {name: \"\", context: {cluster: c, user: u}}\n\
+         - {name: k8rs-tests-plain, context: {cluster: c, user: u}}\n\
+         users: [{name: u, user: {}}]\n",
+    );
+    let listed = contexts(&twice, None);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|choice| (choice.name.as_deref(), choice.shadowed, choice.current))
+            .collect::<Vec<_>>(),
+        [
+            (None, false, true),
+            (None, true, false),
+            (Some("k8rs-tests-plain"), false, false)
+        ],
+        "a name that strips to nothing lost its duplicate's `shadowed`, or gained a second \
+         `(current)` — two identical blank rows and no way to tell which one `⏎` reaches is the \
+         one screen a reader has for a file `kubectl` refuses to open at all (NOTES § D174)"
+    );
 }
 
 /// **An entry whose address k8rs cannot read is not an entry with no address** ([`Address`],
@@ -9722,7 +9872,8 @@ async fn every_string_the_picker_draws_is_stripped_and_bounded() {
     );
     let listed = contexts(&file, None);
     assert_eq!(
-        listed[0].name, "k8rs-tests-reversed",
+        listed[0].name.as_deref(),
+        Some("k8rs-tests-reversed"),
         "a bidi override in a context name reached the picker's row"
     );
     assert_eq!(
@@ -9744,7 +9895,8 @@ async fn every_string_the_picker_draws_is_stripped_and_bounded() {
     );
 
     assert_ne!(
-        listed[0].key, listed[0].name,
+        Some(listed[0].key.as_str()),
+        listed[0].name.as_deref(),
         "the file spells this context with a bidi override in it, so the key and the drawn name \
          cannot be the same string — this test has stopped covering the thing it is for"
     );
@@ -9758,8 +9910,7 @@ async fn every_string_the_picker_draws_is_stripped_and_bounded() {
             )
         });
     assert_eq!(
-        session.context.as_deref(),
-        Some(listed[0].name.as_str()),
+        session.context, listed[0].name,
         "the session named the row's key rather than the row's name, so the header shows the \
          reader a string the picker never drew — with the override back in it"
     );
@@ -9784,10 +9935,15 @@ async fn every_string_the_picker_draws_is_stripped_and_bounded() {
     // **The bound is the requirement and not a number the output is under** (NOTES § D173):
     // `len < IDENTIFIER * 2` permitted 1023 where 535 is owed, so a cap changed to 900 passed.
     // Every input here is ASCII, so [`text`] cuts exactly at the cap and the sum is exact.
+    let drawn_address = shown_address(&listed[0].server);
+    let drawn_name = listed[0]
+        .name
+        .as_deref()
+        .expect("a name of 1024 `n`s is still a name after the strip");
     for (field, value) in [
-        ("name", &listed[0].name),
-        ("server", &shown_address(&listed[0].server)),
-        ("tag", tag),
+        ("name", drawn_name),
+        ("server", drawn_address.as_str()),
+        ("tag", tag.as_str()),
     ] {
         assert_eq!(
             (value.len(), value.ends_with(SHORTENED)),

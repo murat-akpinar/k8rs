@@ -1894,6 +1894,25 @@ recorded reversal and a later box rather than a dev round
   nothing pins it, and it disappears on its own when `sanitize` does at Phase 12
   ([reports/2026-08-31-one-transformation-on-a-string-operator-review.md](reports/2026-08-31-one-transformation-on-a-string-operator-review.md) § 5)
 
+- **`(unnamed)` covers a name that strips to *empty*, not one that draws
+  blank, and `screens/context.md` says the wider thing.** `drawable`'s
+  `is_empty()` is a byte test, while `text` keeps a single space and `U+00A0`
+  on purpose (`k8s.rs:242`, *"U+00A0 is a space that is visible as one"*). So
+  `current-context: " "` measures `name Some(" ") · current true` in both
+  readers — they agree, so this is not
+  [D202](NOTES.md#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02)'s
+  disagreement — and the row draws a blank name slot beside `(current)` with no
+  placeholder, which is the picture `screens/context.md` calls the defect. Same
+  predicate one column over: `tag: " "` is `Tag::Written(" ")` and not `Blank`.
+  Pre-existing and untouched by D202's change; the blast radius is `namespace`,
+  `tag` and `renewal` too, which is why it was not widened into that box. **The
+  ruling owed is whether the placeholder's subject is "strips to empty" or
+  "draws nothing"**, and the second costs a width-aware predicate rather than
+  `is_empty()`. k9s has been bitten by the space-in-a-context-name class before
+  ([PRIOR-ART § B1](PRIOR-ART.md#b1--kubeconfig-is-harder-than-it-looks), k9s
+  [#3815](https://github.com/derailed/k9s/issues/3815))
+  ([reports/2026-09-02-drawable-and-the-blank-looking-context-name.md](reports/2026-09-02-drawable-and-the-blank-looking-context-name.md) § 3)
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
