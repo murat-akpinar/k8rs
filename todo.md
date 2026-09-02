@@ -3472,7 +3472,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       reader can paste any one of them and get what k8rs got; stdout stays the
       findings alone, so `k8rs --once > findings.txt` is unchanged. It is a
       display string and nothing executes it (security gate)
-- [ ] **`screens/once.md` promises four more things the binary does not do**, all
+- [x] **`screens/once.md` promises four more things the binary does not do**, all
       found by sweeping the file against a running binary on a live cluster rather
       than against the design
       ([D190](NOTES.md#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)).
@@ -3516,6 +3516,8 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       one file over. **Done when** every screen file has been read against the
       built binary once, not only `once.md`, and each divergence is either true or
       gone
+      ([D201](NOTES.md#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31) ·
+      [D203](NOTES.md#d203--the-screens-read-against-the-binary-a-failure-state-that-never-existed-and-the-two-files-that-had-to-stop-contradicting-each-other-2026-09-02))
 - [ ] **`server ` with nothing after it, and a dangling double space.**
       `greeting()` (`src/main.rs`) is `format!("server {}", sanitize(version))`
       with no empty guard, so a `/version` that answers `200` without

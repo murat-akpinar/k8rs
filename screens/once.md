@@ -11,7 +11,7 @@ closes ([NOTES § D17](../NOTES.md#d17--the---once-output)).
 
 ```
 $ k8rs --once
-prod-eu · 84 pods · 3 nodes
+84 pods · 3 nodes
 
 ● payments/web · 3 of 5 pods · 4 min ago
   Containers exceeded their memory limit and were killed by the kernel
@@ -63,14 +63,22 @@ prints `30 hours ago`, not `1 day ago`.** The hours rung runs to 48, which is
 where `kubectl` puts it too, so a report and the `kubectl` output beside it do
 not describe the same moment two different ways.
 
-## How wide the report is, and why nothing in it is cut
+## Why nothing in the report is cut or folded
 
-**The report wraps at a fixed 72 columns** — 70 of text after the two-column
-indent every body line carries. It is fixed rather than read from the terminal
-because stdout is as often a file, a pipe or a CI log as it is a terminal, and
-a report whose line breaks depend on the window it was produced in is one that
-looks different every time it is pasted into a ticket. 72 survives an email
-quote, a GitHub comment and an 80-column terminal with room to spare.
+**The report does not wrap.** A body line is as long as its content needs to
+be — a `→` action line, an evidence string quoted straight from a controller,
+an image name — and stdout carries it whole, at whatever width that turns out
+to be. Indent is structure, not a width budget, and it is not a single
+universal two: a card's own body sits at a flat two columns, evidence and the
+`→` trailer alike, whatever follows it — but `--once --analysis`'s Capacity
+pane nests further, four widths deep (measured live: `0` for the pane
+marker, `2` for its own rows, `4` for a node listed under one, `6` for that
+node's own `using …` continuation), because `--analysis` is a released flag
+and its output is ordinary shipped output. Same rule at every depth: `--once`
+writes a line-oriented stream and every one of its documented destinations —
+a pipe into `grep`, a CI log, a paste into a ticket — reads it as one, and
+already soft-wraps it at its own width on the way out; none of them can undo
+a fold baked into the bytes ([NOTES § D201](../NOTES.md#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31)).
 
 **Nothing here is truncated, and that is the one place the two renderers
 deliberately differ.** The console caps a card's evidence at three lines with
@@ -94,7 +102,7 @@ brings back is a pane doing its job.
 
 ```
 $ k8rs --once
-prod-eu · 84 pods · 3 nodes
+84 pods · 3 nodes
 
 ○ nothing is broken
 ```
@@ -107,9 +115,9 @@ lint list would not survive the first person who checked.
 
 ```
 $ k8rs --once --namespace payments
-prod-eu · ns: payments · 12 pods · 3 nodes
+ns: payments · 12 pods · 3 nodes
 
-○ nothing is broken
+○ nothing is broken in payments
 
 One node check is off: spotting a node someone started emptying and
 did not finish needs every pod in the cluster.
@@ -129,8 +137,9 @@ one when the same check was switched off.
   findings.txt` that drops it produces a file claiming a clean cluster with no
   note that a check was switched off, which is the failure the line exists to
   prevent.
-- **It is the same sentence the console draws**, re-wrapped. One string, two
-  renderers — the rule this whole file is built on.
+- **It is the same sentence the console draws**, printed unfolded rather than
+  fit inside a pane. One string, two renderers — the rule this whole file is
+  built on.
 - **`--namespace` and a 403 fallback print it identically**, because the scope
   is identical; the header line names which namespace, and that is the only
   place the cause shows.
@@ -154,7 +163,7 @@ second one would be inventing a second rule this file does not need.
 
 ```
 $ k8rs --once
-prod-eu · 84 pods · 3 nodes
+84 pods · 3 nodes
 
 ● payments/web · 3 of 5 pods
   Containers exceeded their memory limit and were killed by the kernel
@@ -175,7 +184,7 @@ read smaller than they really are.
 
 ```
 $ k8rs --once
-prod-eu · 84 pods · 3 nodes
+84 pods · 3 nodes
 
 ● payments/web · 3 of 5 pods · 4 min ago
   Containers exceeded their memory limit and were killed by the kernel
@@ -211,11 +220,11 @@ glyph from its `⚠ disconnected` / `⚠ login expired` family, but this stream
 has never used that family, and starting here would be a fourth symbol a
 reader of `--once` output has no legend for.
 
-**Both sentences are exactly the strings the console draws**, re-wrapped
-flush left at this report's own width instead of the pane's — the same
-treatment [the check-could-not-run sentence](#when-a-check-could-not-run)
-already gets. One string, two renderers, the rule this whole file is built
-on, unchanged by this box.
+**Both sentences are exactly the strings the console draws**, printed
+unfolded and flush left instead of fit inside the pane — the same treatment
+[the check-could-not-run sentence](#when-a-check-could-not-run) already gets.
+One string, two renderers, the rule this whole file is built on, unchanged by
+this box.
 
 **It does not touch the exit code.** `0` still means "k8rs ran and reported,"
 the same as an incomplete-check notice does today
@@ -232,9 +241,9 @@ are on it at all.
 
 ```
 $ k8rs --once --namespace payments
-prod-eu · ns: payments · 12 pods · 3 nodes
+ns: payments · 12 pods · 3 nodes
 
-○ nothing is broken
+○ nothing is broken in payments
 
 This computer and the cluster disagree about the time by 11 minutes
 (this one is behind), so recent times are missing and older ones can
@@ -350,7 +359,7 @@ several.
 
 ```
 $ k8rs --once
-prod-eu · 84 pods · 3 nodes
+84 pods · 3 nodes
 
 ● payments/web · 3 of 5 pods · 4 min ago
   Containers exceeded their memory limit and were killed by the kernel
@@ -373,7 +382,7 @@ k8rs can do.
 
 ```
 $ k8rs --once
-prod-eu · 84 pods · 3 nodes
+84 pods · 3 nodes
 
 ● payments/web · 3 of 5 pods · 4 min ago
   Containers exceeded their memory limit and were killed by the kernel
@@ -422,7 +431,7 @@ whichever connection this run happened to make.
 
 ```
 $ k8rs --once
-prod-eu · 84 pods · 3 nodes
+84 pods · 3 nodes
 
 ○ nothing is broken
 
@@ -450,7 +459,7 @@ is looking at directly: "reach *this* cluster."
 
 ```
 $ k8rs --once
-prod-eu · 84 pods · 3 nodes
+84 pods · 3 nodes
 
 ○ nothing is broken
 
@@ -592,9 +601,9 @@ fires there is no report for it to join
 
 ```
 $ k8rs --once --namespace payments
-prod-eu · ns: payments · 12 pods · 3 nodes
+ns: payments · 12 pods · 3 nodes
 
-○ nothing is broken
+○ nothing is broken in payments
 
 This computer and the cluster disagree about the time by 11 minutes
 (this one is behind), so recent times are missing and older ones can

@@ -1913,6 +1913,51 @@ recorded reversal and a later box rather than a dev round
   [#3815](https://github.com/derailed/k9s/issues/3815))
   ([reports/2026-09-02-drawable-and-the-blank-looking-context-name.md](reports/2026-09-02-drawable-and-the-blank-looking-context-name.md) § 3)
 
+- **The live path tells the reader five times that nothing is arriving and
+  never tells them what to do.** A kubeconfig pointed at an unreachable address
+  fails on the first request, not at connect, so `--live` prints one
+  `▲ k8rs is not getting <kind> from this cluster …` banner per watched kind —
+  five of them, forever — with no `What k8rs asked for:`, no `What happened:`
+  and **no next action**. The reachability advice exists only on the `--once`
+  path (`main.rs:3135` inside `pods_unread`, `:3206` inside `too_slow`), both
+  behind the `--once` budget. So the operator who forgot the VPN gets a typed,
+  correctly-worded error with the errand missing — `PRIOR-ART § C1`'s shape
+  ([PRIOR-ART § C1](PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error)).
+  Pre-existing; `screens/states.md` was corrected to stop claiming `pods_unread`
+  covers the TUI, but the product gap is untouched and needs a ruling on what a
+  live banner owes a reader
+  ([reports/2026-09-02-startup-failure-screens-operator-review.md](reports/2026-09-02-startup-failure-screens-operator-review.md) § 2)
+
+- **`main.rs:789`'s doc comment still says the clock sentence is "re-wrapped"
+  for `--once`, which [D201](NOTES.md#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31)
+  falsified.** The report does not fold, so the strings arrive unwrapped. It is
+  one line in a file the PM may not write; `screens/` and `NOTES.md` were both
+  corrected in the same turn. **Family 4's boxes are all in `main.rs`** — it
+  rides along there rather than costing a dispatch of its own
+  ([reports/2026-09-02-startup-failure-screens-operator-review.md](reports/2026-09-02-startup-failure-screens-operator-review.md) § 5)
+
+- **The three collapsed kubeconfig failures throw away the path they know.**
+  `Fault::Kubeconfig` covers *no file*, *unreadable* and *not valid YAML* and
+  carries no string by design (`k8s.rs:756`), but kube's `ReadConfig` variant
+  holds **the path and the io reason**. *Which file did you try* is the most
+  useful next action for all three, and `KUBECONFIG` may hold several
+  colon-separated paths kube merges — the deleted fiction promised exactly that
+  (`Looked in: $KUBECONFIG (unset), ~/.kube/config`). Needs a ruling on whether
+  `Fault` should carry it
+  ([reports/2026-09-02-startup-failure-screens-operator-review.md](reports/2026-09-02-startup-failure-screens-operator-review.md) § 3)
+
+- **A 403 has the identical gap `cannot reach the cluster` had, and two screens
+  still describe it as a modal.** `unreadable()` (`main.rs:2353-2377`) builds
+  the banner line generically off `trouble.fault()` for *any* `Fault`, and
+  `pods_unread` is `stopping`-gated with no exception for the fault kind — so on
+  the **live** path a refusal is also just a `▲ k8rs is not getting …` banner,
+  not the `pods_unread`-style block that `screens/states.md:576-577` and
+  `screens/context.md:340-363` both draw. Found by `tui-designer` while tracing
+  the reachability fix and deliberately **not** edited around: fixing it changes
+  the "other two" count one more time and touches `context.md`'s own drawn
+  example. Needs the same ruling as the live-banner entry above — what a live
+  banner owes a reader — and the two should be ruled together
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

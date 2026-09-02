@@ -205,8 +205,9 @@ unsynced laptop does (D177's second finding). So there are two:
 
 Both sentences are written for **any renderer that can hold one line**,
 deliberately not tied to the word "screen" — [`--once` carries the identical
-strings](once.md#when-your-clock-and-the-clusters-disagree), re-wrapped, the
-same rule every shared string in this product already follows.
+strings](once.md#when-your-clock-and-the-clusters-disagree), printed
+unfolded rather than fit to a pane, the same rule every shared string in this
+product already follows.
 
 These replace the pair this file shipped hours earlier the same day, which
 under-drew *behind* to blanking alone and named a culprit neither direction
@@ -562,49 +563,65 @@ making it while one check is switched off.
   nothing to say either; sending the reader there would be a tour of a second
   switched-off check.
 - The wording of the missing check is **the same sentence** as the banner above,
-  re-wrapped for a narrower block. One string, three renderers — the third is
-  `--once` ([once.md](once.md#when-a-check-could-not-run)).
+  wrapped for this narrower block. One string, three renderers — the third is
+  `--once`, which prints it unfolded rather than wrapped
+  ([once.md](once.md#when-a-check-could-not-run)).
 
 ## Before the TUI ever starts
 
 **No kubeconfig at all** is always this — stderr, exit non-zero, no raw mode —
-there is nothing yet to list a context from. The other three below hold only
+there is nothing yet to list a context from. The other two below hold only
 when the picker never opened: one context in the file, `--context` given,
 `--once`, or a non-tty. Once two-or-more contexts put the picker on screen,
-raw mode is already on, and *cannot reach the cluster* / *the certificate
-has expired* / *not allowed* become the modal in
+raw mode is already on, and *the certificate has expired* / *not allowed*
+become the modal in
 [context.md § When the new cluster does not work](context.md#when-the-new-cluster-does-not-work)
 instead of a stderr message. Panicking inside a TUI corrupts the user's
 terminal, so whichever form applies, the failure is handled before it can do
 that.
 
-**The certificate-has-expired message is a more specific *cannot reach the
-cluster*, not a fourth kind of failure.** Both mean the connection did not
-complete; the generic wording above prints only when k8rs genuinely does not
-know why, and steps aside for this one the moment rustls names the reason —
-a fallback string is never printed over a typed error it could have used
-instead ([docs/architecture.md § Error handling](../docs/architecture.md#error-handling)).
-The reasoning that earns it its own sentence, rather than folding into the
-generic one, is [once.md § When the certificate is why nothing came
+**The certificate-has-expired message is a more specific version of the wall
+it replaces, not a new kind of failure beside it.** Once a session opens, a
+call that gets nothing usable back ordinarily prints [`k8s::Fault::Unanswered`](../src/k8s.rs)'s
+own plain wording, once per call — measured live off a dead address: *"could
+not read the server version (nothing usable came back when k8rs tried to
+`get /version`) · could not list what this cluster serves, so k8rs cannot
+show you what is in it or tell which add-ons it has (nothing usable came back
+when k8rs tried to `get /apis`)"* — and steps aside for the certificate
+sentence the moment rustls can name the reason, because a fallback string is
+never printed over a typed error it could have used instead
+([docs/architecture.md § Error handling](../docs/architecture.md#error-handling)).
+The reasoning that earns it its own sentence, rather than folding into that
+wall, is [once.md § When the certificate is why nothing came
 back](once.md#when-the-certificate-is-why-nothing-came-back).
 
-```
-$ k8rs
-k8rs: no kubeconfig found.
+**No kubeconfig at all, one that cannot be read, and one that is not valid
+YAML all reach the same sentence — and that is `Fault`'s own rule doing the
+collapsing, not a lack of anything to say.** kube's own `ReadConfig` carries
+the exact path it tried and the `io::Error` that stopped it
+([`kubeconfig_fault`](../src/k8s.rs)); `k8s::Fault::Kubeconfig` throws both
+away, the same "a `Fault` is a fact and never a sentence… it carries no
+string whatever" rule every other error in this file already follows
+(`k8s.rs`). Measured against `$KUBECONFIG` unset and against a file that
+exists but will not parse as YAML alike, one unwrapped line, 114 columns —
+past this page's frame, so quoted rather than fenced, the same treatment the
+`pods_unread` header gets a few paragraphs below for the same reason:
+*"k8rs: no cluster to watch — the kubeconfig itself could not be read — it
+is missing, unreadable, or not valid YAML."*
 
-  Looked in: $KUBECONFIG (unset), ~/.kube/config
-
-  k8rs uses the same file kubectl does. If kubectl works on this
-  machine, k8rs will too.
-```
-
-```
-$ k8rs
-k8rs: cannot reach the cluster at https://10.0.0.1:6443
-
-  The address is in your kubeconfig, but nothing answered.
-  Is the cluster running? Are you on the right VPN?
-```
+**"Cannot reach the cluster" prints no message of its own on this path,
+because this section is the way into the TUI and that failure cannot end
+it.** Building the client from a kubeconfig never makes a network call, so a
+dead address never fails at connect — the session opens, and on this path
+[`pods_unread`](../src/main.rs) never runs at all: it fires only under
+`--once` (`stopping`, `main.rs:2939`), which has no TUI to start in the
+first place, and its own doc names it *"the one watch whose failure ends a
+`--once` run"* (`:3038`). What actually shows, once the session is open, is
+the same repeating `▲ k8rs is not getting <kind> from this cluster: …`
+banner a session that loses its connection mid-run shows — measured live
+against a dead address: five such lines, one per watch, settling there, and
+nothing else. No `What k8rs asked for:`, no next step — that gap is a
+product question, already in `backlog.md`, not this screen's to fix.
 
 ```
 $ k8rs

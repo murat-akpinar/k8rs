@@ -224,6 +224,7 @@ its line moving with it.
 - [D200](#d200--the-box-that-proved-its-own-thesis-against-itself-three-guards-that-could-not-fail-and-a-cluster-word-on-a-line-the-user-runs-2026-08-31) — the box that proved its own thesis against itself: three guards that could not fail, and a cluster word on a line the user runs
 - [D201](#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31) — the report does not wrap, and the screen loses the section that said it does
 - [D202](#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02) — the three context rows nothing draws yet, and the placeholder that is allowed to collide
+- [D203](#d203--the-screens-read-against-the-binary-a-failure-state-that-never-existed-and-the-two-files-that-had-to-stop-contradicting-each-other-2026-09-02) — the screens read against the binary: a failure state that never existed, and the two files that had to stop contradicting each other
 
 ## Why it exists — where the gap is
 
@@ -15314,8 +15315,12 @@ tell which card in front of them to distrust:
 
 The second is D55's sentence carrying the direction it was actually true of;
 the first replaces it, and D55 is corrected in place to say so. Neither says *"on this screen"*: `--once` draws the
-identical strings re-wrapped, and a word that does not survive being piped to a
-file would have forced a second copy.
+identical strings, and a word that does not survive being piped to a
+file would have forced a second copy. (*"re-wrapped"* here, corrected in place:
+[D201](#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31)
+ruled the `--once` report does not fold at all, so the strings arrive unwrapped
+rather than re-wrapped. The point the sentence is making — one string, both
+renderers — is unaffected.)
 
 **One threshold, five minutes, both directions** — `rules::age`'s
 `SKEW_ALLOWANCE`, reused rather than a second constant invented beside it. Below
@@ -17254,8 +17259,16 @@ measures with `unicodedata` — and it must not break inside a resource name, a
 twelve, [invariant 10](CLAUDE.md)), so it is hand-written product code in a file
 that is about to freeze, bought for an output that is worse afterwards.
 
-**What the section keeps.** The two-column body indent is real and stays — it is
-structure, not width. The *nothing here is truncated* half is a genuine decision
+**What the section keeps.** The body indent is real and stays — it is
+structure, not width. **It is not a single universal two**, which the first
+draft of this entry said and an operator review measured false: the card block
+indents evidence and the `→` trailer by two, but `--analysis` nests further, and
+`--analysis` is a released flag. Counted on the live four-node `k8rs` cluster,
+`--once` uses two widths (0 and 2) and `--once --analysis` uses four (0, 2, 4 and
+6 — the Capacity pane's per-node rows and their `using …` continuation,
+`src/main.rs:1029` and `:1276`). The rule the ruling wanted is *indent is
+structure rather than a width budget*, and that survives the correction; the
+universal quantifier did not. The *nothing here is truncated* half is a genuine decision
 and keeps its reasoning, including the console's three-line cap with `…`, which
 is unaffected: that renderer has `⏎` behind it and this one has no second
 screen. The heading loses its width half and becomes what the file actually
@@ -17394,3 +17407,86 @@ same *name* and it could not tell them apart. It was deleted rather than kept
 as decoration — [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)
 applied by the author to the author's own test, which is the direction it is
 hardest to apply.
+
+### D203 — the screens read against the binary: a failure state that never existed, and the two files that had to stop contradicting each other (2026-09-02)
+
+Family 5's last box, and the one
+[D190](#d190--the-screen-that-ships-first-promises-four-things-the-binary-does-not-do-and-nobody-had-read-them-against-each-other-2026-08-30)
+widened past `once.md`. Its method is the whole point: **read the file against a
+running binary, not against the design.** Everything below was found that way,
+and nothing in it was reasoned.
+
+**`once.md`'s four.** (a) The eleven sample headers lose `prod-eu · ` — the
+header has never printed a cluster name and the omission is deliberate in
+`main.rs`, so the drawings moved and the code did not. (b) The three
+`--namespace` examples take their scope, `○ nothing is broken in payments`,
+which is [D184](#d184--the-namespace-box-what-a-real-restricted-role-took-away-and-the-eight-rulings-it-forced-2026-08-30)'s ruling arriving
+in the drawing; the three *unscoped* examples stay unscoped, because scoping a
+run that passed no `--namespace` would be a fresh divergence. (c) is
+[D201](#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31),
+carried out. (d) **is a decision to write nothing**: the box asked whether the
+screen should say *why* `--read-only` does nothing, and the prose written
+2026-08-30 already says it — verified by running the flag rather than by reading
+the box. Rewriting working prose to satisfy a box that is already satisfied adds
+words with no reader.
+
+**A failure state was drawn for weeks and never existed.** `states.md` showed
+`k8rs: cannot reach the cluster at https://10.0.0.1:6443` with *"Is the cluster
+running? Are you on the right VPN?"* — a whole block, advice and all.
+**Building a client from a kubeconfig makes no network call**, so a dead address
+never fails at connect: the session opens and the failure surfaces on the first
+real request. Measured against a kubeconfig pointed at a closed port, the run
+prints the ordinary greeting and then the watch path's output — never that
+sentence, which no code emits. The block is gone. The other block beside it was
+stale rather than fictional: the real line is one unwrapped 114-column sentence,
+`k8rs: no cluster to watch — the kubeconfig itself could not be read …`, quoted
+in prose because no 80-column fence can honestly hold it — the same treatment
+`states.md` already gives the refusal block's 108/145/178 columns, which
+[D201](#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31)
+turned from a workaround into the answer.
+
+**Deleting a state broke the paragraphs that counted it, and the code cites
+them.** Two paragraphs above the deletion still said *"the other three"* and
+called the certificate message *"a more specific cannot-reach-the-cluster, not a
+fourth kind of failure"*, pointing at *"the generic wording above"* — which the
+same diff had removed. That is not cosmetic: `main.rs:2430` says its sentence is
+`screens/states.md` **byte for byte**, so the next person repairing
+`certificate_is_why` would look for a block that is not there and either re-add
+the fiction or conclude the code is wrong. The count is now *the other two* and
+the dangling reference is the measured `Fault::Unanswered` wall it actually
+replaces. **A deletion owes the sentences that counted the thing deleted**, and
+the operator review is what caught it.
+
+**The collapse is honest; the reason given for it was not.** *No kubeconfig*,
+*unreadable* and *not valid YAML* really do reach one sentence — verified three
+ways, all exit `2`. But the screen justified it by saying none of them tells
+k8rs anything more specific, and that is false of the input: kube's
+`ReadConfig` carries **the path and the io reason**, and `Fault` discards them
+by its own rule (`k8s.rs:756`, *"carries no string whatever"*). The screen now
+states the trade rather than denying the fact exists — because *which file did
+you try* is the best next action for all three, `KUBECONFIG` can hold several
+merged paths, and a sentence that says the information is unobtainable freezes
+the gap instead of leaving it visible. The gap itself is
+[`backlog.md`](backlog.md)'s.
+
+**Where two screens contradicted each other, the one making an absolute claim
+gave way.** `states.md` had ruled *"cannot reach the cluster is not a state of
+its own"* while `context.md` still listed it as one of three distinct sentences.
+They are not actually in conflict — `states.md` describes **today's** temporary
+driver and is measured; `context.md` describes the **Phase 11** picker's modal,
+which no code draws yet and which already cites `pods_unread`'s strings by line
+as what it will quote. So `states.md` narrowed to *on this path* rather than
+`context.md` deleting a forward commitment. **A measured present tense and an
+unbuilt future tense are not a contradiction until one of them pretends to be
+the other.**
+
+**And the fix's own pointer was wrong in the same way the thing it replaced
+was.** The replacement paragraph sent a TUI reader to `pods_unread`, which
+cannot run on that path at all — it is `stopping`-gated and its own doc calls it
+*"the one watch whose failure ends a `--once` run"*. The "30 seconds" quoted
+with it was `--once`'s budget, not a property of the live path. Measured on
+`--live` against a dead address: five `▲ k8rs is not getting <kind> …` banner
+lines, one per watch, and **no next action at all**. The screen now says the
+banner is what draws; the missing errand is a product gap in `main.rs` and is
+[`backlog.md`](backlog.md)'s, together with the 403 that
+`unreadable()` gives the identical treatment.
