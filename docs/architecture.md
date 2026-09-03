@@ -354,6 +354,37 @@ lands, so the size they hold up to is measured in Phase 5 and stated, and above
 it the first paint reports what it is waiting for
 ([NOTES § D115](../NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
 
+## The command log on a read-only run
+
+**Every read k8rs performs on the live path prints its equivalent `kubectl`
+command on stderr**, in the order it starts them, and stdout stays the findings
+alone — so `k8rs --once > findings.txt` gets the report and nothing else. The
+command log was designed as the *write* path's teaching device; it exists for
+reads first, because that is what this build does
+([NOTES § D205](../NOTES.md#d205--what-a-default-run-prints-the-credential-the-reader-can-fix-the-command-log-that-had-to-be-honest-and-a-teaching-line-that-was-a-request-storm-2026-09-03)).
+
+Three things it is careful about, each of which was a defect first:
+
+- **A line that lies is worse than no line.** The scope probe — one `?limit=1`
+  request asking whether this kubeconfig may list pods at all — was spelled
+  `kubectl get pods -A --chunk-size=1`, which sets a *page size* and then pages to
+  completion: measured at **41 round trips against the one request k8rs sends**,
+  and linear in pod count. It prints as the raw path.
+- **A number in the log has to reconcile with a number above it.** `kubectl
+  api-resources` lists every registered kind; k8rs counts only the listable ones,
+  so the line carries `--verbs=list` and the greeting's kind count matches what a
+  reader gets when they paste it.
+- **Where the printed command cannot reproduce what was printed, k8rs says so**
+  — the Secret case in
+  [security.md § Data displayed and stored](security.md#data-displayed-and-stored).
+
+Two reads print no line, both structurally rather than editorially: the TLS
+handshake rule C2 reads sends no request and has no `kubectl` spelling, and the
+second `/version` round trip is the same request twice. The three object verbs
+(`--logs`, `--describe`, `--yaml`) print the one command they are *about*; they
+draw a different screen, and where that ruling belongs on a screen page is
+[`backlog.md`](../backlog.md)'s.
+
 ## Error handling
 
 - **Startup errors are the ones with nothing to connect *with*** — no

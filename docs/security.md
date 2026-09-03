@@ -379,7 +379,14 @@ about a decade of daily use. A rotator would be more code than the log.
 - **Secret contents are hidden by default.** Viewing a Secret shows its keys
   and their sizes; revealing a value requires an explicit second action, and a
   revealed value never enters the command log, the audit log, or the YAML
-  shown by `y`. **A Secret keeps more than one copy of itself, so hiding by
+  shown by `y`. **The command log still shows the command k8rs ran, and on a
+  Secret that command prints what this pane hid** — there is no `kubectl` line
+  that reproduces a masked view, so rather than print a line that does not
+  produce what was printed, k8rs names the difference out loud: *a Secret's
+  values are hidden here and shown as their sizes — the command above prints
+  them in full*. Found and fixed at Phase 6's close, verified against a real
+  Secret
+  ([NOTES § D208](../NOTES.md#d208--the-cross-family-review-the-picker-that-called-a-failed-container-done-and-the-owner-fetch-that-was-never-written-2026-09-03)). **A Secret keeps more than one copy of itself, so hiding by
   position is not enough**: `kubectl apply` writes the whole applied body —
   `data` map included, and *plaintext* when it was applied through `stringData`
   — into `metadata.annotations`, so on a Secret every annotation value is hidden

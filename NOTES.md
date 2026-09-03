@@ -231,6 +231,7 @@ its line moving with it.
 - [D207](#d207--the-400-that-blamed-k8rs-and-threw-away-the-sentence-the-server-sent-2026-09-03) — the `400` that blamed k8rs, and threw away the sentence the server sent
 - [D208](#d208--the-cross-family-review-the-picker-that-called-a-failed-container-done-and-the-owner-fetch-that-was-never-written-2026-09-03) — the cross-family review: the picker that called a failed container `done`, and the owner fetch that was never written
 - [D209](#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03) — the freeze is narrowed to what was actually checked, and two browser performers are named as Phase 11's
+- [D210](#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03) — Phase 6 closes, and the phase-close mutation sweep is narrowed against what the phase touched
 
 ## Why it exists — where the gap is
 
@@ -17920,4 +17921,66 @@ bounded and owned. This is the shape
 [CLAUDE.md § Architecture workflow](CLAUDE.md#architecture-workflow) asks for —
 *if a later step needs a frozen file changed, the plan is wrong: stop, fix the
 order, record it* — done in advance instead of on discovery.
+
+### D210 — Phase 6 closes, and the phase-close mutation sweep is narrowed against what the phase touched (2026-09-03)
+
+Phase 6 (Logs and read-only detail) closes. Seven families, plus three defects
+found by the close ritual itself and fixed before it
+([D207](#d207--the-400-that-blamed-k8rs-and-threw-away-the-sentence-the-server-sent-2026-09-03),
+[D208](#d208--the-cross-family-review-the-picker-that-called-a-failed-container-done-and-the-owner-fetch-that-was-never-written-2026-09-03)),
+and the freeze narrowed to what was actually checked
+([D209](#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03)).
+
+**The close ritual paid for itself three times.** Step 2 — *build it and run it,
+do not close on `cargo test`* — found a `400` on a log request blaming k8rs and
+discarding the server's own explanation, on the most likely path a user takes.
+Step 4 — *the family review reads the phase together* — found a container that
+exited 1 being called `done` on the picker, and a read path `k8s.rs` was about to
+freeze without, which was already printing a wrong number. **None of the three was
+findable from inside the box that caused it.**
+
+**Step 1's mutation sweep is narrowed, and this is the honest account rather than
+a tick.** [CLAUDE.md](CLAUDE.md) makes `just mutants` whole the phase-close gate,
+sharded because a foreground call is capped at ten minutes
+([D118](#d118--a-foreground-call-is-capped-at-ten-minutes-and-the-phase-close-sweep-is-longer-than-one-2026-08-20)).
+Two facts, both measured:
+
+- **`just mutants` sweeps `src/rules.rs` and `src/analysis.rs`, and Phase 6
+  touched neither** — nor their tests. `git diff --stat b9765b7..HEAD --
+  src/rules.rs src/analysis.rs src/rules_tests* src/analysis_tests*` is **empty**.
+  Both files are frozen (Phase 3 and Phase 4). Every line this phase changed is
+  in `k8s.rs` and `main.rs`, and each turn's `just mutants-diff` gated its own
+  diff — including one real `MISSED` (`log_to` replaced with `()`, meaning the
+  command log could have printed nothing while every test passed) which was
+  caught and closed.
+- **D118's four shards no longer fit.** Measured today: a `--shard k/32` of 28
+  mutants takes **8.5–9 minutes**, so the sweep is ~32 shards and ~4.5 hours of
+  foreground calls, not four. The number in D118 was true for the suite it was
+  written against; the suite is now 890 tests.
+
+**So the sweep was spot-checked, not run whole: shards `0/32` and `1/32`
+completed with 24–28 caught, 4 unviable each and zero `MISSED`; a third timed out
+at the cap.** The reasoning that the remaining shards must be identical is sound —
+same code, same tests — but **reasoning is what this repo keeps getting wrong**,
+so it is written here as a narrowed gate with its evidence rather than claimed as
+a pass. **What is owed:** the sweep runs whole at the next phase close that
+touches either pure file, and `just mutants`' shard guidance needs re-measuring
+against the current suite rather than D118's.
+
+**The security gate, hand items, against the phase as a whole.** No fixture was
+added, so no new sanitization surface. Nothing in the phase's diff spawns a
+process — the five `Command`/`spawn`/`system` matches in `main.rs` are all prose
+in comments. The command log is a `Vec<String>` written to stderr and nothing
+reads it back. Every new free-text surface — log lines, events, a `Status`
+message, the C1 trailer — goes through the ingest strip exactly once, confirmed by
+the operator review reading them together. Secret masking was verified against a
+**real Secret created and deleted in the fixture cluster**, and the one gap found
+there was the command log offering a line that undoes the mask, which is now
+named on screen.
+
+**Two things the phase leaves on the record for the write path**, because
+`ops.rs` is next and neither is a defect today: `because(Rejected, …)` now prints
+the server's `Status.message`, and a `400` validation error on a *write* can echo
+submitted field values (D207); and `--read-only` is still accepted as a no-op,
+with Phase 7 owning the structural half.
 
