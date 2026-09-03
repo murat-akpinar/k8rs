@@ -3322,13 +3322,16 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
 > strips to nothing. 6 **where the resident set is**, alone. 7 **a wedged watch
 > against a refused one**, alone.
 >
-> **Families 1, 2, 3, 5 and 6 are closed** (2026-08-30, 2026-08-31, 2026-08-31,
-> 2026-09-02, 2026-09-03). The first unchecked box below belongs to **family
-> 4** — *what a default run prints* — and its three boxes are one turn. They sit
-> *after* the closed family-6 box in the file: the boxes do not sit in family
-> order here, because a family is what a turn briefs together and the file's
-> order is the order they were found in. Read this list, not the line numbers,
-> before batching a turn.
+> **Families 1, 2, 3, 4, 5 and 6 are all closed** (2026-08-30, 2026-08-31,
+> 2026-08-31, 2026-09-03, 2026-09-02, 2026-09-03). **The only unchecked box left
+> in this phase is family 7** — *a wedged watch against a refused one* — and it
+> runs **alone**. It is the last box of Phase 6, so closing it opens the phase
+> close, and `k8s.rs` freezes there.
+>
+> **It is also the box that says its own obvious fix does not work**, which is
+> the part to read before briefing it: a wedged watch records no failure, so
+> *print the report you have* prints zero bytes and exits `0`, which is worse
+> than what it replaces. Read the box, not this line.
 >
 > **Family 5 was briefed as two dispatches, not one**, after a first attempt at
 > all three at once died on a budget limit having written nothing. Both halves
@@ -3460,7 +3463,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       cuts — so what landed is the assertion that goes red the first turn a
       renderer does, beside the three failures it can already catch
       ([D200](NOTES.md#d200--the-box-that-proved-its-own-thesis-against-itself-three-guards-that-could-not-fail-and-a-cluster-word-on-a-line-the-user-runs-2026-08-31))
-- [ ] **The reader is told the control plane's credential is running out and not
+- [x] **The reader is told the control plane's credential is running out and not
       told their own is.** C2 — a certificate *the API server presented* —
       reaches a default run with no flag at all, as a trailer line under the
       cards; C1's **expiring** band — the reader's own kubeconfig certificate,
@@ -3477,8 +3480,15 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       does. **Carries one sentence with it**: `main.rs`'s `ANALYSIS` doc still
       calls the flag *"scaffolding … this goes away with the rest of the
       temporary main"*, which D188 falsified — `--analysis` is part of the
-      released surface and outlives the temporary driver
-- [ ] **The command log the screen promises does not exist.**
+      released surface and outlives the temporary driver.
+      **Done 2026-09-03 ([D205](NOTES.md#d205--what-a-default-run-prints-the-credential-the-reader-can-fix-the-command-log-that-had-to-be-honest-and-a-teaching-line-that-was-a-request-storm-2026-09-03)).** `login_certificate()` draws it, and
+      the review moved the suppression **off the flag and onto the fact**: the
+      pane's row needs a `Finding` the trailer does not, so a context whose name
+      strips to nothing (D202's shape) was told by a bare run and told nothing at
+      all under `--analysis` — the run with more reporting saying less. The
+      `ANALYSIS` sentence the box carried was already true at HEAD and cost
+      nothing, which is what re-checking a premise at brief time is for
+- [x] **The command log the screen promises does not exist.**
       [screens/once.md § stdout and stderr are split on purpose](screens/once.md#stdout-and-stderr-are-split-on-purpose)
       draws `$ kubectl get pods -A` and `$ kubectl get nodes` on stderr and calls
       the command log *"the teaching device outside the TUI too"*; no code in
@@ -3491,7 +3501,15 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       prints its kubectl equivalent on stderr, in the order it was run, and a
       reader can paste any one of them and get what k8rs got; stdout stays the
       findings alone, so `k8rs --once > findings.txt` is unchanged. It is a
-      display string and nothing executes it (security gate)
+      display string and nothing executes it (security gate).
+      **Done 2026-09-03 ([D205](NOTES.md#d205--what-a-default-run-prints-the-credential-the-reader-can-fix-the-command-log-that-had-to-be-honest-and-a-teaching-line-that-was-a-request-storm-2026-09-03)).** Fifteen lines on stderr, stdout
+      unchanged. **The blocker was the scope probe's spelling**: `--chunk-size=1`
+      pages to completion — measured 41 round trips and 6.30 s against the one
+      request k8rs sends — so the first line a stranger read was a poll-list storm
+      published by the tool whose invariant 6 refuses one. It prints as the raw
+      path. `api-resources` gained `--verbs=list` so its 69 rows stop contradicting
+      the greeting's `62 kinds`, and the expired-certificate wall now prints the
+      reads it did make
 - [x] **`screens/once.md` promises four more things the binary does not do**, all
       found by sweeping the file against a running binary on a live cluster rather
       than against the design
@@ -3538,7 +3556,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       gone
       ([D201](NOTES.md#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31) ·
       [D203](NOTES.md#d203--the-screens-read-against-the-binary-a-failure-state-that-never-existed-and-the-two-files-that-had-to-stop-contradicting-each-other-2026-09-02))
-- [ ] **`server ` with nothing after it, and a dangling double space.**
+- [x] **`server ` with nothing after it, and a dangling double space.**
       `greeting()` (`src/main.rs`) is `format!("server {}", sanitize(version))`
       with no empty guard, so a `/version` that answers `200` without
       `gitVersion` prints `k8rs: watching — server  · could not list what this
@@ -3546,7 +3564,12 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       behind a proxy or gateway that drops the field, and a real kube-apiserver
       always sets it. **Done when** an absent *or blank* `gitVersion` costs the
       clause rather than printing an empty one — the blank case is fed by no test
-      today, which is why this is a box and not a shrug
+      today, which is why this is a box and not a shrug.
+      **Done 2026-09-03 ([D205](NOTES.md#d205--what-a-default-run-prints-the-credential-the-reader-can-fix-the-command-log-that-had-to-be-honest-and-a-teaching-line-that-was-a-request-storm-2026-09-03)).** Four shapes fed — absent, empty,
+      whitespace, and strips-to-empty under invariant 9. The guard is on the
+      *trimmed* value and the review caught that the print was not: `" v1.36.1 "`
+      kept its spaces, and the defence that trimming invents a string the cluster
+      did not send does not hold, because `session()` already ran `text()` over it
 - [ ] **A wedged watch costs the whole report where a refused one costs two
       rules**, and closing it is a `k8s.rs` change nobody has granted. Measured: a
       `403` on nodes gives a full report, 41 pods, thirteen findings, exit `0`; a

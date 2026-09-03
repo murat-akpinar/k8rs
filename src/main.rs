@@ -226,7 +226,7 @@ fn run(args: &[String]) -> Result<String, String> {
     // The clock is read once, here, and handed to the rules as a field — never called from
     // inside one (invariant 5, NOTES § D18). Phase 5's `k8s.rs` reads it in the same place.
     let input = wall_clock()
-        .and_then(|now| load(&paths, now))
+        .and_then(|now| load(&paths, now, wanted))
         .map_err(|problem| format!("k8rs: {problem}"))?;
     let findings = analyze(&input.snapshot);
     let mut out = render(&findings, &input);
@@ -362,6 +362,18 @@ struct Input {
     /// saying*. [`k8s::CERT_EXPIRY_WARN`] is applied where the sentence is drawn, because the days
     /// left move against `now` and a session outlives the instant it connected at.
     serving_expiry: Option<Timestamp>,
+    /// **Whether `--analysis`'s panes are printing under this report** — the one thing the
+    /// trailer has to know ([`ANALYSIS`], `screens/once.md` § When your own login is running out).
+    ///
+    /// **It suppresses exactly one line and nothing else** ([`login_certificate`]): [`reports`]
+    /// already draws C1's expiring band as a Certificates row, so the trailer beside it would be
+    /// the same fact twice in two shapes on one page. Every other trailer line is unaffected,
+    /// because none of them has a pane that already says it.
+    ///
+    /// **A fact about the run and not about what was read**, which is why it is here and not in
+    /// [`ClusterSnapshot`]: no rule may see a flag (invariant 5), and both drivers already hold
+    /// it — [`run`] from argv, [`live_report`] from its caller.
+    analysis: bool,
     /// **The kinds k8rs never got a list of at all** — the header's *blank, never guessed* rule
     /// ([`header`], `screens/widgets.md` § 1a).
     ///
@@ -404,12 +416,13 @@ struct Input {
 /// each item is dispatched on its own `kind`; anything else is dispatched whole. `Err` is the
 /// exit-2 path (NOTES § D17): a file that will not read, will not parse, or holds an object of
 /// a kind we claim to understand and does not decode.
-fn load(paths: &[String], now: Time) -> Result<Input, String> {
+fn load(paths: &[String], now: Time, analysis: bool) -> Result<Input, String> {
     let mut input = Input {
         // No cluster answered, so nothing measured this machine's clock ([`Input::skew`]) and no
         // server presented a certificate to read ([`Input::serving_expiry`]).
         skew: None,
         serving_expiry: None,
+        analysis,
         snapshot: ClusterSnapshot {
             now,
             pods: Vec::new(),
@@ -604,9 +617,11 @@ fn render(findings: &[Finding], input: &Input) -> String {
     // **The `Info` band is not drawn here, because this block is Alerts** (NOTES § D87, § D2):
     // `Severity::Info` on a rule already *means* this finding lives in a report rather than in
     // Alerts, which is how N4 and N5 use it and how C1's expiring band reaches the Certificates
-    // pane at all. Filtering once, above the `is_empty` check and above [`tally`], is what stops
-    // the count and the cards disagreeing — the tally counted the band only because the cards
-    // were drawn, and both follow this one line (NOTES § D121's third divergence, now closed).
+    // pane at all — and, since the trailer box, the one line under the tally that restates it on
+    // a run with no pane ([`login_certificate`]). Filtering once, above the `is_empty` check and
+    // above [`tally`], is what stops the count and the cards disagreeing — the tally counted the
+    // band only because the cards were drawn, and both follow this one line (NOTES § D121's third
+    // divergence, now closed).
     //
     // **It was unreachable until this box.** The file path hard-codes C1's two inputs and the
     // control-plane version to `None`, so nothing outside a live run could return an `Info` at
@@ -645,8 +660,9 @@ fn render(findings: &[Finding], input: &Input) -> String {
     }
     // **Under the clock line, which is the trailer order `screens/once.md` § Stacked with the
     // other trailer lines fixes**: clock first because it qualifies every line above it, cards
-    // included; this next, because it is the newest fact and the only open slot; the
-    // check-that-could-not-run line absolutely last, which [`check_switched_off`] now draws.
+    // included; this next, because it was the newest fact when it landed and took the one open
+    // slot; C1's own line then took the next one under it; and the check-that-could-not-run line
+    // is absolutely last, which [`check_switched_off`] draws.
     // **It never rode on [`Input::skipped`]** — that field is the header's, about kinds a file
     // held — and this comment said it did until the namespace-scoping box.
     //
@@ -662,24 +678,78 @@ fn render(findings: &[Finding], input: &Input) -> String {
     if let Some(expiry) = serving_certificate(input.serving_expiry, &input.snapshot.now) {
         spaced(&mut lines, expiry);
     }
-    // **Absolutely last, under everything including the certificate line**
+    // **Under the certificate the *cluster* presented, which is the trailer order
+    // `screens/once.md` § Stacked with the other trailer lines fixes**: it is the newest fact, so
+    // it takes the next open slot rather than displacing a line that already prints correctly
+    // (NOTES § D176's *append, do not reorder*). Ordering the two by urgency instead of arrival
+    // would mean weighing a certificate the cluster answers against one the reader's own laptop
+    // holds, which no rule on this page has ever had to do for two cards, let alone two trailer
+    // lines.
+    //
+    // **The one trailer line whose fact is a `Finding`, restated** (NOTES § D87, § D188). The
+    // clock and the certificate above it are session facts and the line below is about the scope;
+    // this one is C1's `Info` band, which the card block above filters out — so until this box a
+    // bare run told the reader the *cluster's* credential was running out and never that their
+    // own was, which is the one on the page they can renew without asking anybody.
+    //
+    // **Muted only when the Certificates pane is really going to draw this fact as a row**, which
+    // needs the flag *and* the finding — [`drawn_as_a_row`]. Muting on the flag alone was a defect
+    // caught in review (`k8s-admin`, 2026-09-03): the pane's row needs C1's `Finding`, and
+    // `rules::kubeconfig_certificate_expiring` returns `None` with no context while this sentence
+    // needs none, so a context name that strips to nothing (NOTES § D202) gave a bare run the
+    // trailer and `--analysis` neither — the run with *more* reporting saying *less*, in front of
+    // a credential that locks the reader out.
+    if !drawn_as_a_row(input, findings)
+        && let Some(login) = login_certificate(
+            input
+                .snapshot
+                .client_certificate
+                .as_deref()
+                .and_then(rules::expires_at),
+            &input.snapshot.now,
+        )
+    {
+        spaced(&mut lines, login);
+    }
+    // **Absolutely last, under everything including both certificate lines**
     // (`screens/once.md` § Stacked with a check that could not run, and its § Stacked with the
-    // other trailer lines, which fixes the whole order: clock, certificate, this). The comment
-    // above the clock line has claimed this slot since before it could be drawn; this is the box
-    // that fills it (NOTES § D176's *append, do not reorder*).
+    // other trailer lines, which fixes the whole order: clock, the cluster's certificate, this
+    // login's, then this). The comment above the clock line has claimed this slot since before it
+    // could be drawn; the certificate box filled it (NOTES § D176's *append, do not reorder*).
     if let Some(off) = check_switched_off(input.snapshot.namespace_scope.as_deref()) {
         spaced(&mut lines, off);
     }
     lines.join("\n")
 }
 
+/// **Whether the Certificates pane is going to draw C1's expiring band as a row** — the one
+/// question the trailer has to ask before printing the same fact ([`login_certificate`]).
+///
+/// **Both halves, and the second is the one a flag alone gets wrong.** `--analysis` decides
+/// whether [`reports`] runs at all; C1's `Finding` decides whether the pane has a row to draw when
+/// it does. `analysis.rs`'s own `c1` picks the finding out of the slice by this same object kind,
+/// and `rules.rs` is what writes it — three readers, one spelling, and the test
+/// `the_trailer_is_muted_only_where_the_pane_really_draws_the_row` is what fails if any of them
+/// moves. Asking the pane itself would mean building all seven reports to render one line.
+///
+/// **It deliberately does not ask which band.** Past the deadline C1 is `Severity::Critical` and
+/// the card block draws it, but [`login_certificate`] has already answered `None` there, so the
+/// two arms cannot both fire and this needs no third condition to say so.
+fn drawn_as_a_row(input: &Input, findings: &[Finding]) -> bool {
+    input.analysis
+        && findings.iter().any(|finding| {
+            matches!(&finding.object.kind, ObjectKind::Other(kind) if kind == "kubeconfig")
+        })
+}
+
 /// **One block, one blank line above it — unless there is nothing above it to separate from.**
 ///
 /// **Every block in a report is optional now, which is what this exists for.** The header can be
-/// empty ([`header`]), the health claim can be absent ([`health`]), and the three trailer lines
+/// empty ([`header`]), the health claim can be absent ([`health`]), and the four trailer lines
 /// each come and go — so a `push(String::new())` written beside any one of them prints a leading
-/// blank line on the run where everything before it was left out. Five copies of *two lines that
-/// have to agree about emptiness* is five places that gets missed once.
+/// blank line on the run where everything before it was left out. A copy of *two lines that have
+/// to agree about emptiness* beside each block is one more place that gets missed once, and the
+/// number of blocks has only ever gone up.
 fn spaced(lines: &mut Vec<String>, line: String) {
     if !lines.is_empty() {
         lines.push(String::new());
@@ -913,6 +983,72 @@ fn serving_certificate(expiry: Option<Timestamp>, now: &Time) -> Option<String> 
         "A certificate the API server presented — not your kubeconfig's — expires in {} (valid \
          until {expiry}). Once it runs out, kubectl and everything else stop being able to reach \
          this cluster until someone on the control plane renews it — not something k8rs can do.",
+        in_days(left)
+    ))
+}
+
+/// **The one sentence that says the reader's own login is running out** — C1's expiring band, or
+/// `None` when there is nothing to say (`screens/once.md` § When your own login is running out).
+///
+/// **A trailer line and not a fourth card, which is what [`Severity::Info`] already means**
+/// (NOTES § D87): the band lives in a report rather than in Alerts, and until this box the only
+/// report that drew it was the Certificates pane behind [`ANALYSIS`] — so a bare run showed the
+/// reader the *cluster's* expiring certificate and never their own, the one credential on the page
+/// they can renew without asking anybody (NOTES § D188).
+///
+/// **The expired band is deliberately not here.** Past the deadline C1 is [`Severity::Critical`],
+/// which is a card the block above already draws, and a second path to the same fact is the
+/// duplicate this line exists to avoid rather than create.
+///
+/// **The same threshold, because it is this rule's own number** — [`k8s::CERT_EXPIRY_WARN`] is
+/// C1's before it is anything [`serving_certificate`] borrows, and a 210-day reading on every run
+/// is noise before it is information (invariant 14).
+///
+/// **No mirror of C2's `— not your kubeconfig's —` clause, and that is a ruling.** C2 needs it
+/// because *a certificate is expiring* is read as *my own credential* by default and it has to
+/// deny that; this sentence opens with `Your kubeconfig certificate`, which already commits to the
+/// one referent a reader could have.
+///
+/// **It carries no severity, no place in the tally, no `⚠` and no change to the exit code** —
+/// [`serving_certificate`]'s reasons, unchanged: a session fact printed in the same slot is not a
+/// fifth vocabulary, it is the same one used again.
+///
+/// **The cluster refuses, and the sentence says so.** *"kubectl and k8rs both stop letting you
+/// log in"* put the refusal in the tools, and the reader invariant 14 is written for reads that as
+/// *kubectl is broken* and goes to reinstall it (`k8s-admin`, 2026-09-03). What actually happens is
+/// that the cluster stops accepting the certificate; the tools are the messengers.
+///
+/// **And it ends on *k8rs cannot renew it*, which its three siblings all carry.** C1's own card
+/// says it, [`serving_certificate`] says *not something k8rs can do* twice — this line said
+/// neither, and a reader who has just watched this tool print the commands it ran will otherwise
+/// go hunting for a key it does not have.
+///
+/// **The facts are restated, not stitched from C1's three fields.** The pane draws `title`,
+/// `evidence` and `action` as three lines a row can hold; a trailer has no lines to keep apart, so
+/// it joins the same facts the way C2's own trailer joins its own (`screens/once.md`).
+///
+/// **It reads the certificate rather than the `Finding`, and there is one shape where that says
+/// more than C1 does.** `rules::kubeconfig_certificate_expiring` also needs
+/// `ClusterSnapshot::context`, because its card is *about* a named context (NOTES § D51); this
+/// sentence names no context, so it does not. A kubeconfig with a certificate and no current
+/// context would print this line and no pane row — a state `k8s::connect` cannot produce, since a
+/// file with no current context is one k8rs cannot connect with at all, and the more useful
+/// answer of the two if it ever became reachable. The threshold is the shared
+/// [`k8s::CERT_EXPIRY_WARN`], which `scripts/twin-guard.py` keeps equal to the rule's own, so the
+/// two cannot disagree about *when* (dev-core's choice, 2026-09-02 — the brief left it open).
+fn login_certificate(expiry: Option<Timestamp>, now: &Time) -> Option<String> {
+    let expiry = expiry?;
+    let left = expiry.duration_since(now.0);
+    // RFC 5280 §4.1.2.5 at the top and C1's `Critical` card at the bottom: the deadline itself is
+    // still inside the window, and everything past it is already drawn above the tally.
+    if left > k8s::CERT_EXPIRY_WARN || left < SignedDuration::ZERO {
+        return None;
+    }
+    Some(format!(
+        "Your kubeconfig certificate — the file on your own machine that proves who you are, not \
+         anything in the cluster — expires in {} (valid until {expiry}). Once it runs out the \
+         cluster stops accepting it, so kubectl stops working for you too — ask whoever gave you \
+         access for a new kubeconfig before that date, because k8rs cannot renew it.",
         in_days(left)
     ))
 }
@@ -2082,6 +2218,9 @@ fn live_report(
                 // left are measured against the snapshot's own `now`, so a session left open over
                 // a threshold starts saying so without reconnecting.
                 serving_expiry: at.serving_expiry,
+                // **The flag this function was already handed**, so the one trailer line a pane
+                // would repeat is silent on the same runs there ([`Input::analysis`]).
+                analysis,
             };
             let findings = analyze(&input.snapshot);
             let mut block = render(&findings, &input);
@@ -2394,13 +2533,36 @@ fn unreadable(troubles: &[k8s::Trouble<'_>], renewal: Option<&str>) -> Vec<Strin
 /// they were inline (2026-08-27).
 fn greeting(session: &k8s::Session) -> Vec<String> {
     let renewal = session.renewal.as_deref();
-    let mut said = vec![match &session.version {
-        Ok(version) => format!("server {}", sanitize(version)),
-        Err(error) => format!(
+    let mut said = Vec::new();
+    match &session.version {
+        // **A version with nothing readable in it costs the clause rather than printing
+        // `server ` with nothing after it.** Four shapes arrive here blank and only the first is
+        // obvious: no `gitVersion` in the answer at all, one the server wrote as `""`, one that is
+        // only spaces, and one made entirely of characters invariant 9 strips — which is why the
+        // test is on the *stripped* value and why it is `trim` and not `is_empty`. A real
+        // kube-apiserver always sets the field; a proxy or gateway in front of one is where all
+        // four come from.
+        //
+        // **Silence and not a failure sentence**: the call was answered, so *could not read the
+        // server version* would be false, and the clause has nothing true left to say.
+        //
+        // **The trimmed value is what prints, because it is what was decided on.** The first draft
+        // kept the untrimmed string on the grounds that trimming invents text the cluster did not
+        // send; that defence does not hold (`k8s-admin`, 2026-09-03) — `k8s::session` has already
+        // run `text(&mut version, IDENTIFIER)` over it, so this is not the server's untouched
+        // bytes either, and `server  v1.36.1  ·` was the only thing the split bought.
+        Ok(version) => {
+            let version = sanitize(version);
+            let version = version.trim();
+            if !version.is_empty() {
+                said.push(format!("server {version}"));
+            }
+        }
+        Err(error) => said.push(format!(
             "could not read the server version ({})",
             because(k8s::fault(error), "`get /version`", renewal)
-        ),
-    }];
+        )),
+    }
     match &session.served {
         Ok(served) => {
             said.push(format!("{} kinds", served.kinds.len()));
@@ -2422,6 +2584,204 @@ fn greeting(session: &k8s::Session) -> Vec<String> {
         )),
     }
     said
+}
+
+/// **Every read this run performs, spelled as the `kubectl` a reader could paste** — the command
+/// log outside the TUI (invariant 4, `screens/once.md` § stdout and stderr are split on purpose).
+///
+/// **It joins the convention [`kubectl_get`] and [`describe_run`] already ship rather than
+/// starting a second one**: one `$ kubectl …` line per read, on stderr, sanitized like every other
+/// free-text field. **It is display text — nothing here is executed and nothing in it is fed back
+/// into a process** (the security gate).
+///
+/// **The four groups are in the order they happen; inside the last two there is no order to be
+/// in, and this log does not pretend otherwise.** The scope probe is first and alone, then the
+/// version and discovery, one after the other (`k8s.rs` § CONNECTING); then, under [`ANALYSIS`],
+/// the seven a report fetches
+/// **on one deadline and at the same time** (`k8s::report_lists`' `tokio::join!` — concurrency is
+/// the whole reason it is a `join!`); then the five permanent watches, whose LISTs are also in
+/// flight together the moment the loop starts polling them (invariant 6). So this list is spelled
+/// in the order the code *starts* them — the `join!`'s own arms, then `k8s::watches`' own vec —
+/// which is the only stable order a concurrent group has. **Measured rather than assumed**: a
+/// logging stub in front of `--once --analysis` saw the seven arrive services · endpointslices ·
+/// pvcs · pdbs · replicasets · metrics · csrs, and the five arrive deployments · pods · daemonsets
+/// · nodes · statefulsets — neither is a declaration order, and neither is stable (dev-core,
+/// 2026-09-02). Nothing above rests on the wire order; what the reader is owed is *which reads
+/// this run makes*, and a line they can paste.
+///
+/// **`/version` prints once and is read twice.** The second round trip is for the `Date` header
+/// the clock line is built from and it is the identical request; a reader who pastes the line once
+/// has reproduced both, and a second identical line would read as a stutter rather than a fact.
+///
+/// **Discovery prints as `kubectl api-resources` and not as the two raw paths it sends.**
+/// `get --raw /apis` alone leaves out what `/api`'s own versions serve, so it would not answer the
+/// question the reader has — the same one-command-stands-for-several-calls shape
+/// `kubectl describe pod` already has in this file.
+///
+/// **`--verbs=list`, because that is the filter [`greeting`] counts through.** `k8s::browsable`
+/// keeps only kinds whose discovery entry `supports_operation(verbs::LIST)`, which is exactly what
+/// the flag selects; the flag changes nothing on the wire (the same `/api` and `/apis`, measured).
+/// Without it the greeting says `62 kinds` two lines above a command that prints 69, and a reader
+/// reconciling the two concludes the tool is off by seven (`k8s-admin`, 2026-09-03).
+///
+/// **The watches print as `--watch`, which is the closest one command gets.** k8rs re-lists and
+/// keeps going when a watch breaks (`k8s::StandingBackoff`) and `kubectl get --watch` stops; that
+/// gap is about a dropped connection, not about what comes back while it holds.
+///
+/// **The first line is a probe, and it earns a line under the same bar the two below it do**
+/// (`screens/once.md`, `tui-designer`'s ruling of 2026-09-03). `k8s::coverage` asks *may this
+/// login list pods at all* before anything else on this path — one `LIST` capped at a single
+/// object — and what its answer decides is *scope*, not a fact any card is built from. That is a
+/// real reason to leave a line off and it is exactly the reason the handshake below has none; but
+/// this is an ordinary request with an ordinary `kubectl` spelling, and the bar is *every read
+/// k8rs performs*, not *every read the report is built from*. `/version` and discovery are already
+/// printed under the wider bar while deciding a greeting and a kind list, so excluding this one
+/// would be a rule this function does not hold its own next two lines to.
+///
+/// **It prints as a raw path, and `--chunk-size=1` is the spelling that was refused.**
+/// `k8s::lists_pods` sends **one** `GET /api/v1/pods?limit=1`. `kubectl get pods -A
+/// --chunk-size=1` sets the *page size* and then pages to completion: measured against the
+/// fixture cluster, 41 pods cost **41 sequential requests and 6.3 s**, where the raw path costs
+/// one (the PM, 2026-09-03). It is exact for the first request and wrong for every one after it,
+/// and it would teach the reader that k8rs listed every pod one at a time to answer *may I look
+/// at pods at all* — the opposite of the truth, on line 1 of every unscoped run, from the tool
+/// whose invariant 6 is *watch, never poll-list*. On a five-thousand-pod cluster it is
+/// `PRIOR-ART § A2`'s pathological case handed out as a teaching command.
+///
+/// **`get --raw` is not a new shape here**, it is the one `/version` two lines below already
+/// uses, and it is exact rather than approximate. The path is single-quoted so a `?` reaches
+/// `kubectl` instead of the shell's globbing.
+///
+/// **Nothing else on this list carries a page-size flag, and that is the consistent answer rather
+/// than an oversight.** `k8s::whole_list` sends no `limit` at all while `kubectl get` defaults to
+/// `--chunk-size=500`, so exactness of that kind would owe every report line a `--chunk-size=0`.
+/// It does not: those lines are bare, and the reader who pastes one gets the same objects back
+/// (`screens/once.md`). Consistency here is the absence of the flag.
+///
+/// **Which probe lines print is read back off [`k8s::Coverage`] and the context's namespace,
+/// because that pair is what `k8s::coverage` branched on.** `--namespace` answers the question
+/// before it is asked, so nothing is sent and nothing prints; a refusal sends a second probe at
+/// the fallback namespace **only** when the kubeconfig's context names none to use instead — and
+/// the filter here is `k8s::namespace_name`, the same one `context_scope` applies, or the two
+/// disagree about a context namespace that is not a namespace name. **The distinction is not
+/// cosmetic**: a context that itself names `default` produces `Refused("default")` with *one*
+/// probe sent, and a line under it would claim a request k8rs never made (invariant 4).
+///
+/// **`nodes` never carries a scope flag, on any run.** It is cluster-scoped, so there is no
+/// namespaced node list to ask for — `k8s::scoped`'s bound is what makes that structural — and
+/// `certificatesigningrequests` is bare for the same reason.
+///
+/// **One line per kind and not one merged `deployments,statefulsets,daemonsets --watch`.**
+/// `kubectl` would accept the list and print one plausible line, but k8rs opens three separate
+/// watches and a reader troubleshooting which kind misbehaves needs a line they can run alone.
+///
+/// **Two reads on this path deliberately get no line, and both exemptions are structural.** The
+/// TLS handshake C2 reads its certificate off sends no request at all (`k8s.rs` § THE SERVER'S OWN
+/// CERTIFICATE) — there is no `kubectl` spelling of *look at a certificate and hang up* — and the
+/// second `/version` is the one above, printed once. **The scope probe was a third until
+/// 2026-09-03 and is not one any more**: it was measured as request 1 of a bare run and reported
+/// as a gap in `screens/once.md`, which then ruled it a line rather than an exemption.
+///
+/// **Two run shapes print no log at all, and both are runs with no report.** A connection that
+/// never happened returns above this ([`live`]'s `Err` arm), and so does the one session-level
+/// reading that ends the run instead of joining it ([`certificate_is_why`]) — a wall is not a
+/// place to teach commands from. **The three object verbs are outside it too**: `--logs`,
+/// `--describe` and `--yaml` connect through the same [`k8s::connect`] and so perform the first
+/// two reads here, but they draw `screens/detail.md` rather than `screens/once.md` and already
+/// carry their own one line each ([`kubectl_get`], [`describe_run`]). Widening this to them is a
+/// box that page has not been written for, and all three flags die at Phase 12 (NOTES § D194).
+///
+/// **A function so both shapes can be asserted.** `live` writes this to stderr and a test cannot
+/// read the process's own stream back — the reason [`greeting`] is one too.
+/// **Everything read before the first watch, as the `kubectl` a reader could paste** — the scope
+/// probe, the version, and discovery ([`command_log`], which has the whole of why each line is
+/// spelled the way it is).
+///
+/// **It is a function because two runs print it and only one of them goes on** ([`live`]). An
+/// ordinary run prints this and then the rest; the run [`certificate_is_why`] ends on a wall
+/// prints exactly this and nothing more, because on that path the report lists and the watches
+/// never happen. A wall is where *here are the requests I did make* is the most useful thing on
+/// the screen, and printing the whole log there would name reads that never ran.
+fn connect_log(coverage: &k8s::Coverage, context_namespace: Option<&str>) -> Vec<String> {
+    let mut log = Vec::new();
+    // **`k8s::coverage`'s own branches, read back off what it answered** — never a second guess at
+    // which requests it sent. The cluster-wide probe is always cluster-wide, whatever scope the
+    // run ended up with; only the fallback probe names a namespace.
+    let cluster_wide = "$ kubectl get --raw '/api/v1/pods?limit=1'";
+    match coverage {
+        // Typing `--namespace` answers the question the probe exists to ask, so nothing is sent.
+        k8s::Coverage::Asked(_) => {}
+        // Answered cluster-wide: one request, no fallback needed.
+        k8s::Coverage::Cluster => log.push(cluster_wide.to_string()),
+        // Refused cluster-wide. The second probe went out only when the file held no namespace to
+        // fall back to instead — the doc above has why the filter has to be the same one.
+        k8s::Coverage::Refused(_) | k8s::Coverage::Blind(_) => {
+            log.push(cluster_wide.to_string());
+            if context_namespace
+                .filter(|named| k8s::namespace_name(named))
+                .is_none()
+            {
+                // **The namespace the probe was really sent to**, off the value `k8s::coverage`
+                // answered with rather than a second copy of `FALLBACK_NAMESPACE` — this arm is
+                // only reachable when the context named nothing, so it is that constant, and
+                // taking it from here means the line cannot drift from where the request went.
+                log.push(format!(
+                    "$ kubectl get --raw '/api/v1/namespaces/{}/pods?limit=1'",
+                    sanitize(coverage.namespace().unwrap_or(""))
+                ));
+            }
+        }
+    }
+    log.push("$ kubectl get --raw /version".to_string());
+    log.push("$ kubectl api-resources --verbs=list".to_string());
+    log
+}
+
+/// The command log on its way to stderr, from the two places that write one — the ordinary run
+/// and the wall [`certificate_is_why`] ends it on.
+fn log_to(err: &mut impl std::io::Write, lines: Vec<String>) {
+    for line in lines {
+        let _ = writeln!(err, "{line}");
+    }
+}
+
+fn command_log(
+    analysis: bool,
+    coverage: &k8s::Coverage,
+    context_namespace: Option<&str>,
+) -> Vec<String> {
+    // `-A` or `-n payments`, written once: five of these lines follow the scope under
+    // [`ANALYSIS`] and four of the five watches do, and a second spelling of *which namespace* is
+    // another place it can be forgotten in one.
+    let scope = match coverage.namespace() {
+        Some(namespace) => format!(" -n {}", sanitize(namespace)),
+        None => " -A".to_string(),
+    };
+    let mut log = connect_log(coverage, context_namespace);
+    if analysis {
+        log.push("$ kubectl get certificatesigningrequests".to_string());
+        for kind in [
+            "replicasets",
+            "services",
+            "endpointslices",
+            "persistentvolumeclaims",
+            "poddisruptionbudgets",
+        ] {
+            log.push(format!("$ kubectl get {kind}{scope}"));
+        }
+        // **`kubectl top nodes` and not a raw path into `metrics.k8s.io`** — the command a reader
+        // already knows for this question, and the one line here that is not a `kubectl get`. It
+        // prints once whether the reading is [`ONCE`]'s single fetch or `--live`'s thirty-second
+        // poll (`k8s::node_usage_poll`): a line means *this read began*, not *this stream is still
+        // open*.
+        log.push("$ kubectl top nodes".to_string());
+    }
+    log.push(format!("$ kubectl get pods{scope} --watch"));
+    log.push("$ kubectl get nodes --watch".to_string());
+    for kind in ["deployments", "statefulsets", "daemonsets"] {
+        log.push(format!("$ kubectl get {kind}{scope} --watch"));
+    }
+    log
 }
 
 /// **Whether an expired serving certificate is why this session read nothing** — `Some` is the
@@ -2757,6 +3117,16 @@ async fn live(
         .ok()
         .and_then(|n| certificate_is_why(&session, &n))
     {
+        // **The wall gets a command log too, and it is the reads that really happened**
+        // ([`connect_log`], `k8s-admin`, 2026-09-03). This run ends here, so the report lists and
+        // the five watches below never start and may not be named; what did run is the probe, the
+        // version and discovery, and this is the screen where a reader most needs to reproduce
+        // them by hand. The pods-unread wall further down prints the whole log for the same
+        // reason — by then the whole log is true.
+        log_to(
+            &mut std::io::stderr(),
+            connect_log(&session.coverage, session.namespace.as_deref()),
+        );
         return Some(why);
     }
 
@@ -2897,6 +3267,24 @@ async fn live(
     if polls_node_usage(analysis, stopping) {
         watches.push(k8s::node_usage_poll(session.client.clone()));
     }
+    // **Printed here because this is the first instant every line of it is true**
+    // ([`command_log`]): the probe, the version and discovery came back at connect, the seven
+    // above have just answered inside their one deadline, and every stream below — the five
+    // watches and, under `--analysis`, the metrics poll — is in the vec and about to be polled for
+    // the first time. **Below the `push` and not above it**, because on a `--live --analysis` run
+    // that poll is merged here rather than fetched in the `join!`, and `$ kubectl top nodes`
+    // printed a line higher up would be a promise rather than a read starting
+    // (`k8s-admin`, 2026-09-03).
+    log_to(
+        &mut err,
+        command_log(
+            analysis,
+            &coverage,
+            // **The context's own namespace and not [`k8s::Session::namespace_scope`]** — this is
+            // the field `k8s::coverage` branched on, and the two differ on every scoped run.
+            session.namespace.as_deref(),
+        ),
+    );
     let mut last = String::new();
     // **What [`ONCE`] came back with, filled in by the closure below**: `None` is *it reported*,
     // `Some` is the one failure that ends the run instead of joining it ([`pods_unread`]).

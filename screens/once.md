@@ -582,22 +582,176 @@ D176's rule against a placeholder still holds; what changed is that this
 number is read off the failure, not invented to fill the space where one
 used to be missing.
 
-### Stacked with the other trailer lines
+## When your own login is running out
 
-The order is **clock, then this, then the check-that-could-not-run line**,
-and each join has its own reason rather than one blanket rule. Clock goes
-first because it says something about *every* line above it, cards
-included — a reader has to know whether to trust the ages before anything
-else on the page. The check-that-could-not-run line stays absolute last on
-purpose ([§ When a check could not run](#when-a-check-could-not-run): "the
-last thing a reader is already looking at to decide whether the report is
-complete"), and this box does not reopen that. So the only open slot was
-between them, and that is where the newest fact goes — the same append, do
-not reorder call made above, applied to print order rather than drop order.
-This ordering is for the two readings that print *inside* a report — the
-expired-and-typed reading above does not join it, because when that one
-fires there is no report for it to join
-([§ When the certificate is why nothing came back](#when-the-certificate-is-why-nothing-came-back)).
+This is C1's **expiring** band
+([NOTES § Certificate rules](../NOTES.md#certificate-rules-c-series--and-what-is-not-reachable)):
+the kubeconfig's own client certificate, read from the file on disk rather
+than from anything the cluster answers — the login this machine uses,
+not the login the cluster is running. `rules.rs` already carries this
+finding and it is already drawn, one screen over,
+[in the Certificates pane](analysis.md#certificates-and-versions) — the gap
+this box closes is that a bare `k8rs --once` or `k8rs --live`, with no
+`--analysis`, currently shows it nowhere at all. `Severity::Info` is exactly
+what keeps it off a card ([§ What `--once` does not do](#what---once-does-not-do)
+already names it as one of three rules with no other reader before this
+box), and D87's ruling that the card block never draws that band is
+unchanged — this is a trailer sentence, C2's shape, not a fourth card.
+
+**Same threshold as C2, because it is the same rule's own number.**
+`CERT_EXPIRY_WARN` is C1's threshold before it is anything C2 borrows —
+thirty days, "long enough to ask a human who is on holiday, short enough
+not to sit on the screen for a quarter" (`rules.rs` § the certificate
+rules). Below it, nothing prints, for the same reason a healthy serving
+certificate prints nothing: a 210-day reading on every run is noise before
+it is information.
+
+**The facts are C1's own, restated as one paragraph rather than copied
+field by field.** The Certificates pane draws this finding's `title`,
+`evidence` and `action` verbatim, three lines a row can hold; a trailer
+sentence has no lines to keep separate, so this joins the same facts —
+the date, what the file is, and what to do about it — the way C2's own
+trailer joins its facts, rather than stitching the three clauses at their
+original seams. Inventing a fourth, unrelated wording for the same fact
+would be the two-sentences-that-can-disagree failure this file exists to
+prevent; restating the same facts in one shape that already fits a
+trailer is not that.
+
+```
+$ k8rs --once
+84 pods · 3 nodes
+
+● payments/web · 3 of 5 pods · 4 min ago
+  Containers exceeded their memory limit and were killed by the kernel
+  (OOMKilled)
+  limit 256Mi · exit 137 · 47 restarts
+  → raise limits.memory, or find the leak
+
+▲ shop/api · 2 of 6 pods · 12 min ago
+  Running, but not receiving traffic — the readiness check is failing
+  → check the app's /healthz endpoint
+
+1 critical, 1 warning
+
+Your kubeconfig certificate — the file on your own machine that
+proves who you are, not anything in the cluster — expires in 12
+days (valid until 2026-09-09T00:00:00Z). Once it runs out the
+cluster stops accepting it, so kubectl stops working for you too —
+ask whoever gave you access for a new kubeconfig before that date,
+because k8rs cannot renew it.
+```
+
+**No mirror of C2's `— not your kubeconfig's —` clause, and that is a
+ruling and not an omission.** C2 needs that clause because *a certificate is
+expiring* defaults to being read as *my own credential* — the familiar
+case — so C2 has to actively deny it. This sentence opens with `Your
+kubeconfig certificate`, which already commits to the one referent a
+reader could have; there is no other certificate this sentence could be
+mistaken for, and a clause excluding a reading nobody would reach is
+noise invariant 14 rules out before it rules the sentence in. The two
+sentences are already distinguishable at a glance by their opening words
+alone — one names the reader's own file, the other explicitly is not it.
+
+**The expired band is not a new sentence — it already reaches the reader,
+louder, as a card.** `Severity::Critical` past the deadline is the one
+band D87 sent to Alerts, so it is already in the findings list on any run
+that reaches `analyze()`, drawn exactly like every other card:
+
+```
+$ k8rs --once
+84 pods · 3 nodes
+
+● prod-eu
+  Your kubeconfig certificate expired 3 days ago — the cluster is
+  refusing you
+  was valid until 2026-08-25T00:00:00Z · this is the file on your
+  own machine that proves who you are — nothing in the cluster is
+  broken
+  → ask whoever gave you access for a new kubeconfig — k8rs cannot
+    renew it, and kubectl has stopped working for you too
+
+▲ shop/api · 2 of 6 pods · 12 min ago
+  Running, but not receiving traffic — the readiness check is failing
+  → check the app's /healthz endpoint
+
+1 critical, 1 warning
+```
+
+No age on the title line — `timestamp` is `None` on both of C1's bands,
+deliberately: an expiry is a deadline, not an event that happened at a
+moment, and the past-dated half does not get one either
+(`rules.rs` § the certificate rules). The bare `prod-eu` is the context
+name, undecorated, because a kubeconfig is not a namespaced object and rule
+5 draws no slash for the things that are not.
+
+**And this reader may well not have got a report at all — the asymmetry
+with C2 worth stating plainly.** C2's every reading, expiring or expired,
+prints inside a report that already exists: *"the report is the proof the
+connection worked"* ([§ When the API server's own certificate is running
+out](#when-the-api-servers-own-certificate-is-running-out)). C1's expired
+band carries no such guarantee, because the certificate it reads is
+routinely the *same* one the connection just authenticated with — an
+expired client certificate very often fails the TLS handshake outright,
+which is [states.md](states.md#before-the-tui-ever-starts)'s ordinary
+connection-refused wall, exit code `2`, no findings, no card, `analyze()`
+never called. The card above is real and already shipped, but it is
+reachable specifically when this same expired certificate is *not* what
+the connection actually used — a token or an `exec` plugin carries the
+real login while the old certificate sits in the file, unused and stale.
+No new message is built for the more common case: unlike C2, no rustls
+error names *this client's own certificate* as the reason a handshake
+failed, so there is nothing today to word a dedicated sentence from, only
+the generic wall every other unreachable-cluster cause already gets.
+
+**Under `--analysis`, the pane wins and the trailer stays silent — one
+fact, one place, not two.** The Certificates pane already draws this exact
+finding as a row, sorted among every other certificate this cluster and
+this kubeconfig carry
+([analysis.md § Certificates and Versions](analysis.md#certificates-and-versions)).
+Printing the trailer as well would be the same fact twice in two shapes on
+one page — the thing this box exists to stop happening to C2, not
+something to reintroduce for C1. So: no `--analysis`, trailer prints;
+`--analysis`, the pane row prints and the trailer does not. The expired
+band is unaffected either way — it is a card, not a trailer, and cards
+print regardless of `--analysis`.
+
+**A clean tally does not mean the reader's own access is fine.** The same
+argument C2 makes for a clean cluster applies here without changing a
+word: `○ nothing is broken` reads as permission to look away, and a login
+that stops working in six days is exactly the fact that permission would
+hide.
+
+**No card, no severity band, no tally entry, no `⚠`, and no change to the
+exit code — all four for the reason C2's own trailer already states**
+([§ When the API server's own certificate is running
+out](#when-the-api-servers-own-certificate-is-running-out)): a session
+fact printed in the same slot is not a fifth vocabulary, it is the same
+one used again.
+
+## Stacked with the other trailer lines
+
+The order is **clock, then C2, then C1, then the check-that-could-not-run
+line**, and each join has its own reason rather than one blanket rule.
+Clock goes first because it says something about *every* line above it,
+cards included — a reader has to know whether to trust the ages before
+anything else on the page. The check-that-could-not-run line stays
+absolute last on purpose ([§ When a check could not
+run](#when-a-check-could-not-run): "the last thing a reader is already
+looking at to decide whether the report is complete"), and neither box
+that has touched this order has reopened that. So the open slot was always
+between clock and the last line, and that is where each new fact has
+joined — the same append, do not reorder call, applied twice now to print
+order rather than drop order. C1 takes the same treatment: it is the
+newer fact, so it takes the next open slot — right after C2 — rather than
+displacing a line that already prints correctly. Ordering the two by
+urgency instead of arrival would mean weighing a certificate the cluster
+answers against one the reader's own laptop holds, which no rule on this
+page has ever had to do for two cards, let alone two trailer lines, and
+this box does not start now. This
+ordering is for the readings that print *inside* a report — the
+expired-and-typed reading for C2, and the connection-refused wall C1's
+expired band routinely produces instead of a report, do not join it,
+because when either fires there is no report for it to join.
 
 ```
 $ k8rs --once --namespace payments
@@ -614,6 +768,13 @@ expires in 12 days (valid until 2026-09-09T00:00:00Z). Once it runs
 out, kubectl and everything else stop being able to reach this
 cluster until someone on the control plane renews it — not something
 k8rs can do.
+
+Your kubeconfig certificate — the file on your own machine that
+proves who you are, not anything in the cluster — expires in 6
+days (valid until 2026-09-03T00:00:00Z). Once it runs out the
+cluster stops accepting it, so kubectl stops working for you too —
+ask whoever gave you access for a new kubeconfig before that date,
+because k8rs cannot renew it.
 
 One node check is off: spotting a node someone started emptying and
 did not finish needs every pod in the cluster.
@@ -639,15 +800,213 @@ $ k8rs --once 2>/dev/null        # just the report
 $ k8rs --once > findings.txt     # the commands still print to the terminal
 ```
 
+**The command log is the teaching device and it does not stop being one
+outside the TUI** ([invariant 4](../CLAUDE.md)) — but a report that is
+piped somewhere should arrive without it. Splitting the streams gives
+both for free, with no flag.
+
+**The command log already has a shape, and it comes from `--describe` and
+`--yaml`, not from this file.** One `$ kubectl …` line per read, on stderr,
+sanitized like every other free-text field, printed once the read is known
+to have happened rather than promised in advance
+([screens/detail.md](detail.md), `main.rs`'s `kubectl_get` for `--yaml`
+and `describe_run`'s own line for `--describe`, printed after the pod is
+read and before events are asked for). The live path — a bare `k8rs
+--once` or `k8rs --live`, with no other flag — joins that same convention
+instead of starting a second one, and this is the first place it is
+written down rather than only drawn as two lines nobody emits:
+
 ```
-$ kubectl get pods -A
-$ kubectl get nodes
+$ kubectl get --raw '/api/v1/pods?limit=1'
+$ kubectl get --raw /version
+$ kubectl api-resources --verbs=list
+$ kubectl get pods -A --watch
+$ kubectl get nodes --watch
+$ kubectl get deployments -A --watch
+$ kubectl get statefulsets -A --watch
+$ kubectl get daemonsets -A --watch
 ```
 
-The command log is the teaching device and it does not stop being one outside
-the TUI ([invariant 4](../CLAUDE.md)) — but a report that is piped somewhere
-should arrive without it. Splitting the streams gives both for free, with no
-flag.
+That is every read a bare run performs, in the order k8rs starts them:
+first, whether this login may list pods at all, then the server's own
+version, then what kinds it serves, then the five permanent watches,
+declared in this order — Pods, Nodes, Deployments, StatefulSets,
+DaemonSets (invariant 6). **The watches are started together, not one
+after another, and their real order on the wire is neither this list nor
+the declaration order it happens to match** — measured directly, it
+reshuffles from one run to the next. What is fixed is the *group*: the
+probe before the version reads, both before discovery, discovery before
+the five — and the five print in one stable order because a log a reader
+searches needs one, not because the wire gives it one. A reader can still
+paste any one line alone and get what k8rs got from that call; nothing
+here promises which of the five a second terminal would see arrive first.
+
+- **The first line is a probe, not a report input, and it earns a line
+  anyway.** `k8s::coverage` asks *may this login list pods at all* before
+  anything else runs on this path — one `LIST` capped at a single object
+  (`k8s.rs`'s own `lists_pods`, `ListParams::default().limit(1)`) — and
+  what its answer decides is scope, not a fact any card is built from.
+  That is a real reason to leave a line off, and it is exactly the reason
+  the TLS handshake below has none. But this read, unlike that one, is an
+  ordinary HTTP request with an ordinary `kubectl` spelling, and the bar
+  this box sets is *every read k8rs performs*, not *every read the report
+  is built from* — `/version` and discovery below are already printed
+  under that wider bar despite deciding a greeting and a kind list rather
+  than a card. Excluding this one because its answer is scope rather than
+  content would be a rule this file does not hold its own next two lines
+  to. It prints.
+- **Only on a run that did not type `--namespace` or its short form
+  `-n`.** Either spelling already answers the question this probe exists
+  to ask, so nothing is sent and nothing is printed — the scoped example
+  below shows the line simply absent, not refused.
+- **A second one, scoped to `default`, only when the first is refused and
+  the kubeconfig's own context names no *usable* namespace to fall back
+  to instead** (`k8s.rs`'s `coverage`, `FALLBACK_NAMESPACE`). "Usable" is
+  doing real work in that sentence: a context that names something which
+  is not a valid namespace name is the same case as one that names
+  nothing at all — `context_scope` filters it out through
+  `k8s::namespace_name` before `coverage` ever asks — so both send the
+  second probe and both print its line. Only a context that names an
+  actual namespace answers the fallback question for free and sends
+  nothing further; every other case sends the second probe and prints
+  its line, because there is nothing usable in the file to answer the
+  question with instead:
+
+  ```
+  $ kubectl get --raw '/api/v1/pods?limit=1'
+  $ kubectl get --raw '/api/v1/namespaces/default/pods?limit=1'
+  ```
+- **`/version` prints once, not twice.** The live path reads this path
+  twice over the wire — the version string, then the same path again for
+  the `Date` header the clock line is built from (`k8s.rs` § CONNECTING)
+  — but it is the identical request both times, and a reader who pastes
+  the line once has already reproduced both reads. A second, identical
+  line under the first would read as a stutter, not a second fact — the
+  kind of line this box exists to remove, not add.
+- **Discovery prints as `kubectl api-resources --verbs=list`, not as the
+  two raw paths it actually sends** (`/apis` and `/api`, aggregated,
+  "priced at two" — `k8s.rs` § CONNECTING). This is the same shape
+  `kubectl describe pod` already has in this file: one command a reader
+  would actually type, standing in for more than one call underneath it.
+  `kubectl get --raw /apis` alone would not answer the same question a
+  reader has — it leaves out what `/api`'s own versions serve — so the
+  command that answers it is the honest line, not the literal path.
+  **`--verbs=list` changes nothing the wire sends and everything the
+  command prints — measured, still just `/apis` and `/api`, nothing
+  more.** Plain `kubectl api-resources` lists every kind the cluster
+  registers, including ones with no `list` verb at all; `k8s::browsable`
+  keeps only the kinds this browser could ever open a list of
+  (`supports_operation(verbs::LIST)`, invariant 12's own boundary — the
+  exact test the flag names). Printing the flag from the start is why
+  this line and the greeting's own kind count agree without a reader
+  being told why they don't; the bare command would answer a question
+  k8rs did not ask.
+- **The five watches print as `--watch`, because that is the closest one
+  command gets — the same objects back, not the same resilience.** k8rs's
+  own watch quietly re-lists and keeps going when a watch breaks
+  (`StandingBackoff`, `k8s.rs`); a `kubectl get --watch` that hits the
+  same break stops, and getting back to where k8rs is means running it
+  again by hand. That gap is about what happens when the connection
+  drops, not about what a reader gets back while it holds — pasted
+  against a healthy connection, the command returns the same objects k8rs
+  is showing, which is the bar this box sets.
+- **`nodes` carries no `-A`.** Nodes are cluster-scoped — there is no
+  namespaced node list to ask for (`k8s.rs`'s own note on the five
+  watches) — so the honest command has no namespace flag on any run,
+  scoped or not.
+- **One line per kind, not one merged
+  `deployments,statefulsets,daemonsets --watch`.** `kubectl` accepts a
+  comma-separated list and would print a single plausible-looking line,
+  but k8rs opens three separate watches, not one, and a reader troubleshooting
+  which kind is misbehaving needs a line they can run alone — one they
+  could not isolate from a merged command.
+
+**Under `--namespace payments`, four of the five follow the scope and one
+does not — the same split the watches themselves make:**
+
+```
+$ kubectl get --raw /version
+$ kubectl api-resources --verbs=list
+$ kubectl get pods -n payments --watch
+$ kubectl get nodes --watch
+$ kubectl get deployments -n payments --watch
+$ kubectl get statefulsets -n payments --watch
+$ kubectl get daemonsets -n payments --watch
+```
+
+**Two reads on this path print no line at all, for two different
+reasons, and neither is a gap the convention forgot.** The TLS handshake
+C2 reads its certificate off sends no request — it opens a connection,
+reads what the server presents, and closes (`k8s.rs` § CONNECTING;
+[§ When the API server's own certificate is running
+out](#when-the-api-servers-own-certificate-is-running-out) is what the
+read is *for*) — and there is no `kubectl` spelling of *look at a
+certificate and hang up* to print. The second `/version` read, above, has
+a line: it is the first one, printed once rather than twice. A line that
+repeated itself and a command for a thing no command does would both be
+worse than no line — the lie this box exists to remove.
+
+### Under `--analysis`
+
+**Seven more reads, all started together on one deadline, printed after
+discovery and before the five watches.** The group order is real — probe,
+then version and discovery, then these seven as a block, then the five
+watches as a block — and there is no better fixed point to hang a
+guarantee on than that. **The order *within* the seven is not real, and
+this file does not claim it is.** They are one `tokio::join!`
+(§ WHAT A REPORT ASKS FOR), started in the same instant; which one's
+answer lands first is not fixed by the argument order in `k8s.rs`'s own
+source and is not stable from one run to the next — measured directly,
+against one cluster, twice in a row. The seven print in one fixed order
+below for the same reason the five watches do, above: a log a reader
+searches needs a stable shape, and the order `k8s.rs`'s source declares
+them in is as good a choice as any other true one.
+
+```
+$ kubectl get --raw '/api/v1/pods?limit=1'
+$ kubectl get --raw /version
+$ kubectl api-resources --verbs=list
+$ kubectl get certificatesigningrequests
+$ kubectl get replicasets -A
+$ kubectl get services -A
+$ kubectl get endpointslices -A
+$ kubectl get persistentvolumeclaims -A
+$ kubectl get poddisruptionbudgets -A
+$ kubectl top nodes
+$ kubectl get pods -A --watch
+$ kubectl get nodes --watch
+$ kubectl get deployments -A --watch
+$ kubectl get statefulsets -A --watch
+$ kubectl get daemonsets -A --watch
+```
+
+- **Every one of the six lists is a single, unpaged request, and the
+  honest command is still the plain one.** `kubectl get replicasets -A`
+  pages in 500-row chunks by default; `k8s.rs`'s own read asks for the
+  whole list in one request instead (§ WHAT A REPORT ASKS FOR's own
+  `whole_list`, and the paragraph there that measured `kubectl`'s own
+  default chunk size to make exactly this comparison). Chunking changes
+  how many round trips fetch the list, not which objects come back in
+  it — a reader who pastes the plain command gets the same list, which is
+  the bar this file sets, not the same request count.
+- **`certificatesigningrequests` carries no `-A`, and stays bare even
+  under `--namespace`.** `list csr` is cluster-scoped on every cluster —
+  there is no namespaced form to ask for (§ WHAT A REPORT ASKS FOR). The
+  other five *do* follow `--namespace`, the same way the watches do, so a
+  scoped run prints `-n payments` on those five and on none of the other
+  three lines above them.
+- **`kubectl top nodes`, not a raw path into `metrics.k8s.io`.** It is the
+  command a reader already knows for this exact question, and it is the
+  one command in this list that is not a `kubectl get`. Under `k8rs
+  --live --analysis`, the same reading is polled every thirty seconds
+  (`k8s::node_usage_poll`, invariant 6's one timed exception) and the
+  line prints once, when the poll starts, the same as a watch's line
+  marks the read starting rather than every object it delivers — a
+  command log line means *this read began*, not *this stream is still
+  open*.
+
+**The command log is display text. k8rs does not execute it, and nothing
+in it is fed back into a process** (the security gate).
 
 ## Colour and symbols
 

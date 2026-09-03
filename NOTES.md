@@ -226,6 +226,7 @@ its line moving with it.
 - [D202](#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02) — the three context rows nothing draws yet, and the placeholder that is allowed to collide
 - [D203](#d203--the-screens-read-against-the-binary-a-failure-state-that-never-existed-and-the-two-files-that-had-to-stop-contradicting-each-other-2026-09-02) — the screens read against the binary: a failure state that never existed, and the two files that had to stop contradicting each other
 - [D204](#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03) — the resident set named by an instrument: the store is cheaper than the wire, and the memory is in a page of 500 whole pods
+- [D205](#d205--what-a-default-run-prints-the-credential-the-reader-can-fix-the-command-log-that-had-to-be-honest-and-a-teaching-line-that-was-a-request-storm-2026-09-03) — what a default run prints: the credential the reader can fix, the command log that had to be honest, and a teaching line that was a request storm
 
 ## Why it exists — where the gap is
 
@@ -17608,3 +17609,88 @@ expects.
 phase** ([`backlog.md`](backlog.md)): the ~8–14 MB residual with the instant-of-peak
 question under it, and `arena_max`, which measured **45 312 / 45 584 KiB steady —
 under the 50 MB line** — with no data structure touched.
+
+### D205 — what a default run prints: the credential the reader can fix, the command log that had to be honest, and a teaching line that was a request storm (2026-09-03)
+
+Phase 6's family 4 — three boxes about what reaches the screen when nobody
+passes a flag. They landed together because they are one question, and the
+review of them turned on a single line of output.
+
+**C1's expiring band reaches a default run as a trailer, mirroring C2.**
+`login_certificate()` puts one sentence under the cards when the reader's own
+kubeconfig certificate is inside `CERT_EXPIRY_WARN` — the credential on that
+page they can renew without asking anybody, which
+[D188](#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)
+left reachable only under `--analysis`. Only the **expiring** band: the expired
+one is already `Critical` and already draws a card. Both certificate sentences
+can print on one report and stay distinguishable — *"Your kubeconfig
+certificate — the file on your own machine…"* against C2's *"A certificate the
+API server presented — not your kubeconfig's —"* — so C1 needs no mirror of that
+clause, because it has no default reading to deny.
+
+**The command log the screen had promised since before `--once` existed.** Every
+read on the live path now prints its kubectl equivalent on stderr; stdout stays
+the findings alone, so `k8rs --once > findings.txt` is unchanged. Two reads
+deliberately print nothing, and the exemptions are structural rather than
+editorial: the TLS handshake C2 reads sends no request and has no kubectl
+spelling, and the second `/version` round trip is the same request twice.
+
+**The blocker was a teaching line that taught a request storm.** The scope probe
+sends one request — `?limit=1`, asking only whether this kubeconfig may list pods
+at all — and the log first spelled it `kubectl get pods -A --chunk-size=1`.
+`--chunk-size` sets the *page size* and then pages to completion. Measured on the
+fixture cluster, twice, by two people:
+
+| what | round trips | elapsed |
+|---|---|---|
+| `kubectl get --raw '/api/v1/pods?limit=1'` — what k8rs sends | **1** | 0.075 s |
+| `kubectl get pods -A --chunk-size=1` — what the log printed | **41** | 6.30 s |
+
+41 pods, 41 sequential requests, and it is linear: 5 000 pods is 5 000 requests.
+So the first line a stranger reads was **the tool whose invariant 6 is *watch,
+never poll-list* handing out a poll-list storm as a teaching command**, and
+teaching the opposite of the truth about the one question the probe asks. It
+prints as the raw path now, which is exact rather than approximate and is a shape
+the file already ships one line below. The same review fixed `kubectl
+api-resources`, which lists 69 kinds where the greeting says `62`: `browsable`
+filters on `LIST`, so the line carries `--verbs=list` and the two numbers
+reconcile instead of the prose apologising for the terminal.
+
+**A flag is not a fact, and suppressing on one hid the thing entirely.** The
+trailer was muted under `--analysis` because the Certificates pane draws the same
+row — except the pane's row needs a `Finding`, and `kubeconfig_certificate_expiring`
+returns `None` without a context while the trailer needs none. A context whose
+name strips to nothing under invariant 9 — [D202](#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02)'s
+own shape, closed one box earlier — connects, reports, and lands exactly there:
+bare run tells the reader, `--analysis` tells them nothing. **The run with more
+reporting said less, about a credential that locks the reader out.** It suppresses
+on the finding now, not the flag. The test that should have caught it asserted
+only that the trailer was absent and never that the pane drew it instead, so it
+passed on a run where nobody was told anything — [D26](#d26--a-green-build-that-proves-nothing-2026-08-12)'s
+class, found by a reviewer rather than by the suite.
+
+**What the process caught that the process is for.** The blocker, the suppression
+gap and four smaller findings all came from the **operator review**, from someone
+who had written none of it and who ran the commands against a real cluster rather
+than reading them. Two came back the other way: the author's own measurement
+falsified its own doc comment about wire ordering — the analysis reads and the
+five watches start together, so no printed order is a wire order — and it renamed
+its test from `..._in_the_order_it_performs_them` to `..._in_the_order_it_starts_them`
+rather than leave a claim it had just disproved. **And the mutation gate earned
+its keep on the second pass**: 37 mutants, one `MISSED` — `log_to` replaced with
+`()`, meaning `live` could have printed no log at all and every test would still
+have passed, because they all read the `Vec<String>` and none read the stream.
+
+**Three smaller rulings, recorded because they are the kind that get re-litigated.**
+A wall is a place to teach commands from after all — the pods-unread wall printed
+the full log while the expired-certificate wall printed none, one stated rule and
+two behaviours, and the reads that *were* attempted are the most useful thing on a
+screen with no report. `greeting()` decided on the trimmed version string and
+printed the untrimmed one, so `" v1.36.1 "` printed two spaces either side; the
+defence that trimming would invent a string the cluster did not send does not hold,
+because `session()` already ran `text()` over it. And the trailer now ends *"because
+k8rs cannot renew it"*, the clause its three sibling sentences all carry, with the
+refusal put on the cluster rather than on the tools — *"kubectl stops letting you
+log in"* reads to a beginner as *kubectl is broken*, and the plausible next action
+is reinstalling it.
+
