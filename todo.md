@@ -3629,6 +3629,21 @@ Goal: every write works and is safe, **before a single key is bound to one**.
 This is the phase where the reversal actually happens, and it is deliberately
 placed low in the pyramid so the dangerous code is proven headlessly.
 
+> **Phase 5's release box is still unchecked, and it is still not next** — it
+> needs the maintainer's crates.io credential and a `README.md` that belongs to
+> Phase 13
+> ([D193](NOTES.md#d193--the-crates-own-description-promised-a-tui-and-the-release-stops-for-a-readme-rather-than-shipping-a-blank-page-2026-08-30)).
+> It is the first unchecked box in this file, so a cold session lands on it; the
+> note that said so sat at Phase 6's head, and Phase 6 has closed, so it is
+> repeated here and moves forward with whichever phase is open. Running a later
+> phase over a deliberately open earlier one is
+> [D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+> [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12)'s
+> shape, and it owes what they owed: **Phase 5's close ritual has not run, and it
+> runs whole when that box closes**
+> ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
+> The next box is the first unchecked one below.
+
 - [ ] `ops.rs` with the single `#![allow(clippy::disallowed_methods)]`; CI's
       containment check now expects exactly this file
 - [ ] The mutation contract, one shared function so no operation can skip a
