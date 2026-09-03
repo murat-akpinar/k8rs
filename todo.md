@@ -3322,16 +3322,12 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
 > strips to nothing. 6 **where the resident set is**, alone. 7 **a wedged watch
 > against a refused one**, alone.
 >
-> **Families 1, 2, 3, 4, 5 and 6 are all closed** (2026-08-30, 2026-08-31,
-> 2026-08-31, 2026-09-03, 2026-09-02, 2026-09-03). **The only unchecked box left
-> in this phase is family 7** — *a wedged watch against a refused one* — and it
-> runs **alone**. It is the last box of Phase 6, so closing it opens the phase
-> close, and `k8s.rs` freezes there.
+> **All seven families are closed** (2026-08-30 → 2026-09-03), family 7 last.
 >
-> **It is also the box that says its own obvious fix does not work**, which is
-> the part to read before briefing it: a wedged watch records no failure, so
-> *print the report you have* prints zero bytes and exits `0`, which is worse
-> than what it replaces. Read the box, not this line.
+> **Every box in this phase is now closed** (family 7, 2026-09-03). What remains
+> is the phase close itself, and it runs whole. Note that **Phase 5's release box
+> is still open on purpose** and its own close is still owed — see the head note
+> above.
 >
 > **Family 5 was briefed as two dispatches, not one**, after a first attempt at
 > all three at once died on a budget limit having written nothing. Both halves
@@ -3570,7 +3566,7 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       *trimmed* value and the review caught that the print was not: `" v1.36.1 "`
       kept its spaces, and the defence that trimming invents a string the cluster
       did not send does not hold, because `session()` already ran `text()` over it
-- [ ] **A wedged watch costs the whole report where a refused one costs two
+- [x] **A wedged watch costs the whole report where a refused one costs two
       rules**, and closing it is a `k8s.rs` change nobody has granted. Measured: a
       `403` on nodes gives a full report, 41 pods, thirteen findings, exit `0`; a
       nodes endpoint that accepts and never answers gives **zero bytes** and exit
@@ -3585,7 +3581,21 @@ Goal: the whole beginner debugging loop, still headless, still read-only.
       [D28](NOTES.md#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12)'s.
       **Done when** the two failure modes cost the same, or a recorded decision
       says why they must not — and either way `live`'s doc stops naming it as an
-      unclosed limit
+      unclosed limit.
+      **Done 2026-09-03 ([D206](NOTES.md#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03)). The box's own premise was wrong and
+      that was the box**: `Watch::live` is swapped once at `InitDone`, so a wedged
+      watch holds **zero** objects and not a partial list — byte-identical to what
+      the refused path already ships, so no partial snapshot was ever needed and
+      D28 stands untouched. The defect was classification: `Fault::Unfinished` is
+      the tenth variant, set only when `--once`'s existing deadline has fired, so
+      no deadline is added and D150 is intact. **Pods are excluded** — settling
+      that watch would publish an empty pod list and destroy the counts that tell
+      a 10 000-pod cluster from a dead one. Both modes exit `0`; what an
+      unreadable kind *should* cost a deploy gate applies equally to the refusal
+      that ships today and is [`backlog.md`](backlog.md)'s. **The operator review
+      caught the sentence delivering D150's forbidden verdict** — a LIST still
+      moving at the deadline was told the cluster had gone quiet — so the counts
+      are threaded through and a slow kind and a dead one now read differently
 
 **🔒 Security gate:** log streams are attacker-controlled text — bounded
 buffer, control characters stripped, no unbounded growth. Secret values are

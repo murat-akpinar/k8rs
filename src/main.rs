@@ -386,8 +386,11 @@ struct Input {
     /// down: *stale vitals stay visible*.
     ///
     /// **It is a subset of [`Input::watch_trouble`] and never bigger**: [`k8s::Store::snapshot`]
-    /// publishes nothing until every watch has listed *or settled*, and settling is a standing
-    /// failure — so an unlisted watch inside a rendered report always has a line above the cards.
+    /// publishes nothing until every watch has listed *or settled*, and both ways to settle put
+    /// the watch in [`k8s::Store::troubles`] — a standing failure it will not recover from, or a
+    /// run with a budget that stopped waiting for it ([`k8s::Store::stop_waiting`]). So an
+    /// unlisted watch inside a rendered report always has a line above the cards. It said
+    /// *settling is a standing failure* until 2026-09-03, when the second way was added.
     ///
     /// **Always empty on the file-driven path**, for [`Input::skew`]'s reason: a `.json` on disk
     /// has no watch to have failed. A file that holds no Nodes is *a file with no Nodes*, and the
@@ -2187,6 +2190,7 @@ fn live_report(
     now: Time,
     last: &mut String,
     analysis: bool,
+    stopping: bool,
     at: &AtConnect,
 ) -> Option<String> {
     let troubles = store.troubles();
@@ -2199,7 +2203,11 @@ fn live_report(
         .map(|trouble| trouble.kind.clone())
         .collect();
     let watch_trouble = !troubles.is_empty();
-    let mut report = unreadable(&troubles, at.renewal);
+    // **`now` reaches the lines as well as the cards** ([`read_so_far`]): a kind the run stopped
+    // waiting for states how far its LIST got and when the last object landed, which is D150's
+    // pair and needs the same clock the ages below it are measured against. The borrow ends
+    // before `now` is moved into `k8s::Store::snapshot`.
+    let mut report = unreadable(&troubles, at.renewal, Some(&now), stopping);
     match store.snapshot(now) {
         Some(snapshot) => {
             let input = Input {
@@ -2412,6 +2420,19 @@ fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>) -> String {
             )
         }
         k8s::Fault::Unanswered => format!("nothing usable came back when k8rs tried to {asked}"),
+        // **The one arm with no cause in it, and that is the arm** (`k8s::Fault::Unfinished`).
+        // Nothing came back and nothing said why, so every sentence that would explain it is a
+        // guess: NOTES § D148's missing keepalive makes a socket that died mid-LIST look exactly
+        // like a server that went quiet, and NOTES § D150 refuses to call a LIST that is still
+        // moving *hung*. An earlier draft said *nothing is wrong with this login: it is the
+        // cluster, or the network in between, that has gone quiet* and was both — a cause the
+        // taxonomy cannot see and a verdict D150 forbids (`k8s-admin`, 2026-09-03).
+        //
+        // **What a reader gets instead is the two numbers**, and they are [`unreadable`]'s, not
+        // this function's: `k8s::Trouble::outstanding` travels beside the fault for exactly that.
+        k8s::Fault::Unfinished => {
+            format!("the request k8rs made to {asked} had not been answered")
+        }
     }
 }
 
@@ -2489,27 +2510,94 @@ fn plain_kind(kind: &ObjectKind) -> (&'static str, &'static str) {
 /// the merely-degraded line wore the same one. The reuse of the severity glyphs for a second axis
 /// is a real collision and is `tui-designer`'s to settle when `views.rs` lands (backlog); giving
 /// the terminal state the heavier of the two is free and correct either way.
-fn unreadable(troubles: &[k8s::Trouble<'_>], renewal: Option<&str>) -> Vec<String> {
+///
+/// # Four tails, and *It keeps asking* is only true of one of them
+///
+/// **A run that is ending may not promise a retry** (`k8s-admin`, 2026-09-03). These lines are
+/// printed by [`ONCE`] one instant before `stop.abort()`, so the retry sentence is false of every
+/// line on that run — not only of the kind that ran out of time. `stopping` picks that tail and
+/// `k8s::Trouble::unfinished` does not, because `unfinished` was doubling as a mode signal: it is
+/// unreachable outside `--once` today, and a watch that **listed and then broke** is not
+/// unfinished, took the ordinary tail, and got the promise anyway.
+///
+/// **The kind the run stopped waiting for gets NOTES § D150's two numbers and no cause**
+/// ([`read_so_far`], `k8s::Trouble::outstanding`). *Slow* and *hung* overlap by construction and
+/// this file may not pick between them: a nodes LIST holding 1 500 objects with a stamp from this
+/// millisecond is a **slow** cluster, and the line said *it is the cluster, or the network in
+/// between, that has gone quiet* — a verdict D150 exists to refuse, delivered to an operator
+/// whose cluster was working. A `k8s::Fault` alone could never have avoided it, because a fault
+/// is a constant per class and the thing that separates the two cases is a number.
+///
+/// **A fault that *is* a cause is still stated, ahead of the numbers.** `k8s::Fault::Unfinished`
+/// means *no answer and no error*, so its sentence would only repeat the count; an `Unanswered`
+/// behind the same watch is a real reason with a real action and keeps its clause.
+fn unreadable(
+    troubles: &[k8s::Trouble<'_>],
+    renewal: Option<&str>,
+    now: Option<&Time>,
+    stopping: bool,
+) -> Vec<String> {
     troubles
         .iter()
         .map(|trouble| {
             let (kind, resource) = plain_kind(&trouble.kind);
-            let why = match trouble.fault() {
+            // Read once: every line below selects off it and one of them matches on it as well,
+            // and two calls is where they would come to disagree about which fault this is
+            // ([`pods_unread`] states the same rule over the same value).
+            let fault = trouble.fault();
+            let why = match fault {
                 Some(fault) => because(fault, &format!("`list` and `watch` {resource}"), renewal),
                 // `ended` with no failure: the stream finished and never said why. The only
                 // honest clause, and the one thing a fallback string is allowed to describe.
                 None => "nothing was ever said about why".to_string(),
             };
-            if trouble.ended {
-                format!(
+            // **The middle arm keys on `unfinished` and not on `outstanding`**, and the
+            // difference is `--live`: *every* watch that has not listed carries the two numbers,
+            // including a refused one on a run that has not ended and never will
+            // (`k8s::Trouble::outstanding`). Keying on the numbers would put *this run ran out of
+            // time* on a screen somebody is still watching.
+            match (trouble.ended, trouble.unfinished, &trouble.outstanding) {
+                (true, _, _) => format!(
                     "● k8rs has stopped receiving {kind} from this cluster: {why}. What is shown \
                      about them will not change again"
-                )
-            } else {
-                format!(
+                ),
+                // **The two numbers, and no cause** (NOTES § D150, [`read_so_far`]). This is the
+                // line for a kind the run stopped waiting for, and what separates *slow* from
+                // *hung* is the shape of those numbers over time — not anything this driver may
+                // say about it. A sentence naming a cause here told the operator of a 2 000-node
+                // cluster whose nodes LIST was mid-flight that their cluster had *gone quiet*,
+                // which is the one direction D150 forbids.
+                //
+                // **`k8s::Fault::Unfinished` is dropped and every other fault is kept.** That
+                // variant means *no answer and no error*, so its sentence would only repeat the
+                // count beside it; an `Unanswered` behind the same watch is a real cause with a
+                // real action and is stated ahead of the numbers.
+                // `unfinished` without `outstanding` cannot happen — both gate on `complete`
+                // (`k8s::Watch::outstanding`) — and if it ever did it would fall to the arm below,
+                // which is honest rather than wrong.
+                (false, true, Some(outstanding)) => {
+                    let stated = match fault {
+                        Some(k8s::Fault::Unfinished) | None => String::new(),
+                        Some(_) => format!("{why}; "),
+                    };
+                    format!(
+                        "▲ k8rs never finished reading {kind} from this cluster: {stated}{}, and \
+                         this run ran out of time — so nothing here about them can be trusted",
+                        read_so_far(outstanding, now)
+                    )
+                }
+                // **A run that is ending may not promise a retry**, and this is the tail that did
+                // it (`k8s-admin`, 2026-09-03): under [`ONCE`] it prints one instant before
+                // `stop.abort()`. It is true of a refused watch and of one that listed and then
+                // broke, so the fix is to drop the promise rather than to split the line again.
+                (false, _, _) if stopping => format!(
+                    "▲ k8rs is not getting {kind} from this cluster: {why}. Nothing here about \
+                     them can be trusted"
+                ),
+                (false, _, _) => format!(
                     "▲ k8rs is not getting {kind} from this cluster: {why}. It keeps asking, and \
                      until that works nothing here about them can be trusted"
-                )
+                ),
             }
         })
         .collect()
@@ -3040,18 +3128,28 @@ struct Budget {
 /// measurement). Only when pods carry no standing fault is the answer *slow or hung*, which is
 /// the one NOTES § D150 refuses to split.
 ///
-/// **What that does not make symmetric is a kind that is wedged rather than refused, and it
-/// cannot be made symmetric from this file** (`k8s-admin`,
-/// `reports/2026-08-30-once-flag-against-a-live-cluster.md` § 3 vs § 4c). Measured on one
-/// cluster: `nodes` refused gives a full report, 41 pods and exit `0`; a `nodes` endpoint that
-/// accepts and never answers gives 0 bytes and exit `2`, with the same 41 pods sitting in the
-/// store. `k8s::Fault::Refused` settles and opens the gate; a hang settles nothing, so
-/// `k8s::Store::snapshot` answers `None` and **there is no report to print** — [`live_report`]
-/// over that store has no cards, and a wedged kind with no failure recorded is not even a
-/// [`k8s::Trouble`], so it has no line either. *Print the report you have and exit `0`* would
-/// print nothing and exit `0`, which turns `k8rs --once && deploy` green on a run that read
-/// nothing. Publishing a partial snapshot is `k8s::Store`'s decision and NOTES § D28's, so it is
-/// a box against that file and not a fix here.
+/// **A kind that is wedged now costs what a refused one costs, and it did not until 2026-09-03**
+/// (`k8s-admin`, `reports/2026-08-30-once-flag-against-a-live-cluster.md` § 3 vs § 4c). Measured
+/// on one cluster: the run whose role could not `list nodes` gave a full report — `41 pods`,
+/// `12 critical, 2 warnings` — and exit `0`; the run in which only the nodes LIST was accepted and
+/// never answered gave **0 bytes** and exit `2` after 30 s, with the same pods sitting in the
+/// store — a transient failure costing strictly more than a permanent one, so
+/// `k8rs --once && deploy` flipped on which of the two the cluster was in. `k8s::Fault::Refused`
+/// settled and opened the gate; a wedge recorded no failure at all, so it settled nothing, held
+/// the gate for everybody and was not even a [`k8s::Trouble`] to draw a line from.
+///
+/// **What closed it is a classification and not a partial snapshot, which is why NOTES § D28 did
+/// not have to move.** At the deadline this run is over, so a watch that has not listed is not
+/// slow — [`k8s::Store::stop_waiting`] says so, the watch settles like a refused one, and what it
+/// publishes is an **empty** list rather than a short one (`k8s::Watch` swaps `live` whole at
+/// `InitDone`, so there was never a half-filled list here to mistake for a small cluster). The
+/// kind is named twice over, exactly as a refusal is: [`unreadable`]'s line above the cards, and
+/// `analysis.rs`'s *needs permission to list nodes* rows where the numbers would be.
+///
+/// **Pods are the exception and keep both of their old answers** ([`out_of_time`]): a classified
+/// pod failure is still [`pods_unread`]'s one sentence, and a pod LIST that is merely slow is
+/// still [`too_slow`]'s two facts, because settling that watch would throw away the counts
+/// NOTES § D150 built for it.
 ///
 /// # What it returns
 ///
@@ -3342,7 +3440,7 @@ async fn live(
                     return;
                 }
             }
-            if let Some(report) = live_report(store, now, &mut last, analysis, &at) {
+            if let Some(report) = live_report(store, now, &mut last, analysis, stopping, &at) {
                 // **`--live` drops a failed write and `--once` does not, and the difference is
                 // that one of them has an exit to take.** Under `--live` there is nowhere left to
                 // report it and no ending to give it, the same reason `main` drops a failed
@@ -3358,11 +3456,10 @@ async fn live(
                 // wholesale when this path grew a stopping point, so a redirected `--once` report
                 // ended on two newlines where the file-driven one ends on one (`tester`,
                 // `tests/binary.rs`).
-                let separator = if stopping { "" } else { "\n" };
-                if let Err(failed) = writeln!(std::io::stdout(), "{report}{separator}")
-                    && stopping
-                {
-                    ending = stdout_failure(&failed);
+                if stopping {
+                    ending = emit_once(&report);
+                } else {
+                    let _ = writeln!(std::io::stdout(), "{report}\n");
                 }
             }
             // **Aborted whether or not [`live_report`] had anything to say**, because *the gate
@@ -3412,15 +3509,100 @@ async fn live(
                 // **It is not D150's threshold question.** That decision refuses to separate
                 // *slow* from *hung* and this does not try to: *not reachable* is a third state
                 // and it is a typed fact, so it is reported rather than diagnosed. When pods have
-                // no standing fault the sentence below is unchanged, which is D150 intact.
-                Err(_) => Some(
-                    pods_unread(&store.troubles(), &coverage, at.renewal).unwrap_or_else(|| {
-                        too_slow(&store.still_listing(), wall_clock().ok(), budget.whole)
-                    }),
-                ),
+                // no standing fault the sentence is unchanged, which is D150 intact.
+                //
+                // **Three answers now, and the third is a report rather than a sentence**
+                // ([`out_of_time`], `k8s::Fault::Unfinished`). Both of the two above are about
+                // *pods*, because pods are where every finding starts; a run that read them and
+                // ran out on some other kind has cards to draw, and printing nothing for it was
+                // the asymmetry this box closed.
+                Err(_) => {
+                    let now = wall_clock().ok();
+                    // **Read before anything below settles a watch**, because
+                    // [`k8s::Store::stop_waiting`] empties this call: these are the two facts
+                    // D150 hands a reader who may be looking at a cluster that is merely slow.
+                    let listing = store.still_listing();
+                    match out_of_time(&store, &coverage, now.clone(), budget.whole, at.renewal) {
+                        Some(why) => Some(why),
+                        // **Pods were read and something else was not, so this run has a report
+                        // in it** — and until 2026-09-03 it printed zero bytes and exited `2`
+                        // instead (`k8s::Fault::Unfinished`).
+                        None => {
+                            store.stop_waiting();
+                            match now.and_then(|now| {
+                                live_report(&store, now, &mut last, analysis, stopping, &at)
+                            }) {
+                                Some(report) => emit_once(&report),
+                                // A clock this machine cannot read leaves nothing to render a
+                                // report against — [`live_report`] takes `now` by value and the
+                                // ages in every card are measured from it. The counts read above
+                                // are what is left, which is the same answer this arm gave before
+                                // there was a report to prefer.
+                                None => Some(too_slow(&listing, None, budget.whole)),
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/// **One [`ONCE`] report onto stdout, and the sentence that replaces exit `0` if the write fails**
+/// — `None` is *it reported*.
+///
+/// **A function because two places in [`live`] print that one report**: the pass where the gate
+/// opened on its own, and the deadline arm where it opened because the run stopped waiting
+/// ([`k8s::Store::stop_waiting`]). Both owe the same thing — `k8rs --once > findings.txt` onto a
+/// full disk may not leave half a report behind and exit `0` ([`stdout_failure`], which keeps
+/// `head` closing the pipe at `0` because that is the pipeline working, NOTES § D17) — and two
+/// copies of that rule is one place for it to stop being kept.
+///
+/// **No trailing blank line, unlike `--live`'s.** That one separates one report from the next and
+/// this mode has none (`screens/once.md` § What it prints ends at the tally).
+fn emit_once(report: &str) -> Option<String> {
+    use std::io::Write;
+    match writeln!(std::io::stdout(), "{report}") {
+        Ok(()) => None,
+        Err(failed) => stdout_failure(&failed),
+    }
+}
+
+/// **What a [`ONCE`] run whose budget ran out has to say instead of a report, or `None` when it
+/// still has one** — the whole of the decision the deadline arm makes, lifted out because a test
+/// cannot read the process's own stdout back (the reason [`greeting`] and [`scoped_because`] are
+/// functions).
+///
+/// **Pods decide, and the two answers for them are unchanged.** [`pods_unread`] is asked first,
+/// so a pod watch the store has classified — refused, unreachable, ended — ends the run on its
+/// own sentence exactly as it did before. A pod LIST with no failure behind it is asked second and
+/// gets [`too_slow`]'s two facts, which is NOTES § D150's answer and the one thing this box may
+/// not spend: *8 000 read so far, the last one 2s ago* is how a reader tells a big cluster from a
+/// dead one, and it is only readable while the LIST is still counted as running.
+///
+/// **`None` is the case this function exists to separate out**: pods landed, so there are cards to
+/// draw, and some *other* kind did not. That used to be [`too_slow`] too — thirty seconds, zero
+/// bytes on stdout, exit `2` — while the same store with a `403` on the same kind printed the
+/// whole report and exited `0` (`k8s::Fault::Unfinished` has the measurement). The caller answers
+/// it by telling the store the waiting is over and printing what is there.
+///
+/// **Which is why nothing here calls [`k8s::Store::stop_waiting`].** Settling a watch empties
+/// [`k8s::Store::still_listing`], and this function reads it — one call that both consumed and
+/// destroyed its own evidence is how the counts above would go missing without a test noticing.
+fn out_of_time(
+    store: &k8s::Store,
+    coverage: &k8s::Coverage,
+    now: Option<Time>,
+    budget: std::time::Duration,
+    renewal: Option<&str>,
+) -> Option<String> {
+    pods_unread(&store.troubles(), coverage, renewal).or_else(|| {
+        let listing = store.still_listing();
+        listing
+            .iter()
+            .any(|one| one.kind == ObjectKind::Pod)
+            .then(|| too_slow(&listing, now, budget))
+    })
 }
 
 /// **The one watch whose failure ends a `--once` run instead of joining its report**, and the
@@ -3436,7 +3618,7 @@ async fn live(
 ///
 /// **It was `pods_refused` until 2026-08-30 and a refusal is only one of the faults it now
 /// answers for** (`k8s-admin`, `reports/2026-08-30-once-flag-against-a-live-cluster.md` § 5).
-/// [`live`] asks it at the deadline as well as at the gate, so an unreachable cluster — five
+/// The deadline asks it as well as the gate ([`out_of_time`]), so an unreachable cluster — five
 /// watches holding `k8s::Fault::Unanswered`, none of them settling, the gate never opening —
 /// reaches this instead of being reported as a *slow* one. The name said *refused* while the
 /// commonest thing it now catches is a cluster nobody can reach.
@@ -3534,6 +3716,34 @@ fn pods_unread(
     ))
 }
 
+/// **NOTES § D150's two facts as one clause** — *`1500 read so far, the last one 4s ago`*.
+///
+/// **One function because two sentences state them and they may not drift** ([`too_slow`], which
+/// is the whole message when a run has no report, and [`unreadable`], which is one line above the
+/// cards when it has one). A reader who sees `0 read so far` in one and *0 objects* in the other
+/// is reading two vocabularies for one measurement, which is what [`plain_kind`] exists to stop
+/// one layer over.
+///
+/// **`0 read so far` never carries an age, and that is a correction rather than a tidy-up**
+/// (`k8s-admin` and `tester`, independently, 2026-08-30). `k8s::Listing::since` is stamped by the
+/// `Init` that *opens* the watch, so `0` with a stamp is the ordinary reading for a whole first
+/// round trip — and the sentence read *0 read so far, the last one 30s ago* when there was no
+/// last one for *one* to bind to (invariant 14). Worse, on an unreachable cluster the five ages
+/// read `12s, 12s, 10s, 12s, 10s`: numbers that move while nothing whatever arrives, which points
+/// D150's *counts that have moved mean it is slow* separator at the wrong answer. `k8s::Watch`
+/// carries `Watch::settled` because that same restamping was *"a screen actively lying about
+/// progress"* for the refused case.
+///
+/// **Nothing here is outside text**: a `usize` and [`age`]'s ladder, so nothing needs
+/// [`sanitize`].
+fn read_so_far(listing: &k8s::Listing, now: Option<&Time>) -> String {
+    let arrived = now
+        .filter(|_| listing.so_far > 0)
+        .and_then(|now| listing.since.as_ref().and_then(|since| age(now, since)))
+        .map_or(String::new(), |ago| format!(", the last one {ago}"));
+    format!("{} read so far{arrived}", listing.so_far)
+}
+
 /// **What `--once` says when the run's budget ran out with no complete answer in it**
 /// ([`ONCE_DEADLINE`], [`cluster_run`]) — one sentence on stderr, exit `2`, and nothing at all on
 /// stdout.
@@ -3545,25 +3755,20 @@ fn pods_unread(
 /// again and see whether they moved. A sentence that called this cluster broken would be the
 /// threshold that file declined to invent, printed as a verdict.
 ///
-/// **An empty list is [`cluster_run`]'s shape and no longer an unreachable one.** The deadline
-/// inside [`live`] fires only while something is listing, but the one around the connection fires
-/// before any watch exists — there is no kind to name and no count to report, and *run it again
-/// and see whether the counts moved* is advice about numbers that were never printed. That arm
+/// **An empty list is [`cluster_run`]'s shape and no longer an unreachable one.** [`out_of_time`]
+/// reaches this only for a pod LIST that is still counted as running, but the deadline around the
+/// connection fires before any watch exists — there is no kind to name and no count to report,
+/// and *run it again and see whether the counts moved* is advice about numbers that were never
+/// printed. That arm
 /// names the one thing that is still true and still actionable.
 ///
 /// **`now` is the caller's and may be absent** (invariant 5, NOTES § D18). A machine whose clock
 /// will not read loses *when the last one arrived* and keeps the counts, which is
 /// [`Input::skew`]'s rule about evidence: no reading is printed as no reading.
 ///
-/// **`0 read so far` never carries an age, and that is a correction rather than a tidy-up**
-/// (`k8s-admin` and `tester`, independently, 2026-08-30). `k8s::Listing::since` is stamped by the
-/// `Init` that *opens* the watch, so `0` with a stamp is the ordinary reading for a whole first
-/// round trip — and the sentence read *0 read so far, the last one 30s ago* when there was no
-/// last one for *one* to bind to (invariant 14). Worse, on an unreachable cluster the five ages
-/// read `12s, 12s, 10s, 12s, 10s`: numbers that move while nothing whatever arrives, which points
-/// D150's *counts that have moved mean it is slow* separator at the wrong answer. `k8s::Watch`
-/// carries `Watch::settled` because that same restamping was *"a screen actively lying
-/// about progress"* for the refused case.
+/// **The clause itself is [`read_so_far`]'s**, shared with [`unreadable`] since 2026-09-03 so a
+/// reader meets one vocabulary for one measurement — including its rule that `0 read so far`
+/// never carries an age, which is written once, there.
 ///
 /// **The number of seconds is the caller's** ([`Budget::whole`]), so the sentence cannot drift
 /// from the deadline that produced it — and both places that give up inside a run hand over the
@@ -3576,15 +3781,10 @@ fn too_slow(listing: &[k8s::Listing], now: Option<Time>, deadline: std::time::Du
     let waited: Vec<String> = listing
         .iter()
         .map(|one| {
-            let arrived = now
-                .as_ref()
-                .filter(|_| one.so_far > 0)
-                .and_then(|now| one.since.as_ref().and_then(|since| age(now, since)))
-                .map_or(String::new(), |ago| format!(", the last one {ago}"));
             format!(
-                "{} ({} read so far{arrived})",
+                "{} ({})",
                 plain_kind(&one.kind).0,
-                one.so_far
+                read_so_far(one, now.as_ref())
             )
         })
         .collect();

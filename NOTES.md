@@ -227,6 +227,7 @@ its line moving with it.
 - [D203](#d203--the-screens-read-against-the-binary-a-failure-state-that-never-existed-and-the-two-files-that-had-to-stop-contradicting-each-other-2026-09-02) — the screens read against the binary: a failure state that never existed, and the two files that had to stop contradicting each other
 - [D204](#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03) — the resident set named by an instrument: the store is cheaper than the wire, and the memory is in a page of 500 whole pods
 - [D205](#d205--what-a-default-run-prints-the-credential-the-reader-can-fix-the-command-log-that-had-to-be-honest-and-a-teaching-line-that-was-a-request-storm-2026-09-03) — what a default run prints: the credential the reader can fix, the command log that had to be honest, and a teaching line that was a request storm
+- [D206](#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03) — a wedged watch cost the whole report, and the partial snapshot it was said to need was never needed
 
 ## Why it exists — where the gap is
 
@@ -17693,4 +17694,72 @@ k8rs cannot renew it"*, the clause its three sibling sentences all carry, with t
 refusal put on the cluster rather than on the tools — *"kubectl stops letting you
 log in"* reads to a beginner as *kubectl is broken*, and the plausible next action
 is reinstalling it.
+
+### D206 — a wedged watch cost the whole report, and the partial snapshot it was said to need was never needed (2026-09-03)
+
+Phase 6's last box, and it was written as a collision with
+[D28](#d28--the-workload-watch-and-the-blind-spot-it-closes-2026-08-12): *symmetry
+needs a partial snapshot, which is `k8s::Store`'s decision and D28's.* **The
+collision was not real, and finding that out was the whole box.**
+
+**The asymmetry, measured before any of this.** A `403` on nodes gives a full
+report and exit `0`, costing two rules. A nodes endpoint that accepts and never
+answers gives **zero bytes** and exit `2`. So a *transient* fault produced less
+than a *permanent* one, and `k8rs --once && deploy` flipped on which failure mode
+the cluster happened to be in.
+
+**Why it looked like it needed a partial snapshot, and why it did not.**
+`Store::snapshot` refuses to publish until every watch has listed, so the obvious
+fix — *print the report you have* — publishes zero bytes and exits `0`, strictly
+worse ([D191](#d191--the---once-review-round-three-blockers-and-the-one-pm-ruling-a-measurement-refused-2026-08-30)).
+That is where the box stopped. What nobody had read is the assignment: `Watch::live`
+is written in **exactly one place**, `Event::InitDone`, guarded by `filling.take()`.
+Objects accumulate in `filling` and become visible in one swap. **So a wedged watch
+holds zero objects, not a partial list** — and zero-with-the-kind-named is
+byte-identical to what the refused path already ships and already announces.
+Proven rather than argued: a test asserts `wedged.snapshot(now) ==
+refused.snapshot(now)`, object for object. D28 refuses a *short list a rule cannot
+tell from a small cluster*; this was never one.
+
+**So the defect was classification, not publication.** A refusal is classified —
+`Watch::settled`, so `still_listing` drops it and `troubles` names it. A wedge was
+classified as *still working*, forever. `Fault::Unfinished` is the tenth variant,
+set only when the `--once` deadline has already fired, which adds no deadline and
+leaves [D150](#d150--a-first-sync-that-never-finishes-two-facts-and-no-threshold-2026-08-22)'s ruling intact: what changes is what the existing deadline
+*means*, because a watch that has not listed when the run is over is not slow.
+It says what actually happened — the cluster accepted the request and never
+answered — rather than borrowing the refusal's sentence, because one is fixed with
+an RBAC grant and the other by looking at the API server.
+
+**Pods are excluded from the stamp, and that exclusion is the part worth keeping.**
+Settling the pod watch would publish an empty pod list and throw away the counts
+D150 exists for — the ones that tell a 10 000-pod cluster from a dead one. So: pods
+with a classified fault stay `pods_unread`; pods not listed and no fault stay the
+two-fact *too slow* wall; **only a run whose pods landed and whose other kind did
+not** prints the report. Without that split this change would have regressed the
+slow-cluster case into a lie.
+
+**Exit `0`, and the argument rather than the ruling.** The box's done-when is *the
+two failure modes cost the same*, and the refusal ships `0`; making the wedge `2`
+would keep the asymmetry, just smaller. `0` here has never meant *the cluster is
+healthy* — `screens/once.md § Exit codes` says it means *k8rs ran and reported* —
+and this run does report: the pods, the findings, and a line naming the kind it
+could not read. The one kind whose absence means no report is pods, and that stays
+`2`. **What an unreadable kind should cost is a real question and it is not this
+box's**: it applies identically to the `403` that ships today, and answering it
+here would change shipped behaviour for a developer whose Role legitimately cannot
+list nodes — the environment `Coverage::Refused` exists for. It is one
+[`backlog.md`](backlog.md) line covering both.
+
+**Three doc comments in `k8s.rs` were made false by this change and were found by
+the author's own second pass**, which matters because the file freezes at the end
+of this phase: `Watch::settled` still said it deliberately does not cover
+`Unanswered`; `Trouble::listed` said `false` in a report always means a standing
+failure; `Watch::progress` and `Store::listed` each knew only one way to settle.
+The same pass caught the author repeating **this box's own paraphrase** of a
+measurement — *41 pods, thirteen findings* — where the report says `12 critical,
+2 warnings` with four kinds refused, `13 critical, 3 warnings` being the
+full-permission run. A number copied from a box instead of from the report it
+cites is [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
+class, one remove further out.
 

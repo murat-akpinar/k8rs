@@ -14,10 +14,13 @@
 //! decode. It serves the resident-set budget `REQUIREMENTS.md` states at a cluster size, and a
 //! comment here claiming it serves first paint would be a defect.
 //!
-//! **Nothing escapes [`Store::snapshot`] until every initial LIST has landed** (NOTES § D28). A
-//! rule cannot tell a short list from a small cluster — invariant 5 leaves it no way to ask — so
-//! a snapshot published mid-bootstrap makes rule 10 say *none of the 3 nodes have that label* on
-//! a 200-node cluster.
+//! **Nothing escapes [`Store::snapshot`] until every initial LIST has landed, or is not going
+//! to** (NOTES § D28). A rule cannot tell a short list from a small cluster — invariant 5 leaves
+//! it no way to ask — so a snapshot published mid-bootstrap makes rule 10 say *none of the 3
+//! nodes have that label* on a 200-node cluster. **Two things are *not going to*, and neither is
+//! a partial list**: a watch the cluster refuses ([`Watch::settled`]), and a watch a run with a
+//! budget has stopped waiting for ([`Store::stop_waiting`]). Both publish **zero** objects for
+//! their kind, which the caller announces; what D28 forbids is a *short* one.
 //!
 //! **[`drive`] is the loop, and it is a pump and nothing else.** Every decision about what an
 //! event means lives in [`Store`], which is tested on its own by feeding it events by hand; the
@@ -45,10 +48,13 @@
 //!
 //! **A first sync that never finishes is a state and not a spinner, and there is no deadline in
 //! it** (NOTES § D150, `PRIOR-ART § A7`). Each unfinished LIST reports two facts — how many
-//! objects it has decoded, and when the last one arrived — because *slow* and *hung* overlap by
-//! construction and any threshold that called the twentieth round trip of a 10 000-pod cluster a
-//! hang would call a working cluster broken. A LIST that is working moves both numbers; a LIST
-//! that is hung moves neither, and [`Listing`] is readable at any instant without one. **Nothing
+//! objects it has decoded, and when the last one arrived — and it reports them **whether or not
+//! the run has stopped waiting for it** ([`Trouble::outstanding`]), because a kind missing from a
+//! report is exactly where a renderer would otherwise have to guess a cause. *Slow* and *hung*
+//! overlap by construction, and any threshold that called the twentieth round trip of a
+//! 10 000-pod cluster a hang would call a working cluster broken. A LIST that is working moves
+//! both numbers; a LIST that is hung moves neither, and [`Listing`] is readable at any instant
+//! without one. **Nothing
 //! here cancels anything**: the tool does not quit because a cluster is slow.
 //!
 //! **The oldest API server this build is supported against is Kubernetes 1.29, and a cluster
@@ -803,7 +809,7 @@ fn ingest<K, T: From<K> + Bounded>(object: K) -> T {
 ///
 /// **The count is read off the enum and not carried forward.** It said *six* over eight variants
 /// until 2026-08-30 — a figure reasoned about rather than counted, which is the class CLAUDE.md
-/// names — and the edit that added the ninth found it.
+/// names — and the edit that added the ninth found it. The tenth read it again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
     /// **The kubeconfig file itself** — not found, unreadable, or not valid YAML. Nothing was
@@ -907,6 +913,42 @@ pub enum Fault {
     /// deletes the ReplicaSet it replaced, and a pod read a moment earlier can name one that is
     /// already gone (§ RESOLVING AN OWNER).
     Gone,
+    /// **The server took the request and this run ended before it answered** — the only fault in
+    /// the taxonomy that is a fact about the *run* as well as about the call.
+    ///
+    /// **It is what a wedged watch is, and it exists because a wedge cost more than a refusal.**
+    /// Read off `reports/2026-08-30-once-flag-against-a-live-cluster.md`, § 3 against § 4c on one
+    /// four-node kind cluster: the run whose role could not `list nodes` printed a **full
+    /// report** — `41 pods`, `12 critical, 2 warnings` — and exited `0`; the run in which only
+    /// the nodes LIST was accepted and never answered printed **0 bytes** and exited `2` after
+    /// 30 s, with the same pods sitting in the store. § 4c says it in its own words: *the same
+    /// kind refused produces a full report and exit `0`*. A refusal is
+    /// classified and settles ([`Watch::settled`]); a wedge records no failure at all, so nothing
+    /// settled, [`Store::snapshot`] answered `None` and there was no report to print. This is the
+    /// classification a wedge did not have, stamped by [`Store::stop_waiting`] when the run's own
+    /// deadline says the waiting is over.
+    ///
+    /// **It is not [`Unanswered`](Fault::Unanswered), and telling them apart is the whole point.**
+    /// That one is *something came back and it was not usable* — an error, a dead socket, a
+    /// `5xx`. This one is *nothing came back at all and nothing said why*, which is a different
+    /// thing to be told and the reason it is a variant rather than a reuse.
+    ///
+    /// **It does not say the server is at fault, and it may not.** NOTES § D148 is why: the watch
+    /// sockets carry no TCP keepalive, so a connection that died mid-LIST stalls with no error and
+    /// looks exactly like a server that accepted the request and went quiet. This doc claimed *the
+    /// connection is fine and the server went quiet* until 2026-09-03 — an overclaim past the
+    /// shipped sentence beside it, which correctly hedges *or the network in between*.
+    ///
+    /// **And it carries no verdict about speed either** (NOTES § D150). A LIST holding 1 500
+    /// objects with a stamp from this millisecond is *slow*, not dead, and this variant cannot
+    /// tell the two apart — which is why [`Trouble::outstanding`] travels beside it and why a
+    /// renderer states the two numbers rather than this fault's sentence.
+    ///
+    /// **Nothing in [`watch_fault`] can produce it.** It has no `watcher::Error` behind it —
+    /// there was no error, which is exactly the problem — so it arrives only through
+    /// [`Watch::unfinished`], and a watch that *does* hold a failure keeps that failure's own
+    /// fault instead ([`Trouble::fault`]).
+    Unfinished,
     /// **Nothing usable came back** — a socket that died, a timeout, a `5xx`, a `429` that
     /// outlived kube's retries, a body that would not decode, a watch answer with no
     /// `resourceVersion`, a proxy protocol kube will not speak.
@@ -950,6 +992,11 @@ impl Fault {
             // The three kubeconfig faults cannot reach a watch — the client is already built by
             // then — and they are here because the match is exhaustive, not because a watch can
             // raise one. Each is still a fact a retry cannot change.
+            // **[`Fault::Unfinished`] cannot arrive here either**, for a sharper reason than
+            // the three above: [`watch_fault`] has no arm that produces it, so no `failure` can
+            // carry it and this call never sees one. It is on this side because the fact it
+            // names is *this run ended before the server answered*, and no retry inside a run
+            // that is over can make the next attempt go differently.
             Fault::Kubeconfig
             | Fault::NoContext
             | Fault::BadEntry
@@ -957,7 +1004,8 @@ impl Fault {
             | Fault::Rejected
             | Fault::Expired
             | Fault::Refused
-            | Fault::Gone => true,
+            | Fault::Gone
+            | Fault::Unfinished => true,
         }
     }
 }
@@ -1155,11 +1203,20 @@ impl Trouble<'_> {
     /// **Why this watch is not delivering**, or `None` for a stream that finished without ever
     /// saying why — the `ended`-with-no-`failure` shape [`Trouble::failure`] names.
     ///
+    /// **A recorded failure wins over [`Trouble::unfinished`]**, so a watch that spent the run
+    /// retrying an `Unanswered` says so rather than being flattened into *the run ran out*. The
+    /// fallback answers only for the watch that has no failure to read, which is the wedge: no
+    /// error, no events, and until [`Fault::Unfinished`] existed no sentence either — it came out
+    /// of here as `None` and wore the *nothing was ever said about why* clause a finished stream
+    /// owns.
+    ///
     /// **The classification is [`watch_fault`]'s and this is one call of it.** The bootstrap gate
     /// reads the same error through the same function ([`Watch::settled`]), so a screen and the
     /// gate can never come to disagree about what one failure meant.
     pub fn fault(&self) -> Option<Fault> {
-        self.failure.map(watch_fault)
+        self.failure
+            .map(watch_fault)
+            .or_else(|| self.unfinished.then_some(Fault::Unfinished))
     }
 }
 
@@ -1228,6 +1285,24 @@ fn key(object: &impl Watched) -> Key {
 /// One watch stream's objects, and whether its first LIST has landed.
 struct Watch<T> {
     /// The last **complete** answer, and the only thing [`Store::snapshot`] reads.
+    ///
+    /// # Empty-not-partial is `ListWatch`'s guarantee, and [`Store::stop_waiting`] rests on it
+    ///
+    /// **This map is written in exactly two places and only one of them can run before a LIST
+    /// finishes.** `InitDone` swaps `filling` in whole; `Apply`/`Delete` edit in place. Under
+    /// kube's default `ListWatch` an `Apply` is reachable only from `State::Watching`, which is
+    /// entered only through `InitDone`, which kube only sends after the `Init` that created
+    /// `filling` — so a watch that has not listed holds **zero** objects, never a fraction of a
+    /// cluster. That is the whole reason settling one and publishing it is not the partial list
+    /// NOTES § D28 forbids.
+    ///
+    /// **Under `StreamingList` it would not hold, and nothing here would notice.** A kind with no
+    /// objects emits no `Init`, `filling` stays `None`, `complete` stays `false`, and the `Apply`s
+    /// that follow land straight in here — so [`Store::stop_waiting`] would publish exactly the
+    /// partial list D28 refuses. It is unreachable today (kube's default is `ListWatch`,
+    /// `watcher.rs:201-202`, and `k8s_tests.rs` pins it), and it is written *here* because
+    /// `PRIOR-ART § A7` says in as many words that streaming-list may be turned on for speed —
+    /// and this is the field a reader would be looking at when they did.
     live: BTreeMap<Key, T>,
     /// `Some` while a LIST is in flight, filled by `InitApply` and swapped into `live` whole at
     /// `InitDone` — kube's own instruction for the event, and what keeps a relist from being
@@ -1262,6 +1337,20 @@ struct Watch<T> {
     /// **Never cleared.** A stream that ended cannot deliver the event that would clear it, and
     /// [`updates`] appends this as the last item of the stream, so nothing follows it.
     ended: bool,
+    /// **The run this watch is in ended before its first LIST did** ([`Store::stop_waiting`],
+    /// [`Fault::Unfinished`]).
+    ///
+    /// **Set by the caller and never by an event**, because it is the one fact in this struct
+    /// that no stream can deliver: a wedged watch's whole signature is that nothing arrives on
+    /// it. Only a caller that owns the run's deadline knows the waiting is over, so only a
+    /// caller can set it — which is also what keeps `--live` out of it, since `--live` has no
+    /// deadline and never asks (NOTES § D150).
+    ///
+    /// **It is read in exactly the two places `failure` is** — [`Watch::settled`], so the
+    /// bootstrap gate opens, and [`Store::troubles`], so the kind is named in the report that
+    /// gate lets through. One flag in both, for the reason [`Watch::settled`]'s own doc gives:
+    /// *the screen stops claiming a LIST is moving* and *the gate opens* may not be two changes.
+    unfinished: bool,
 }
 
 // Written out rather than derived: `#[derive(Default)]` would demand `T: Default`, which no
@@ -1275,6 +1364,7 @@ impl<T> Default for Watch<T> {
             last_progress: None,
             failure: None,
             ended: false,
+            unfinished: false,
         }
     }
 }
@@ -1387,16 +1477,40 @@ impl<T: Watched> Watch<T> {
         }
     }
 
-    /// **What this watch's unfinished initial LIST has to show for itself**, or `None` once it
-    /// has finished one (NOTES § D150).
+    /// **What this watch's unfinished initial LIST has to show for itself, while a screen may
+    /// still call it a LIST in progress** — `None` once it has finished one, and `None` once it
+    /// has [`settled`](Watch::settled) (NOTES § D150).
     ///
-    /// The count is `filling`'s own length rather than a counter kept beside it: kube buffers a
-    /// page and drains it one `InitApply` at a time (NOTES § D147), so the map *is* the tally,
-    /// and a second one could drift from it. It is objects **decoded and kept**, which is not
-    /// the same as objects the server has sent — a page in flight is invisible here, and no
-    /// number in this file can see it.
+    /// **`None` here is not *there is nothing to say*, and [`Store::troubles`] is where the
+    /// difference is spent.** A settled watch still has a true answer to *how far did it get*;
+    /// what it has stopped being is a bootstrap anybody should be shown as running. The numbers
+    /// come out of [`Watch::outstanding`] either way, which is why that is the function with the
+    /// body and this is the one with the gate.
     fn progress(&self) -> Option<(usize, Option<Time>)> {
-        (!self.complete && !self.settled()).then(|| {
+        (!self.settled()).then(|| self.outstanding())?
+    }
+
+    /// **The same two facts, without the settle gate** — how far this watch's initial LIST got,
+    /// or `None` once it has a complete answer.
+    ///
+    /// **[`Watch::progress`] is this behind [`Watch::settled`], and [`Store::troubles`] is this
+    /// without it.** The two questions are different: *may a screen still call this a LIST in
+    /// progress* is the gate's, and *how far did it get* is this one's — and a settled watch
+    /// answers `no` to the first while still having a true answer to the second. Reading the
+    /// fields twice is how the two would come to disagree, so they are read once, here
+    /// (NOTES § D150).
+    ///
+    /// **The gate is `complete` and nothing else, which is what keeps [`Watch::last_progress`]'s
+    /// stale-stamp guarantee true**: a watch that has listed answers `None`, so a timestamp left
+    /// over from an earlier bootstrap can never be presented as a live one.
+    ///
+    /// **The count is `filling`'s own length rather than a counter kept beside it**: kube buffers
+    /// a page and drains it one `InitApply` at a time (NOTES § D147), so the map *is* the tally,
+    /// and a second one could drift from it. It is objects **decoded and kept**, which is not the
+    /// same as objects the server has sent — a page in flight is invisible here, and no number in
+    /// this file can see it.
+    fn outstanding(&self) -> Option<(usize, Option<Time>)> {
+        (!self.complete).then(|| {
             (
                 self.filling.as_ref().map_or(0, BTreeMap::len),
                 self.last_progress.clone(),
@@ -1412,16 +1526,31 @@ impl<T: Watched> Watch<T> {
     /// derived from that call — so *the screen stops claiming a LIST is moving* and *the gate
     /// opens* are the same line, and cannot be fixed apart.
     ///
-    /// **One way to be finished, and it is a standing failure** ([`Fault::standing`]). A refused
-    /// watch runs `Err → Init → list() → 403` forever (§ THE DRIVER), and every `Init` restamps
-    /// [`Listing::since`] — so before this it reported *0 so far, since just now*, several times a
-    /// second, for the life of the process. That is a screen actively lying about progress, and a
-    /// gate that never opened behind it: `snapshot()` answered `None` and every rule was silent,
+    /// **Two ways to be finished.** The first is a standing failure ([`Fault::standing`]). A
+    /// refused watch runs `Err → Init → list() → 403` forever (§ THE DRIVER), and every `Init`
+    /// restamps [`Listing::since`] — so before this it reported *0 so far, since just now*,
+    /// several times a second, for the life of the process. That is a screen actively lying
+    /// about progress, and a gate that never opened behind it: `snapshot()` answered `None` and
+    /// every rule was silent,
     /// including the ones about the four kinds the cluster was serving perfectly.
     ///
-    /// **What it deliberately does not cover is [`Fault::Unanswered`]**, which is where D28's own
-    /// *do not blank on a blip* paragraph lives: the next poll may answer, the retry is the fix,
-    /// and the driver prints a [`Trouble`] line meanwhile rather than nothing.
+    /// **The second is [`Watch::unfinished`], and it closes the case the first one made visible.**
+    /// A watch the cluster *refuses* is classified and settles here; a watch the cluster *accepts
+    /// and never answers* records no failure at all, so it settled nothing and held the gate for
+    /// everybody. Measured, that made a transient wedge cost strictly more than a permanent
+    /// refusal — a full report against zero bytes ([`Fault::Unfinished`] carries the numbers).
+    /// The flag is a caller's, set once when a run's own deadline says the waiting is over, so
+    /// there is still no deadline in this file and D150 is untouched: what changed is that *the
+    /// run is over* is now a fact a watch can be told, not one it has to infer from a clock it
+    /// may not read.
+    ///
+    /// **What the *first* way deliberately does not cover is [`Fault::Unanswered`]**, which is
+    /// where D28's own *do not blank on a blip* paragraph lives: the next poll may answer, the
+    /// retry is the fix, and the driver prints a [`Trouble`] line meanwhile rather than nothing.
+    /// **The second way covers it, and that is not a contradiction of the first** — it is the
+    /// difference between *this failure will never clear* and *this run is not going to be here
+    /// when it does*. A `--live` run never says the second, so a blip there still blanks nothing,
+    /// for as long as the process is alive.
     ///
     /// **[`Watch::ended`] is not in it either, and that is a decision rather than an oversight.**
     /// A stream that finished before it listed will also never list, so on the face of it it
@@ -1439,10 +1568,22 @@ impl<T: Watched> Watch<T> {
     /// kind and the verb, and `analysis.rs`'s *Reading what a node has needs permission to list
     /// nodes* rows draw the same fact where a number would have been.
     fn settled(&self) -> bool {
-        self.failure
-            .as_ref()
-            .map(watch_fault)
-            .is_some_and(Fault::standing)
+        self.unfinished
+            || self
+                .failure
+                .as_ref()
+                .map(watch_fault)
+                .is_some_and(Fault::standing)
+    }
+
+    /// **This run is over, so a LIST that has not landed is not going to** —
+    /// [`Store::stop_waiting`] for one watch.
+    ///
+    /// **A watch that already listed is left alone**, and that is the whole of the condition: it
+    /// holds a complete answer, and a relist in flight over the top of one is not an unfinished
+    /// bootstrap (`complete` is never reset, which is what `filling` is for).
+    fn stop_waiting(&mut self) {
+        self.unfinished = !self.complete;
     }
 }
 
@@ -1508,8 +1649,9 @@ pub struct Listing {
 /// return. Nothing here counts retries and nothing here gives up: [`drive`] cannot return on a
 /// failure, and this is the state that says one is standing.
 ///
-/// **At least one of the two below is always true** — [`Store::troubles`] does not report a watch
-/// that has neither.
+/// **At least one of [`failure`](Trouble::failure), [`ended`](Trouble::ended) and
+/// [`unfinished`](Trouble::unfinished) is always true** — [`Store::troubles`] does not report a
+/// watch that has none of them.
 ///
 /// **Nothing here is a duration.** *How long* is [`Listing::since`]'s question for a bootstrap
 /// that has not landed; a failure is answered by *is it still standing*, which is one read of
@@ -1532,10 +1674,13 @@ pub struct Trouble<'a> {
     /// arrive here as a watch in trouble; only this field tells them apart, and without it the
     /// header prints a measured `0 nodes` for a refusal and blanks a real count for a blip.
     ///
-    /// **`false` inside a report means a standing failure, always.** [`Store::snapshot`] answers
-    /// `None` until every watch has listed *or settled*, and settling is a standing failure
-    /// ([`Watch::settled`]) — so a watch that reaches a rendered report unlisted is one the
-    /// cluster refuses, not one that is still working.
+    /// **`false` inside a report means the waiting is over, one way or the other.**
+    /// [`Store::snapshot`] answers `None` until every watch has listed *or settled*
+    /// ([`Watch::settled`]), so a watch that reaches a rendered report unlisted is never one that
+    /// is still working — it is one the cluster **refuses**, which no retry will change, or one
+    /// the run **stopped waiting for**, which is [`unfinished`](Trouble::unfinished) beside it.
+    /// It said *a standing failure, always* until 2026-09-03, when the second way in was added
+    /// and made that half of the sentence untrue.
     pub listed: bool,
     /// **The last failure this watch reported and has not recovered from.** `None` beside an
     /// `ended` of `true` is a stream that finished without ever saying why.
@@ -1583,6 +1728,42 @@ pub struct Trouble<'a> {
     /// doc, never observed — so in a live cluster this is expected to stay `false`; it is a field
     /// because *expected* is not *guaranteed*, and the alternative to a field was silence.
     pub ended: bool,
+    /// **The run ended before this watch's first LIST did** ([`Store::stop_waiting`],
+    /// [`Watch::unfinished`]) — `false` on every `--live` run, which never stops waiting.
+    ///
+    /// **It is not a second spelling of `!listed`.** A watch the cluster refuses reaches a report
+    /// unlisted and this is `false`: it was classified, it settled on its own, and the reason
+    /// beside it is the `403`. This is `true` for **every** watch the run stopped waiting for,
+    /// whether or not it had a reason — and for the one that had none it is what
+    /// [`Trouble::fault`] turns into [`Fault::Unfinished`], so a renderer has something true to
+    /// say about it. It said *only for the watch that had no reason* until 2026-09-03, which the
+    /// paragraph below and `a_watch_that_spent_the_run_failing_keeps_its_own_reason_for_it` both
+    /// contradicted.
+    ///
+    /// **A watch that holds a real failure keeps it**, even when this is `true`: thirty seconds
+    /// of `Unanswered` is still `Unanswered`, and *the run ran out* is the weaker of the two
+    /// facts.
+    pub unfinished: bool,
+    /// **How far this watch's initial LIST got, or `None` once it has a complete answer**
+    /// ([`Watch::outstanding`]) — the same two facts [`Store::still_listing`] reports, read off
+    /// the same accessor so the two calls cannot disagree about one LIST.
+    ///
+    /// **It is here because [`Store::stop_waiting`] empties the other call and a renderer still
+    /// needs the numbers** (NOTES § D150). Settling a watch is what lets the gate open; it is not
+    /// evidence about how far the LIST got, and without these a report can only state a *cause*
+    /// for a kind that is missing — which is the verdict D150 refuses to let anything in this
+    /// design deliver. A nodes LIST holding 1 500 objects with a stamp from this millisecond is a
+    /// cluster that is **slow**, and a renderer with only a `Fault` in hand would call it dead.
+    ///
+    /// **`Some` and `unfinished` are `true` together, both gating on `complete`** — but they are
+    /// not one field: a watch that never listed and is merely *in trouble* under `--live` answers
+    /// `Some` here and `false` there, and drawing the deadline's line off this one would put it
+    /// on a run that has not ended.
+    ///
+    /// **The `kind` inside it is this [`Trouble`]'s own.** [`Listing`] is reused rather than
+    /// copied into two loose fields because it is already the documented name for *one initial
+    /// LIST that has not finished, and what it has to show for itself*.
+    pub outstanding: Option<Listing>,
 }
 
 /// **The four facts about a cluster that no watch carries**, handed to the store once
@@ -1813,11 +1994,13 @@ impl Store {
     /// monotone or four healthy watches would erase the fifth's standing 403 with their own
     /// ordinary traffic (NOTES § D145). With identity, a watch may clear its own.
     ///
-    /// **The two facts are not one enum, because they answer different questions.** `failure`
+    /// **The three facts are not one enum, because they answer different questions.** `failure`
     /// is *what went wrong and may still be going wrong*; `ended` is *nothing will arrive here
-    /// again*. Both together is the ordinary shape of a watch that died of the failure beside
-    /// it, and either alone is a real state: a watch retrying a 403 has no `ended`, and a stream
-    /// that finished cleanly has no `failure`.
+    /// again*; `unfinished` is *the run stopped waiting for this one* ([`Store::stop_waiting`]).
+    /// `failure` and `ended` together is the ordinary shape of a watch that died of the failure
+    /// beside it, and each alone is a real state: a watch retrying a 403 has no `ended`, a stream
+    /// that finished cleanly has no `failure`, and the wedge this call could not report at all
+    /// until [`Fault::Unfinished`] existed has neither.
     ///
     /// **The gate is not closed by either, and since the namespace box a standing refusal does
     /// not *hold* it either** (NOTES § D28, § D162, todo.md § Phase 5). A watch that ends after
@@ -1831,7 +2014,8 @@ impl Store {
     ///
     /// # This call and [`Store::still_listing`] can no longer disagree about a kind
     ///
-    /// **A refused watch is reported here and not there.** It re-`Init`s in a tight loop and
+    /// **A refused watch — and, once a run has stopped waiting, a wedged one — is reported here
+    /// and not there.** A refusal re-`Init`s in a tight loop and
     /// every `Init` refreshes [`Listing::since`], so it used to appear there as a LIST moving
     /// briskly (NOTES § D150 explains why `Init` counts *for that question*) and callers were
     /// told to join the two by kind and let this one win. [`Watch::settled`] removes it from that
@@ -1848,41 +2032,99 @@ impl Store {
                 &self.pods.failure,
                 self.pods.ended,
                 self.pods.complete,
+                self.pods.unfinished,
+                self.pods.outstanding(),
             ),
             (
                 ObjectKind::Node,
                 &self.nodes.failure,
                 self.nodes.ended,
                 self.nodes.complete,
+                self.nodes.unfinished,
+                self.nodes.outstanding(),
             ),
             (
                 ObjectKind::Deployment,
                 &self.deployments.failure,
                 self.deployments.ended,
                 self.deployments.complete,
+                self.deployments.unfinished,
+                self.deployments.outstanding(),
             ),
             (
                 ObjectKind::StatefulSet,
                 &self.stateful_sets.failure,
                 self.stateful_sets.ended,
                 self.stateful_sets.complete,
+                self.stateful_sets.unfinished,
+                self.stateful_sets.outstanding(),
             ),
             (
                 ObjectKind::DaemonSet,
                 &self.daemon_sets.failure,
                 self.daemon_sets.ended,
                 self.daemon_sets.complete,
+                self.daemon_sets.unfinished,
+                self.daemon_sets.outstanding(),
             ),
         ]
         .into_iter()
-        .filter(|(_, failure, ended, _)| failure.is_some() || *ended)
-        .map(|(kind, failure, ended, listed)| Trouble {
-            kind,
-            listed,
-            failure: failure.as_ref(),
-            ended,
-        })
+        .filter(|(_, failure, ended, _, unfinished, _)| failure.is_some() || *ended || *unfinished)
+        .map(
+            |(kind, failure, ended, listed, unfinished, outstanding)| Trouble {
+                kind: kind.clone(),
+                listed,
+                failure: failure.as_ref(),
+                ended,
+                unfinished,
+                outstanding: outstanding.map(|(so_far, since)| Listing {
+                    kind,
+                    so_far,
+                    since,
+                }),
+            },
+        )
         .collect()
+    }
+
+    /// **The run is over, so every watch still inside its first LIST is told so**
+    /// ([`Watch::unfinished`], [`Fault::Unfinished`]) — after this call each of them settles,
+    /// leaves [`Store::still_listing`], appears in [`Store::troubles`] with a fault of its own,
+    /// and [`Store::snapshot`] publishes an **empty** list for its kind rather than nothing at all.
+    ///
+    /// # This is not a partial snapshot, and NOTES § D28 is intact
+    ///
+    /// **What a settled watch publishes is empty, never short.** `live` is swapped whole at
+    /// `InitDone` and objects accumulate in `filling` until then ([`Watch::take`]), so a watch
+    /// that has not listed holds **zero** objects — there is no half-filled list here for a rule
+    /// to mistake for a small cluster, which is the confusion D28 exists to prevent. It is the
+    /// same shape a refused watch has published since [`Watch::settled`] landed, announced the
+    /// same two ways: [`Store::troubles`] names the kind and the reason, and `analysis.rs`'s
+    /// *needs permission to list nodes* rows draw the fact where a number would have been.
+    ///
+    /// **So the asymmetry this closes was never about what could be published.** It was that a
+    /// refusal is classified and a wedge is classified as *still working, forever* — which made
+    /// the transient failure cost the whole report where the permanent one cost two rules
+    /// ([`Fault::Unfinished`] has the measurement).
+    ///
+    /// # Nothing in this file decides when
+    ///
+    /// **There is still no deadline here** (NOTES § D150, § THE DRIVER): this file cancels
+    /// nothing, quits nothing and reads no clock. The caller owns the run's budget and this is
+    /// how it says so — which is why `--live`, having no budget, never calls it and a wedge there
+    /// stays a wedge on a screen that says it is waiting.
+    ///
+    /// **It assigns rather than latches, and a watch that has listed is never marked.** Calling
+    /// it twice with nothing in between says the same thing twice, and a watch whose LIST landed
+    /// between two calls is correctly un-marked by the second — which is the same state
+    /// [`Watch::take`] would have left it in, rather than a stale claim it has to be told to
+    /// drop. Calling it on a healthy store marks nothing.
+    pub fn stop_waiting(&mut self) {
+        self.pods.stop_waiting();
+        self.nodes.stop_waiting();
+        self.deployments.stop_waiting();
+        self.stateful_sets.stop_waiting();
+        self.daemon_sets.stop_waiting();
     }
 
     /// The initial LISTs that have not landed, in the order the watches are declared — each
@@ -1927,6 +2169,12 @@ impl Store {
     /// is being retried, and it may well land. [`Store::troubles`] names it in parallel, which is
     /// what tells *this is taking a while* from *this is taking a while and erroring*.
     ///
+    /// **Until the caller says the waiting is over.** [`Store::stop_waiting`] settles every watch
+    /// still in here, so a run with a budget ends with this call empty and the kinds that did not
+    /// land named in [`Store::troubles`] instead — which is the same move the refusal made, one
+    /// failure mode later. A run with no budget never calls it, so `--live` reads this exactly as
+    /// it always did.
+    ///
     /// **The words are the caller's.** This returns facts, not sentences: invariant 14's plain
     /// language is the screen's decision and `views.rs` is not this file's.
     pub fn still_listing(&self) -> Vec<Listing> {
@@ -1950,7 +2198,8 @@ impl Store {
     }
 
     /// Every initial LIST has landed **or is never going to**, so there is something honest to
-    /// publish (NOTES § D28, and [`Watch::settled`] is the exception D28 did not carry).
+    /// publish (NOTES § D28, and [`Watch::settled`] is the exception D28 did not carry — a
+    /// refusal, or a run that has [`stopped waiting`](Store::stop_waiting)).
     ///
     /// Derived from [`Store::still_listing`] rather than from the five fields a second time: the
     /// gate and the state the screen draws the wait from cannot disagree if only one of them

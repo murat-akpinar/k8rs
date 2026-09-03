@@ -973,6 +973,7 @@ fn the_live_report_prints_the_reading_line_above_the_panes() {
         now(),
         &mut last,
         true,
+        false,
         &AtConnect {
             lists_read_at: Some(four_minutes_ago()),
             ..Default::default()
@@ -1010,6 +1011,7 @@ fn the_live_report_prints_the_reading_line_above_the_panes() {
         now(),
         &mut last,
         true,
+        false,
         &AtConnect::default(),
     )
     .expect("a bootstrapped store draws a report");
@@ -1326,6 +1328,7 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
             now(),
             &mut last,
             false,
+            false,
             &AtConnect::default()
         ),
         None
@@ -1335,7 +1338,14 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     let mut store = k8s::Store::default();
     the_other_four(&mut store);
     assert_eq!(
-        live_report(&store, now(), &mut last, false, &AtConnect::default()),
+        live_report(
+            &store,
+            now(),
+            &mut last,
+            false,
+            false,
+            &AtConnect::default()
+        ),
         None
     );
     assert!(
@@ -1352,6 +1362,7 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
         now(),
         &mut last,
         false,
+        false,
         &AtConnect::default(),
     )
     .expect("a listed store");
@@ -1359,7 +1370,14 @@ fn a_bootstrap_that_has_not_finished_prints_nothing_at_all() {
     // `None` and not merely *empty*: `Some(String::new())` is a blank block on stdout, which is
     // what the driver would print every time a watch re-listed.
     assert_eq!(
-        live_report(&store, now(), &mut last, false, &AtConnect::default()),
+        live_report(
+            &store,
+            now(),
+            &mut last,
+            false,
+            false,
+            &AtConnect::default()
+        ),
         None,
         "a bootstrap with nothing wrong printed something after an earlier report"
     );
@@ -1377,15 +1395,29 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     let mut store = listed(objects::<Pod>("kube-system-pods.json"));
     let mut last = String::new();
 
-    let first = live_report(&store, now(), &mut last, false, &AtConnect::default())
-        .expect("every initial LIST landed");
+    let first = live_report(
+        &store,
+        now(),
+        &mut last,
+        false,
+        false,
+        &AtConnect::default(),
+    )
+    .expect("every initial LIST landed");
     println!("{first}");
     assert!(
         first.contains(" pods · "),
         "the live report is not the report `render` draws"
     );
     assert_eq!(
-        live_report(&store, now(), &mut last, false, &AtConnect::default()),
+        live_report(
+            &store,
+            now(),
+            &mut last,
+            false,
+            false,
+            &AtConnect::default()
+        ),
         None,
         "the same cluster printed twice"
     );
@@ -1395,8 +1427,15 @@ fn the_same_cluster_prints_once_and_a_changed_one_prints_again() {
     )
     .expect("the capture decodes");
     store.pod(&now(), Event::Apply(crashloop));
-    let second = live_report(&store, now(), &mut last, false, &AtConnect::default())
-        .expect("a pod arrived, so the report moved");
+    let second = live_report(
+        &store,
+        now(),
+        &mut last,
+        false,
+        false,
+        &AtConnect::default(),
+    )
+    .expect("a pod arrived, so the report moved");
     println!("{second}");
     assert!(
         second.contains("broken-crashloop"),
@@ -1453,8 +1492,15 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
     );
 
     let mut last = String::new();
-    let plain = live_report(&store, now(), &mut last, false, &AtConnect::default())
-        .expect("every LIST landed");
+    let plain = live_report(
+        &store,
+        now(),
+        &mut last,
+        false,
+        false,
+        &AtConnect::default(),
+    )
+    .expect("every LIST landed");
     for pane in PANES {
         assert!(
             !plain.contains(pane),
@@ -1463,7 +1509,7 @@ fn the_panes_are_drawn_live_only_when_the_flag_is_passed() {
     }
 
     let mut last = String::new();
-    let panes = live_report(&store, now(), &mut last, true, &AtConnect::default())
+    let panes = live_report(&store, now(), &mut last, true, false, &AtConnect::default())
         .expect("every LIST landed");
     for pane in PANES {
         assert!(
@@ -1509,7 +1555,7 @@ fn versions_draws_the_control_plane_line_and_the_machines_behind_it() {
     let pane_of = |identity| {
         let store = identified(Vec::new(), nodes(), identity);
         let mut last = String::new();
-        let printed = live_report(&store, now(), &mut last, true, &AtConnect::default())
+        let printed = live_report(&store, now(), &mut last, true, false, &AtConnect::default())
             .expect("every LIST landed");
         let at = printed.find("[versions]").expect("the pane is drawn");
         printed[at..].to_string()
@@ -1572,7 +1618,7 @@ fn certificates_draws_c1s_row_and_the_sidebar_badge() {
     let printed = |identity| {
         let store = identified(Vec::new(), Vec::new(), identity);
         let mut last = String::new();
-        let printed = live_report(&store, now(), &mut last, true, &AtConnect::default())
+        let printed = live_report(&store, now(), &mut last, true, false, &AtConnect::default())
             .expect("every LIST landed");
         let at = printed.find("[certificates]").expect("the pane is drawn");
         let end = printed[at..].find("[drain safety]").expect("the next pane");
@@ -2090,8 +2136,15 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     k8s::drive_watching(watches, &mut store, |_| {}).await;
 
     let mut last = String::new();
-    let failing = live_report(&store, now(), &mut last, false, &AtConnect::default())
-        .expect("five watches are failing");
+    let failing = live_report(
+        &store,
+        now(),
+        &mut last,
+        false,
+        false,
+        &AtConnect::default(),
+    )
+    .expect("five watches are failing");
     println!("{failing}");
     for kind in ["pods", "nodes", "Deployments", "StatefulSets", "DaemonSets"] {
         assert!(
@@ -2114,7 +2167,14 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
 
     // The same store again is not news…
     assert_eq!(
-        live_report(&store, now(), &mut last, false, &AtConnect::default()),
+        live_report(
+            &store,
+            now(),
+            &mut last,
+            false,
+            false,
+            &AtConnect::default()
+        ),
         None
     );
 
@@ -2123,8 +2183,15 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
     store.pod(&now(), Event::Init);
     store.pod(&now(), Event::InitDone);
     the_other_four(&mut store);
-    let recovered = live_report(&store, now(), &mut last, false, &AtConnect::default())
-        .expect("the cluster came back");
+    let recovered = live_report(
+        &store,
+        now(),
+        &mut last,
+        false,
+        false,
+        &AtConnect::default(),
+    )
+    .expect("the cluster came back");
     println!("{recovered}");
     assert!(
         !recovered.contains("not getting"),
@@ -2154,8 +2221,15 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         .map(|watch| watch.take(2).boxed())
         .collect();
     k8s::drive_watching(watches, &mut store, |_| {}).await;
-    let stale = live_report(&store, now(), &mut last, false, &AtConnect::default())
-        .expect("an outage is news");
+    let stale = live_report(
+        &store,
+        now(),
+        &mut last,
+        false,
+        false,
+        &AtConnect::default(),
+    )
+    .expect("an outage is news");
     println!("{stale}");
     let (unreadable, cards) = stale
         .split_once("\n\n")
@@ -2426,7 +2500,7 @@ async fn refused_over(store: &mut k8s::Store) -> String {
         .collect();
     k8s::drive_watching(watches, store, |_| {}).await;
     let mut last = String::new();
-    live_report(store, now(), &mut last, false, &AtConnect::default())
+    live_report(store, now(), &mut last, false, false, &AtConnect::default())
         .expect("five refused watches are news whatever else the store holds")
 }
 
@@ -2633,8 +2707,12 @@ fn a_refusal_an_expired_login_and_a_dead_cluster_are_three_different_lines() {
                 listed: false,
                 failure: Some(failure),
                 ended: false,
+                unfinished: false,
+                outstanding: None,
             }],
             renewal,
+            None,
+            false,
         );
         let [line] = lines.as_slice() else {
             panic!("one trouble did not make one line: {lines:?}")
@@ -2710,8 +2788,10 @@ fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
         listed: false,
         failure: None,
         ended,
+        unfinished: false,
+        outstanding: None,
     };
-    let degraded = unreadable(&[trouble(ObjectKind::Node, false)], None);
+    let degraded = unreadable(&[trouble(ObjectKind::Node, false)], None, None, false);
     let [degraded] = degraded.as_slice() else {
         panic!("one trouble did not make one line: {degraded:?}")
     };
@@ -2725,7 +2805,7 @@ fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
         "the degraded line claims something a standing refusal makes false: {degraded:?}"
     );
 
-    let stopped = unreadable(&[trouble(ObjectKind::Pod, true)], None);
+    let stopped = unreadable(&[trouble(ObjectKind::Pod, true)], None, None, false);
     let [stopped] = stopped.as_slice() else {
         panic!("one trouble did not make one line: {stopped:?}")
     };
@@ -2752,7 +2832,154 @@ fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
     }
 }
 
-/// **Nine faults, nine sentences, and no two of them the same** — the second box's whole claim
+/// **The line about a kind the run stopped waiting for states NOTES § D150's two numbers and
+/// never a cause** (`k8s::Trouble::outstanding`, [`read_so_far`]).
+///
+/// **The shape that caught the defect is the second one, and it had no test at all**
+/// (`k8s-admin`, 2026-09-03; NOTES § D29 — a check is proven only for the shapes it was fed).
+/// Every wedge test used `so_far == 0`, and the negative that guards D150 holds *pods*, which is
+/// the one kind [`out_of_time`] exempts — so nothing in the suite could see a **non-pod LIST that
+/// was still moving at the deadline**. `k8rs --once -n payments` against a 2 000-node cluster is
+/// exactly that: pods land in a second, nodes is cluster-scoped whatever the scope is, and at the
+/// deadline the nodes LIST holds 1 500 objects with a stamp from this millisecond. The line for
+/// it said *it is the cluster, or the network in between, that has gone quiet* — a verdict about
+/// a cluster that was working, in the one direction D150 forbids anything here to guess.
+///
+/// **`--once` may not promise a retry either.** [`ONCE`] prints these one instant before
+/// `stop.abort()`, so *It keeps asking* is false of every line on that run — not only of the
+/// kind that ran out of time, which is why `stopping` and not `unfinished` picks that tail.
+#[test]
+fn the_line_about_a_kind_the_run_ran_out_on_states_the_two_numbers_and_never_a_cause() {
+    let ran_out = |so_far, since| k8s::Trouble {
+        kind: ObjectKind::Node,
+        listed: false,
+        failure: None,
+        ended: false,
+        unfinished: true,
+        outstanding: Some(k8s::Listing {
+            kind: ObjectKind::Node,
+            so_far,
+            since,
+        }),
+    };
+    let one = |troubles: &[k8s::Trouble<'_>]| {
+        let lines = unreadable(troubles, None, Some(&now()), true);
+        let [line] = lines.as_slice() else {
+            panic!("one trouble did not make one line: {lines:?}")
+        };
+        println!("{line}");
+        line.clone()
+    };
+
+    // **The LIST that was still moving** — the shape the suite could not see.
+    let moving = one(&[ran_out(1500, Some(four_minutes_ago()))]);
+    assert!(
+        moving.contains("1500 read so far, the last one 4 min ago"),
+        "the two facts D150 hands a reader are missing, so a slow cluster and a dead one read \
+         the same: {moving:?}"
+    );
+    // **No verdict, in either direction.** These are the words a cause would arrive in.
+    for guess in [
+        "gone quiet",
+        "nothing is wrong with this login",
+        "never answered",
+        "accepted the request",
+    ] {
+        assert!(
+            !moving.contains(guess),
+            "a LIST that was still moving at the deadline was given a cause ({guess:?}), which \
+             is the verdict NOTES § D150 exists to refuse: {moving:?}"
+        );
+    }
+    assert!(
+        moving.contains("this run ran out of time"),
+        "the line does not say what actually happened: {moving:?}"
+    );
+
+    // **The wedge**: the same line, and the number is what differs.
+    let wedged = one(&[ran_out(0, Some(four_minutes_ago()))]);
+    assert!(
+        wedged.contains("0 read so far") && !wedged.contains("the last one"),
+        "`0 read so far` carried an age, and `k8s::Listing::since` is stamped by the `Init` that \
+         opens the watch, so there is no *one* for it to be about: {wedged:?}"
+    );
+    assert_ne!(
+        moving, wedged,
+        "a LIST holding 1 500 objects and one holding none printed the same line, which is the \
+         whole of what this box had to fix"
+    );
+
+    // **A real failure behind it keeps its own reason, ahead of the numbers**
+    // (`k8s::Trouble::fault`): *check the address* is an action, and the counts are not.
+    let dark = watcher::Error::WatchFailed(kube::Error::Service(Box::new(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "timed out",
+    ))));
+    let mut with_reason = ran_out(0, None);
+    with_reason.failure = Some(&dark);
+    let retried = one(&[with_reason]);
+    assert!(
+        retried.contains("nothing usable came back") && retried.contains("0 read so far"),
+        "thirty seconds of a dead connection lost either its reason or its numbers: {retried:?}"
+    );
+
+    // **Jargon only inside backticks** (invariant 14), the rule the two older tails are held to.
+    for line in [&moving, &wedged] {
+        let english = prose(line);
+        assert!(
+            !english.contains("watch") && !english.contains("list"),
+            "the sentence a reader has to understand uses an RBAC verb outside a quoted one: \
+             {english:?}"
+        );
+    }
+}
+
+/// **A run that is ending may not promise it keeps asking** — the tail [`ONCE`] prints one
+/// instant before `stop.abort()` (`k8s-admin`, 2026-09-03).
+///
+/// **It is `stopping` and not `unfinished` that picks it**, which is the finding: the wedge tail
+/// only read correctly because `k8s::Store::stop_waiting` is unreachable outside `--once`, so
+/// `unfinished` was doubling as a mode signal. A watch that **listed and then broke** is not
+/// unfinished, gets the ordinary tail, and on a `--once` run that tail was a promise the process
+/// was about to break.
+///
+/// **The same trouble, both modes, asserted against each other** — a `--live` run must keep the
+/// retry sentence, because there a retry really is what happens next.
+#[test]
+fn a_run_that_is_about_to_exit_does_not_promise_it_keeps_asking() {
+    let refused = watcher::Error::InitialListFailed(api_error(403, "Forbidden"));
+    let broke = |listed| {
+        vec![k8s::Trouble {
+            kind: ObjectKind::Node,
+            listed,
+            failure: Some(&refused),
+            ended: false,
+            unfinished: false,
+            outstanding: None,
+        }]
+    };
+    for listed in [true, false] {
+        let watching = unreadable(&broke(listed), None, Some(&now()), false);
+        let stopping = unreadable(&broke(listed), None, Some(&now()), true);
+        println!("--live  {}", watching[0]);
+        println!("--once  {}", stopping[0]);
+        assert!(
+            watching[0].contains("It keeps asking"),
+            "a screen somebody is watching stopped saying the tool is still trying: {watching:?}"
+        );
+        assert!(
+            !stopping[0].contains("It keeps asking"),
+            "a run one instant from exiting told the reader it keeps asking: {stopping:?}"
+        );
+        // **The reason survives the shorter tail**, which is what the line is for.
+        assert!(
+            stopping[0].contains("the role this kubeconfig uses needs to"),
+            "dropping the promise dropped the refusal with it: {stopping:?}"
+        );
+    }
+}
+
+/// **Ten faults, ten sentences, and no two of them the same** — the second box's whole claim
 /// (`PRIOR-ART § C1`), checked as a set rather than one at a time.
 ///
 /// **A generic message may never stand in for an error we were handed.** The failure that rule
@@ -2760,17 +2987,21 @@ fn what_the_driver_says_about_itself_is_true_of_a_refusal_and_of_an_outage() {
 /// looks fine in every review and sends a reader to the wrong place at 3am. Two faults collapsing
 /// into one string is what fails here, whichever two.
 ///
-/// **Only four of the nine use `asked`, and that is deliberate.** The three kubeconfig faults and
+/// **Only five of the ten use `asked`, and that is deliberate.** The three kubeconfig faults and
 /// a login helper that answered nothing all happened before anything was asked of any cluster, so
 /// a sentence naming a verb and a resource there would be inventing one.
 ///
-/// **All nine, and it was seven of nine until 2026-08-30** — `NoContext` and `BadEntry` had never
+/// **All ten, and it was seven of nine until 2026-08-30** — `NoContext` and `BadEntry` had never
 /// been in this list, so the one test whose whole claim is *no two collapse* could not have seen
-/// those two collapse (`dev-core`'s own second pass).
+/// those two collapse (`dev-core`'s own second pass). `k8s::Fault::Unfinished` is the tenth, and
+/// it is the one this list matters most for: it is a hair from `Unanswered` — a server that
+/// answered nothing against a connection that carried nothing — and the two send a reader to
+/// opposite places.
 #[test]
 fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
     use k8s::Fault::{
-        BadEntry, Expired, Gone, Kubeconfig, NoContext, NoCredential, Refused, Rejected, Unanswered,
+        BadEntry, Expired, Gone, Kubeconfig, NoContext, NoCredential, Refused, Rejected,
+        Unanswered, Unfinished,
     };
     let all = [
         Kubeconfig,
@@ -2781,6 +3012,7 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
         Expired,
         Refused,
         Gone,
+        Unfinished,
         Unanswered,
     ];
 
@@ -2819,7 +3051,7 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
             // The three arms that read `asked` must actually contain it, whichever framing
             // arrives. That is the cheap half; the grid below is the half that catches a frame
             // that reads wrongly.
-            for fault in [Refused, Rejected, Gone, Unanswered] {
+            for fault in [Refused, Rejected, Gone, Unanswered, Unfinished] {
                 let line = because(fault, asked, renewal);
                 assert!(
                     line.contains(asked),
@@ -2897,7 +3129,7 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
 /// and *reach this cluster* from [`live`].
 #[test]
 fn the_three_sentences_that_name_what_was_asked_read_in_all_four_framings() {
-    use k8s::Fault::{Gone, Refused, Rejected, Unanswered};
+    use k8s::Fault::{Gone, Refused, Rejected, Unanswered, Unfinished};
     let grid = [
         (
             Refused,
@@ -2982,6 +3214,31 @@ fn the_three_sentences_that_name_what_was_asked_read_in_all_four_framings() {
             Unanswered,
             "reach this cluster",
             "nothing usable came back when k8rs tried to reach this cluster",
+        ),
+        // **The arm that carries no cause at all, and that is the assertion.** Nothing came
+        // back and nothing said why, so any explanation is a guess — NOTES § D148's missing
+        // keepalive hides a dead socket behind a quiet server, and NOTES § D150 refuses to call a
+        // LIST that is still moving *hung*. An earlier draft said *nothing is wrong with this
+        // login: it is the cluster, or the network in between, that has gone quiet* and was both.
+        (
+            Unfinished,
+            "`get /version`",
+            "the request k8rs made to `get /version` had not been answered",
+        ),
+        (
+            Unfinished,
+            "`get /apis`",
+            "the request k8rs made to `get /apis` had not been answered",
+        ),
+        (
+            Unfinished,
+            "`list` and `watch` pods",
+            "the request k8rs made to `list` and `watch` pods had not been answered",
+        ),
+        (
+            Unfinished,
+            "reach this cluster",
+            "the request k8rs made to reach this cluster had not been answered",
         ),
     ];
     for (fault, asked, expected) in grid {
@@ -4041,6 +4298,7 @@ async fn a_measured_clock_reaches_the_live_report_and_sits_under_what_it_qualifi
         now(),
         &mut last,
         false,
+        false,
         &AtConnect {
             skew: Some(SignedDuration::from_mins(9)),
             ..Default::default()
@@ -4558,6 +4816,7 @@ async fn a_read_certificate_reaches_the_live_report_as_the_same_sentence() {
         now(),
         &mut last,
         false,
+        false,
         &AtConnect {
             serving_expiry: expiry,
             ..Default::default()
@@ -4589,8 +4848,15 @@ async fn a_read_certificate_reaches_the_live_report_as_the_same_sentence() {
     );
 
     let mut last = String::new();
-    let unread = live_report(&store, now(), &mut last, false, &AtConnect::default())
-        .expect("every LIST landed");
+    let unread = live_report(
+        &store,
+        now(),
+        &mut last,
+        false,
+        false,
+        &AtConnect::default(),
+    )
+    .expect("every LIST landed");
     assert!(
         !unread.contains("A certificate the API server presented"),
         "a session that read nothing printed a sentence anyway: {unread}"
@@ -4811,8 +5077,15 @@ fn the_pane_wins_under_analysis_and_the_trailer_does_not_print_twice() {
     let printed = |analysis| {
         let store = identified(Vec::new(), Vec::new(), nearly_out(Some("v1.36.1")));
         let mut last = String::new();
-        live_report(&store, now(), &mut last, analysis, &AtConnect::default())
-            .expect("every LIST landed")
+        live_report(
+            &store,
+            now(),
+            &mut last,
+            analysis,
+            false,
+            &AtConnect::default(),
+        )
+        .expect("every LIST landed")
     };
 
     let bare = printed(false);
@@ -5519,6 +5792,8 @@ async fn a_once_run_that_reported_ends_by_itself_and_has_no_sentence_to_return()
         now(),
         &mut String::new(),
         false,
+        // The store a `--once` run reaches, read the way that run reads it.
+        true,
         &AtConnect::default(),
     )
     .expect("the store a --once run reaches is a report, or `None` above means it printed none");
@@ -5635,6 +5910,8 @@ fn only_a_pod_watch_that_never_listed_ends_the_run_and_a_stale_one_does_not() {
         listed,
         ended: false,
         failure: None,
+        unfinished: false,
+        outstanding: None,
     };
 
     let stops = pods_unread(
@@ -5715,6 +5992,8 @@ fn the_block_a_run_with_no_pods_ends_on_names_the_scope_and_a_next_step_that_fit
             listed: false,
             ended: false,
             failure: Some(failure),
+            unfinished: false,
+            outstanding: None,
         }]
     }
 
@@ -5919,6 +6198,170 @@ async fn a_cluster_that_answers_nothing_names_the_fault_instead_of_calling_it_sl
     );
 }
 
+/// **A store with one kind still inside its first LIST and the rest of the cluster read** — the
+/// shape a wedged watch has, built without a socket so the decision below can be asserted rather
+/// than inferred.
+///
+/// **Empty LISTs, because what is under test is the kind that is *missing*.** An `Init` followed
+/// by an `InitDone` is a complete answer of zero objects, which is exactly what `k8s::Watch`
+/// treats as listed — and no capture is loaded, so nothing here can pass by accident on a card
+/// somebody else's fixture happened to draw.
+fn read_everything_but(wedged: ObjectKind) -> k8s::Store {
+    use kube::runtime::watcher::Event;
+    let mut store = k8s::Store::default();
+    // **The wedged kind gets its `Init` and nothing after it**, which is the shape a live wedge
+    // has: kube emits `Init` and then hangs inside `api.list()` (`k8s.rs` § THE DRIVER). Leaving
+    // the watch untouched instead would be *a stream that has not been polled yet*, which is a
+    // different state and not the one under test.
+    store.pod(&now(), Event::<Pod>::Init);
+    if wedged != ObjectKind::Pod {
+        store.pod(&now(), Event::InitDone);
+    }
+    store.node(&now(), Event::<Node>::Init);
+    if wedged != ObjectKind::Node {
+        store.node(&now(), Event::InitDone);
+    }
+    store.deployment(&now(), Event::<Deployment>::Init);
+    store.deployment(&now(), Event::InitDone);
+    store.stateful_set(&now(), Event::<StatefulSet>::Init);
+    store.stateful_set(&now(), Event::InitDone);
+    store.daemon_set(&now(), Event::<DaemonSet>::Init);
+    store.daemon_set(&now(), Event::InitDone);
+    store
+}
+
+/// **Which of the three answers a run that ran out of time gets** ([`out_of_time`]) — and the
+/// third one is the box (`k8s::Fault::Unfinished`).
+///
+/// **Pods keep both of their old answers and that is the constraint, not a side effect.** A pod
+/// LIST that is merely slow is NOTES § D150's two facts — *8 000 read so far, the last one 2s
+/// ago* is how a reader tells a big cluster from a dead one — and it is only readable while that
+/// LIST is still counted as running. Settling it to open the gate would publish an empty pod list
+/// and throw the counts away, so [`out_of_time`] answers for pods *before* anything is settled.
+///
+/// **`None` is the one that changed.** Pods landed and some other kind did not: that used to be
+/// [`too_slow`] as well — thirty seconds, zero bytes on stdout, exit `2` — while the same store
+/// with a `403` on the same kind printed the whole report and exited `0`.
+#[test]
+fn a_run_that_ran_out_of_time_keeps_the_counts_for_pods_and_publishes_for_everything_else() {
+    let budget = std::time::Duration::from_secs(30);
+
+    // Nothing has landed at all: pods are still listing, so the two facts are what there is.
+    let nothing = k8s::Store::default();
+    let waiting = out_of_time(&nothing, &k8s::Coverage::Cluster, Some(now()), budget, None)
+        .expect("a run whose pods never landed has no report in it");
+    println!("{waiting}");
+    assert!(
+        waiting.contains("still reading pods (0 read so far)"),
+        "the counts NOTES § D150 hands the reader went missing: {waiting:?}"
+    );
+
+    // Pods landed and nodes did not: the case the box is about.
+    let wedged = read_everything_but(ObjectKind::Node);
+    assert_eq!(
+        out_of_time(&wedged, &k8s::Coverage::Cluster, Some(now()), budget, None),
+        None,
+        "a run that had read every pod in the cluster was ended with nothing on stdout because \
+         one other kind had not answered — which is what a `403` on that same kind does not do"
+    );
+
+    // And the pod watch is what decides, not *any* watch: the same store with pods held back
+    // goes the other way.
+    let held = read_everything_but(ObjectKind::Pod);
+    assert!(
+        out_of_time(&held, &k8s::Coverage::Cluster, Some(now()), budget, None)
+            .is_some_and(|said| said.contains("still reading pods")),
+        "a run whose pods never landed published a report about a cluster it was never shown"
+    );
+}
+
+/// **The report a wedged kind used to cost the whole of** — zero bytes and exit `2`, where the
+/// same store with a `403` on the same kind printed everything
+/// (`reports/2026-08-30-once-flag-against-a-live-cluster.md` § 3 vs § 4c).
+///
+/// **The two halves are asserted in one test on purpose.** Before [`k8s::Store::stop_waiting`],
+/// [`live_report`] over this store answered `None`: `k8s::Store::snapshot` was shut and a wedged
+/// kind was not a `k8s::Trouble` either, so there was no card **and** no line. The fix is only a
+/// fix if both arrive.
+#[test]
+fn a_kind_the_run_ran_out_on_reaches_the_report_where_it_used_to_cost_the_whole_of_it() {
+    let mut wedged = read_everything_but(ObjectKind::Node);
+    let mut last = String::new();
+    assert_eq!(
+        live_report(
+            &wedged,
+            now(),
+            &mut last,
+            false,
+            true,
+            &AtConnect::default()
+        ),
+        None,
+        "the gate was open before anybody said the waiting was over, so the assertion below is \
+         about nothing"
+    );
+
+    wedged.stop_waiting();
+    let report = live_report(
+        &wedged,
+        now(),
+        &mut last,
+        false,
+        true,
+        &AtConnect::default(),
+    )
+    .expect("a wedged kind cost the entire report, where a refused one costs two rules");
+    println!("{report}");
+    assert!(
+        report.contains("▲ k8rs never finished reading nodes from this cluster"),
+        "the kind the run never read is named nowhere in the report it is missing from: \
+         {report:?}"
+    );
+    // **The numbers, and no cause** (NOTES § D150) — the line's own test one file up covers the
+    // three shapes; what is asserted here is that they survive the trip through `live_report`.
+    assert!(
+        report.contains("0 read so far") && report.contains("this run ran out of time"),
+        "the report says the kind is missing and not how far it got: {report:?}"
+    );
+}
+
+/// **A wedged kind ends a `--once` run the way a refused one does: a report, and exit `0`**
+/// (`k8s::Fault::Unfinished`, todo.md § Phase 6).
+///
+/// **The endpoint is the one the original measurement used** — a nodes URL that accepts the
+/// connection and never answers, with the rest of the cluster replying normally. That is what
+/// makes `k8s::Store::troubles` empty and `k8s::Store::still_listing` name one kind: there is no
+/// error anywhere, which is the whole difficulty.
+///
+/// **`None` is exit `0` in this driver and there is no other way to reach it** — the report went
+/// to stdout, which a test cannot read back (the reason [`out_of_time`] and [`live_report`] are
+/// asserted directly above). What this adds is that the whole path runs: connect, five watches,
+/// the deadline, the store told to stop waiting, the write.
+#[tokio::test]
+async fn a_once_run_whose_nodes_never_answered_still_reports_and_exits_zero() {
+    let (client, _) =
+        emptied_but_slow_on("/api/v1/nodes", std::time::Duration::from_secs(30)).await;
+
+    // **Two seconds and not the 300–500 ms its two neighbours use.** Those end at the deadline
+    // with nothing landed; this one has to get four LISTs in and a whole report rendered before
+    // the deadline is the thing being measured, and a machine running sixteen mutants in parallel
+    // is where a tight budget turns a passing gate into a flaky one.
+    let ended = live(
+        Ok(k8s::session(client, k8s::Coverage::Cluster).await),
+        false,
+        Some(in_a_moment(2_000)),
+    )
+    .await;
+
+    println!("{ended:?}");
+    assert_eq!(
+        ended, None,
+        "a nodes endpoint that accepted the connection and never answered cost the whole report \
+         and a non-zero exit, where a `403` on the same watch costs two rules and exits 0 — so \
+         `k8rs --once && deploy` still flips on which failure the cluster is in"
+    );
+}
+
 /// **A LIST that is genuinely just slow keeps the sentence D150 wrote for it** — the negative
 /// half of the test above, and what stops *name the typed fault first* from swallowing the case
 /// it was not for.
@@ -5988,6 +6431,8 @@ async fn analysis_under_once_puts_the_panes_under_the_cards_and_without_it_there
         now(),
         &mut String::new(),
         true,
+        // `--once --analysis`, so the lines are that mode's.
+        true,
         &AtConnect::default(),
     )
     .expect("a cluster with nothing in it is still a report");
@@ -5997,6 +6442,8 @@ async fn analysis_under_once_puts_the_panes_under_the_cards_and_without_it_there
         now(),
         &mut String::new(),
         false,
+        // The store a `--once` run reaches, read the way that run reads it.
+        true,
         &AtConnect::default(),
     )
     .expect("a cluster with nothing in it is a report with or without the flag");

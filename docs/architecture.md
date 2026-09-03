@@ -367,7 +367,7 @@ it the first paint reports what it is waiting for
   This bullet said the opposite until 2026-08-27, when a run against a dead port
   was measured and did not exit
   ([NOTES § D167](../NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
-- **Nine distinctions matter to the user, not two, and they get one enum:
+- **Ten distinctions matter to the user, not two, and they get one enum:
   `k8s::Fault`.** *Permission denied vs no connection* was the original pair
   and it was never enough — `Kubeconfig` (the file itself: missing, unreadable,
   not valid YAML) · `NoContext` (the file loaded and names no such context) ·
@@ -387,6 +387,17 @@ it the first paint reports what it is waiting for
   Added 2026-08-30, when a multi-container `Pending` pod's log request came back
   `400` and was read as *nothing usable came back* — a client-side fault
   printed as a connectivity sentence) ·
+  `Unfinished` (the server accepted the request and the run ended before it
+  answered — a wedged watch. It recorded no failure at all, so it held the whole
+  report where a refusal costs two rules, and `--once` printed zero bytes on a
+  transient fault where a permanent one printed a full report. **Not**
+  `Unanswered`: the handshake demonstrably worked, so the reader is sent at the
+  cluster rather than at their own kubeconfig. It does **not** claim the network
+  is fine — D148's no-keepalive finding means a socket that died mid-LIST is
+  indistinguishable from a server that went quiet, and the shipped sentence says
+  *"the cluster, or the network in between"* for exactly that reason. Added 2026-09-03,
+  [NOTES § D206](../NOTES.md#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03))
+  ·
   `Unanswered` (everything that did not come back usably — one variant on
   purpose, because from the reader's side they are one fact).
 - **A fallback string is printed only for the case it actually describes**, and

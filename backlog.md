@@ -2001,6 +2001,49 @@ recorded reversal and a later box rather than a dev round
   snapshot, which is source-reading today and needs a cluster
   ([D204](NOTES.md#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03))
 
+- **An empty node list has three causes and `analysis.rs` prints one of them as
+  fact.** The three node panes infer the *cause* of `snapshot.nodes.is_empty()`
+  and print *"Reading what a node has needs permission to list nodes, and this
+  login does not have it — ask for permission to list nodes across the whole
+  cluster."* `ClusterSnapshot` carries no `Trouble` and no `Fault`, so the pane
+  cannot tell **denied** from **never answered** from **genuinely empty**, and it
+  names the one cause that sends the reader to a person. Measured 2026-09-03 by a
+  cold operator review: `Gone` (404) and `Rejected` (400) on the nodes watch
+  already produce that sentence at HEAD, and a wedged watch now reaches a report
+  too ([D206](NOTES.md#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03)),
+  so the reader can be sent to open an RBAC ticket while the API server is what is
+  wedged. This is `PRIOR-ART § C2` — *loading · empty · denied, three states not
+  two* — uncovered for the node panes, and `§ C1`'s class one remove out: an
+  inferred cause standing in for a typed one **the same run is holding**.
+  **It is here and not in a box because the fix touches a file frozen since Phase
+  4**, and forward-only says that is a plan question rather than a dev's. Two
+  shapes to rule between: the prose drops the cause and points at the line above
+  the cards, which is cheap and honest; or `ClusterSnapshot` carries the fact,
+  which is the real fix and unfreezes more. **The cheap one does not need the
+  freeze broken if it lands in the phase that next opens `analysis.rs`**
+
+- **A report that ran out on a kind has no screen.** `screens/states.md:620`
+  documents the watch-trouble banner in its two-tail form and there is now a
+  third; `screens/once.md` gained a new exit-`0` shape — *the report printed and
+  one kind in it is unreadable* — that no screen file draws
+  ([D206](NOTES.md#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03)).
+  `tui-designer`'s, and it is the same *read the screens against the binary* sweep
+  family 5 ran, so it belongs with whatever picks that up next
+
+- **What an unreadable kind should cost a deploy gate, and `--once` +
+  Deployments is the pairing that makes it concrete.** `k8rs --once && deploy`
+  exits `0` when a kind could not be read, for a refusal (shipped) and now for a
+  wedge ([D206](NOTES.md#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03)).
+  The operator review's sharpening: the kind a deploy gate is actually gating on
+  is **Deployments**, not nodes — W1 *pods were never created* and W2 *rollout
+  gave up* are the two rules in that chain — so a wedged deployments watch costs
+  exactly the rules the pipeline is asking about and still returns `0`. Any ruling
+  covers the refusal too, which ships and works for the developer whose Role
+  legitimately cannot list nodes, so it is not a one-line change. Related: the
+  `▲` the report leads with is the same glyph a WARN finding uses, so in a report
+  with warnings it is the fourth `▲` on the page — prominent positionally, not
+  typographically, and under `--once` there is no colour guarantee
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

@@ -535,6 +535,244 @@ async fn a_refusal_that_is_repaired_puts_the_kind_back() {
     );
 }
 
+/// **A wedge costs what a refusal costs, and until [`Store::stop_waiting`] it cost the whole
+/// report** (todo.md § Phase 6, NOTES § D28, [`Fault::Unfinished`]).
+///
+/// **Measured on a cluster before it was written**, and read off the report rather than off a
+/// summary of it (`reports/2026-08-30-once-flag-against-a-live-cluster.md` § 3 against § 4c): the
+/// run whose role could not `list nodes` printed a full report — `41 pods`, `12 critical, 2
+/// warnings` — and exited `0`; the run in which only the nodes LIST was accepted and never
+/// answered printed **0 bytes** and exited `2`, with the same pods sitting in the store. The
+/// transient failure cost strictly more than the permanent one.
+///
+/// **The pre-state is asserted first, and it is the shape the report recorded**: `still_listing`
+/// naming nodes with `0` and `troubles` empty. That is why the obvious fix does not work — there
+/// is no failure to open the gate on, so *print the report you have* would have printed nothing
+/// and exited `0`, which is worse than what it replaced.
+///
+/// **The two snapshots are compared to each other and not to a shape written here.** *They cost
+/// the same* is the box's claim, so the assertion is the claim: the store a wedged nodes watch
+/// publishes is the store a refused one publishes, object for object.
+#[tokio::test]
+async fn a_wedged_watch_costs_what_a_refused_one_costs_once_the_run_stops_waiting() {
+    // The wedge: kube emits `Init` and then hangs inside `api.list()`, so this is every event
+    // the watch ever delivers (§ THE DRIVER, `watcher.rs:521-527`).
+    let mut wedged = all_but("nodes");
+    wedged.node(&now(), Event::Init);
+
+    assert_eq!(
+        outstanding_kinds(&wedged),
+        vec![ObjectKind::Node],
+        "the wedge is not the shape the report measured, so nothing below is about it"
+    );
+    assert_eq!(
+        listing_for(&wedged, ObjectKind::Node).so_far,
+        0,
+        "the report recorded `[(\"Node\", 0)]` and this store holds something else"
+    );
+    assert!(
+        failing_kinds(&wedged).is_empty() && wedged.troubles().is_empty(),
+        "a wedge that recorded a failure is a refusal, and this test would prove the wrong thing"
+    );
+    assert!(
+        wedged.snapshot(now()).is_none(),
+        "the gate was open before anybody said the waiting was over"
+    );
+
+    wedged.stop_waiting();
+    println!(
+        "after stop_waiting · outstanding {:?} · troubles {:?}",
+        outstanding_kinds(&wedged),
+        wedged
+            .troubles()
+            .iter()
+            .map(|t| (t.kind.clone(), t.fault()))
+            .collect::<Vec<_>>()
+    );
+    let published = wedged
+        .snapshot(now())
+        .expect("a wedged kind held the whole report, where a refused one costs two rules");
+    assert!(
+        outstanding_kinds(&wedged).is_empty(),
+        "the wedged watch is still reported as a LIST in progress after the run stopped waiting"
+    );
+    assert_eq!(
+        trouble_for(&wedged, ObjectKind::Node).and_then(|trouble| trouble.fault()),
+        Some(Fault::Unfinished),
+        "the empty node list arrived with nothing said about why it is empty, which is the \
+         silence the whole box is about"
+    );
+    // **Settling the watch may not take D150's two facts with it** ([`Trouble::outstanding`]).
+    // `stop_waiting` empties `still_listing`, so this is the only place left holding them — and
+    // a renderer without them can state a *cause* and nothing else, which is the verdict D150
+    // exists to refuse (`k8s-admin`, 2026-09-03).
+    assert_eq!(
+        trouble_for(&wedged, ObjectKind::Node)
+            .and_then(|trouble| trouble.outstanding)
+            .map(|listing| listing.so_far),
+        Some(0),
+        "the counts went out with the settle, so a report about this kind can only guess at why"
+    );
+    assert!(
+        published.nodes.is_empty() && !published.pods.is_empty(),
+        "the gate opened on an empty cluster, or on nodes nobody was ever sent"
+    );
+
+    // The other half of the cluster: the same kind, refused instead of silent.
+    let mut refused = all_but("nodes");
+    drive(
+        vec![one_watch::<Node, _>(vec![Err(list_failed(403))], |s| {
+            &mut s.nodes
+        })],
+        &mut refused,
+    )
+    .await;
+    assert_eq!(
+        Some(published),
+        refused.snapshot(now()),
+        "a wedged kind and a refused one publish two different clusters, so `k8rs --once` still \
+         costs more for the failure that may clear itself than for the one that will not"
+    );
+    // **And they are still told apart.** Equally costly is not indistinguishable: one is fixed
+    // with an RBAC grant and the other by looking at the API server.
+    assert_eq!(
+        trouble_for(&refused, ObjectKind::Node).and_then(|trouble| trouble.fault()),
+        Some(Fault::Refused),
+        "the refusal came out wearing the wedge's fault"
+    );
+}
+
+/// **A LIST that is still moving when the run stops waiting keeps its count** — the shape that
+/// separates *slow* from *hung*, and the one no test in this file had (NOTES § D150, § D29).
+///
+/// **`k8rs --once -n payments` against a 2 000-node cluster is this run.** Pods land in a second;
+/// nodes is cluster-scoped whatever the scope is, and at the deadline its LIST holds 1 500
+/// objects with a stamp from this millisecond. Every other wedge test here uses `so_far == 0`, so
+/// a store that threw the count away on settling would pass all of them — and a renderer with
+/// only a `Fault` in hand then tells that operator their working cluster has gone quiet.
+///
+/// **The stamp is asserted as well as the count**, because D150's separator is *both* numbers:
+/// `Watch::last_progress` is what a caller turns into *the last one 4s ago*, and it is the half
+/// that says the LIST is moving *now* rather than having moved once.
+#[test]
+fn a_list_that_is_still_moving_keeps_its_count_when_the_run_stops_waiting() {
+    let nodes = items::<Node>("nodes");
+    assert!(!nodes.is_empty(), "the capture must hold nodes");
+
+    let mut store = all_but("nodes");
+    store.node(&now(), Event::Init);
+    for node in nodes.clone() {
+        store.node(&now(), Event::InitApply(node));
+    }
+    // No `InitDone`: the LIST is mid-flight, which is what a page that never arrived looks like.
+    assert_eq!(
+        listing_for(&store, ObjectKind::Node).so_far,
+        nodes.len(),
+        "the store did not count what the LIST had already decoded, so nothing below is about a \
+         LIST that is moving"
+    );
+
+    store.stop_waiting();
+    let trouble =
+        trouble_for(&store, ObjectKind::Node).expect("the kind the run stopped waiting for");
+    let outstanding = trouble
+        .outstanding
+        .expect("a watch that never listed still has two facts about how far it got");
+    println!(
+        "after stop_waiting · so_far {} · since {:?}",
+        outstanding.so_far, outstanding.since
+    );
+    assert_eq!(
+        outstanding.so_far,
+        nodes.len(),
+        "settling the watch threw away how far its LIST had got, which is the one thing that \
+         tells a slow cluster from a dead one"
+    );
+    assert!(
+        outstanding.since.is_some(),
+        "the stamp went with it, so nothing downstream can say whether the count is still moving"
+    );
+    assert!(
+        store.still_listing().is_empty() && store.snapshot(now()).is_some(),
+        "the gate did not open, so this store is not the one a report is drawn over"
+    );
+}
+
+/// **Every one of the five settles, and a watch that listed is left alone** —
+/// [`Store::stop_waiting`] row by row, because four correct rows and one forgotten one is a gate
+/// that opens for four kinds and hangs on the fifth.
+#[test]
+fn stopping_the_wait_settles_whichever_watch_is_outstanding_and_no_other() {
+    for (missing, _) in streams() {
+        let mut store = all_but(missing);
+        assert!(
+            store.snapshot(now()).is_none(),
+            "{missing} did not hold the gate, so this row proves nothing"
+        );
+        store.stop_waiting();
+        let troubles: Vec<ObjectKind> = store.troubles().into_iter().map(|t| t.kind).collect();
+        println!("{missing} · troubles {troubles:?}");
+        assert!(
+            store.snapshot(now()).is_some(),
+            "the run stopped waiting and the {missing} watch went on holding the gate"
+        );
+        assert_eq!(
+            troubles.len(),
+            1,
+            "stopping the wait named the wrong number of kinds with {missing} outstanding"
+        );
+    }
+
+    // **A watch that has an answer is not told it is unfinished**, or every healthy run would end
+    // with five lines about kinds that were read perfectly.
+    let mut whole = bootstrapped();
+    whole.stop_waiting();
+    assert!(
+        whole.troubles().is_empty(),
+        "stopping the wait on a store where every LIST landed invented trouble for all five"
+    );
+    assert!(
+        whole.snapshot(now()).is_some(),
+        "a store that had an answer lost it"
+    );
+}
+
+/// **A watch that spent the run failing keeps its own reason** ([`Trouble::fault`]) — *the run
+/// ran out* is the weaker of the two facts and may not overwrite the stronger one.
+///
+/// **`Unanswered` is the shape this matters for.** It does not settle on its own (NOTES § D28's
+/// *do not blank on a blip*), so it reaches the deadline still holding the gate — and its
+/// sentence is *check the address and whether this machine can reach it*, where a wedge's is
+/// *nothing is wrong with this login*. Collapsing the two sends a reader with a dead VPN to go
+/// and look at a healthy API server.
+#[tokio::test]
+async fn a_watch_that_spent_the_run_failing_keeps_its_own_reason_for_it() {
+    let mut store = all_but("nodes");
+    drive(
+        vec![one_watch::<Node, _>(vec![Err(list_failed(500))], |s| {
+            &mut s.nodes
+        })],
+        &mut store,
+    )
+    .await;
+    assert!(
+        store.snapshot(now()).is_none(),
+        "a 5xx settled on its own, so this test is no longer about the deadline"
+    );
+
+    store.stop_waiting();
+    assert!(
+        store.snapshot(now()).is_some(),
+        "the run stopped waiting and a watch that had been retrying went on holding the gate"
+    );
+    assert_eq!(
+        trouble_for(&store, ObjectKind::Node).and_then(|trouble| trouble.fault()),
+        Some(Fault::Unanswered),
+        "thirty seconds of `nothing came back` was reported as a server that accepted the \
+         request and went quiet, which is the opposite thing to go and look at"
+    );
+}
+
 /// **Which faults a retry cannot clear** ([`Fault::standing`]) — every variant, one answer each.
 ///
 /// **The list is written out rather than derived**, so a variant added later fails to compile
@@ -552,6 +790,9 @@ fn only_a_failure_a_retry_can_clear_holds_the_bootstrap_gate() {
         (Fault::Expired, true),
         (Fault::Refused, true),
         (Fault::Gone, true),
+        // It cannot reach `Watch::settled` through a `failure` — no `watch_fault` arm produces
+        // it — and the fact it names is *this run is over*, which no retry inside the run undoes.
+        (Fault::Unfinished, true),
         (Fault::Unanswered, false),
     ] {
         assert_eq!(
@@ -4032,6 +4273,8 @@ fn every_watcher_error_answers_for_itself_and_none_of_them_is_a_fallback() {
         listed: false,
         failure,
         ended: false,
+        unfinished: false,
+        outstanding: None,
     };
 
     // The initial LIST refused: the ordinary standing 403 on a kind.
