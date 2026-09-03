@@ -70,7 +70,10 @@ python3 scripts/screens-check.py
 python3 scripts/test-guard.py --self-test
 python3 scripts/test-guard.py
 # Invariant 1, as an allowlist derived from the kube version in the lock file —
-# never a hand-written denylist.
+# never a hand-written denylist. And the other half of the same invariant: that
+# the one `#![allow(clippy::disallowed_methods)]` exempting `ops.rs` from it is
+# still the only one in the crate. An allowed lint never fires, so clippy cannot
+# report the file that turns it off.
 python3 scripts/write-guard.py --self-test
 python3 scripts/write-guard.py
 # The mechanizable half of CLAUDE.md § Security gate — including CI itself: the

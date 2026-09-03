@@ -214,7 +214,13 @@ resource.
 - `clippy.toml` still carries a `disallowed-methods` list crate-wide as the
   fast feedback loop (CI runs clippy with `-D warnings`), and `ops.rs` carries
   the single `#![allow(clippy::disallowed_methods)]` in the project — the
-  exception announces itself at the top of the file that owns it.
+  exception announces itself at the top of the file that owns it. **That it is
+  still the only one is checked, because clippy structurally cannot check it**:
+  an allowed lint never fires, so nothing in the build reports the file that
+  turned it off. `scripts/write-guard.py` pins the exception to `ops.rs` — in
+  every cargo root, and in `Cargo.toml`, `.cargo/config.toml` and the committed
+  rustc command lines that can silence it with no `.rs` file changed
+  ([NOTES § D212](../NOTES.md#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03)).
 - The e2e job runs under `--read-only` against kind and fails if any mutating
   request reaches the API server.
 - **The mechanizable half of the review checklist is a script**, not a list

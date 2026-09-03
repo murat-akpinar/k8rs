@@ -3644,8 +3644,12 @@ placed low in the pyramid so the dangerous code is proven headlessly.
 > ([D157](NOTES.md#d157--what-a-re-close-runs-and-the-two-numbers-that-only-a-close-re-takes-2026-08-22)).
 > The next box is the first unchecked one below.
 
-- [ ] `ops.rs` with the single `#![allow(clippy::disallowed_methods)]`; CI's
-      containment check now expects exactly this file
+- [x] `ops.rs` with the single `#![allow(clippy::disallowed_methods)]`; CI's
+      containment check now expects exactly this file — `scripts/write-guard.py`,
+      which already owned the half proving the ban list complete, now owns the
+      half proving the exception singular. An allowed lint never fires, so clippy
+      cannot report the file that turns it off
+      ([D212](NOTES.md#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03))
 - [ ] The mutation contract, one shared function so no operation can skip a
       step: *consequence text → dry-run → confirm callback → call → audit*
 - [ ] Server-side `dryRun=All` wherever supported; a rejected dry-run aborts

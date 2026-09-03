@@ -40,6 +40,7 @@
 // moment it exists rather than when something calls it (NOTES § D34).
 mod analysis;
 mod k8s;
+mod ops;
 mod rules;
 
 #[cfg(test)]

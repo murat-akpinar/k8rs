@@ -2100,6 +2100,33 @@ recorded reversal and a later box rather than a dev round
   all (`/usr/bin/cargo` is a distro package), so it would change nothing there
   today. Raised by `tester` at Phase 6's close and deliberately not taken silently
 
+- **Two `clippy.toml` entries close the `Client::send` hole, and
+  [D142](NOTES.md#d142--a-write-does-not-have-to-go-through-apik-and-the-allowlist-already-fits-the-surface-that-was-missed-2026-08-22)
+  says none can.** Measured by `k8s-admin` at Phase 7's first box, 2026-09-03
+  ([reports/2026-09-03](reports/2026-09-03-invariant-1-containment-operator-review.md)):
+  `http::Request::method_mut` and `http::request::Builder::method` are the only
+  two ways a verb reaches a hand-built request, and banning both is red on the
+  probe and green on all three real call sites (`k8s.rs:3079`, `6526`, `8157`).
+  Not taken in that box, and the reason is mechanical rather than a judgement:
+  `write-guard.py` requires `clippy.toml` to name **exactly** the derived set, so
+  a hand-added defence-in-depth ban is unrepresentable in that file today — which
+  is a design consequence of the guard nobody had stated. Taking it means
+  changing the guard's contract in the same turn as landing the guard. Two
+  things wait on the ruling: whether the entries land, and
+  [PRIOR-ART § G2](PRIOR-ART.md#g-destructive-actions)'s **immune** tag, which
+  rests on `--read-only` making the write path unreachable — true of `Api`, one
+  layer weaker for every future `Client::send` call site
+
+- **Nothing compares `clippy-driver`'s version with `rustc`'s and `cargo
+  clippy`'s.** Phase 7's containment check derives its silencing-lint set from
+  `clippy-driver -W help`, which makes it a third binary in the toolchain chain;
+  `scripts/toolchain-guard.py` pins the first two and its own docstring says a
+  guard whose subject is *which clippy runs* must ask clippy something. All three
+  are one distro package on the dev machine, so there is no live defect — a
+  mixed install (distro `rustc`, rustup `clippy-driver` first on `PATH`) is the
+  shape [D211](NOTES.md#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03) exists for. One line in either guard. Found by
+  `k8s-admin`, 2026-09-03
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

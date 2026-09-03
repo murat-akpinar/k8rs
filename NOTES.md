@@ -233,6 +233,7 @@ its line moving with it.
 - [D209](#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03) — the freeze is narrowed to what was actually checked, and two browser performers are named as Phase 11's
 - [D210](#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03) — Phase 6 closes, and the phase-close mutation sweep is narrowed against what the phase touched
 - [D211](#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03) — `development` was red for seven days and nobody read it: the toolchain is pinned, and a feature flag added compiled code without adding a package
+- [D212](#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03) — an allowed lint never fires, so clippy cannot report the file that turns it off, and the switch was in the justfile
 
 ## Why it exists — where the gap is
 
@@ -12437,6 +12438,27 @@ functions for the same reason and are likewise unbanned. They **build** a reques
 rather than send one, so they fall under the residual named above — reaching a
 server still needs `Client` — and they are behind the `kubelet-debug` feature,
 which is off.
+**Correction, 2026-09-03: "No list closes that" is false, and it is left visible
+here rather than restated.** `k8s-admin`, reviewing Phase 7's first box, measured
+that two entries close it —
+`http::Request::method_mut` and `http::request::Builder::method`, the only two
+ways a verb reaches a hand-built request. Red on the probe, and green on all
+three real call sites (`k8s.rs:3079`, `6526`, `8157`); the field route is not an
+escape, because rebuilding `parts` needs `http::Request::from_parts`, and `http`
+is not a direct dependency nor re-exported by kube
+([reports/2026-09-03](reports/2026-09-03-invariant-1-containment-operator-review.md)).
+**What stays true is everything the ruling rests on** — `Client` is
+verb-agnostic, Phase 5 needs it outside `ops.rs` for a read, and the lint is
+defence in depth rather than the guarantee. What was wrong was the claim that the
+door cannot be narrowed at all, and that claim is why nobody looked. Not acted on
+in the box that found it: `scripts/write-guard.py` requires `clippy.toml` to name
+*exactly* the derived set, so a hand-added ban is unrepresentable there, and
+taking it means changing that guard's contract in the same turn as landing it.
+The open ruling — the two entries, and
+[PRIOR-ART § G2](PRIOR-ART.md#g-destructive-actions)'s **immune** tag, which
+reads one layer weaker for a `Client::send` call site than for `Api` — is in
+[`backlog.md`](backlog.md).
+
 
 ### D143 — the eleventh crate, and why the list of ten was wrong rather than the task (2026-08-22)
 
@@ -18055,3 +18077,68 @@ push and the phase-close PR**, so a seven-day breakage can only surface as a mer
 blocker. That is [`backlog.md`](backlog.md)'s, because a new gate is not something
 to inject into a phase that is closing.
 
+### D212 — an allowed lint never fires, so clippy cannot report the file that turns it off, and the switch was in the justfile (2026-09-03)
+
+Phase 7's first box is two clauses: `ops.rs` carries the single
+`#![allow(clippy::disallowed_methods)]`, and *CI's containment check now expects
+exactly this file*. The first clause is nine lines. The second is the box.
+
+**Why a guard at all, when clippy is the containment.**
+[D141](#d141--the-write-guard-has-never-run-and-the-fix-is-to-give-the-matching-to-the-tool-that-resolves-paths-2026-08-22)
+gave the matching to clippy because clippy resolves paths and a grep does not.
+But a lint that is *allowed* never fires, so the one thing clippy structurally
+cannot report is the file that switched it off. `write-guard.py` already owned
+the half proving the ban list is complete against the kube in `Cargo.lock`; this
+is the half proving the exception to it is singular. It went in that file and not
+a new one — a second script for the second half of one invariant is the drift
+`scripts/guards.sh`'s own header warns about, and `guards.sh` needed no new line.
+
+**The set of things that silence it is derived, not pinned, because six of the
+fourteen ways contain no occurrence of the lint's name.** Measured off
+`clippy-driver -W help`: `clippy::disallowed-methods` is a member of
+`clippy::style`, which is a member of `clippy::all`. So `#![allow(clippy::all)]`,
+`#![allow(clippy::style)]` and `#![allow(warnings)]` each turn the containment
+off with the string `disallowed_methods` nowhere in the file — and a crate-level
+`#![allow(warnings)]` beats the command line's `-D warnings`. `tester` fed
+fourteen shapes to a throwaway crate and watched clippy accept eleven, including
+`#[expect(…)]`, an attribute inside a `#[path]` child module, a `[lints.clippy]`
+table in `Cargo.toml`, and a `[build] rustflags` line in `.cargo/config.toml`. A
+guard grepping the literal name catches eight of fourteen. The hyphen spelling
+`clippy::disallowed-methods` **does not compile** inside an attribute, so the
+guard returns the underscore spelling only — named rather than dropped.
+
+**The blocker, and it is the reason this entry exists.** The first version's
+docstring named its ceilings honestly and one of them was false: *"`RUSTFLAGS` in
+the environment … No committed file can rule them out."* `RUSTFLAGS` is set in
+exactly two places in this repo and both are committed —
+`justfile:14` and `.github/workflows/ci.yml:17`, the second job-wide, so it
+covers the `bash scripts/guards.sh` step that runs the guard. `k8s-admin`
+measured `-D warnings -A clippy::disallowed_methods` in the justfile line, with
+`Api::delete` sitting in `k8s.rs`: clippy exit 0, the guard exit 0, the ban gone.
+The guard's own off-switch was in the file CI runs it from. **This is
+[D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)
+wearing the one coat that reads as diligence** — a *named ceiling* is a claim
+about the object like any other, and this one was reasoned from what RUSTFLAGS
+is rather than measured against where it is set. A ceiling paragraph now needs
+the same grep as a number does.
+
+**Two ceilings are accepted on purpose, and the second is a choice about which
+direction to be wrong in.** The ambient environment, and a `.cargo/config.toml`
+in a parent directory or `$CARGO_HOME`, genuinely cannot be read out of a
+committed file. And the scan does **not** strip comments or string literals, so
+a doc comment quoting the attribute counts as a second silencer: stripping needs
+string-awareness, and getting it wrong loses a real attribute after a `//`
+inside a string — a false positive is loud, a hole is not. The cost is paid in
+the messages, which now say the check does not parse Rust, because the file most
+likely to trip it is `ops.rs`, whose doc comment is *about* the attribute.
+
+**`ops.rs` has no code, so the product does not exercise the attribute — and the
+containment is still not unproven.** Four runs, each one clippy's verdict rather
+than an author's claim: the call inside `ops.rs` is green, the same call in
+`analysis.rs` is red, both removed is green, and — the run that isolates the
+attribute rather than the file — the call back inside `ops.rs` with the
+attribute deleted is red. `dev-core` added the fourth itself, having noticed the
+first three prove only that `ops.rs` is treated differently. Nothing from it was
+committed. The one thing owed before the next box lands on this: the first real
+mutation gets that red/green pair against product code rather than an appended
+probe, which is the moment `ops.rs` stops being an empty announcement.
