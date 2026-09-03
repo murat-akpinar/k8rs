@@ -52,6 +52,14 @@ case "$body" in *scripts/*)
   echo "guards: 'just check' runs a scripts/ guard directly. Move that line into scripts/guards.sh — it is the one list CI runs, and a guard only 'check' knows about never runs on a push" >&2; exit 1 ;; esac
 
 set -x
+# First, because it decides whether anything above it meant anything. `just
+# check` ran fmt, clippy and the tests before reaching this file, and all three
+# are only as good as the toolchain that ran them: CI asked for `toolchain:
+# stable`, stable moved twice in one phase, and clippy 1.98's `result_large_err`
+# was a red push the local gate could not reproduce for seven days
+# (NOTES § D211). On the runner this asserts the action honoured the pin.
+python3 scripts/toolchain-guard.py --self-test
+python3 scripts/toolchain-guard.py
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
 python3 scripts/todo-guard.py --self-test

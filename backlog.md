@@ -2081,6 +2081,25 @@ recorded reversal and a later box rather than a dev round
   second half. **Nine of the fourteen flags in it die at Phase 12**, so the cheap
   moment is after that, not now
 
+- **Nothing reads CI between a push and the phase-close PR, and that cost seven
+  days.** `development` was red from **2026-08-27T07:31 to 2026-09-03** — 40 runs,
+  0 successes — and it surfaced only as a merge blocker at Phase 6's close
+  ([D211](NOTES.md#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03)).
+  **Loudness is not the missing mechanism**: `just cross`'s skip banner was loud,
+  correct, and said in as many words *"it will land on the push instead of here"*.
+  It did, forty times, and every one of those pushes was made by someone who had
+  just read a green `just check`. The cheap shape is one `gh run list` read at the
+  push, in the ritual, next to the CHANGELOG step — but it is a new gate and a new
+  gate does not get injected into a phase that is closing, so it is here
+
+- **Should a `rust-toolchain.toml` replace the workflow pin?** It would make
+  local == CI *structural* for anyone with rustup, which is stronger than
+  `scripts/toolchain-guard.py` comparing two places. Against: it is a second place
+  the version lives, it is a new root file with no **Writes** cell in
+  [CLAUDE.md](CLAUDE.md)'s ownership table, and the dev machine has no rustup at
+  all (`/usr/bin/cargo` is a distro package), so it would change nothing there
+  today. Raised by `tester` at Phase 6's close and deliberately not taken silently
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

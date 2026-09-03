@@ -7155,6 +7155,18 @@ pub(crate) enum NotConnected {
 /// `scripts/security-guard.py`. TLS verification is never
 /// disabled here — a kubeconfig that sets `insecure-skip-tls-verify` is honoured, because it is
 /// the user's own file, and saying so in the header is `views.rs`'s.
+///
+/// **`result_large_err` fires from clippy 1.98, and the lint's premise does not hold here.**
+/// `NotConnected` is 136 bytes, and `size_of::<Result<Session, NotConnected>>()` is 520 — the
+/// same as a bare [`Session`] — so the `Err` variant fits inside what `Ok` already occupies and
+/// boxing it would save zero bytes and add an allocation and an indirection (measured,
+/// NOTES § D211). `allow` and not `expect`: clippy does not lint `async fn` at 1.97.1, and an
+/// unfulfilled expectation is itself a `-D warnings` error, so `expect` here is red on one of
+/// the two toolchains whichever way the pin moves.
+#[allow(
+    clippy::result_large_err,
+    reason = "the Ok variant already dominates: boxing saves zero bytes (NOTES § D211)"
+)]
 pub(crate) async fn connect(
     context: Option<&str>,
     namespace: Option<&str>,
@@ -7178,16 +7190,23 @@ pub(crate) async fn connect(
 /// the shape NOTES § D26 refuses, and the whole reason [`connect_with`] exists beside
 /// [`connect`]. The mutation gate reports it MISSED and that report is correct.
 ///
-/// **`result_large_err` is expected rather than designed around.** clippy sees a 136-byte
-/// [`NotConnected`] over a smaller `Ok`; [`connect`] and [`connect_with`] carry the same `Err`
-/// and do not trip it only because a [`Session`] is bigger. Boxing it would reshape the type five
-/// call sites read, and narrowing this to `KubeconfigError` would put the
-/// `NotConnected::Kubeconfig` wrap back at every caller — which is the duplication this function
-/// exists to remove. It is called once, at startup. `expect` rather than `allow` so it expires by
-/// itself if the type ever shrinks.
+/// **`result_large_err` is expected rather than designed around**, and the two sentences that
+/// used to be here were both wrong (`tester`, 2026-09-03, NOTES § D211). They said clippy sees
+/// the 136-byte [`NotConnected`] "over a smaller `Ok`" and that [`connect`] and
+/// [`connect_with`] escape the lint "only because a [`Session`] is bigger". Measured:
+/// `Kubeconfig` is 248 bytes and `Session` is 520, so both `Ok` variants are *larger* than the
+/// error and `Ok` size cannot be what separates them — clippy simply did not lint `async fn`
+/// until 1.98, which is why those two went red the day CI's `stable` moved and this one did not.
+///
+/// What is true is stronger: `size_of::<Result<Kubeconfig, NotConnected>>()` is 248, exactly
+/// `Kubeconfig` alone, so the `Err` variant costs this `Result` nothing and **boxing would save
+/// zero bytes.** Narrowing this to `KubeconfigError` would put the `NotConnected::Kubeconfig`
+/// wrap back at every caller — the duplication this function exists to remove. It is called
+/// once, at startup. `expect` rather than `allow` so it expires by itself if the type ever
+/// shrinks; the two `async fn`s cannot do the same, for the reason given on each.
 #[expect(
     clippy::result_large_err,
-    reason = "one call at startup; boxing reshapes a type five sites read"
+    reason = "the Ok variant already dominates: boxing saves zero bytes (NOTES § D211)"
 )]
 pub(crate) fn kubeconfig() -> Result<Kubeconfig, NotConnected> {
     Kubeconfig::read().map_err(NotConnected::Kubeconfig)
@@ -7208,6 +7227,18 @@ pub(crate) fn kubeconfig() -> Result<Kubeconfig, NotConnected> {
 /// ambient file passes on a runner even when the argument is ignored entirely, which is a test
 /// that cannot fail (NOTES § D26). Handed a kubeconfig it wrote itself, the same test has a
 /// current context to be wrongly loaded, and ignoring the argument turns it green.
+///
+/// **`result_large_err` fires from clippy 1.98, and the lint's premise does not hold here.**
+/// `NotConnected` is 136 bytes, and `size_of::<Result<Session, NotConnected>>()` is 520 — the
+/// same as a bare [`Session`] — so the `Err` variant fits inside what `Ok` already occupies and
+/// boxing it would save zero bytes and add an allocation and an indirection (measured,
+/// NOTES § D211). `allow` and not `expect`: clippy does not lint `async fn` at 1.97.1, and an
+/// unfulfilled expectation is itself a `-D warnings` error, so `expect` here is red on one of
+/// the two toolchains whichever way the pin moves.
+#[allow(
+    clippy::result_large_err,
+    reason = "the Ok variant already dominates: boxing saves zero bytes (NOTES § D211)"
+)]
 pub(crate) async fn connect_with(
     kubeconfig: Kubeconfig,
     context: Option<&str>,

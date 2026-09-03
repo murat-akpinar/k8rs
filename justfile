@@ -136,8 +136,19 @@ cross:
       echo "#  Their std is not installed on this machine, so the step was skipped, not"
       echo "#  passed. CI runs all of them: a break that only shows up for musl or darwin"
       echo "#  is still ahead of you, and it will land on the push instead of here."
+      echo "#  That is not hypothetical — it is exactly how both musl targets stayed red"
+      echo "#  on every push for seven days while this banner said 'skipped' (NOTES § D211)."
       echo "#"
       echo "#  To close it locally:  rustup target add$skipped"
+      # A std is necessary and not sufficient, and saying only the first half
+      # sends the reader into a build-script error with no idea why: `ring` needs
+      # a C compiler named `<arch>-linux-musl-gcc` for the musl rows, which is
+      # what CI installs `musl-tools` for. The darwin rows need a macOS SDK and
+      # cannot be closed on Linux at all, so the line names only what is real.
+      case "$skipped" in *-linux-musl*)
+        echo "#  …and for the musl rows a C compiler too — ring's build script wants"
+        echo "#  <arch>-linux-musl-gcc by that exact name (Debian/Ubuntu: musl-tools)." ;;
+      esac
       echo "###############################################################################"
     } >&2
 

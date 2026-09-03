@@ -232,6 +232,7 @@ its line moving with it.
 - [D208](#d208--the-cross-family-review-the-picker-that-called-a-failed-container-done-and-the-owner-fetch-that-was-never-written-2026-09-03) — the cross-family review: the picker that called a failed container `done`, and the owner fetch that was never written
 - [D209](#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03) — the freeze is narrowed to what was actually checked, and two browser performers are named as Phase 11's
 - [D210](#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03) — Phase 6 closes, and the phase-close mutation sweep is narrowed against what the phase touched
+- [D211](#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03) — `development` was red for seven days and nobody read it: the toolchain is pinned, and a feature flag added compiled code without adding a package
 
 ## Why it exists — where the gap is
 
@@ -17983,4 +17984,74 @@ named on screen.
 the server's `Status.message`, and a `400` validation error on a *write* can echo
 submitted field values (D207); and `--read-only` is still accepted as a no-op,
 with Phase 7 owning the structural half.
+
+### D211 — `development` was red for seven days and nobody read it: the toolchain is pinned, and a feature flag added compiled code without adding a package (2026-09-03)
+
+Phase 6's close opened its PR and CI came back red. The failures were not the
+phase's last box; they were seven days old.
+
+**The number that matters: 40 runs, 0 successes, last green `2026-08-27T07:31`.**
+Counted, not recalled — `gh run list --branch development --limit 45` returns
+`Counter({'failure': 40, 'success': 5})` with every success older than that
+timestamp. **Every push of this session, the PM's included, went onto a red branch
+and nobody looked.** `main` was green on 2026-08-23, which is true and is exactly
+the sort of true thing that hides this.
+
+**Why the local gate could not see either failure**, which is the part worth
+keeping. [CLAUDE.md](CLAUDE.md) says *`just check` is the whole of CI, or it is a
+lie*, and it had become one in two different ways at once.
+
+**Failure 1 — clippy's `result_large_err`, and it took two factors.** The
+workflow asked for `toolchain: stable`; the dev machine has `/usr/bin/cargo`
+1.97.1 and no rustup. Stable moved to 1.98.0 on 2026-08-27 and 1.98.1 on
+2026-09-01 — twice inside one phase — and 1.98 began linting `async fn`. The
+second factor is **ours**: `df50815` grew `NotConnected` from 112 to 136 bytes by
+turning `Client(kube::Error)` into a struct variant with a `renewal` field,
+crossing the 128-byte threshold. Proven by counterfactual rather than argued:
+clippy 1.98.1 on the tree *before* that commit is green; on HEAD it is red; 1.97.1
+is green on both.
+
+**The lint's premise is false here, and that is why it is allowed rather than
+obeyed.** Measured with `size_of`: `NotConnected` 136, `Session` 520,
+`Result<Session, NotConnected>` **520** — the `Err` variant fits inside what `Ok`
+already occupies and boxing would cost an allocation to save **zero bytes**, while
+reshaping a type five call sites read field by field. `#[allow]` and not
+`#[expect]`, because the full four-cell matrix was run: `expect` is red on 1.97.1
+(`unfulfilled_lint_expectations`, itself a `-D warnings` error) and `allow` is the
+only attribute green on both.
+
+**The pin goes backwards, to 1.97.1.** Pinning forward would leave `just check`
+red on the only machine that runs it. Pinning to the dev machine's version makes
+the gate green *and honest today*, and it is self-correcting: the next system
+upgrade turns `scripts/toolchain-guard.py` red at the user's desk, where a bump is
+a deliberate one-line edit rather than a surprise at a phase close.
+
+**Failure 2 — the musl targets, and the idiom this corrects.** They built for 14
+days and broke on 2026-08-27 with `ToolNotFound: x86_64-linux-musl-gcc`. The cause
+is [D165](#d165--the-two-cargotoml-lines-the-first-client-forced-and-the-one-that-was-a-panic-on-every-machine-2026-08-27)'s `ring` feature. **`ring` had a `[[package]]` in `Cargo.lock`
+the whole time — the count really was unchanged — but turning the feature on moved
+it into the build graph and ran its C build script for the first time.** That the
+musl rows were green for a fortnight *is* the proof it had not been compiled
+before.
+
+**So invariant 10's favourite idiom needs a caveat, and this is it.** *"213
+packages in `Cargo.lock` before and after"* ([D143](#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22),
+[D178](#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28))
+measures the **package list** and concludes about **compiled code**. Enabling a
+feature adds compiled code — here, an entire C toolchain requirement on two build
+targets — without adding a package. The idiom stays useful and stops being
+sufficient on its own.
+
+`musl-tools` ships both `musl-gcc` and `x86_64-linux-musl-gcc`, so no `CC_*`
+variable is needed; the amd64 package does **not** carry `aarch64-linux-musl-gcc`,
+so that row moves to a native `ubuntu-24.04-arm` runner rather than pulling a
+cross toolchain from a third-party host — **a new hostname in front of the supply
+chain for one `cargo check` is a worse trade than a runner label.**
+
+**The gap neither fix closes, and it is the real one.** The `just cross` skip
+banner was loud, correct, and said in as many words *"it will land on the push
+instead of here"*. It did, forty times. **Nothing in the ritual reads CI between a
+push and the phase-close PR**, so a seven-day breakage can only surface as a merge
+blocker. That is [`backlog.md`](backlog.md)'s, because a new gate is not something
+to inject into a phase that is closing.
 
