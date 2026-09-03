@@ -54,6 +54,7 @@
 - *(main)* Add --once, the flag v0.0.1 ships ([c28ec7b](https://github.com/murat-akpinar/k8rs/commit/c28ec7b764947d5068d5a8b3341fd57680ece678)) — k8rs --once connects, prints one report and exits — 0 when it ran and reported, 2 when it could not run. It is the live path stopping at the bootstrap gate instead of redrawing forever; --live stays as the reconnect proof. --analysis, --context and --namespace apply unchanged, --read-only is accepted and does nothing, and the whole run is bounded at 30 seconds.
 - *(k8s)* Print a named pod's logs, bounded at 2 MB and counted ([4b82198](https://github.com/murat-akpinar/k8rs/commit/4b821986bbcd26a3854078f5a5f9232a7e8c2265)) — The log read path: fetch, follow, pick a container, --previous for a crashed one. --logs names the verb and --object the pod, one selector the per-object events, describe and yaml boxes will share rather than spell three more ways (NOTES § D194, which reads D17's clap threshold against a binary that already parses two value-taking flags by hand).
 - *(k8s)* Read one object's own story — its events, its describe, its yaml ([bf7b0cc](https://github.com/murat-akpinar/k8rs/commit/bf7b0cc4a221802585e6b91058fb4afc4f9d0407)) — Phase 6 family 2. Three boxes land together because they are three consumers of one question: which object.
+- *(main)* Tell the reader their own login is running out, and show every read ([f06e9b5](https://github.com/murat-akpinar/k8rs/commit/f06e9b583294e2c58e785205adf1d7c20971fe1e)) — Three boxes about what a default run prints, landed together.
 
 ### 🐛 Bug Fixes
 
