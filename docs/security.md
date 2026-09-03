@@ -58,9 +58,31 @@ Five mechanisms, each a requirement rather than a nicety:
 |---|---|
 | **Containment** — writes exist only in `ops.rs` | An accidental mutation anywhere else in the codebase |
 | **Consent** — selected object + keypress + confirmation stating the consequence | Acting on the wrong object, or without understanding what happens |
-| **Preflight** — server-side `dryRun=All`, abort on rejection | Discovering an admission-webhook rejection halfway through a change |
+| **Preflight** — server-side `dryRun=All` where the API offers it, abort on rejection | Discovering an admission-webhook rejection halfway through a change |
 | **Typed confirmation** for delete and drain | The keyboard-slip class of accident |
 | **Audit** — every attempt, including refusals and failures | Not being able to answer "what happened to this cluster" |
+
+**Opening a confirmation dialog sends one request to the API server, and that
+is by design rather than by accident.** `screens/dialogs.md` requires the
+dry-run's verdict to be shown *before* the confirm button is live — the dialog's
+own line is *"The cluster checked it first and accepted it."* — so the
+`dryRun=All` goes out while the dialog is on screen and before anybody has
+agreed to anything. Two consequences a reviewer should meet here rather than
+discover: the **apiserver's own** audit log records a `patch` with
+`?dryRun=All` for a dialog the operator then cancelled, and every matching
+admission webhook is invoked with `dryRun: true`. A SIEM rule counting
+`patch deployments/scale by user X` counts dialogs, not changes. Nothing is
+mutated — that is what `dryRun=All` means — and k8rs's own audit log records the
+outcome as *nothing was changed*, but a request was sent
+([NOTES § D214](../NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
+
+**Three operations have no preflight at all, because the API has none to
+offer.** `restart`, `cordon` and `uncordon` go through kube entry points that
+take no parameters, so no `dryRun=All` can be attached — which is why invariant
+2 says *where the API supports it* and why the contract lets an operation
+declare it has no check. The audit line then says so in words rather than
+leaving the field out, so *"was this checked first?"* is answerable for every
+mutation and not only the checkable ones.
 
 Plus two absences that matter: **no bulk mutation** (single object, single
 confirmation — the multi-select delete is how outages happen) and **no

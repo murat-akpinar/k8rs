@@ -2127,6 +2127,43 @@ recorded reversal and a later box rather than a dev round
   shape [D211](NOTES.md#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03) exists for. One line in either guard. Found by
   `k8s-admin`, 2026-09-03
 
+- **`drain` does not fit the mutation contract, and `ops.rs` freezes at the end
+  of Phase 7.** `perform` has one `verb`, one `path`, one dry-run, one real call,
+  one attempt line and one result line. `drain` is N eviction POSTs over minutes
+  with a live *"moved 4 of 11 · blocked 2"* pane
+  ([screens/dialogs.md](screens/dialogs.md), [NOTES § D20](NOTES.md#d20--a-call-that-takes-time-is-a-state-and-there-was-none)):
+  no single verb, no single path, no single result, and no progress channel in
+  the signature. So either drain does not go through the contract — which breaks
+  *every write goes through here* — or the contract needs a shape it does not
+  have. **Deliberately not built now**: a progress sink for a v0.2 operation is
+  speculative code, and the two honest answers are a second entry point in
+  `ops.rs` written before the freeze, or a recorded freeze exception when drain
+  lands. Whoever opens v0.2's drain box decides which. Found by `k8s-admin`,
+  2026-09-04 ([NOTES § D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04))
+
+- **The confirmation dialogs draw no pending state, and rule 3 requires one to
+  exist.** `screens/dialogs.md` draws `[ ⏎ do it ]` and `[ esc cancel ]` live in
+  every mockup, but its own rule 3 says the verdict is shown *before the button
+  is live* — so there is a window, between the dialog opening and the dry-run
+  answering, that no mockup draws. The contract now implements that window and
+  the PM has ruled `esc` **inert** inside it
+  ([NOTES § D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)),
+  so what is missing is the drawing: what the button looks like dead, and what
+  the footer says while nothing may be pressed. `tui-designer`'s, and it is
+  Phase 11's — the console is where a dialog first exists as code. Found by
+  `k8s-admin`, 2026-09-04
+
+- **`Fault::Conflict` swallows `409 AlreadyExists` along with `409 Conflict`.**
+  `kube-core` gives `409` two reasons and
+  [D213](NOTES.md#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04)'s
+  code arm fires before the reason fallback, so an `AlreadyExists` reads as *the
+  object had already been changed by something else* — a sentence that sends the
+  reader to re-read an object that was never theirs. **No live defect**: no
+  v0.1 or v0.2 write creates anything, so nothing reaches it. It becomes real
+  the first time an operation POSTs a new object. Not fixed because D213 bounded
+  the exception to two arms and widening it silently is the thing that ruling
+  exists to prevent. Found by `dev-core`, 2026-09-04
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

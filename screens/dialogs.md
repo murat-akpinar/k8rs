@@ -75,8 +75,8 @@ A rejected write is a first-class state, not a toast that vanishes.
 │    │    the request: replicas may not exceed 5 in this    │        │
 │    │    namespace                                         │        │
 │    │                                                      │        │
-│    │  This was caught by the check that runs before the   │        │
-│    │  real change, so nothing reached your cluster.       │        │
+│    │  This is the check that runs before the real change  │        │
+│    │  — it stopped this one.                              │        │
 │    │                                                      │        │
 │    │                     [ esc dismiss ]                  │        │
 │    └──────────────────────────────────────────────────────┘        │
@@ -107,7 +107,7 @@ by its ReplicaSet while you were typing its name
 │    │    payments/web-7d9f4                                │        │
 │    │    replaced by web-2c81a 3 seconds ago               │        │
 │    │                                                      │        │
-│    │  Nothing was sent to the cluster.                    │        │
+│    │  Nothing was changed.                                │        │
 │    │                                                      │        │
 │    │                  [ esc dismiss ]                     │        │
 │    │                                                      │        │

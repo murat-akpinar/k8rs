@@ -2497,6 +2497,15 @@ fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>, said: Option<&
                  fault in k8rs, and nothing is wrong with the cluster or with this login"
             ),
         },
+        // **The one arm that names no verb, because a `409` is not about what was asked** — it
+        // is about the object having moved between the read and the write (NOTES § D213). It is
+        // the only fault whose fix is *k8rs reads it again*, so the sentence says what the reader
+        // will see happen rather than sending them anywhere.
+        k8s::Fault::Conflict => {
+            "something else changed this object while k8rs was working on it — nothing was \
+             changed, and reading it again shows what it looks like now"
+                .to_string()
+        }
         k8s::Fault::Unanswered => format!("nothing usable came back when k8rs tried to {asked}"),
         // **The one arm with no cause in it, and that is the arm** (`k8s::Fault::Unfinished`).
         // Nothing came back and nothing said why, so every sentence that would explain it is a

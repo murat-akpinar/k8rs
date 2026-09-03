@@ -3650,8 +3650,21 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       half proving the exception singular. An allowed lint never fires, so clippy
       cannot report the file that turns it off
       ([D212](NOTES.md#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03))
-- [ ] The mutation contract, one shared function so no operation can skip a
-      step: *consequence text → dry-run → confirm callback → call → audit*
+- [x] The mutation contract, one shared function so no operation can skip a
+      step: *consequence text → dry-run → confirm callback → call → audit* —
+      `perform` in `ops.rs`, with the order that satisfies invariant 2,
+      `screens/dialogs.md` rule 3 and this box at once: **dialog opens pending →
+      dry-run → verdict into the open dialog → button lives → answer → real call
+      → audit**. `Checked` is constructible only after a passing check, so rule 3
+      is structural rather than remembered; `Mutation::checkable` is the seam for
+      the three operations the API offers no `dryRun=All` for. Four ways a record
+      could lie were found and closed — and the fourth by the PM's pass over the
+      landed tree, after both agents' rounds
+      ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
+      `k8s.rs` opened for two arms under a recorded exception, because a `409`
+      and a `422` — the two answers a write meets most — both read as *the
+      network said nothing*
+      ([D213](NOTES.md#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04))
 - [ ] Server-side `dryRun=All` wherever supported; a rejected dry-run aborts
       and surfaces the API server's own message
 - [ ] **A dry-run does not reject an unknown field, so the mutation contract
@@ -3689,7 +3702,15 @@ placed low in the pyramid so the dangerous code is proven headlessly.
 - [ ] `restart` — `Api::restart(name)`, which kube-rs already implements for
       workloads. For a bare pod there is no restart: it is a *delete*, and the
       consequence text must say so in plain words
-- [ ] `delete` — requires the typed object name
+- [ ] `delete` — requires the typed object name. **The contract does not enforce
+      this yet and this is the box that makes it structural**: `Answer::Confirmed`
+      says somebody agreed and nothing says *how*, so a press-only delete dialog
+      is caught by review rather than by the compiler — which is the *trusted to
+      follow a checklist* shape `Checked` was built to remove for the dry-run
+      ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
+      A `Confirm::Press | Confirm::Type(&str)` on `Mutation` makes it a type
+      error instead. `ops.rs` is still open until this phase closes, which is why
+      it waits here and not longer (`k8s-admin`, 2026-09-04)
 - [ ] Every call sends the resourceVersion that was read; a `409` offers a
       re-read, never a blind overwrite (the case `edit` will lean on in v0.4 —
       the mechanism is built and tested now, while it is cheap)
@@ -3697,7 +3718,12 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       recording refusals and failures as well as successes, and recording
       **both** the equivalent kubectl line and the real API call (verb, path,
       resourceVersion, dry-run verdict) — the kubectl line is a teaching aid,
-      not what ran ([NOTES § D8](NOTES.md#d8--invariant-4-was-not-literally-true))
+      not what ran ([NOTES § D8](NOTES.md#d8--invariant-4-was-not-literally-true)).
+      **Two things the contract left for this box**, because this is the box that
+      owns what the log records: the result line names its attempt but carries no
+      landing time, so *how long did it take* is unanswerable, and one
+      `write_all` is atomic per record only while a record fits one syscall
+      ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04))
 - [ ] **`may_i(...)`** — `SelfSubjectRulesReview` per namespace, plus a
       `SelfSubjectAccessReview` for the two cluster-scoped operations. It lives
       in `ops.rs` although it mutates nothing, because it is performed with

@@ -2987,20 +2987,20 @@ fn a_run_that_is_about_to_exit_does_not_promise_it_keeps_asking() {
 /// looks fine in every review and sends a reader to the wrong place at 3am. Two faults collapsing
 /// into one string is what fails here, whichever two.
 ///
-/// **Only five of the ten use `asked`, and that is deliberate.** The three kubeconfig faults and
-/// a login helper that answered nothing all happened before anything was asked of any cluster, so
-/// a sentence naming a verb and a resource there would be inventing one.
+/// **Only five of the eleven use `asked`, and that is deliberate.** The three kubeconfig faults,
+/// a login helper that answered nothing, and a `409` about an object rather than about a request
+/// all happened somewhere a verb and a resource would be invented rather than reported.
 ///
-/// **All ten, and it was seven of nine until 2026-08-30** — `NoContext` and `BadEntry` had never
-/// been in this list, so the one test whose whole claim is *no two collapse* could not have seen
-/// those two collapse (`dev-core`'s own second pass). `k8s::Fault::Unfinished` is the tenth, and
-/// it is the one this list matters most for: it is a hair from `Unanswered` — a server that
+/// **All eleven, and it was seven of nine until 2026-08-30** — `NoContext` and `BadEntry` had
+/// never been in this list, so the one test whose whole claim is *no two collapse* could not have
+/// seen those two collapse (`dev-core`'s own second pass). `k8s::Fault::Unfinished` is the tenth,
+/// and it is the one this list matters most for: it is a hair from `Unanswered` — a server that
 /// answered nothing against a connection that carried nothing — and the two send a reader to
-/// opposite places.
+/// opposite places. `k8s::Fault::Conflict` is the eleventh (NOTES § D213).
 #[test]
 fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
     use k8s::Fault::{
-        BadEntry, Expired, Gone, Kubeconfig, NoContext, NoCredential, Refused, Rejected,
+        BadEntry, Conflict, Expired, Gone, Kubeconfig, NoContext, NoCredential, Refused, Rejected,
         Unanswered, Unfinished,
     };
     let all = [
@@ -3012,6 +3012,7 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
         Expired,
         Refused,
         Gone,
+        Conflict,
         Unfinished,
         Unanswered,
     ];

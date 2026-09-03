@@ -5034,6 +5034,26 @@ fn a_refusal_that_carries_only_a_status_code_is_still_a_refusal() {
          sent to check a connection that had just answered"
     );
 
+    // **And the two the *write* path meets most**, which had no arm until 2026-09-04 and fell
+    // the same way (NOTES § D213). Neither is reachable from a read: a rejected dry-run is a
+    // `422` and a lost race is a `409`, so this row is the first one the mutation contract's own
+    // consumer needed. Both were `Fault::Unanswered` — a sentence about the network, for two
+    // answers the cluster gave.
+    let lost_race = kube::core::Status::failure("", "Failed to parse error data").with_code(409);
+    assert_eq!(
+        fault(&kube::Error::Api(lost_race.boxed())),
+        Fault::Conflict,
+        "a `409` carrying no reason read as a network failure, so the write path cannot tell a \
+         lost race from a dead socket and has nothing to offer a re-read on"
+    );
+    let bad_object = kube::core::Status::failure("", "Failed to parse error data").with_code(422);
+    assert_eq!(
+        fault(&kube::Error::Api(bad_object.boxed())),
+        Fault::Rejected,
+        "a `422` carrying no reason read as a network failure, which is the `400` defect one \
+         code along"
+    );
+
     // And the other way round: the reason with no code, which is what the API server's own
     // `Status` body carries when `code` is absent.
     for (reason, expected) in [
@@ -5041,6 +5061,9 @@ fn a_refusal_that_carries_only_a_status_code_is_still_a_refusal() {
         ("Forbidden", Fault::Refused),
         ("Unauthorized", Fault::Expired),
         ("NotFound", Fault::Gone),
+        // The same two, through the other door (NOTES § D213).
+        ("Conflict", Fault::Conflict),
+        ("Invalid", Fault::Rejected),
     ] {
         assert_eq!(
             fault(&kube::Error::Api(

@@ -398,7 +398,7 @@ draw a different screen, and where that ruling belongs on a screen page is
   This bullet said the opposite until 2026-08-27, when a run against a dead port
   was measured and did not exit
   ([NOTES § D167](../NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
-- **Ten distinctions matter to the user, not two, and they get one enum:
+- **Eleven distinctions matter to the user, not two, and they get one enum:
   `k8s::Fault`.** *Permission denied vs no connection* was the original pair
   and it was never enough — `Kubeconfig` (the file itself: missing, unreadable,
   not valid YAML) · `NoContext` (the file loaded and names no such context) ·
@@ -412,7 +412,8 @@ draw a different screen, and where that ruling belongs on a screen page is
   · `Refused` (`403` — the sentence says the **role needs** the verb, never that
   the kubeconfig *is not allowed*: k8rs needs both `list` and `watch` to watch a
   kind and cannot tell from a refusal which one was missing) · `Gone` (`404`) ·
-  `Rejected` (`400` — the server understood the request and will not act on it.
+  `Rejected` (`400` and `422` — the server understood the request and will not
+  act on it, and what is wrong is the request k8rs made.
   **The sentence quotes what the server said**, because for this fault that
   message is the diagnosis: a log request against a container that has not
   started comes back *container "app" in pod "x" is waiting to start:
@@ -424,6 +425,17 @@ draw a different screen, and where that ruling belongs on a screen page is
   Added 2026-08-30, when a multi-container `Pending` pod's log request came back
   `400` and was read as *nothing usable came back* — a client-side fault
   printed as a connectivity sentence) ·
+  `Conflict` (`409` — the request was fine and the object moved underneath it.
+  **It cannot borrow `Rejected` and that is the whole of why it is its own
+  variant**: k8rs sent the `resourceVersion` it had read and something else
+  wrote the object in between, which is answered by reading it again and never
+  by editing the request, so the write path's re-read offer branches on exactly
+  that difference. Added 2026-09-04, when the first code in `ops.rs` measured
+  both a `409` and a `422` coming out `Unanswered` — a sentence about the
+  network, for the two answers a write meets most, and the third occurrence of
+  the defect the `400` arm was added to close
+  ([NOTES § D213](../NOTES.md#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04)))
+  ·
   `Unfinished` (the server accepted the request and the run ended before it
   answered — a wedged watch. It recorded no failure at all, so it held the whole
   report where a refusal costs two rules, and `--once` printed zero bytes on a

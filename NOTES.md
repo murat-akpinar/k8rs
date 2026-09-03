@@ -234,6 +234,8 @@ its line moving with it.
 - [D210](#d210--phase-6-closes-and-the-phase-close-mutation-sweep-is-narrowed-against-what-the-phase-touched-2026-09-03) — Phase 6 closes, and the phase-close mutation sweep is narrowed against what the phase touched
 - [D211](#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03) — `development` was red for seven days and nobody read it: the toolchain is pinned, and a feature flag added compiled code without adding a package
 - [D212](#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03) — an allowed lint never fires, so clippy cannot report the file that turns it off, and the switch was in the justfile
+- [D213](#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04) — the write path is the fifth consumer of `Fault` and it cannot see the two answers it meets most
+- [D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04) — the mutation contract: four lies a record could tell, and the three operations that have no dry-run
 
 ## Why it exists — where the gap is
 
@@ -18142,3 +18144,219 @@ first three prove only that `ops.rs` is treated differently. Nothing from it was
 committed. The one thing owed before the next box lands on this: the first real
 mutation gets that red/green pair against product code rather than an appended
 probe, which is the moment `ops.rs` stops being an empty announcement.
+
+### D213 — the write path is the fifth consumer of `Fault` and it cannot see the two answers it meets most (2026-09-04)
+
+Phase 7's first box put the first real code in `ops.rs`, and the operator review
+and `tester` independently measured the same thing through it:
+
+```
+--- code 409 reason Conflict     -> Some(Unanswered)
+--- code 422 reason Invalid      -> Some(Unanswered)
+--- code 401 reason Unauthorized -> Some(Expired)
+```
+
+`answer()` has arms for `400 401 403 404` and a `reason` fallback for the same
+four. A **409 Conflict** and a **422 Invalid** match neither and come out
+[`Fault::Unanswered`](#) — *nothing usable came back*, which is a sentence about
+the network. Those are the two answers the write path meets most: a rejected
+dry-run is a 422, a lost race is a 409.
+
+**This is the third occurrence of one defect, and `answer()`'s own doc comment
+records the second.** `400` had no arm until 2026-08-30 and fell to
+`Unanswered` — *a request this side got wrong, reported as a network that
+answered nothing* — filed then as `PRIOR-ART § C1` in the very function written
+to close it. The class is not "an arm is missing". The class is **a fallback
+that is a claim about the cluster**, so every code without an arm silently
+accuses the network.
+
+**Why it was not caught by Phase 6's freeze check.**
+[D209](#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03)
+narrowed the freeze to what was actually checked, and what was checked was
+`k8s.rs`'s **four read consumers**. The write path was not one of them, because
+it did not exist. A freeze verified against every consumer that exists is still
+only verified against the consumers that exist — which is not a flaw in D209's
+check, it is the reason a freeze gets exceptions rather than absolutes.
+
+**The three ways to keep `k8s.rs` closed were each worse than opening it.**
+
+- **`ops.rs` reads `status.code` itself.** A second classifier — the thing
+  § WHAT WENT WRONG deleted `why()` by name to prevent, and the defect class
+  [CLAUDE.md § step 6](CLAUDE.md) says this repo has paid most for: two callers
+  reading one object and disagreeing about what it meant.
+- **Box 3693 string-matches `said`.** Classifying on the server's English.
+- **Live without it.** Box 3693 must choose between *offer a re-read* and *this
+  is a network failure*. It cannot, and neither can the verdict sentence the
+  audit log writes.
+
+**The ruling: `k8s.rs` opens for exactly two arms in `answer()`, and that edit
+is `dev-core`'s.**
+
+- **`422` and `reason::INVALID` → `Fault::Rejected`, no new variant.** A 422 is
+  `Rejected`'s own definition — the server understood the request and will not
+  act on it; what is wrong is the request k8rs made. Routing it to `Unanswered`
+  is the same `400` defect one code along.
+- **`409` and `reason::CONFLICT` → `Fault::Conflict`, a new variant.** This one
+  cannot borrow `Rejected`: a 409 is *not* a bad request. The request was fine
+  and the object moved underneath it, and box 3693 branches on precisely that
+  difference. The enum's counted-variants doc moves with it.
+
+Both constants are upstream in `kube-core-4.2.0/src/response.rs` (`CONFLICT`
+:283, `INVALID` :301) and `use kube::core::response::reason` is already in the
+file, so the edit adds no import and no dependency.
+
+**One more line opens, and it makes `ops.rs` shorter rather than longer.**
+`text()` — the strip that substitutes *one space* for a removed whitespace
+character and bounds the result — is private, so the first draft of `ops.rs`
+spelled its own `clean()` that **removed** instead. Measured on the exact string
+`screens/dialogs.md:39` draws: `start a\nreplacement` came out `areplacement`,
+and two object names fused into `deployment/webdeployment/db`. `text`'s own doc
+already says why — *a boundary deleted glues two words into one* — and
+[D154](#d154--the-browsers-rows-a-37-that-was-one-event-a-floor-measured-from-the-answer-and-a-guard-that-stopped-at-cc-2026-08-22)
+ruled this predicate has one spelling in one place. The second copy diverged on
+*disposal* within one box of the first being written, which is that ruling's
+other half arriving late. `text` becomes `pub(crate)`; `ops.rs` deletes `clean`
+and inherits the bounding it did not have. **A visibility change with no
+behaviour change, that removes a duplicate rather than adding a caller.**
+
+**`IDENTIFIER` and `FREE_TEXT` go with it, and that is beyond this entry's first
+letter.** `text(&mut String, cap)` cannot be called without a cap, so naming
+`text` alone would have left `ops.rs` spelling D146's two numbers a second
+time — a duplicated *bound*, which is the thing this exception was opened to
+avoid one level down. `dev-core` took the visibility and said out loud that it
+wanted a line here, which is the report item that exists for exactly this.
+
+**Bounded, named and owned, which is what makes it a plan and not a break.**
+Nothing else in `k8s.rs` opens: two arms in `answer()`, the `Conflict` variant
+they need with its `standing()` arm, and `pub(crate)` on `text` and the two caps
+it cannot be called without. `main.rs`'s `because()` is an exhaustive match on
+`Fault` and does not compile without an arm for the new variant, so that one arm
+is part of the same edit rather than a second exception — `main.rs` is
+`dev-core`'s own file until Phase 12
+([D34](#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12))
+and no freeze is crossed by it. This is
+[CLAUDE.md § Architecture workflow](CLAUDE.md#architecture-workflow)'s *if a
+later step needs a frozen file changed, the plan is wrong: stop, fix the order,
+record it* — D209 did that shape **in advance**, and this one is doing it **on
+discovery**, which is the only difference between them and is why it is written
+here before the code is touched rather than after.
+
+### D214 — the mutation contract: four lies a record could tell, and the three operations that have no dry-run (2026-09-04)
+
+Phase 7's second box put the first real code in `ops.rs`: one function every
+write goes through, sequencing *consequence text → dry-run → confirm → call →
+audit*. It took two review rounds and a third pass by the PM, and what all three
+found was one class of defect — **a record that says something the code cannot
+know**. Invariant 4 says neither record may lie; four of them did.
+
+**1. The verdict was keyed on which branch fired, not on what the fault was.**
+A dead socket during the dry-run logged *"the server refused the dry-run, so the
+change was never sent"*. The server refused nothing; it was not there. The same
+line printed for `Expired` (the login ran out), `BadEntry` (a
+`client-certificate` path that had moved) and `NoCredential` (the login program
+exited 1) — three failures **on the operator's own machine**, recorded as the
+cluster saying no. That is `PRIOR-ART § C1` in the first function of the write
+path, and § WHAT WENT WRONG deleted a second classifier (`why()`) by name to
+prevent it. The sentence is now selected off the [`Fault`] through `in_words`,
+one phrase per fault, and `answered()` splits a failed real call into *nothing
+was changed* (the cluster answered) from *k8rs does not know whether the change
+was made* (nothing usable came back). **A broken pipe after the request went out
+is the case that matters**: the old line asserted the call failed, which is the
+one thing k8rs cannot see from there.
+
+**2. `ask -> bool` collapsed three endings into one, and one of them accused the
+operator.** [D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms) gives
+the dialog three ways to end without a call — cancelled, the object is **gone**,
+the object **changed**. All three came back `false` and all three logged *nobody
+confirmed it*. So: the ReplicaSet replaces the pod while its name is being
+typed, k8rs correctly refuses to delete whatever now holds that name, and the
+post-incident review reads *someone opened a delete dialog on prod and backed
+out*. `Answer { Confirmed, Cancelled, Gone, Changed }`, one outcome and one
+sentence each. `Changed` is also what box 3693's re-read returns through, so it
+is not speculative surface.
+
+**3. The dry-run verdict was missing from the record on the two outcomes that
+carry it most.** [D8](#d8--invariant-4-was-not-literally-true) requires *verb,
+path, resourceVersion sent, dry-run verdict, result* — unconditionally. Measured
+by `tester`: on `Done` and on `Cancelled` the word "dry-run" appeared nowhere.
+It showed up on the failures only because those sentences happened to mention
+it. *Did this write get checked first?* is the one question the audit log exists
+to answer **about the contract itself**, and it was unanswerable on 95% of the
+lines. **And the test locked it in**: the expected string was matched to what
+the code printed rather than derived from D8, so it would have gone green on any
+rewording forever.
+
+**4. `nothing was sent` was false on the one arm it was printed from.** Found by
+the PM's step-7 pass over the landed tree, after both agents' rounds. `NotSent`
+is reachable only through the `Err` of the dry-run, which only runs when the
+operation is checkable — so **a `dryRun=All` had always gone out** by the time
+that sentence was written. An operator cross-referencing k8rs's log against the
+apiserver's own finds the request in one and a denial that it happened in the
+other. It is *the change* that was never sent, and the word is now `changed`
+wherever `sent` was wrong — including `screens/dialogs.md`, which carried the
+same claim twice in prose the code had made false.
+
+**Three operations have no dry-run, and the contract has to be able to say so.**
+The first draft argued an opt-out "would be a hole with nothing behind it". Four
+things disagree, and the first was measured: `Api::restart(&self, name)` takes
+no params argument at all (`kube-client-4.2.0/src/api/util/mod.rs:19`), as do
+`cordon` and `uncordon`; [§ Operations](#operations--the-full-admin-surface)
+gives `restart`, `cordon`, `delete` and `drain` the guard *confirm* where only
+`scale`, `undo` and `edit` are *confirm + dry-run*; invariant 2 says `dryRun=All`
+**where the API supports it**; and `todo.md`'s own next box says *wherever
+supported*. `Mutation::checkable` cuts the seam in the signature that freezes,
+and the audit line records *"the cluster has no way to check this one first"*
+rather than omitting the field — D8's verdict recorded honestly.
+
+**A cluster can also refuse every dry-run there is, and that is accepted rather
+than designed around.** A `ValidatingWebhookConfiguration` matching the resource
+with `sideEffects: Some | Unknown` fails `dryRun=All` for a fully authorised
+user (`tmp/k8s/api-concepts.txt:743`). There is no flag for it. What makes it
+diagnosable is defect 1's fix: the fault is honest and the server's own
+*"admission webhook … does not support dry run"* travels beside it.
+
+**The ordering: three documents were right and the code was wrong.** Invariant 2
+("confirmation dialog stating the consequence → `dryRun=All`"),
+`screens/dialogs.md` rule 3 ("the verdict is shown *before* the button is live")
+and this box ("consequence text → dry-run → confirm callback") read as three
+different orders and are one: **dialog opens pending → dry-run → verdict into
+the open dialog → button lives → answer → real call → audit.** Invariant 2 is
+the dialog being *shown* first, rule 3 is the verdict landing *in* it, the box
+is the answer *coming back*. No document changed. The code did: `perform` had
+awaited the dry-run to completion before calling `ask`, so **nothing was on
+screen at all** while that request was in flight — the frozen keypress
+[D20](#d20--a-call-that-takes-time-is-a-state-and-there-was-none) refuses.
+
+`show` is `FnOnce(&Shown)` and **synchronous on purpose**: a future here lets an
+implementation park the dialog behind an `await` and rebuild the bug. `Checked`
+has private fields and is constructible only inside `ops.rs`, only after the
+check was answered — so **rule 3 is structural rather than remembered**: an
+operation cannot enable its confirm button without a passing check, because it
+cannot name the type that enables it. Its `Response` is generic because `edit`
+in v0.4 diffs the object the dry-run returned and that *is* its confirmation;
+the channel exists for the verdict anyway, and `ops.rs` freezes at the end of
+this phase.
+
+**`esc` is inert until the verdict arrives** (PM ruling). The alternative was a
+`Drop` guard landing a *"k8rs stopped before the call returned"* line, and that
+would be a record of something that did not happen. Drawing the pending state is
+`screens/dialogs.md`'s and is boxed for Phase 11.
+
+**D21 governs the attempt line and not the result line, and conflating them
+threw away the fact an operator most needs.** A result that cannot be written
+does not un-make a change that has already been made. `Performed { outcome,
+recorded }`: `outcome: None` is D21's pre-flight refusal — nothing was sent,
+nobody was asked — while `Some(Done)` beside `recorded: false` is *the change
+was made and k8rs could not write it down*, which is more honest than *go and
+look* because k8rs holds that fact at the moment the operator is least able to
+go and get it.
+
+**Two things this box did not take, both recorded against box 3696** — the
+audit log's own file, which is the box that owns what the log records. The
+result line names the attempt it belongs to (two k8rs against two clusters share
+one log, and `attempt(A) attempt(B) result(A) result(B)` made B's result read as
+A's), but it carries **no landing time**, so *how long did it take* is still
+unanswerable — `perform` reads the clock once. And `write_line`'s one
+`write_all` + flush is atomic per record only while a record fits one syscall,
+which a 4 KB server message need not. Both are one line in the box that opens
+the file; neither is worth a signature change while `ops.rs` is still open.
