@@ -55,6 +55,7 @@
 - *(k8s)* Print a named pod's logs, bounded at 2 MB and counted ([4b82198](https://github.com/murat-akpinar/k8rs/commit/4b821986bbcd26a3854078f5a5f9232a7e8c2265)) — The log read path: fetch, follow, pick a container, --previous for a crashed one. --logs names the verb and --object the pod, one selector the per-object events, describe and yaml boxes will share rather than spell three more ways (NOTES § D194, which reads D17's clap threshold against a binary that already parses two value-taking flags by hand).
 - *(k8s)* Read one object's own story — its events, its describe, its yaml ([bf7b0cc](https://github.com/murat-akpinar/k8rs/commit/bf7b0cc4a221802585e6b91058fb4afc4f9d0407)) — Phase 6 family 2. Three boxes land together because they are three consumers of one question: which object.
 - *(main)* Tell the reader their own login is running out, and show every read ([f06e9b5](https://github.com/murat-akpinar/k8rs/commit/f06e9b583294e2c58e785205adf1d7c20971fe1e)) — Three boxes about what a default run prints, landed together.
+- *(ci)* Pin the single disallowed-methods exception to ops.rs ([ddbed0f](https://github.com/murat-akpinar/k8rs/commit/ddbed0fb4f10edd3738970ed41e98e82a7821012)) — Phase 7's first box. `src/ops.rs` lands carrying the one `#![allow(clippy::disallowed_methods)]` that announces invariant 1's exception, and `scripts/write-guard.py` gains the half of that invariant clippy structurally cannot check: an allowed lint never fires, so nothing in the build reports the file that turned it off.
 
 ### 🐛 Bug Fixes
 
