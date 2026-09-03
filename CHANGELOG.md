@@ -56,6 +56,7 @@
 - *(k8s)* Read one object's own story — its events, its describe, its yaml ([bf7b0cc](https://github.com/murat-akpinar/k8rs/commit/bf7b0cc4a221802585e6b91058fb4afc4f9d0407)) — Phase 6 family 2. Three boxes land together because they are three consumers of one question: which object.
 - *(main)* Tell the reader their own login is running out, and show every read ([f06e9b5](https://github.com/murat-akpinar/k8rs/commit/f06e9b583294e2c58e785205adf1d7c20971fe1e)) — Three boxes about what a default run prints, landed together.
 - *(ci)* Pin the single disallowed-methods exception to ops.rs ([ddbed0f](https://github.com/murat-akpinar/k8rs/commit/ddbed0fb4f10edd3738970ed41e98e82a7821012)) — Phase 7's first box. `src/ops.rs` lands carrying the one `#![allow(clippy::disallowed_methods)]` that announces invariant 1's exception, and `scripts/write-guard.py` gains the half of that invariant clippy structurally cannot check: an allowed lint never fires, so nothing in the build reports the file that turned it off.
+- *(ops)* The mutation contract — one function every write goes through ([891fc8d](https://github.com/murat-akpinar/k8rs/commit/891fc8d2c29934c837b401a4d6100578b24419b4)) — Sequences consequence text → dry-run → confirm → call → audit, in the one order that satisfies invariant 2, screens/dialogs.md rule 3 and the box at once: the dialog opens pending, the check goes out, its verdict lands in the open dialog, the button lives, the answer comes back, then the real call.
 
 ### 🐛 Bug Fixes
 
