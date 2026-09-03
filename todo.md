@@ -3259,9 +3259,9 @@ public release.
       after.
       **This is the first unchecked box in the file and it is not the next one to
       work.** Nothing here can move until the user runs `cargo publish` and until
-      Phase 13 writes the README. **The next box is Phase 6's first unchecked
-      one**, and Phase 6's head note says why a later phase runs over this one and
-      what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
+      Phase 13 writes the README. **The next box is the first unchecked one in the
+      lowest open phase below this one — Phase 7 today**, and that phase's head
+      note says why a later phase runs over this one and what that owes ([D33](NOTES.md#d33--phase-3-opens-with-one-phase-2-box-still-open-on-purpose-2026-08-12) ·
       [D47](NOTES.md#d47--phase-3-is-running-ahead-of-an-open-phase-2-and-what-that-buys-and-owes-2026-08-12))
 
 **🔒 Security gate:** TLS verification is never disabled by us; if the
