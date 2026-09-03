@@ -3605,8 +3605,19 @@ alphabetised and wrong.
 
 **Done when:** the temporary main can print logs, describe output, events and
 YAML for any object it can see.
-**Frozen after:** `k8s.rs` — every read path in the product now exists. Check
-it against all four consumers before closing the phase: the Alerts rules, the
+**Frozen after:** `k8s.rs` — **with two named exceptions, because the check this
+line asks for was run and found them** ([D209](NOTES.md#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03)).
+The owner `get` was the third and it was **written** at the close rather than
+excepted, because it was already printing a wrong number
+([D208](NOTES.md#d208--the-cross-family-review-the-picker-that-called-a-failed-container-done-and-the-owner-fetch-that-was-never-written-2026-09-03)).
+The two that remain unwritten are the browser's server-side `Table` LIST and the
+browser view's refresh: for both, the decision, the request builder and the
+decoder are here and only the function that *sends* is missing, and both are
+Phase 11's — a phase owned by `dev-ui`, which may not write this file. **So Phase
+11 opens `k8s.rs` for exactly those two performers and nothing else, and the box
+that does it is `dev-core`'s.** Named now so it is a planned seam rather than a
+frozen-file surprise. The original line, still true of everything else: check
+it against all four consumers before closing the phase — the Alerts rules, the
 Analysis reports, the browser, and the detail tabs. A read path missed here is
 a frozen-file problem in Phase 11, not a small addition.
 

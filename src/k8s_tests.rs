@@ -1862,6 +1862,61 @@ async fn five_watches_one_failing(failing: &str) -> Store {
     store
 }
 
+/// **A stream beside the watches is polled, and it does not decide when the run is over.**
+///
+/// **Both halves were defects and one of them shipped.** [`node_usage_poll`] has been pushed into
+/// the same vec as the watches since Phase 5 and has no branch that ends it (NOTES § D181), so
+/// `--live --analysis` could never reach *every watch has stopped*; the owner fetches made it
+/// visible, because their channel is held by the pump's own observer and
+/// `a_cluster_that_never_answers_prints_nothing_and_says_why_it_stopped` **hung** instead of
+/// failing (`dev-core`, Phase 6 close).
+///
+/// **`stream::pending()` is the whole of what a poll and a fetcher have in common**: neither ends,
+/// and nothing about *what* they carry matters to this question.
+#[tokio::test]
+async fn a_stream_beside_the_watches_is_polled_and_never_decides_the_ending() {
+    // **Polled**: nothing but the stream beside the watches can move the store here, and it does.
+    let mut store = all_but("pods");
+    let landing = one_watch(listing(items::<Pod>("kube-system-pods")), |s| &mut s.pods);
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        drive_watching(
+            vec![stream::pending().boxed()],
+            vec![landing],
+            &mut store,
+            |_| {},
+        ),
+    )
+    .await;
+    assert!(
+        store
+            .snapshot(now())
+            .is_some_and(|read| !read.pods.is_empty()),
+        "an update from beside the watches never reached the store"
+    );
+
+    // **And never decides the ending**: the watches run out, so the run is over — whatever else
+    // is still open.
+    let mut store = all_but("pods");
+    let ending = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        drive_watching(
+            vec![one_watch(listing(items::<Pod>("kube-system-pods")), |s| {
+                &mut s.pods
+            })],
+            vec![stream::pending().boxed()],
+            &mut store,
+            |_| {},
+        ),
+    )
+    .await;
+    assert!(
+        ending.is_ok(),
+        "the pump outlived every watch, waiting on a stream that is not one — which is `--live` \
+         never saying that nothing is being read any more"
+    );
+}
+
 /// **`ended` is never cleared, and this is what pins it** (NOTES § D162). It is an *absent*
 /// line, so `cargo mutants` has nothing to mutate: the guard has to be a test or it is nothing.
 ///
@@ -5298,6 +5353,117 @@ fn the_finding_a_pod_draws_files_under_the_deployment_once_the_owner_resolves() 
              it — two group keys is D3's two-cards bug"
         );
     }
+}
+
+/// **A controller name k8rs would not put in a URL is never fetched and never cached** — the
+/// third refusal in `owner_uid`, which arrived with the `get` that made the name a path segment.
+///
+/// **Synthesised, and it says so**: the API server rejects `../` in a `metadata.name`, so no
+/// capture can hold this and nothing is edited to make it pass (NOTES § D53). It is exactly
+/// invariant 9's class — a value from the wire, one layer past the strip, which `ingest` bounds
+/// and cleans of control characters without ever making it *safe in a path*.
+#[test]
+fn an_owner_whose_name_would_build_its_own_request_is_not_asked_for() {
+    let mut escaping = items::<Pod>("owned-pods");
+    for owner in escaping[0].metadata.owner_references.iter_mut().flatten() {
+        owner.name = "../../../secrets/db-credentials".to_string();
+    }
+    let mut store = all_but("pods");
+    list(&mut store, Store::pod, escaping);
+    assert!(
+        store.unresolved_owners().is_empty(),
+        "a name with a path in it became a `get` this file wrote for somebody else"
+    );
+
+    // **And the card is unharmed**: the heading stays at the ReplicaSet, which is what every
+    // reference nobody has answered for already shows.
+    let unresolved = store.snapshot(now()).expect("every watch listed");
+    let pod = pod_named(&unresolved, "broken-owned-7bdb7645c8-bwdfd");
+    assert_eq!(pod.owner.kind, ObjectKind::ReplicaSet);
+}
+
+/// **The `get` this region described for a phase and nobody ever made** — one request, by name,
+/// whose answer walks the pod's heading up to the Deployment.
+///
+/// **`unresolved_owners` and `owner_fetched` had no product caller at all** (`grep`, Phase 6
+/// close): every test above hands the store an answer the tests themselves built, so the whole
+/// chain was proven except the one line that puts a request on the wire. The number that shipped
+/// while it was missing is `analysis.rs`'s capacity count — two ReplicaSets of one Deployment
+/// counted as two workloads.
+///
+/// **The path is the assertion.** `broken-owned-7bdb7645c8` is a *name*, the namespace is the
+/// pod's, and both are what a `get` puts in a URL; that the answer then resolves the heading is
+/// the store's half, proven above and asserted here once end to end.
+#[tokio::test]
+async fn the_owner_fetch_asks_for_the_replicaset_by_name_and_the_heading_follows() {
+    let body = capture("owned-replicasets")["items"][0].to_string();
+    let (client, asked) = stub(None, move |_, path| {
+        (path.to_string(), "200 OK".to_string(), body.clone())
+    })
+    .await;
+
+    let mut store = store_with_pods("owned-pods");
+    let want = store.unresolved_owners();
+    assert_eq!(want.len(), 1, "the capture names one ReplicaSet");
+
+    let (asking, wanted) = tokio::sync::mpsc::unbounded_channel();
+    asking.send(want[0].id.clone()).expect("the stream is live");
+    let update = owner_fetches(client, wanted)
+        .next()
+        .await
+        .expect("one answer for one request");
+    update(&mut store);
+
+    println!("{:?}", asked.lock().expect("the log is never poisoned"));
+    assert_eq!(
+        asked.lock().expect("the log is never poisoned").clone(),
+        ["/apis/apps/v1/namespaces/default/replicasets/broken-owned-7bdb7645c8"],
+        "the fetch asked for something other than the ReplicaSet the pod named"
+    );
+    let resolved = store.snapshot(now()).expect("every watch listed");
+    let pod = pod_named(&resolved, "broken-owned-7bdb7645c8-bwdfd");
+    assert_eq!(
+        (&pod.owner.kind, pod.owner.name.as_str()),
+        (&ObjectKind::Deployment, "broken-owned"),
+        "the answer came back and the heading stayed at the generated name"
+    );
+    assert!(
+        store.unresolved_owners().is_empty(),
+        "an answered reference is still being asked about"
+    );
+}
+
+/// **A refusal is filed as one and asked no second time** — the retry loop the security gate
+/// forbids by name, arriving through the fetcher rather than through the store.
+#[tokio::test]
+async fn a_refused_owner_fetch_is_filed_and_not_asked_again() {
+    let (client, asked) = stub(None, |_, path| {
+        (
+            path.to_string(),
+            "403 Forbidden".to_string(),
+            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","code":403}"#.to_string(),
+        )
+    })
+    .await;
+
+    let mut store = store_with_pods("owned-pods");
+    let want = store.unresolved_owners();
+    let (asking, wanted) = tokio::sync::mpsc::unbounded_channel();
+    asking.send(want[0].id.clone()).expect("the stream is live");
+    let update = owner_fetches(client, wanted)
+        .next()
+        .await
+        .expect("a refusal is an answer");
+    update(&mut store);
+
+    assert_eq!(asked.lock().expect("the log is never poisoned").len(), 1);
+    let outstanding = store.unresolved_owners();
+    assert_eq!(
+        outstanding[0].why,
+        Some(Fault::Refused),
+        "a `403` on replicasets is a standing fact about the role and has to read as one: {:?}",
+        outstanding[0].why
+    );
 }
 
 // --- EVERY KIND THE CLUSTER SERVES ---

@@ -1765,6 +1765,28 @@ fn not_a_namespace(subject: &str, value: &str) -> String {
     )
 }
 
+/// **What [`OBJECT`] names on this line — `pod`, or `object` on a run that named a kind** — the
+/// noun the two refusals above it end with.
+///
+/// **One flag may not have two nouns.** Every sentence past the connect uses the kind's own
+/// singular (`screens/detail.md` § The yaml tab, [`read_failed`]), and these two checks — which
+/// the same run passes through *first* — said `pod` whatever `--kind` held, so
+/// `--yaml --kind node --object A_B` was refused as a badly written pod (`k8s-admin`, Phase 6
+/// close).
+///
+/// **`object` and not the word the reader typed**, because nothing has connected yet. `--kind po`
+/// and `--kind pods` are spellings only discovery turns into a singular (`k8s::kind_named`,
+/// [`which_kind`]), and *names one pods* is a worse sentence than the one this replaces. The
+/// generic word is true of every kind and claims nothing this check cannot know — which is the
+/// same standard [`KIND`]'s own *no value check beyond the three shapes of nothing* holds itself
+/// to, one flag over.
+fn named_thing(args: &[String]) -> &'static str {
+    match kind_arg(args) {
+        Some(Some(_)) => "object",
+        _ => POD,
+    }
+}
+
 /// **The sentence a word that looks like a flag and is not one gets**, or `None` when every
 /// flag on the line is one this build has.
 ///
@@ -1905,8 +1927,9 @@ fn mistyped(args: &[String]) -> Option<String> {
             }
             if name.is_empty() {
                 return Some(format!(
-                    "k8rs: {OBJECT} has nothing after the `/`, so it names no pod — write it as \
-                     `<namespace>/<name>`\n{USAGE}"
+                    "k8rs: {OBJECT} has nothing after the `/`, so it names no {} — write it as \
+                     `<namespace>/<name>`\n{USAGE}",
+                    named_thing(args)
                 ));
             }
             if let Some(namespace) = namespace
@@ -1919,9 +1942,10 @@ fn mistyped(args: &[String]) -> Option<String> {
             }
             if !k8s::object_name(name) {
                 return Some(format!(
-                    "k8rs: {OBJECT} names one pod, written as `<namespace>/<name>` or just \
+                    "k8rs: {OBJECT} names one {}, written as `<namespace>/<name>` or just \
                      `<name>`, and {} is not one — a name is letters, digits, dashes and dots, \
                      up to {} characters\n{USAGE}",
+                    named_thing(args),
                     shown(name, k8s::NAME_MAX),
                     k8s::NAME_MAX
                 ));
@@ -3144,6 +3168,82 @@ fn polls_node_usage(analysis: bool, stopping: bool) -> bool {
     analysis && !stopping
 }
 
+/// **Every ReplicaSet the store still has no answer for, put on their way to
+/// [`k8s::owner_fetches`]** — and how many are outstanding, which is the number [`ONCE`] waits on.
+///
+/// **The chain was written whole and never called.** `k8s.rs` § RESOLVING AN OWNER decides what a
+/// fetch's answer means and `k8s_tests.rs` proves it, but nothing in this file ever asked, so
+/// every pod's card was filed under `web-7d4f5c6b8` instead of `web` and `analysis.rs`'s capacity
+/// row counted two ReplicaSets of one Deployment as two workloads (`k8s-admin`, Phase 6 close).
+///
+/// **The same reference is asked about once, and `asked` is what makes that true.** A `get` is in
+/// flight for as long as a throttling server wants (NOTES § D148), and the store has no *pending*
+/// state — an unanswered reference reads exactly like a never-asked one — so a caller that did not
+/// remember would send one request per reference per watch event: the retry loop the security gate
+/// forbids by name, at storm rate. **It is pruned against the store on every pass**, so it holds
+/// one uid per reference the live pods currently name and shrinks to nothing when they go: bounded
+/// by the same set [`k8s::Store::unresolved_owners`] is, which is what keeps a process that runs
+/// for a month from remembering every ReplicaSet a rollout ever made.
+///
+/// **A failed fetch is not outstanding and is never asked again.** The store keeps the fault, so
+/// the reference comes back with a `why` and is filtered out here — a `403` on `replicasets` is a
+/// standing fact about the kubeconfig's role, not something to re-ask per event.
+///
+/// **Nothing here has to close the channel.** [`k8s::owner_fetches`] runs *alongside* the watches
+/// rather than among them (`k8s::drive_watching`), so the pump ends when the last watch does and
+/// takes the fetcher with it — the sender lives as long as this closure and no longer.
+///
+/// **What it costs is one [`k8s::Store::unresolved_owners`] per watch event, in both modes**, and
+/// that is a walk over the live pods. It is named rather than avoided: the same observer already
+/// renders a whole report per event to see whether the text changed ([`live_report`]), which is
+/// the same walk and more, so a second gate here would buy nothing and would be a second place
+/// deciding when a fetch may be sent.
+fn ask_owners(
+    store: &k8s::Store,
+    asked: &mut std::collections::BTreeSet<String>,
+    asking: &tokio::sync::mpsc::UnboundedSender<rules::ObjectId>,
+) -> usize {
+    let waiting: Vec<rules::ObjectId> = store
+        .unresolved_owners()
+        .into_iter()
+        .filter(|one| one.why.is_none())
+        .map(|one| one.id)
+        .collect();
+    let live: std::collections::BTreeSet<String> =
+        waiting.iter().filter_map(|id| id.uid.clone()).collect();
+    asked.retain(|uid| live.contains(uid));
+    for id in &waiting {
+        let Some(uid) = id.uid.clone() else { continue };
+        if asked.insert(uid) {
+            let _ = asking.send(id.clone());
+        }
+    }
+    waiting.len()
+}
+
+/// **Whether a [`ONCE`] pass has everything it promised to print** — every initial LIST landed
+/// (NOTES § D28) *and* every heading answered for.
+///
+/// **`--live` never asks this**, and the second half is why it may not. `k8s.rs` § RESOLVING AN
+/// OWNER refuses to hold [`k8s::Store::snapshot`] back for an owner, because a reader watching a
+/// screen would pay NOTES § D148's two and a half to eight minutes before seeing an alert the
+/// store already has — and gets the corrected heading a moment later, on the update the answer
+/// lands as. **This mode has no reader watching and one chance to be right**: `k8rs --once
+/// --analysis` prints a *count of workloads*, and two ReplicaSets of one Deployment counted twice
+/// is a wrong number in a file somebody reads tomorrow (`analysis.rs`'s capacity row, which
+/// shipped wrong for a phase because nothing ever fetched an owner).
+///
+/// **It cannot wait forever**: the deadline arm in [`live`] stops the watches waiting and prints
+/// what is there, so the worst case is the report this mode would have printed anyway, late.
+///
+/// **[`pods_unread`] is asked after this and not before, which changes nothing**: it fires on a
+/// pod watch that was refused or ended, and such a watch publishes an *empty* list (`k8s.rs`
+/// § THE STORE, `Watch::settled`) — no live pod, so no owner outstanding, so this is already
+/// `true` whenever that refusal has something to say.
+fn ready_to_report(store: &k8s::Store, unresolved: usize) -> bool {
+    store.still_listing().is_empty() && unresolved == 0
+}
+
 /// **The one budget a [`ONCE`] run has, and the moment it is over by.**
 ///
 /// **A pair because the two places that give up inside it need different halves of it**
@@ -3450,10 +3550,19 @@ async fn live(
     // moves on the next line and the borrow would not survive it. [`pods_unread`] needs it to say
     // where k8rs looked.
     let coverage = session.coverage.clone();
-    let mut watches = session.watches;
+    let watches = session.watches;
+    // **Beside the watches and not among them** (`k8s::drive_watching`): neither of these ends on
+    // its own, and *nothing is being watched any more* is a fact about the five watches.
+    let mut alongside = Vec::new();
     if polls_node_usage(analysis, stopping) {
-        watches.push(k8s::node_usage_poll(session.client.clone()));
+        alongside.push(k8s::node_usage_poll(session.client.clone()));
     }
+    // **The owner fetches, in both modes** ([`ask_owners`]). Unlike the metrics poll above there
+    // is no `join!` copy of this for [`ONCE`] to use instead: a ReplicaSet is fetched by *name*
+    // and the names are not known until the pod LIST has landed, which is inside the pump.
+    let (asking, wanted) = tokio::sync::mpsc::unbounded_channel();
+    let mut asked = std::collections::BTreeSet::new();
+    alongside.push(k8s::owner_fetches(session.client.clone(), wanted));
     // **Printed here because this is the first instant every line of it is true**
     // ([`command_log`]): the probe, the version and discovery came back at connect, the seven
     // above have just answered inside their one deadline, and every stream below — the five
@@ -3496,7 +3605,7 @@ async fn live(
     // linked and `--live` never touches it.
     let (stop, waiting) = futures_util::future::AbortHandle::new_pair();
     let driving = futures_util::future::Abortable::new(
-        k8s::drive_watching(watches, &mut store, |store| {
+        k8s::drive_watching(watches, alongside, &mut store, |store| {
             // **The latch, and it is the first line because everything under it prints.** See
             // `done`'s own comment: the abort above is a request the pump honours on its next
             // poll, and every update already queued in this one arrives here first.
@@ -3506,15 +3615,23 @@ async fn live(
             // A clock this driver cannot read is not a reason to stop watching; the next event
             // asks again. `wall_clock`'s own `Err` is a machine set before 1970.
             let Ok(now) = wall_clock() else { return };
+            // **Above the gate, because the answer is what opens it under [`ONCE`]** — and
+            // because a `--live` reader gets the corrected heading on the update the answer
+            // itself lands as, without waiting for the cluster to do anything else
+            // ([`k8s::owner_fetches`] is one more stream in the same pump).
+            let unresolved = ask_owners(store, &mut asked, &asking);
             // **The bootstrap gate, read through the one call `k8s::Store::snapshot` derives it
             // from** (NOTES § D28). Under [`ONCE`] a pass before the gate opens has nothing
             // complete to print — [`live_report`] would print the trouble lines alone and then
             // print them again inside the report a moment later — so it is skipped whole, and
             // `--once` prints exactly one thing.
             if stopping {
-                // Asked only on the mode that stops: `--live` never reads this and should not
-                // pay five `progress()` calls per watch event for an answer it drops.
-                if !store.still_listing().is_empty() {
+                // Asked only on the mode that stops. `--live` fills the same channel one line up
+                // — it has to, or nothing is ever fetched — and then never reads the count back:
+                // it should not pay five `progress()` calls per watch event for an answer it
+                // drops, and its own answer to an unresolved heading is to draw it and correct it
+                // when the fetch lands.
+                if !ready_to_report(store, unresolved) {
                     return;
                 }
                 // **The one refusal that is not a report** (`screens/once.md` § Exit codes,
@@ -4185,17 +4302,20 @@ const WAITING_REASONS: &[(&str, &str)] = &[
 /// **What one container's row says on `--describe`** — the word after its name, and the indented
 /// line under it where there is one (`screens/detail.md` § The describe tab).
 ///
-/// **This is not [`doing`] and deliberately does not replace it.** That function's doc argues
-/// correctly that the jargon card is the Alerts view's — and it was written for
-/// [`container_choice`], the **log picker**, where that card is one keypress away. Describe is the
-/// headless surface: there is no card in the same output, so `waiting` printed alike for
-/// `ImagePullBackOff`, `CrashLoopBackOff` and `CreateContainerConfigError` is the whole of what a
-/// reader gets (`k8s-admin`, 2026-08-31). **The picker's wording is unchanged**; this is a second
-/// reader of one state, not a second spelling of one sentence.
+/// **[`doing`] is this function**, and the sentence that used to stand here — *"the picker's
+/// wording is unchanged; this is a second reader of one state, not a second spelling of one
+/// sentence"* — was false when it was written. It was exactly a second spelling: the two `match`es
+/// disagreed on the terminated-non-zero arm, and the picker's `done` about a container that exited
+/// `1` is the claim that let it through (`k8s-admin`, Phase 6 close). What is a *reader* is the
+/// second line, which describe prints and the picker has no room for.
+///
+/// **Describe is the headless surface**, and that is what earned the words: there is no card in
+/// the same output, so `waiting` printed alike for `ImagePullBackOff`, `CrashLoopBackOff` and
+/// `CreateContainerConfigError` is the whole of what a reader gets (`k8s-admin`, 2026-08-31).
 ///
 /// **`done` is not renamed to `failed` before it earns the word.** A clean `exit 0` is the healthy
 /// case and stays `done`; measured, three containers that exited 1, 0 and 255 all printed `done`,
-/// and `done` is a false statement about the third.
+/// and `done` is a false statement about two of them.
 ///
 /// **A momentary `ContainerCreating` stays the calm `not started`** rather than being dressed up
 /// as a problem — it is the ordinary first second of every pod.
@@ -4256,21 +4376,24 @@ fn restarts(status: Option<&ContainerSnapshot>) -> String {
     }
 }
 
-/// **What a container is doing, in one word a beginner reads** (invariant 14).
+/// **What a container is doing, in one word a beginner reads** (invariant 14) — the picker's half
+/// of [`container_state`], which is the only place that decides what a state is called.
 ///
-/// **A waiting container's `reason` is not printed here.** It is the jargon this product exists to
-/// translate — `CrashLoopBackOff`, `ImagePullBackOff` — and the card that explains it is the
-/// Alerts view's, not a line above a log.
-fn doing(state: Option<&ContainerState>) -> &'static str {
-    match state {
-        Some(ContainerState::Running { .. }) => "running",
-        Some(ContainerState::Terminated(_)) => "done",
-        Some(ContainerState::Waiting { .. }) => "waiting",
-        // **A container the pod declares and the kubelet has not reported on** — a `Pending`
-        // pod, which the picker can now list because the list comes from `spec` and not from
-        // `status` (`k8s::PodRead`). *waiting* would be a claim the kubelet has not made.
-        None => "not started",
-    }
+/// **It was a second `match` over the same value and it disagreed on the arm that matters most.**
+/// Measured on `default/broken-neverback`, three containers that exited `1`, `0` and `255`: the
+/// picker printed *(done)* beside all three while `--describe` printed `failed` beside two of them
+/// (`k8s-admin`, Phase 6 close). The picker is the screen where a reader chooses **which
+/// container's log explains a failed pod**, so of the two spellings it was the calm one that was
+/// wrong, and wrong in the direction that sends them to the log of a container that is fine.
+///
+/// **What is dropped here is the second line and never the word**: [`container_state`] returns
+/// `failed` *and* `container exceeded its memory limit — exit 137`, and a picker row is one line
+/// with a restart count already on it. **A waiting container's raw `reason` still never reaches
+/// this screen** — that was this function's original argument and it survives whole, because the
+/// table it now reads through translates the four reasons it names and falls through to the raw
+/// word only where no phrase exists (`WAITING_REASONS`).
+fn doing(state: Option<&ContainerState>) -> String {
+    container_state(state).0
 }
 
 /// **The container the log is read from**, or the sentence saying why there is none
@@ -5275,6 +5398,56 @@ fn kubectl_get(qualified: &str, name: &str, namespace: Option<&str>) -> String {
     )
 }
 
+/// **The sentences that go under the `$ kubectl …` line where running it would not give the
+/// reader what k8rs gave them** — empty when it would.
+///
+/// **The Secret one is a hole in the masking that the masking cannot close.** `k8s::document`
+/// replaces `data`, `stringData` and every annotation with their sizes before [`k8s::Document`]
+/// exists, and [`yaml_run`] rules there is no `--reveal` on this surface — and then the command
+/// log printed `kubectl get secret … -o yaml`, which prints the values. The security gate's
+/// Secrets row is about the *value*, and no value ever enters the log; what is handed over is the
+/// **line**, and the reader it is handed to is the one pasting a `<hidden — 8 bytes>` document
+/// into a ticket because k8rs told them the document was safe (`k8s-admin`, Phase 6 close).
+///
+/// **The command is still printed and still the real request.** Invariant 4 asks that the record
+/// not lie, not that it be a command whose output matches byte for byte —
+/// `kubectl get -o yaml` already alphabetises where this surface keeps the API's order
+/// ([`kubectl_get`]). What was missing is that this difference is *k8rs's* and not the printer's,
+/// so it is the one that gets a sentence.
+///
+/// **The namespace one is what a cluster-scoped kind does with the rest of the line.**
+/// `--yaml --kind node --object default/k8rs-worker` reads the node and drops `default`, because
+/// `k8s::Fetch::table` takes no namespace for a kind that has none. That is the right read and it
+/// was silent: half of what the reader typed did nothing and no line said so.
+///
+/// **It is told rather than refused**, and `named` is what the reader *typed* rather than the
+/// namespace [`in_namespace`] settled on. A kubeconfig whose context carries `default` supplies
+/// one to every run, and a refusal keyed on the settled value would refuse
+/// `--yaml --kind node --object k8rs-worker` — a line with no namespace on it at all. Refusing
+/// the typed one was the alternative and is what `kubectl` does not do either: `-n` beside a
+/// cluster-scoped kind is ignored there, and a reader whose shell alias carries `-n payments`
+/// would be stopped by k8rs for a word that changes nothing.
+fn caveats(kind: &k8s::Browsable, named: Option<&str>) -> Vec<String> {
+    let mut said = Vec::new();
+    if kind.kind == k8s::SECRET {
+        said.push(
+            "k8rs: a Secret's values are hidden here and shown as their sizes — the command above \
+             prints them in full"
+                .to_string(),
+        );
+    }
+    if let Some(named) = named
+        && !kind.namespaced
+    {
+        said.push(format!(
+            "k8rs: a {} lives in no namespace, so `{}` on this line was not used",
+            sanitize(&kind.kind.to_lowercase()),
+            shown(named, k8s::NAMESPACE_MAX)
+        ));
+    }
+    said
+}
+
 /// **Print one object as the API server returned it, and stop** — the headless yaml tab.
 ///
 /// **One read, unpruned and untyped** (`k8s.rs` § ONE OBJECT'S OWN STORY, ruling 2 of this box's
@@ -5349,6 +5522,9 @@ async fn yaml_run(
         false => format!("{singular}.{}", sanitize(&kind.group)),
     };
     let _ = writeln!(err, "{}", kubectl_get(&qualified, asked.name, scope));
+    // **Under the line and not above it**: both sentences are about that command, and the reader
+    // has to have read it first ([`caveats`]).
+    log_to(&mut err, caveats(kind, asked.namespace));
 
     let document = match tokio::time::timeout(
         OBJECT_READ,

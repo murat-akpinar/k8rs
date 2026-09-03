@@ -2133,7 +2133,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         .map(|watch| watch.take(2).boxed())
         .collect();
     let mut store = k8s::Store::default();
-    k8s::drive_watching(watches, &mut store, |_| {}).await;
+    k8s::drive_watching(watches, Vec::new(), &mut store, |_| {}).await;
 
     let mut last = String::new();
     let failing = live_report(
@@ -2220,7 +2220,7 @@ async fn a_watch_that_stops_delivering_is_a_line_in_the_report_and_so_is_its_rec
         .into_iter()
         .map(|watch| watch.take(2).boxed())
         .collect();
-    k8s::drive_watching(watches, &mut store, |_| {}).await;
+    k8s::drive_watching(watches, Vec::new(), &mut store, |_| {}).await;
     let stale = live_report(
         &store,
         now(),
@@ -2498,7 +2498,7 @@ async fn refused_over(store: &mut k8s::Store) -> String {
         // and no backoff is ever waited on.
         .map(|watch| watch.take(2).boxed())
         .collect();
-    k8s::drive_watching(watches, store, |_| {}).await;
+    k8s::drive_watching(watches, Vec::new(), store, |_| {}).await;
     let mut last = String::new();
     live_report(store, now(), &mut last, false, false, &AtConnect::default())
         .expect("five refused watches are news whatever else the store holds")
@@ -3763,6 +3763,91 @@ async fn a_cluster_that_never_answers_prints_nothing_and_says_why_it_stopped() {
     );
 }
 
+/// **A `--once` report waits for the headings it is about to count** (`analysis.rs`'s capacity
+/// row), and for nothing else it is not already waiting for.
+///
+/// **The second assertion is the one that shipped wrong.** With no fetcher wired, every pass had
+/// `0` outstanding by construction and the report printed with two ReplicaSets of one Deployment
+/// counted as two workloads.
+#[tokio::test]
+async fn a_once_report_waits_for_a_heading_that_is_still_on_its_way() {
+    let mut listing = k8s::Store::default();
+    listing.pod(&now(), Event::Init);
+    the_other_four(&mut listing);
+    assert!(
+        !ready_to_report(&listing, 0),
+        "a pass whose pod LIST has not landed printed a report about a cluster it had not read"
+    );
+
+    let landed = listed(objects::<Pod>("owned-pods.json"));
+    assert!(
+        !ready_to_report(&landed, 1),
+        "the report printed while a heading was still on its way, which is the count in it \
+         being wrong"
+    );
+    assert!(ready_to_report(&landed, 0));
+}
+
+/// **Every unresolved ReplicaSet is asked about, and each of them once** — the caller
+/// `k8s.rs` § RESOLVING AN OWNER described for a phase and this file never was.
+///
+/// **The count is what `--once` waits on**, so it is asserted as well as the traffic: a run that
+/// printed while a heading was still in flight is `analysis.rs`'s capacity row counting two
+/// ReplicaSets of one Deployment as two workloads.
+///
+/// **The second pass is the assertion that matters.** An answer can be minutes away
+/// (NOTES § D148) and the store has no *pending* state — an unanswered reference reads exactly
+/// like a never-asked one — so a caller with no memory sends one `get` per reference per watch
+/// event, which is a storm-rate retry loop against a cluster that is already slow.
+#[tokio::test]
+async fn one_get_per_unresolved_owner_however_many_events_go_past() {
+    let mut store = listed(objects::<Pod>("owned-pods.json"));
+    let (asking, mut wanted) = tokio::sync::mpsc::unbounded_channel();
+    let mut asked = std::collections::BTreeSet::new();
+
+    assert_eq!(
+        ask_owners(&store, &mut asked, &asking),
+        1,
+        "the capture's pod names one ReplicaSet and nothing asked about it"
+    );
+    let first = wanted.try_recv().expect("one reference on its way");
+    println!("{first:?}");
+    assert_eq!(
+        (first.name.as_str(), first.namespace.as_deref()),
+        ("broken-owned-7bdb7645c8", Some("default")),
+        "the fetch was pointed at something other than the pod's own controller"
+    );
+
+    // Every event of a storm, while the answer is still in flight.
+    for _ in 0..50 {
+        assert_eq!(
+            ask_owners(&store, &mut asked, &asking),
+            1,
+            "a reference nobody has answered for stopped being counted as outstanding"
+        );
+    }
+    assert!(
+        wanted.try_recv().is_err(),
+        "one reference was asked about twice, which is one `get` per event per pod"
+    );
+
+    // The answer lands, and the run has nothing left to wait for.
+    store.owner_fetched(
+        &first,
+        Ok(objects::<k8s_openapi::api::apps::v1::ReplicaSet>("owned-replicasets.json").remove(0)),
+    );
+    assert_eq!(ask_owners(&store, &mut asked, &asking), 0);
+    assert!(
+        asked.is_empty(),
+        "the set of references already asked about keeps a uid nothing is waiting on any more, \
+         so a process that runs for a month remembers every ReplicaSet a rollout ever made"
+    );
+    assert!(
+        wanted.try_recv().is_err(),
+        "an answered reference was re-asked"
+    );
+}
+
 // --- THE COMMAND LOG ---
 //
 // **The teaching device outside the TUI** (invariant 4, `screens/once.md` § stdout and stderr are
@@ -4363,7 +4448,7 @@ async fn a_measured_clock_reaches_the_live_report_and_sits_under_what_it_qualifi
         .into_iter()
         .map(|watch| watch.take(2).boxed())
         .collect();
-    k8s::drive_watching(watches, &mut store, |_| {}).await;
+    k8s::drive_watching(watches, Vec::new(), &mut store, |_| {}).await;
 
     let mut last = String::new();
     let report = live_report(
@@ -5909,7 +5994,7 @@ async fn driven(client: kube::Client) -> k8s::Store {
         .map(|watch| watch.take(2).boxed())
         .collect();
     let mut store = k8s::Store::default();
-    k8s::drive_watching(watches, &mut store, |_| {}).await;
+    k8s::drive_watching(watches, Vec::new(), &mut store, |_| {}).await;
     assert!(
         store.still_listing().is_empty(),
         "the bootstrap gate did not open, so this store is not the one a --once run reports over"
@@ -7253,6 +7338,51 @@ fn a_selectors_namespace_and_its_name_are_refused_for_their_own_reasons() {
     );
 }
 
+/// **One flag, one noun.** `--object`'s two refusals said *pod* on a run that named another kind,
+/// while every sentence past the connect uses the kind's own singular
+/// (`screens/detail.md` § The yaml tab, `read_failed`) — one binary telling a reader two things
+/// about the same word (`k8s-admin`, Phase 6 close).
+///
+/// **`object` and not the word the reader typed**, because at this point in the run there is no
+/// cluster and no discovery: `--kind po` and `--kind pods` are both spellings this check cannot
+/// turn into a singular, and *names one pods* is a worse sentence than the one it replaces. The
+/// kind's own word arrives after `which_kind`, which is where `read_failed` uses it.
+#[test]
+fn a_selector_refused_on_a_run_that_named_a_kind_does_not_call_it_a_pod() {
+    let named = |line: &[&str]| {
+        let said = mistyped(&argv(line)).expect("an underscore is not in a name");
+        println!("{}", said.lines().next().expect("a first line"));
+        said.lines()
+            .next()
+            .expect("a first line")
+            .split(" — ")
+            .next()
+            .expect("the clause before the rule")
+            .to_string()
+    };
+
+    assert_eq!(
+        named(&["--yaml", "--kind", "node", "--object", "A_B"]),
+        "k8rs: --object names one object, written as `<namespace>/<name>` or just `<name>`, and \
+         A_B is not one",
+    );
+    assert_eq!(
+        named(&["--yaml", "--kind", "node", "--object", "web/"]),
+        "k8rs: --object has nothing after the `/`, so it names no object",
+    );
+    // **A run that names no kind is a pod run** — `POD` is the default `yaml_run` applies, so the
+    // word is not dropped from the surface, only from the lines that cannot know it.
+    assert_eq!(
+        named(&["--logs", "--object", "A_B"]),
+        "k8rs: --object names one pod, written as `<namespace>/<name>` or just `<name>`, and A_B \
+         is not one",
+    );
+    assert_eq!(
+        named(&["--yaml", "--object", "web/"]),
+        "k8rs: --object has nothing after the `/`, so it names no pod",
+    );
+}
+
 /// **A file beside `--logs` is refused, and the sentence names `--logs`** — not the two flags the
 /// run did not have.
 #[test]
@@ -7396,7 +7526,7 @@ async fn a_pod_that_declares_no_container_is_refused_without_an_empty_list() {
 ///
 /// **`neverrules.json` is the capture that can fail this.** Its `spec` is `[retry, keeper]` and
 /// its `status` is `[keeper, retry]`, and the two containers differ in *both* the things drawn
-/// beside a name — `retry` is `done` with one restart, `keeper` is `running` with none. A list
+/// beside a name — `retry` exited `1` with one restart, `keeper` is `running` with none. A list
 /// built from `spec` and a status read by *index* would print each container's row against the
 /// other one's name, and every order-blind capture in this repo passes that.
 #[tokio::test]
@@ -7408,7 +7538,7 @@ async fn the_container_block_is_drawn_only_when_there_was_something_to_choose() 
         container_choice(&pod, None, chosen).expect("two containers is something to choose");
     assert_eq!(
         block,
-        "k8rs: this pod has 2 containers — retry (done, 1 restart), keeper (running)\n\
+        "k8rs: this pod has 2 containers — retry (failed, 1 restart), keeper (running)\n\
          k8rs: reading retry. Name another with `--container <name>`.",
         "the block a reader gets is not what the container list and the choice say — a row drawn \
          against the wrong name is a status read by index"
@@ -7465,7 +7595,7 @@ async fn a_container_that_has_restarted_says_so_beside_its_state() {
     let one = pod_read("neverrules").await;
     let block = container_choice(&one, None, Some("retry")).expect("two containers");
     assert!(
-        block.contains("retry (done, 1 restart)"),
+        block.contains("retry (failed, 1 restart)"),
         "the singular is missing or mis-pluralised, and it is the whole reason a reader reaches \
          for --previous: {block:?}"
     );
@@ -7480,8 +7610,34 @@ async fn a_container_that_has_restarted_says_so_beside_its_state() {
     );
 }
 
+/// **The picker names the container the reader is looking for**, on the capture the defect was
+/// measured on.
+///
+/// **`neverback.json` is three containers with three different endings** — `broke` exited `1`,
+/// `done` exited `0`, `keeper` is still running — and the picker printed *(done)* beside all
+/// three of the first two, so the one line whose job is *which log explains this* said the
+/// container that failed had finished cleanly (`k8s-admin`, Phase 6 close, against the live pod
+/// this capture came from).
+#[tokio::test]
+async fn the_picker_does_not_call_a_container_that_failed_done() {
+    let pod = pod_read("neverback").await;
+    let block = container_choice(&pod, None, Some("broke")).expect("three containers");
+    println!("{block}");
+    assert_eq!(
+        block,
+        "k8rs: this pod has 3 containers — broke (failed), done (done), keeper (running)\nk8rs: \
+         reading broke. Name another with `--container <name>`.",
+        "the picker's word for a container is not the word describe gives the same state"
+    );
+}
+
 /// **What a container is doing, in a word a beginner reads** (invariant 14) — never the API's own
 /// `reason`, which is the jargon this product exists to translate.
+///
+/// **And never a second spelling of [`container_state`]'s word.** The picker is the screen where a
+/// reader chooses which container's log explains a failed pod, and it printed `done` for a
+/// container that exited `1` while describe printed `failed` for the same state — the one word
+/// that sends the reader to the wrong log (`k8s-admin`, Phase 6 close).
 #[test]
 fn a_containers_state_is_a_word_and_never_the_reason_code() {
     assert_eq!(
@@ -7493,8 +7649,9 @@ fn a_containers_state_is_a_word_and_never_the_reason_code() {
             reason: Some("CrashLoopBackOff".to_string()),
             message: None,
         })),
-        "waiting",
-        "a waiting container printed the API's own reason code where the screen says one word"
+        "keeps crashing and restarting",
+        "a waiting container printed the API's own reason code, or one generic word for three \
+         different problems"
     );
     // **The third arm, fed** — `screens/detail.md` draws a finished init container as `done`, and
     // without this the word could be anything.
@@ -7509,6 +7666,21 @@ fn a_containers_state_is_a_word_and_never_the_reason_code() {
             }
         ))),
         "done"
+    );
+    // **The arm the two functions disagreed on**: a clean exit stays `done` and everything else is
+    // `failed`, in the picker as well as in describe.
+    assert_eq!(
+        doing(Some(&ContainerState::Terminated(
+            crate::rules::Terminated {
+                reason: Some("Error".to_string()),
+                exit_code: 1,
+                started_at: None,
+                finished_at: None,
+                message: None,
+            }
+        ))),
+        "failed",
+        "the picker told a reader that the container which failed had finished cleanly"
     );
     // **The fourth arm is a container the pod declares and the kubelet has not reported on**,
     // which the picker can reach now that its list comes from `spec` (`k8s::PodRead`).
@@ -9402,26 +9574,43 @@ fn a_containers_row_says_what_happened_and_not_one_word_for_every_ending() {
     );
     assert_eq!(container_state(None), ("not started".to_string(), None));
 
-    // **The log picker's own wording is untouched** — [`doing`]'s doc argues correctly that the
-    // jargon card is one keypress away *there*, and this is a second reader of one state rather
-    // than a second spelling of one sentence.
-    assert_eq!(
-        doing(Some(&ContainerState::Waiting {
+    // **The log picker is this function's word and not a second spelling of it.** It said `done`
+    // about a container that exited `137` while describe said `failed` about the same state, on
+    // the one screen where a reader picks which log explains a failed pod (`k8s-admin`, Phase 6
+    // close). Every state is checked, not the two that were wrong, because *one word, one reader*
+    // is the property and the arms are where a second one grows back.
+    for state in [
+        Some(ContainerState::Running { started_at: None }),
+        Some(ContainerState::Waiting {
             reason: Some("CrashLoopBackOff".to_string()),
-            message: None
-        })),
-        "waiting"
-    );
-    assert_eq!(
-        doing(Some(&ContainerState::Terminated(rules::Terminated {
+            message: None,
+        }),
+        Some(ContainerState::Waiting {
+            reason: None,
+            message: None,
+        }),
+        Some(ContainerState::Terminated(rules::Terminated {
             reason: Some("OOMKilled".to_string()),
             exit_code: 137,
             started_at: None,
             finished_at: None,
-            message: None
-        }))),
-        "done"
-    );
+            message: None,
+        })),
+        Some(ContainerState::Terminated(rules::Terminated {
+            reason: None,
+            exit_code: 0,
+            started_at: None,
+            finished_at: None,
+            message: None,
+        })),
+        None,
+    ] {
+        assert_eq!(
+            doing(state.as_ref()),
+            container_state(state.as_ref()).0,
+            "the picker and the describe row spell one state two ways again: {state:?}"
+        );
+    }
 }
 
 /// **A pod carrying `status.reason` says why, and one without it prints exactly what it did
@@ -9657,6 +9846,59 @@ fn the_yaml_teaching_line_asks_for_the_document_that_was_printed() {
     assert_eq!(
         kubectl_get("node", "k8rs-worker2", None),
         "$ kubectl get node k8rs-worker2 -o yaml --show-managed-fields"
+    );
+}
+
+/// **What the `kubectl` line does not say, said** — the two places where running that command
+/// gives a reader something other than what k8rs did (`k8s-admin`, Phase 6 close).
+///
+/// **A Secret is the one that matters.** `--yaml` masks `data`, `stringData` and every annotation
+/// before `k8s::Document` exists and there is no `--reveal` on this surface, and then it printed
+/// `kubectl get secret … -o yaml` beside it — the command that prints the base64 values. The
+/// security gate's Secrets row holds on the value, which never enters the log; what defeats the
+/// masking is the *line*, for the reader who follows the teaching device into a ticket.
+///
+/// **The namespace is the other.** A cluster-scoped kind drops it, so
+/// `--yaml --kind node --object default/k8rs-worker` reads the node and never tells the reader
+/// that half of what they typed was eaten.
+#[test]
+fn the_line_that_does_not_produce_what_was_printed_says_so() {
+    assert_eq!(
+        caveats(&browsable("", "Secret", "secrets", true), Some("payments")),
+        vec![
+            "k8rs: a Secret's values are hidden here and shown as their sizes — the command above \
+             prints them in full"
+        ],
+        "the command log handed over what this run had just masked, and said nothing"
+    );
+    assert_eq!(
+        caveats(&browsable("", "Node", "nodes", false), Some("default")),
+        vec!["k8rs: a node lives in no namespace, so `default` on this line was not used"],
+        "half of what the reader typed was dropped in silence"
+    );
+    // **Nothing to say is nothing printed.** A namespaced kind used the namespace, and a run that
+    // named none had none to drop — a note about a word the reader did not type is the failure
+    // this is one line away from.
+    assert_eq!(
+        caveats(&browsable("", "Pod", "pods", true), Some("payments")),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        caveats(&browsable("", "Node", "nodes", false), None),
+        Vec::<String>::new(),
+        "a run that named no namespace was told one of its words was dropped"
+    );
+    // **The kind's own singular and the namespace as it was typed**, both through the strip every
+    // other sentence on this surface uses (invariant 9).
+    assert_eq!(
+        caveats(
+            &browsable("k8rs.example.com", "Widget\u{7}", "widgets", false),
+            Some("pay\u{7}ments")
+        ),
+        vec![
+            "k8rs: a widget lives in no namespace, so `payments (with what cannot print removed)` \
+             on this line was not used"
+        ]
     );
 }
 

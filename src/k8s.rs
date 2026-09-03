@@ -3120,9 +3120,11 @@ pub(crate) async fn node_usage(client: &Client, deadline: std::time::Duration) -
 /// restarting comes back, one that is installed starts answering, and a role that is granted the
 /// verb starts working — each within one [`METRICS_POLL`], without touching anything.
 ///
-/// **Like the five watches, this stream cannot end**, which is what `select_all` in
-/// [`drive_watching`] wants: [`updates`] appends an end marker precisely because a watch that
-/// finishes would otherwise be read as live, and there is nothing here that can finish.
+/// **Unlike the five watches, this stream cannot end** — there is no branch here that finishes —
+/// **so it is handed to [`drive_watching`] as `alongside` and never among them.** A poll is not
+/// something being watched: while it sat in the same vec, a `--live --analysis` whose five watches
+/// all ended left the pump waiting on this one forever, and *every watch has stopped* could not be
+/// reached (`dev-core`, Phase 6 close).
 pub(crate) fn node_usage_poll(client: Client) -> BoxStream<'static, Update> {
     let mut ticker = tokio::time::interval(METRICS_POLL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -3175,13 +3177,18 @@ pub(crate) fn node_usage_poll(client: Client) -> BoxStream<'static, Update> {
 // while an unresolved owner names the pod's true controller, one step lower than the reader
 // would have named it.
 //
-// **What is not here is the `get` itself**, for the reason § THE INITIAL LIST gives about
-// `page_size`: there is no `Client` in this build yet, and a function no test can fail on is
-// what the mutation gate exists to catch. Everything a fetch's answer means is decided here and
-// proven here; the `connect()` box supplies one line —
-// `Api::<ReplicaSet>::namespaced(client, ns).get(&name).await` — and hands the result to
-// [`Store::owner_fetched`] **unchanged**. Not `get_opt`, which folds a 404 into `Ok(None)` and
-// throws away the difference between *deleted mid-rollout* and *never existed*.
+// **The `get` is [`owner`] and the pump reaches it through [`owner_fetches`]**, both at the end
+// of this region. Until the Phase 6 close they were not here at all: this region said *the
+// `connect()` box supplies one line* and no box ever did, so [`Store::unresolved_owners`] and
+// [`Store::owner_fetched`] had **no product caller** and no live run ever fetched a ReplicaSet by
+// name (`k8s-admin`, `grep`, Phase 6 close). Everything a fetch's *answer* means was decided and
+// proven here the whole time; what was missing was the request, and the number that shipped
+// meanwhile is `analysis.rs`'s capacity count — two ReplicaSets of one Deployment counted as two
+// workloads.
+//
+// **The answer reaches [`Store::owner_fetched`] unchanged.** Not `get_opt`, which folds a 404
+// into `Ok(None)` and throws away the difference between *deleted mid-rollout* and *never
+// existed*.
 
 /// **One ReplicaSet a pod names as its controller, which the cache cannot answer for**, and why.
 ///
@@ -3205,12 +3212,22 @@ pub struct Unresolved {
 
 /// The uid a ReplicaSet owner is cached under, or `None` where there is nothing safe to key on.
 ///
-/// **Two refusals, and both are load-bearing.** An owner that is not a ReplicaSet is already the
-/// workload the reader deployed and there is nothing above it to walk to. An owner whose uid is
-/// **empty** is refused because the uid is the cache key: two different ReplicaSets would share
-/// the entry `""` and each would be handed the other's Deployment. The API server rejects an
-/// `ownerReference` with no uid, so this is a shape only something between us and it can
-/// produce — which is exactly invariant 9's class of input, one layer past the strip.
+/// **Three refusals, and all three are load-bearing.** An owner that is not a ReplicaSet is
+/// already the workload the reader deployed and there is nothing above it to walk to. An owner
+/// whose uid is **empty** is refused because the uid is the cache key: two different ReplicaSets
+/// would share the entry `""` and each would be handed the other's Deployment. The API server
+/// rejects an `ownerReference` with no uid, so this is a shape only something between us and it
+/// can produce — which is exactly invariant 9's class of input, one layer past the strip.
+///
+/// **An owner k8rs would not put in a request is the third**, and it arrived with [`owner`]: the
+/// namespace and the name of this reference are two words that go straight into a URL path, and
+/// they come from the API server rather than from argv — so a `/` in a controller's name is a
+/// request path something upstream wrote for us (the security gate's *names build paths* row,
+/// [`path_safe`], the same predicate `Fetch::table` runs over a discovered kind's own words).
+/// **Refused here rather than in the fetcher** because this one function decides what may be
+/// cached at all: a reference the `get` would skip and the list would keep asking for is a heading
+/// waiting on an answer nobody is going to send. The pod's card is unharmed — its heading stays at
+/// the ReplicaSet, which is what every unresolved reference already shows.
 ///
 /// **The ceiling, named rather than guarded**: the uid has already been through [`ingest`], so
 /// two uids longer than [`IDENTIFIER`] sharing a 512-byte prefix would collapse into one entry —
@@ -3218,6 +3235,9 @@ pub struct Unresolved {
 /// generates is 36 bytes.
 fn owner_uid(owner: &ObjectId) -> Option<&str> {
     if owner.kind != ObjectKind::ReplicaSet {
+        return None;
+    }
+    if !path_safe(&owner.name) || !owner.namespace.as_deref().is_some_and(path_safe) {
         return None;
     }
     owner.uid.as_deref().filter(|uid| !uid.is_empty())
@@ -3354,6 +3374,74 @@ impl Store {
         sets.sort_by_key(|set| (key(set), set.id.uid.clone()));
         sets
     }
+}
+
+/// **One ReplicaSet, fetched by name** — the request this region described for a phase and did
+/// not make.
+///
+/// **The answer is handed back whole**, so the one classifier (§ WHAT WENT WRONG) sees the real
+/// `kube::Error` and [`Store::owner_fetched`] does the rest: a 404 is *deleted mid-rollout*, a 403
+/// is a standing fact about the role, and neither is an `Option` this function decided for them.
+///
+/// **No deadline of its own**, for [`pod`]'s reason — the caller owns it. Here the caller is the
+/// watch pump, which has no ending to be late for, and a `get` a throttling server is silent on
+/// for the two and a half to eight minutes NOTES § D148 measured delays **a heading** and nothing
+/// else: the snapshot is published with the ReplicaSet as the owner and never held back (the
+/// region doc). What it also does is hold the one queue in [`owner_fetches`] behind it, which is
+/// the ceiling named rather than closed — a second in-flight fetch buys a faster heading on a
+/// cluster that is already too slow to answer one.
+pub(crate) async fn owner(
+    client: &Client,
+    namespace: &str,
+    name: &str,
+) -> Result<ReplicaSet, kube::Error> {
+    Api::<ReplicaSet>::namespaced(client.clone(), namespace)
+        .get(name)
+        .await
+}
+
+/// **[`owner`] on a channel, as one more stream for [`drive_watching`]** — the whole of how a
+/// fetch reaches a store the watch loop holds `&mut`, and [`node_usage_poll`]'s shape exactly.
+///
+/// **An [`Update`] and not a task, so nothing here needs a lock**: the store is owned by the pump
+/// and mutated only between events, and a mutex over it is a second way for a snapshot to be read
+/// half-written.
+///
+/// **The store is what the caller reads to fill this channel** ([`Store::unresolved_owners`]), so
+/// the queue is bounded by what the live pods reference — one entry per distinct ReplicaSet, sent
+/// once. **Sending the same reference twice is the caller's to prevent**, and it has to be: this
+/// end cannot tell a second copy from a re-ask without keeping its own set of every uid it ever
+/// saw, which is the one structure here that nothing would ever prune (the security gate's *sizes
+/// are bounded* row, [`Store::prune_owners`]'s reasoning one layer up).
+///
+/// **One fetch at a time.** A rollout produces one ReplicaSet, not a burst, and a serial queue
+/// cannot turn a slow API server into a fan of requests against it — the shape § WHAT A THROTTLE
+/// LOOKS LIKE exists to warn about.
+///
+/// **It ends when the channel closes and not before**, and the caller holds the sending end for
+/// the life of the pump — so in practice it does not end, exactly like [`node_usage_poll`]. That
+/// is why both are handed to [`drive_watching`] as `alongside` and not as watches: a stream that
+/// cannot finish, in among the ones whose finishing *is* the ending, is a pump that never returns.
+/// Nothing here can end it early either — no `?` on a fetch, and no counting of failures.
+pub(crate) fn owner_fetches(
+    client: Client,
+    wanted: tokio::sync::mpsc::UnboundedReceiver<ObjectId>,
+) -> BoxStream<'static, Update> {
+    stream::unfold((client, wanted), |(client, mut wanted)| async move {
+        loop {
+            let id = wanted.recv().await?;
+            // **A reference with no namespace is dropped rather than guessed at.** `owner_uid`
+            // refuses one already, so this is the door being shut on both sides: `Api::namespaced`
+            // needs a namespace and inventing `default` would fetch a different object.
+            let Some(namespace) = id.namespace.clone() else {
+                continue;
+            };
+            let answer = owner(&client, &namespace, &id.name).await;
+            let update = Box::new(move |store: &mut Store| store.owner_fetched(&id, answer));
+            return Some((update as Update, (client, wanted)));
+        }
+    })
+    .boxed()
 }
 
 // --- RESOLVING AN OWNER END ---
@@ -3857,10 +3945,11 @@ where
 /// **real** severed socket comes back with nobody touching the keyboard is the `connect()`
 /// box's proof and not this function's (NOTES § D161).
 ///
-/// **It is [`drive_watching`] with nobody watching**, so every test of the pump below is a test
-/// of that one too — Rust has no default arguments and this is the shape that costs no call site.
+/// **It is [`drive_watching`] with nobody watching and nothing running alongside**, so every test
+/// of the pump below is a test of that one too — Rust has no default arguments and this is the
+/// shape that costs no call site.
 async fn drive(watches: Vec<BoxStream<'static, Update>>, store: &mut Store) {
-    drive_watching(watches, store, |_| {}).await;
+    drive_watching(watches, Vec::new(), store, |_| {}).await;
 }
 
 /// **[`drive`], with the store handed to somebody after every update** — the same pump, and the
@@ -3879,13 +3968,44 @@ async fn drive(watches: Vec<BoxStream<'static, Update>>, store: &mut Store) {
 /// **No clock and no timer** (invariant 7): this fires once per update, and coalescing storms is
 /// the caller's, where the frame is. The temporary driver in `main.rs` prints only when the
 /// report it renders differs from the last one, which is the cheapest form of it.
+///
+/// # `alongside` is everything in the pump that is not a watch
+///
+/// **The metrics poll and the owner fetches land here the same way an event does** — as an
+/// [`Update`] on the same single-threaded loop, so the store needs no lock — **but they may not
+/// decide when the run is over.** *Nothing is being watched any more* is a fact about the
+/// **watches**, and both of these run forever by construction: [`node_usage_poll`] has no branch
+/// that ends it (NOTES § D181) and [`owner_fetches`] ends only when its channel closes, which is
+/// the caller holding the sending end.
+///
+/// **In one `select_all` with the watches they were a deadlock, and it was measured as one**: the
+/// five streams ran out, this loop kept waiting on the poll nobody could feed, and `--live` never
+/// came back to say *every watch has stopped* (`dev-core`, Phase 6 close,
+/// `a_cluster_that_never_answers_prints_nothing_and_says_why_it_stopped` hanging rather than
+/// failing). It was already true of `--live --analysis` before the fetches existed, with no test
+/// on that path to catch it.
+///
+/// **So the watches carry a marker and this loop breaks on it.** `None` is *the last watch
+/// ended*, appended by `chain` after `select_all` has drained them — the same trick [`updates`]
+/// uses one layer down for the same reason, and the reason the item type is `Option<Update>` here
+/// and nowhere else. **It is still not a way for anything to stop the loop early**: an `Err`
+/// cannot reach here ([`updates`] turns it into an update), the observer returns `()`, and the
+/// only `break` is the ending this function always had — `select_all` running out — spelled so
+/// that a stream beside the watches cannot postpone it forever.
 pub(crate) async fn drive_watching(
     watches: Vec<BoxStream<'static, Update>>,
+    alongside: Vec<BoxStream<'static, Update>>,
     store: &mut Store,
     mut watching: impl FnMut(&Store),
 ) {
-    let mut merged = select_all(watches);
-    while let Some(update) = merged.next().await {
+    // `stream::iter` and not `stream::once(async …)`: the marker is a value and not something to
+    // wait for, and an async block is not `Unpin`, which `stream::select` needs.
+    let watched = select_all(watches).map(Some).chain(stream::iter([None]));
+    let mut merged = stream::select(watched, select_all(alongside).map(Some));
+    while let Some(next) = merged.next().await {
+        // The marker: every watch has ended, so whatever else is still running has nothing left
+        // to be running *for* — including an owner fetch in flight, which is dropped here.
+        let Some(update) = next else { break };
         update(store);
         watching(store);
     }
@@ -6163,7 +6283,7 @@ impl Document {
 /// **The one kind whose values are masked**, spelled once because [`mask`] now compares it twice —
 /// against the kind the caller resolved before the request, and against the kind the answer claims
 /// to be.
-const SECRET: &str = "Secret";
+pub(crate) const SECRET: &str = "Secret";
 
 /// **How many bytes a base64 value decodes to** — the number a masked Secret value is reported at
 /// instead of the value (`screens/detail.md` § A Secret, values hidden behind an explicit reveal).

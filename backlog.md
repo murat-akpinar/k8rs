@@ -2054,6 +2054,33 @@ recorded reversal and a later box rather than a dev round
   defect. `tui-designer`'s, and it wants doing **before Phase 11 draws that
   pane** rather than after
 
+- **`--live` prints nothing at all for a wedged watch, and `Store::stop_waiting`'s
+  doc says it says something.** D206 fixed `--once`; under `--live` a wedged watch
+  has no `failure`, is not `ended` and is never `unfinished` (nothing calls
+  `stop_waiting` without a budget), so `Store::troubles` is empty, `unreadable`
+  draws no line, `snapshot()` is `None`, and `live_report` takes its *the silence
+  is the answer* arm — **forever**. Measured 2026-09-03 over 40 s: the greeting,
+  the command log, and then nothing. The doc claims *"a wedge there stays a wedge
+  on a screen that says it is waiting"*; there is no such saying. This is
+  `PRIOR-ART § A7`/`§ A3` — a wait with nothing to see it by, the k9s failure
+  `Listing` was built to prevent — still live in the mode that becomes the whole
+  product. `Listing`'s own doc names it: *"this makes the state readable, and
+  something still has to ask."* **Nothing asks.** The screen that would show it is
+  Phase 11's, which is why this is here and not a Phase 6 box; the *doc* was
+  corrected at the close so it no longer claims a behaviour that does not exist
+
+- **The `--logs`/`--describe`/`--yaml` command-log exemption is ruled in a
+  `main.rs` doc comment and nowhere a screen reader looks.** Measured: `--logs`
+  sends seven requests and prints one `$ kubectl` line. The ruling — those three
+  verbs draw `screens/detail.md`, not `screens/once.md` — is defensible and is
+  *written in the wrong place*, given Phase 11 draws a command-log panel that is
+  *always visible, showing what k8rs ran*. `tui-designer`'s, before that pane
+
+- **The usage line is 360 characters.** Five wrapped rows of dense flags at 80
+  columns, and it is the first thing a newcomer sees after a typo — invariant 13's
+  second half. **Nine of the fourteen flags in it die at Phase 12**, so the cheap
+  moment is after that, not now
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

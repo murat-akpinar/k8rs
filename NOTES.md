@@ -229,6 +229,8 @@ its line moving with it.
 - [D205](#d205--what-a-default-run-prints-the-credential-the-reader-can-fix-the-command-log-that-had-to-be-honest-and-a-teaching-line-that-was-a-request-storm-2026-09-03) — what a default run prints: the credential the reader can fix, the command log that had to be honest, and a teaching line that was a request storm
 - [D206](#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03) — a wedged watch cost the whole report, and the partial snapshot it was said to need was never needed
 - [D207](#d207--the-400-that-blamed-k8rs-and-threw-away-the-sentence-the-server-sent-2026-09-03) — the `400` that blamed k8rs, and threw away the sentence the server sent
+- [D208](#d208--the-cross-family-review-the-picker-that-called-a-failed-container-done-and-the-owner-fetch-that-was-never-written-2026-09-03) — the cross-family review: the picker that called a failed container `done`, and the owner fetch that was never written
+- [D209](#d209--the-freeze-is-narrowed-to-what-was-actually-checked-and-two-browser-performers-are-named-as-phase-11s-2026-09-03) — the freeze is narrowed to what was actually checked, and two browser performers are named as Phase 11's
 
 ## Why it exists — where the gap is
 
@@ -17821,4 +17823,101 @@ been written yet.** `because(Rejected, …)` prints the server's `Status.message
 On a read that is harmless. On a **write**, a `400` validation error can echo the
 field values that were submitted — so the Secrets row of the security gate has to
 look at this when `ops.rs` lands, and this paragraph is where it is written down.
+
+### D208 — the cross-family review: the picker that called a failed container `done`, and the owner fetch that was never written (2026-09-03)
+
+Phase 6's close, step 4 — the review that reads the phase's families **together**,
+which exists because a reviewer shown one box finds the defect in that one box.
+It earned itself twice over.
+
+**A container that exited 1 was called `done` on the screen where you pick which
+log explains the failure.** `doing` (family 1) and `container_state` (family 2)
+took the same `Option<&ContainerState>` and disagreed on the terminated-non-zero
+arm. Measured live:
+
+```
+--logs      broke (done),   done (done), keeper (done)
+--describe  broke  failed   exit 1  ·  done  done  ·  keeper  failed  exit 255
+kubectl     broke exit=1    ·  done exit=0  ·  keeper exit=255
+```
+
+**And `container_state`'s own doc asserted this could not be happening** —
+*"The picker's wording is unchanged; this is a second reader of one state, not a
+second spelling of one sentence."* It was exactly a second spelling, wrong in the
+one direction that costs an outage: the reader is told all three finished cleanly
+and the one they need is the one that failed. Neither family's own review could
+see it; both functions are correct read alone. `doing` is now
+`container_state(state).0` — **one reader, one word** — and the doc says it was
+false rather than being quietly deleted.
+
+**A read path the file was about to freeze without.** `Store::unresolved_owners`
+and `Store::owner_fetched` had **no product caller**: § RESOLVING AN OWNER says
+*"the `connect()` box supplies one line — `Api::<ReplicaSet>::…get(&name)"*, and
+it never did. That is not a latent gap — it was **printing a wrong number**:
+`analysis.rs` says *"By Phase 5 the ReplicaSet named here resolves up to its
+Deployment… until then two ReplicaSets of one Deployment count twice"*, and the
+fixture cluster's one rolling Deployment made `[capacity]` say **19 workloads have
+no memory or CPU limit** where the truth is **18**. Written and wired, so the
+number is now 18 on `--once` and corrects itself mid-run on `--live`.
+
+**Writing it uncovered a latent `--live --analysis` defect that predates this
+phase.** Pushing the fetcher into `session.watches` hung two tests, because a
+stream that cannot end sits inside the `select_all` whose *running out* is the
+ending — and **`node_usage_poll` had been that shape since Phase 5**, so
+`--live --analysis` could never reach *every watch has stopped* and no test
+covered it. `drive_watching` now takes a fourth argument: `alongside` streams are
+polled and never vote on the ending.
+
+**Two more, both invariant 4's subject.** The command log printed
+`$ kubectl get secret … -o yaml` beside a pane that had masked every value —
+handing the reader a command that prints `aHVudGVyMg==` under output that says
+`<hidden — 7 bytes>`. There is no kubectl line that reproduces a masked view, so
+the honest fix is to name the difference and own it: *a Secret's values are hidden
+here and shown as their sizes — the command above prints them in full*. Verified
+against a real Secret created and deleted in the fixture cluster. And the argv
+check said *"--object names one **pod**"* on a `--kind node` run, because
+`read_failed` was made kind-aware in family 2 and the check the same run passes
+through *first* was not swept. A cluster-scoped kind now also says so rather than
+silently eating a namespace the reader typed.
+
+**What this says about the process.** Step 4 is the only step positioned to find
+any of this: the picker/describe pair is invisible from inside either family, the
+missing performer is invisible to anyone reviewing a box that does not call it,
+and the argv sentence went stale because a *later* family changed the vocabulary
+around it. The cost of running it is one dispatch; the cost of skipping it was
+about to be a frozen `k8s.rs` with a read path missing from it.
+
+### D209 — the freeze is narrowed to what was actually checked, and two browser performers are named as Phase 11's (2026-09-03)
+
+`todo.md`'s Phase 6 close said *"Frozen after: `k8s.rs` — every read path in the
+product now exists. Check it against all four consumers before closing the
+phase."* The check was run
+([D208](#d208--the-cross-family-review-the-picker-that-called-a-failed-container-done-and-the-owner-fetch-that-was-never-written-2026-09-03))
+and the claim was false in three places. **A freeze that asserts more than was
+checked is worse than no freeze**, because the next phase discovers it as a plan
+break rather than reading it as a plan.
+
+**One was written rather than excepted.** The ReplicaSet owner `get` had no
+product caller and was already making `[capacity]` count a rolling Deployment
+twice. A wrong number shipping is not a seam to plan around, so it was built at
+the close.
+
+**Two are named exceptions.** The browser's server-side `Table` LIST
+(`Fetch::table`, `Fetch::plain`, `not_acceptable`, `TableResponse` — with
+`Fetch::accept` read *only in tests*) and the browser view's refresh
+(`Browsing::issue`, whose § KEEPING A BROWSER VIEW FRESH carries an ` ```ignore `
+block holding the line the next box is supposed to write). For both, the
+decision, the request builder and the decoder are in `k8s.rs`; only the sender is
+missing. **They are not written now because nothing consumes them** — the browser
+pane is Phase 11's — and a performer with no caller is the speculative code this
+project refuses. But Phase 11 is `dev-ui`'s, and `dev-ui` may not write `k8s.rs`,
+so leaving it implicit would have made the first browser box a frozen-file
+argument.
+
+**The ruling: Phase 11 opens `k8s.rs` for exactly those two performers and
+nothing else, and that box is `dev-core`'s, not `dev-ui`'s.** The seam is named,
+bounded and owned. This is the shape
+[CLAUDE.md § Architecture workflow](CLAUDE.md#architecture-workflow) asks for —
+*if a later step needs a frozen file changed, the plan is wrong: stop, fix the
+order, record it* — done in advance instead of on discovery.
 
