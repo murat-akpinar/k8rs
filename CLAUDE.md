@@ -51,6 +51,17 @@ whoever is writing — a dev at step 3 as much as the PM at step 7:
   doc comment, a box, a report: they link `D##`, they do not restate it. The
   second copy is the one that goes stale, and it is never the one that gets
   fixed.
+- **The box is the code, and the turn makes one dispatch.** What the PM writes
+  before it is what the brief could not be written without — a blocking ruling,
+  a screen the code must match. Nothing else. A stale list, a wrong number, a
+  contradiction noticed on the way is
+  [`backlog.md`](backlog.md)'s ([D108](NOTES.md#d108--work-with-no-phase-gets-a-file-and-measurements-get-a-directory-2026-08-16)),
+  not this turn's edit. Three hours once went into documents nobody was blocked
+  on, each defensible on its own, while the code sat finished and uncommitted in
+  the working tree
+  ([D196](NOTES.md#d196--three-hours-of-documents-nobody-was-blocked-on-and-the-gate-the-process-does-not-have-2026-08-30)).
+  The three rules above bound what goes *into* a document; this one bounds
+  whether it is written *now*.
 - **`NOTES.md`'s index is part of the entry.** A new `### D##` heading lands
   with its line in [§ Decision index](NOTES.md#decision-index) in the same edit.
   `scripts/check-docs.py` fails on a line whose anchor stopped resolving, so a
@@ -169,12 +180,33 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
    the temp file behind `e` edit: mode 0600, removed after use.
 9. **Free text from the API is untrusted.** Strip control characters before it
    reaches the screen, or a crafted pod name rewrites the user's terminal.
-10. **No new dependencies without asking.** The **eleven** allowed crates:
+10. **No new dependencies without asking.** The **twelve** allowed crates:
     `kube`, `k8s-openapi`, `ratatui`, `crossterm`, `tokio`, `anyhow`,
-    `serde_json`, `serde_yaml_ng`, `x509-parser`, `similar`, `futures-util`.
+    `serde_json`, `serde_yaml_ng`, `x509-parser`, `similar`, `futures-util`,
+    `tokio-rustls`.
     `similar` arrives only in v0.4 with `edit` — approved is not the same as
-    present. No `clap` while the flags are `--read-only` / `--context` /
-    `--namespace` / `--once`; no `tracing` until debugging demands it
+    present. **No `clap`**, and the threshold is not *a flag that takes a
+    value* — `--context` and `--namespace` take one each, `--context`'s against
+    a closed set, both parsed by hand. It is **subcommands, generated help, or a
+    mutual-exclusion table**
+    ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)).
+    **The flag list here is a fact about the code, it gets no `check-docs` and no
+    operator review, and it has now gone stale twice** — four when the binary had
+    six (fixed 2026-08-30, [D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30)),
+    six when it had fourteen (fixed 2026-08-31). **Counted, not recalled:**
+    `grep -oE '^const [A-Z_]+: &str = "--[a-z-]+"' src/main.rs`. Two groups, and
+    the split is the point:
+    **released** — `--read-only` `--context` `--namespace` `--once` `--analysis`
+    (the last put there by
+    [D188](NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30));
+    **temporary driver's, and gone at Phase 12** — `--live`, plus the verbs and
+    the selector that name one object: `--logs` `--describe` `--yaml`, `--object`
+    `--kind` `--container` `--previous` `--follow`
+    ([D194](NOTES.md#d194--the-flag-that-names-an-object-and-d17s-threshold-read-against-the-binary-it-was-written-for-2026-08-30) ·
+    [D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
+    `--namespace` also answers to `-n`. **Nine of these fourteen are scaffolding,
+    which is why the count alone was never the thing to defend** — the threshold
+    below is. No `tracing` until debugging demands it
     ([NOTES § Dependencies](NOTES.md#dependencies)).
     **The eleventh was a reversal and is the shape to argue from**
     ([D143](NOTES.md#d143--the-eleventh-crate-and-why-the-list-of-ten-was-wrong-rather-than-the-task-2026-08-22)):
@@ -184,6 +216,15 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
     because `futures-util` was already linked under `kube-client`. A crate that
     is already in the build and only needs *naming* is the narrow case; `clap`
     and `tracing` are not, which is why they are still refused.
+    **The twelfth is the same shape, measured the same way**
+    ([D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)):
+    C2 is only readable off the peer certificate of a handshake we drive, driving
+    one needs a connector, and `tokio-rustls` was already linked under
+    `hyper-rustls` — **213 packages in `Cargo.lock` before and after**. It
+    re-exports `rustls`, so one crate is named and not two, and the `ClientConfig`
+    it is handed is `kube::client::ConfigExt`'s, built from the same kubeconfig CA
+    the real client uses — so nothing here calls `dangerous()` and
+    the TLS line of the security gate holds structurally.
 11. **Eight product files, flat.** `main.rs / k8s.rs / ops.rs / rules.rs /
     analysis.rs / views.rs / ui.rs / theme.rs` — no `mod.rs` pyramid, no trait
     layer, no plugin system. Exactly one ninth is pre-approved: `dialog.rs`, if
@@ -247,8 +288,16 @@ that goes green says nothing about those.
 **Authorization**
 
 - [ ] Least privilege holds: the documented read-only role runs everything
-      except the operations. A 403 degrades that one feature and names the
-      missing verb + resource; it never crashes and never retries in a loop.
+      except the operations — **including the `nonResourceURLs` grant discovery
+      needs**, which the role lacked until 2026-08-26 and which only a cluster
+      without the default `system:discovery` binding reveals
+      ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+      A 403 degrades that one feature and names the missing verb + resource; it
+      never crashes and never retries in a loop. **A `nonResourceURL` refusal
+      has neither** — the measured `Status` for `/apis` carries an empty
+      `details`, so a formatter reading `details.group`/`details.kind` prints an
+      empty sentence and the only true one names the path: *"this kubeconfig may
+      not `get /apis`"*.
 - [ ] `--read-only` is structurally true — `ops.rs` unreachable, keys unbound.
 
 **The write path**
@@ -267,10 +316,13 @@ that goes green says nothing about those.
       stripped of control characters before it reaches the screen.
 - [auto] **No API string is ever interpolated into a shell** — the guard reads
       `src/`, `tests/`, `examples/` and `benches/`, and for every file that spawns
-      at all it refuses a shell program, a `-c` flag and a command string. One
-      file spawns today: `tests/binary.rs`, which runs the built binary through an
-      argument vector. When `$EDITOR` lands it is an argument vector too, never a
-      command string; a pod named `; rm -rf ~` is boring.
+      at all it refuses a shell program, a `-c` flag and a command string. **Two
+      files spawn today**, each through an argument vector: `tests/binary.rs` runs
+      the built binary, and `src/k8s_tests.rs` runs `openssl` on literals and temp
+      paths to build the CA and leaf its TLS server needs
+      ([D179](NOTES.md#d179--the-refusal-that-kept-a-mutant-alive-rested-on-a-dependency-just-check-already-had-2026-08-28)).
+      When `$EDITOR` lands it is an argument vector too, never a command string;
+      a pod named `; rm -rf ~` is boring.
 - [ ] The command log is display text. k8rs does not execute it, and nothing in
       it is fed back into a process.
 - [ ] Object names are sanitised before they build a filesystem path — `../` in
@@ -427,6 +479,13 @@ the user is not in the room.** The PM picks the next family, briefs it, runs the
 cycle, lands it, and starts the next — no "shall I continue", no question
 [`todo.md`](todo.md) already answers. **Nothing else loosens**, and the person who
 could have caught a skipped gate has left, so a gate skipped now is never found.
+
+**But the PM reports at the first dispatch, not only at the push** — one line:
+the box, what had to be ruled before it, what is running now.
+[D98](NOTES.md#d98--the-user-leaves-the-room-and-the-pm-stops-asking-2026-08-15)
+removed the *asking*, not the *saying*. A box that has been running three hours
+is otherwise invisible until the user asks what happened to their afternoon
+([D196](NOTES.md#d196--three-hours-of-documents-nobody-was-blocked-on-and-the-gate-the-process-does-not-have-2026-08-30)).
 The only stops: the section below, a red build, and any reversal of a design
 decision — written into [NOTES.md](NOTES.md) before it is acted on.
 
@@ -485,6 +544,27 @@ exists if two writers are ever unavoidable, but reach for the plan fix first.
 **Review is not one of these slots** — nothing is built on top of a box until
 `k8s-admin` reports, and the dev idles meanwhile.
 
+**A sweep that edits in place is a writer for as long as it runs, and what it
+breaks is a reader.** A statement-deletion run that mutates the shared tree, waits
+for a test, then restores is a writer holding that file — and when the ten-minute
+tool cap kills it, the restore on its last line never runs. The tree survives,
+because the author restores it; what does not survive is anybody who *read* the
+file meanwhile and measured a real state no commit ever held. That is how the PM
+filed a live invariant-9 defect against a line that was there the whole time
+([D180](NOTES.md#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)).
+So a sweep runs against a copy with its own `CARGO_TARGET_DIR`, and its restore
+lives in a `try`/`finally` and not on a last line. **That holds for every resource
+a run owes cleanup on, not just an edited file**
+([D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)):
+a killed background job, a torn-down cluster, a released lock. A load generator
+whose `kill` sat on the last line spawned 32 busy loops, exceeded the ten-minute
+cap, and left them spinning for twenty-six hours at load average 33 — where they
+became a silent term in every timing number measured beside them. If the only
+thing between the machine and a leak is the script reaching its final statement,
+there is no cleanup. **`just mutants-diff` is already
+this shape** — `scripts/mutants.sh` names its own scratch volume — which is why the
+hand sweeps are the ones that need saying.
+
 **A re-dispatch to fix a finding is a write, not a review** — `screens/` went to
 its owner for a rewrite in the slot the table below reserves for two *reviewers*,
 and the reviewer's first read carried a section that no longer existed
@@ -518,7 +598,7 @@ gives sixteen boxes of work one changelog line and no way back to box eleven.
 
 | # | Step | Who | Gate to pass |
 |---|---|---|---|
-| 1 | Read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking |
+| 1 | **`git status --short` first**, then read the box, decide the owner, write the brief | PM | the box is the *first unchecked one in the lowest open phase* — no cherry-picking — **and no file the brief names is already modified** ([D195](NOTES.md#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30)) |
 | 2 | Screen spec, **only if a screen changes** | `tui-designer` | the mockup covers every state, not just the happy one |
 | 3 | Write the code **and its tests together** | `dev-core` / `dev-ui` | invariants; forward-only; no new dependency |
 | 4 | Prove the tests can fail | the author, before reporting | `just mutants-diff` over the box's **own diff**, not the file — a surviving mutant is a test that cannot fail; the author's red/green is pasted in step 3 — see below |
@@ -625,6 +705,11 @@ decision, and the PM writes it into `NOTES.md` before committing.
 
 ### Where a leak would actually happen — the PM checks these by hand
 
+- **A brief dispatched over a dirty tree.** A modified file the brief names is
+  somebody's turn already in flight — another session, or a box that landed
+  while the PM was writing documents. The whole dispatch is then wasted and its
+  output is a merge nobody asked for. It costs one command and it is step 1's
+  gate now ([D195](NOTES.md#d195--the-brief-that-ordered-work-the-working-tree-already-held-2026-08-30)).
 - A box checked for work that was written but never *run*.
 - A test that has only ever been green — step 4's mutation run skipped because
   the diff looked small. It is `--in-diff` and it costs a minute.

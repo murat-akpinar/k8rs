@@ -928,6 +928,67 @@ fn the_limits_row_counts_workloads_and_not_the_copies_of_them() {
     );
 }
 
+/// Every node row of a pane as its reader sees it — the name **and** the numbers beside it, so a
+/// comparison across two panes catches a sum that moved and not only a row that appeared.
+fn node_rows(report: &Report) -> Vec<String> {
+    node_names(report)
+        .into_iter()
+        .map(|name| text_of(row_for(report, name)).to_string())
+        .collect()
+}
+
+#[test]
+fn a_pod_whose_node_is_gone_belongs_to_no_row_and_is_still_counted_as_a_workload() {
+    // **The shape, and the ruling on it** (NOTES § D183): a node deleted while the pods bound to
+    // it still name it. Per-node answers cannot hold such a pod — each one names a machine and
+    // sums what is on it — while the limits row asks about workloads and not about machines, so
+    // it must.
+    let before = super::capacity(&corpus(), &[]);
+    let rows = node_rows(&before);
+    let count = uncapped_count(&before).expect("the corpus has uncapped workloads");
+    assert_eq!(
+        rows.len(),
+        4,
+        "the rows the assertion below searches — *found nothing* and *nothing to find* print the \
+         same green (CLAUDE.md § Tests must not lie)"
+    );
+
+    let report = super::capacity(&with_a_pod_whose_node_left(corpus()), &[]);
+    println!("{}", pane(&report));
+
+    // **On no row, and no row is a millicore different for it**: the node rows are the same four
+    // the corpus draws, carrying the same sums, with no fifth one added for the machine.
+    assert_eq!(
+        node_rows(&report),
+        rows,
+        "a pod whose machine is gone belongs to no per-node row rather than being missing from \
+         one, and its 350m is charged to nobody (NOTES § D183)"
+    );
+    // **And no row stands for the machine that left**, whatever shape it might have taken: one
+    // would print on every scale-down of every cluster that runs an autoscaler (NOTES § D183).
+    // Read over every string the pane carries, title and badge included, because a row that is
+    // not a node row would not be in the comparison above.
+    let strings = strings_of(&report);
+    assert!(
+        strings.iter().any(|s| s.contains("k8rs-worker2")),
+        "the strings searched below are the pane's own — *found nothing* and *nothing to find* \
+         print the same green"
+    );
+    assert!(
+        !strings.iter().any(|s| s.contains(NODE_THAT_LEFT)),
+        "nothing on this pane names a machine the snapshot does not have: {strings:?}"
+    );
+
+    // **And it is counted, because *which of my workloads has no limit* is asked about workloads
+    // and not about machines.** A node-scoped denominator here would make the count drop when a
+    // machine left — the number moving for a reason the reader did not cause.
+    assert_eq!(
+        uncapped_count(&report),
+        Some(count + 1),
+        "the limits row filters on `finished` and on nothing else (NOTES § D183)"
+    );
+}
+
 #[test]
 fn at_exactly_its_allocatable_a_node_says_nothing_and_one_step_past_it_says_why() {
     // **The line, from both sides, on the report's side of it** (NOTES § D81). A node packed to
@@ -1149,11 +1210,7 @@ fn every_way_the_probe_can_fail_draws_its_own_way_out_and_no_two_are_the_same() 
             Some(Metrics::Silent),
             "Check that its pods are running",
         ),
-        (
-            "denied",
-            Some(Metrics::Denied),
-            "read access to node metrics",
-        ),
+        ("denied", Some(Metrics::Denied), "metrics.k8s.io"),
     ] {
         let cluster = ClusterSnapshot {
             metrics,
@@ -1258,6 +1315,28 @@ fn the_node_section_being_off_takes_the_metrics_row_with_it_however_the_probe_we
                 .iter()
                 .any(|s| s.contains("metrics-server") || s.starts_with("using ")),
             "{name}: no metrics row at all, and no measurement either"
+        );
+    }
+}
+
+#[test]
+fn the_denied_metrics_row_names_the_group_that_is_the_only_thing_telling_the_two_nodes_apart() {
+    // **The one `ask_for` where the resource plural alone misleads** (NOTES § D187). Every other
+    // one names a resource that exists in exactly one group; `nodes` exists in two, the reader
+    // very likely already holds the core one, and the group is the whole of the difference. The
+    // requirement is that a reader can write the Role rule off this line — verb, resource, group —
+    // not that the sentence matches a literal.
+    let cluster = ClusterSnapshot {
+        metrics: Some(Metrics::Denied),
+        ..corpus()
+    };
+    let report = super::capacity(&cluster, &[]);
+    let (_, ask_for) = not_computed(&report)[0];
+    println!("denied → {ask_for}");
+    for token in ["list", "nodes", "metrics.k8s.io"] {
+        assert!(
+            ask_for.contains(token),
+            "the Role rule cannot be written without `{token}`: {ask_for}"
         );
     }
 }

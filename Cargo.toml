@@ -6,11 +6,28 @@ edition = "2024"
 # `time` release that fixes RUSTSEC-2026-0009 needs 1.88 (NOTES § D86).
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
-description = "The Kubernetes TUI in Rust — says what is broken in your cluster and why, in plain English."
+# **It said "The Kubernetes TUI in Rust" until 2026-08-30 and there is no TUI**
+# (NOTES § D193). This is the most public string this project owns — crates.io's
+# front page for everyone who searches "kubernetes tui" — and it was describing
+# Phase 11 while the binary shipped a headless report. What ships today is the
+# report; the console is named as coming, not as here.
+description = "Says what is broken in your Kubernetes cluster and why, in plain English — a single binary that prints a report and exits. The TUI console is coming."
 repository = "https://github.com/murat-akpinar/k8rs"
 keywords = ["kubernetes", "tui", "k8s", "cluster", "terminal"]
 categories = ["command-line-utilities"]
-exclude = ["screens/", "scripts/", "tmp/", "docs/", "NOTES.md", "REQUIREMENTS.md", "todo.md", "CLAUDE.md"]
+# **Working documents do not go on a public registry, and this list was written
+# before three of them existed** (NOTES § D193). Measured 2026-08-30: without the
+# second line the package carried 145 files and 5.2 MiB, including all 40 of
+# `reports/` and the seven files of `.claude/` — agent definitions and a local
+# permission policy naming internal hosts. `tests/` stays in deliberately, so a
+# consumer can run the suite; the fixtures are sanitized captures and are 636K.
+exclude = [
+    "screens/", "scripts/", "tmp/", "docs/",
+    "NOTES.md", "REQUIREMENTS.md", "todo.md", "CLAUDE.md",
+    "reports/", "backlog.md", "PRIOR-ART.md",
+    ".claude/", ".github/", ".gitignore",
+    "justfile", "deny.toml", "cliff.toml", "clippy.toml",
+]
 
 # Dependencies arrive with the step that uses them (invariant 10): k8s-openapi
 # in Phase 3, kube in Phase 5, ratatui/crossterm in Phase 11.
@@ -44,6 +61,17 @@ kube = { version = "4.2.0", default-features = false, features = [
     "client",
     "runtime",
     "rustls-tls",
+    # **`rustls-tls` alone does not make a working TLS client, and dropping this
+    # is what D140's feature list got wrong** ([NOTES § D165](NOTES.md)).
+    # rustls 0.23 has no built-in crypto and panics at `Client::try_from` —
+    # *"Could not automatically determine the process-level CryptoProvider"* —
+    # unless exactly one of `ring` / `aws-lc-rs` is compiled in. It is not a
+    # second TLS backend, which is what D140 meant to keep out; it is the first
+    # one's arithmetic. `ring` and not `aws-lc-rs` because it is kube's own
+    # default and needs no cmake or NASM, which `just cross`'s four targets do
+    # not have. It adds no `[[package]]` to `Cargo.lock`: `ring` was already
+    # resolved there, feature-gated out of the build.
+    "ring",
 ] }
 
 # Required by kube-rs, and later the single `select!` loop. Two features now —
@@ -52,9 +80,28 @@ kube = { version = "4.2.0", default-features = false, features = [
 tokio = { version = "1.53.1", default-features = false, features = [
     "rt-multi-thread",
     "macros",
+    # **`net` moved up from `[dev-dependencies]` when C2 landed**
+    # ([NOTES § D178](NOTES.md)). The comment below said *k8rs itself never binds
+    # a socket*; § THE SERVER'S OWN CERTIFICATE does, because the peer
+    # certificate is only readable off a handshake we drive. Measured with
+    # `cargo tree -e features,no-dev -i tokio`, the feature was **already on in
+    # the release build** — `hyper-util` turns it on under `kube-client` — so this
+    # adds no compiled code and buys the right to write `tokio::net` in our own
+    # file rather than inherit a transitive crate's feature choice.
+    "net",
+    # **`time` for the same reason and in the same change** (NOTES § D178).
+    # C2's handshake is bounded by `tokio::time::timeout` — without the bound, a
+    # middlebox that accepts the socket and never speaks TLS hangs `connect_with`
+    # forever, which `dev-core` proved rather than argued (the test is killed at
+    # 45 s, `exit status: 124`). `cargo tree -e features,no-dev -i tokio` shows
+    # `time` already on under `kube-client`, so this compiles today either way and
+    # adds no code; naming it is what stops a *bound on a security-relevant wait*
+    # from resting on a transitive crate's feature choice.
+    "time",
 ] }
 
-# **The eleventh crate, and the one reversal of invariant 10**
+# **The eleventh crate, and the first reversal of invariant 10** (D178 is the
+# second)
 # ([NOTES § D143](NOTES.md)). Every entry point in `kube-runtime` returns
 # `impl Stream` and `Stream` is not in `std`, so the ten approve a client and
 # nothing that can consume it. This adds no compiled code: `futures-util` is
@@ -64,7 +111,80 @@ futures-util = { version = "0.3.34", default-features = false, features = [
     "std",
 ] }
 
+# **The twelfth crate, and the second reversal of invariant 10**
+# ([NOTES § D178](NOTES.md)). C2 — *the API server's own certificate expires in
+# N days* — is only readable off the peer certificate of a TLS handshake, and
+# `kube` drives its own handshake internally without exposing one. Reading it
+# means driving a second handshake, and driving one needs a connector.
+#
+# **It adds no compiled code**, which is the whole of what made `futures-util`
+# the narrow case D143 allows. Measured, not assumed:
+#
+#     $ cargo tree -i tokio-rustls
+#     tokio-rustls v0.26.4
+#     └── hyper-rustls v0.27.9
+#         └── kube-client v4.2.0 → kube v4.2.0 → k8rs
+#
+# It re-exports `rustls`, so one crate is named rather than two, and the
+# `ClientConfig` it is handed is built by `kube::client::ConfigExt` from the same
+# kubeconfig CA and `accept_invalid_certs` the real client uses (the client
+# identity is deliberately withheld — reading it spawns the `exec` login program
+# a second time, NOTES § D178) —
+# nothing here calls `dangerous()` or installs a verifier, so the security gate's
+# *TLS verification is never disabled by us* holds structurally rather than by
+# review.
+tokio-rustls = { version = "0.26.4", default-features = false }
+
+# **The seventh of the approved twelve to arrive, and the first that is not
+# free** — approved is not the same as present (invariant 10). Counted, not
+# guessed: this section holds `k8s-openapi`, `x509-parser`, `kube`, `tokio`,
+# `futures-util`, `tokio-rustls` and now this one; `serde_json` is still only a
+# `[dev-dependencies]` line because the product reads k8s-openapi's re-export.
+# This is the box that finally needs it:
+# `y` prints an object as YAML, and a Secret's values are masked *before* it is
+# printed. That ordering is the whole reason a crate is named here rather than a
+# text transformation applied to the server's own `Accept: application/yaml`
+# answer: masking by editing YAML text means parsing YAML to find the values,
+# which is the crate again with the failure modes moved into our file. So the
+# object is read as JSON, the values are replaced in the tree, and the tree is
+# serialised once.
+#
+# **Unlike the eleventh and twelfth crates, this one adds compiled code** —
+# measured, `Cargo.lock` goes **213 → 218 packages**: `serde_yaml_ng`,
+# `unsafe-libyaml`, `indexmap`, `hashbrown` and `ryu`. It is named on invariant 10's list, so it
+# needs no reversal, but the list said nothing about its cost and now this line
+# does. `cargo deny check advisories licenses sources bans` is green with it in
+# (2026-08-31).
+#
+# **`unsafe-libyaml` is the name that stops a reader, so it is answered here.**
+# It is a transliteration of libyaml *into Rust*, not a binding to the C library
+# — checked in the vendored source rather than taken from the name: no
+# `build.rs`, no `.c` or `.h` file, no `links` key and no `[build-dependencies]`,
+# so nothing outside the crates.io graph is compiled or linked, which is what
+# `sources ok` above is asserting. It carries `unsafe` blocks and that is real;
+# what bounds the exposure is the *direction* k8rs uses it in. **k8rs never
+# hands this crate a string to parse.** The one YAML a cluster's operator points
+# us at — the kubeconfig — is read by `kube`'s own dependency and never by this
+# one, and no API server answer is YAML: § THE BROWSER'S ROWS asks for JSON and
+# so does everything else. Serialising is the only direction, so a parser
+# advisory is a hazard on a path this build does not have.
+serde_yaml_ng = "0.10.0"
+
 [dev-dependencies]
+# **Named because our test code uses them, not because the build lacked them**
+# ([NOTES § D165](NOTES.md)) — the shape D143 argued for `futures-util`. Measured
+# with `cargo tree -e features -i tokio`: `net` and `io-util` are **already on in
+# every build**, release included, because `hyper-util` turns them on under
+# `kube-client`. So this line adds no compiled code; what it adds is the right to
+# write `tokio::net` in our own file instead of silently inheriting a transitive
+# crate's feature choice, which is a thing that can change under us in a patch
+# release. **`net` is no longer only a test need** — C2 drives a handshake in
+# `k8s.rs`, so it moved up to `[dependencies]` above (NOTES § D178) and what is
+# left here is `io-util`, for the stub API server that exercises § EVERY KIND THE
+# CLUSTER SERVES' legacy fallback — the branch a supported-with-a-note pre-1.27
+# cluster reaches and no other test can (D149, D152 failure 1).
+tokio = { version = "1.53.1", features = ["net", "io-util"] }
+
 # Only the fixture tests parse JSON in Phase 3 — the decode they exercise is
 # `serde` into `k8s_openapi::api::core::v1::Pod`. It moves up to a real
 # dependency in Phase 5, where `k8s.rs` builds the browser's Table request by

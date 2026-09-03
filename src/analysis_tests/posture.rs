@@ -266,7 +266,8 @@ fn one_row_per_host_path_and_the_count_is_pods_and_not_mounts() {
     assert_eq!(paths(&report), vec!["/var/log"]);
     assert_eq!(
         under(&report, "/var/log"),
-        "Read-only, mounted by 1 pod in default.",
+        "Read-only, mounted by 1 pod in default — outside kube-system, so k8rs cannot tell \
+         what it is.",
         "two containers of one pod are one pod that can read it"
     );
 }
@@ -426,7 +427,8 @@ fn a_pod_that_mounts_one_path_both_ways_is_on_alerts_and_not_also_here() {
     assert_eq!(paths(&report), vec!["/var/log"]);
     assert_eq!(
         under(&report, "/var/log"),
-        "Read-only, mounted by 1 pod in default.",
+        "Read-only, mounted by 1 pod in default — outside kube-system, so k8rs cannot tell \
+         what it is.",
         "two containers of one pod are still one pod that can read it"
     );
 
@@ -449,7 +451,8 @@ fn a_pod_that_mounts_one_path_both_ways_is_on_alerts_and_not_also_here() {
     println!("{}", pane(&report));
     assert_eq!(
         under(&report, "/var/log"),
-        "Read-only, mounted by 1 pod in payments.",
+        "Read-only, mounted by 1 pod in payments — outside kube-system, so k8rs cannot tell \
+         what it is.",
         "the pod on both screens is the one that is dropped, and the count says so"
     );
 }
@@ -475,25 +478,37 @@ fn a_row_names_three_namespaces_and_then_counts_the_rest() {
         under(&report, "/var/log").to_string()
     };
 
-    assert_eq!(spread(&["one"]), "Read-only, mounted by 1 pod in one.");
+    // **The namespace clause is the half this test is about**, and it is unchanged by the box
+    // that gave these rows their tail: `healthy-hostpath` copied into `one` runs outside
+    // `kube-system`, so every row here has a pod the check does not clear and the sentence says
+    // so after the list, never inside it.
+    assert_eq!(
+        spread(&["one"]),
+        "Read-only, mounted by 1 pod in one — outside kube-system, so k8rs cannot tell what \
+         it is."
+    );
     assert_eq!(
         spread(&["one", "two"]),
-        "Read-only, mounted by 2 pods in one and two."
+        "Read-only, mounted by 2 pods in one and two. At least one of them is outside \
+         kube-system, so k8rs cannot tell what it is."
     );
     assert_eq!(
         spread(&["one", "two", "three"]),
-        "Read-only, mounted by 3 pods in one, three and two.",
+        "Read-only, mounted by 3 pods in one, three and two. At least one of them is outside \
+         kube-system, so k8rs cannot tell what it is.",
         "three named, in the order `kubectl get -A` prints them and not the order they arrived"
     );
     // The fourth is where the sentence stops naming and starts counting.
     assert_eq!(
         spread(&["one", "two", "three", "four"]),
-        "Read-only, mounted by 4 pods in four, one, three and 1 more.",
+        "Read-only, mounted by 4 pods in four, one, three and 1 more. At least one of them is \
+         outside kube-system, so k8rs cannot tell what it is.",
         "three named, and what is left off is a count and never the total"
     );
     assert_eq!(
         spread(&["one", "two", "three", "four", "five", "six"]),
-        "Read-only, mounted by 6 pods in five, four, one and 3 more."
+        "Read-only, mounted by 6 pods in five, four, one and 3 more. At least one of them is \
+         outside kube-system, so k8rs cannot tell what it is."
     );
     // **A pod with no namespace names none**, rather than an empty `in ` hanging off the
     // sentence. It cannot exist in the API and nothing is invented for one that decoded without.
@@ -511,13 +526,26 @@ fn a_row_names_three_namespaces_and_then_counts_the_rest() {
         },
         &[],
     );
-    assert_eq!(under(&report, "/var/log"), "Read-only, mounted by 1 pod.");
+    assert_eq!(
+        under(&report, "/var/log"),
+        "Read-only, mounted by 1 pod — outside kube-system, so k8rs cannot tell what it is.",
+        "a pod with no namespace is in no namespace, which is not `kube-system` either"
+    );
 }
 
 #[test]
 fn the_widest_path_leads_and_the_rest_follow_by_name() {
-    let report = super::posture(&posture_corpus(), &[]);
+    // **Inside a group**, which on `kube-system-pods.json` + `nodes.json` is the whole pane:
+    // every pod that mounts anything off the node there is a DaemonSet or a mirror pod, so this
+    // is the order the pane has when nothing has to be lifted out of it. The group boundary
+    // itself is the test below.
+    let report = super::posture(&corpus(), &[]);
     println!("{}", pane(&report));
+    assert!(
+        paths(&report).len() > 10 && !paths(&report).contains(&"/var/log"),
+        "the premise: a full pane, and every pod on it clears the check: {:?}",
+        paths(&report)
+    );
     let drawn = paths(&report);
     let counts: Vec<(usize, &str)> = drawn
         .iter()
@@ -548,11 +576,8 @@ fn the_widest_path_leads_and_the_rest_follow_by_name() {
 fn the_opening_paragraph_is_part_of_the_report_and_goes_when_there_is_no_list() {
     // **Without it the pane reads as an accusation**, and every row on it is something the
     // cluster is supposed to have (`screens/analysis.md` § Posture).
-    let report = super::posture(&posture_corpus(), &[]);
-    let Some(Row::Prose(opening)) = report.rows.first() else {
-        panic!("the first line of this pane is read, never selected");
-    };
-    assert!(opening.starts_with("Nothing here is broken."));
+    let report = super::posture(&corpus(), &[]);
+    assert!(opening(&report).starts_with("Nothing here is broken."));
     assert!(
         matches!(report.rows[1], Row::Answer { .. }),
         "and the list starts directly under it"
@@ -722,4 +747,335 @@ fn nothing_on_this_pane_judges_opens_or_badges() {
         );
         assert_eq!(detail.len(), 1, "one paragraph, and it is the sentence");
     }
+}
+
+// --- THE ROW WITH A POD OUTSIDE KUBE-SYSTEM ---
+//
+// **Three claims, and the corpus already holds the shape.** `healthy-hostpath` reads `/var/log`
+// from one pod in `default`: nothing rule 8 escalates, nothing NOTES § D2 sends to Alerts, and —
+// before this box — a row sorted last of fourteen under a paragraph saying network, storage and
+// metrics agents are supposed to do this
+// (`reports/2026-08-22-phase-4-close-cross-family-review.md` § 4). The plants below are the two
+// shapes no capture has: a pod outside `kube-system` on a path pods inside it mount *too*, and
+// one reading a path they write.
+//
+// **None of the sentences asserted below says what such a pod is**, because the check cannot:
+// it reads a namespace and an owner kind, and Rook, Longhorn, Cilium and every CSI node plugin
+// fail it while being exactly the agents this pane is otherwise full of (NOTES § D70).
+
+/// One captured `kube-system` pod with its namespace moved (NOTES § D40) — the field rule 8's
+/// silence turns on, and the only one changed.
+fn moved_out_of_kube_system(name: &str, pods: &mut [PodSnapshot]) {
+    let pod = pods
+        .iter_mut()
+        .find(|pod| pod.id.name.starts_with(name))
+        .unwrap_or_else(|| panic!("the capture runs {name}"));
+    assert_eq!(pod.id.namespace.as_deref(), Some("kube-system"));
+    pod.id.namespace = Some("payments".to_string());
+}
+
+/// The pane's opening paragraph, which is a `Prose` row and never a selectable one.
+fn opening(report: &Report) -> &str {
+    match report.rows.first() {
+        Some(Row::Prose(text)) => text.as_str(),
+        other => panic!("the first line of this pane is read, never selected: {other:?}"),
+    }
+}
+
+#[test]
+fn a_row_with_a_pod_outside_kube_system_leads_the_pane() {
+    // **The row an operator would act on sorts first, and pod count is what buried it**
+    // (`screens/analysis.md` § Posture): a pod the check clears mounts its path on every node it
+    // runs on, so one pod reading one directory loses every tie to them.
+    let mixed = super::posture(&posture_corpus(), &[]);
+    println!("{}", pane(&mixed));
+    let drawn = paths(&mixed);
+    assert_eq!(
+        drawn.first(),
+        Some(&"/var/log"),
+        "the row with a pod outside kube-system leads, whatever the counts beside it: {drawn:?}"
+    );
+
+    // **And nothing else moved**: with that pod gone the rest of the pane is the same list in
+    // the same order, so this is a lift out of one group and not a second sort key.
+    let agents = super::posture(&corpus(), &[]);
+    println!("{}", pane(&agents));
+    assert!(
+        drawn.len() > 10,
+        "a full pane, or the tail below proves nothing: {drawn:?}"
+    );
+    assert_eq!(drawn[1..], paths(&agents)[..], "the tail is untouched");
+    assert_eq!(
+        paths(&agents).first(),
+        Some(&"/lib/modules"),
+        "and the negative: with no such row on it, the widest path leads as it always did"
+    );
+
+    // **A row leaves the group the moment one contributing pod fails the check, whatever else
+    // mounts the same path** — `/lib/modules` is read by eight pods and one is enough — **and two
+    // such rows sort among themselves by the key that has not changed.**
+    let mut pods = posture_corpus().pods;
+    moved_out_of_kube_system("kindnet", &mut pods);
+    let two = super::posture(&ClusterSnapshot { pods, ..corpus() }, &[]);
+    println!("{}", pane(&two));
+    assert_eq!(
+        paths(&two)[..2],
+        ["/lib/modules", "/var/log"],
+        "most widely mounted first inside the group, and both of them above every row the check \
+         cleared: {:?}",
+        paths(&two)
+    );
+}
+
+#[test]
+fn the_opening_paragraph_stops_saying_nothing_is_broken_when_a_pod_runs_outside_kube_system() {
+    // **A pane that opens by saying nothing is broken while holding a row it cannot vouch for is
+    // telling two stories at once** (`screens/analysis.md` § Posture). It is still not an alarm:
+    // NOTES § D2 keeps a plain read-only hostPath off Alerts, and the band and the badge are
+    // asserted unchanged by the sweep below this.
+    //
+    // **The subject is the pod, not the row.** The flag is true when any one contributor fails
+    // the check, so a sentence about *the row* would be false of the pods on it that cleared.
+    let agents = super::posture(&corpus(), &[]);
+    assert_eq!(
+        opening(&agents),
+        "Nothing here is broken. Network, storage and metrics agents are supposed to do this — \
+         the list says who can, not what to go and fix.",
+        "every pod on this pane clears the check, so the sentence is untouched"
+    );
+
+    let mixed = super::posture(&posture_corpus(), &[]);
+    println!("{}", pane(&mixed));
+    assert_eq!(
+        opening(&mixed),
+        "Network, storage and metrics agents are supposed to do this. The top row has a pod \
+         outside kube-system, so k8rs cannot tell what it is. Nothing is marked broken; it still \
+         says who can, not what to go and fix.",
+        "one pod on it runs outside kube-system, and its row is the one at the top"
+    );
+    assert_eq!(
+        mixed
+            .rows
+            .iter()
+            .filter(|row| matches!(row, Row::Prose(_)))
+            .count(),
+        1,
+        "still one paragraph, not one per group"
+    );
+
+    // **It names no proportion on purpose**: an ordinary app namespace has no pods in
+    // `kube-system` at all, so a scoped view is routinely *every* row and the sentence has to
+    // stay true of that render too.
+    let only = super::posture(
+        &ClusterSnapshot {
+            pods: vec![captured_pod("healthy-hostpath")],
+            namespace_scope: Some("default".to_string()),
+            ..corpus()
+        },
+        &[],
+    );
+    println!("{}", pane(&only));
+    assert_eq!(opening(&only), opening(&mixed));
+}
+
+#[test]
+fn a_row_with_a_pod_outside_kube_system_says_so_in_its_own_sentence() {
+    // **The reorder alone is not legible** — *near the top* means nothing to a reader who does
+    // not already know the sort key (`screens/analysis.md` § Posture) — so each of the three
+    // shapes says what the check found, and each is asserted against the row that is the same
+    // shape with every pod behind it cleared.
+    //
+    // **None of them says what the pod *is***, because the check cannot: a pod in
+    // `longhorn-system` fails it and is a node agent (NOTES § D70).
+    let mixed = super::posture(&posture_corpus(), &[]);
+    let agents = super::posture(&corpus(), &[]);
+
+    // Read-only, one pod: the committed capture's own row. The em dash is load-bearing — a
+    // `which` clause would bind to `default` and call the namespace the thing outside
+    // `kube-system`.
+    assert_eq!(
+        under(&mixed, "/var/log"),
+        "Read-only, mounted by 1 pod in default — outside kube-system, so k8rs cannot tell \
+         what it is."
+    );
+
+    // Read-only, several pods, one of them failing the check: eight pods mount `/lib/modules`
+    // and the sentence is *at least one*, which is as much as the check knows and all it claims.
+    let mut pods = posture_corpus().pods;
+    moved_out_of_kube_system("kindnet", &mut pods);
+    let moved = super::posture(&ClusterSnapshot { pods, ..corpus() }, &[]);
+    println!("{}", pane(&moved));
+    assert_eq!(
+        under(&moved, "/lib/modules"),
+        "Read-only, mounted by 8 pods in kube-system and payments. At least one of them is \
+         outside kube-system, so k8rs cannot tell what it is."
+    );
+    assert_eq!(
+        under(&agents, "/lib/modules"),
+        "Read-only, mounted by 8 pods in kube-system.",
+        "and the negative is the same eight pods with none of them moved"
+    );
+
+    // Writable, several pods, one of them a reader the check does not clear: every writer is
+    // still in `kube-system`, and the sentence stops short of claiming every *pod* is.
+    // The plant is the corpus plus one pod in `default` reading a path `kube-system`'s own pods
+    // write — `healthy-hostpath`, with the one field that says which directory changed
+    // (NOTES § D40).
+    let mut reader = captured_pod("healthy-hostpath");
+    assert!(
+        reader.host_path_mounts[0].read_only,
+        "the plant reads: a writable mount on that pod is rule 8's card and never this pane's"
+    );
+    reader.host_path_mounts[0].path = "/run/xtables.lock".to_string();
+    let mut pods = posture_corpus().pods;
+    pods.push(reader);
+    let lock = super::posture(&ClusterSnapshot { pods, ..corpus() }, &[]);
+    println!("{}", pane(&lock));
+    assert_eq!(
+        under(&lock, "/run/xtables.lock"),
+        "Mounted by 9 pods in default and kube-system, and at least one of them can write to \
+         it. The ones that write are in kube-system; not every pod here is."
+    );
+    assert_eq!(
+        under(&agents, "/run/xtables.lock"),
+        "Mounted by 8 pods in kube-system, and at least one of them can write to it. Kubernetes \
+         runs its own node agents this way.",
+        "and the negative is the lock with every pod on it cleared"
+    );
+    assert_eq!(
+        under(&agents, "/var/lib/etcd"),
+        "Mounted by 1 pod in kube-system, which can write to it. Kubernetes runs its own node \
+         agents this way.",
+        "the one-pod writable sentence is untouched, and the test below is why it can be"
+    );
+}
+
+#[test]
+fn every_pod_that_writes_to_a_path_on_this_pane_runs_in_kube_system() {
+    // **A writable, one-pod row outside `kube-system` cannot be built** (`screens/analysis.md`
+    // § Posture): the row's only contributor wrote, so [`super::left_by_rule_8`] let a writable
+    // mount through, which it does only for a pod that clears the check — every other writable
+    // mount is rule 8's card. That is the premise `host_paths` asserts, so it is measured over
+    // every captured mount here rather than reasoned about.
+    //
+    // **The predicate is spelled out here and not called out of `analysis.rs`**: a test that
+    // asked the code what the check is would agree with it by construction. This is the third
+    // spelling of rule 8's clause and the only one outside product code.
+    let cluster = posture_corpus();
+    let writers: Vec<_> = every_mount(&cluster)
+        .into_iter()
+        .filter(|(pod, mount)| !mount.read_only && super::left_by_rule_8(pod, mount))
+        .collect();
+    assert!(
+        writers.len() > 5,
+        "walked {} writable mounts this pane keeps — the corpus stopped carrying them and this \
+         would pass on nothing",
+        writers.len()
+    );
+    for (pod, mount) in &writers {
+        assert!(
+            pod.id.namespace.as_deref() == Some("kube-system")
+                && (pod.mirror || pod.owner.kind == ObjectKind::DaemonSet),
+            "{} writes {} and does not clear the check, so this pane must not have been the \
+             screen it landed on",
+            pod.id.name,
+            mounted_path(mount)
+        );
+    }
+
+    // **The negative, on the one field that decides it**: the same writable mount on a pod that
+    // is not one of them never reaches this pane at all.
+    let mut pods = cluster.pods.clone();
+    moved_out_of_kube_system("kube-proxy", &mut pods);
+    let moved = pods
+        .iter()
+        .find(|pod| pod.id.namespace.as_deref() == Some("payments"))
+        .expect("the plant is the moved pod");
+    let lock = moved
+        .host_path_mounts
+        .iter()
+        .find(|mount| mounted_path(mount) == "/run/xtables.lock")
+        .expect("kube-proxy takes the iptables lock writable");
+    assert!(!lock.read_only && !super::left_by_rule_8(moved, lock));
+}
+
+#[test]
+fn a_row_does_not_change_group_because_some_other_pods_mount_went_to_alerts() {
+    // **A pod rule 8 escalated contributes nothing to this row at all** ([`super::Mounters`]),
+    // and the group is one of the things it contributes nothing to: a pod in `default` *writing*
+    // `/lib/modules` is an Alerts card, and the row the node's own agents read is still theirs.
+    // The alternative is a pane whose opening paragraph is rewritten by a pod that already has a
+    // card on another screen — one object saying two different things (NOTES § D46).
+    //
+    // **The negative is the same path with the same outside namespace and one bit different**:
+    // `a_row_the_nodes_own_agents_did_not_mount_alone_leads_the_pane` moves `kindnet` out of
+    // `kube-system` and `/lib/modules` *does* leave the group, because that pod is on no other
+    // screen. The bit is `read_only`, and it is the whole difference.
+    //
+    // **The plant is `healthy-hostpath` with two fields moved** (NOTES § D40): the directory it
+    // mounts, and the bit that decides which screen it lands on.
+    let mut escalating = captured_pod("healthy-hostpath");
+    assert_eq!(escalating.id.namespace.as_deref(), Some("default"));
+    escalating.host_path_mounts[0].path = "/lib/modules".to_string();
+    escalating.host_path_mounts[0].read_only = false;
+
+    let mut pods = corpus().pods;
+    pods.push(escalating);
+    let cluster = ClusterSnapshot { pods, ..corpus() };
+    assert!(
+        analyze(&cluster)
+            .iter()
+            .any(|f| f.evidence.contains("/lib/modules on the node")),
+        "the premise: rule 8 draws the card, so the pod is answered for somewhere else"
+    );
+
+    let report = super::posture(&cluster, &[]);
+    println!("{}", pane(&report));
+    assert_eq!(
+        under(&report, "/lib/modules"),
+        "Read-only, mounted by 8 pods in kube-system.",
+        "the eight node agents that read it are still the whole of the row"
+    );
+    assert!(
+        opening(&report).starts_with("Nothing here is broken."),
+        "and the pane still opens the way a pane of node agents opens: {}",
+        opening(&report)
+    );
+}
+
+#[test]
+fn the_writable_row_no_producer_can_build_still_has_a_sentence_that_is_true() {
+    // **The one claim on this pane that is not read off a producer, and it says why.** A row that
+    // is writable, single-pod and outside `kube-system` cannot be built — the test above measures
+    // that over every captured mount, and [`super::host_paths`] asserts it — so
+    // [`super::Mounters::sentence`] is called directly here, which is the only way to read the
+    // arm at all.
+    //
+    // **It is worth an arm because the reason it is unreachable is one NOTES § D70 already calls
+    // too narrow.** Widen the `kube-system` clause and this row becomes buildable; an arm that
+    // fell through to the single-pod writable sentence above it would then tell a reader that a
+    // pod in `longhorn-system` is one of the node's own agents, in a release build where the
+    // assertion is compiled out.
+    let row = |outside| {
+        super::Mounters {
+            pods: 1,
+            namespaces: BTreeSet::from(["longhorn-system".to_string()]),
+            writable: true,
+            outside_kube_system: outside,
+        }
+        .sentence()
+    };
+    assert_eq!(
+        row(true),
+        "Mounted by 1 pod in longhorn-system, which can write to it. That pod is outside \
+         kube-system, so k8rs cannot tell what it is.",
+        "it says where the pod runs and then stops, because that is all the check knows"
+    );
+    // **The negative is the same row with the check cleared**, which is the sentence this pane
+    // draws today and the one that would be wrong above.
+    assert_eq!(
+        row(false),
+        "Mounted by 1 pod in longhorn-system, which can write to it. Kubernetes runs its own \
+         node agents this way."
+    );
 }

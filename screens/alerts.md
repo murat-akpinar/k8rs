@@ -774,8 +774,9 @@ The sentence itself is **one string**, wrapped by whoever is drawing it — the
 banner at the content pane's width less its two-column pads (**53 at 80×24**,
 and 43 in the 70-column drawings on these pages, the same two numbers the card
 region has: [How wide a card is, and how tall](#how-wide-a-card-is-and-how-tall)),
-the empty screen's centred block at 34, `--once` at the
-same fixed wrap its findings already use ([once.md](once.md#how-wide-the-report-is-and-why-nothing-in-it-is-cut)).
+the empty screen's centred block at 34, `--once` printing it unfolded, the same
+as it prints its own findings
+([once.md](once.md#why-nothing-in-the-report-is-cut-or-folded)).
 If the console and `--once` ever word this differently, one of them is lying
 about what was checked.
 

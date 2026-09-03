@@ -15,6 +15,25 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # **The one place the toolchain version is written**, and it is a version and
+  # never a channel. This said `toolchain: stable` until 2026-09-03, and
+  # `stable` moved under it twice inside one phase — rustc 1.97.x, then 1.98.0
+  # on 2026-08-27, then 1.98.1 on 2026-09-01. clippy 1.98 extended
+  # `result_large_err` to `async fn`, two functions nobody had touched went red,
+  # and because the dev machine's clippy was 1.97.1 `just check` could not fail
+  # on it: green here, red on every one of ~30 pushes, found at the phase-close
+  # PR. "`just check` is the whole of CI, or it is a lie" — it was a lie, and
+  # `toolchain: stable` is how (NOTES § D211).
+  #
+  # `scripts/toolchain-guard.py` holds this together: it refuses a channel here,
+  # refuses a `dtolnay/rust-toolchain` step that does not read this value, and
+  # refuses a local `rustc` that is not this version. It runs on the runner too,
+  # where it asserts the action actually honoured the pin.
+  #
+  # **TO BUMP:** change this one line, run `just check`, read what the newer
+  # clippy found, fix it, commit. That is the whole procedure and it is manual
+  # on purpose — a new lint arrives when somebody chooses, not on a Tuesday.
+  RUST_TOOLCHAIN: "1.97.1"
 
 jobs:
   check:
@@ -24,7 +43,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
@@ -80,8 +99,16 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+          # **An ARM runner, and the reason is a compiler name.** `ring`'s build
+          # script asks cc-rs for `<arch>-linux-musl-gcc` by that exact name, and
+          # Ubuntu's `musl-tools` ships it for the architecture the package is
+          # built for and no other — measured: amd64 gives
+          # `x86_64-linux-musl-gcc`, arm64 gives `aarch64-linux-musl-gcc`. So
+          # this row builds natively rather than pulling a cross toolchain from
+          # a third-party host, which would put a new hostname in front of the
+          # supply chain for one `cargo check` (NOTES § D211).
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
             os: macos-latest
           - target: aarch64-apple-darwin
@@ -90,11 +117,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ matrix.target }}
+      # **`ring` has a C build script, and that is what broke both musl rows.**
+      # It arrived in the *build graph* on 2026-08-27 when D165 turned kube's
+      # `ring` feature on — not in `Cargo.lock`, where it had been resolved and
+      # feature-gated out for weeks, which is why D165's "adds no `[[package]]`"
+      # measurement was true and still missed this. cc-rs then looked for
+      # `x86_64-linux-musl-gcc` / `aarch64-linux-musl-gcc`, the runner has
+      # neither, and both rows failed in the build script — before link time,
+      # where this job was watching. They were red on every push for seven days
+      # (NOTES § D211).
+      #
+      # Ubuntu's own `musl-tools` is the whole fix and adds no hostname the
+      # runner image does not already trust. The darwin rows need nothing: they
+      # never reach a musl libc.
+      - name: musl C toolchain for ring's build script
+        if: endsWith(matrix.target, '-linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       # Check only, not test: cross-compilation breaks at link time and it
       # breaks late, so it is watched from day one — cheaply.
       - run: cargo check --locked --target ${{ matrix.target }} --all-targets

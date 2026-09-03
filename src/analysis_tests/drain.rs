@@ -1954,6 +1954,34 @@ fn every_node_ready_says_so_in_this_reports_own_words() {
 }
 
 #[test]
+fn a_pod_whose_node_is_gone_lands_on_no_row_and_takes_no_sentence_away() {
+    // **The shape, and the ruling on it** (NOTES § D183): a node deleted while the pods bound to
+    // it still name it. Every row here names a machine and says what a drain would move off it,
+    // so a pod whose machine is gone belongs to no row rather than being missing from one — and
+    // the closing sentence, the one cluster-wide claim this pane makes, is folded from those same
+    // rows and so does not move for it either.
+    let before = super::drain_safety(&nothing_to_drain(), &[]);
+
+    let after = super::drain_safety(&with_a_pod_whose_node_left(nothing_to_drain()), &[]);
+    println!("{}", pane(&after));
+
+    // **No fifth row for the machine that left, and the four it draws are the same four** — read
+    // off the jump, so a row that took the plant's node as an identity is caught here even if it
+    // never printed the name.
+    assert_eq!(drained_nodes(&after), drained_nodes(&before));
+    // **And nothing on any of them moved.** The plant is a bare pod a drain would move and
+    // nothing would restart: charged to a node it gives that node a band and a row of its own,
+    // and charged to nobody it changes nothing (NOTES § D183).
+    assert_eq!(pane(&after), pane(&before));
+    assert!(
+        pane(&after).contains("Every node could be drained right now."),
+        "and the pane those comparisons ran over is the all-clear one, whose sentence has a \
+         cluster for its subject — two `NotComputed` panes would compare equal and assert \
+         nothing (CLAUDE.md § Tests must not lie)"
+    );
+}
+
+#[test]
 fn under_one_namespace_the_whole_pane_is_one_not_computed() {
     // This report says it more loudly than the others: *"18 pods move, node-1 is ok"* is a green
     // light for an operation that then hangs on a pod the report could not see.

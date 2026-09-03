@@ -52,6 +52,14 @@ case "$body" in *scripts/*)
   echo "guards: 'just check' runs a scripts/ guard directly. Move that line into scripts/guards.sh — it is the one list CI runs, and a guard only 'check' knows about never runs on a push" >&2; exit 1 ;; esac
 
 set -x
+# First, because it decides whether anything above it meant anything. `just
+# check` ran fmt, clippy and the tests before reaching this file, and all three
+# are only as good as the toolchain that ran them: CI asked for `toolchain:
+# stable`, stable moved twice in one phase, and clippy 1.98's `result_large_err`
+# was a red push the local gate could not reproduce for seven days
+# (NOTES § D211). On the runner this asserts the action honoured the pin.
+python3 scripts/toolchain-guard.py --self-test
+python3 scripts/toolchain-guard.py
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
 python3 scripts/todo-guard.py --self-test
@@ -98,6 +106,13 @@ bash scripts/cluster.sh --self-test
 # front of it (NOTES § D108). This is that filter, for prose rather than JSON.
 python3 scripts/reports-guard.py --self-test
 python3 scripts/reports-guard.py
+# `rules.rs` is frozen and its constants are private, so `k8s.rs` keeps a second
+# copy of each threshold both layers need — five minutes of clock skew, thirty
+# days of certificate. Each file's tests pin only its own copy, so a re-tune of
+# one is green with the two out of step (measured for `CERT_EXPIRY_WARN`,
+# 2026-08-28: 639 tests pass with `k8s.rs`'s at sixty days).
+python3 scripts/twin-guard.py --self-test
+python3 scripts/twin-guard.py
 # `cargo fmt` reflows code and leaves comments alone, so the 100-column rule was
 # a convention until this ran. rustfmt's own options for it are nightly-only.
 python3 scripts/width-guard.py --self-test

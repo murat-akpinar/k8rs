@@ -146,9 +146,12 @@
 - No kubeconfig / invalid context → clear message on stderr **before**
   entering the TUI + non-zero exit. Panicking inside the TUI is forbidden
   (raw mode corrupts the terminal).
-- API unreachable → clear error at startup; if the connection drops while
-  running, show "disconnected, retrying" in the header — never silently
-  freeze on stale state.
+- API unreachable → **not a startup error**: a banner that says so, retried
+  forever, never an exit. If the connection drops while running, show
+  "disconnected, retrying" in the header — never silently freeze on stale
+  state. This item said "clear error at startup" until 2026-08-27, when the
+  run against a dead port was measured and correctly did not end
+  ([NOTES § D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
 - Insufficient RBAC (403) → say which permission is missing; if the Events
   watch gets 403, only the affected rule (11) is disabled, the app
   keeps running.
@@ -192,7 +195,22 @@
 
 ### Non-functional targets
 
-- Memory: < 50MB RSS at ~1000 pods. First paint < 1s, findings < 3s. **The
+- Memory: < 50MB RSS at ~1000 pods. **Measured 2026-08-28 and not met — 58 752
+  KiB (57.4 MiB) at 1 011 pods, peak and steady the same value; 125 704 KiB at
+  10 011. The figure above stays as written on purpose: do not move it to the
+  measurement, and see
+  [NOTES § D171](NOTES.md#d171--the-resident-set-measured-at-four-sizes-the-budget-it-broke-and-the-ruling-that-the-budget-stays-2026-08-28)
+  before changing this line.** **A heap profile since says where it goes**
+  ([NOTES § D204](NOTES.md#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03)):
+  ~60 % is live heap, ~17 % is the binary and its four shared libraries, and
+  8–10 MB is glibc arena slack a single `arena_max` tunable gives back with no
+  code change. **The store is the cheap part and was the wrong suspect**: a
+  stored pod costs 2 701 bytes — *less* than the 3 708 it arrives in — and both
+  copies the process holds come to 5 729, under 10 % of the resident set. The
+  expensive object is the whole decoded `Pod` the snapshot is pruned out of, at
+  6.43× its pruned form, and kube buffers **500 of them at a time**
+  (`INITIAL_LIST_PAGE`) — 18–24 MB, the largest single term. **The number is
+  stated for one machine**: arena count follows core count. First paint < 1s, findings < 3s. **The
   paint figures hold up to a cluster size Phase 5 measures and then states**;
   the initial LIST has no size-independent bound and nothing may be drawn until
   it lands, so above that size the first paint says what it is still waiting for

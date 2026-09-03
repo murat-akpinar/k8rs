@@ -594,7 +594,15 @@ state, it needs a decision, and a decision goes in `NOTES.md`.
   a new product file would be a silent gap of exactly the kind
   [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21)
   and [D134](NOTES.md#d134--family-c-the-six-reports-the-frozen-file-they-had-to-move-and-the-two-green-lights-a-review-took-away-2026-08-21)
-  are both about. Found by the author, 2026-08-21
+  are both about. Found by the author, 2026-08-21. **The gap stopped being silent
+  on 2026-08-29 and is not otherwise smaller**: `just mutants-diff` now refuses a
+  diff it found no mutants in, so a turn whose only product change is an untracked
+  new `src/*.rs` exits 1 saying *nothing to gate* instead of passing quietly
+  ([D182](NOTES.md#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29)).
+  The refusal's own text tells the reader to check whether the product change is
+  missing from `git diff HEAD`, which is exactly this. Still worth fixing at the
+  source — the reader is being asked to diagnose what the recipe could scope
+  correctly
 - **`scripts/certs-test.sh` has no `--self-test`.** It grew a second check this
   turn — the two files that pin an instant against the committed certificates —
   and its red was proven on scratch copies rather than by a self-test, which every
@@ -1005,8 +1013,10 @@ stop being cheap.***
 
 - **The read-only role's over-grant is the other half of a box that is already
   open.** `docs/security.md` grants cluster-wide `list configmaps` and
-  `list events`; no product code reads either, and the test suite uses `ConfigMap`
-  as its example of *a kind nothing reads*. `list configmaps` cluster-wide is not
+  `list events`. **`list events` stopped being an over-grant on 2026-08-31** —
+  `--describe` reads them (NOTES § D198) — so what is left of this entry is
+  `list configmaps`, which no product code reads and which the test suite still
+  uses as its example of *a kind nothing reads*. `list configmaps` cluster-wide is not
   neutral — they routinely hold what should have been Secrets. Named here only so
   it is not lost: it belongs to **Phase 5's own unchecked `ClusterRole` box**,
   which already carries the under-grant half.
@@ -1163,28 +1173,6 @@ not a phase close.*
   like every other bounded field, or give the cap a second, wider budget for the
   author-written case
 
-- **`scripts/mutants.sh`'s three log scans read `mutants.out` unconditionally, so
-  a run that never got the lock reports another run's numbers.** Reproduced by
-  accident during the re-close review: an invocation that tested **zero** mutants
-  printed *"180 log(s) read"* and *"18 unviable"*, all of them `analysis.rs`, from
-  a sweep another process was running in the same tree. cargo-mutants only rotates
-  its output directory once it holds the lock. **The exit status is unaffected**
-  (`exit $rc`), so nothing has ever passed on this — what it corrupts is the
-  human-readable line the script exists to make trustworthy, which is the whole
-  point of [D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21).
-  **Seen a second way an hour later, which is what makes it a box rather than a
-  curiosity**: `just mutants-diff` over a diff that contains **only** a
-  `#[cfg(test)]` module printed `INFO No mutants to filter` and then thirteen
-  `src/rules.rs` unviables from a shard of the whole-file sweep that had ended
-  twenty minutes earlier. Exit 0 both times. The recipe already refuses an
-  *empty* diff for exactly this reason — nothing to test reads like nothing got
-  past — and does not refuse a diff with **no mutants in it**, which is the same
-  sentence. If boxed: the scans run only when this invocation owned the lock and
-  actually tested something, the stale output directory is cleared or
-  timestamped, and the `--self-test` gains both cases — a run that never held the
-  lock, and a run that held it and tested zero — each of which must print
-  *nothing read*, never a count
-
 ### From the Phase 4 re-close review (2026-08-23)
 
 *Two findings from [`reports/2026-08-23-phase-4-reclose-family-review.md`](reports/2026-08-23-phase-4-reclose-family-review.md)
@@ -1217,6 +1205,900 @@ position the four findings above them are in
   reported. It is in no checked box. If boxed: measure it on a quiet machine
   first and only then decide whether an index earns its complexity — Phase 5's
   store is where a node→pods map would live, not here
+
+### From the capability-probe operator review (2026-08-26)
+
+*Every entry measured against an ephemeral cluster —
+[reports/2026-08-26](reports/2026-08-26-capability-probe-group-strings.md) —
+and ruled in [D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26).*
+
+- **C4 has a capability and no permission, so an empty list would read as
+  *healthy*.** `docs/security.md` omits the `cert-manager.io` grant from
+  `k8rs-readonly` **deliberately**, and the probe answers *present* off the CRDs
+  alone — so on a cluster that really runs cert-manager, C4's every list is a
+  403 over a row the screen was told to draw. `Capability::CertManager`'s doc
+  already says a 403 is the feature's to report; the C4 box has to actually
+  report it rather than render zero findings. C4 has no phase yet, which is why
+  this is here and not a box.
+- **Nothing runs rustdoc, so a doc link rots unseen.** `just check` has no
+  `cargo doc` step, and `RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo
+  doc --no-deps --document-private-items` reports three already broken, all in
+  frozen files: `crate::rules::in_days` (`analysis.rs:3028`),
+  `crate::analysis::capped` (`rules.rs:973`) and `Row::NotComputed`
+  (`rules.rs:1812`). This repo writes more doc comment than code and cites items
+  by path throughout, so it is the one gate whose absence is invisible — and
+  `check-docs.py` covers markdown anchors only. Found while proving the
+  capability probe's own new links resolve, which nothing else would have done.
+  `tester`'s, and forward-only says the three existing ones are not this box's.
+- **`kind delete cluster` was refused four times by the session's permission
+  system**, so the review's teardown went through `docker rm -f
+  <name>-control-plane` plus `kubectl config delete-context/delete-cluster`.
+  Verified clean, and the fixture cluster was untouched — but a measurement
+  brief should say which teardown path is expected rather than leaving the
+  agent to find one under time pressure.
+- **`▲` is `Severity::Warn`'s glyph and the watch-health lines reuse it for a
+  second axis** (2026-08-27). `screens/resources.md:10` draws `ALERTS 3 ● 7 ▲`
+  counting *findings*; the temporary driver's health lines print `▲`/`●` for
+  *tool* health. When `views.rs` lands, either those lines inflate the finding
+  count or one glyph means two things on one screen
+  ([screens/README.md](screens/README.md)). `tui-designer`'s to settle before
+  Phase 11 draws the Alerts header. The terminal `ended` line already took `●`
+  by a PM ruling, which is the severity right but not the axis. Found by the
+  operator review of `connect()`, which also noted the case any reordering must
+  not break: the health lines print *above* the counts and the verdict, and that
+  ordering is what makes `○ nothing is broken` read as qualified rather than
+  asserted while five watches are down.
+- **`ResetTimerBackoff`'s 120-second recovery is not unit-tested** (2026-08-27).
+  `tokio::time::pause`/`advance` need tokio's `test-util` feature, which is not
+  enabled, so `StandingBackoff`'s recovery half rests on kube's own tests plus an
+  assertion that we still delegate to them
+  ([NOTES § D165](NOTES.md#d165--the-two-cargotoml-lines-the-first-client-forced-and-the-one-that-was-a-panic-on-every-machine-2026-08-27)).
+  Refused for now because the operator review **observed the timer firing on a
+  live cluster** — twelve minutes after the plateau, a fresh outage restarted at
+  the bottom of the ladder — so the property is measured even though it is not
+  pinned. One word on the existing `[dev-dependencies] tokio` line if it is ever
+  worth pinning.
+- **`scripts/security-guard.py` has no rule against `src/` binding a socket**
+  (2026-08-27). Nothing in k8rs should ever listen; the existing outbound rule
+  only matches literal hostnames, so the discovery fallback's stub server —
+  `TcpListener::bind("127.0.0.1:0")` with a `format!`-built URL — passes it, and
+  so would a real listener. `tester`'s. Found while proving that stub was
+  allowed to exist.
+
+- **A `403` from a proxy that answers JSON reads as *nothing usable came back***
+  (2026-08-27). Every field of `Status` is `#[serde(default)]`, so any JSON
+  object body deserializes successfully into an all-default `Status` and kube's
+  `with_code` fallback never runs; the HTTP status is then unrecoverable from
+  `kube::Error::Api`, which carries the parsed `Status` and nothing else.
+  Measured through the binary — the same `403` with a `text/plain` body
+  classifies correctly. oauth2-proxy, an auth-annotated ingress and an API
+  gateway all answer JSON. **The only route is a `ClientBuilder::with_layer`
+  above the transport** that rewrites such a response before kube parses it,
+  which no box has claimed and which is machinery, not a fix. Stated in
+  `answer()`'s doc and pinned by a test rather than claimed away
+  ([NOTES § D167](NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
+- **`cargo doc` has three broken intra-doc links and nothing runs it**
+  (2026-08-27). `cargo doc --document-private-items` reports
+  `src/analysis.rs:3028` (`crate::analysis::capped`), `src/rules.rs:973`
+  (`crate::rules::in_days`) and `src/rules.rs:1812` (`Row::NotComputed`). All
+  three are in **frozen** files and all three are pre-existing; `just check` does
+  not run `cargo doc`, which is why they survived. Adding the step is `tester`'s
+  and fixing the links is a [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  question, so the two do not land together. Found by `dev-core` while checking
+  its own new doc links.
+- **A routine `410` watch desync prints *"nothing usable came back"* for a
+  second** (2026-08-27). `watcher.rs:610-622` emits `Err(WatchError(status))` for
+  a stale `resourceVersion` and then re-lists; that `Status` carries
+  `reason: "Expired"` (`kube-core/src/response.rs:390`), which `answer()` matches
+  on neither its code arms nor its reason arms. It clears on the next `InitDone`,
+  so it is a wrong sentence and not a wrong state. Read off the two match arms —
+  producing it needs etcd compaction or watch-cache eviction on demand, which
+  `k8s-admin` could not do.
+- **One credential fault is reported seven times** (2026-08-27). Under a
+  mid-session 401 an operator gets two greeting clauses plus one line per watch,
+  all saying the same thing, and the whole report reprints as each lands — five
+  blocks in the first four seconds, measured. Correct per watch, unreadable as a
+  screen. This is `views.rs`'s header and belongs to Phase 11; named here so it
+  is boxed rather than discovered there.
+- **The Waste pane names a working `ExternalName` Service and tells the operator
+  to delete it** (2026-08-27). `analysis.rs:1798` selects on
+  `!service.selector.is_empty()` and nothing else. A `type: ExternalName` Service
+  with a leftover `spec.selector` is accepted by the API server, the
+  endpointslice controller creates **no slice at all** for it, and the row fires:
+  *"This Service points at nothing. Anything calling it gets a 503. → fix its
+  selector, or delete it"*. Measured on a live cluster through the built binary —
+  `spec.clusterIP` is **empty**, so there is no address for anything to get a 503
+  *from*, and deleting it breaks whatever resolves through the CNAME. This is
+  what a `type:` change from `ClusterIP` leaves behind, which is how it reaches a
+  real cluster. **Not a one-line fix**: `ServiceSnapshot` (`rules.rs:1583`)
+  carries `id` and `selector` only, so it needs `spec.type` on the snapshot plus
+  a prune-line change in **frozen** `rules.rs` — a
+  [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  question and a box of its own. Pre-existing: the filter is byte-identical
+  before and after the join was rewritten.
+- **The Waste join's speedup is not reachable through `--live` yet, so the number
+  that decides a budget has not been taken** (2026-08-27). `k8s.rs:1515` sets
+  `endpoint_slices: None`, so this row is `NotComputed` on a real cluster and all
+  three timing runs went through the file driver. The ordering is right — the
+  join is fixed before the fetch makes it hot — but the measurement worth
+  budgeting against is the one taken *after* the on-demand fetch lands, with
+  watch and prune cost in it
+  ([reports/2026-08-27](reports/2026-08-27-endpoints-behind-join-and-growth.md)).
+- **`endpoints_behind` counts endpoints, which is `pods × address families`**
+  (2026-08-27). Measured on a dual-stack cluster: one Deployment, one replica,
+  `ipFamilyPolicy: RequireDualStack` → two slices (IPv4 and IPv6), and the join
+  returns **2** for one pod. Correct as written and harmless while the only
+  reader is `== 0`, but every slice in `tests/fixtures/endpointslices.json` is
+  IPv4, so the corpus cannot hold the shape, and the first consumer that reads
+  this `usize` as *pods behind the Service* inherits
+  [PRIOR-ART § F2](PRIOR-ART.md#f2--a-number-that-cannot-be-defended).
+- **`scripts/reports-guard.py` classes cluster DNS as a machine hostname**
+  (2026-08-27). It refused a report line containing `*.svc.cluster.local` under
+  "a hostname". A cluster-internal DNS name is never a machine identifier, and
+  any report describing DNS behaviour hits it. `tester`'s. Found by `k8s-admin`
+  writing up the join measurement.
+
+### From the Posture node-infrastructure box and its operator review (2026-08-27)
+
+- **The all-`kube-system` writable sentence still concludes where every other string
+  now reports.** *"Kubernetes runs its own node agents this way"* (`analysis.rs`,
+  `Mounters::sentence`) asserts what a pod *is* from the same narrow check
+  [D168](NOTES.md#d168--posture-sorts-the-row-it-cannot-vouch-for-first-and-says-the-check-instead-of-a-verdict-2026-08-28)
+  rewrote every other sentence to stop doing. It is not wrong today — `left_by_rule_8`
+  guarantees the writer cleared the check — and it is a reassurance rather than an
+  accusation, which is why it was left. Ruled: wrong-and-quiet in
+  [D70](NOTES.md#d70--rule-8-is-narrowed-to-kube-system-and-every-storage-operator-lives-outside-it-2026-08-13)'s
+  sense, sweep it when D70 itself is widened. Raised by `tui-designer`.
+- **The densest Posture detail sentence is now 155 characters where it was 44**, which
+  is five lines at `screens/analysis.md` § Posture's 40-column detail budget, and the
+  section's mockups only draw the three-line case. Nothing wraps yet because `views.rs`
+  does not exist, so nothing is wrong today; it is whoever draws the pane who inherits
+  it. Raised by `tester`.
+- **Nothing in the sidebar points at a pane that now says something is worth a look.**
+  Posture badges nothing, deliberately and for a reason that has not changed
+  ([D127](NOTES.md#d127--the-report-shape-the-test-that-decided-its-fields-and-the-two-panes-it-cannot-express-2026-08-20)),
+  so the box's value only reaches someone already standing on the pane. Raised by
+  `k8s-admin` as a tension, not a finding — a badge is the obvious answer and is the
+  one D127 refused.
+- **D70 fires wrong-and-loud on Alerts too, and this box could not touch it.** With
+  kindnet in `calico-system`, its *writable* mounts (`/etc/cni/net.d`, `/var/run/nri`,
+  half of `/run/xtables.lock`) leave Posture and become rule 8 CRITICAL cards. That is
+  D70's recorded limit on the other screen; it needs `rules.rs`, which is frozen.
+  Measured by `dev-core` while proving the Calico render.
+
+### From the live-fields box and its attack (2026-08-28)
+
+- **C1's card says *"this is the file on your own machine that proves who you are"* about a
+  file the connection may never have touched.** When a kubeconfig's `exec` plugin returns
+  `clientCertificateData`, kube takes the plugin's identity and never calls `identity_pem()`,
+  so `client-certificate` is read by k8rs and by nobody else
+  (`kube-client-4.2.0/src/client/config_ext.rs:391`, measured on the binary by `tester`).
+  Ruled 2026-08-28: **k8rs keeps reading it** — an exec plugin returning a *token* does fall
+  through to `identity_pem`, so the certificate genuinely is the TLS identity there, and a
+  missed expiry is worse than an over-broad card. What is left is the card's *framing*, which
+  is `rules.rs` and frozen. Sweep it with the C-series wording.
+- **A context name has no length bound but `IDENTIFIER`'s 512**, and it is the first object
+  name on a card that is not a Kubernetes object name — the API caps its own at 253, a
+  kubeconfig context is whatever the user's file says. A 304-character name drew a 306-column
+  card line. Control characters are stripped and nothing crashes; it is a `views.rs` question
+  from Phase 8 on. Found by `tester`.
+- **`--context` without `--live` still prints errno jargon about a file nobody named** —
+  `k8rs --context prod` → `k8rs: --context: No such file or directory (os error 2)`, because
+  `run()` filters only `--analysis` out of `paths`. Invariant 14's exact shape, arriving
+  through the door `mistyped`'s own doc says it closed. **Pre-existing** — verified against
+  `git show HEAD:src/main.rs` — and not caused by the live-fields box. Found by `tester`.
+- **The one MISSED mutant on `connect_with`'s `client_certificate` has a route that was
+  refused, not one that does not exist.** An `exec` plugin emitting an ExecCredential with a
+  key generated at test time closes it and commits no key material. Refused 2026-08-28 because
+  it puts `openssl`-on-PATH into `cargo test`, and *`just check` is the whole of CI or it is a
+  lie*. Reopen only if the toolchain requirement stops being one. Found by `tester`.
+
+### From the clock-skew screen spec (2026-08-28)
+
+- **Nothing decides whether a zero severity count is omitted or printed as `0` in the sidebar
+  badge.** The clock-skew mockups first drew `│▸ ALERTS     1 ●    │`; every badge drawn
+  anywhere else in `screens/` is either blank or `3 ● 7 ▲`, so it was a new shape and was
+  re-drawn out of that box on 2026-08-28
+  ([D176](NOTES.md#d176--the-clock-skew-line-does-not-fit-in-the-header-and-the-two-halves-do-not-share-a-sentence-2026-08-28)).
+  It is a `views.rs` question and that file does not exist yet, so it is Phase 10's.
+  **The answer is very likely already fixed by precedent**, and whoever picks this up should
+  start there rather than re-deciding it: `--once` settled the identical question in code —
+  `tally()` emits *only the bands that have something in them* (`src/main.rs:550-566`) — and
+  `screens/once.md`'s own rule is one string, two renderers. A badge that reads `1 ● 0 ▲`
+  would put the two renderers in disagreement on the same fact.
+  **The all-zero case is not this question**: it is already drawn as a different thing entirely
+  (`○ nothing is broken`, the centred pane), which is why the counter is not a fixed-shape
+  template. Found by `tui-designer`, which flagged it against itself.
+
+  > **The `--once` half of this entry was wrong and is deleted.** As first written on
+  > 2026-08-28 it also called `1 critical` an unbacked shape and had the mockups re-drawn to
+  > avoid it. `tally()` had answered that in shipped code for a phase, and the PM ruled on the
+  > `screens/` files without opening `main.rs` — the failure `CLAUDE.md` § *Where a leak would
+  > actually happen* names as *a claim reasoned from a definition instead of measured against
+  > the object*. Both drawn forms are correct; only the badge is open.
+
+### From the clock-skew operator review (2026-08-28)
+
+- **The skew is measured once at connect and never refreshed.** Disclosed in `Session::skew`'s
+  own doc, so it is a known ceiling rather than a surprise, but it cuts both ways: a laptop that
+  starts k8rs in the seconds after resume — before chrony steps the clock — carries a false
+  sentence for the life of the process, and a clock that goes wrong mid-session is never
+  reported. The watches already reconnect, so re-measuring on a reconnect is close to free.
+  It also lands the other half of `screens/states.md § While disconnected`, which requires the
+  pointer and banner to vanish when k8rs is not completing requests — a session-level state that
+  does not exist today, which `dev-core` recorded on the field rather than inventing. A
+  `views.rs` question as much as a `k8s.rs` one, so it waits for the phase that has both.
+  Found by `k8s-admin`
+  ([reports/2026-08-28-clock-skew-date-header.md](reports/2026-08-28-clock-skew-date-header.md) § 5).
+- **`/version` is fetched twice at connect and the two calls can be answered by two different
+  API servers.** Measured on the wire: two requests 7 ms apart, then never again — no polling, so
+  nothing here scales with cluster size. Behind an HA control plane or a round-robin load
+  balancer, though, the version comes from one machine and the clock from another. Ruled
+  2026-08-28: **the second call stays.** Collapsing them means deserialising `Info` here and
+  re-implementing kube's status classification, which is private — and the same review proved
+  that classification load-bearing, since reading a response without it is what let a refusal's
+  `Date` become a clock claim
+  ([D177](NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28)).
+  Reopen if a cluster is ever seen where the two disagree by more than NTP tolerance. Found by
+  `k8s-admin`.
+- **Whether a real TLS-terminating middlebox rewrites `Date` on a 200 is unproven in both
+  directions.** `kubectl proxy` was measured and *copies* the upstream `Date` byte for byte, so
+  a bastion hop does not make the reading a lie, and an SSH tunnel cannot touch it — TLS is end
+  to end. But no nginx/envoy/F5 was available on the review host, and the status check that
+  closes the refusal case does not cover a middlebox rewriting `Date` on a success. What limits
+  the damage is the wording: the sentence names a measured gap and a direction and never a
+  culprit, which stays true whichever clock the header came from. Measure it if one is ever to
+  hand. Found by `k8s-admin`, who named it unproven rather than inferring it.
+
+### From the C2/C3 certificate box (2026-08-28)
+
+- **C2's Certificates-pane row has no phase, because the only file that can draw it is frozen.**
+  `analysis::certificates` is `c1_row` plus `kubelets_waiting_to_join` and has no third source, so
+  the row means changing `analysis.rs`, which froze at Phase 4 close; the snapshot types froze with
+  it and [D124](NOTES.md#d124--the-freeze-forbids-reaching-back-into-finished-logic-and-a-card-the-capture-proves-wrong-is-not-that-2026-08-20)
+  condition 3 refuses a snapshot field for it by name. The *fact* is not lost — it lands on
+  `Session` and `main.rs` spells it — but the pane keeps the gap `screens/analysis.md` already
+  draws. Needs a narrow `analysis.rs` unfreeze in the phase that has a renderer, decided the way
+  D124 decided `rules.rs`'s: bounds first, and named by the box
+  ([D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)).
+  **What the operator review adds to this**: until the row lands, the most catastrophic
+  thing k8rs can detect prints with no `●`, no contribution to the `N critical, N warning`
+  tally and exit code `0` — so anyone piping `k8rs --once` into an alerting path gets no
+  signal for it at all. C1, one file over, is banded `Critical` when expired for a
+  certificate on the reader's own laptop; the *cluster's* is prose. That is the freeze's
+  consequence and not a second ruling, but it is the cost the unfreeze buys back.
+- **The four session calls have no read deadline, and a half-answering cluster hangs k8rs
+  forever with nothing on either stream.** `/version` twice, `/apis` and `/api`, all inside
+  `connect_with`, all unbounded — `Config::read_timeout` defaults to `None`. Measured
+  against a TLS server that completes every handshake, reads the request and answers
+  nothing: `exit=124 elapsed=120.007125650 s`, stdout empty, stderr empty. `PRIOR-ART § A7`
+  one layer down. Not created by the C2/C3 box — that box bounded both calls it added
+  (`SERVING_PROBE`, `REPORT_FETCH`) and the asymmetry inside one file is now what makes the
+  hole visible. `k8s-admin` called it a high-priority box rather than a blocker and the PM
+  agrees; the one-line `tokio::time::timeout` wrapper is already spelled twice in that file
+  ([reports/2026-08-28-c2-c3-against-a-real-api-server.md](reports/2026-08-28-c2-c3-against-a-real-api-server.md) § 4).
+
+### From the typed-lists box and its attack (2026-08-29)
+
+- **Five *not checked* rows name a cause the field cannot know, and two rows beside them
+  already show what the right shape is.** `k8s.rs` § WHAT A REPORT ASKS FOR collapses
+  three different failures into one `None` on purpose — *nobody fetched it*, *this login
+  may not list them*, and *the answer never came* past the deadline — and states that it
+  owes no sentence, so it needs no taxonomy. `analysis.rs` then draws a sentence that
+  picks one of the three and prints it as fact: *"and this login could not read any of
+  them"* (`analysis.rs:1694`, Waste), and the same claim at `:810`, `:1893`, `:2084`
+  and `:2842`. Every one of the five is false on the file-driven path, where there is no
+  login at all — measured by running the binary over `tests/fixtures/*.json`, which
+  prints the Waste paragraph above with the five lists simply never named on argv.
+  **The model to copy is one file over and needs no invention**:
+  `kubelets_waiting_to_join` (`analysis.rs:3233`) draws *"k8rs does not have one"* and
+  its doc comment says exactly why that is the only honest wording —
+  *the field cannot tell them apart, so the sentence says what is missing rather than
+  whose fault it is, and the way out is the one that works either way*. The `ask_for`
+  line is the half that stays right in all three cases and needs no change. **`:821` is
+  the near miss worth keeping in view**: *"k8rs could not read them"* names no login and
+  is nearly right, but *could not read* still asserts an attempt, and on the file path
+  none was made — so the wording that survives every case is `:3233`'s *does not have
+  one*, and that is the one to copy rather than `:821`. **Pre-existing
+  and not the typed-lists box's** — these rows printed identically at HEAD before it and
+  the five fields were `None` on the fixture path both before and after; the box is only
+  what finally got someone to run the panes. `analysis.rs` is frozen (Phase 4), so this
+  is a narrow unfreeze in the phase that has a renderer, bounded the way
+  [D178](NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)
+  bounds the C2 row above — and it is plain-language rule 14 as much as correctness, since
+  the sentence sends a reader to argue with their cluster admin about a permission that
+  was never the problem. Found by `tester`, 2026-08-29.
+
+### From the typed-lists operator review (2026-08-29)
+
+*All six are `k8s-admin`'s, reading the five on-demand report lists as a family
+([D180](NOTES.md#d180--the-box-named-six-lists-and-five-were-real-an-empty-envelope-names-no-kind-and-a-sweep-that-edits-in-place-made-a-reader-measure-a-moving-object-2026-08-29)).
+The box landed with the ceiling named on screen and in its docs; these are the
+things naming it does not fix.*
+
+- **The lists are read once and never again, and four of the five carry status that
+  moves.** The right refresh is *when a user opens the pane* — on demand, which is
+  what the box's own title says and what invariant 6 permits, unlike the periodic
+  LIST it forbids. There is no pane until Phase 10, so the fetch sits on the
+  startup path and `main.rs` states the read time instead. When a pane exists, the
+  re-read belongs to it: `disruptions_allowed`, `current_healthy`,
+  `desired_healthy` and `observed_generation` are rewritten continuously by the
+  disruption controller, and Drain safety's per-node rows already recompute from a
+  streaming pod list beside them. Until then a PDB applied after connect is
+  invisible to a green light drawn in front of a destructive operation
+  ([D46](NOTES.md#d46--nine-fields-the-contract-dropped-and-the-drain-that-does-not-drain-2026-08-12)).
+- **The lists are fetched unpaged, and one of the five is the heaviest read in the
+  product.** `ListParams::default()` sends no `limit`, so each is one whole answer
+  the API server builds, transfers and kube deserializes before `ingest` prunes —
+  body and decoded objects alive at once, and the six run concurrently so the peak
+  is the sum. A ReplicaSet carries the whole pod template and `revisionHistoryLimit`
+  defaults to 10, so 1000 Deployments is up to 10 000 template-carrying objects.
+  Paging to completion — kube's own watcher does it at 500, following the `continue`
+  token — is the same whole answer with a bounded working set, and is what
+  `kubectl get -A` does by default. Needs its own tests for a `continue` loop, which
+  is why it is a box and not a line.
+- **The 10s `REPORT_FETCH` bounds a hang correctly and a large answer incorrectly.**
+  It sits *above* kube's retry ladder — 429/503/504 retried fifteen times, base
+  `5ms × 2^i` with jitter, invisible to us
+  ([D148](NOTES.md#d148--nothing-rate-limits-us-something-retries-us-for-eight-minutes-in-silence-and-the-watch-sockets-have-no-keepalive-2026-08-22))
+  — and the first eleven waits alone sum past ten seconds at the floor. So on a
+  large or throttled cluster the most expensive request k8rs makes is issued, the
+  server does all the work, and the answer is discarded at the deadline; the pane
+  then tells the operator to ask for RBAC they already have. A deadline *each*
+  changes nothing. What would: bound the work (paging, above), or make it a
+  no-progress deadline rather than a total one.
+- **Waste counts a Deployment's rollback history as waste.** `replica_sets_parked_at_zero`
+  counts every ReplicaSet with `spec.replicas == 0`, which is exactly what
+  `revisionHistoryLimit` means and what `kubectl rollout undo` restores from. On any
+  cluster that has rolled anything the row prints a four-figure number under
+  *"Things that cost you something for nothing"* with the detail *"Left behind when
+  deployments moved on."* Two outcomes, both bad: the reader stops believing the
+  Waste pane, or the reader deletes their rollback history. Invisible in testing
+  because a fresh kind cluster has never rolled. `analysis.rs` is frozen, so this is
+  a narrow unfreeze in the phase that has a renderer, and it is invariant 13's
+  second half as much as correctness.
+- **`Store::snapshot` deep-clones five immutable lists on every watch event.** The
+  pattern predates this box — pods, nodes and workloads are cloned on the same line
+  — but these five never change after connect, so it is a constant cloned per event,
+  and on a real cluster it is the larger volume. Belongs in the 10 000-pod
+  measurement rather than as a fix on its own, so the reading is understood when it
+  comes in.
+- **Services and EndpointSlices are fetched together but not pinned to one
+  `resourceVersion`.** They are two independent LISTs under `join!`, so a Service
+  created in the window — or one whose slice the controller has not written yet —
+  appears in one and not the other, and the row that reads the pair is
+  `Severity::Critical`. Consistent to within milliseconds today; combined with the
+  no-refresh entry above, a millisecond race becomes a row that stays for the
+  session. `endpoint_slices`' doc already says the pairing is the report's to
+  enforce; what it does not say is that *fetched together* is not *consistent*.
+
+### From the metrics-poll operator review (2026-08-29)
+
+- **`Read(∅)` renders byte-identically to a healthy cluster, which reverses a
+  `PRIOR-ART § C2` item this repo marks *covered*.** `analysis.rs`'s `live_usage_row`
+  returns `None` for `Some(Metrics::Read(_))` without looking inside the map, so an
+  answered-but-empty reading draws no `using` line, no row and no sentence — the same
+  screen a cluster with usage on every node would draw, and the same screen as *not
+  loaded yet*. C2 is tagged covered on the strength of *"three states, not two:
+  loading · empty · denied"*; here empty and answered are one screen. Measured that
+  the shape is real and passes the strict decode:
+  `{"kind":"PodMetricsList","apiVersion":"metrics.k8s.io/v1beta1","metadata":{},"items":[]}`.
+  It matters most in the window right after somebody installs metrics-server, which
+  serves an empty list before its first scrape. `analysis.rs` is frozen; no test feeds
+  it either.
+- **k8rs and `kubectl top` print different numbers for the same node in the same
+  minute.** k8rs drew `1Gi` where `kubectl top nodes` drew `1083Mi` — `bytes()`
+  computes its one decimal as 0 at the Gi boundary and `trimmed` drops it. The
+  operator's own cross-check is the thing that disagrees, which is worse than being
+  imprecise. `rules.rs` frozen.
+- **The Capacity line puts an averaged sample beside a declared reservation, in one
+  visual frame, with different denominators.** `k8rs-control-plane 0.95 of 12 cpu ·
+  290Mi of 23.1Gi` / `using 0.077 cpu and 1Gi`: `290Mi` is the sum of pod *requests*,
+  `1Gi` is the *whole node* including kubelet, containerd and page cache — a newcomer
+  reads *we promised 290Mi and we're using 1Gi* and concludes the requests are four
+  times too low. And `using 0.077` beside `0.95 of 12` invites *cut the requests by
+  twelve*, off a 10–20s average sampled once per 30s, which can describe an interval
+  that ended ~50s ago. Requests exist to survive the peak. `window` and `timestamp`
+  are deliberately not decoded, so the screen could not say so even if it wanted to
+  — which is the box to open, not the field to add on its own.
+- **The equivalent command for the command log is not `kubectl top nodes`.**
+  `screens/analysis.md` § Live usage says `$ kubectl top nodes` appears in the command
+  log only if k8rs actually called it (invariant 4) — k8rs never will. Measured with
+  `-v=6`: `kubectl top nodes` sends four requests (`/api`, `/apis`, the metrics list,
+  and `/api/v1/nodes`); `node_usage` sends one. The honest line is
+  `kubectl get --raw /apis/metrics.k8s.io/v1beta1/nodes`. Nothing lies today because
+  no command log exists; decide it before Phase 12 writes the wrong one.
+- **`Silent`'s first move is right for the cause that was measured and wrong for the
+  commonest managed-cluster one.** *"metrics-server is installed here but did not
+  answer" → "Check that its pods are running"* fits a pod restart (the 61× 503 that
+  was measured). On a managed control plane that cannot reach the backend port,
+  `kubectl -n kube-system get pods` shows Running and the advice dead-ends; it is also
+  wrong for a 401. The one read that discriminates all of them is
+  `kubectl get apiservice v1beta1.metrics.k8s.io`. Same class, all four sentences:
+  they name the **product** for a state read off the **group**, and `metrics.k8s.io`
+  is also served by prometheus-adapter and by control planes with no visible pod.
+  `screens/analysis.md` is `tui-designer`'s and `analysis.rs` is frozen.
+- **Under `--analysis` the poll alone reprints the whole report twice a minute
+  forever.** Two consecutive 252-line reports 30s apart differed only in
+  `using 0.03 cpu and 534.4Mi` → `534.3Mi` and `0.014` → `0.013`. Invariant 7 is not
+  broken — a poll is not an FPS and the box authorised it — but *block when idle* stops
+  being true in practice under that flag, and the last digit is noise the sample does
+  not support. Belongs with whichever box first makes the renderer decide what counts
+  as a change.
+
+### From the metrics-server box and its attack (2026-08-29)
+
+- **`main.rs`'s `if analysis { watches.push(node_usage_poll(…)) }` has no test, and
+  the mutant that would prove it hangs instead of failing.** Deleting the gate keeps
+  the suite green; forcing it on makes two `main_tests.rs` tests run past 60s,
+  because a real watch never ends — so under `just check` that mutation is a CI run
+  that never returns rather than a red build. The behaviour *is* right, measured on
+  the binary against a logging listener: **0 metrics requests without `--analysis`,
+  1 with it against a 404, and 3 in 75 s against a 500 (t=0, 30, 60)** — which also
+  proves the 30s interval, the immediate first tick, and the security gate's *never
+  retries in a loop* end to end. What is missing is a test, and closing it needs a
+  stub server that today lives only in `k8s_tests.rs`: two `#[path]` children of
+  different product files with no module between them, so it is a decision about
+  test-file structure under invariant 11 rather than a line
+  ([D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)).
+  Found by `tester`, 2026-08-29.
+- **Two doc sentences went stale the moment the poll landed, and both are in files
+  this box may not write.** `analysis.rs`'s `live_usage_row` says the fifth wording
+  is *"the only one that happens"* until Phase 5's poll lands — it has landed, and
+  `Metrics: None` now means only *this run passed no `--analysis`*. `screens/analysis.md`
+  says k8rs *"has not asked (every cluster, through the whole of Phase 4…)"* — same
+  staleness, and that file is `tui-designer`'s. Neither is wrong about the code as it
+  was; both describe a world that ended this morning.
+- **The `Denied` wording does not name the verb and resource, and the object now
+  proves it could.** `screens/analysis.md`'s refusal reads *"Ask for read access to
+  node metrics"* — a deliberate plain-language choice, not a regression. But the
+  security gate asks a 403 to name the missing verb + resource, and the measured
+  `Status` for this refusal carries `details: {"group":"metrics.k8s.io","kind":"nodes"}`
+  **populated** — the exact opposite of the `nonResourceURL` refusal that had an empty
+  `details` and forced a path-shaped sentence
+  ([D160](NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+  So the two halves can both be had here, and the screen spec is where that is decided.
+- **27 `PodMetrics` items carry 28 containers, so a per-item reader under-counts.**
+  Measured on the live cluster: one pod has two containers, and 12 of the 28 report
+  `cpu: "0"` with no suffix at all. Not this box — `Metrics::Read` is keyed by node
+  and PodMetrics is out of scope — but it is the shape the first pod-level consumer
+  will get wrong, and `metrics_saying` in `analysis.rs` has two call sites and neither
+  feeds a bare suffix today.
+
+### From the mutation-gate box (2026-08-29)
+
+*One finding from the box that fixed the stale-report defect
+([D182](NOTES.md#d182--the-gate-reports-a-run-it-did-not-make-and-stated-not-failed-was-written-about-the-wrong-caller-2026-08-29)).
+It is in `src/`, which `tester` may not write, and it is not a defect in that box.*
+
+- **`src/k8s_tests.rs`'s stalled-handshake test asserts a bound five times tighter
+  than the property it is testing, and it is flaky in CI.**
+  `a_server_that_accepts_and_never_speaks_does_not_hold_the_probe_open` asserts
+  `waited < deadline * 4` — 800 ms — while the property it exists to prove is *one
+  deadline around the loop, not twenty around each handshake*, whose discriminating
+  boundary is `20 x 200 ms = 4 s`. Measured 2026-08-29: **1 failure in 5 isolated
+  runs**, observed at 1.046 s inside `just check` and 963 ms on an idle re-run, both
+  four times under the boundary the design property actually needs — so the property
+  held on every run that went red. A gate that is red for nothing is one people learn
+  to wave through, which is the justfile's own argument for why `just check` is CI.
+  `dev-core`'s file. Found by `tester`, 2026-08-29.
+  **Re-measured independently 2026-08-29** during the box below: 1 red in 4 full
+  `just check` runs at 956 ms, and 8 isolated runs at 296–608 ms (median ~430 ms).
+  **Every number in this entry is now suspect and the entry must be re-measured
+  before it becomes a box.** Both measurements were taken while 32 orphaned busy
+  loops from a load generator were spinning on this machine (load average 33.7,
+  found and killed 2026-08-30) — so the *isolated* runs were not isolated, and
+  whether this test is flaky on a quiet machine is unknown
+  ([D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)).
+
+### From the pod-whose-node-left box and its two reviews (2026-08-29)
+
+*Three findings from the box that ruled on a pod naming a node the snapshot does
+not have ([D183](NOTES.md#d183--a-pod-can-name-a-node-that-is-gone-and-every-per-node-row-is-right-to-be-silent-about-it-2026-08-29)).
+None is a defect in that box; the two that were are fixed in it. The first is the
+one that changes a number a user reads.*
+
+- **A pod with no `containerStatuses` is counted as *capped* in both dimensions,
+  so Capacity's limits row cannot see the pods most likely to have no limits.**
+  [`capped`](src/analysis.rs) is `of_pod(pod).is_some() || pod.containers.iter().all(...)`
+  and `all` over an empty list is `true`; `PodSnapshot::containers` is built from
+  `status.containerStatuses`, never from the spec. Measured 2026-08-29 against
+  committed captures: `pending`, `unstarted` and `unjudged` — three fixtures whose
+  whole purpose is *no limits* — each move the row by **zero**, while `image`
+  (Pending, one status) does count, so it is not *all Pending pods*. The behaviour
+  is deliberate and documented (`analysis.rs:677`: a pod nobody has looked at is
+  left out rather than guessed at), and a real scale-down was measured taking the
+  row `8 workloads` → `7` for the same reason. **What has never been ruled is what
+  the row should say about a pod whose declarations the snapshot cannot see** —
+  count it, exclude it, or say how many were not readable. A ruling, not a fix,
+  and it changes a user-visible count. `dev-core`'s file. Found by `tester`, and
+  the scale-down half by `k8s-admin`, 2026-08-29
+- **Drain safety's all-clear sentence is cluster-wide but is folded from per-node
+  lines, so it can be false rather than merely incomplete.** *"Nothing on **this
+  cluster** … was started by hand, and nothing on it keeps its own files"*
+  (`analysis.rs:773`) comes from `all_clear` over `snapshot.nodes`, each line
+  through `pods_on`. Measured 2026-08-29: it printed while two pods ran on a
+  machine that had left. A bare hand-started pod with an `emptyDir` on a
+  just-removed node makes it false for the ~50 s window. D183 states the carve-out
+  and declines a row for it — the open question is whether the *sentence* should
+  be narrowed to the nodes it actually read. `dev-core`'s file. Found by
+  `k8s-admin`, 2026-08-29
+- **Three intra-doc links have been unresolved for some time and no gate sees
+  them.** `crate::rules::in_days` (`analysis.rs:3182`), `crate::analysis::capped`
+  (`rules.rs:973`), `Row::NotComputed` (`rules.rs:1812`). `just check` runs clippy
+  and not rustdoc, so `cargo doc --no-deps --document-private-items` is the only
+  thing that reports them — which is either a one-line addition to `just check` or
+  a decision that rustdoc is not a gate. `tester`'s call on the gate, `dev-core`'s
+  on the links. Found by `dev-core`, 2026-08-29
+
+### From the namespace-scoping box and its two reviews (2026-08-30)
+
+*Findings from the box that gave a namespace-scoped login a working tool
+([D184](NOTES.md#d184--the-namespace-box-what-a-real-restricted-role-took-away-and-the-eight-rulings-it-forced-2026-08-30)).
+The blocker and seven rulings were fixed inside it; these are what is left.
+The two `screens/` entries are `tui-designer`'s and were found by measurement
+against a real restricted role.*
+
+- **`screens/states.md:451` claims a namespace the tool cannot know it is
+  showing.** It draws *"k8rs is showing the namespace **your kubeconfig points
+  at**: payments"*, which is false whenever the context names no namespace and
+  k8rs fell back — the ordinary platform-issued kubeconfig. `scoped_because`'s
+  doc explicitly declines to make that claim, so the code is right and the screen
+  is wrong. Three states need separating and only one is drawn: the user **asked**
+  with `--namespace`, k8rs **narrowed** after a refusal, and — new with this box —
+  the fallback was **refused too**. `tui-designer`'s. Found by `k8s-admin`,
+  2026-08-30
+- **`screens/once.md` says the header is the only place the cause shows.** As
+  shipped the header names *which* namespace and stderr carries *why*, and only on
+  the refused arm — a run the user scoped explicitly says nothing, because they
+  already know. The rule *stdout is the findings, stderr is the connection's
+  story* is right for `--once` (`k8rs --once > findings.txt` must not collect
+  connection prose), so the sentence in `once.md` is what has to move.
+  `tui-designer`'s. Found by `tester`, 2026-08-30
+- **`screens/once.md` never draws a header whose node count cannot be read.** It
+  only ever shows `ns: payments · 12 pods · 3 nodes`, which cannot happen for a
+  403-fallback user, because `nodes` is cluster-scoped and no namespaced `Role`
+  can grant it. The code now blanks the vital rather than guessing a zero
+  (D184, ruling 2); the screen file has no drawing of that state, nor of the
+  cluster-wide reader with no node permission, which has no `ns:` fragment and no
+  trailer line at all. `tui-designer`'s. Found by `k8s-admin`, 2026-08-30
+- **A `Role` with `get` but not `list`, and a context naming a namespace that
+  does not exist, both reach the same screen as a refusal.** Measured; the health
+  claim is now suppressed for all of them (D184), but nothing distinguishes *you
+  may not read this* from *there is nothing here* in the sentence the reader gets.
+  A ruling, not a fix. Found by `k8s-admin`, 2026-08-30
+
+### From the namespace box's owed test and its two reviews (2026-08-30)
+
+*Both need a field on a type frozen at an earlier phase close, so both are a
+recorded reversal and a later box rather than a dev round
+([D186](NOTES.md#d186--a-done-when-written-from-a-measurement-its-own-commit-had-already-invalidated-and-the-two-findings-that-outlived-it-2026-08-30)).*
+
+- **`analysis.rs` reads an empty node list as a *permission fact*, and `main.rs`
+  reads the same fact off `Trouble::listed`.** Three panes turn
+  `snapshot.nodes.is_empty()` into a sentence about the reader's RBAC —
+  `analysis.rs:410` *"needs permission to list nodes, and this login does not
+  have it"*, `:808`, `:2837` — while `main.rs:933` derives it from
+  `!input.unreadable.contains(kind)`, which is the real answer.
+  `ClusterSnapshot` carries no field naming a kind whose list could not be read,
+  so `analysis.rs` structurally cannot know and guesses. **Measured on the
+  file-driven path, where there is no login at all:**
+  `k8rs --analysis tests/fixtures/crashloop.json` prints `1 pod · 0 nodes` and
+  then *"this login cannot list the nodes"* three lines below. `[versions]` on
+  the same run gets it right, because it keys on `server_version: None` rather
+  than on emptiness. **This box made it reachable live**: `Fault::standing` opens
+  the gate for `Expired` and `Gone` as well as `Refused`, so a stale EKS/GKE
+  token now draws panes — the top of the report correctly names the renewal
+  program and `[capacity]` below tells the reader to ask for RBAC they already
+  have. [PRIOR-ART § C1](PRIOR-ART.md#c-errors-that-lie) by name. For a genuine
+  403 the pane is correct, so the Authorization row is not violated; the
+  wrong-reason cases are 401 and 404. The fix is a field on `ClusterSnapshot`,
+  frozen at Phase 4 close. Found by `k8s-admin`, 2026-08-30
+- **A stale vital keeps its count and never says how old it is.**
+  `main.rs:339` cites `screens/widgets.md` § 1a as its authority and quotes it as
+  *"stale vitals stay visible"*; the file says *"stay visible **and say how old
+  they are** (`nodes 3/3 (40s ago)`)"*. The header implements the first half.
+  On a real cluster a refused-after-listing pod watch reads `84 pods` and keeps
+  reading `84 pods` for the life of the process — `live_report` only prints on
+  change, so once the refusal is standing nothing reprints at all, and the ▲ line
+  above is the sole staleness marker. It is gone the moment somebody quotes the
+  tail of a `--once` output into a ticket. The data exists
+  (`Watch::last_progress`) but `Trouble` does not carry it, so this is a `k8s.rs`
+  shape question; `screens/once.md` does not draw the state at all, which makes it
+  `tui-designer`'s first. Found by `k8s-admin`, 2026-08-30
+
+- **The API's own error body reaches stdout as if the container had written
+  it.** `--previous` on a crashlooper whose previous log the runtime has already
+  collected returns HTTP 200 with `unable to retrieve container logs for
+  containerd://<id>` as the body, so `arrived` becomes true and even
+  `nothing_written` stays silent. **`kubectl` does exactly the same**, so this
+  is not a divergence and not a defect in the box — it is the product's stated
+  reason to exist ([invariant 14](CLAUDE.md)) declining to fire on the one
+  sentence a beginner who pressed `⇧p` will read as their own application's
+  output. Needs a screen decision before a code one, so it is `tui-designer`'s
+  first and `screens/detail.md` does not cover it. Found by `k8s-admin` against
+  a live cluster, 2026-08-30
+  ([reports/2026-08-30-the-log-stream-against-a-cluster.md](reports/2026-08-30-the-log-stream-against-a-cluster.md) § 7)
+
+- **The teaching line lands before the read on `--yaml` and after it on `--logs`
+  and `--describe`, so a mistyped name teaches the command on one verb and
+  nothing on the other two.** Measured on a live cluster, 2026-08-31: `--yaml`
+  prints `$ kubectl get …` and *then* 404s, which is the more useful of the two
+  because a 404 is exactly when a beginner wants the command; `--logs` set the
+  other precedent and `--describe` matched it. Both are defensible, which is why
+  this is a ruling and not a defect — and why it is here rather than in the box:
+  making them agree edits a **landed** box's behaviour and its tests. **The same
+  entry carries its second half**: no verb puts `--context` on the printed line,
+  so a reader who ran with `--context prod` and pastes it hits their current
+  context instead. Pre-existing on `--logs`; this family tripled the number of
+  verbs that print one, which is what makes it worth a line
+  ([reports/2026-08-31-describe-and-yaml-against-a-cluster.md](reports/2026-08-31-describe-and-yaml-against-a-cluster.md) § 12)
+
+- **What `--describe` still does not say, ranked, and each item needs a decode
+  that does not exist yet.** The three cheap ones — a terminated container's
+  reason and exit code, a waiting container's reason, and the pod's own
+  `status.reason` — were fixed in the box (NOTES § D198). These four were not,
+  because each needs a field added to a snapshot type rather than a field already
+  decoded being printed: the **node** the pod is on, the **image** a container
+  runs, the last run's **`finishedAt`**, and **`status.message`** — which for
+  `broken-evicted` is the entire sentence *"Pod ephemeral local storage usage
+  exceeds the total limit of containers 8Mi"* and is deliberately absent from the
+  snapshot per [D155](NOTES.md#d155--a-whole-project-review-found-two-boxes-checked-over-work-their-own-text-does-not-describe-2026-08-22).
+  Ranked in that order by what would have changed a diagnosis at 3am
+  ([reports/2026-08-31-describe-and-yaml-against-a-cluster.md](reports/2026-08-31-describe-and-yaml-against-a-cluster.md) § 4)
+
+- **`main_tests.rs` is 7 700 lines and invariant 11 already says what to do about
+  it.** The file splits into `src/main_tests/` with one `#[path]` module per
+  `// --- … START ---` region of `main.rs`, exactly as `rules_tests.rs` did on
+  2026-08-15 ([D91](NOTES.md#d91--the-tests-split-and-the-product-file-does-not-2026-08-15)).
+  **Refused during Phase 6 family 2, deliberately**: a 7 000-line mechanical move
+  landing in the same commit as a security-relevant redaction path is how a defect
+  hides. It is a convention the invariant already mandates, not a judgement call,
+  so it needs no ruling — only a turn of its own with nothing else in it.
+
+- **`insecure-skip-tls-verify` is honoured and shown nowhere, and no headless
+  surface has an equivalent.** Measured 2026-08-31 on the fixture cluster: one
+  kubeconfig with the CA dropped and the flag set produced output **byte-identical**
+  to the verified run — `k8rs: watching — server v1.36.1 · 62 kinds …`, same 41
+  pods, same 4 nodes — and `grep -rn "\.insecure\b" src/*.rs` outside the tests
+  returns nothing. The flag is carried on a context-picker row
+  ([D174](NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28))
+  that Phase 11 has not drawn. **The security gate's row is *honoured and
+  surfaced*, and it is the one no script can check** — so it has been passing by
+  hand on a half that does not exist. The answer is a screen decision before a
+  Rust one (what `--once`, `--describe` and `--yaml` say about a connection whose
+  certificate was not verified), so it is `tui-designer`'s first
+  ([reports/2026-08-31-one-transformation-on-a-string-operator-review.md](reports/2026-08-31-one-transformation-on-a-string-operator-review.md) § 6)
+
+- **`Happened::cut` can be true with nothing cut.** `cut` is
+  `continue_.is_some()`, and measured against the fixture cluster a token comes
+  back whenever the page **exactly fills** the limit and the collection has more
+  keys, whether or not any of them match the selector: `limit=2 items=2
+  continue=yes`, `limit=4 items=4 continue=yes` (the object has exactly 4 events),
+  `limit=6 items=4 continue=no`. So an object with exactly `EVENTS_KEPT` events
+  prints *"there are more, and these are not the newest"* over a complete list —
+  a heading that is a claim, and false. A nit today: the busiest object measured
+  has 8 events, because the kubelet aggregates repeats into `count`
+  ([D199](NOTES.md#d199--one-objects-own-story-the-flag-that-exists-so-a-redaction-has-a-caller-and-the-bound-that-costs-a-claim-2026-08-31)).
+  Worth knowing before Phase 11's events tab reuses the fetch
+  ([reports/2026-08-31-one-transformation-on-a-string-operator-review.md](reports/2026-08-31-one-transformation-on-a-string-operator-review.md) § 8)
+
+- **The file path and the cluster path print different lines for the same
+  object, and no test says so.** `k8s::text` **substitutes** a space for an
+  unprintable whitespace character ([D146](NOTES.md#d146--the-ingest-guard-two-bounds-off-a-census-a-visible-marker-and-the-newline-a-real-kubelet-sent-2026-08-22));
+  `main.rs`'s `sanitize` **removes** it. A controller message reading
+  `secret "prod" not found\nand a second line` comes out of the fixture path as
+  `…not foundand a second line` — the exact gluing D146 gives as its reason for
+  substituting. The disposal difference is documented on both functions, so this
+  is a named divergence rather than a contradiction; what is missing is that
+  nothing pins it, and it disappears on its own when `sanitize` does at Phase 12
+  ([reports/2026-08-31-one-transformation-on-a-string-operator-review.md](reports/2026-08-31-one-transformation-on-a-string-operator-review.md) § 5)
+
+- **`(unnamed)` covers a name that strips to *empty*, not one that draws
+  blank, and `screens/context.md` says the wider thing.** `drawable`'s
+  `is_empty()` is a byte test, while `text` keeps a single space and `U+00A0`
+  on purpose (`k8s.rs:242`, *"U+00A0 is a space that is visible as one"*). So
+  `current-context: " "` measures `name Some(" ") · current true` in both
+  readers — they agree, so this is not
+  [D202](NOTES.md#d202--the-three-context-rows-nothing-draws-yet-and-the-placeholder-that-is-allowed-to-collide-2026-09-02)'s
+  disagreement — and the row draws a blank name slot beside `(current)` with no
+  placeholder, which is the picture `screens/context.md` calls the defect. Same
+  predicate one column over: `tag: " "` is `Tag::Written(" ")` and not `Blank`.
+  Pre-existing and untouched by D202's change; the blast radius is `namespace`,
+  `tag` and `renewal` too, which is why it was not widened into that box. **The
+  ruling owed is whether the placeholder's subject is "strips to empty" or
+  "draws nothing"**, and the second costs a width-aware predicate rather than
+  `is_empty()`. k9s has been bitten by the space-in-a-context-name class before
+  ([PRIOR-ART § B1](PRIOR-ART.md#b1--kubeconfig-is-harder-than-it-looks), k9s
+  [#3815](https://github.com/derailed/k9s/issues/3815))
+  ([reports/2026-09-02-drawable-and-the-blank-looking-context-name.md](reports/2026-09-02-drawable-and-the-blank-looking-context-name.md) § 3)
+
+- **The live path tells the reader five times that nothing is arriving and
+  never tells them what to do.** A kubeconfig pointed at an unreachable address
+  fails on the first request, not at connect, so `--live` prints one
+  `▲ k8rs is not getting <kind> from this cluster …` banner per watched kind —
+  five of them, forever — with no `What k8rs asked for:`, no `What happened:`
+  and **no next action**. The reachability advice exists only on the `--once`
+  path (`main.rs:3135` inside `pods_unread`, `:3206` inside `too_slow`), both
+  behind the `--once` budget. So the operator who forgot the VPN gets a typed,
+  correctly-worded error with the errand missing — `PRIOR-ART § C1`'s shape
+  ([PRIOR-ART § C1](PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error)).
+  Pre-existing; `screens/states.md` was corrected to stop claiming `pods_unread`
+  covers the TUI, but the product gap is untouched and needs a ruling on what a
+  live banner owes a reader
+  ([reports/2026-09-02-startup-failure-screens-operator-review.md](reports/2026-09-02-startup-failure-screens-operator-review.md) § 2)
+
+- **`main.rs:789`'s doc comment still says the clock sentence is "re-wrapped"
+  for `--once`, which [D201](NOTES.md#d201--the-report-does-not-wrap-and-the-screen-loses-the-section-that-said-it-does-2026-08-31)
+  falsified.** The report does not fold, so the strings arrive unwrapped. It is
+  one line in a file the PM may not write; `screens/` and `NOTES.md` were both
+  corrected in the same turn. **Family 4's boxes are all in `main.rs`** — it
+  rides along there rather than costing a dispatch of its own
+  ([reports/2026-09-02-startup-failure-screens-operator-review.md](reports/2026-09-02-startup-failure-screens-operator-review.md) § 5)
+
+- **The three collapsed kubeconfig failures throw away the path they know.**
+  `Fault::Kubeconfig` covers *no file*, *unreadable* and *not valid YAML* and
+  carries no string by design (`k8s.rs:756`), but kube's `ReadConfig` variant
+  holds **the path and the io reason**. *Which file did you try* is the most
+  useful next action for all three, and `KUBECONFIG` may hold several
+  colon-separated paths kube merges — the deleted fiction promised exactly that
+  (`Looked in: $KUBECONFIG (unset), ~/.kube/config`). Needs a ruling on whether
+  `Fault` should carry it
+  ([reports/2026-09-02-startup-failure-screens-operator-review.md](reports/2026-09-02-startup-failure-screens-operator-review.md) § 3)
+
+- **A 403 has the identical gap `cannot reach the cluster` had, and two screens
+  still describe it as a modal.** `unreadable()` (`main.rs:2353-2377`) builds
+  the banner line generically off `trouble.fault()` for *any* `Fault`, and
+  `pods_unread` is `stopping`-gated with no exception for the fault kind — so on
+  the **live** path a refusal is also just a `▲ k8rs is not getting …` banner,
+  not the `pods_unread`-style block that `screens/states.md:576-577` and
+  `screens/context.md:340-363` both draw. Found by `tui-designer` while tracing
+  the reachability fix and deliberately **not** edited around: fixing it changes
+  the "other two" count one more time and touches `context.md`'s own drawn
+  example. Needs the same ruling as the live-banner entry above — what a live
+  banner owes a reader — and the two should be ruled together
+
+- **The memory budget is reachable from inside the binary, and the profile that
+  found it recorded the route as blocked when it is not.**
+  [NOTES § D204](NOTES.md#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03)
+  measured `arena_max=1` with `mmap_threshold` named putting steady `VmRSS` at
+  **45 312 / 45 584 KiB — 46.4 MB, under the `< 50MB` line** — with no data
+  structure touched. **State both figures or the claim is a unit trick**: peak
+  `VmHWM` under the same tunables is 50 444 KiB, which is 49.3 MiB but **51.6 MB
+  decimal and still over**. D171 tested the budget *"over on either reading of
+  the unit"* precisely because peak and steady were then the same value, and
+  these tunables are what break that identity — so the ruling this entry asks
+  for has to include *which figure the budget is against*. `GLIBC_TUNABLES` is read before `main`, so the in-process
+  equivalent is `mallopt(3)`; the report called that blocked on a `libc` crate
+  (invariant 10) and **it is not** — a bare `extern "C"` declaration links
+  against the glibc already in the build and names no crate — **measured, not
+  argued**: a cold reviewer compiled the three `mallopt` calls with no crate and
+  `nm -D` showed `U mallopt@GLIBC_2.2.5`, all three returning success. **But
+  "not the code" is wrong twice.** It needs `unsafe`, and `src/` contains no
+  `unsafe` block at all today, so the first one in an eight-file codebase whose
+  security gate runs on every diff is itself a ruling; and the three parameters
+  are glibc-private magic negatives with no Rust binding to check them against,
+  so a wrong `-8` silently sets `M_ARENA_TEST` instead. Four things need ruling,
+  and the fourth is the code: whether tuning the
+  allocator to meet a budget is meeting it or hiding it; that the win is
+  **host-dependent**, since arena count follows core count, so a machine with
+  fewer cores may already be under the line and a bigger one still over; and
+  that `k8s.rs` freezes at the end of Phase 6 while `main.rs` does not, so the
+  call has a home either way
+
+- **8–14 MB of the resident set is still unnamed, and the instant the peak is
+  taken at decides how much.** The other half of D204: the slopes are `per pod`
+  from two instruments that agree, but naming the field needs stack-trace
+  allocation profiling and neither `heaptrack` nor `valgrind` is installed on
+  the dev machine. A 6.7× expansion between the pruned JSON and the in-memory
+  `PodSnapshot` is either the price of typed storage or a fixable defect, and
+  which it is cannot be argued from the number alone — so this is a
+  *measurement* waiting on a tool, not a design question waiting on an opinion.
+  **Most of it has since been answered and this entry is what is left**: the
+  store is 2 701 bytes per pod, the decoded `Pod` behind it 17 956, and one page
+  of 500 is 18–24 MB scaled live — leaving **8–14 MB unnamed**, plus the question
+  of whether the page buffer is live at the same instant as the published
+  snapshot, which is source-reading today and needs a cluster
+  ([D204](NOTES.md#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03))
+
+- **An empty node list has three causes and `analysis.rs` prints one of them as
+  fact.** The three node panes infer the *cause* of `snapshot.nodes.is_empty()`
+  and print *"Reading what a node has needs permission to list nodes, and this
+  login does not have it — ask for permission to list nodes across the whole
+  cluster."* `ClusterSnapshot` carries no `Trouble` and no `Fault`, so the pane
+  cannot tell **denied** from **never answered** from **genuinely empty**, and it
+  names the one cause that sends the reader to a person. Measured 2026-09-03 by a
+  cold operator review: `Gone` (404) and `Rejected` (400) on the nodes watch
+  already produce that sentence at HEAD, and a wedged watch now reaches a report
+  too ([D206](NOTES.md#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03)),
+  so the reader can be sent to open an RBAC ticket while the API server is what is
+  wedged. This is `PRIOR-ART § C2` — *loading · empty · denied, three states not
+  two* — uncovered for the node panes, and `§ C1`'s class one remove out: an
+  inferred cause standing in for a typed one **the same run is holding**.
+  **It is here and not in a box because the fix touches a file frozen since Phase
+  4**, and forward-only says that is a plan question rather than a dev's. Two
+  shapes to rule between: the prose drops the cause and points at the line above
+  the cards, which is cheap and honest; or `ClusterSnapshot` carries the fact,
+  which is the real fix and unfreezes more. **The cheap one does not need the
+  freeze broken if it lands in the phase that next opens `analysis.rs`**
+
+- **A report that ran out on a kind has no screen.** `screens/states.md:620`
+  documents the watch-trouble banner in its two-tail form and there is now a
+  third; `screens/once.md` gained a new exit-`0` shape — *the report printed and
+  one kind in it is unreadable* — that no screen file draws
+  ([D206](NOTES.md#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03)).
+  `tui-designer`'s, and it is the same *read the screens against the binary* sweep
+  family 5 ran, so it belongs with whatever picks that up next
+
+- **What an unreadable kind should cost a deploy gate, and `--once` +
+  Deployments is the pairing that makes it concrete.** `k8rs --once && deploy`
+  exits `0` when a kind could not be read, for a refusal (shipped) and now for a
+  wedge ([D206](NOTES.md#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03)).
+  The operator review's sharpening: the kind a deploy gate is actually gating on
+  is **Deployments**, not nodes — W1 *pods were never created* and W2 *rollout
+  gave up* are the two rules in that chain — so a wedged deployments watch costs
+  exactly the rules the pipeline is asking about and still returns `0`. Any ruling
+  covers the refusal too, which ships and works for the developer whose Role
+  legitimately cannot list nodes, so it is not a one-line change. Related: the
+  `▲` the report leads with is the same glyph a WARN finding uses, so in a report
+  with warnings it is the fourth `▲` on the page — prominent positionally, not
+  typographically, and under `--once` there is no colour guarantee
+
+- **The logs tab has no state for a refused log request, and it is the first one
+  a beginner hits.** `screens/detail.md` draws *no logs yet*, *no previous run*
+  and *pod deleted* — not the state that arrives when you ask for the logs of the
+  pod Alerts has just carded CRITICAL, which is a `400` carrying the server's own
+  sentence ([D207](NOTES.md#d207--the-400-that-blamed-k8rs-and-threw-away-the-sentence-the-server-sent-2026-09-03)).
+  The headless surface answers it correctly as of 2026-09-03; the pane that will
+  draw it does not exist yet, which is why this is a screen question and not a
+  defect. `tui-designer`'s, and it wants doing **before Phase 11 draws that
+  pane** rather than after
+
+- **`--live` prints nothing at all for a wedged watch, and `Store::stop_waiting`'s
+  doc says it says something.** D206 fixed `--once`; under `--live` a wedged watch
+  has no `failure`, is not `ended` and is never `unfinished` (nothing calls
+  `stop_waiting` without a budget), so `Store::troubles` is empty, `unreadable`
+  draws no line, `snapshot()` is `None`, and `live_report` takes its *the silence
+  is the answer* arm — **forever**. Measured 2026-09-03 over 40 s: the greeting,
+  the command log, and then nothing. The doc claims *"a wedge there stays a wedge
+  on a screen that says it is waiting"*; there is no such saying. This is
+  `PRIOR-ART § A7`/`§ A3` — a wait with nothing to see it by, the k9s failure
+  `Listing` was built to prevent — still live in the mode that becomes the whole
+  product. `Listing`'s own doc names it: *"this makes the state readable, and
+  something still has to ask."* **Nothing asks.** The screen that would show it is
+  Phase 11's, which is why this is here and not a Phase 6 box; the *doc* was
+  corrected at the close so it no longer claims a behaviour that does not exist
+
+- **The `--logs`/`--describe`/`--yaml` command-log exemption is ruled in a
+  `main.rs` doc comment and nowhere a screen reader looks.** Measured: `--logs`
+  sends seven requests and prints one `$ kubectl` line. The ruling — those three
+  verbs draw `screens/detail.md`, not `screens/once.md` — is defensible and is
+  *written in the wrong place*, given Phase 11 draws a command-log panel that is
+  *always visible, showing what k8rs ran*. `tui-designer`'s, before that pane
+
+- **The usage line is 360 characters.** Five wrapped rows of dense flags at 80
+  columns, and it is the first thing a newcomer sees after a typo — invariant 13's
+  second half. **Nine of the fourteen flags in it die at Phase 12**, so the cheap
+  moment is after that, not now
+
+- **Nothing reads CI between a push and the phase-close PR, and that cost seven
+  days.** `development` was red from **2026-08-27T07:31 to 2026-09-03** — 40 runs,
+  0 successes — and it surfaced only as a merge blocker at Phase 6's close
+  ([D211](NOTES.md#d211--development-was-red-for-seven-days-and-nobody-read-it-the-toolchain-is-pinned-and-a-feature-flag-added-compiled-code-without-adding-a-package-2026-09-03)).
+  **Loudness is not the missing mechanism**: `just cross`'s skip banner was loud,
+  correct, and said in as many words *"it will land on the push instead of here"*.
+  It did, forty times, and every one of those pushes was made by someone who had
+  just read a green `just check`. The cheap shape is one `gh run list` read at the
+  push, in the ritual, next to the CHANGELOG step — but it is a new gate and a new
+  gate does not get injected into a phase that is closing, so it is here
+
+- **Should a `rust-toolchain.toml` replace the workflow pin?** It would make
+  local == CI *structural* for anyone with rustup, which is stronger than
+  `scripts/toolchain-guard.py` comparing two places. Against: it is a second place
+  the version lives, it is a new root file with no **Writes** cell in
+  [CLAUDE.md](CLAUDE.md)'s ownership table, and the dev machine has no rustup at
+  all (`/usr/bin/cargo` is a distro package), so it would change nothing there
+  today. Raised by `tester` at Phase 6's close and deliberately not taken silently
 
 ## Ruled out
 

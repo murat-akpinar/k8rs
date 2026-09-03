@@ -20,7 +20,9 @@
 # absorb it — `Request`'s readers are `list`, `watch`, `get`, `get_subresource`,
 # `get_metadata`, `list_metadata`, `watch_metadata` and `logs`, so the same rule
 # partitions the second type unchanged. `Client` is deliberately absent: its
-# `request` is verb-agnostic and Phase 5 needs it outside `ops.rs` for a read.
+# `request` and `send` are both verb-agnostic and Phase 5 needs each of them
+# outside `ops.rs` for a read — `send` since the `Date` header behind
+# `Session::skew`, which is the only call that hands back a response head.
 #
 # `namespace` and `resource_url` mutate nothing and are here anyway: the
 # allowlist is deliberately conservative, and a method is banned by default

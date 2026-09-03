@@ -1,12 +1,13 @@
 # k8rs — documentation
 
-> Status: **Phase 3 — the rules.** The design is closed; the guards and the
-> fixture-capture pipeline exist, and `tests/fixtures/` holds real captures from
-> a kind cluster you can stand up yourself
+> Status: **Phase 5 — live reads.** The rules and the seven analysis reports are
+> written and tested against real captures from a kind cluster you can stand up
+> yourself
 > ([tech-stack § The test cluster](tech-stack.md#the-test-cluster--reproducing-it-yourself)).
-> `rules.rs` carries the finding shape, the snapshot types and the clock;
-> the diagnoses themselves are being written. Nothing runs yet — `main.rs` is
-> wired last · Last updated: 2026-08-12
+> **It runs**: a temporary driver reads objects from disk, or watches a cluster
+> with `--live`, and prints the findings
+> ([architecture § The command line](architecture.md#the-command-line)). The TUI
+> itself is not built yet — that is Phases 8-12 · Last updated: 2026-08-30
 
 This directory is the **built** state: what is true of the shipped tool, written
 for humans outside this repo. The reasoning behind any of it lives one level up,

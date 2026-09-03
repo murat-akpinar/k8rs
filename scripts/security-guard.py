@@ -10,12 +10,14 @@ mattered became a script (`write-guard.py` for invariant 1, `test-guard.py` for
    read, every `uses:` pinned to a 40-hex commit SHA rather than a tag (a tag
    is a moving pointer somebody else controls), and no `pull_request_target`,
    which runs with the base repo's secrets against a fork's code.
-2. **No API string ever reaches a shell** (invariant 9). `src/` spawns nothing
-   at all today; the guard keeps the *class* empty, so it is already standing
-   when `$EDITOR` arrives with `e` in v0.4 — the one place this repo will ever
-   spawn a process, and the one that must use an argument vector.
-3. **No telemetry, no second outbound path** — the dependency list is the
-   eleven invariant 10 allows and nothing else (an allowlist, because a
+2. **No API string ever reaches a shell** (invariant 9). Two files spawn today,
+   each through an argument vector: `tests/binary.rs` runs the built binary
+   (`CARGO_BIN_EXE_k8rs`), and `src/k8s_tests.rs` runs `openssl` on literals and
+   temp paths to build the CA and leaf its TLS server needs. The rule does not
+   soften for a caller, and will not for `$EDITOR` in v0.4 — in every file that
+   spawns at all it refuses a shell program, a `-c` flag and a command string.
+3. **No telemetry, no second outbound path** — the dependency list is what
+   invariant 10 allows and nothing else (an allowlist, because a
    denylist of HTTP crates would need to know about `reqwest`, `hyper`,
    `ureq`, `isahc`, `attohttpc`… and whatever ships next month), and no
    hardcoded host in the code. Both halves are narrower than the name: the
@@ -25,15 +27,32 @@ mattered became a script (`write-guard.py` for invariant 1, `test-guard.py` for
    either, and neither is the kubeconfig's own API server — this check never
    sees the one allowed path, it only refuses the ways a second one is
    usually typed.
-4. **Token hygiene** — a type that can hold a kube `Config`/`Client` may not
-   *derive* `Debug`: the derived one prints the auth info, and the gate's line
-   is "any type that can hold config has a wrapped `Debug`". The taint follows
-   a *field type spelled `Client`* into the struct that owns it, to a fixpoint,
-   so it catches a foreign type without reading kube. It reads `struct` only:
-   an `enum` variant holding a `Client` is not seen, and neither is one behind
-   a `type` alias. `kube` landed in Phase 5, so the note that said this check
-   was still waiting no longer prints; nothing in the tree holds a `Client`
-   yet, which is why the count is zero rather than the scan being broken.
+4. **Token hygiene** — a type that can hold a kube `Config`/`Client`, or a
+   kube error, may not *derive* `Debug`, which prints the auth info. The gate's
+   line is "no `Debug` is **derived** over a type that can hold config"
+   (CLAUDE.md § Security gate), and the fix is to drop the derive rather than
+   wrap it: an impl leaves `{:?}` compiling forever and has to be kept correct
+   by whoever adds the next field, while no impl turns a stray `{:?}` into a
+   compile error — and a hand-written one is in this check's blind spot either
+   way (NOTES § D164). The taint follows a field type into the type that owns
+   it, to a fixpoint, through `struct` fields, `enum` variant payloads and
+   `type` aliases alike, so it catches a foreign type without reading kube.
+   **This check is a *derived* `Debug` on a declaration the scan parses, and
+   nothing else** — the summary line says so on every run, because a count
+   beside the word OK is read as coverage. Outside it, all of it hand-checked
+   against `docs/security.md § Token hygiene`: every `{}` / `{:?}` /
+   `.to_string()` / `{:#}` **call** on a kube error or a `Config` (this is the
+   shape NOTES § D162 measured a bearer token coming out of — `Display`
+   interpolates its source down to an `exec` plugin's stdout, and `anyhow` is
+   approved but unused, so the whole `?`-then-print path is still ahead);
+   a hand-written `Debug` that formats one whole — the last resort the FAIL
+   text names, and names as unverifiable, for this reason; a renamed import
+   (`use kube::Client as Kc;`); a generic default (`struct Conn<C = Client>`);
+   a generic parameter never named in a field; and an unqualified `Error`
+   import, which cannot be told from `anyhow::Error` without resolving imports.
+   What the check *can* be trusted about is bounded by one number it does not
+   derive from itself: a keyword count of `struct`/`enum` that must agree with
+   how many declarations the parser reached, and FAILs loudly when it does not.
 
 What is deliberately **not** here: every gate item about code that does not
 exist yet (the write path and `dryRun`, the audit log's mode, `--read-only`
@@ -57,17 +76,18 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # --- what each check is allowed to see -----------------------------------
 
-# The eleven of invariant 10 (CLAUDE.md § Hard invariants). A twelfth is a
+# The twelve of invariant 10 (CLAUDE.md § Hard invariants). A thirteenth is a
 # recorded decision, so it lands here and in CLAUDE.md in the same change —
-# which is exactly the review this line exists to force. It forced the
-# eleventh: `futures-util` is a reversal of "no new dependencies", ruled in
-# NOTES § D143 — every entry point in kube-runtime returns `impl Stream`,
-# `Stream` is not in `std`, and the crate was already linked under
-# `kube-client`, so it names a trait rather than adding compiled code.
+# which is exactly the review this line exists to force. It forced both
+# reversals of "no new dependencies", and each is a crate the build already
+# linked, so it names something rather than adding compiled code:
+# `futures-util` for `Stream`, which `kube-runtime` returns and `std` does not
+# have (NOTES § D143), and `tokio-rustls` for the connector C2 needs to drive
+# its own handshake and read the API server's certificate (NOTES § D178).
 ALLOWED_CRATES = {
     "kube", "k8s-openapi", "ratatui", "crossterm", "tokio",
     "anyhow", "serde_json", "serde_yaml_ng", "x509-parser", "similar",
-    "futures-util",
+    "futures-util", "tokio-rustls",
 }
 
 # Reserved names that cannot resolve to a real service (RFC 2606 / RFC 6761),
@@ -82,8 +102,59 @@ SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh",
           "cmd", "cmd.exe", "command.com", "powershell", "powershell.exe",
           "pwsh", "env"}
 
-# Types that carry, or can carry, a bearer token / client certificate.
-TOKEN_TYPES = ("Config", "Client", "AuthInfo", "ExecConfig", "TokenFile")
+# Types that carry, or can carry, a bearer token / client certificate. Each
+# entry is a regex fragment, prefixed with `\b` below, because the right-hand
+# boundary is not the same on both ends:
+#   * `Client` has none — `\bClient\b` does not match `ClientBuilder`, which is
+#     the type holding the config it is one call away from building from.
+#   * `Config` keeps one, or `ConfigMap` taints everything that names it, and
+#     that browser kind is in this tree today (src/k8s.rs, src/rules.rs). It
+#     also refuses `watcher::Config`, which is a page size and a label selector
+#     and carries no credential at all — named in comments here today, and a
+#     field of the driver's the moment the client lands, at which point a FAIL
+#     naming a token that is not there is what teaches people to edit the guard.
+# The kube **error** family is here for the reason docs/security.md § Token
+# hygiene measured (NOTES § D162): a kube error's `Display` interpolates its
+# source at every hop down to `AuthError::AuthExecRun`, whose `{out:?}` over a
+# `std::process::Output` prints an exec credential plugin's stdout — the
+# ExecCredential JSON, token included. Qualified spellings **only**: a bare
+# `Error` would match `anyhow::Error` and every `serde_json::Error` in the
+# tree, so `use kube_runtime::watcher::Error;` followed by `Option<Error>` is
+# a miss this scan cannot close and says so in its summary line.
+TOKEN_TYPES = (
+    r"(?<!watcher::)Config\b", r"Client", r"AuthInfo\b", r"ExecConfig\b",
+    r"TokenFile\b",
+    r"kube\s*::\s*Error\b", r"kube_client\s*::\s*Error\b",
+    r"kube_runtime\s*::[\s\w:]*Error\b", r"watcher\s*::\s*Error\b",
+    r"AuthError\b", r"KubeError\b",
+)
+TOKEN_TYPE = re.compile("|".join(rf"\b(?:{t})" for t in TOKEN_TYPES))
+
+# The *other* thing a `{:?}` can print, and TOKEN_TYPES cannot reach it: an
+# object the **cluster** considers secret. `k8s.rs`'s `Document` wraps one whole
+# unpruned API object — a Secret's `data` among them — and holds no name on the
+# list above, so a `#[derive(Debug)]` added to it tomorrow is a green build
+# (measured against this guard, `tester`, 2026-08-31: it reports `Session` and
+# says nothing at all about `Document`).
+#
+# It is a *second* list and not three more entries in the one above, because the
+# FAIL sentence is the whole value of a guard at 3am and the two sentences are
+# not the same one: nothing in `Document` is a bearer token, and a message that
+# names one is the class NOTES § D190 is about.
+#
+# **The type and not the name.** A canary list of type *names* would go quiet
+# the day the type is renamed; matching the untyped-tree type means any future
+# wrapper around a raw API document is caught the day it is written, with no
+# list to remember to extend. `serde_yaml_ng::Value` is exactly one field in
+# this tree today (`struct Document(serde_yaml_ng::Value)`, src/k8s.rs) — which
+# is precisely when to write the assertion.
+#
+# `serde_json::Value` is deliberately **not** here. `k8s.rs` imports it bare
+# (`use k8s_openapi::serde_json::Value`) and a `\bValue\b` clause would match
+# every `Value` in the tree including ones that are not documents; the masked,
+# order-preserving tree the yaml pane holds is the yaml one, and that is the one
+# with a Secret in it.
+PAYLOAD_TYPE = re.compile(r"\bserde_yaml_ng\s*::\s*Value\b")
 
 # --- shared scanning ------------------------------------------------------
 
@@ -103,7 +174,7 @@ def sources(root: Path) -> list[Path]:
     ) + [p for p in [root / "build.rs"] if p.is_file()]
 
 
-def strip_comments(text: str) -> str:
+def strip_comments(text: str, strings: bool = False) -> str:
     """`text` with every comment blanked to spaces, offsets preserved.
 
     String-aware in both directions, and that is the whole difficulty: a URL is
@@ -111,6 +182,16 @@ def strip_comments(text: str) -> str:
     every line that mentions one (the hole `write-guard.py`'s own stripper
     documents), while a scanner that ignores strings reads `"// not a comment"`
     as code. Blanking rather than deleting keeps `count('\\n')` a line number.
+
+    `strings=True` **also** blanks the inside of every string and char literal,
+    and it is off by default because two checks need the opposite: the outbound
+    scan matches a literal `https://host` and the shell scan matches
+    `Command::new("x").arg("sh -c …")`, both inside string literals and both
+    proven by plants in `--self-test`. Only the token check asks for it — its
+    two bracket matchers count `{`, `}` and `]`, and a `#[serde(rename = "}")]`
+    on a field truncated the struct body so the `Client` after it left the field
+    list, with the struct still counted
+    (reports/2026-08-27-token-hygiene-guard-shape-probe.md).
     """
     out = list(text)
     n = len(text)
@@ -143,8 +224,11 @@ def strip_comments(text: str) -> str:
         elif c == "r" and (m := RAW_STR.match(text, i)):
             close = '"' + "#" * len(m.group(1))
             j = text.find(close, m.end())
+            if strings:
+                blank(m.end(), n if j < 0 else j)
             i = n if j < 0 else j + len(close)
         elif c == '"':
+            opened = i
             i += 1
             while i < n:
                 if text[i] == "\\":
@@ -154,7 +238,11 @@ def strip_comments(text: str) -> str:
                     i += 1
                     break
                 i += 1
+            if strings:
+                blank(opened + 1, min(i, n) - 1)
         elif c == "'" and (m := CHAR_LIT.match(text, i)):
+            if strings:
+                blank(m.start() + 1, m.end() - 1)
             i = m.end()
         else:
             i += 1
@@ -165,6 +253,14 @@ def strip_comments(text: str) -> str:
 def code(path: Path) -> str:
     """Stripped source, cached: six checks read the same 22k lines."""
     return strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+
+
+@lru_cache(maxsize=None)
+def code_no_strings(path: Path) -> str:
+    """The same, with string and char literals hollowed out — the token check's
+    view, and only its (see `strip_comments`)."""
+    return strip_comments(path.read_text(encoding="utf-8", errors="replace"),
+                          strings=True)
 
 
 def at(text: str, pos: int) -> int:
@@ -356,21 +452,72 @@ def check_outbound(files: list[Path], root: Path) -> tuple[list[str], str]:
 
 # --- 4. token hygiene -----------------------------------------------------
 
-# `#\[.*?\]` across newlines, not `[^\n]*`: rustfmt wraps a long derive list
-# onto its own lines, and a one-line attribute pattern captures no attrs at all
-# for exactly the structs whose derive list grew — which reads as "derives no
-# Debug" and is the silent half of this check.
-STRUCT = re.compile(
-    r"(?P<attrs>(?:^[ \t]*#\[.*?\]\s*?\n)*)"
-    r"^[ \t]*(?:pub(?:\([^)]*\))?\s+)?struct\s+(?P<name>\w+)"
-    r"(?P<generics><[^{;(]*>)?\s*(?P<body>[{(])",
-    re.M | re.S,
+# `struct` and `enum` are one shape here, and that is the point of this pattern:
+# `enum Conn { Up(kube::Client), Down }` leaks through a derived `Debug` exactly
+# as well as the struct that would have wrapped it, and a connection-state enum
+# is the natural shape for the code that builds the client. A scan that read
+# `struct` only went green on it without having looked (todo.md Phase 5,
+# NOTES § D141).
+#
+# The attribute pattern spans newlines, because rustfmt wraps a long derive list
+# onto its own lines and a one-line pattern captures no attrs at all for exactly
+# the types whose derive list grew — which reads as "derives no Debug" and is the
+# silent half of this check. It is **bracket-balanced** rather than `#\[.*?\]`,
+# and that is not tidying: under `re.S` the lazy `.*?` gets backtracked forward
+# through the file hunting a `]` that a declaration follows, and everything it
+# crosses ends up inside one match and is never scanned. It was happening here —
+# `struct Mounters` (src/analysis.rs:2176) matched with an `attrs` group that
+# began at line 172, and five declarations in between vanished with it:
+# `Watch` (k8s.rs:585, which holds a `watcher::Error`), `NodeLine`, `DrainLine`,
+# `NotCaughtUp` and `Blocked`. Measured on this tree, 2026-08-27: the old pattern
+# matched 44 structs, this one matches 49.
+#
+# Whitespace-only lines are allowed *between* the attributes and the declaration:
+# `strip_comments` blanks a doc comment to spaces rather than deleting it, so an
+# attribute with a `///` under it is separated by a line of spaces, and a pattern
+# that demanded adjacency would read that type as deriving nothing. The final
+# newline is optional so that `#[derive(Debug)] pub struct S { … }` on one line
+# is parsed — rustfmt splits that shape, so `cargo fmt --check` normally removes
+# it before this guard runs, but a guard that depends on another step having run
+# first is a guard with a precondition nobody states.
+ATTRS = r"(?:^[ \t]*#\[(?:[^\[\]]|\[[^\[\]]*\])*\][ \t]*(?:\n(?:[ \t]*\n)*)?)*"
+# Line start, or straight after an attribute's `]` on the same line — the second
+# branch is only for `#[derive(Debug)] pub struct S { … }`, and it matches
+# nothing in this tree today (measured 2026-08-27). What makes an unanchored
+# reader safe at all here is `code_no_strings`: a `struct`/`enum` keyword inside
+# a string literal is blanked before this runs, which is worth one hit — the
+# unanchored keyword count is 63 with strings kept and 62 with them blanked, the
+# odd one being prose inside a test assertion at src/rules_tests/pod.rs:3680.
+ANCHOR = r"(?:^|(?<=\]))[ \t]*(?:pub(?:\([^)]*\))?\s+)?"
+DECL = re.compile(rf"(?P<attrs>{ATTRS}){ANCHOR}(?P<kw>struct|enum)\s+(?P<name>\w+)",
+                  re.M)
+# The denominator, and it must not come from `DECL`: a count derived from the
+# regex being checked reads as coverage and cannot reveal that regex's own miss —
+# the same disease as the empty-tree canary below (PRIOR-ART § F2). This one
+# counts the keyword and stops. It is the tripwire for a `DECL` that stops
+# *matching*; a `DECL` that matches but cannot find the body is the `lost` list
+# further down, and the two together are what "parsed" in the summary means.
+# Equal on this tree (62 = 49 + 13), and a disagreement is a FAIL, not a note.
+NAIVE_DECL = re.compile(rf"{ANCHOR}(?:struct|enum)\s+\w+", re.M)
+# An alias declares no fields, so the fixpoint below could not walk through one:
+# `type Handle = kube::Client;` made every holder of a `Handle` clean.
+ALIAS = re.compile(
+    r"^[ \t]*(?:pub(?:\([^)]*\))?\s+)?type\s+(?P<name>\w+)"
+    r"(?:<[^=;]*>)?\s*=\s*(?P<ty>[^;]+);",
+    re.M,
 )
 # To end of line, not to the next comma: `map: HashMap<String, Client>` splits on
 # that comma, and the half the field name is on is the half without the token in
 # it — an under-extraction that reads exactly like a clean tree.
 FIELD = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?\w+\s*:\s*(?P<ty>.+)$", re.M)
-DERIVES_DEBUG = re.compile(r"#\[derive\([^)]*\bDebug\b")
+# `\bderive(` and not `#\[derive(`, so the gated forms are seen:
+# `#[cfg_attr(test, derive(Debug))]` is the most likely way a connection type in
+# *this* repo gets a `Debug` — the tests want to assert on it and the product
+# does not need it — and `#![cfg_attr(…)]` is already in the tree (src/k8s.rs:100,
+# src/analysis.rs:59). The narrow form parsed the declaration, tainted it, and
+# printed no FAIL beside a tainted count that had gone up
+# (reports/2026-08-27-token-hygiene-guard-shape-probe.md).
+DERIVES_DEBUG = re.compile(r"\bderive\([^)]*\bDebug\b")
 
 
 def balanced(text: str, open_at: int) -> str:
@@ -387,48 +534,246 @@ def balanced(text: str, open_at: int) -> str:
     return text[open_at + 1 :]
 
 
+def body_at(text: str, i: int) -> int | None:
+    """Index of a declaration's body opener, scanning from just after its name.
+
+    `-1` is `struct Foo;`, which holds nothing and is a real answer. `None` is
+    *this scan lost it* — and the two must not be one value, because a lost
+    declaration otherwise reads as a type with no fields, which is a clean type.
+
+    A scan and not part of `DECL`, because what sits between the name and the
+    body is not regular. `struct S<F: Fn(&str) -> bool>` puts parens and a `>`
+    inside the generics, and rustfmt **canonicalises** an inline `where` into
+
+        pub struct S<T>
+        where
+            T: Clone,
+        {
+
+    so the pattern that demanded `<…>` then `{` missed a shape `cargo fmt` in
+    `just check` actively produces — the gate installing the blind spot rather
+    than closing it (reports/2026-08-27-token-hygiene-guard-shape-probe.md).
+    """
+    n = len(text)
+    depth = 0
+    while i < n:
+        c = text[i]
+        if text[i : i + 2] == "->":
+            i += 2  # a return arrow inside a bound, not a closing angle
+        elif c == "<":
+            depth += 1
+            i += 1
+        elif c == ">":
+            depth = max(0, depth - 1)
+            i += 1
+        elif c == "(":
+            if depth == 0:
+                return i  # a tuple struct's body
+            i += len(balanced(text, i)) + 2  # a bound such as `Fn(&str)`
+        elif c == "{":
+            return i if depth == 0 else None
+        elif c == ";":
+            return -1  # a unit struct; a tuple struct returned at its `(`
+        else:
+            i += 1
+    return None
+
+
+def payloads(body: str) -> list[str]:
+    """Every variant payload in an enum body — a tuple variant's `(…)` and a
+    struct variant's `{…}`, nesting included.
+
+    Variant *names* are left out deliberately: a unit variant holds nothing, and
+    `k8s.rs`'s `Capability` is seven of them. Reading the body whole would taint
+    any enum with a variant merely *named* after a token type, and a guard that
+    fires on a name nobody can hold is a guard people start editing around.
+    """
+    out, i = [], 0
+    while i < len(body):
+        if body[i] in "({":
+            inner = balanced(body, i)
+            out.append(inner)
+            i += len(inner) + 2
+        else:
+            i += 1
+    return out
+
+
 def check_token_debug(files: list[Path], root: Path) -> tuple[list[str], str]:
     """A type that can hold a token may not *derive* Debug.
 
     Holding a `Client` is what `k8s.rs` is for, so the ban is on the derived
     `Debug` — the one that prints the auth info — and it follows a field into
-    the struct that owns it: `App { k8s: K8s }` leaks exactly as well.
+    the type that owns it: `App { k8s: K8s }` leaks exactly as well.
+
+    **What it does not cover is in the summary line, and that is the point.**
+    A regex has no types, so the whole `Display` half — `format!("{e}")`,
+    `.to_string()`, `{:#}` on an `anyhow` chain — and every `{:?}` on a bare
+    local are outside it, and those are the shapes NOTES § D162 measured a
+    token coming out of. They are hand-checked against
+    docs/security.md § Token hygiene.
     """
-    structs = {}  # name -> (where, field types, derives Debug)
+    # Keyed by *name*, because that is the only thing the fixpoint below can
+    # match a field type against — a regex has no name resolution. Every
+    # declaration of a name is kept as its own site rather than overwriting or
+    # merging into one: an assignment silently dropped a declaration whole, and a
+    # merge that kept only the first site printed the wrong file and line — the
+    # tree already collides once (`Row`: analysis.rs:173 enum, k8s.rs:2722
+    # struct), and a FAIL naming a line with no `derive` on it is how a guard
+    # earns a suppression at 3am.
+    decls: dict[str, list[tuple[str, str, list[str], bool]]] = {}
+    kinds = {"struct": 0, "enum": 0, "type": 0}
+    naive = 0
+    lost: list[str] = []
+
+    def record(name: str, kw: str, where: str, held: list[str], dbg: bool) -> None:
+        kinds[kw] += 1
+        decls.setdefault(name, []).append((kw, where, held, dbg))
+
     for path in files:
-        text = code(path)
-        for m in STRUCT.finditer(text):
-            body = balanced(text, m.end("body") - 1)
-            types = [f.group("ty") for f in FIELD.finditer(body)] \
-                if m.group("body") == "{" else body.split(",")
-            structs[m.group("name")] = (
-                f"{rel(root, path)}:{at(text, m.end('attrs'))}",
-                types,
-                bool(DERIVES_DEBUG.search(m.group("attrs"))),
-            )
+        # Strings hollowed out for this check alone: `balanced` and `ATTRS` count
+        # brackets, and a `#[serde(rename = "}")]` on a field truncated the body
+        # so the `Client` below it was never in the field list — with the struct
+        # still counted, so the cross-check could not see it either.
+        text = code_no_strings(path)
+        naive += sum(1 for _ in NAIVE_DECL.finditer(text))
+        for m in DECL.finditer(text):
+            open_at = body_at(text, m.end())
+            if open_at is None:
+                lost.append(f"{rel(root, path)}:{at(text, m.start('kw'))}")
+                held = []
+            elif open_at < 0:
+                held = []  # `struct Foo;` holds nothing, and still counts
+            else:
+                body = balanced(text, open_at)
+                if m.group("kw") == "enum":
+                    held = payloads(body)
+                elif text[open_at] == "{":
+                    held = [f.group("ty") for f in FIELD.finditer(body)]
+                else:
+                    held = body.split(",")
+            record(m.group("name"), m.group("kw"),
+                   f"{rel(root, path)}:{at(text, m.end('attrs'))}", held,
+                   bool(DERIVES_DEBUG.search(m.group("attrs"))))
+        # An alias is a propagation node and never a report: it derives nothing.
+        for m in ALIAS.finditer(text):
+            record(m.group("name"), "type",
+                   f"{rel(root, path)}:{at(text, m.start())}",
+                   [m.group("ty")], False)
 
-    tainted = {n for n, (_, types, _) in structs.items()
-               if any(re.search(rf"\b{t}\b", ty) for ty in types for t in TOKEN_TYPES)}
-    # A field of a tainted type taints its owner, to a fixpoint: the leak is one
-    # `{:?}` away however many structs deep the client sits.
-    while True:
-        grown = tainted | {
-            n for n, (_, types, _) in structs.items()
-            if any(re.search(rf"\b{t}\b", ty) for ty in types for t in tainted)
-        }
-        if grown == tainted:
-            break
-        tainted = grown
+    def holds(name: str, pattern: re.Pattern) -> bool:
+        return any(pattern.search(ty) for _, _, held, _ in decls[name] for ty in held)
 
-    problems = [
-        f"{structs[n][0]}  struct {n} can hold a token and derives Debug — "
-        f"write it by hand and print no auth info (§ Token hygiene)"
-        for n in sorted(tainted) if structs[n][2]
-    ]
-    if not structs:
-        problems.append("no struct found in the whole tree — the parser broke, "
-                        "and this check just passed on nothing")
-    return problems, f"{len(structs)} structs, {len(tainted)} can hold a token"
+    def spreads(seed: re.Pattern) -> set[str]:
+        """Every type that holds `seed`, and every type that holds one of those.
+
+        A field of a tainted type taints its owner, to a fixpoint: the leak is
+        one `{:?}` away however many types deep the held thing sits. One
+        function and not two copies, because the token walk and the payload walk
+        are the same walk over the same `decls` and a second copy is the one
+        that stops matching the first (CLAUDE.md § Code phase rules).
+        """
+        tainted = {n for n in decls if holds(n, seed)}
+        while True:
+            grown = tainted | {
+                n for n in decls
+                if any(holds(n, re.compile(rf"\b{t}\b")) for t in tainted)
+            }
+            if grown == tainted:
+                break
+            tainted = grown
+        return tainted
+
+    tainted = spreads(TOKEN_TYPE)
+    # The cluster's secrets rather than the user's credential, and reported
+    # apart from them so the sentence is true of what it names (PAYLOAD_TYPE).
+    # `- tainted` because a type that holds both is already reported above and
+    # two FAILs on one line teaches people to read neither.
+    # Walked once and read twice — the count below and the canary are two
+    # questions about one answer, and two calls is the pair that drifts.
+    payload = spreads(PAYLOAD_TYPE)
+    carries_payload = payload - tainted
+
+    problems = []
+    for n in sorted(carries_payload):
+        for kw, where, _, dbg in decls[n]:
+            if dbg:
+                problems.append(
+                    f"{where}  {kw} {n} holds a whole unpruned API object and "
+                    f"derives Debug — remove the derive. A `{{:?}}` on this "
+                    f"prints a Secret's `data` into a log line or a panic "
+                    f"message; with no Debug at all a stray one is a compile "
+                    f"error instead, which is what src/k8s.rs § ONE OBJECT'S "
+                    f"OWN STORY says this type's missing derive buys "
+                    f"(§ Data displayed and stored)")
+    # A derived list asserts it found something (CLAUDE.md § Code phase rules):
+    # *extracted nothing* and *nothing to extract* print the same OK line, so a
+    # `PAYLOAD_TYPE` that stops matching — the type renamed, the field moved
+    # behind an alias this scan cannot follow — must be a FAIL and not a pass.
+    #
+    # `decls and` because the empty-tree canary below already says the parser
+    # broke, and two FAILs for one cause is what the message above refuses to do
+    # per type — the same rule applied to the check as a whole.
+    if decls and not payload:
+        problems.append(
+            "no type in this tree holds an untyped API document, so the "
+            "payload half of this check just passed on nothing — either "
+            "`k8s.rs`'s `Document` is gone (say so here) or `PAYLOAD_TYPE` no "
+            "longer matches the field that holds one")
+    for n in sorted(tainted):
+        sites = decls[n]
+        elsewhere = ""
+        if len(sites) > 1:
+            elsewhere = (f" — and {n} is declared {len(sites)} times "
+                         f"({', '.join(w for _, w, _, _ in sites)}); this scan "
+                         f"matches field types by name, so the token may be in "
+                         f"one of the others")
+        for kw, where, _, dbg in sites:
+            if dbg:
+                problems.append(
+                    f"{where}  {kw} {n} can hold a token and derives Debug — "
+                    f"remove the derive. A `{{:?}}` on this prints a bearer "
+                    f"token; with no Debug at all, a stray `{{:?}}` is a "
+                    f"compile error instead. Only if something truly needs "
+                    f"Debug, write one by hand that selects fields — and this "
+                    f"check cannot tell whether a hand-written one leaks "
+                    f"(§ Token hygiene){elsewhere}")
+    # Not "no struct": a tree whose only declarations are enums is a legitimate
+    # shape, and a canary that fires on it gets read as the rule above catching
+    # something. This one fires only when nothing at all was parsed.
+    if not decls:
+        problems.append("no struct, enum or type alias found in the whole tree — "
+                        "the parser broke, and this check just passed on nothing")
+    parsed = kinds["struct"] + kinds["enum"]
+    # The other half, and it is the one the reviewer's `where`-clause plant now
+    # lands in: `DECL` matches the keyword, so a body it cannot follow keeps the
+    # two counts equal while the type is scanned for neither a token nor a
+    # derive. A declaration with no readable body is never a pass.
+    for where in lost:
+        problems.append(
+            f"{where}  this declaration's body could not be found, so it was "
+            f"scanned for neither a token nor a derive — and an unreadable body "
+            f"reads exactly like a type with no fields. Teach `body_at` the "
+            f"shape rather than letting it answer nothing")
+    if parsed != naive:
+        problems.append(
+            f"the keyword count found {naive} struct/enum declarations and the "
+            f"parser reached {parsed}, a gap of {naive - parsed} — those were "
+            f"scanned for neither a token nor a derive, and the count in the "
+            f"summary cannot show it because that count comes from the same "
+            f"regex. Find the shape (a `where` clause, a bound with a paren, a "
+            f"macro) and teach `DECL` about it")
+    return problems, (
+        f"{kinds['struct']} structs, {kinds['enum']} enums, {kinds['type']} "
+        f"aliases ({parsed} of {naive} declarations parsed), {len(tainted)} can "
+        f"hold a token and {len(carries_payload)} an unpruned API object — and "
+        f"this check is a *derived* `Debug` on a declaration "
+        f"it parses, nothing more: a `{{}}`/`{{:?}}`/`.to_string()` on a kube "
+        f"error or a Config, a hand-written Debug that formats one whole, a "
+        f"`use kube::Client as Kc` rename, a generic default or a generic never "
+        f"named in a field, and an unqualified `Error` import are all outside a "
+        f"regex and are hand-checked against docs/security.md § Token hygiene"
+    )
 
 
 # --- 5 & 6. credentials and transport -------------------------------------
@@ -487,6 +832,7 @@ def run(root: Path) -> dict[str, tuple[list[str], str]]:
     # once, and `--self-test` rewrites the same paths between runs — a cache
     # that outlived a run would hand the next check the file before the plant.
     code.cache_clear()
+    code_no_strings.cache_clear()
     files = sources(root)
     return {
         "workflows": check_workflows(root),
@@ -527,6 +873,23 @@ def self_test() -> None:
         (fake / "src" / "main.rs").write_text(
             '//! See https://kube.rs/docs — a citation, not a connection.\n'
             '/* https://k8s.io/docs is one too */\n'
+            # The payload half's negative, and it has to live in the clean tree
+            # rather than in a plant: `PAYLOAD_TYPE` matching nothing is a FAIL
+            # (a derived list asserts it found something), so a fake tree with
+            # no untyped-document holder in it can never be the baseline. It is
+            # in main.rs and not k8s.rs because every plant below overwrites
+            # k8s.rs whole and only appends to this file.
+            #
+            # **Above `Fine` and not below it**, and that ordering is load
+            # bearing: plant 4v deliberately breaks `DECL` so that `body_at`
+            # starts one bracket late, and with this line last the mis-scan
+            # handed `Fine` *this* struct's field — printing "struct Fine holds
+            # a whole unpruned API object", a sentence that is false of the type
+            # it names, in the middle of a self-test whose whole job is to be
+            # read. Declared first, the mis-scan lands on `Fine`'s own body and
+            # `Fine`'s on `fn main`'s, and 4v prints only the count line it is
+            # actually about.
+            'struct Document(serde_yaml_ng::Value);\n'
             '#[derive(Debug)]\n'
             'struct Fine { name: String }\n'
             'fn main() {\n'
@@ -706,7 +1069,390 @@ def self_test() -> None:
         planted["a wrapped derive list rustfmt wrote"] = only("token hygiene")
         assert any("struct Wrapped" in p for p in planted["a wrapped derive list rustfmt wrote"])
 
-        # …and holding one without deriving Debug is exactly what k8s.rs is for.
+        # 4e — a token in an *enum variant*, and the struct that merely owns the
+        # enum. `struct`-only was the whole of this scan until 2026-08-27, so a
+        # connection-state enum — the natural shape for the code that builds the
+        # client — went green without having been looked at (NOTES § D141).
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub enum Conn {\n"
+            "    Up(kube::Client),\n"
+            "    Down,\n"
+            "}\n"
+            "#[derive(Debug)]\n"
+            "pub struct Owner {\n"
+            "    conn: Conn,\n"
+            "}\n"
+        )
+        planted["a token in an enum variant"] = only("token hygiene")
+        for want in ("enum Conn can hold a token", "struct Owner can hold a token"):
+            assert any(want in p for p in planted["a token in an enum variant"]), \
+                (want, planted["a token in an enum variant"])
+
+        # 4f — the *other* half of an enum body. A payload scan that reads only
+        # `(…)` sees a struct variant as a unit one, which is a clean tree again.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub enum Session {\n"
+            "    Live { client: Client, since: Instant },\n"
+            "    Cold,\n"
+            "}\n"
+        )
+        planted["a token in a struct variant"] = only("token hygiene")
+        assert any("enum Session can hold a token" in p
+                   for p in planted["a token in a struct variant"]), \
+            planted["a token in a struct variant"]
+
+        # 4g — behind a `type` alias, the hop the fixpoint could not walk because
+        # an alias declares no fields.
+        (fake / "src" / "k8s.rs").write_text(
+            "type Handle = kube::Client;\n"
+            "#[derive(Debug)]\n"
+            "pub struct Aliased {\n"
+            "    h: Handle,\n"
+            "}\n"
+        )
+        planted["a token behind a type alias"] = only("token hygiene")
+        assert any("struct Aliased can hold a token" in p
+                   for p in planted["a token behind a type alias"]), \
+            planted["a token behind a type alias"]
+
+        # 4h — `ClientBuilder`. `\bClient\b` has no match inside it, so the type
+        # holding the config it is one call away from building from was invisible
+        # (NOTES § D31: the framing, not only the value).
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Wiring {\n"
+            "    inner: ClientBuilder,\n"
+            "}\n"
+        )
+        planted["a ClientBuilder, which has no word boundary before B"] = \
+            only("token hygiene")
+        assert any("struct Wiring can hold a token" in p for p in
+                   planted["a ClientBuilder, which has no word boundary before B"]), \
+            planted["a ClientBuilder, which has no word boundary before B"]
+
+        # 4i — the foreign type that matters. `watcher::Error`'s `Display`
+        # interpolates its source down to `AuthError::AuthExecRun`, whose
+        # `{out:?}` over a `std::process::Output` prints an exec credential
+        # plugin's stdout — the ExecCredential JSON, token included
+        # (docs/security.md § Token hygiene, NOTES § D162). This is the live
+        # shape: src/k8s.rs:840's `Trouble` is written exactly like this.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Trouble<'a> {\n"
+            "    pub kind: ObjectKind,\n"
+            "    pub failure: Option<&'a watcher::Error>,\n"
+            "}\n"
+        )
+        planted["a kube watcher::Error, whose Display carries a token"] = \
+            only("token hygiene")
+        assert any("struct Trouble can hold a token" in p for p in
+                   planted["a kube watcher::Error, whose Display carries a token"]), \
+            planted["a kube watcher::Error, whose Display carries a token"]
+
+        # 4j — two files, one name. This repo is flat, so two product files may
+        # each declare a `Row` and this tree already does (analysis.rs:173,
+        # k8s.rs:2723). The dict is keyed by name because the fixpoint has no
+        # name resolution, so an assignment drops one declaration whole — and
+        # `sources()` is alphabetical, which makes *which* one is dropped an
+        # accident of the filename. The tainted half must survive either order.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Row {\n"
+            "    client: Client,\n"
+            "}\n"
+        )
+        (fake / "src" / "rules.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Row {\n"
+            "    label: String,\n"
+            "}\n"
+        )
+        planted["a collided name whose tainted half must not be dropped"] = \
+            only("token hygiene")
+        assert any("struct Row can hold a token" in p for p in
+                   planted["a collided name whose tainted half must not be dropped"]), \
+            planted["a collided name whose tainted half must not be dropped"]
+        (fake / "src" / "rules.rs").unlink()
+
+        # 4k — the canary, and it had to be re-thought for this box: it used to
+        # read "no *struct* found", so a plant written into a file of pure enums
+        # fired the canary instead of the rule, and a canary line reads exactly
+        # like a catch. A tree that declares only enums is now a legitimate one.
+        (fake / "src" / "main.rs").write_text("fn main() {}\n")
+        # The variant carries the untyped document so this tree still satisfies
+        # the payload canary below — which is *also* the only plant that proves
+        # the payload walk reads an enum's variant payloads and not just a
+        # struct's fields. It derives no Debug, so it is still a green tree.
+        (fake / "src" / "k8s.rs").write_text(
+            "pub enum Only { A(serde_yaml_ng::Value), B }\n")
+        assert not only("token hygiene"), only("token hygiene")
+        (fake / "src" / "k8s.rs").write_text("fn nothing_at_all() {}\n")
+        planted["nothing declares a type at all (canary)"] = only("token hygiene")
+        assert any("no struct, enum or type alias found" in p
+                   for p in planted["nothing declares a type at all (canary)"]), \
+            planted["nothing declares a type at all (canary)"]
+        (fake / "src" / "main.rs").write_text(main)
+
+        # 4l — a declaration **swallowed by the scan's own attribute pattern**.
+        # `#\[.*?\]` under `re.S` backtracks its lazy `.*?` forward through the
+        # file looking for a `]` that a struct follows, and everything it crosses
+        # is inside one match and never scanned. Reduced from src/analysis.rs,
+        # where `struct Mounters` (line 2176) matched with an `attrs` group that
+        # began at line 172 and four structs vanished between them.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Clone, Debug, PartialEq, Eq)]\n"
+            "pub enum Row {\n"
+            "    A,\n"
+            "    B,\n"
+            "}\n"
+            "\n"
+            "fn helper(v: &[u8]) -> bool {\n"
+            "    v[0] == 1\n"
+            "}\n"
+            "\n"
+            "struct Hidden {\n"
+            "    client: Client,\n"
+            "}\n"
+            "\n"
+            "#[derive(Debug)]\n"
+            "struct Mounters {\n"
+            "    inner: Hidden,\n"
+            "}\n"
+        )
+        planted["a declaration swallowed by the attribute pattern"] = \
+            only("token hygiene")
+        assert any("struct Mounters can hold a token" in p for p in
+                   planted["a declaration swallowed by the attribute pattern"]), \
+            planted["a declaration swallowed by the attribute pattern"]
+
+        # 4m — an attribute, a doc comment, then the declaration. Not a shape
+        # this box widened the scan to reach: it is the one the bracket-balanced
+        # `ATTRS` above could have *lost*. `strip_comments` blanks a `///` to
+        # spaces rather than deleting it, so the attribute and the struct are not
+        # adjacent lines, and a pattern demanding adjacency reads this type as
+        # deriving nothing at all.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "/// What this holds.\n"
+            "pub struct Docced {\n"
+            "    client: Client,\n"
+            "}\n"
+        )
+        planted["an attribute separated from its struct by a doc comment"] = \
+            only("token hygiene")
+        assert any("struct Docced can hold a token" in p for p in
+                   planted["an attribute separated from its struct by a doc comment"]), \
+            planted["an attribute separated from its struct by a doc comment"]
+
+        # Everything below came out of the operator review of the block above
+        # (reports/2026-08-27-token-hygiene-guard-shape-probe.md), which fed the
+        # check one declaration shape at a time. Each of these walked straight
+        # through the version of the scan the plants above were written for.
+
+        # 4n — a `where` clause, and this is the one that made the review
+        # blocking rather than academic: `just check` runs `cargo fmt --check`
+        # first, and rustfmt *canonicalises* an inline `where` into exactly this
+        # multi-line form. The gate was installing the blind spot.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Session<T>\n"
+            "where\n"
+            "    T: Clone,\n"
+            "{\n"
+            "    client: kube::Client,\n"
+            "    tag: T,\n"
+            "}\n"
+        )
+        planted["a where clause between the generics and the body"] = \
+            only("token hygiene")
+        assert any("struct Session can hold a token" in p for p in
+                   planted["a where clause between the generics and the body"]), \
+            planted["a where clause between the generics and the body"]
+
+        # 4o — a bound with a paren in it. The generics group was `<[^{;(]*>`,
+        # so `Fn(&str) -> bool` ended the pattern before the body.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Session<F: Fn(&str) -> bool> {\n"
+            "    client: kube::Client,\n"
+            "    pred: F,\n"
+            "}\n"
+        )
+        planted["a generic bound containing a paren"] = only("token hygiene")
+        assert any("struct Session can hold a token" in p
+                   for p in planted["a generic bound containing a paren"]), \
+            planted["a generic bound containing a paren"]
+
+        # 4p — derive and declaration on one line. rustfmt splits this, so
+        # `cargo fmt --check` normally removes it before the guard runs; a guard
+        # that is only correct because an earlier step ran is a guard with an
+        # unstated precondition.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)] pub struct SameLine { client: kube::Client }\n"
+        )
+        planted["a derive and its declaration on one line"] = only("token hygiene")
+        assert any("struct SameLine can hold a token" in p
+                   for p in planted["a derive and its declaration on one line"]), \
+            planted["a derive and its declaration on one line"]
+
+        # 4q — a body the scan cannot follow. This one is a hazard `body_at`
+        # *introduced* and has to answer for: `DECL` now stops at the name, so a
+        # declaration whose body cannot be found would be recorded with an empty
+        # field list — indistinguishable from a type that holds nothing, and
+        # invisible to the keyword count, which matched it perfectly well. A
+        # missing body is a FAIL, never a zero.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Dangling<T\n"
+        )
+        planted["a declaration whose body could not be found"] = \
+            only("token hygiene")
+        assert any("body could not be found" in p
+                   for p in planted["a declaration whose body could not be found"]), \
+            planted["a declaration whose body could not be found"]
+
+        # 4r — a gated derive, in both spellings. `#[cfg_attr(test,
+        # derive(Debug))]` is the most likely way a connection type in *this*
+        # repo gets one, and the narrow `#\[derive\(` parsed the type, tainted
+        # it, and printed no FAIL beside a tainted count that had gone up.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[cfg_attr(test, derive(Debug))]\n"
+            "pub struct Gated { client: kube::Client }\n"
+            "#[cfg_attr(feature = \"dbg\", derive(Debug))]\n"
+            "pub struct Featured { client: kube::Client }\n"
+        )
+        planted["a derive behind cfg_attr"] = only("token hygiene")
+        for want in ("struct Gated can hold a token", "struct Featured can hold a token"):
+            assert any(want in p for p in planted["a derive behind cfg_attr"]), \
+                (want, planted["a derive behind cfg_attr"])
+
+        # 4s — a bracket inside a *string* in an attribute, plain and raw. The
+        # bracket matchers count characters; `strip_comments` skipped string
+        # literals rather than blanking them, so `"press ] to close"` closed the
+        # attribute early and the derive was never in `attrs`.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "#[doc = \"press ] to close\"]\n"
+            "pub struct Docs { client: kube::Client }\n"
+            "#[derive(Debug)]\n"
+            "#[doc = r\"a ] b\"]\n"
+            "pub struct Raw { client: kube::Client }\n"
+        )
+        planted["a ] inside a string in an attribute"] = only("token hygiene")
+        for want in ("struct Docs can hold a token", "struct Raw can hold a token"):
+            assert any(want in p for p in planted["a ] inside a string in an attribute"]), \
+                (want, planted["a ] inside a string in an attribute"])
+
+        # 4t — and the same cause in the body: a `}` inside a field attribute's
+        # string truncated the struct, so the `Client` under it was not in the
+        # field list — with the struct still *counted*, which is why no count
+        # could have revealed this one.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug, Clone)]\n"
+            "pub struct Neighbour { name: String }\n"
+            "\n"
+            "#[derive(Debug)]\n"
+            "pub struct Conn {\n"
+            "    #[serde(rename = \"}\")]\n"
+            "    tag: String,\n"
+            "    client: kube::Client,\n"
+            "}\n"
+        )
+        planted["a } inside a string in a field attribute"] = only("token hygiene")
+        assert any("struct Conn can hold a token" in p
+                   for p in planted["a } inside a string in a field attribute"]), \
+            planted["a } inside a string in a field attribute"]
+
+        # 4u — the collided name again, and this time what the *message* says.
+        # Merging into the first site printed `analysis.rs:1` for a derive that
+        # is in `k8s.rs` — nonsense on the line it names at 3am. Every site is
+        # kept: the FAIL is on the one that derives, and it names the others,
+        # because a name-keyed scan genuinely cannot tell which `Session` a
+        # field of type `Session` meant.
+        (fake / "src" / "analysis.rs").write_text(
+            "pub struct Session { label: String }\n"
+        )
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Session { client: kube::Client }\n"
+        )
+        planted["a collided name, reported on the site that derives Debug"] = \
+            only("token hygiene")
+        assert any(p.startswith("src/k8s.rs:2  struct Session can hold a token")
+                   and "src/analysis.rs:1" in p
+                   for p in planted["a collided name, reported on the site that derives Debug"]), \
+            planted["a collided name, reported on the site that derives Debug"]
+        (fake / "src" / "analysis.rs").unlink()
+
+        # 4v — the denominator, proved by breaking the numerator. `NAIVE_DECL`
+        # exists so a `DECL` that stops matching cannot report its own coverage,
+        # and on this tree the two agree at 62, which is what a tripwire looks
+        # like when nothing has tripped it — indistinguishable from one that is
+        # wired to nothing. So narrow `DECL` here the way the reviewed one was,
+        # demanding `<…>` then the body, and require the count to say so.
+        global DECL
+        was, DECL = DECL, re.compile(
+            rf"(?P<attrs>{ATTRS}){ANCHOR}(?P<kw>struct|enum)\s+(?P<name>\w+)"
+            r"(?:<[^{;(]*>)?\s*[{(]", re.M)
+        try:
+            (fake / "src" / "k8s.rs").write_text(
+                "pub struct Session<T>\n"
+                "where\n"
+                "    T: Clone,\n"
+                "{\n"
+                "    client: kube::Client,\n"
+                "}\n"
+            )
+            planted["a DECL that stopped matching, caught by the keyword count"] = \
+                only("token hygiene")
+            assert any("the parser reached" in p for p in
+                       planted["a DECL that stopped matching, caught by the keyword count"]), \
+                planted["a DECL that stopped matching, caught by the keyword count"]
+        finally:
+            DECL = was
+
+        # …and `watcher::Config`, which is a page size and a label selector and
+        # carries no credential — beside a `kube::Config` in the same file, so
+        # the green below cannot be the rule having died.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Spec { wc: watcher::Config }\n"
+        )
+        assert not only("token hygiene"), only("token hygiene")
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub struct Spec { wc: watcher::Config }\n"
+            "#[derive(Debug)]\n"
+            "pub struct Boot { cfg: kube::Config }\n"
+        )
+        assert [p for p in only("token hygiene") if "struct Boot" in p] \
+            and not [p for p in only("token hygiene") if "struct Spec" in p], \
+            only("token hygiene")
+
+        # …and the shapes that must NOT fire, each one a boundary this scan had
+        # to widen without widening: unit variants carry nothing (k8s.rs's
+        # `Capability` is thirteen of them), `ConfigMap` is a browser kind and
+        # not a kubeconfig, and `anyhow::Error` is why the kube error family is
+        # spelled qualified rather than as a bare `Error`.
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Clone, Copy, Debug, PartialEq, Eq)]\n"
+            "pub enum Capability { Metrics, DisruptionBudgets, CertManager }\n"
+            "#[derive(Debug)]\n"
+            "pub struct Cached {\n"
+            "    maps: BTreeMap<Key, ConfigMap>,\n"
+            "    last: Option<anyhow::Error>,\n"
+            "    note: serde_json::Error,\n"
+            "}\n"
+        )
+        assert not only("token hygiene"), only("token hygiene")
+
+        # …and holding one without *deriving* Debug is exactly what k8s.rs is
+        # for. This green is the check's limit and not a verdict on the impl:
+        # a hand-written Debug that formatted the client whole would pass here
+        # too, which is why the FAIL text makes writing one the last resort and
+        # says out loud that this check cannot verify it (NOTES § D164).
         (fake / "src" / "k8s.rs").write_text(
             "pub struct K8s { client: Client }\n"
             "impl std::fmt::Debug for K8s {\n"
@@ -714,6 +1460,55 @@ def self_test() -> None:
             "}\n"
         )
         assert not only("token hygiene"), only("token hygiene")
+
+        # 4w — the *other* thing a `{:?}` prints, and the whole reason
+        # `PAYLOAD_TYPE` exists beside `TOKEN_TYPES`: an object the cluster
+        # considers secret. `k8s.rs`'s `Document` wraps one whole unpruned API
+        # object, a Secret's `data` among them, and holds no name on the token
+        # list — so before this the check reported `Session` and said nothing at
+        # all about a `#[derive(Debug)]` on `Document` (`tester`, 2026-08-31).
+        # The owner is planted too, because a `{:?}` on the pane that holds the
+        # document prints the document.
+        (fake / "src" / "main.rs").write_text(main)
+        (fake / "src" / "k8s.rs").write_text(
+            "#[derive(Debug)]\n"
+            "pub(crate) struct Document(serde_yaml_ng::Value);\n"
+            "#[derive(Debug)]\n"
+            "pub struct Pane { doc: Document }\n"
+        )
+        planted["a derived Debug over a whole unpruned API object"] = \
+            only("token hygiene")
+        for want in ("struct Document holds a whole unpruned API object",
+                     "struct Pane holds a whole unpruned API object"):
+            assert any(want in p for p in
+                       planted["a derived Debug over a whole unpruned API object"]), \
+                (want, planted["a derived Debug over a whole unpruned API object"])
+        # …and the sentence has to be the payload one and not the token one, or
+        # a FAIL at 3am sends somebody hunting a bearer token that is not there
+        # (NOTES § D190).
+        assert not any("bearer token" in p for p in
+                       planted["a derived Debug over a whole unpruned API object"]), \
+            planted["a derived Debug over a whole unpruned API object"]
+
+        # …and the same type without the derive, which is what k8s.rs ships.
+        (fake / "src" / "k8s.rs").write_text(
+            "pub(crate) struct Document(serde_yaml_ng::Value);\n"
+        )
+        assert not only("token hygiene"), only("token hygiene")
+
+        # 4x — the payload half's own canary. *Extracted nothing* and *nothing
+        # to extract* print the same OK line, so a `PAYLOAD_TYPE` that stops
+        # matching — the type renamed, the field moved behind an alias — must be
+        # a FAIL. `main.rs` carries the only other holder in this fake tree, so
+        # emptying both is what "the pattern found nothing" looks like.
+        (fake / "src" / "main.rs").write_text("fn main() {}\n")
+        (fake / "src" / "k8s.rs").write_text("pub struct Plain { name: String }\n")
+        planted["nothing holds an untyped API document (canary)"] = \
+            only("token hygiene")
+        assert any("passed on nothing" in p for p in
+                   planted["nothing holds an untyped API document (canary)"]), \
+            planted["nothing holds an untyped API document (canary)"]
+        (fake / "src" / "main.rs").write_text(main)
         (fake / "src" / "k8s.rs").unlink()
 
         # 5 — every door into the in-cluster environment. `infer` and

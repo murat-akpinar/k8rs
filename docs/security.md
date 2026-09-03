@@ -93,21 +93,32 @@ kind: ClusterRole
 metadata:
   name: k8rs-readonly
 rules:
+  # API discovery — the sidebar, and the capability probe that decides which
+  # analysis rows can answer at all. `system:discovery` is bound to
+  # `system:authenticated` by default, so this rule looks redundant until a
+  # cluster removes that binding as ordinary hardening; then every resource
+  # grant below still works and `/apis` alone answers 403 (NOTES § D160)
+  - nonResourceURLs: ["/api", "/apis", "/api/*", "/apis/*", "/version"]
+    verbs: ["get"]
+  # `pods/log` is read as of 2026-08-30 — `--logs` fetches and follows one
+  # container's log. This grant was measured sufficient for it against a real
+  # cluster: extracted verbatim, bound to a ServiceAccount, `--logs` exits 0
+  # (`k8s-admin`, reports/2026-08-30-the-log-stream-against-a-cluster.md).
+  # `events` was granted ahead of the code (NOTES § D187) and **the code caught
+  # up on 2026-08-31**: `--describe` reads this object's events through an
+  # `involvedObject` field selector, and `k8s-admin` measured the refusal under a
+  # role without it — stdout byte-identical to a pod with no events, the
+  # difference carried by exit `2` and one sentence naming the missing verb and
+  # resource (NOTES § D198)
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services", "nodes",
-                "persistentvolumeclaims", "configmaps"]
+                "persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
-    verbs: ["get", "list", "watch"]
-  # a CronJob's pods are owned by a Job, and only the Job names the CronJob.
-  # `cronjobs` itself is deliberately absent: the Job's ownerReference already
-  # carries the CronJob's kind, name and uid, so nothing reads the object
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
     verbs: ["get", "list", "watch"]
   # rule C3 — the pending certificate signing requests nobody approved
   - apiGroups: ["certificates.k8s.io"]
@@ -117,9 +128,12 @@ rules:
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
     verbs: ["get", "list", "watch"]
-  # only needed for the capacity report
+  # only needed for the capacity report's `using …` lines. `nodes` and not
+  # `pods`: k8rs reads one item per node, never one per pod — the pod half was
+  # granted before anything read either, and a grant nothing uses is not least
+  # privilege (`k8s-admin`, 2026-08-29). It is also the expensive half.
   - apiGroups: ["metrics.k8s.io"]
-    resources: ["pods", "nodes"]
+    resources: ["nodes"]
     verbs: ["get", "list"]
   # only needed for rule C4, and only where cert-manager is installed —
   # omitted deliberately, add it if you want the certificate rows it feeds:
@@ -128,13 +142,18 @@ rules:
   #     verbs: ["get", "list", "watch"]
 ```
 
-`batch` is here because of what a pod carries and what it does not. A CronJob's
-pod names its Job in `ownerReferences` and says nothing about the CronJob above
-it, so grouping the pods of a five-minute schedule onto one card requires a GET
-on the Job. Without the verb that GET is a 403, every tick files under its own
-Job name, and the card churn lands on the user running the least-privileged
-role — the one least equipped to explain it. The degradation is named, not
-silent: the finding files under the Job and says the CronJob could not be read.
+**Every rule above is reachable by code that exists, and that is checked rather
+than assumed.** The role was run against kind under itself on 2026-08-30 — including under an
+identity outside `system:authenticated`, so the default `system:discovery`
+binding could not apply and the `nonResourceURLs` rule above is what answered
+discovery — and it drew every finding and all seven analysis panes with zero
+refusals ([NOTES § D187](../NOTES.md#d187--the-read-only-role-under-itself-two-grants-nothing-reads-a-decision-that-described-code-that-was-never-written-and-the-one-sentence-that-sends-an-operator-to-the-wrong-resource-2026-08-30)).
+Two grants came out in that audit: `configmaps`, which nothing has ever read —
+rule 4 reads the kubelet's *message*, which names the missing object without
+needing access to it — and `batch: ["jobs"]`, granted in 2026-08-12 for a
+CronJob grouping that was described in NOTES and never written. `pods/log` and
+`events` are the two that stayed ahead of their code, and the comment above
+them says so.
 
 Admin — the above plus the operations:
 
@@ -180,6 +199,18 @@ resource.
   `replace_*` siblings. A ban list over that surface is wrong the first time
   kube-rs adds a method; an allowlist asks "is this read-only", which is the
   question that actually matters.
+- **The list covers two types, and the door it leaves open is guarded at the
+  other end.** The allowlist is derived over `kube::Api` *and* `kube_core::Request`,
+  because a write does not have to go through `Api<K>`: a `Request` built by hand
+  and posted through the client was a complete DELETE that raised nothing
+  ([NOTES § D142](../NOTES.md#d142--a-write-does-not-have-to-go-through-apik-and-the-allowlist-already-fits-the-surface-that-was-missed-2026-08-22)).
+  `kube::Client` is deliberately **not** on the list — its `request` and `send`
+  are verb-agnostic, and a read outside `ops.rs` needs one of them. So what makes
+  such a call read-only is not the method that sends it but **the builder that
+  shaped it**: the only request k8rs sends this way is built by
+  `Request::get`, which is on the allowlist, and a `Request::delete` piped through
+  the same sender is caught at the builder. Reading the sender and not the builder
+  is how the DELETE above got through the first time.
 - `clippy.toml` still carries a `disallowed-methods` list crate-wide as the
   fast feedback loop (CI runs clippy with `-D warnings`), and `ops.rs` carries
   the single `#![allow(clippy::disallowed_methods)]` in the project — the
@@ -194,7 +225,18 @@ resource.
   type that can hold a token, a call into the in-cluster ServiceAccount
   environment, or a TLS verification knob turned off by us. It bans the **call**
   and never the word, so a kubeconfig that itself sets
-  `insecure-skip-tls-verify` is still honoured and still shown in the header.
+  `insecure-skip-tls-verify` is still **honoured**. **It is not yet shown
+  anywhere, and this line claimed it was until 2026-08-31.** Measured: one
+  kubeconfig with the CA dropped and the flag set produces output byte-identical
+  to the verified run, and `grep -rn "\.insecure\b" src/*.rs` outside the tests
+  returns nothing — the flag is carried on a context-picker row
+  ([D174](../NOTES.md#d174--the-operator-review-of-the-kubeconfig-family-ten-fixed-one-refused-and-the-two-reversals-it-forced-2026-08-28) ·
+  [D175](../NOTES.md#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28))
+  that Phase 11 has not drawn yet, and the headless surfaces have no equivalent
+  at all. The gate item stays *honoured **and** surfaced*; what changed is that
+  this file now says which half is built. Boxed in
+  [backlog.md](../backlog.md), because the answer is a screen decision before it
+  is a Rust one.
   What it cannot decide yet is decided by a human, and
   [NOTES § D105](../NOTES.md#d105--the-security-gate-splits-into-what-a-script-can-decide-today-and-what-is-waiting-for-code-2026-08-16)
   lists every one of those with the phase that makes it mechanical.
@@ -204,9 +246,65 @@ resource.
 ## Token hygiene
 
 - The kubeconfig token is never logged, never rendered on screen, never
-  embedded in an error message. The config type's `Debug` output is wrapped.
+  embedded in an error message. **No type of ours that can reach a token
+  derives `Debug`** — the rule is the derive, not a wrapper, because a
+  hand-written `Debug` still lets `{:?}` compile and has to be kept correct by
+  whoever adds the next field. `Trouble` lost its derive on 2026-08-27 for
+  exactly that reason
+  ([NOTES § D164](../NOTES.md#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27)).
+  **`Session` is the first type in `src/` that holds one** — through
+  `kube::Client`, whose `Config` keeps the oidc and gcp providers' tokens in a
+  plain `HashMap<String, String>` with a derived `Debug`. It carries no `Debug`
+  of its own, so a stray `{session:?}` is a compile error rather than a leak,
+  and `scripts/security-guard.py` refuses the derive if anyone adds it back
+  ([NOTES § D166](../NOTES.md#d166--connect-its-shape-its-fourteen-choices-and-the-backoff-kubes-own-default-did-not-earn-2026-08-27)).
+- **A credential can arrive in the `server:` line, and it is stripped before
+  that address is drawn.** `clusters[].server` may carry URL userinfo
+  (`https://admin:hunter2@host`) — basic auth at a proxy in front of an API
+  server — and it is all printable, so no control-character strip removes it.
+  The context picker draws that address on its most prominent row, so a
+  kubeconfig password would reach the first screen a stranger sees and every
+  screenshot of it. `k8s::address` removes the userinfo, and **where the two
+  readings of an ambiguous `@` disagree it draws nothing at all rather than
+  guessing** — guessing the other way invents a hostname, which is a different
+  lie on the same line
+  ([NOTES § D175](../NOTES.md#d175--the-ruling-in-d174-was-wrong-about-rfc-3986-and-the-parse-that-is-safe-in-both-directions-2026-08-28)).
+  No script sees this class: it is printable text in a field nothing else
+  treats as secret.
 - This includes the panic path: a backtrace dumped to stderr must not
   contain credentials.
+- **A `kube` error is never formatted whole — not with `{}`, not with `{:?}`.**
+  A renderer selects fields off the typed error: the variant, and the `Status`
+  where there is one. **Read
+  [`k8s.rs` § WHAT A THROTTLE LOOKS LIKE](../src/k8s.rs) before writing that
+  renderer** — *four* `watcher::Error` variants carry a `Status` and only
+  *three* wrap it in `Error::Api`. `WatchError(Box<Status>)` holds it directly
+  and is the one a busy cluster produces most (the 410 desync, an in-band 403),
+  so a formatter written from the three-variant list unwraps, finds nothing,
+  and prints a generic message for the commonest watch failure there is —
+  `PRIOR-ART § C1` exactly. Key on `Status.code`: it survives both parse
+  branches and `reason` survives only one. Measured against the
+  crates on 2026-08-26, `Display` interpolates the source at every hop —
+  `watcher::Error::InitialListFailed` is `"…: {0}"` (`watcher.rs:30`),
+  `kube_client::Error::Auth` is `"auth error: {0}"` (`error.rs:104`), and
+  `AuthError::AuthExecRun` is
+  `"auth exec command '{cmd}' failed with status {status}: {out:?}"`
+  (`client/auth/mod.rs:55`) over a `std::process::Output`, whose `Debug` prints
+  stdout as a string when it is valid UTF-8. An `exec` credential plugin writes
+  `{"kind":"ExecCredential","status":{"token":"…"}}` to **stdout**, so one
+  `format!("{}", err)` on an expired EKS/GKE/AKS session prints a bearer token.
+  Turning `oauth` and `oidc` off removes two variants and not this one.
+  **This bullet is half mechanical and half yours, and the split is the thing
+  to remember.** `scripts/security-guard.py` refuses a *derived* `Debug` on any
+  declaration it parses that can reach a `Config`, a `Client` or a qualified
+  `kube` error type — that half is enforced, and it is what took the derive off
+  `Trouble`. It sees **no format call at all**: a `{}`, a `{:?}` or a
+  `.to_string()` on a kube error, a hand-written `Debug` that formats one
+  whole, an `anyhow` chain printed after a `?`. The guard prints that list in
+  its own summary on every run rather than leaving the gap to be inferred, and
+  those are checked by hand against this section
+  ([NOTES § D162](../NOTES.md#d162--per-watch-identity-and-the-six-choices-the-reconnect-box-had-to-make-2026-08-26),
+  [§ D164](../NOTES.md#d164--the-token-hygiene-guard-learns-three-shapes-it-could-not-see-and-says-out-loud-what-it-still-cannot-2026-08-27)).
 - **One thing off the kubeconfig does enter our own structs, and it is the
   public half only.** Certificate rule C1 warns when the client certificate is
   about to expire, so `ClusterSnapshot` carries the **certificate** bytes and
@@ -267,11 +365,49 @@ about a decade of daily use. A rotator would be more code than the log.
 
 ## Data displayed and stored
 
-- Environment variable **values are never displayed**.
+- Environment variable **values are never displayed** *by a finding, a card or
+  any surface k8rs composes*. **The `y` YAML pane is the stated exception**, and
+  it is one because of what that pane is: the object as the API server sent it,
+  which is the only claim it makes and the only one that makes it useful. A pane
+  that quietly dropped an ordinary field would be lying about being a copy —
+  `kubectl get -o yaml`, which the reader can already run, shows the same line.
+  The rule bites where k8rs goes and *fetches* a value on its own initiative and
+  puts it somewhere the reader did not ask for
+  ([NOTES § D37](../NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12) ·
+  [§ D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)),
+  and `managedFields` is on the pane for the same reason.
 - **Secret contents are hidden by default.** Viewing a Secret shows its keys
   and their sizes; revealing a value requires an explicit second action, and a
   revealed value never enters the command log, the audit log, or the YAML
-  shown by `y`.
+  shown by `y`. **The command log still shows the command k8rs ran, and on a
+  Secret that command prints what this pane hid** — there is no `kubectl` line
+  that reproduces a masked view, so rather than print a line that does not
+  produce what was printed, k8rs names the difference out loud: *a Secret's
+  values are hidden here and shown as their sizes — the command above prints
+  them in full*. Found and fixed at Phase 6's close, verified against a real
+  Secret
+  ([NOTES § D208](../NOTES.md#d208--the-cross-family-review-the-picker-that-called-a-failed-container-done-and-the-owner-fetch-that-was-never-written-2026-09-03)). **A Secret keeps more than one copy of itself, so hiding by
+  position is not enough**: `kubectl apply` writes the whole applied body —
+  `data` map included, and *plaintext* when it was applied through `stringData`
+  — into `metadata.annotations`, so on a Secret every annotation value is hidden
+  behind its size too, and the keys stay drawn
+  ([NOTES § D198](../NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
+  Labels stay visible: 63 characters, and nothing writes a Secret's body into
+  one. **The headless `--yaml` has no reveal at all** — a reveal is a keypress on
+  a drawn pane — so on that surface a Secret's values are unreachable, not merely
+  hidden.
+- **A report is a document, and its reader chooses where it goes.** A finding
+  carries the controller's message **verbatim**
+  ([NOTES § D37](../NOTES.md#d37--a-controllers-message-is-a-status-field-not-a-payload-2026-08-12)),
+  and a validating webhook that echoes back the object it rejected — several in
+  the wild do — can put an env value inside one. On a terminal that is no worse
+  than `kubectl describe`, which the same reader can already run; redirected into
+  a CI log with `k8rs --once > findings.txt`, or pasted into a ticket, it reaches
+  everyone who can read that log. k8rs does not blank the field — refusing to show
+  what `kubectl` shows is a tool lying by omission, not a security control — so
+  **a `--once` report carries whatever this cluster's controllers wrote into a
+  status, and redirecting it is a decision about who sees that**
+  ([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
 - **The edit temp file is treated as a leak surface.** A full object YAML can
   carry Secret data, environment values and tokens. It is written to the
   user's own temp directory with mode 0600 and removed on exit *and* on panic.

@@ -1,9 +1,10 @@
 # k8rs Architecture
 
-> Status: design phase — this document describes the agreed architecture
-> before any code exists. Decisions and their rationale live in `../NOTES.md`;
-> the technology choices (language, crates, toolchain) in `tech-stack.md`;
-> this is the buildable summary.
+> Status: partly built. The bottom of the pyramid — `rules.rs`, `analysis.rs`,
+> `k8s.rs` — exists and runs behind a temporary driver; the three views and the
+> write path are still design. Decisions and their rationale live in
+> `../NOTES.md`; the technology choices (language, crates, toolchain) in
+> `tech-stack.md`; this is the buildable summary.
 
 ## Overview
 
@@ -28,6 +29,59 @@ believable — so "this pod has no memory limit" is a Capacity row, not an
 alarm. Alerts findings are also **grouped by owner**: one Deployment with
 three sick pods is one entry carrying a count, never three entries, and a
 DaemonSet on forty nodes is still one.
+
+## The command line
+
+Flags are parsed from `std::env::args` — there is no `clap` while the surface is
+this small ([tech-stack § Deliberately absent](tech-stack.md#deliberately-absent)).
+What this build accepts:
+
+```
+usage: k8rs [--analysis] <file.json>...   |   k8rs --once|--live [--analysis] [--context <name>] [--namespace <name>]
+```
+
+| Flag | What it does |
+|---|---|
+| `<file.json>...` | Read Kubernetes objects from disk — one object per file, or a `kind: List`. Without `--once` or `--live` this build reads files only — it cannot reach a cluster. |
+| `--analysis` | Draw the seven `analysis.rs` panes under the findings. One meaning in both modes ([NOTES § D169](../NOTES.md#d169--the-three-reports-box-was-placed-above-the-boxes-that-fill-its-fields-and-capacitys-half-moves-to-the-one-that-owns-metrics-2026-08-28)). |
+| `--once` | Connect, print one report, exit — `0` when it ran and reported, `2` when it could not run. **The released surface**: this is what v0.0.1 ships ([NOTES § D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). The whole run is bounded — it does not wait forever on a cluster that never answers. |
+| `--live` | Watch the cluster and redraw whenever the answer changes, forever. **The temporary driver's**, not a shipped flag: a watch that reconnects on its own is provable no other way. |
+| `--read-only` | Accepted and does nothing. There is no write path in this build to disable — `ops.rs` does not exist — so the guarantee holds by there being nothing to guard. **Phase 7 must make it load-bearing**; a flag that silently means nothing once there is something to guard is the failure this is one phase away from. |
+| `--context <name>` | Which context `--once`/`--live` connects to. **Scaffolding** — the shipped flag is Phase 12's; the spelling matches so the muscle memory transfers. A `--context` with nothing usable after it is **refused**, not silently answered with the current context ([D189](../NOTES.md#d189----once-is-built-in-phase-5-a-path-beside-a-cluster-flag-is-refused-rather-than-ignored-and-the-command-log-the-screen-promises-does-not-exist-2026-08-30)). |
+| `--namespace <name>`, `-n <name>` | Narrow the watches to one namespace. **This one is not scaffolding**: the scope it sets is a field on the snapshot that rules and reports were written to read. |
+
+`--namespace` and `-n` each take their value attached with `=` or as the next
+argument — `--namespace payments`, `--namespace=payments`, `-n payments`,
+`-n=payments`. **`-npayments` is refused, not accepted and not ignored.**
+`kubectl` takes it because Go's `pflag` splits a shorthand cluster; taking it
+here would make `-nginx` mean *the namespace `ginx`*, which is a silent wrong
+scope for a word somebody plausibly types. The value must be a DNS-1123 label of
+at most 63 characters, checked before it reaches the API.
+
+**Omitting `--namespace` does not mean *the whole cluster*, it means *do not
+narrow here*.** What happens next is described under
+[Error handling](#error-handling): a cluster-wide pod LIST decides, and a `403`
+on it falls back to the context's own namespace rather than handing back an
+empty tool. Either way the header states the scope that is in effect, because a
+report that does not say what it covered cannot be trusted once it is pasted
+into a ticket.
+
+**`--once` is built and `--read-only` is accepted as a no-op**; both were
+*"specified but not yet built"* until 2026-08-30. `--read-only` is described in
+[security.md § Write safety](security.md#write-safety-model) and becomes
+load-bearing with the write path in Phase 7.
+
+**The panes are not the default under `--once`, and they are one word away.**
+The default is the findings; seven whole-cluster reports stacked under three cards
+buries them. But three rules return `Severity::Info` and nothing else, and the
+card block does not draw that band, so without `--analysis` they would ship with
+no reader at all
+([NOTES § D188](../NOTES.md#d188--where-a---once-report-ends-up-and-the-flag-that-is-the-only-reader-three-shipped-rules-have-2026-08-30)).
+
+**`--live` is the temporary driver's**, not a shipped flag: the console watches a
+cluster because that is what it is, and reading objects from a file is the
+scaffolding that let the rules be proven before there was a screen
+([NOTES § D34](../NOTES.md#d34--the-temporary-mainrs-belongs-to-dev-core-until-phase-12-2026-08-12)).
 
 ## Data flow
 
@@ -59,13 +113,24 @@ binary can mutate anything, and the result comes back through the same watch
 stream as any other change — there is no optimistic local mutation of the
 store.
 
-**Two things in the store did not come from a watch**, and the diagram would
-otherwise imply they did: the API server's version, read once at startup for
-N4's skew comparison, and — for certificate rule C1 — the kubeconfig context
-name and the client **certificate**, which never came from the cluster at all.
-Rules are pure functions over the snapshot, so an input that is not an API
-object still has to arrive on it. The private key is not carried; see
+**Three kinds of thing in the store did not come from a watch**, and the diagram
+would otherwise imply they did. First, the API server's version, read once at
+startup for N4's skew comparison. Second — for certificate rule C1 — the
+kubeconfig context name and the client **certificate**, which never came from the
+cluster at all. Third, **a list a report asks for**: certificate signing requests
+for rule C3 are fetched once, cluster-scoped, only on a run that draws a pane, and
+never watched (a refusal leaves the field `None`, which is *nobody looked* and not
+*nothing to find*). Rules are pure functions over the snapshot, so an input that is
+not an API object still has to arrive on it. The private key is not carried; see
 [Token hygiene](security.md#token-hygiene).
+
+**And one fact does not reach the store at all.** Rule C2 — *the API server's own
+certificate expires in N days* — is the peer certificate of a TLS handshake, so it
+is neither an API object nor a field any rule can read: the snapshot types froze a
+phase before it landed, and the pane that would draw it froze with them. It is
+carried on the session beside the clock-skew reading and spelled by the renderer,
+which is why it appears in no rule and in no report
+([NOTES § D178](../NOTES.md#d178--c3-lands-whole-c2s-row-cannot-be-drawn-in-a-frozen-pane-and-the-twelfth-crate-was-already-compiled-2026-08-28)).
 
 Why watch instead of polling: every `LIST pods -A` forces the API server to
 read and serialize every pod from etcd, degrading linearly with cluster
@@ -171,12 +236,26 @@ and `--once` make — two renderers spelling the same finding differently is one
 of them lying. It answers `None` in two cases that draw the same blank: no
 field records when the event happened, so the right edge stays empty rather
 than borrowing a nearby timestamp that answers a different question; or the
-moment is *ahead* of `now` by more than five minutes, which is not a clock the
-tool can absorb but a rule that filled the wrong field, and a plausible phrase
-would hide it. Inside that five-minute window a future moment is the user's
-clock running behind the API server's and draws `just now`
+moment is *ahead* of `now` by more than five minutes, which is either a rule
+that filled the wrong field or a machine whose clock is behind the cluster's,
+and a plausible phrase would hide both. Inside that five-minute window a future
+moment draws `just now`
 ([NOTES § D18](../NOTES.md#d18--the-clock-is-an-input-not-an-ambient-fact) ·
 [§ D68](../NOTES.md#d68--the-age-ladder-is-not-the-formatters-choice-and-what-the-brief-still-left-open-2026-08-13)).
+
+**That blank is only half of what a wrong clock does, and `k8s.rs` says the
+other half out loud.** With this machine behind the cluster by `S`, an event of
+age `A` is blanked only while `A < S − 5min`; everything older prints a number
+short by the whole `S`, so the same screen both hides recent times and
+under-reports old ones. Ahead of the cluster nothing blanks and every age
+inflates. Neither is visible from inside `rules.rs`, whose only input is the
+snapshot, so the measurement is `k8s.rs`'s: it reads the API server's own `Date`
+response header — refusing a non-2xx, because a refusal's clock may be a
+middlebox's — and `Session::skew` carries the signed gap past the same five
+minutes. The renderer states the gap and the direction and never whose clock is
+wrong, which is not something the header can tell
+([NOTES § D55](../NOTES.md#d55--the-clock-was-written-backwards-and-the-clamp-protects-the-harmless-half-2026-08-12) ·
+[§ D177](../NOTES.md#d177--the-behind-half-does-not-only-blank-it-also-under-reports-and-a-refusals-date-is-not-the-clusters-clock-2026-08-28)).
 
 ### Rules are pure functions
 
@@ -275,12 +354,113 @@ lands, so the size they hold up to is measured in Phase 5 and stated, and above
 it the first paint reports what it is waiting for
 ([NOTES § D115](../NOTES.md#d115--the-prune-line-bounds-memory-and-was-read-as-if-it-bounded-time-and-the-paint-budget-is-stated-at-a-cluster-size-the-risk-is-not-2026-08-18)).
 
+## The command log on a read-only run
+
+**Every read k8rs performs on the live path prints its equivalent `kubectl`
+command on stderr**, in the order it starts them, and stdout stays the findings
+alone — so `k8rs --once > findings.txt` gets the report and nothing else. The
+command log was designed as the *write* path's teaching device; it exists for
+reads first, because that is what this build does
+([NOTES § D205](../NOTES.md#d205--what-a-default-run-prints-the-credential-the-reader-can-fix-the-command-log-that-had-to-be-honest-and-a-teaching-line-that-was-a-request-storm-2026-09-03)).
+
+Three things it is careful about, each of which was a defect first:
+
+- **A line that lies is worse than no line.** The scope probe — one `?limit=1`
+  request asking whether this kubeconfig may list pods at all — was spelled
+  `kubectl get pods -A --chunk-size=1`, which sets a *page size* and then pages to
+  completion: measured at **41 round trips against the one request k8rs sends**,
+  and linear in pod count. It prints as the raw path.
+- **A number in the log has to reconcile with a number above it.** `kubectl
+  api-resources` lists every registered kind; k8rs counts only the listable ones,
+  so the line carries `--verbs=list` and the greeting's kind count matches what a
+  reader gets when they paste it.
+- **Where the printed command cannot reproduce what was printed, k8rs says so**
+  — the Secret case in
+  [security.md § Data displayed and stored](security.md#data-displayed-and-stored).
+
+Two reads print no line, both structurally rather than editorially: the TLS
+handshake rule C2 reads sends no request and has no `kubectl` spelling, and the
+second `/version` round trip is the same request twice. The three object verbs
+(`--logs`, `--describe`, `--yaml`) print the one command they are *about*; they
+draw a different screen, and where that ruling belongs on a screen page is
+[`backlog.md`](../backlog.md)'s.
+
 ## Error handling
 
-- Startup errors (no kubeconfig, unreachable API, bad context) are reported
-  on stderr **before** the TUI starts; non-zero exit. `anyhow` is enough.
-- One distinction matters to the user and gets its own enum: *permission
-  denied (403)* vs *no connection* — the messages differ.
+- **Startup errors are the ones with nothing to connect *with*** — no
+  kubeconfig, a file that will not load, a context the file does not name, a
+  login program that produced no credential. Those reach stderr **before** the
+  TUI starts, with a non-zero exit.
+- **An unreachable API server is not one of them.** A cluster that is down at
+  connect is a screen full of *this is failing*, retried forever, never a tool
+  that would not start — `PRIOR-ART § B3`'s rule is that a connectivity failure
+  is a banner, not a shutdown, and `k8s.rs` § CONNECTING implements it that way.
+  This bullet said the opposite until 2026-08-27, when a run against a dead port
+  was measured and did not exit
+  ([NOTES § D167](../NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
+- **Ten distinctions matter to the user, not two, and they get one enum:
+  `k8s::Fault`.** *Permission denied vs no connection* was the original pair
+  and it was never enough — `Kubeconfig` (the file itself: missing, unreadable,
+  not valid YAML) · `NoContext` (the file loaded and names no such context) ·
+  `BadEntry` (the file loaded and something it points at did not — a certificate
+  it names, a `server:` line, a cluster a context refers to) · `NoCredential`
+  (the kubeconfig names a login program and that program produced nothing —
+  still nothing sent, and the fix is on the reader's own machine; reachable at
+  connect **and** mid-session) · `Expired` (`401`, the ordinary managed-cluster case, and it names
+  the login program from the user's own `exec` block rather than guessing a
+  cloud, [NOTES § D19](../NOTES.md#d19--401-is-a-third-case-and-the-kubeconfig-can-run-a-program))
+  · `Refused` (`403` — the sentence says the **role needs** the verb, never that
+  the kubeconfig *is not allowed*: k8rs needs both `list` and `watch` to watch a
+  kind and cannot tell from a refusal which one was missing) · `Gone` (`404`) ·
+  `Rejected` (`400` — the server understood the request and will not act on it.
+  **The sentence quotes what the server said**, because for this fault that
+  message is the diagnosis: a log request against a container that has not
+  started comes back *container "app" in pod "x" is waiting to start:
+  CreateContainerConfigError*, which names the same cause the report already
+  carded and hands the reader a real errand. It said *that is a fault in k8rs*
+  and gave no errand until 2026-09-03, which was false on the most likely path a
+  user takes — the pod k8rs has just called CRITICAL
+  ([NOTES § D207](../NOTES.md#d207--the-400-that-blamed-k8rs-and-threw-away-the-sentence-the-server-sent-2026-09-03)).
+  Added 2026-08-30, when a multi-container `Pending` pod's log request came back
+  `400` and was read as *nothing usable came back* — a client-side fault
+  printed as a connectivity sentence) ·
+  `Unfinished` (the server accepted the request and the run ended before it
+  answered — a wedged watch. It recorded no failure at all, so it held the whole
+  report where a refusal costs two rules, and `--once` printed zero bytes on a
+  transient fault where a permanent one printed a full report. **Not**
+  `Unanswered`: the handshake demonstrably worked, so the reader is sent at the
+  cluster rather than at their own kubeconfig. It does **not** claim the network
+  is fine — D148's no-keepalive finding means a socket that died mid-LIST is
+  indistinguishable from a server that went quiet, and the shipped sentence says
+  *"the cluster, or the network in between"* for exactly that reason. Added 2026-09-03,
+  [NOTES § D206](../NOTES.md#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03))
+  ·
+  `Unanswered` (everything that did not come back usably — one variant on
+  purpose, because from the reader's side they are one fact).
+- **A fallback string is printed only for the case it actually describes**, and
+  every site holding a typed error routes through the one classifier. This is
+  stronger than invariant 14 and sits beside it: invariant 14 governs the
+  *wording* a user reads, this governs where it is allowed to come from. k9s
+  tells these errors apart internally and still prints
+  `Ruroh? 'v1/pods' command not found` when a credential expires, because a
+  generic handler between the call and the screen swallowed the typed error
+  ([PRIOR-ART § C1](../PRIOR-ART.md#c1--the-generic-handler-ate-the-real-error)).
+  One fallback remains legitimate and is named rather than implied: a watch
+  that ended with no error attached says *nothing was ever said about why*.
+- **The words are the caller's, and so is what was asked.** `Fault` carries no
+  string at all; the sentence is written where the call site is, because that
+  is what knows the verb and the resource the security gate requires a `403`
+  to name — and a `nonResourceURL` refusal has neither, so the only true
+  sentence names the path
+  ([NOTES § D160](../NOTES.md#d160--the-capability-probe-the-seven-group-strings-a-cluster-confirmed-and-the-two-prose-claims-it-took-away-2026-08-26)).
+- **One refusal the classifier cannot see, stated because the code claimed the
+  opposite until it was measured**: every field of `Status` is
+  `#[serde(default)]`, so a proxy answering `403` with a JSON body that is not
+  a `Status` deserializes *successfully* into an all-default one — `code: 0`,
+  no reason — and kube's own `with_code` fallback never runs. The HTTP status
+  is then unrecoverable from `kube::Error::Api`, and such a refusal reads as
+  *nothing usable came back*
+  ([NOTES § D167](../NOTES.md#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)).
 - Watch drops / `410 Gone`: kube-rs watcher reconnects with backoff; the UI
   must show "disconnected, retrying" — silently stale data is forbidden.
 - Partial RBAC: a 403 on a secondary stream disables only the rules that

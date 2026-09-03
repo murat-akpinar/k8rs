@@ -28,7 +28,7 @@ fail=0
 note() { echo "FAIL  $*"; fail=1; }
 declare -A left              # fixture name -> days of validity at `now`
 
-# --- ONE INSTANT, THREE FILES START ---
+# --- ONE INSTANT, EVERY FILE THAT READS THESE BYTES START ---
 # `now` above and `fn now()` in each file below are the same fact written twice —
 # the dates below are asserted against this one, and the `Snapshot` every
 # certificate assertion is built with comes from those. Nothing else compares
@@ -47,6 +47,15 @@ declare -A left              # fixture name -> days of validity at `now`
 # a fact that moves with every capture is pointed at, never restated, because a
 # copy nothing compares is a lie with a delay on it (NOTES § D57).
 #
+# **And three became four on 2026-08-27**, found by the scan below and not by a
+# reviewer: the live driver started honouring `--analysis`, so `src/main_tests.rs`
+# reads `expiring-client` to assert the Certificates pane's row and its `Nd` badge
+# off a shape only a cluster reaches (NOTES § D169). It had pinned
+# `2026-08-16T12:00:00Z` while it was only about card ages, and moved to this
+# instant to do it — which is the *right* repair, and the wrong one was equally
+# available: leave the pin and write whatever day count that instant happens to
+# produce into the badge assertion.
+#
 # The spelling differs per file (`time("…")` there, a bare `Time("…".parse())`
 # here), so the pattern takes the first date-shaped string inside `fn now()`
 # rather than one call's shape. A second one landing in the same body hands two
@@ -55,7 +64,7 @@ declare -A left              # fixture name -> days of validity at `now`
 #
 # An extraction that finds nothing must fail loudly, not pass quietly
 # (CLAUDE.md — a derived list asserts it found something).
-pins_in=(src/rules_tests.rs src/analysis_tests.rs)
+pins_in=(src/rules_tests.rs src/analysis_tests.rs src/main_tests.rs)
 for file in "${pins_in[@]}"; do
   # `|| true`, and stderr dropped, so a file that has moved is reported by the
   # sentence below rather than by sed killing the run under `set -e`.
@@ -67,14 +76,16 @@ for file in "${pins_in[@]}"; do
   fi
 done
 
-# **And the list above is itself a derived claim**: a fourth module reading these
+# **And the list above is itself a derived claim**: a fifth module reading these
 # certificates would measure them from a pin nothing here compares. Every file
 # under src/ that names the fixture directory has to be one of the files above,
 # or sit in the module directory one of them owns
 # (`src/analysis_tests/certificates.rs` -> `src/analysis_tests.rs`, invariant 11).
-# `src/main_tests.rs` pins a different instant on purpose — it is about card ages,
-# not certificates — and needs no exception written for it: it reads none of
-# these files, so it never appears in the list this loop walks.
+# **No file is exempt from that, and one used to look like it was.** A module
+# that reads these bytes measures them from *some* instant whatever it thinks it
+# is about, and the only instant this file can vouch for is the one above — so
+# the answer to a new reader is to move its pin onto this one, never to write it
+# an exception here.
 readers=$(cd "$here/.." && grep -rl 'fixtures/certs' src) || true
 [ -n "$readers" ] ||
   note "no file under src/ names tests/fixtures/certs — either the certificates are read by nothing, or this scan is looking in the wrong place and the pin check above just passed on a list it did not build"
@@ -85,7 +96,7 @@ for file in $readers; do
     *) note "$file reads the committed certificates and nothing here checks which instant it measures them from — add the file holding its \`fn now()\` to pins_in above" ;;
   esac
 done
-# --- ONE INSTANT, THREE FILES END ---
+# --- ONE INSTANT, EVERY FILE THAT READS THESE BYTES END ---
 
 # name | notBefore | notAfter | days left at the reference `now`
 pinned=(
