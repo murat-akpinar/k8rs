@@ -2044,6 +2044,16 @@ recorded reversal and a later box rather than a dev round
   with warnings it is the fourth `▲` on the page — prominent positionally, not
   typographically, and under `--once` there is no colour guarantee
 
+- **The logs tab has no state for a refused log request, and it is the first one
+  a beginner hits.** `screens/detail.md` draws *no logs yet*, *no previous run*
+  and *pod deleted* — not the state that arrives when you ask for the logs of the
+  pod Alerts has just carded CRITICAL, which is a `400` carrying the server's own
+  sentence ([D207](NOTES.md#d207--the-400-that-blamed-k8rs-and-threw-away-the-sentence-the-server-sent-2026-09-03)).
+  The headless surface answers it correctly as of 2026-09-03; the pane that will
+  draw it does not exist yet, which is why this is a screen question and not a
+  defect. `tui-designer`'s, and it wants doing **before Phase 11 draws that
+  pane** rather than after
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

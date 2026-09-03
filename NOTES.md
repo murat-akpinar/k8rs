@@ -228,6 +228,7 @@ its line moving with it.
 - [D204](#d204--the-resident-set-named-by-an-instrument-the-store-is-cheaper-than-the-wire-and-the-memory-is-in-a-page-of-500-whole-pods-2026-09-03) — the resident set named by an instrument: the store is cheaper than the wire, and the memory is in a page of 500 whole pods
 - [D205](#d205--what-a-default-run-prints-the-credential-the-reader-can-fix-the-command-log-that-had-to-be-honest-and-a-teaching-line-that-was-a-request-storm-2026-09-03) — what a default run prints: the credential the reader can fix, the command log that had to be honest, and a teaching line that was a request storm
 - [D206](#d206--a-wedged-watch-cost-the-whole-report-and-the-partial-snapshot-it-was-said-to-need-was-never-needed-2026-09-03) — a wedged watch cost the whole report, and the partial snapshot it was said to need was never needed
+- [D207](#d207--the-400-that-blamed-k8rs-and-threw-away-the-sentence-the-server-sent-2026-09-03) — the `400` that blamed k8rs, and threw away the sentence the server sent
 
 ## Why it exists — where the gap is
 
@@ -17762,4 +17763,62 @@ measurement — *41 pods, thirteen findings* — where the report says `12 criti
 full-permission run. A number copied from a box instead of from the report it
 cites is [D136](#d136--three-claims-that-were-reasoned-instead-of-measured-and-the-one-sentence-that-catches-all-three-2026-08-21)'s
 class, one remove further out.
+
+### D207 — the `400` that blamed k8rs, and threw away the sentence the server sent (2026-09-03)
+
+Found at **Phase 6's close, step 2** — the step that exists because a phase whose
+only evidence is `cargo test` has never left the fixture. It is this phase's own
+subject matter failing on its most likely path.
+
+`k8rs --once` cards `● default/broken-config` CRITICAL: *Container needs a
+ConfigMap or Secret that does not exist*. The obvious next thing anyone does is
+ask for that pod's logs, and what came back was:
+
+> k8rs: this cluster would not accept the request k8rs made to `get pods/log` in
+> `default` — **that is a fault in k8rs**, and nothing is wrong with the cluster
+> or with this login
+
+**False twice.** Nothing was wrong with k8rs; the container genuinely had not
+started, which is what the line above already said. And the server had explained
+itself in plain English — *container "app" in pod "broken-config" is waiting to
+start: CreateContainerConfigError* — which we replaced with a self-accusation.
+`kubectl` prints that sentence; we had it in hand and dropped it.
+
+**This is the second pass over one defect.**
+[D167](#d167--eight-faults-not-two-and-the-two-the-review-had-to-produce-2026-08-27)
+added `Fault::Rejected` on 2026-08-30 precisely because a `400` was being printed
+as a connectivity sentence. That fixed the *category* and still discarded the
+*message* — `PRIOR-ART § C1`'s generic handler, eating the real error one layer
+further in.
+
+**The mechanism is a second selector, not a string on the `Fault`.** `Fault`
+carrying no text is invariant 9 made structural and it stays: `message(&Status)`
+and `said(&kube::Error)` sit beside `fault`, run the text through the ingest
+guard's `text(.., FREE_TEXT)` so it is stripped and bounded like every other
+API string, and `watch_said`/`Trouble::said` mirror `watch_fault`/`Trouble::fault`
+so a watch and a one-object read cannot disagree about which part of a `Status`
+is the sentence. **Only the `Rejected` arm reads it**, and a test asserts the
+other nine are byte-identical with and without a message: a `403`'s message names
+a user where our sentence names the fix, and a `404`'s repeats a name just typed.
+
+**All three read surfaces had it**, not just `--logs`: `--describe` and `--yaml`
+share one object `get` through `read_failed`. Feeding the fix also turned up a
+second live shape nobody had measured — `default/broken-image` answers *container
+"nope" in pod "broken-image" is waiting to start: trying and failing to pull
+image*, which is plain English end to end.
+
+**The rule's own wording was deliberately not reused, and the reason is
+measured.** `WAITING_REASONS` maps `CreateContainerConfigError` to a card phrase,
+so reach was never the obstacle — but for the second live state the two disagree
+outright: the API server writes *trying and failing to pull image* where the
+table writes *cannot get its image*, and printing both in one sentence is the two
+spellings of one condition this repo has paid most for. Keying off the message's
+trailing token would also be scraping free text whose shape the API never
+promised.
+
+**One thing this opens for the write path, recorded now because `ops.rs` has not
+been written yet.** `because(Rejected, …)` prints the server's `Status.message`.
+On a read that is harmless. On a **write**, a `400` validation error can echo the
+field values that were submitted — so the Secrets row of the security gate has to
+look at this when `ops.rs` lands, and this paragraph is where it is written down.
 

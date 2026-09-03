@@ -381,9 +381,15 @@ it the first paint reports what it is waiting for
   · `Refused` (`403` — the sentence says the **role needs** the verb, never that
   the kubeconfig *is not allowed*: k8rs needs both `list` and `watch` to watch a
   kind and cannot tell from a refusal which one was missing) · `Gone` (`404`) ·
-  `Rejected` (`400` — the server understood the request and will not act on it,
-  so the fault is in the request k8rs made: the sentence says so and hands the
-  reader no errand, because there is nothing on their side to go and fix.
+  `Rejected` (`400` — the server understood the request and will not act on it.
+  **The sentence quotes what the server said**, because for this fault that
+  message is the diagnosis: a log request against a container that has not
+  started comes back *container "app" in pod "x" is waiting to start:
+  CreateContainerConfigError*, which names the same cause the report already
+  carded and hands the reader a real errand. It said *that is a fault in k8rs*
+  and gave no errand until 2026-09-03, which was false on the most likely path a
+  user takes — the pod k8rs has just called CRITICAL
+  ([NOTES § D207](../NOTES.md#d207--the-400-that-blamed-k8rs-and-threw-away-the-sentence-the-server-sent-2026-09-03)).
   Added 2026-08-30, when a multi-container `Pending` pod's log request came back
   `400` and was read as *nothing usable came back* — a client-side fault
   printed as a connectivity sentence) ·

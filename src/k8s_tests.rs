@@ -4524,6 +4524,210 @@ fn the_failures_that_never_reached_the_cluster_are_not_nothing_answered() {
     );
 }
 
+/// **The server's own sentence survives the classifier, and it is the diagnosis for one fault.**
+///
+/// **Measured on a live four-node kind cluster before it was a test** (`k8s-admin`, 2026-09-03):
+/// `k8rs --logs --object default/broken-config` printed *that is a fault in k8rs, and nothing is
+/// wrong with the cluster* while the API server had answered *container "app" in pod
+/// "broken-config" is waiting to start: CreateContainerConfigError* — the same root cause the
+/// CRITICAL card one screen up already names. `PRIOR-ART § C1` in the region written to close it,
+/// for the third time.
+///
+/// **Both `Status` framings, because [`answer`] needs both and so does this** (NOTES § D29): the
+/// body's own `code`, and kube's fallback shape where the code is on the HTTP line and the
+/// `reason` is a placeholder no server sent. The message is read the same way out of each.
+#[test]
+fn the_sentence_a_server_wrote_about_a_refused_call_survives() {
+    let waiting = "container \"app\" in pod \"broken-config\" is waiting to start: \
+                   CreateContainerConfigError";
+    let body = kube::core::Status::failure(waiting, "BadRequest").with_code(400);
+    assert_eq!(
+        fault(&kube::Error::Api(body.clone().boxed())),
+        Fault::Rejected
+    );
+    assert_eq!(
+        said(&kube::Error::Api(body.boxed())).as_deref(),
+        Some(waiting),
+        "the one sentence that says why the log cannot be read was thrown away, so the reader is \
+         told the cluster is fine and k8rs is broken"
+    );
+
+    // kube's own fallback for a body that is not JSON: the code is the real HTTP one and the
+    // whole response text is the message (`client/mod.rs:551-558`).
+    let raw =
+        kube::core::Status::failure("Bad Request", "Failed to parse error data").with_code(400);
+    assert_eq!(
+        said(&kube::Error::Api(raw.boxed())).as_deref(),
+        Some("Bad Request"),
+        "a refusal whose body kube could not parse lost the body kube did keep"
+    );
+}
+
+/// **Nothing said and something said are two different answers, and a caller has to be able to
+/// tell them apart** — [`message`]'s `None`.
+///
+/// **`message` is `#[serde(default)]`**, so an empty one is what a `Status` with no message
+/// decodes to; `Some("")` there would put *and said:* in front of nothing.
+///
+/// **And every error that never received a `Status` is `None`**, which is not a shortcut: a
+/// kubeconfig kube read for itself, a login helper that produced nothing and a socket that died
+/// each have no server answer in them at all. The `403` row is the one that says this is a
+/// *selection* and not a dump — it has a message, [`said`] hands it over, and `main.rs`'s
+/// `because` deliberately does not print it.
+#[test]
+fn an_error_with_no_server_answer_in_it_says_nothing_rather_than_nothing_at_all() {
+    assert_eq!(
+        said(&kube::Error::Api(
+            kube::core::Status::failure("", "BadRequest")
+                .with_code(400)
+                .boxed()
+        )),
+        None,
+        "a `Status` carrying no message answered with an empty sentence, so a reader is shown a \
+         quotation mark with nothing behind it"
+    );
+    for (name, error) in [
+        (
+            "a kubeconfig kube read for itself",
+            kube::Error::InferKubeconfig(kube::config::KubeconfigError::CurrentContextNotSet),
+        ),
+        ("a TLS stack that would not build", kube::Error::TlsRequired),
+        (
+            "a socket that died",
+            kube::Error::Service(Box::new(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "connection reset by peer",
+            ))),
+        ),
+    ] {
+        assert_eq!(
+            said(&error),
+            None,
+            "{name} was quoted as though a server had said it"
+        );
+    }
+    assert_eq!(
+        said(&kube::Error::Api(
+            kube::core::Status::failure("pods is forbidden: User \"dev\" cannot get", "Forbidden")
+                .with_code(403)
+                .boxed()
+        ))
+        .as_deref(),
+        Some("pods is forbidden: User \"dev\" cannot get"),
+        "the selection stopped answering for a fault whose sentence a later caller may want"
+    );
+}
+
+/// **A message is free text from the API and meets the ingest guard like every other one**
+/// (invariant 9, the security gate's *sizes are bounded* row).
+///
+/// **The bound is load-bearing rather than nominal here.** When a response body is not JSON at
+/// all kube puts the **whole body** in this field, so an authorizing proxy's HTML error page
+/// arrives as one `message` — the shape § WHAT WENT WRONG names as the one most likely to answer
+/// something that is not a `Status`.
+///
+/// **A bidi override in it is Trojan Source through an error sentence**, which is the door
+/// [`unprintable`] exists for and the one a `Status` opens without any object being involved.
+#[test]
+fn a_server_sentence_is_stripped_and_bounded_like_every_other_field() {
+    let crafted = "waiting\u{202e}to start\u{0}\u{1b}[2J";
+    let cleaned = said(&kube::Error::Api(
+        kube::core::Status::failure(crafted, "BadRequest")
+            .with_code(400)
+            .boxed(),
+    ))
+    .expect("a crafted message is still a message");
+    assert!(
+        !cleaned.chars().any(unprintable),
+        "a server sentence reached a caller with a bidi override or an escape still in it: \
+         {cleaned:?}"
+    );
+
+    let huge = "a".repeat(FREE_TEXT * 4);
+    let cut = said(&kube::Error::Api(
+        kube::core::Status::failure(&huge, "BadRequest")
+            .with_code(400)
+            .boxed(),
+    ))
+    .expect("a long message is still a message");
+    assert!(
+        cut.len() <= FREE_TEXT + SHORTENED.len(),
+        "a proxy's whole error page reached a caller unbounded: {} bytes",
+        cut.len()
+    );
+    assert!(
+        cut.ends_with(SHORTENED),
+        "a message was cut and the reader was not told: {:?}",
+        &cut[cut.len().saturating_sub(40)..]
+    );
+}
+
+/// **A watch reads a `Status` the same way a one-object read does** — [`Trouble::said`] over
+/// [`watch_said`], beside [`Trouble::fault`] over [`watch_fault`].
+///
+/// **`WatchError` is the arm that matters and the one an unwrapping match misses**: it carries
+/// its `Status` directly rather than behind `kube::Error::Api`, so a reader written for the
+/// wrapped shape alone silently answers *the server said nothing*.
+///
+/// **Two negatives.** `NoResourceVersion` has no `Status` in it at all, and a `Trouble` whose
+/// only fault is [`Fault::Unfinished`] never received an answer to have read — the fault says so
+/// in as many words, and a sentence there would be invented.
+#[test]
+fn a_watch_that_was_refused_carries_what_the_server_said_and_a_wedged_one_carries_nothing() {
+    // **A `fn` and not a closure**: `Trouble` borrows its failure, and a closure's return type is
+    // inferred once, so one written here would pin every row of the loop below to the first row's
+    // temporary.
+    fn trouble(failure: Option<&watcher::Error>, unfinished: bool) -> Trouble<'_> {
+        Trouble {
+            kind: ObjectKind::Pod,
+            listed: false,
+            failure,
+            ended: false,
+            unfinished,
+            outstanding: None,
+        }
+    }
+    let refused = || kube::core::Status::failure("pods is forbidden", "Forbidden").with_code(403);
+
+    for (name, failure) in [
+        (
+            "the initial LIST",
+            watcher::Error::InitialListFailed(kube::Error::Api(refused().boxed())),
+        ),
+        (
+            "the watch that would not start",
+            watcher::Error::WatchStartFailed(kube::Error::Api(refused().boxed())),
+        ),
+        (
+            "the watch that failed mid-stream",
+            watcher::Error::WatchFailed(kube::Error::Api(refused().boxed())),
+        ),
+        (
+            "the watch verb refused after the LIST succeeded",
+            watcher::Error::WatchError(refused().boxed()),
+        ),
+    ] {
+        assert_eq!(
+            trouble(Some(&failure), false).said().as_deref(),
+            Some("pods is forbidden"),
+            "{name} lost what the server said about it"
+        );
+    }
+
+    assert_eq!(
+        trouble(Some(&watcher::Error::NoResourceVersion), false).said(),
+        None,
+        "an answer with no `resourceVersion` in it was quoted as though it were a sentence"
+    );
+    let wedged = trouble(None, true);
+    assert_eq!(wedged.fault(), Some(Fault::Unfinished));
+    assert_eq!(
+        wedged.said(),
+        None,
+        "a watch the server never answered was given words to have said"
+    );
+}
+
 // --- RESOLVING AN OWNER ---
 //
 // **Every ReplicaSet below is a committed capture** (NOTES § D53) and the joins between them are

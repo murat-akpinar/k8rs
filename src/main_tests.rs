@@ -3026,38 +3026,68 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
         "`list` and `watch` pods",
         "reach this cluster",
     ];
+    // **The server's own sentence, in the two states it has**: one it wrote and one it did not.
+    // Every claim below has to hold in both, because a caller supplies whichever it was handed.
+    let wrote = "container \"app\" in pod \"broken-config\" is waiting to start: \
+                 CreateContainerConfigError";
     for renewal in [None, Some("aws")] {
         for asked in framings {
-            let said: Vec<String> = all
-                .iter()
-                .map(|fault| because(*fault, asked, renewal))
-                .collect();
-            for line in &said {
-                println!("{renewal:?}  {line}");
-            }
-            let distinct: std::collections::BTreeSet<&String> = said.iter().collect();
-            assert_eq!(
-                distinct.len(),
-                all.len(),
-                "two faults print the same sentence, which is the generic handler growing back: \
-                 {said:#?}"
-            );
-            for line in &said {
-                assert!(
-                    !line.is_empty() && !line.contains("``"),
-                    "a sentence is empty or carries an empty pair of backticks: {line:?}"
+            for server in [None, Some(wrote)] {
+                let said: Vec<String> = all
+                    .iter()
+                    .map(|fault| because(*fault, asked, renewal, server))
+                    .collect();
+                for line in &said {
+                    println!("{renewal:?}  {server:?}  {line}");
+                }
+                let distinct: std::collections::BTreeSet<&String> = said.iter().collect();
+                assert_eq!(
+                    distinct.len(),
+                    all.len(),
+                    "two faults print the same sentence, which is the generic handler growing \
+                     back: {said:#?}"
                 );
+                for line in &said {
+                    assert!(
+                        !line.is_empty() && !line.contains("``"),
+                        "a sentence is empty or carries an empty pair of backticks: {line:?}"
+                    );
+                }
+                // The three arms that read `asked` must actually contain it, whichever framing
+                // arrives. That is the cheap half; the grid below is the half that catches a
+                // frame that reads wrongly.
+                for fault in [Refused, Rejected, Gone, Unanswered, Unfinished] {
+                    let line = because(fault, asked, renewal, server);
+                    assert!(
+                        line.contains(asked),
+                        "`{fault:?}` dropped what k8rs was trying to do: {line:?}"
+                    );
+                }
             }
-            // The three arms that read `asked` must actually contain it, whichever framing
-            // arrives. That is the cheap half; the grid below is the half that catches a frame
-            // that reads wrongly.
-            for fault in [Refused, Rejected, Gone, Unanswered, Unfinished] {
-                let line = because(fault, asked, renewal);
+        }
+    }
+
+    // **Exactly one arm reads what the server said, and the other nine are byte-identical with
+    // and without it.** That is the claim `because`'s own doc makes and the one that would rot
+    // silently: a `403`'s message names a user and a verb where *the role this kubeconfig uses
+    // needs to …* names the fix, and a `404`'s repeats a name the reader just typed.
+    for fault in all {
+        let quiet = because(fault, "`get /apis`", None, None);
+        let told = because(fault, "`get /apis`", None, Some(wrote));
+        match fault {
+            Rejected => {
                 assert!(
-                    line.contains(asked),
-                    "`{fault:?}` dropped what k8rs was trying to do: {line:?}"
+                    told.contains(wrote) && !told.contains("fault in k8rs"),
+                    "the one fault whose diagnosis is the server's own sentence either dropped \
+                     it or kept blaming k8rs over the top of it: {told:?}"
                 );
+                assert_ne!(quiet, told);
             }
+            other => assert_eq!(
+                quiet, told,
+                "`{other:?}` started quoting the server, which puts a username or a name the \
+                 reader just typed in place of the sentence written for it: {told:?}"
+            ),
         }
     }
 
@@ -3065,14 +3095,14 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
     // a `nonResourceURL` that means a path, because its `Status` carries no group and no kind
     // (NOTES § D160).
     assert_eq!(
-        because(Refused, "`get /apis`", None),
+        because(Refused, "`get /apis`", None, None),
         "the role this kubeconfig uses needs to `get /apis`"
     );
     // **And it never claims which verb is missing.** A watch is two verbs, and a `Role` granting
     // `list` without `watch` is ordinary — measured as printing *not allowed to `list` and
     // `watch` pods* while the LIST had just succeeded (`k8s-admin`, 2026-08-27).
     for asked in ["`get /apis`", "`list` and `watch` pods"] {
-        let line = because(Refused, asked, None);
+        let line = because(Refused, asked, None, None);
         assert!(
             !line.contains("not allowed"),
             "the refusal claims a state this code cannot know — which of two verbs was \
@@ -3081,7 +3111,7 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
     }
     // **And the expiry is not a refusal.** Telling a beginner *you are not allowed* when their
     // login timed out sends them to their platform team for nothing (NOTES § D19).
-    let expired = because(Expired, "`get /apis`", Some("aws"));
+    let expired = because(Expired, "`get /apis`", Some("aws"), None);
     assert!(
         !expired.contains("needs") && expired.contains("`aws`"),
         "{expired:?}"
@@ -3093,7 +3123,7 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
     // shape, a token with no `expirationTimestamp`, genuinely does need one; the sentence has to
     // be true of both, so it names neither.
     for renewal in [None, Some("aws")] {
-        let line = because(Expired, "`get /apis`", renewal);
+        let line = because(Expired, "`get /apis`", renewal, None);
         assert!(
             !line.contains("afresh") && !line.contains("restart") && !line.contains("start k8rs"),
             "the expired-login sentence tells the reader to restart, which is false for the \
@@ -3101,13 +3131,13 @@ fn every_fault_gets_its_own_sentence_and_none_of_them_stands_in_for_another() {
         );
     }
     assert!(
-        !because(Expired, "`get /apis`", None).contains('`'),
+        !because(Expired, "`get /apis`", None, None).contains('`'),
         "a kubeconfig with no login program to name printed backticks around nothing"
     );
     // **The program is named where there is one and the sentence still works where there is
     // not.** Both shapes are ordinary: a static token in the file has no program behind it.
-    assert!(because(NoCredential, "", Some("aws")).contains("(`aws`)"));
-    assert!(!because(NoCredential, "", None).contains('`'));
+    assert!(because(NoCredential, "", Some("aws"), None).contains("(`aws`)"));
+    assert!(!because(NoCredential, "", None, None).contains('`'));
 }
 
 /// **The four sentences that carry `asked`, in all four framings a caller can supply, written
@@ -3242,13 +3272,56 @@ fn the_three_sentences_that_name_what_was_asked_read_in_all_four_framings() {
         ),
     ];
     for (fault, asked, expected) in grid {
-        let line = because(fault, asked, None);
+        let line = because(fault, asked, None, None);
         println!("{line}");
         assert_eq!(
             line, expected,
             "`{fault:?}` has been reworded — read all four framings of it above before updating \
              this literal, because three of the four callers supply a verb phrase and one \
              supplies a path"
+        );
+    }
+
+    // **The one arm that reads what the server said, written out in all four framings too**
+    // (`k8s::said`). It is the sentence a live cluster produced, and it is here as a literal for
+    // the reason the twenty above are: the difference between quoting the server and blaming
+    // k8rs is a difference no predicate over a string can see.
+    let wrote = "container \"app\" in pod \"broken-config\" is waiting to start: \
+                 CreateContainerConfigError";
+    let quoted = [
+        (
+            "`get /version`",
+            "this cluster would not accept the request k8rs made to `get /version`, and said: \
+             container \"app\" in pod \"broken-config\" is waiting to start: \
+             CreateContainerConfigError",
+        ),
+        (
+            "`get /apis`",
+            "this cluster would not accept the request k8rs made to `get /apis`, and said: \
+             container \"app\" in pod \"broken-config\" is waiting to start: \
+             CreateContainerConfigError",
+        ),
+        (
+            "`list` and `watch` pods",
+            "this cluster would not accept the request k8rs made to `list` and `watch` pods, and \
+             said: container \"app\" in pod \"broken-config\" is waiting to start: \
+             CreateContainerConfigError",
+        ),
+        (
+            "reach this cluster",
+            "this cluster would not accept the request k8rs made to reach this cluster, and \
+             said: container \"app\" in pod \"broken-config\" is waiting to start: \
+             CreateContainerConfigError",
+        ),
+    ];
+    for (asked, expected) in quoted {
+        let line = because(Rejected, asked, None, Some(wrote));
+        println!("{line}");
+        assert_eq!(
+            line, expected,
+            "the rejected call's sentence has been reworded — it is the only one that quotes the \
+             cluster, and what it may not do again is claim the fault is k8rs's over the top of \
+             an explanation the server gave"
         );
     }
 }
@@ -6768,6 +6841,28 @@ async fn answers(status: &'static str, pod: String, log: &'static str) -> (kube:
     answers_that_may_cut_the_log(status, pod, log, false).await
 }
 
+/// [`answers`], with the **log** path answering on a status of its own — a pod that reads
+/// perfectly and a log request the server will not accept.
+///
+/// **The only shape a `400` on `pods/log` actually arrives in, and one status for the whole
+/// server cannot spell it**: the pod has to be readable or [`logs_run`] ends before it asks for a
+/// log at all, and the sentence under test is the one printed after it asks. Measured on a live
+/// kind cluster before it was a test — `default/broken-config`, whose container is waiting on a
+/// ConfigMap that does not exist (`k8s-admin`, 2026-09-03).
+async fn answers_but_refuses_the_log(
+    pod: String,
+    refusal: (&'static str, String),
+) -> (kube::Client, Requests) {
+    served(
+        "200 OK",
+        pod,
+        refusal,
+        Some(("200 OK", no_event_list())),
+        false,
+    )
+    .await
+}
+
 /// [`answers`], with the whole of the events answer the caller's — **its status as well as its
 /// body, and `None` for a server that never answers that path at all**.
 ///
@@ -6786,7 +6881,7 @@ async fn answers_with_events(
     pod: String,
     events: Option<(&'static str, String)>,
 ) -> (kube::Client, Requests) {
-    served("200 OK", pod, "", events, false).await
+    served("200 OK", pod, ("200 OK", String::new()), events, false).await
 }
 
 /// The empty `EventList` [`answers`] hands back when the caller did not choose one.
@@ -6810,7 +6905,14 @@ async fn answers_that_may_cut_the_log(
     log: &'static str,
     cut: bool,
 ) -> (kube::Client, Requests) {
-    served(status, pod, log, Some((status, no_event_list())), cut).await
+    served(
+        status,
+        pod,
+        (status, log.to_string()),
+        Some((status, no_event_list())),
+        cut,
+    )
+    .await
 }
 
 /// The one server the three wrappers above are, and the only place this file writes HTTP.
@@ -6818,10 +6920,14 @@ async fn answers_that_may_cut_the_log(
 /// **`events` carries its own status because the events path is the one that has to disagree with
 /// the others** ([`answers_with_events`]), and `None` there is a request that is read, logged and
 /// then never answered.
+///
+/// **`log` carries its own for the same reason** ([`answers_but_refuses_the_log`]): a `400` on
+/// `pods/log` only exists after a pod read that succeeded, so a single status for the whole server
+/// could not spell it and the arm that prints it was unreachable.
 async fn served(
     status: &'static str,
     pod: String,
-    log: &'static str,
+    log: (&'static str, String),
     events: Option<(&'static str, String)>,
     cut: bool,
 ) -> (kube::Client, Requests) {
@@ -6835,6 +6941,7 @@ async fn served(
     tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
             let pod = pod.clone();
+            let log = log.clone();
             let events = events.clone();
             let log_of = std::sync::Arc::clone(&log_of);
             tokio::spawn(async move {
@@ -6853,7 +6960,7 @@ async fn served(
                             .push(request.split_whitespace().nth(1).unwrap_or("/").to_string());
                         let log_asked_for = request.contains("/log?");
                         let (status, body) = if log_asked_for {
-                            (status, log.to_string())
+                            (log.0, log.1.clone())
                         } else if request.contains("/events?") {
                             match &events {
                                 Some((status, body)) => (*status, body.clone()),
@@ -7665,6 +7772,162 @@ async fn a_pod_that_is_not_there_and_a_pod_that_is_refused_get_different_sentenc
         None,
         "a log that was read and printed did not end the run happily, so `k8rs --logs` exits 2 \
          on a working cluster"
+    );
+}
+
+/// **The pod reads and the log request is refused: the reader is shown what the server said, not
+/// an apology from k8rs.**
+///
+/// **Measured on a live four-node kind cluster before it was a test** (`k8s-admin`, 2026-09-03).
+/// `k8rs --once` cards `default/broken-config` CRITICAL — *Container needs a ConfigMap or Secret
+/// that does not exist* — and the obvious next thing anybody does is ask for that pod's log:
+///
+/// ```text
+/// before  k8rs: this cluster would not accept the request k8rs made to get pods/log in default
+///               — that is a fault in k8rs, and nothing is wrong with the cluster or with this
+///               login
+/// after   k8rs: this cluster would not accept the request k8rs made to get pods/log in default,
+///               and said: container "app" in pod "broken-config" is waiting to start:
+///               CreateContainerConfigError
+/// ```
+///
+/// **The before is false twice over.** Nothing is wrong with k8rs — the container genuinely has
+/// not started — and the server had already written the most useful sentence available, naming
+/// the same root cause the card names. `PRIOR-ART § C1` in the region written to close it, and
+/// `k8s::Fault::Rejected` was the first pass over the same defect: it fixed the category and
+/// still dropped the message.
+///
+/// **Two shapes, both off the same cluster** (NOTES § D29): a container waiting on a ConfigMap
+/// that is not there, and one waiting on an image that will not pull. The second was found by
+/// feeding the fix rather than by reasoning about it — `default/broken-image` answers *container
+/// "nope" in pod "broken-image" is waiting to start: trying and failing to pull image*, which is
+/// plain English the reader can act on and which the old sentence also threw away.
+///
+/// **The two shapes this verb cannot reach are named rather than left implied.** A `--container`
+/// naming something the pod does not declare is refused by [`which_container`] before any request
+/// goes out, and `--previous` against a container that has never restarted is turned off by
+/// [`no_previous_run`] — both measured on the same cluster, and neither reaches a `400`.
+#[tokio::test]
+async fn a_log_the_server_refuses_prints_what_the_server_said_about_it() {
+    let refusal = |message: &str| {
+        serde_json::to_string(&serde_json::json!({
+            "apiVersion": "v1", "kind": "Status", "status": "Failure",
+            "reason": "BadRequest", "code": 400, "message": message,
+        }))
+        .expect("a json object serialises")
+    };
+    // The two sentences the live cluster wrote, verbatim.
+    for (message, pod) in [
+        (
+            "container \"app\" in pod \"broken-config\" is waiting to start: \
+             CreateContainerConfigError",
+            "broken-config",
+        ),
+        (
+            "container \"nope\" in pod \"broken-image\" is waiting to start: trying and failing \
+             to pull image",
+            "broken-image",
+        ),
+    ] {
+        let (client, _) = answers_but_refuses_the_log(
+            pod_body("healthy-sidecar"),
+            ("400 Bad Request", refusal(message)),
+        )
+        .await;
+        let sentence = logs_run(
+            std::future::ready(Ok(session_over(client, None))),
+            &Asked {
+                verb: Verb::Logs,
+                namespace: Some("default"),
+                name: "healthy-sidecar",
+                container: Some("app"),
+                kind: None,
+                previous: false,
+                follow: false,
+            },
+        )
+        .await
+        .expect("a refused log ends the run");
+
+        assert_eq!(
+            sentence,
+            format!(
+                "k8rs: this cluster would not accept the request k8rs made to get pods/log in \
+                 default, and said: {message}"
+            ),
+            "the one sentence that says why this log cannot be read was replaced by an apology, \
+             so the reader is sent to look for a fault in k8rs while {pod} sits waiting"
+        );
+        assert!(
+            !sentence.contains("nothing is wrong with the cluster"),
+            "k8rs blamed itself over the top of an explanation the server gave: {sentence:?}"
+        );
+    }
+}
+
+/// **The object read the three verbs share carries the server's sentence too**, so the fix is
+/// where they all pass through and not on the one path the finding named ([`read_failed`]).
+///
+/// **`--logs`, `--describe` and `--yaml` open with the same `get`** (§ ONE OBJECT'S OWN STORY),
+/// so a `400` there had the same defect on all three and one row proves all three. **It could not
+/// be produced against a live cluster** — every `400` that four-node kind cluster was seen to
+/// answer came back on `pods/log`, and nothing there makes a `get pod` malformed — so it is fed
+/// here instead, and that is the honest split rather than a claim about a surface nobody
+/// exercised.
+///
+/// **A `404` still gets its own sentence and never [`because`]'s**, which is the negative: that
+/// arm returns before the fault is ever spelled, so a message is not printed there and must not
+/// start being.
+#[tokio::test]
+async fn a_read_the_server_refuses_carries_its_sentence_on_every_verb_that_makes_it() {
+    let refusal = |code: u16, reason: &str, message: &str| {
+        serde_json::to_string(&serde_json::json!({
+            "apiVersion": "v1", "kind": "Status", "status": "Failure",
+            "reason": reason, "code": code, "message": message,
+        }))
+        .expect("a json object serialises")
+    };
+    let about = Asked {
+        verb: Verb::Logs,
+        namespace: Some("payments"),
+        name: "web-7d9f4",
+        kind: None,
+        container: None,
+        previous: false,
+        follow: false,
+    };
+
+    let (client, _) = answers(
+        "400 Bad Request",
+        refusal(400, "BadRequest", "the server rejected this request"),
+        "",
+    )
+    .await;
+    assert_eq!(
+        logs_run(std::future::ready(Ok(session_over(client, None))), &about).await,
+        Some(
+            "k8rs: this cluster would not accept the request k8rs made to get the pod web-7d9f4 \
+             in payments, and said: the server rejected this request"
+                .to_string()
+        ),
+        "the read every one-object verb opens with threw away what the server said, so the \
+         defect the log path had is still on `--describe` and `--yaml`"
+    );
+
+    let (client, _) = answers(
+        "404 Not Found",
+        refusal(404, "NotFound", "pods \"web-7d9f4\" not found"),
+        "",
+    )
+    .await;
+    assert_eq!(
+        logs_run(std::future::ready(Ok(session_over(client, None))), &about).await,
+        Some(
+            "k8rs: there is no pod named web-7d9f4 in payments — check the name and the namespace"
+                .to_string()
+        ),
+        "a `404` started quoting a server sentence that only repeats the name the reader just \
+         typed, in place of the one written for it"
     );
 }
 

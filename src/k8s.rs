@@ -760,9 +760,10 @@ fn ingest<K, T: From<K> + Bounded>(object: K) -> T {
 // that is not a failure at all.
 //
 // **A `Fault` is a fact and never a sentence, and it carries no string whatever.** The words are
-// the caller's, exactly as for [`Listing`], [`Trouble`] and [`Unresolved`]. Six unit variants is
+// the caller's, exactly as for [`Listing`], [`Trouble`] and [`Unresolved`]. Ten unit variants is
 // invariant 9 made structural (NOTES § D160): nothing the API server wrote can reach a screen
-// through this type, so no reader of it has to remember to strip anything.
+// through this type, so no reader of it has to remember to strip anything. What the server wrote
+// travels beside the fault and never on it ([`message`], below).
 //
 // **The 403 names its verb and resource at the call site and not here.** The security gate
 // requires a refusal to name them and there is exactly one place that knows: `get replicasets`,
@@ -796,20 +797,41 @@ fn ingest<K, T: From<K> + Bounded>(object: K) -> T {
 //
 // **Select, never format, is unchanged and this region is the selection.** `Display` on a `kube`
 // error interpolates its source down to an `exec` plugin's stdout ([`Trouble::failure`] carries
-// the chain, `docs/security.md` § Token hygiene). What is read here is `Status::code` and
-// `Status::reason` and what comes back is an enum, so a caller that goes through this never
-// touches the text — and [`Session::renewal`] is the one string a screen may name beside a
-// [`Fault::Expired`], read off the reader's own kubeconfig rather than off anything the cluster
+// the chain, `docs/security.md` § Token hygiene). What is read here is three named fields and
+// never a formatter: `Status::code` and `Status::reason` for [`answer`], `Status::message` for
+// [`message`].
+//
+// **The third of those is new on 2026-09-03, and it is the one thing a caller gets back that the
+// cluster wrote.** *A `Fault` carries no string* is a property of the **type** and it still holds
+// exactly; what changed is that for one fault the server's own sentence is the diagnosis and
+// throwing it away was `PRIOR-ART § C1` a third time, in the region written to close it. A `400`
+// on `pods/log` against a container that has not started answers *container "app" in pod
+// "broken-config" is waiting to start: CreateContainerConfigError* — the same root cause the
+// CRITICAL card beside it names — and k8rs printed *that is a fault in k8rs, and nothing is wrong
+// with the cluster* over the top of it (`k8s-admin` against a live kind cluster).
+// [`Fault::Rejected`] itself was this defect's first pass: it fixed the *category* and still
+// dropped the *message*.
+//
+// **So the string is a second value and never a field on the fault, and it is stripped and
+// bounded on the way out** ([`message`], § THE INGEST GUARD) — which is what keeps *no reader of
+// a `Fault` has to remember to strip anything* true of the enum while giving the one caller that
+// needs the sentence a way to ask for it by name.
+//
+// **[`Session::renewal`] is still the one string a screen may name beside a
+// [`Fault::Expired`]**, read off the reader's own kubeconfig rather than off anything the cluster
 // sent.
 
-/// **What one failed call actually says** — nine facts, no sentence and no string.
+/// **What one failed call actually says** — ten facts, no sentence and no string.
 ///
 /// Ordered as the reader meets them: the four that never reached the cluster, then the four the
 /// cluster answered, then everything that produced no usable answer at all.
 ///
 /// **The count is read off the enum and not carried forward.** It said *six* over eight variants
 /// until 2026-08-30 — a figure reasoned about rather than counted, which is the class CLAUDE.md
-/// names — and the edit that added the ninth found it. The tenth read it again.
+/// names — and the edit that added the ninth found it. It then said **nine over ten** from the
+/// day [`Fault::Unfinished`] landed: that edit corrected the sentence about the count and left
+/// the count, which is the same class one layer in. Counted, 2026-09-03:
+/// `awk '/^pub enum Fault \{/,/^\}/' src/k8s.rs | grep -cE '^    [A-Z][A-Za-z]+,$'`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
     /// **The kubeconfig file itself** — not found, unreadable, or not valid YAML. Nothing was
@@ -1091,6 +1113,52 @@ fn answer(status: &Status) -> Fault {
     }
 }
 
+/// **The one sentence the server wrote about a failed call, or `None` where it wrote none** —
+/// `Status::message`, and nothing else on the object (§ WHAT WENT WRONG).
+///
+/// **A [`Fault`] says what happened and this says what the server said about it, and the two are
+/// separate for the reason the enum carries no string.** For one fault the message *is* the
+/// diagnosis and dropping it was `PRIOR-ART § C1` in the region written to close it: a `400` on
+/// `pods/log` against a container that has not started carries *container "app" in pod
+/// "broken-config" is waiting to start: CreateContainerConfigError*, which names the same root
+/// cause the CRITICAL card names, and k8rs printed *that is a fault in k8rs* over the top of it
+/// (`k8s-admin` against a live kind cluster, 2026-09-03).
+///
+/// **Still select and never format.** One named field is read; `Display` on a `Status` is
+/// `"{message}: {reason}"` and `Display` on a `kube::Error` walks down to an `exec` plugin's
+/// stdout (`docs/security.md` § Token hygiene), so neither is touched.
+///
+/// **It goes through [`text`] like every other free-text field the API sends** (invariant 9,
+/// § THE INGEST GUARD): a message is a sentence, so the cap is [`FREE_TEXT`] and not
+/// [`IDENTIFIER`]. That bound is load-bearing here rather than nominal — when a response body is
+/// not JSON at all, kube puts **the whole body** in this field
+/// (`Status::failure(&text, "Failed to parse error data")`,
+/// `kube-client-4.2.0/src/client/mod.rs:551-558`), so a proxy's HTML error page arrives as one
+/// `message`.
+///
+/// **Empty is `None` and not `Some("")`.** The field is `#[serde(default)]`, kube's own fallback
+/// writes a `reason` no server sent, and a caller has to be able to tell *the server explained
+/// itself* from *the server said nothing*: those are two different sentences.
+fn message(status: &Status) -> Option<String> {
+    let mut said = status.message.clone();
+    text(&mut said, FREE_TEXT);
+    (!said.is_empty()).then_some(said)
+}
+
+/// **What the server said about one failed call**, for the callers that already read [`fault`]
+/// off the same error (§ WHAT WENT WRONG).
+///
+/// **`None` for every error that is not the server's answer.** A kubeconfig that would not load,
+/// a login program that produced nothing, a socket that died: no `Status` was ever received, so
+/// there is no sentence to have read — the same reason [`NotConnected`] is given no accessor of
+/// this shape at all.
+pub fn said(error: &kube::Error) -> Option<String> {
+    match error {
+        kube::Error::Api(status) => message(status),
+        _ => None,
+    }
+}
+
 /// **Which of the three kubeconfig faults one `KubeconfigError` is** (§ WHAT WENT WRONG).
 ///
 /// **No catch-all, and `KubeconfigError` is not `#[non_exhaustive]`, so that is a choice with
@@ -1218,6 +1286,16 @@ impl Trouble<'_> {
             .map(watch_fault)
             .or_else(|| self.unfinished.then_some(Fault::Unfinished))
     }
+
+    /// **What the server said about the failure this watch is carrying** — [`said`] for a watch,
+    /// beside [`Trouble::fault`] and reading the same value through the same split.
+    ///
+    /// **[`Trouble::unfinished`] has no arm here, and that is the fact rather than a gap.** That
+    /// state is *the run ended before the server answered* ([`Fault::Unfinished`]): there was no
+    /// answer, so there is no sentence in it to read.
+    pub fn said(&self) -> Option<String> {
+        self.failure.and_then(watch_said)
+    }
 }
 
 /// **What one `watcher::Error` means** — [`Trouble::fault`]'s body, lifted out because
@@ -1240,6 +1318,22 @@ fn watch_fault(failure: &watcher::Error) -> Fault {
         | watcher::Error::WatchFailed(error) => fault(error),
         watcher::Error::WatchError(status) => answer(status),
         watcher::Error::NoResourceVersion => Fault::Unanswered,
+    }
+}
+
+/// **What the server said about one `watcher::Error`** — [`watch_fault`]'s split, over
+/// [`message`] instead of over [`answer`], so a watch and a one-object read cannot come to
+/// disagree about which part of a `Status` is the sentence.
+///
+/// **`NoResourceVersion` is `None` for the reason its fault is a collapse**: the server answered
+/// with something no watch can be built on, and there is no `Status` in that answer at all.
+fn watch_said(failure: &watcher::Error) -> Option<String> {
+    match failure {
+        watcher::Error::InitialListFailed(error)
+        | watcher::Error::WatchStartFailed(error)
+        | watcher::Error::WatchFailed(error) => said(error),
+        watcher::Error::WatchError(status) => message(status),
+        watcher::Error::NoResourceVersion => None,
     }
 }
 

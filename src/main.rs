@@ -2315,9 +2315,18 @@ fn live_report(
 /// never the login program's output, which is a credential
 /// (`docs/security.md` § Token hygiene).
 ///
-/// **Nothing here formats the error we were handed, and that is structural rather than a rule to
-/// keep**: [`k8s::Fault`] carries no string at all, so there is nothing in scope to interpolate.
-fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>) -> String {
+/// **Nothing here formats the error we were handed**: [`k8s::Fault`] carries no string at all, and
+/// `said` is one named field selected by [`k8s::said`] — never a `Display`, which walks down to an
+/// `exec` plugin's stdout (`docs/security.md` § Token hygiene).
+///
+/// **`said` is the server's own sentence about this call, already stripped and bounded by
+/// `k8s.rs`'s ingest guard**, and `None` where the server sent none or where nothing was ever sent
+/// to a server. **Exactly one arm reads it and the rest ignore it on purpose**
+/// ([`k8s::Fault::Rejected`]): for every other fault this file's own sentence is the better one
+/// and was written to be — a `403`'s message names a user and a verb where *the role this
+/// kubeconfig uses needs to …* names the fix, and a `404`'s repeats a name the reader just typed.
+/// The rejected call is the one where k8rs has nothing of its own to say.
+fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>, said: Option<&str>) -> String {
     // The program named, or not named, without changing the sentence around it.
     let named = renewal.map_or(String::new(), |program| format!(" (`{program}`)"));
     match fault {
@@ -2408,17 +2417,61 @@ fn because(fault: k8s::Fault, asked: &str, renewal: Option<&str>) -> String {
         k8s::Fault::Gone => {
             format!("this server says there is no such thing when k8rs tries to {asked}")
         }
-        // **The only arm whose fix is in k8rs and not on the reader's side**, so it says so
-        // instead of handing out an errand. A `400` was [`k8s::Fault::Unanswered`] until
-        // 2026-08-30 and printed *nothing usable came back* — a network sentence for a request
-        // this side got wrong, which is `PRIOR-ART § C1` in the box written to close it
-        // (`k8s-admin`; `k8s::Fault::Rejected` carries the measured shape).
-        k8s::Fault::Rejected => {
-            format!(
+        // **The server's own words where it wrote any, because for this fault they are the
+        // diagnosis** (`k8s::said`). Measured on a live kind cluster, `--logs` against the pod
+        // `--once` had just carded CRITICAL: the API server answered *container "app" in pod
+        // "broken-config" is waiting to start: CreateContainerConfigError* — the same root cause
+        // the card names — and k8rs replaced it with the self-accusation below
+        // (`k8s-admin`, 2026-09-03). `k8s::Fault::Rejected` was this defect's first pass and
+        // fixed only the category; this is the message.
+        //
+        // **Quoted verbatim rather than re-explained, which is NOTES § D37's rule and not an
+        // exemption from invariant 14.** Rules 3, 4 and 10 already put the runtime's own message
+        // on the card word for word, and the card for this very pod carries the plain-language
+        // reading beside the kubelet's own line: *Container needs a ConfigMap or Secret that does
+        // not exist (CreateContainerConfigError)* over *configmap "…" not found*. The jargon word
+        // is kept **and** explained, on the surface built to explain it.
+        //
+        // **[`WAITING_REASONS`] is in this file and is still not reused here, which is the
+        // question this box had to answer.** Reaching it is not the obstacle — the obstacle is
+        // that its phrases are this file's paraphrase of the cards, not the cards' words, and for
+        // one of the two states a live cluster produced they and the server disagree outright:
+        // the API server writes *trying and failing to pull image* where that table writes
+        // *cannot get its image* (`default/broken-image`, 2026-09-03). Printing both in one
+        // sentence is two spellings of one condition, which is the defect this repo has paid most
+        // for; keying off the message's trailing word to pick one would be scraping free text the
+        // API server never promised the shape of. **And this function has no container in scope
+        // anyway** — eleven callers, one of which is a log request — so the reason would have to
+        // travel from a pod read that happened a round trip earlier and may already be stale.
+        //
+        // **So the choice is the cluster's sentence or none, and the cluster's says what is
+        // wrong.** What is *not* closed by that is the reader who runs only `--logs` and never
+        // sees the card; `screens/detail.md` has no state for a refused log request at all, and
+        // that is the screen's gap to fill rather than this line's to guess at.
+        //
+        // **`and said:` attributes it.** The words after it are the server's and the reader has
+        // to be able to tell; nothing else in this function quotes anybody.
+        k8s::Fault::Rejected => match said {
+            Some(said) => format!(
+                "this cluster would not accept the request k8rs made to {asked}, and said: {said}"
+            ),
+            // **The honest fallback, and it stays as it was.** With no message there is nothing
+            // to go on but the code, and a `400` is a request this side built — so *the reader
+            // has nothing to fix here* remains the only thing that can be said.
+            //
+            // **No shape produced so far enters it, and that is a measurement and not a
+            // guarantee.** Both `400`s a live four-node kind cluster answered for `--logs`
+            // carried a message (`default/broken-config`, `default/broken-image`, 2026-09-03),
+            // and a `400` whose body is not a `Status` at all loses its code inside kube and
+            // lands in `k8s::Fault::Unanswered` instead (`k8s::answer`). What is *not* claimed is
+            // that no server ever sends a `Status` with an empty `message`: the field is
+            // `#[serde(default)]`, nothing was measured that does it, and the arm is here for
+            // exactly that.
+            None => format!(
                 "this cluster would not accept the request k8rs made to {asked} — that is a \
-                     fault in k8rs, and nothing is wrong with the cluster or with this login"
-            )
-        }
+                 fault in k8rs, and nothing is wrong with the cluster or with this login"
+            ),
+        },
         k8s::Fault::Unanswered => format!("nothing usable came back when k8rs tried to {asked}"),
         // **The one arm with no cause in it, and that is the arm** (`k8s::Fault::Unfinished`).
         // Nothing came back and nothing said why, so every sentence that would explain it is a
@@ -2546,7 +2599,12 @@ fn unreadable(
             // ([`pods_unread`] states the same rule over the same value).
             let fault = trouble.fault();
             let why = match fault {
-                Some(fault) => because(fault, &format!("`list` and `watch` {resource}"), renewal),
+                Some(fault) => because(
+                    fault,
+                    &format!("`list` and `watch` {resource}"),
+                    renewal,
+                    trouble.said().as_deref(),
+                ),
                 // `ended` with no failure: the stream finished and never said why. The only
                 // honest clause, and the one thing a fallback string is allowed to describe.
                 None => "nothing was ever said about why".to_string(),
@@ -2648,7 +2706,12 @@ fn greeting(session: &k8s::Session) -> Vec<String> {
         }
         Err(error) => said.push(format!(
             "could not read the server version ({})",
-            because(k8s::fault(error), "`get /version`", renewal)
+            because(
+                k8s::fault(error),
+                "`get /version`",
+                renewal,
+                k8s::said(error).as_deref()
+            )
         )),
     }
     match &session.served {
@@ -2668,7 +2731,12 @@ fn greeting(session: &k8s::Session) -> Vec<String> {
         Err(error) => said.push(format!(
             "could not list what this cluster serves, so k8rs cannot show you what is in it or \
              tell which add-ons it has ({})",
-            because(k8s::fault(error), "`get /apis`", renewal)
+            because(
+                k8s::fault(error),
+                "`get /apis`",
+                renewal,
+                k8s::said(error).as_deref()
+            )
         )),
     }
     said
@@ -2988,7 +3056,11 @@ fn certificate_is_why(session: &k8s::Session, now: &Time) -> Option<String> {
 /// is the same reason [`greeting`] is a function (2026-08-27) — and the mutation gate said so,
 /// with two mutants that survived on the day the `if` was spelled inline.
 fn scoped_because(session: &k8s::Session, stopping: bool) -> Option<String> {
-    let refused = |asked: &str| because(k8s::Fault::Refused, asked, session.renewal.as_deref());
+    // **`None`, because this refusal is not an error that was handed to us**: it is
+    // `k8s::Coverage`'s own reading of a probe that already happened, so there is no `Status` in
+    // scope and nothing the server said to quote.
+    let refused =
+        |asked: &str| because(k8s::Fault::Refused, asked, session.renewal.as_deref(), None);
     match &session.coverage {
         k8s::Coverage::Cluster | k8s::Coverage::Asked(_) => None,
         k8s::Coverage::Blind(_) if stopping => None,
@@ -3192,15 +3264,32 @@ async fn live(
         // away the only actionable thing it had. [`k8s::NotConnected::renewal`] answers `None`
         // only for the arm where the file itself would not load.
         //
-        // **Nothing has been sent to a cluster at this point**, so of the six only `Kubeconfig`,
-        // `NoCredential` and `Unanswered` (a proxy protocol kube will not speak, a TLS stack that
-        // would not build) are reachable. A `403` or a `404` here would read oddly against *reach
-        // this cluster*; neither can arrive, and a guard for a sentence nobody can produce is a
-        // second copy of the reasoning above.
+        // **Nothing has been sent to a cluster at this point**, so five of the ten are
+        // reachable and five are not: `Kubeconfig`, `NoContext` and `BadEntry` through
+        // `k8s::NotConnected::Kubeconfig`, and `NoCredential` and `Unanswered` (a proxy protocol
+        // kube will not speak, a TLS stack that would not build) through its `Client` arm. A
+        // `403` or a `404` here would read oddly against *reach this cluster*; neither can
+        // arrive, and a guard for a sentence nobody can produce is a second copy of the reasoning
+        // above.
+        //
+        // **This said *of the six* over ten faults, and named three of the five** — the count was
+        // carried forward from a taxonomy that has grown twice since, and the two it dropped are
+        // the two a kubeconfig that loads and points at something broken produces. Read off
+        // `k8s::NotConnected::fault` and the two classifiers under it, 2026-09-03.
         Err(problem) => {
             return Some(format!(
                 "k8rs: no cluster to watch — {}",
-                because(problem.fault(), "reach this cluster", problem.renewal())
+                // **`None` because a `k8s::NotConnected` can hold no `Status` at all**, which is
+                // that type's own words and not an inference here: its `Client` arm is *the
+                // kubeconfig parsed and no client could be built from it* and says **not** a
+                // cluster that is down: nothing here has sent a request yet. No request, no
+                // answer, nothing said.
+                because(
+                    problem.fault(),
+                    "reach this cluster",
+                    problem.renewal(),
+                    None
+                )
             ));
         }
     };
@@ -3668,7 +3757,12 @@ fn pods_unread(
     // where they would come to disagree about which fault this is.
     let fault = unread.fault();
     let why = match fault {
-        Some(fault) => because(fault, &format!("`list` and `watch` {resource}"), renewal),
+        Some(fault) => because(
+            fault,
+            &format!("`list` and `watch` {resource}"),
+            renewal,
+            unread.said().as_deref(),
+        ),
         // `ended` with no failure: the stream finished and never said why. [`unreadable`]'s
         // clause, because it is the same fact and there is only one honest way to say it.
         None => "nothing was ever said about why".to_string(),
@@ -4444,7 +4538,8 @@ async fn logs_run(
                 because(
                     k8s::fault(&failure),
                     &format!("get pods/log in {}", request.namespace),
-                    renewal
+                    renewal,
+                    k8s::said(&failure).as_deref(),
                 )
             ));
         }
@@ -4656,7 +4751,15 @@ async fn opened(
     connecting.await.map_err(|problem| {
         format!(
             "k8rs: no cluster to watch — {}",
-            because(problem.fault(), "reach this cluster", problem.renewal())
+            // `None` for [`live`]'s reason at the same sentence, and it is
+            // [`k8s::NotConnected`]'s own: no request has been sent when this fires, so no
+            // server has said anything to quote.
+            because(
+                problem.fault(),
+                "reach this cluster",
+                problem.renewal(),
+                None
+            )
         )
     })
 }
@@ -4746,7 +4849,8 @@ fn read_failed(
         because(
             k8s::fault(failure),
             &format!("get {}", about(singular, name, namespace)),
-            renewal
+            renewal,
+            k8s::said(failure).as_deref(),
         )
     )
 }
@@ -5064,7 +5168,8 @@ async fn describe_run(
             because(
                 k8s::fault(&failure),
                 &format!("list events in {}", sanitize(namespace)),
-                renewal
+                renewal,
+                k8s::said(&failure).as_deref(),
             )
         )),
         Err(_) => Some(format!(
@@ -5207,7 +5312,12 @@ async fn yaml_run(
             return Some(format!(
                 "k8rs: this cluster would not say what kinds it serves, so k8rs cannot tell \
                  which one {KIND} means — {}",
-                because(k8s::fault(failure), "`get /apis`", renewal)
+                because(
+                    k8s::fault(failure),
+                    "`get /apis`",
+                    renewal,
+                    k8s::said(failure).as_deref()
+                )
             ));
         }
     };
