@@ -3746,33 +3746,34 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       creates its directory 0700. The record can finally name the **cluster**
       and not just the context
       ([D219](NOTES.md#d219--the-audit-log-refuses-what-it-cannot-trust-and-says-what-it-cannot-fix-2026-09-04))
-- [ ] `scale` — via the **scale subresource** (`get_scale` / `patch_scale`),
-      not a full-object patch. **First operation, so four things land with it**
-      ([D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)):
-      the **audit sink**, because `perform` takes a `&mut impl Write` and nothing
-      has decided what it writes to — invariant 4 means no mutation runs until it
-      does, so the audit-log box lands here or before; an **exit-code
-      vocabulary**, because every ops line exits `2` today and
-      `echo no | k8rs ops delete … && kubectl get pod` reads a cancellation as
-      success; `Kind::namespaced` in the driver is a **second copy** of what
-      discovery already answers (`k8s::Browsable::namespaced`) and one of the two
-      must go; and `tests/binary.rs`'s usage line — *"this build reads files only
-      — it cannot reach a cluster"* — stops being true the moment this box lands,
-      which is `tester`'s file.
-      **And three preconditions, not follow-ups** (`k8s-admin`, 2026-09-04):
-      `ops_line` returns `Option<String>` where `None` means *not an ops line*,
-      and `main` reads it as `ops_line(…).or_else(|| mistyped(…))` — so a `scale`
-      that **succeeds** and returns `None` falls through into `mistyped`, then
-      `live_context`, and **k8rs starts watching a cluster after performing a
-      mutation**. Unreachable today only because `None` means no `ops` word at
-      all. That signature changes before an arm is wired, and it is the same
-      change as the exit-code vocabulary. · **Nothing reads
-      `Performed.recorded`** — `#[must_use]` is on the struct, not the field, so
-      *the change was made and k8rs could not write it down*
-      ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04))
-      reaches nobody unless the driver prints it. · `perform`'s
-      `clock: impl Fn() -> Timestamp` is the last unbound parameter and it
-      decides what every stamp in the log looks like
+- [x] `scale` — via the **scale subresource** (`get_scale` / `patch_scale`), not
+      a full-object patch, for deploy/sts/rs. **The first operation, so four
+      things landed with it** ([D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)):
+      the audit sink wired into `perform`; an **exit-code vocabulary** — `0` iff
+      the cluster changed, `2` for every refusal, cancellation and failure, `1`
+      still unused; `ops_line` carrying that code back so a line which reached the
+      seam can no longer fall through into `mistyped` and start watching a cluster
+      it had just changed; and `USAGE`, which claimed this build cannot reach one.
+      The seven rulings the box could not be briefed without — including the two
+      it named that were **rejected** — are
+      [D220](NOTES.md#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04);
+      the frozen `k8s.rs` stayed shut, because `k8s::contexts` already answers
+      which cluster with the userinfo strip
+      [D173](NOTES.md#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28)
+      built on it. What the log does **not** record — a request refused before a
+      `Mutation` exists — is
+      [D221](NOTES.md#d221--the-audit-log-records-mutations-not-intentions-and-that-is-where-screensdialogsmd-rule-5-stops-2026-09-04),
+      written before the freeze rather than by it. The review round found two
+      blockers — one sentence that named neither the fault nor what the server
+      said, so a `403` and a `422` printed byte-identically, and a documented
+      `k8rs-admin` role that could not perform a single scale because RBAC matches
+      `resource/subresource` as one string — and six more
+      ([D222](NOTES.md#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04)).
+      **Done when:** measured against a stub apiserver and a pty — `kubectl
+      scale`'s own verb, path, subresource, patch type and body, confirmed
+      identical; `dryRun=All` then the real call from one closure, `Strict` on
+      both, on the wire; stdout byte-empty and exit `0` only where the cluster
+      changed; `just check` green and `just mutants-diff` **80 mutants, 0 missed**
 - [ ] `restart` — **not** `Api::restart(name)`: that helper writes
       `kube.kubernetes.io/restartedAt` where `kubectl rollout restart` writes
       `kubectl.kubernetes.io/restartedAt`, so the command log would teach a line

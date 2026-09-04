@@ -109,7 +109,11 @@ fn scaling() -> Mutation<'static> {
         // request carries, which is why it is `Some` here where `version` is `None`: it is what
         // k8rs saw, not what k8rs sent.
         uid: Some("18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11"),
-        consequence: "This changes how many copies of deployment/web are running, from 2 to 3.",
+        // **What [`consequence`] really produces for 2 → 3** — `screens/dialogs.md` § Scale's own
+        // *up, by one* relation. It was a hand-written sentence while no operation existed to
+        // produce one; a fixture whose doc says *the way `scale` will describe it* and does not
+        // is the second copy that goes stale (CLAUDE.md § D103).
+        consequence: "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies.",
         kubectl: "kubectl scale deployment/web --replicas=3 -n payments",
         verb: "PATCH",
         path: "/apis/apps/v1/namespaces/payments/deployments/web/scale",
@@ -279,8 +283,9 @@ async fn the_dialog_gets_its_title_its_consequence_and_its_command_line_and_noth
         Some(Dialog {
             object: "deployment/web".to_string(),
             namespace: Some("payments".to_string()),
-            consequence: "This changes how many copies of deployment/web are running, from 2 to 3."
-                .to_string(),
+            consequence:
+                "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies."
+                    .to_string(),
             kubectl: "kubectl scale deployment/web --replicas=3 -n payments".to_string(),
         }),
         "the dialog cannot draw its own title or its own $ line from what it was given"
@@ -430,8 +435,8 @@ async fn a_refused_check_stops_before_the_confirmation_and_keeps_what_the_server
             "shown".to_string(),
             "dry-run".to_string(),
             format!(
-                "{RESULT} · dry-run: not checked, the cluster would not allow it · the change \
-                 was never sent: {denial}\n"
+                "{RESULT} · dry-run: not checked · the change was never sent — the cluster would \
+                 not allow it: {denial}\n"
             ),
         ],
         "a refused check either asked for a confirmation it could not honour, or went on to the \
@@ -484,11 +489,97 @@ async fn an_invalid_object_is_a_rejected_request_and_keeps_the_servers_explanati
     assert_eq!(
         transcript(&trace).last().cloned(),
         Some(format!(
-            "{RESULT} · dry-run: not checked, the cluster would not accept the request k8rs \
-             made · the change was never sent: {invalid}\n"
+            "{RESULT} · dry-run: not checked · the change was never sent — the cluster would not \
+             accept the request k8rs made: {invalid}\n"
         )),
         "the audit log does not record which field the server rejected"
     );
+}
+
+/// **The surface the operator is looking at names the fault *and* the cluster's own words** —
+/// `403` and `422` on the same call printed one identical line until 2026-09-04 (`k8s-admin`).
+///
+/// The audit log had both all along — [`Record::check`] read the fault and [`Record::result_line`]
+/// appended the message — while the person who ran the operation got `k8rs: the change was never
+/// sent`, byte for byte, whichever it was. That breaks the security gate's *a 403 … names the
+/// missing verb + resource*, `PRIOR-ART § C1`'s *a fallback message may never replace a typed
+/// error*, and the operation's own consistency: a `403` on the `GET` forty milliseconds earlier
+/// names both.
+///
+/// **Both halves are load-bearing on every row.** Dropping the fault makes rows 1 and 2 the same
+/// sentence, which is the defect itself; dropping the message makes every row short of what the
+/// operator needs. Neither can be lost and leave this test green — which is the property, not that
+/// the rows have distinct prefixes, since rows 1 and 2 deliberately share one.
+///
+/// **The last row is the unhappy path composed with the unhappy path**: a failure whose words
+/// arrived, on a run whose log could not be written. The two clauses have to stack in that order
+/// or the *k8rs could not write that down* clause sits between the fault and the server's answer.
+#[test]
+fn the_sentence_the_operator_reads_names_the_fault_and_what_the_cluster_said() {
+    let denial = "deployments.apps \"web\" is forbidden: User \"dev\" cannot patch resource \
+                  \"deployments/scale\" in API group \"apps\" in the namespace \"payments\"";
+    let invalid = "Deployment.apps \"web\" is invalid: spec.replicas: Invalid value: -1: must be \
+                   greater than or equal to 0";
+    for (outcome, recorded, expected) in [
+        (
+            Outcome::NotSent {
+                fault: Fault::Refused,
+                said: Some(denial.to_string()),
+            },
+            true,
+            format!("the change was never sent — the cluster would not allow it: {denial}"),
+        ),
+        (
+            Outcome::NotSent {
+                fault: Fault::Rejected,
+                said: Some(invalid.to_string()),
+            },
+            true,
+            format!(
+                "the change was never sent — the cluster would not accept the request k8rs made: \
+                 {invalid}"
+            ),
+        ),
+        (
+            Outcome::Failed {
+                fault: Fault::Rejected,
+                said: Some(invalid.to_string()),
+            },
+            true,
+            format!(
+                "nothing was changed — the cluster would not accept the request k8rs made: \
+                 {invalid}"
+            ),
+        ),
+        (
+            Outcome::Failed {
+                fault: Fault::Unanswered,
+                said: None,
+            },
+            true,
+            "k8rs does not know whether the change was made — k8rs could not reach the cluster"
+                .to_string(),
+        ),
+        (
+            Outcome::Failed {
+                fault: Fault::Refused,
+                said: Some(denial.to_string()),
+            },
+            false,
+            format!(
+                "nothing was changed — the cluster would not allow it: {denial} — but k8rs could \
+                 not write that to the audit log, so the trail of it is short a line"
+            ),
+        ),
+    ] {
+        let performed = Performed {
+            outcome: Some(outcome),
+            recorded,
+        };
+        let sentence = performed.plainly();
+        println!("{sentence}\n");
+        assert_eq!(sentence, expected);
+    }
 }
 
 /// **A failure on the operator's own machine is never recorded as the cluster saying no**
@@ -536,7 +627,7 @@ async fn a_failure_this_side_of_the_wire_is_not_recorded_as_the_server_refusing(
         assert_eq!(got, fault);
         let line = transcript(&trace).last().cloned().expect("a result line");
         assert!(
-            line.contains(&format!("dry-run: not checked, {words}")),
+            line.contains(&format!("the change was never sent — {words}")),
             "the record keys its sentence on which branch fired rather than on what failed: \
              {line}"
         );
@@ -598,7 +689,7 @@ async fn a_call_that_fails_after_a_good_check_is_told_apart_from_a_refused_check
     assert_eq!(
         transcript(&trace).last().cloned(),
         Some(format!(
-            "{RESULT} · {CHECKED_FIRST} · nothing was changed: the login k8rs was using had \
+            "{RESULT} · {CHECKED_FIRST} · nothing was changed — the login k8rs was using had \
              run out: {expired}\n"
         )),
         "a failed mutation is not in the audit log as one"
@@ -1467,6 +1558,833 @@ fn both_passes_ask_the_server_to_reject_an_unknown_field() {
         "a delete now carries a fieldValidation this file's doc comment says it cannot — \
          {uri} · {body}"
     );
+}
+
+// --- SCALE ---
+//
+// **The wire is what these tests read, because the box is a claim about it**: the scale
+// subresource and not the object, `dryRun=All` on the first pass and not on the second, and a
+// body that carries `spec.replicas` and nothing else. A double over `Api` could satisfy every one
+// of those while sending something different, so the assertions are made against a socket.
+//
+// **The stub is this module's own and is not `k8s_tests.rs`'s.** That one is private to `k8s`,
+// this file is a child module of `ops`, and D50 refuses the `lib.rs` that would let them share —
+// so the twenty lines below are the accepted price of the no-lib-target rule rather than a
+// helper somebody forgot about.
+
+/// **What a real `autoscaling/v1 Scale` looks like coming back** — the fields the apiserver puts
+/// on a Deployment's scale subresource, and no more
+/// (`pkg/registry/apps/deployment/storage/storage.go:370-393`).
+fn scale_body(replicas: i32) -> String {
+    format!(
+        r#"{{"kind":"Scale","apiVersion":"autoscaling/v1","metadata":{{"name":"web",
+           "namespace":"payments","uid":"18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11",
+           "resourceVersion":"41751","creationTimestamp":"2026-09-01T00:00:00Z"}},
+           "spec":{{"replicas":{replicas}}},"status":{{"replicas":{replicas}}}}}"#
+    )
+}
+
+/// Where a header block ends, or `None` while the request is still arriving.
+fn at(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// **How long the body is**, off the one header that says so. Absent means there is none.
+fn body_bytes(head: &str) -> usize {
+    head.lines()
+        .find_map(|line| {
+            line.split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                .and_then(|(_, value)| value.trim().parse().ok())
+        })
+        .unwrap_or(0)
+}
+
+/// **A stub API server that logs `METHOD target body` and answers what it is told to.**
+///
+/// **The address is built and not written**, which is not a trick played on
+/// `scripts/security-guard.py`: the port is whatever `:0` gave us and the string does not exist
+/// until the test runs, so there is no hardcoded loopback URL for the guard to be right about.
+async fn stub(
+    answer: impl Fn(&str) -> (String, String) + Send + Sync + 'static,
+) -> (Client, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = std::sync::Arc::clone(&asked);
+    let answer = std::sync::Arc::new(answer);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let log = std::sync::Arc::clone(&log);
+            let answer = std::sync::Arc::clone(&answer);
+            tokio::spawn(async move {
+                // One connection carries three requests: hyper keeps it alive, so this reads
+                // until the socket closes rather than answering once and giving up.
+                let mut pending: Vec<u8> = Vec::new();
+                loop {
+                    let mut chunk = [0_u8; 4096];
+                    match socket.read(&mut chunk).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => pending.extend_from_slice(&chunk[..read]),
+                    }
+                    // **A PATCH has a body, so a request does not end at the blank line** — the
+                    // header says how much more there is, and reading one byte short leaves the
+                    // next request's first line glued to this one's.
+                    while let Some(end) = at(&pending, b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&pending[..end]).to_string();
+                        let length = body_bytes(&head);
+                        if pending.len() < end + 4 + length {
+                            break;
+                        }
+                        let body = String::from_utf8_lossy(&pending[end + 4..end + 4 + length])
+                            .to_string();
+                        pending.drain(..end + 4 + length);
+                        let mut words = head.split_whitespace();
+                        let asked = format!(
+                            "{} {} {body}",
+                            words.next().unwrap_or_default(),
+                            words.next().unwrap_or_default()
+                        );
+                        let asked = asked.trim_end().to_string();
+                        let (status, reply) = answer(&asked);
+                        log.lock().expect("the log is never poisoned").push(asked);
+                        let sent = format!(
+                            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n\
+                             content-length: {}\r\n\r\n{reply}",
+                            reply.len()
+                        );
+                        if socket.write_all(sent.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    let client = Client::try_from(kube::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing");
+    (client, asked)
+}
+
+/// The scale `k8rs ops scale deploy/web 3 -n payments` describes.
+fn asking(count: i32) -> Scaling<'static> {
+    Scaling {
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+        kind: "deployment",
+        name: "web",
+        namespace: Some("payments"),
+        count,
+    }
+}
+
+/// **What `scale` can be pointed at, and what it says about everything else** —
+/// NOTES § Operations' `s` row, over every kind the driver lets through (NOTES § D220 ruling 7).
+///
+/// **`main.rs`'s `KINDS` is read, not copied**, because the driver accepts all of them for all
+/// three verbs on purpose and the refusal is what stops the ones scale does not serve.
+///
+/// **It used to say that and write six string literals** (`k8s-admin`, 2026-09-04). The two agreed
+/// on the day it was written, so a seventh kind would have gone unfed while the sentence above
+/// still claimed otherwise — CLAUDE.md's *a derived list asserts it found something* row, which is
+/// what the count at the bottom is for.
+#[test]
+fn scale_takes_the_three_kinds_it_works_on_and_names_them_when_it_refuses_the_rest() {
+    let works = [
+        ("deployment", "deployments"),
+        ("statefulset", "statefulsets"),
+        ("replicaset", "replicasets"),
+    ];
+    let (mut served, mut refused) = (0, 0);
+    for kind in &crate::KINDS {
+        let kind = kind.singular;
+        if let Some((_, plural)) = works.iter().find(|(named, _)| *named == kind) {
+            served += 1;
+            let resource = scalable(kind).unwrap_or_else(|refusal| panic!("{kind}: {refusal}"));
+            println!(
+                "{kind} → {}/{} {}",
+                resource.group, resource.version, resource.plural
+            );
+            assert_eq!(
+                (
+                    resource.group.as_str(),
+                    resource.version.as_str(),
+                    resource.plural.as_str()
+                ),
+                ("apps", "v1", *plural),
+                "{kind} did not resolve to the apps/v1 resource its own type declares"
+            );
+        } else {
+            refused += 1;
+            let refusal = scalable(kind).expect_err("a kind scale does not work on is refused");
+            println!("{kind}\n{refusal}");
+            assert!(
+                refusal.contains(&format!("cannot scale a {kind}")),
+                "{kind}: the refusal does not name the kind that was asked for: {refusal:?}"
+            );
+            // **It names what it *can* do, in plain words** (invariant 14): a reader told only
+            // *no* has to go and find the table this sentence is.
+            assert!(
+                refusal.contains("a deployment, a statefulset and a replicaset"),
+                "{kind}: the refusal does not say what scale works on: {refusal:?}"
+            );
+        }
+    }
+    // **The derived list says what it found.** An empty `KINDS`, or a renamed entry that no longer
+    // matches `works`, passes every assertion above by running none of them — *extracted nothing*
+    // and *nothing to extract* print the same line.
+    assert_eq!(
+        (served, refused),
+        (works.len(), crate::KINDS.len() - works.len()),
+        "the driver's kind table no longer splits into the three scale serves and the rest"
+    );
+}
+
+/// **A kind word out of argv is free text and is stripped before it is quoted back**
+/// (invariant 9). `scalable` is `pub` and the word reaching it came off a command line.
+#[test]
+fn a_crafted_kind_cannot_rewrite_the_terminal_on_its_way_into_scales_refusal() {
+    let refusal = scalable("pod\u{1b}[2J\u{202e}").expect_err("that is not a kind scale works on");
+    println!("{refusal}");
+    assert!(
+        !refusal.chars().any(crate::k8s::unprintable),
+        "a kind word carried an escape into the refusal: {refusal:?}"
+    );
+    assert!(
+        refusal.contains("cannot scale a pod"),
+        "the strip ate the readable part of the word too: {refusal:?}"
+    );
+}
+
+/// **The five relations, in `screens/dialogs.md` § Scale's own sentences** — asserted against that
+/// file's words and not against what the function happens to return.
+///
+/// **The count is on both sides of every one of them**, which is the rule that stops anything
+/// depending on the reader remembering the old number.
+#[test]
+fn the_five_relations_between_what_is_running_and_what_was_asked_for_read_as_the_screen_says() {
+    for (running, asked, expected) in [
+        (
+            2,
+            3,
+            "This starts 1 more copy of your app. Right now: 2 copies. After: 3 copies.",
+        ),
+        (
+            2,
+            5,
+            "This starts 3 more copies of your app. Right now: 2 copies. After: 5 copies.",
+        ),
+        (
+            3,
+            2,
+            "This stops 1 copy of your app. Right now: 3 copies. After: 2 copies.",
+        ),
+        (
+            3,
+            0,
+            "This stops all 3 copies of your app — nothing will be left running. Right now: 3 \
+             copies. After: 0 copies.",
+        ),
+        // **The unchanged relation describes the request, because the request is made**
+        // (`k8s-admin` and a PM ruling, 2026-09-04). Both `PATCH`es go out, the cluster accepts
+        // them and the run ends *the change was made* — so a consequence asserting *This makes no
+        // change* was the same screen saying both (invariant 14, invariant 4).
+        (
+            3,
+            3,
+            "This asks for the count web is already running. Right now: 3 copies. After: 3 \
+             copies.",
+        ),
+    ] {
+        let said = consequence("web", running, asked);
+        println!("{running} → {asked}\n{said}\n");
+        assert_eq!(said, expected, "{running} → {asked}");
+    }
+}
+
+/// **A count of one is a copy and everything else is copies**, in every place a count is printed —
+/// the rule `screens/dialogs.md` writes as *1 more copy* and *3 more copies* and never spells for
+/// the two halves of the `Right now:` line.
+///
+/// **`all 1 copy` is not a sentence anybody says**, so the one relation that would have produced
+/// it has its own words. The fact is the same and the grammar is not.
+#[test]
+fn one_is_a_copy_and_the_sentence_that_would_have_read_all_one_copy_does_not_exist() {
+    assert_eq!(copies(1), "1 copy");
+    for count in [0, 2, 3, i64::from(i32::MAX)] {
+        assert_eq!(copies(count), format!("{count} copies"), "{count}");
+    }
+    assert_eq!(
+        consequence("web", 1, 0),
+        "This stops the only copy of your app — nothing will be left running. Right now: 1 copy. \
+         After: 0 copies."
+    );
+    assert_eq!(
+        consequence("web", 0, 1),
+        "This starts 1 more copy of your app. Right now: 0 copies. After: 1 copy."
+    );
+    // **Nothing running and nothing asked for is *no change*, not *stops all 0 copies*** — the
+    // unchanged relation is decided first, and it has to be.
+    assert_eq!(
+        consequence("web", 0, 0),
+        "This asks for the count web is already running. Right now: 0 copies. After: 0 copies."
+    );
+}
+
+/// **The widest counts a `replicas` field can hold do not overflow the arithmetic that describes
+/// them.** Both ends are `i32`, so the difference is not one — which is why it is taken in `i64`.
+#[test]
+fn the_two_ends_of_the_replicas_field_are_described_without_overflowing() {
+    let said = consequence("web", i32::MIN, i32::MAX);
+    println!("{said}");
+    assert!(
+        said.starts_with("This starts 4294967295 more copies of your app."),
+        "{said}"
+    );
+}
+
+/// **A scale reads the count off the scale subresource and changes only that** — the whole box, on
+/// a socket, so what is asserted is what went on the wire (todo.md 3749).
+///
+/// **Three requests and their order is the claim**: the `GET` that the consequence sentence is
+/// built from, the `PATCH` carrying `dryRun=All`, then the `PATCH` that is not a dry run. Every
+/// one of them is on `…/deployments/web/scale`; none of them touches the deployment itself, which
+/// is what keeps NOTES § D217's *a `422` hands back the object you sent* bounded to a `Scale`.
+///
+/// **The body is `spec.replicas` and nothing else.** A full-object patch would be a scale that can
+/// drift a pod template while claiming to be counting copies.
+#[tokio::test]
+async fn a_scale_reads_the_count_off_the_subresource_and_patches_only_that() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = scale(
+        &client,
+        &asking(3),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    assert_eq!(
+        requests,
+        vec![
+            "GET /apis/apps/v1/namespaces/payments/deployments/web/scale".to_string(),
+            "PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale\
+             ?&dryRun=All&fieldValidation=Strict {\"spec\":{\"replicas\":3}}"
+                .to_string(),
+            "PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale\
+             ?&fieldValidation=Strict {\"spec\":{\"replicas\":3}}"
+                .to_string(),
+        ],
+        "the scale did not read the subresource, check it, and then change it"
+    );
+    assert_eq!(
+        done,
+        Performed {
+            outcome: Some(Outcome::Done),
+            recorded: true
+        }
+    );
+    assert_eq!(
+        done.plainly(),
+        "the change was made",
+        "a scale that landed does not say so"
+    );
+    assert!(done.changed(), "a scale that landed is not an exit 0");
+}
+
+/// **What the dialog and the audit log were given, off a real answer from a real socket** —
+/// the consequence built from the count that came back, the object as the reader knows it, the
+/// `uid` the `Scale` carried, and the path the request really took.
+#[tokio::test]
+async fn what_a_scale_records_is_the_object_it_read_and_the_call_it_made() {
+    let (client, _) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = scale(
+        &client,
+        &asking(3),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+    assert_eq!(done.outcome, Some(Outcome::Done));
+
+    assert_eq!(
+        trace.borrow().dialog,
+        Some(Dialog {
+            object: "deployment/web".to_string(),
+            namespace: Some("payments".to_string()),
+            consequence: "This starts 1 more copy of your app. Right now: 2 copies. After: 3 \
+                          copies."
+                .to_string(),
+            // **`deployment/web`, never `deploy/web`** (`screens/dialogs.md` § Scale): this line's
+            // whole job is teaching a newcomer a command they can read.
+            kubectl: "kubectl scale deployment/web --replicas=3 -n payments".to_string(),
+        }),
+        "the dialog was not given the object, the count it read, or a runnable kubectl line"
+    );
+    let lines = transcript(&trace);
+    let attempt = lines
+        .iter()
+        .find(|line| line.contains("attempt ·"))
+        .expect("the attempt line is written before anything is sent");
+    assert_eq!(
+        attempt,
+        "audit: 2026-09-03T12:34:56Z attempt · deployment/web · context kind-k8rs · server \
+         https://k8rs-tests.invalid:41751 · namespace payments · \
+         uid 18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11 · kubectl: kubectl scale deployment/web \
+         --replicas=3 -n payments · call: PATCH \
+         /apis/apps/v1/namespaces/payments/deployments/web/scale · resourceVersion not sent\n",
+        "the attempt line does not name the call that was actually made"
+    );
+}
+
+/// **Cancelling sends the check and nothing after it** — invariant 2 through the real operation
+/// and not only through the contract's own double.
+#[tokio::test]
+async fn a_scale_nobody_confirmed_sends_the_check_and_never_the_change() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = scale(
+        &client,
+        &asking(0),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Cancelled),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    assert_eq!(
+        requests.len(),
+        2,
+        "a cancelled scale sent the change anyway"
+    );
+    assert!(
+        requests[1].contains("dryRun=All"),
+        "the one call after the read was not the check: {:?}",
+        requests[1]
+    );
+    assert_eq!(done.outcome, Some(Outcome::Cancelled));
+    assert!(!done.changed(), "a cancelled scale is not an exit 0");
+    // **The scale-to-zero wording is what the reader was shown before saying no**, which is the
+    // one relation `screens/dialogs.md` prints in full for the headless surface.
+    assert_eq!(
+        trace
+            .borrow()
+            .dialog
+            .as_ref()
+            .map(|dialog| dialog.consequence.clone()),
+        Some(
+            "This stops all 2 copies of your app — nothing will be left running. Right now: 2 \
+             copies. After: 0 copies."
+                .to_string()
+        )
+    );
+}
+
+/// **A cluster that will not say how many copies are running is a refusal, and nothing is
+/// recorded** — there is no mutation to describe, so there is no attempt line to write.
+///
+/// **The reason is keyed on the `Fault` and the server's own words travel beside it**
+/// (`PRIOR-ART § C1`): a `403` here is the cluster saying no, and it is the one sentence that
+/// tells an operator whether to fix their RBAC or their network.
+#[tokio::test]
+async fn a_scale_that_cannot_read_the_current_count_refuses_and_records_nothing() {
+    let (client, sent) = stub(|_| {
+        (
+            "403 Forbidden".to_string(),
+            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","code":403,
+               "reason":"Forbidden","message":"deployments.apps \"web\" is forbidden"}"#
+                .to_string(),
+        )
+    })
+    .await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let refusal = scale(
+        &client,
+        &asking(3),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect_err("a cluster that will not answer the read cannot be scaled");
+
+    println!("{refusal}");
+    assert!(
+        refusal.starts_with(
+            "k8rs could not read how many copies of deployment/web are running \
+                             right now — the cluster would not allow it"
+        ),
+        "{refusal:?}"
+    );
+    assert!(
+        refusal.contains("is forbidden"),
+        "the server's own explanation was dropped: {refusal:?}"
+    );
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        1,
+        "a read that failed was followed by something else"
+    );
+    assert!(
+        transcript(&trace).is_empty(),
+        "a mutation that was never described was written into the audit log"
+    );
+}
+
+/// **A `Scale` that does not say what it is asking for is refused rather than read as zero.**
+///
+/// *Right now: 0 copies* over an object k8rs could not read invents the one number the whole
+/// consequence turns on — and the sentence the reader then agrees to is about a scale that is not
+/// the one they typed.
+#[tokio::test]
+async fn a_scale_the_cluster_gave_no_count_for_is_refused_rather_than_read_as_none() {
+    let (client, _) = stub(|_| {
+        (
+            "200 OK".to_string(),
+            r#"{"kind":"Scale","apiVersion":"autoscaling/v1","metadata":{"name":"web"}}"#
+                .to_string(),
+        )
+    })
+    .await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let refusal = scale(
+        &client,
+        &asking(3),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect_err("a Scale with no spec.replicas says nothing about what is running");
+
+    println!("{refusal}");
+    assert!(
+        refusal.contains("did not say how many it is asking for"),
+        "{refusal:?}"
+    );
+    assert!(
+        transcript(&trace).is_empty(),
+        "a mutation nobody could describe was written into the audit log"
+    );
+}
+
+/// **A namespace nobody named is refused inside the operation, before anything is read** —
+/// one place, rather than a second copy of which kinds live in a namespace
+/// (NOTES § D220 ruling 4).
+#[tokio::test]
+async fn a_scale_with_no_namespace_is_refused_before_a_single_call_goes_out() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let nowhere = Scaling {
+        namespace: None,
+        ..asking(3)
+    };
+
+    let refusal = scale(
+        &client,
+        &nowhere,
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect_err("a namespaced object with no namespace is not something to scale");
+
+    println!("{refusal}");
+    assert_eq!(
+        refusal,
+        "k8rs will not scale deployment/web without being told which namespace it is in"
+    );
+    assert!(
+        sent.lock().expect("the log is never poisoned").is_empty(),
+        "a scale with nowhere to send anything sent something"
+    );
+}
+
+/// **A name that would change the address the request goes to is refused where the path is
+/// built**, not only where the command line was parsed.
+///
+/// **Nothing on a command line can reach this** — `k8s::object_name` and `k8s::namespace_name`
+/// refuse both in the driver — which is exactly why the guard is here: `scale` is `pub` in a file
+/// that freezes at the end of this phase, and Phase 12's console is a caller nobody has written
+/// yet. `k8s::owner` keeps the same guard for the same reason one file over.
+#[tokio::test]
+async fn a_name_that_would_rewrite_the_request_path_is_refused_where_the_path_is_built() {
+    for (name, namespace, which) in [
+        ("web/../../secrets", "payments", "an object's own name"),
+        ("web", "payments/../kube-system", "the name of a namespace"),
+        ("", "payments", "an object's own name"),
+        ("web", "", "the name of a namespace"),
+    ] {
+        let (client, sent) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
+        let trace = trace();
+        let mut sink = Sink(trace.clone());
+        let crafted = Scaling {
+            name,
+            namespace: Some(namespace),
+            ..asking(3)
+        };
+
+        let refusal = scale(
+            &client,
+            &crafted,
+            stamp,
+            &mut sink,
+            shows(&trace),
+            asked(&trace, Answer::Confirmed),
+        )
+        .await
+        .expect_err("a name that is not addressable is not something to scale");
+
+        println!("{name:?} in {namespace:?}\n{refusal}");
+        assert!(
+            refusal.contains(which) && refusal.contains("part of the address"),
+            "{name:?} in {namespace:?} was refused for something else: {refusal:?}"
+        );
+        assert!(
+            sent.lock().expect("the log is never poisoned").is_empty(),
+            "{name:?} in {namespace:?} reached the cluster anyway"
+        );
+        assert!(
+            transcript(&trace).is_empty(),
+            "{name:?} in {namespace:?} was written into the audit log"
+        );
+    }
+}
+
+/// **A count below zero is refused where the request is built, for the same reason the two names
+/// above are** (`k8s-admin`, 2026-09-04). `count: i32` is the one field on [`Scaling`] the type
+/// does not constrain; `src/main.rs`'s `refuse_count` bounds a command line and Phase 12's console
+/// is a caller nobody has written, and `scale` is `pub` in a file that freezes.
+///
+/// **Unguarded it produced two records that lie before the cluster gets a say** (invariant 4): a
+/// consequence reading *This stops 8 copies of your app … After: -5 copies*, a command log reading
+/// `--replicas=-5`, an audit line holding both — and only then a `422`.
+///
+/// **No upper bound is fed, because there is none to feed**: `replicas` is an `i32` and so is this,
+/// so `i32::MAX` is a legal ask and is asserted to go through.
+#[tokio::test]
+async fn a_count_below_zero_is_refused_before_anything_describes_it() {
+    for count in [-1, -5, i32::MIN] {
+        let (client, sent) = stub(|_| ("200 OK".to_string(), scale_body(3))).await;
+        let trace = trace();
+        let mut sink = Sink(trace.clone());
+
+        let refusal = scale(
+            &client,
+            &asking(count),
+            stamp,
+            &mut sink,
+            shows(&trace),
+            asked(&trace, Answer::Confirmed),
+        )
+        .await
+        .expect_err("a count Kubernetes cannot hold is not something to scale to");
+
+        println!("{count}\n{refusal}");
+        assert_eq!(
+            refusal,
+            format!(
+                "k8rs will not scale deployment/web to {count} copies: the fewest Kubernetes \
+                 takes is 0"
+            )
+        );
+        assert!(
+            sent.lock().expect("the log is never poisoned").is_empty(),
+            "{count} reached the cluster anyway"
+        );
+        assert!(
+            transcript(&trace).is_empty(),
+            "{count} was described to somebody and written into the audit log"
+        );
+    }
+    // **The other end is not a refusal**, which is what keeps the guard from being a bound the
+    // field does not have.
+    let (client, sent) = stub(|_| ("200 OK".to_string(), scale_body(3))).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let largest = scale(
+        &client,
+        &asking(i32::MAX),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Cancelled),
+    )
+    .await
+    .expect("the largest count the replicas field holds is a scale k8rs describes");
+    println!("{}", largest.plainly());
+    assert_eq!(
+        largest.outcome,
+        Some(Outcome::Cancelled),
+        "the largest legal count was refused rather than described and declined"
+    );
+    assert!(
+        !sent.lock().expect("the log is never poisoned").is_empty(),
+        "the largest legal count never reached the cluster"
+    );
+}
+
+/// **A kind `scale` does not work on never reaches a cluster**, whatever the caller does — the
+/// driver asks first (NOTES § D220 ruling 7), and the operation refuses again if it is asked
+/// anyway.
+#[tokio::test]
+async fn a_scale_pointed_at_a_kind_it_does_not_work_on_sends_nothing() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), scale_body(2))).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let pod = Scaling {
+        kind: "pod",
+        ..asking(3)
+    };
+
+    let refusal = scale(
+        &client,
+        &pod,
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect_err("a pod is not something k8rs scales");
+
+    println!("{refusal}");
+    assert!(refusal.contains("cannot scale a pod"), "{refusal:?}");
+    assert!(
+        sent.lock().expect("the log is never poisoned").is_empty(),
+        "a kind k8rs will not scale was looked up on the cluster anyway"
+    );
+}
+
+/// **`recorded: false` beside a `Done` is a sentence and never a different exit code**
+/// (NOTES § D220 ruling 1, § D214's fourth lie).
+///
+/// **The change happened.** A `2` here sends a script back to re-run a mutation that already
+/// landed, and `restart` and `delete` are not idempotent under that re-run the way a scale is.
+#[test]
+fn a_change_that_could_not_be_written_down_still_says_it_happened_and_still_exits_zero() {
+    let unrecorded = Performed {
+        outcome: Some(Outcome::Done),
+        recorded: false,
+    };
+    println!("{}", unrecorded.plainly());
+    assert!(
+        unrecorded.changed(),
+        "a change that happened was reported as one that did not"
+    );
+    assert_eq!(
+        unrecorded.plainly(),
+        "the change was made — but k8rs could not write that to the audit log, so the trail of it \
+         is short a line"
+    );
+}
+
+/// **Every other ending says what happened and none of them is a `0`** — one sentence per
+/// `Outcome`, and NOTES § D21's *nothing was sent at all* beside them.
+#[test]
+fn everything_that_is_not_a_change_says_so_and_none_of_it_exits_zero() {
+    let refused = Performed {
+        outcome: None,
+        recorded: false,
+    };
+    println!("{}", refused.plainly());
+    assert!(!refused.changed());
+    assert_eq!(
+        refused.plainly(),
+        "nothing was changed — k8rs could not write this to its audit log first, and every \
+         change k8rs makes is written to that log before it is sent"
+    );
+    for (outcome, expected) in [
+        (
+            Outcome::Cancelled,
+            "nobody confirmed it, so nothing was changed",
+        ),
+        (
+            Outcome::Gone,
+            "the object was already gone, so nothing was changed",
+        ),
+        (
+            Outcome::Changed,
+            "the object changed while this was open, so nothing was changed",
+        ),
+        // **The fault is on the sentence even where the server said nothing** (`k8s-admin`,
+        // 2026-09-04) — that is the half [`and_said`] cannot supply, and the half a `403` and a
+        // `422` were indistinguishable without.
+        (
+            Outcome::NotSent {
+                fault: Fault::Refused,
+                said: None,
+            },
+            "the change was never sent — the cluster would not allow it",
+        ),
+        (
+            Outcome::Failed {
+                fault: Fault::Conflict,
+                said: None,
+            },
+            "nothing was changed — the object had already been changed by something else",
+        ),
+        // **A `404` does not claim the object used to be there.** *no such object any more* over a
+        // mistyped name — the commonest way to reach this — sends the reader looking for whoever
+        // deleted their deployment (`k8s-admin`, 2026-09-04).
+        (
+            Outcome::Failed {
+                fault: Fault::Gone,
+                said: None,
+            },
+            "nothing was changed — the cluster has no object with that name",
+        ),
+    ] {
+        let performed = Performed {
+            outcome: Some(outcome),
+            recorded: true,
+        };
+        println!("{}", performed.plainly());
+        assert_eq!(performed.plainly(), expected);
+        assert!(
+            !performed.changed(),
+            "{expected:?} was reported as a cluster that changed"
+        );
+    }
 }
 
 // --- THE AUDIT LOG'S OWN FILE ---

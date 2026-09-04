@@ -1335,3 +1335,536 @@ fn a_log_run_that_named_something_unusable_is_refused_with_nothing_on_stdout() {
 }
 
 // --- ONE OBJECT'S LOG END ---
+
+// --- ONE OPERATION START ---
+//
+// **`ops` is the first subcommand that changes a cluster, and three of the things it owes are
+// only visible from outside the process** (NOTES § D220): which stream every sentence goes to,
+// what the exit code is, and whether a line k8rs refused left a state directory behind. Nothing
+// in `src/main_tests.rs` can see any of the three — it hands `scaled` a `Vec<u8>` and reads it
+// back, which proves the words and not the plumbing.
+//
+// **The cluster is the same shape § ONE OBJECT'S LOG already uses**: a listener on a loopback
+// port the kernel chose, a kubeconfig written beside it, and no network. What is new is the two
+// things an operation needs that a read does not — a state directory it is pointed at with
+// `$XDG_STATE_HOME`, so no test ever appends to the developer's own audit log, and a line on
+// stdin, because there is no flag that means yes (NOTES § D218).
+
+/// **The `uid` the stub's `Scale` carries, with an escape sequence in the middle of it.**
+///
+/// It is the **one** field on a scale's `ops::Mutation` that the *cluster* fills in — every
+/// other one is a literal, or a word the driver refused before it got this far — and it lands in
+/// a file somebody `cat`s at 3am. Invariant 9 is asserted for it in both directions: nothing
+/// controlling survives, and the readable half still does (NOTES § D31; CLAUDE.md § A derived
+/// list asserts it found something).
+///
+/// **Written as JSON escapes and not as the characters themselves**, which is not tidiness: a raw
+/// `U+001B` inside a JSON string is not legal JSON, so a stub that spelled it that way would hand
+/// back a body `serde_json` refuses and every test below would go red on *k8rs could not reach the
+/// cluster* — a decode failure wearing a connection failure's sentence. Measured, not reasoned:
+/// that is exactly what the first draft of this file did.
+const CRAFTED_UID: &str = r"18f0b6ee\u001b[2J2b0e\u202e4b53";
+
+/// The readable part of [`CRAFTED_UID`]. A strip that ate the whole value would satisfy the
+/// *no control characters* half on its own and leave the audit log naming no object.
+const UID_READS: &str = "18f0b6ee";
+
+/// The kubeconfig context every run below is on, except the one that is about not having a name.
+const STUB_CONTEXT: &str = "stub";
+
+/// **A context name that is read, resolved and connected with — and that invariant 9 strips to
+/// nothing.** `k8s::Session::context`'s third way to be `None` (NOTES § D202), and the only one
+/// that arrives on a connection that *worked*: kube looks the entry up by the file's own
+/// spelling, so `U+200B` names a real context, and only k8rs's own strip removes it.
+const NAMELESS_CONTEXT: &str = "\u{200b}";
+
+/// **What one `k8rs ops` run left behind** — the two streams, the exit code, what reached the
+/// stub, and the audit log it wrote.
+struct Ran {
+    out: Output,
+    /// `METHOD target body`, one per request the stub answered.
+    asked: Vec<String>,
+    /// The audit log's contents, or `""` where the run never made one.
+    audit: String,
+    /// Whether `$XDG_STATE_HOME/k8rs` exists at all — NOTES § D220 ruling 7's own question.
+    state_dir: bool,
+}
+
+impl Ran {
+    /// The requests that were about the scale subresource, which is every request this file
+    /// asserts on: discovery and `/version` are `k8s.rs`'s and are not this box's subject.
+    fn scale_calls(&self) -> Vec<&String> {
+        self.asked
+            .iter()
+            .filter(|asked| asked.contains("/scale"))
+            .collect()
+    }
+}
+
+/// **A cluster that answers one `Scale` and an empty list for everything else it is asked.**
+///
+/// **`spec` and `status` are separate parameters on purpose.** They are equal on every object at
+/// rest and differ on every one mid-rollout, and which of the two the consequence sentence is
+/// built from is the number the reader agrees to (invariant 4). A stub that could only say *3 and
+/// 3* cannot tell the two apart.
+///
+/// **`context` names the kubeconfig entry**, and it is a parameter because one caller needs a
+/// name that survives being read and does not survive invariant 9's strip — `k8s::Session`'s
+/// third way to be `None` (NOTES § D202), which arrives on a connection that *worked*.
+///
+/// **The address is the one the kernel handed back**, never a literal —
+/// `scripts/security-guard.py` § no second outbound path refuses a hardcoded host under `tests/`,
+/// and the two stubs above are written the same way.
+fn a_cluster_that_answers_one_scale(
+    spec: i32,
+    status: i32,
+    context: &str,
+) -> (std::path::PathBuf, Asked) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let asked: Asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = std::sync::Arc::clone(&asked);
+    std::thread::spawn(move || {
+        for socket in listener.incoming() {
+            let Ok(socket) = socket else { return };
+            let seen = std::sync::Arc::clone(&seen);
+            std::thread::spawn(move || answer_one_scale(socket, spec, status, &seen));
+        }
+    });
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-opsstub-{}-{}.kubeconfig.yaml",
+        std::process::id(),
+        address.port()
+    ));
+    std::fs::write(
+        &path,
+        format!(
+            "apiVersion: v1\nkind: Config\ncurrent-context: '{context}'\n\
+             clusters: [{{name: stub, cluster: {{server: 'http://{address}'}}}}]\n\
+             contexts: [{{name: '{context}', context: {{cluster: stub, user: stub}}}}]\n\
+             users: [{{name: stub, user: {{}}}}]\n"
+        ),
+    )
+    .expect("the stub kubeconfig writes");
+    (path, asked)
+}
+
+/// **The `autoscaling/v1 Scale` a cluster hands back for `deployment/web` in `payments`**, and an
+/// empty list for everything else — `/version`, `/api` and `/apis` all arrive on this socket and
+/// none of them is this box's subject.
+///
+/// **A `PATCH` has a body, so a request does not end at the blank line** — the header says how
+/// much more there is, and reading one byte short glues the next request's first line onto this
+/// one's.
+fn answer_one_scale(mut socket: std::net::TcpStream, spec: i32, status: i32, seen: &Asked) {
+    use std::io::{Read, Write};
+    let scale = format!(
+        "{{\"kind\":\"Scale\",\"apiVersion\":\"autoscaling/v1\",\"metadata\":{{\"name\":\"web\",\
+         \"namespace\":\"payments\",\"uid\":\"{CRAFTED_UID}\",\"resourceVersion\":\"41751\"}},\
+         \"spec\":{{\"replicas\":{spec}}},\"status\":{{\"replicas\":{status}}}}}"
+    );
+    let empty =
+        r#"{"apiVersion":"v1","kind":"List","metadata":{"resourceVersion":"1"},"items":[]}"#;
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        let mut chunk = [0_u8; 4096];
+        match socket.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => pending.extend_from_slice(&chunk[..read]),
+        }
+        while let Some(end) = pending.windows(4).position(|window| window == b"\r\n\r\n") {
+            let head = String::from_utf8_lossy(&pending[..end]).to_string();
+            let length: usize = head
+                .lines()
+                .find_map(|line| {
+                    line.split_once(':')
+                        .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                        .and_then(|(_, value)| value.trim().parse().ok())
+                })
+                .unwrap_or(0);
+            if pending.len() < end + 4 + length {
+                break;
+            }
+            let body = String::from_utf8_lossy(&pending[end + 4..end + 4 + length]).to_string();
+            pending.drain(..end + 4 + length);
+            let mut words = head.split_whitespace();
+            let verb = words.next().unwrap_or_default().to_string();
+            let target = words.next().unwrap_or_default().to_string();
+            let asked = format!("{verb} {target} {body}").trim_end().to_string();
+            let sent = if target.contains("/scale") {
+                scale.clone()
+            } else {
+                empty.to_string()
+            };
+            seen.lock()
+                .expect("the record is never poisoned")
+                .push(asked);
+            let answer = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                 content-length: {}\r\n\r\n{sent}",
+                sent.len()
+            );
+            if socket.write_all(answer.as_bytes()).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+/// **One `k8rs ops …` run, with a state directory of its own and a scripted stdin.**
+///
+/// **`typed` is `None` for a run with no stdin at all**, which is `< /dev/null`, a CI step and
+/// cron — the unattended default NOTES § D218 says must be *no*.
+///
+/// **`cluster` is `false` for a line the driver refuses before it dials anything**, so a refusal
+/// that started reaching for a socket would fail on the connection with a different sentence
+/// rather than passing quietly.
+///
+/// Everything is torn down **before** the assertions run, so a red run leaves neither a
+/// kubeconfig nor a state directory behind (NOTES § D185).
+fn one_ops_run(
+    spec: i32,
+    status: i32,
+    typed: Option<&str>,
+    args: &[&str],
+    cluster: bool,
+    context: &str,
+) -> Ran {
+    let state = std::env::temp_dir().join(format!(
+        "k8rs-opsstate-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&state);
+    std::fs::create_dir_all(&state).expect("a state directory this test owns");
+    let stub = cluster.then(|| a_cluster_that_answers_one_scale(spec, status, context));
+    let kubeconfig = stub.as_ref().map_or_else(
+        || std::path::PathBuf::from("/nonexistent/k8rs-tests/there-is-no-kubeconfig-here"),
+        |(path, _)| path.clone(),
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_k8rs"))
+        .args(args)
+        .env("KUBECONFIG", &kubeconfig)
+        .env("XDG_STATE_HOME", &state)
+        .stdin(if typed.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the built binary runs");
+    if let Some(typed) = typed {
+        use std::io::Write;
+        let mut stdin = child.stdin.take().expect("stdin was piped");
+        stdin
+            .write_all(typed.as_bytes())
+            .expect("the answer is fed");
+    }
+    let out = child.wait_with_output().expect("the child ends");
+    let asked = stub.as_ref().map_or_else(Vec::new, |(_, asked)| {
+        asked.lock().expect("the record is never poisoned").clone()
+    });
+    let audit = std::fs::read_to_string(state.join("k8rs").join("audit.log")).unwrap_or_default();
+    let state_dir = state.join("k8rs").is_dir();
+    if let Some((path, _)) = stub {
+        std::fs::remove_file(path).expect("the stub kubeconfig is removed");
+    }
+    std::fs::remove_dir_all(&state).expect("the state directory is removed");
+    Ran {
+        out,
+        asked,
+        audit,
+        state_dir,
+    }
+}
+
+/// **A line k8rs is going to refuse anyway leaves no state directory behind** (NOTES § D220
+/// ruling 7) — the rule `k8rs ops bogus` already had, reached through the one door that is not a
+/// spelling mistake: a kind the operation does not work on.
+///
+/// **`src/main_tests.rs` counts a closure; this counts a directory.** The unit test hands
+/// `ops_line` a double that says it was asked, which proves the ordering of two calls. What it
+/// cannot see is `ops::audit_log` itself running against a real `$XDG_STATE_HOME` — and *making
+/// a directory in the user's home* is the effect the ruling is about.
+///
+/// **Exit `2` with nothing on stdout is the other half** (NOTES § D220 rulings 1 and 3):
+/// `k8rs ops scale pod/web 3 -n payments > out` writes an empty file, and `&& kubectl …` does
+/// not run.
+#[test]
+fn an_ops_line_that_is_refused_is_exit_2_with_no_stdout_and_no_state_directory() {
+    for line in [
+        vec!["ops", "scale", "pod/web", "3", "-n", "payments"],
+        vec!["ops", "scale", "node/worker-1", "3"],
+        vec!["ops", "bogus", "deploy/web"],
+        vec!["ops", "scale", "deploy/web", "three", "-n", "payments"],
+        vec!["ops", "scale", "deploy/web", "3"],
+        vec![
+            "--read-only",
+            "ops",
+            "scale",
+            "deploy/web",
+            "3",
+            "-n",
+            "payments",
+        ],
+    ] {
+        // **No stdin at all, and that is not incidental.** Every row here is refused before a
+        // confirmation is asked for, so the child never reads — and writing a scripted answer
+        // into a pipe whose reader has already exited is an `EPIPE` race that would redden this
+        // test for a reason it is not about.
+        let ran = one_ops_run(3, 3, None, &line, false, STUB_CONTEXT);
+
+        assert_eq!(
+            ran.out.status.code(),
+            Some(2),
+            "{line:?} did not exit 2: {:?}",
+            text(ran.out.stderr.clone())
+        );
+        assert_eq!(
+            text(ran.out.stdout.clone()),
+            "",
+            "{line:?} put a diagnostic where a report goes"
+        );
+        let stderr = text(ran.out.stderr);
+        assert!(stderr.starts_with("k8rs: "), "{line:?}: {stderr:?}");
+        // **The canary, and `starts_with("k8rs: ")` is not one**: a run that got past the driver
+        // would reach for a kubeconfig that is not there and print `k8rs: ` too. *nothing was
+        // changed* is the lead clause of both sentences past this point — `main`'s `no_cluster`
+        // and `ops::Performed::plainly`'s no-outcome arm — so its absence is what says the line
+        // was refused rather than attempted.
+        assert!(
+            !stderr.contains("nothing was changed"),
+            "{line:?} reached the operation before it was refused: {stderr:?}"
+        );
+        assert!(
+            !ran.state_dir,
+            "{line:?} was refused and made a state directory in the user's home anyway"
+        );
+        assert_eq!(ran.audit, "", "{line:?} wrote an audit line for nothing");
+    }
+}
+
+/// **A confirmed scale: the cluster changes, the process exits `0`, and stdout stays empty.**
+///
+/// **This is the only path in this binary that reaches exit `0` after changing something**
+/// (NOTES § D220 ruling 1), and the only one whose sentences all go to stderr while stdout is a
+/// stream nothing is written to (ruling 3) — `screens/once.md`'s split is *stdout is the
+/// findings*, and an operation produces none.
+///
+/// **The three printed lines are `screens/dialogs.md` § *Printed instead of drawn*'s**, in that
+/// order, with the box removed and nothing reworded for the terminal. The scale is to zero
+/// because that is the relation that file prints in full.
+///
+/// **The wire is asserted too**: read, check, change — three calls on the scale subresource and
+/// none on the Deployment itself.
+#[test]
+fn a_confirmed_scale_changes_the_cluster_exits_0_and_leaves_stdout_empty() {
+    let ran = one_ops_run(
+        3,
+        3,
+        Some("yes\n"),
+        &["ops", "scale", "deploy/web", "0", "-n", "payments"],
+        true,
+        STUB_CONTEXT,
+    );
+
+    let stderr = text(ran.out.stderr.clone());
+    println!("--- stderr ---\n{stderr}\n--- audit ---\n{}", ran.audit);
+    assert_eq!(
+        ran.out.status.code(),
+        Some(0),
+        "a scale that landed did not exit 0: {stderr:?}"
+    );
+    assert_eq!(
+        text(ran.out.stdout.clone()),
+        "",
+        "`k8rs ops scale … > out` wrote a dialog into the file a report goes in"
+    );
+    let lines: Vec<&str> = stderr.lines().collect();
+    // Said before the slice below, because `lines[..3]` on a two-line stderr is an index panic
+    // and not a sentence — the one unhappy path in this test that would report nothing useful.
+    assert!(
+        lines.len() >= 3,
+        "the headless dialog printed fewer than three lines: {stderr:?}"
+    );
+    assert_eq!(
+        lines[..3],
+        [
+            "deployment/web in payments",
+            "This stops all 3 copies of your app — nothing will be left running. Right now: 3 \
+             copies. After: 0 copies.",
+            "$ kubectl scale deployment/web --replicas=0 -n payments",
+        ],
+        "the headless dialog is not the three lines screens/dialogs.md prints: {stderr:?}"
+    );
+    assert!(
+        stderr.ends_with("k8rs: the change was made\n"),
+        "a write with no receipt: {stderr:?}"
+    );
+    let calls = ran.scale_calls();
+    assert_eq!(
+        calls,
+        [
+            "GET /apis/apps/v1/namespaces/payments/deployments/web/scale",
+            "PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale\
+             ?&dryRun=All&fieldValidation=Strict {\"spec\":{\"replicas\":0}}",
+            "PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale\
+             ?&fieldValidation=Strict {\"spec\":{\"replicas\":0}}",
+        ],
+        "the binary did not read the subresource, check it, and then change it"
+    );
+    assert_eq!(
+        ran.audit.lines().count(),
+        2,
+        "one mutation is one attempt line and one result line: {:?}",
+        ran.audit
+    );
+    // **Invariant 9 over the one field the *cluster* filled in**, both halves: the escape is
+    // gone from a file somebody `cat`s, and the readable part of the uid is still there
+    // (NOTES § D31).
+    let survivors: Vec<char> = ran
+        .audit
+        .lines()
+        .flat_map(str::chars)
+        .filter(|c| c.is_control())
+        .collect();
+    assert!(
+        survivors.is_empty(),
+        "a uid the cluster chose carried control characters into the audit log: {survivors:?}"
+    );
+    assert!(
+        ran.audit.contains(&format!("uid {UID_READS}")),
+        "the strip ate the uid instead of cleaning it: {:?}",
+        ran.audit
+    );
+}
+
+/// **Nothing but the word `yes` confirms, and the unattended default is no** (NOTES § D218) —
+/// the property that is the whole difference between this design and a `--yes` flag, and the one
+/// a regression removes in silence.
+///
+/// **The three rows are the three ways it is reached in the wild.** No stdin at all is
+/// `< /dev/null`, a CI step and cron; `y` is what coreutils `yes` emits, which is the single
+/// most likely accidental bulk-confirm; `no` is somebody reading the dialog and declining.
+///
+/// **Each asserts the wire and not only the sentence**: the check went out and the change never
+/// did, which is invariant 2 through the real process.
+#[test]
+fn a_scale_nobody_confirmed_is_exit_2_and_the_change_is_never_sent() {
+    for typed in [None, Some("y\n"), Some("no\n")] {
+        let ran = one_ops_run(
+            2,
+            2,
+            typed,
+            &["ops", "scale", "deploy/web", "5", "-n", "payments"],
+            true,
+            STUB_CONTEXT,
+        );
+
+        let stderr = text(ran.out.stderr.clone());
+        println!("--- {typed:?} ---\n{stderr}");
+        assert_eq!(
+            ran.out.status.code(),
+            Some(2),
+            "{typed:?} confirmed a scale nobody agreed to: {stderr:?}"
+        );
+        assert_eq!(
+            text(ran.out.stdout.clone()),
+            "",
+            "{typed:?} wrote to stdout"
+        );
+        assert!(
+            stderr.ends_with("k8rs: nobody confirmed it, so nothing was changed\n"),
+            "{typed:?}: {stderr:?}"
+        );
+        let calls = ran.scale_calls();
+        assert_eq!(
+            calls.len(),
+            2,
+            "{typed:?} sent something after the check: {calls:?}"
+        );
+        assert!(
+            calls[1].contains("dryRun=All"),
+            "{typed:?}: the one call after the read was not the check: {:?}",
+            calls[1]
+        );
+    }
+}
+
+/// **The count the reader is asked to agree to is the one the object is *asking for*, not the one
+/// it currently has** — `spec.replicas` and never `status.replicas`.
+///
+/// **The two differ on every object mid-rollout**, which is exactly when somebody scales one. A
+/// Deployment asking for 2 with 7 still running, scaled to 5, is *starts 3 more copies*; read off
+/// `status` it would be announced as *stops 2 copies* — the opposite verb, over the one number
+/// the whole consequence turns on (invariant 4, *neither record may lie*).
+///
+/// **No test anywhere fed these two apart before this one**: every other stub answers a `Scale`
+/// whose two counts agree, which is the one shape that cannot tell the fields apart
+/// (NOTES § D29).
+#[test]
+fn the_count_the_reader_agrees_to_is_the_one_the_object_asks_for() {
+    let ran = one_ops_run(
+        2,
+        7,
+        Some("no\n"),
+        &["ops", "scale", "deploy/web", "5", "-n", "payments"],
+        true,
+        STUB_CONTEXT,
+    );
+
+    let stderr = text(ran.out.stderr);
+    println!("{stderr}");
+    assert!(
+        stderr.contains(
+            "This starts 3 more copies of your app. Right now: 2 copies. After: 5 copies."
+        ),
+        "the consequence was not built from spec.replicas: {stderr:?}"
+    );
+    assert!(
+        !stderr.contains("7 copies"),
+        "the count still running was described as the count that was asked for: {stderr:?}"
+    );
+}
+
+/// **A context whose name is nothing but characters invariant 9 strips still records as a gap,
+/// not as a dangling label** — `k8s::Session::context`'s third `None` (NOTES § D202), reached on
+/// a connection that worked.
+///
+/// **This is the shape the record's own doc comment argues for and nothing fed.** Every other
+/// test in this repo hands `ops::Record` a context that is a real word, so
+/// `gap(Some(&self.context), "not named", "")` is indistinguishable from `self.context` to all of
+/// them — and `context ·` with nothing after it is exactly the truncated-looking record the
+/// neighbouring fields are gapped to avoid (`src/ops.rs` § THE MUTATION CONTRACT).
+///
+/// **It has to be the whole process.** The `None` is made in `scale_connected`, which reads the
+/// reader's own kubeconfig and dials it, and is the one part of this operation no unit test
+/// reaches.
+#[test]
+fn a_context_whose_name_strips_to_nothing_is_recorded_as_a_gap_and_not_a_dangling_label() {
+    let ran = one_ops_run(
+        2,
+        2,
+        Some("yes\n"),
+        &["ops", "scale", "deploy/web", "3", "-n", "payments"],
+        true,
+        NAMELESS_CONTEXT,
+    );
+
+    let stderr = text(ran.out.stderr);
+    println!("--- stderr ---\n{stderr}\n--- audit ---\n{}", ran.audit);
+    assert_eq!(
+        ran.out.status.code(),
+        Some(0),
+        "a context k8rs cannot name stopped a scale it could otherwise make: {stderr:?}"
+    );
+    assert!(
+        ran.audit.contains(" · context not named · server "),
+        "a context that strips to nothing left a dangling label in the audit log: {:?}",
+        ran.audit
+    );
+}
+
+// --- ONE OPERATION END ---

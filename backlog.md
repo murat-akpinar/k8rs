@@ -2262,6 +2262,51 @@ recorded reversal and a later box rather than a dev round
   mutation, instead?** Phase 11's, and this is where it became visible. Found by
   `k8s-admin`, 2026-09-04
 
+- **Scaling a ReplicaSet promises a change its Deployment undoes.** `kubectl
+  scale rs/…` sends the identical patch, so k8rs follows NOTES § Operations
+  correctly — but the consequence says *"This starts 1 more copy of your app"*
+  and the record says *"the change was made"*, and for a Deployment-owned
+  ReplicaSet both stop being true within a second. Counted in the fixture
+  cluster: **8 of 8 ReplicaSets are Deployment-controlled, 0 bare.** The `Scale`
+  the apiserver returns carries no `ownerReferences`, so naming the owner costs a
+  second `GET`; the alternative is one clause for the `replicaset` kind. Must be
+  ruled before `ops.rs` freezes at this phase's close. Found by `k8s-admin`,
+  2026-09-04
+  ([D222](NOTES.md#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04))
+
+- **A one-shot `ops` line builds a whole `Session`.** `k8s::connect_with` runs
+  full discovery and the C2 TLS handshake probe for a mutation that needs
+  neither. Measured against a stub without aggregated discovery: **kubectl 6
+  requests before the PATCH, k8rs 12** — `/version` ×2, `/apis` ×4, `/api` ×2. On
+  a v1.36 server with aggregated discovery it is 2 round trips and this is noise;
+  without it, `2 + ΣV(g)`. Nothing scales with pod count, and the fix is in the
+  frozen `k8s.rs`, which is why
+  [D220](NOTES.md#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+  ruling 5 did not open it. Found by `k8s-admin`, 2026-09-04
+
+- **`Mutation` carries two conventions for *absent*.** `namespace`, `uid` and
+  `version` are `Option`; `context` and `server` are `&str` where `""` means
+  absent and `gap` recovers it. `ops.rs` freezes at this phase's close, so this is
+  the shape `restart`, `delete` and Phase 12 inherit. Found by `k8s-admin`,
+  2026-09-04
+
+- **`just check` has no disk-headroom check, and a full `/tmp` reads as twelve
+  test failures.** `scripts/mutants.sh` refuses to start without headroom
+  ([D133](NOTES.md#d133--the-mutation-gate-files-a-failed-build-as-unviable-so-a-full-disk-reads-as-a-pass-2026-08-21));
+  nothing else does. Measured 2026-09-04 on a 12 GiB tmpfs at 100%: every test in
+  `tests/binary.rs` went red because the stub kubeconfigs go to
+  `std::env::temp_dir()`, and the twelve failures named decode and connection
+  errors rather than the disk. Loud rather than falsely green, so not a test that
+  cannot fail — but one line in `scripts/guards.sh` would have named it. Found by
+  `tester`, 2026-09-04
+
+- **`ops::ACCEPTED` is lower case and `screens/dialogs.md` draws it capitalised.**
+  The contract's constant is *"the cluster checked it first and accepted it"*; the
+  mockup's dialog line is *"The cluster checked it first and accepted it."* One
+  reads correctly mid-sentence on the headless surface, the other as a drawn line
+  in a box. Cosmetic, and it is the kind of thing Phase 11 transcribes wrong.
+  Found by the PM, 2026-09-04
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

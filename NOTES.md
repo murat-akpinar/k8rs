@@ -241,6 +241,9 @@ its line moving with it.
 - [D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04) — `Strict` on every write that can carry it, and the 422 that hands back the object you sent
 - [D218](#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04) — the headless driver: five divergences from kubectl, and why piping a word is not `--yes`
 - [D219](#d219--the-audit-log-refuses-what-it-cannot-trust-and-says-what-it-cannot-fix-2026-09-04) — the audit log refuses what it cannot trust, and says what it cannot fix
+- [D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04) — the seven rulings `scale` could not be briefed without, and the frozen file that stayed shut
+- [D221](#d221--the-audit-log-records-mutations-not-intentions-and-that-is-where-screensdialogsmd-rule-5-stops-2026-09-04) — the audit log records mutations, not intentions, and that is where `screens/dialogs.md` rule 5 stops
+- [D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04) — the `scale` review round: the sentence that named neither fault nor message, and the admin role that could not scale
 
 ## Why it exists — where the gap is
 
@@ -18789,3 +18792,208 @@ server URL, already read at `k8s.rs`) and `uid`. It had to be now: `ops.rs`
 freezes when this phase closes and `Mutation` gains no field after that. The
 Kubernetes *subject* is deliberately not here — k8rs cannot know the effective
 identity without `SelfSubjectReview`, which is `may_i`'s box.
+
+### D220 — the seven rulings `scale` could not be briefed without, and the frozen file that stayed shut (2026-09-04)
+
+`scale` is the first operation to reach the cluster, and todo.md 3749 names four
+things that land with it plus three preconditions. Six of the seven below are
+rulings the brief could not be written without; the seventh is a finding
+rejected. Written before the dispatch, not after
+([CLAUDE.md § Agent workflow](CLAUDE.md)).
+
+**1. The exit-code vocabulary is [D17](#d17--the---once-output)'s table read onto
+the write path, and it turns on one question: did the cluster change?** Exit `0`
+for `Outcome::Done` and nothing else. Exit `2` for every refusal of the line, for
+`Cancelled`, `Gone`, `Changed`, `NotSent` and `Failed`, and for D21's
+`outcome: None`. `1` stays unused, so no `--exit-code` is redefined and this is an
+extension of D17 rather than a reversal of it.
+
+**The box's own hazard is the reason:** `echo no | k8rs ops delete … && kubectl
+get pod` must not read a cancellation as success, and today every ops line exits
+`2`, which gets that backwards for the one case that worked.
+
+**`recorded: false` beside a `Done` still exits `0`,** which is the arm worth
+saying out loud. The change happened; a `2` there makes a script re-run a
+mutation that already landed, and `restart` and `delete` are not idempotent under
+that re-run the way a scale is. The fact does not disappear — it is a sentence on
+stderr, which is [D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)'s
+own *"the change was made — but k8rs could not write it to the audit log"*
+reaching somebody. The exit code answers *did it happen*; stderr answers *is the
+trail complete*.
+
+**2. `ops_line`'s signature carries the code back with the sentence.** Today it is
+`Option<String>` and `main` reads it as `ops_line(…).or_else(|| mistyped(…))`, so
+a `scale` that succeeds and returns `None` falls through into `mistyped`, then
+`live_context`, and k8rs starts watching a cluster after performing a mutation.
+Unreachable only because `None` still means *no `ops` word at all*. The
+requirement is the behaviour and not a spelling: **a line that reached the seam
+never reaches `mistyped` or `live_context`, whatever it did there.** It is the
+same change as ruling 1, which is why they are one turn.
+
+**3. An ops line writes to stderr and leaves stdout empty.**
+[`screens/once.md`](screens/once.md)'s split is *stdout is the findings, stderr is
+everything else*, and an operation produces no findings — so the confirmation
+prompt, the verdict, the notes and the outcome all go to stderr and
+`k8rs ops … > out` writes an empty file. The driver's `show`/`ask` already take a
+writer for this reason; this ruling is which one they are handed.
+
+**4. `Kind::namespaced` stays, and the finding that one of the two copies must go
+is rejected.** The two do not answer one question. `Kind::namespaced` is six
+literals consulted *before* a cluster is dialled — the driver refuses a malformed
+line without connecting, which is what `ops_namespace` is for — and
+`Browsable::namespaced` is discovery's answer about every kind the cluster serves,
+read *after*. Deleting the first means refusing `k8rs ops scale deploy/web` (no
+`-n`) only after a connection, which is the opposite of the driver's purpose;
+deleting the second is impossible, `k8s.rs:4885` reads it. `src/main.rs`'s own
+`Kind` doc already said this, landed after the finding was written. **What the box
+is still owed is that `scale` grows no *third* copy:** it takes the kind from the
+driver and re-derives scope nowhere.
+
+**5. The `server:` the audit record names comes from `k8s::contexts`, and
+`k8s.rs` is not opened.** `Mutation::server` wants `Config::cluster_url`, which
+`connect_with` consumes when it builds the client, so the first draft of this
+ruling added a field to `Session` — a third exception this phase to a file frozen
+at Phase 6's close. It is not needed. `k8s::kubeconfig()` is already `pub(crate)`
+and already read once by the caller; `k8s::contexts(&kubeconfig, context)` is a
+lookup over `Vec`s in memory that opens no file and introduces no second reader of
+it, marks `current` by the same first-wins rule kube's own lookup uses, and puts
+every address through `address()` — so the userinfo strip
+[D173](#d173--the-tags-matching-rules-tightened-against-the-object-rather-than-the-wording-and-the-credential-the-server-line-was-drawing-2026-08-28)
+built after a kubeconfig password reached the screen is on this path for free,
+rather than being remembered a second time on the way into a log file that is kept.
+`Address::Undefined` and `Address::Unreadable` become the gap word
+`Record::attempt_line` already spells. **The frozen file stays shut, and the
+cheaper route was the safer one.**
+
+**6. `scale` sends no `resourceVersion`,** and records `version: None`. todo.md
+3824 is one box for *every call* on purpose — the precondition and the `409`
+re-read are one mechanism and building half of it inside `scale` would be a box
+added to a running phase.
+
+**7. A kind `scale` will not work on must be refused before the state directory
+is made.** NOTES § Operations gives `scale` deploy/sts/rs; the driver deliberately
+accepts all six kinds for all three verbs and lets the operation hold that matrix,
+so `k8rs ops scale pod/web 3` reaches the seam. The audit-log box already ruled
+that a line k8rs is going to refuse anyway leaves no state directory behind —
+`k8rs ops bogus` must not — and a kind refusal is that same line. So the
+operation's *can I be pointed at this* answer is read before `audit()` is called,
+not after.
+
+### D221 — the audit log records mutations, not intentions, and that is where `screens/dialogs.md` rule 5 stops (2026-09-04)
+
+`k8s-admin` measured `scale` against a stub that answers `403` on the
+`get_scale` every operation makes before it can describe anything, with a fresh
+`$XDG_STATE_HOME` each run:
+
+| run | state dir | audit.log | lines |
+|---|---|---|---|
+| `--read-only`, no `-n`, unscalable kind | not made | not made | — |
+| **403 on `get_scale`** | made | made | **0** |
+| **404 on `get_scale`** | made | made | **0** |
+| cancelled, and every ending after the dialog opens | made | made | 2 |
+
+An operator refused at 03:00 leaves a zero-byte file, and
+[`screens/dialogs.md`](screens/dialogs.md) rule 5 says *success, failure and
+cancellation all reach the audit log — a trail that records only what worked
+cannot answer "what did they try"*.
+
+**The ruling is that rule 5 is about a dialog that opened, and these refusals
+happen before one exists.** `ops::scale`'s three early `Err`s — a kind
+[`scalable`](src/ops.rs) does not serve, a namespace nobody named, a cluster that
+would not say how many copies are running — all return before a `Mutation` is
+built. There is no consequence, no kubectl line and no path, so a line written
+there would be a record of a change *nobody described*: invariant 4's two records
+would both be inventions. **The log records mutations. What the operator tried is
+on stderr, with the reason and the server's own words** — which is what
+[D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04)
+had to fix before this ruling was worth anything.
+
+**Two shipped sentences it falsified, both fixed in the same change.**
+[`docs/security.md`](docs/security.md)'s mechanism table read *"**Audit** — every
+attempt, including refusals and failures"*, and the paragraph below it said the
+same thing at length. Neither is true of a line refused before a `Mutation`
+exists, and the word doing the damage is *attempt*: the refusals that **are**
+recorded are refusals of a described mutation — cancelled at the dialog, refused
+by the cluster, failed mid-call — which is also exactly `screens/dialogs.md` rule
+5's population. The table now says *every described mutation*, and the paragraph
+names the boundary. `todo.md`'s own audit-log box says *"recording refusals and
+failures as well as successes"* and stays true under that reading.
+
+**Written before the freeze rather than after it.** `ops.rs` freezes when this
+phase closes, and `restart` and `delete` have the identical read-then-describe
+shape, so an unrecorded ruling here would have been made silently by the freeze.
+
+### D222 — the `scale` review round: the sentence that named neither fault nor message, and the admin role that could not scale (2026-09-04)
+
+Two blockers against the box as first landed, both measured, plus what the round
+settled.
+
+**The operator's sentence dropped everything the log kept.** `verdict`'s
+`Outcome::NotSent { .. }` arm bound neither `fault` nor `said`, so a `403` and a
+`422` on the `dryRun=All` PATCH printed **byte-identical** stderr —
+*"k8rs: the change was never sent"* — while the audit line beside it carried
+*"not checked, the cluster would not allow it … cannot patch resource
+`deployments/scale` in API group `apps`"*. `Outcome::Failed` named the fault class
+and still dropped the server's sentence, which is the half carrying the verb and
+the resource. It broke the security gate's *a 403 names the missing verb +
+resource*, `PRIOR-ART § C1` in the region written to close it, and the operation's
+own consistency: a `403` on `get_scale` named both, and one forty milliseconds
+later on the PATCH named neither.
+
+**The fix has two owners because the two halves have different readers.** The
+fault goes into `verdict`, which both readers share; the server's words go into
+`Performed::plainly` alone, because `Record::result_line` already appends them and
+a message in `verdict` would print twice on the audit line. One `and_said` owns
+the join, replacing three hand-written ones — and `Record::check` stopped naming
+the fault it now duplicates, becoming `&'static str` again.
+
+**The documented `k8rs-admin` ClusterRole could not perform a single scale, and
+RBAC is why.** It matches `resource/subresource` as **one string**: a grant on
+`deployments` does not carry `deployments/scale`. Measured against a live v1.36.1
+cluster, upstream's own `edit` ClusterRole lists `deployments/scale` separately in
+*both* its read rule and its write rule — which it would not need to if the parent
+covered it — and `system:controller:horizontal-pod-autoscaler` holds
+`*/scale` with no verb at all on the workloads. Three gaps: the resource is
+`<plural>/scale`; **`get` is required**, because every operation reads the count
+before it can describe the change and the role granted no `get` at all; and
+`replicasets` was absent although NOTES § Operations gives scale deploy/sts/rs.
+A user granted exactly `k8rs-readonly` + `k8rs-admin` met a 403 on every scale.
+This is `PRIOR-ART § B4` — *a convenience feature silently added a permission
+requirement* — arriving through the front door, and the hand-checked gate row it
+falsified is the admin half of *least privilege holds*.
+
+**Four more the round fixed.** *"the cluster has no such object any more"*
+asserted an object used to exist, and a mistyped name is the common case — it sent
+the reader hunting for whoever deleted their deployment. The `Unchanged` relation
+said *"This makes no change"* over a `PATCH` whose outcome line then said *"the
+change was made"*; the consequence now describes the request — *"This asks for the
+count `web` is already running."* — and exit `0` does not move, because an
+idempotent re-run reaching `0` is [D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+ruling 1's whole point. `Scaling::count` was unguarded where `Scaling::name` was
+guarded by the same argument — the driver bounds it and a Phase 12 console need
+not, and a `-5` produced a consequence, a command-log line and an audit line that
+all lied before the cluster got a say. And the confirmation prompt ended without a
+newline, so under `echo yes |` — the only scripted form D218 allows — the closing
+sentence landed glued to its back; since D220 ruling 1 keeps *the change was made
+but k8rs could not write it down* out of the exit code, that sentence **is** the
+delivery, and it was being hidden. The prompt now ends its own line, which is the
+one placement that adds no blank line on a tty either.
+
+**Three that the tests, not the code, got wrong.** `spec.replicas` versus
+`status.replicas` was unfed everywhere — every stub answered a `Scale` whose two
+counts agreed, the one shape that cannot tell the fields apart; fed, the defect
+announces *the opposite verb* over the number the reader agrees to. A test whose
+doc claimed *all six of `main.rs`'s `KINDS` are fed* wrote six literals and read
+`KINDS` never. And `consequence`'s `1 → 0` arm — *"This stops the only copy of
+your app"*, because *"all 1 copy"* is not a sentence anybody says — existed only
+in the code and in a test asserting it, so its expected value came from the
+implementation rather than the requirement; it is now `screens/dialogs.md`'s sixth
+relation row.
+
+**Boxed rather than fixed**, all in `backlog.md`: scaling a ReplicaSet a
+Deployment owns promises a change the controller undoes within a second (8 of 8
+ReplicaSets in the fixture cluster are Deployment-owned); a one-shot `ops` line
+builds a whole `Session` and pays 12 requests where `kubectl` pays 6; `Mutation`
+carries two conventions for *absent*; and `just check` has no disk-headroom check,
+which is how a full `/tmp` produced twelve confusing test failures instead of one
+sentence naming the disk.

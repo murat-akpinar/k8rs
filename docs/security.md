@@ -60,7 +60,7 @@ Five mechanisms, each a requirement rather than a nicety:
 | **Consent** — selected object + keypress + confirmation stating the consequence | Acting on the wrong object, or without understanding what happens |
 | **Preflight** — server-side `dryRun=All` where the API offers it, abort on rejection | Discovering an admission-webhook rejection halfway through a change |
 | **Typed confirmation** for delete and drain | The keyboard-slip class of accident |
-| **Audit** — every attempt, including refusals and failures | Not being able to answer "what happened to this cluster" |
+| **Audit** — every described mutation, including refusals and failures | Not being able to answer "what happened to this cluster" |
 
 **Opening a confirmation dialog sends one request to the API server, and that
 is by design rather than by accident.** `screens/dialogs.md` requires the
@@ -220,8 +220,27 @@ rules:
     verbs: ["patch"]                 # cordon / uncordon
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["patch", "update"]       # scale, rollout restart, edit
+    verbs: ["patch", "update"]       # rollout restart, edit
+  # scale is a subresource, and RBAC matches `resource/subresource` as one
+  # string — the rule above does not carry these (NOTES § D222).
+  - apiGroups: ["apps"]
+    resources:
+      ["deployments/scale", "statefulsets/scale", "replicasets/scale"]
+    verbs: ["get", "patch"]          # scale
 ```
+
+**The `/scale` rule is separate on purpose, and `get` is not a typo.** RBAC
+matches `resource/subresource` as one string, so a grant on `deployments` does
+not carry `deployments/scale`; upstream's own `edit` ClusterRole lists
+`deployments/scale` in both its read rule and its write rule, which it would not
+need to if the parent covered it. And `get` is there because every operation
+reads the count *before* it can say what the change would do — `ops::scale`
+calls `get_scale` to build the sentence the confirmation states, so a role with
+`patch` alone meets a 403 before the dialog ever opens. `replicasets` appears
+here and nowhere above because scale is the only operation it takes
+([NOTES § Operations](../NOTES.md#operations--the-full-admin-surface)).
+**Measured against a live cluster after the documented role failed every scale**
+([NOTES § D222](../NOTES.md#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04)).
 
 `pods/exec` and `pods/portforward` are intentionally absent — grant them only
 when those features ship and only to users who need them.
@@ -415,6 +434,17 @@ a defect, it is why the field is not called `took`. Both stamps are the
 It records refusals and failures as well as successes — a trail that only
 records what worked cannot answer "what did they try". Nothing about it
 involves the cluster; it is a local file.
+
+**Where that stops is the point at which a change has been described**
+([NOTES § D221](../NOTES.md#d221--the-audit-log-records-mutations-not-intentions-and-that-is-where-screensdialogsmd-rule-5-stops-2026-09-04)).
+Every operation reads the object before it can say what the change would do —
+`scale` fetches the count its confirmation states — and a line refused *there*
+has no consequence, no kubectl command and no request path to record, so a line
+written for it would be a record of a change nobody described. The log holds
+mutations, not intentions; what the operator tried is on stderr, with the fault
+and the server's own words. Everything from the confirmation onward — cancelled,
+refused by the cluster, failed mid-call — is in the log, which is
+`screens/dialogs.md` rule 5's whole population.
 
 **Order matters:** the attempt line is written and flushed *before* the API
 call and the result is appended when it returns, so a crash mid-call leaves an

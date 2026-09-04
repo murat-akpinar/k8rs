@@ -29,6 +29,7 @@
 #[path = "ops_tests.rs"]
 mod tests;
 
+use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::future::Future;
@@ -36,10 +37,16 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::autoscaling::v1::Scale;
 use k8s_openapi::jiff::Timestamp;
-use kube::api::{DeleteParams, PatchParams, ValidationDirective};
+use k8s_openapi::serde_json::json;
+use kube::api::{
+    Api, ApiResource, DeleteParams, DynamicObject, Patch, PatchParams, ValidationDirective,
+};
+use kube::{Client, Resource};
 
-use crate::k8s::{FREE_TEXT, Fault, IDENTIFIER, fault, said, text};
+use crate::k8s::{FREE_TEXT, Fault, IDENTIFIER, fault, namespace_name, object_name, said, text};
 
 // --- THE MUTATION CONTRACT START ---
 //
@@ -289,6 +296,26 @@ pub enum Outcome {
     },
 }
 
+impl Outcome {
+    /// **What the server said about this outcome, where it said anything** — one match, read by
+    /// the audit line through [`Record::result_line`] and by the operator's own closing sentence
+    /// through [`Performed::plainly`], so the record and the screen cannot end up holding
+    /// different halves of one failure.
+    ///
+    /// **Annotated and exhaustive**, so that dropping an arm is a *testable* change rather than
+    /// one the compiler refuses for want of a type (NOTES § D133), and so that a seventh outcome —
+    /// there are six — has to decide whether it carries words rather than defaulting to silence.
+    ///
+    /// The string is [`crate::k8s::said`]'s and is not cleaned again here — [`Record::of`]'s own
+    /// doc says why.
+    fn said(&self) -> Option<&str> {
+        match self {
+            Self::NotSent { said, .. } | Self::Failed { said, .. } => said.as_deref(),
+            Self::Done | Self::Cancelled | Self::Gone | Self::Changed => None,
+        }
+    }
+}
+
 /// **What [`perform`] hands back: what happened, and whether the log knows it.**
 ///
 /// **`outcome: None` is NOTES § D21's refusal** — the attempt line could not be written, so
@@ -307,6 +334,53 @@ pub struct Performed {
     pub outcome: Option<Outcome>,
     /// Whether the audit log holds the whole record — attempt line *and* result line.
     pub recorded: bool,
+}
+
+impl Performed {
+    /// **Whether the cluster changed** — the one question an exit code may answer
+    /// (NOTES § D220 ruling 1).
+    ///
+    /// **`recorded` is deliberately not part of it.** A `Done` k8rs could not write down still
+    /// happened, and a script told otherwise re-runs a mutation that already landed — which
+    /// `restart` and `delete` are not idempotent under the way a scale is. The incomplete trail
+    /// travels in [`Self::plainly`] instead, which is a sentence and not a code.
+    pub fn changed(&self) -> bool {
+        matches!(self.outcome, Some(Outcome::Done))
+    }
+
+    /// **The whole of what happened, in one sentence somebody reads at 3am** (invariant 14) —
+    /// the outcome's own words, and the clause that says the trail is short of them.
+    ///
+    /// **Something reads [`Self::recorded`] now, which is the point** (todo.md 3749): `#[must_use]`
+    /// is on the struct and not on the field, so *the change was made and k8rs could not write it
+    /// down* — NOTES § D214's fourth lie — reached nobody until a caller said it out loud.
+    ///
+    /// **The cluster's own words are part of the sentence** (`k8s-admin`, 2026-09-04). The audit
+    /// line carried the fault *and* the server's explanation while this surface carried neither,
+    /// so a `403` on the `dryRun=All` and a `422` strict rejection printed one identical line —
+    /// *the change was never sent* — and the person who cannot go and open the log is exactly the
+    /// person reading this. The fault is [`verdict`]'s now and the join is [`and_said`]'s, once, so
+    /// this cannot come to spell either of them differently from the record.
+    pub fn plainly(&self) -> String {
+        // NOTES § D21: the attempt line could not be written, so nothing was sent, nobody was
+        // asked, and there is no outcome to report. The words are [`without`]'s, which is what
+        // the same machine is told when the log cannot even be opened.
+        let Some(outcome) = self.outcome.as_ref() else {
+            return "nothing was changed — k8rs could not write this to its audit log first, and \
+                    every change k8rs makes is written to that log before it is sent"
+                .to_string();
+        };
+        // The whole sentence first, so the clause below lands after the cluster's own words rather
+        // than between them and the fault they belong to.
+        let sentence = and_said(verdict(outcome), outcome.said());
+        if self.recorded {
+            return sentence;
+        }
+        format!(
+            "{sentence} — but k8rs could not write that to the audit log, so the trail of it is \
+             short a line"
+        )
+    }
 }
 
 /// **Which of the two passes an operation is being asked to make — and the only thing it is
@@ -596,6 +670,13 @@ impl Record {
     /// [`gap`] is what [`Mutation::server`] is put through too, though its type says it is always
     /// there: an operation that hands over an empty string writes the same dangling label.
     ///
+    /// **[`Mutation::context`] goes through it for that same reason, and the first operation to
+    /// use this file is what found it** (todo.md 3749). `k8s::Session::context` is an `Option`
+    /// with three ways to be `None` (NOTES § D202), and the third of them — a context whose name
+    /// is nothing but characters invariant 9 strips — arrives on a connection that *worked*. The
+    /// driver has no name to hand over there, and `context ·` with nothing after it is exactly
+    /// the dangling label the paragraph above refuses for its neighbour.
+    ///
     /// **Which cluster, then which object, then what was sent.** `context` and `server` are one
     /// pair because neither answers *which cluster* alone ([`Mutation::server`]), and `namespace`
     /// and `uid` sit with the object for the same reason — a name plus a namespace names whatever
@@ -605,7 +686,7 @@ impl Record {
             "{now} attempt · {} · context {} · server {} · {} · uid {} · kubectl: {} · \
              call: {} {} · resourceVersion {}\n",
             self.object,
-            self.context,
+            gap(Some(&self.context), "not named", ""),
             gap(Some(&self.server), "not known", ""),
             gap(self.namespace.as_deref(), "cluster-wide", "namespace "),
             gap(self.uid.as_deref(), "not read", ""),
@@ -645,23 +726,13 @@ impl Record {
     /// question the log exists to answer about the contract itself, and on `Done` and
     /// `Cancelled` the word did not appear at all until 2026-09-04 (`tester`).
     fn result_line(&self, attempt: Timestamp, recorded: Timestamp, outcome: &Outcome) -> String {
-        // Annotated, so that dropping the arm below is a *testable* change rather than one the
-        // compiler refuses for want of a type — an `unviable` mutant is a line no test was asked
-        // about (NOTES § D133).
-        let message: Option<&str> = match outcome {
-            Outcome::NotSent { said, .. } | Outcome::Failed { said, .. } => said.as_deref(),
-            _ => None,
-        };
         let line = format!(
             "result · attempt {attempt} · recorded {recorded} · {} · dry-run: {} · {}",
             self.object,
             self.check(outcome),
             verdict(outcome),
         );
-        message.map_or_else(
-            || format!("{line}\n"),
-            |message| format!("{line}: {message}\n"),
-        )
+        format!("{}\n", and_said(line, outcome.said()))
     }
 
     /// **What a check that did not fail says** — one rule, read by the dialog through
@@ -676,11 +747,33 @@ impl Record {
     }
 
     /// **What the check did**, as the audit log records it.
-    fn check(&self, outcome: &Outcome) -> String {
+    ///
+    /// **It says what happened to the check and no longer why, because [`verdict`] now does**
+    /// (`k8s-admin`, 2026-09-04). This field answers *was this write checked first?* — the one
+    /// question the log exists to answer about the contract itself — and the fault that stopped it
+    /// belongs beside the outcome, where the operator's own sentence can read it too. Named in
+    /// both places it was one clause printed twice on one line — and with the fault gone it is a
+    /// `&'static str` again, which is what it was before a `format!` was needed here.
+    fn check(&self, outcome: &Outcome) -> &'static str {
         match outcome {
-            Outcome::NotSent { fault, .. } => format!("not checked, {}", in_words(*fault)),
-            _ => self.accepted().to_string(),
+            Outcome::NotSent { .. } => "not checked",
+            _ => self.accepted(),
         }
+    }
+}
+
+/// **A k8rs sentence, then the cluster's own words where there are any** — the one place a server
+/// message is joined onto one, read by the audit line ([`Record::result_line`]), by the sentence
+/// the operator is left looking at ([`Performed::plainly`]) and by [`unread`].
+///
+/// **It exists because the third caller was missing rather than different** (`k8s-admin`,
+/// 2026-09-04): two of these spelled the join and the operator's own surface threw the message
+/// away, so a `403` and a `422` on the same call printed one identical line. A colon, because
+/// that is the shape the other two already had and the shape a server message already arrives in.
+fn and_said(line: String, said: Option<&str>) -> String {
+    match said {
+        Some(said) => format!("{line}: {said}"),
+        None => line,
     }
 }
 
@@ -693,6 +786,10 @@ fn gap(value: Option<&str>, absent: &str, prefix: &str) -> String {
 }
 
 /// **What happened to the mutation, in one sentence per [`Outcome`]** (invariant 14).
+///
+/// **The cluster's own words are not in here**, because both readers append them through
+/// [`and_said`] and a sentence that carried them would put the message on the audit line twice.
+/// What this owes each of them is the *fault*, which is why the two arms that have one name it.
 fn verdict(outcome: &Outcome) -> String {
     match outcome {
         Outcome::Done => "the change was made".to_string(),
@@ -706,16 +803,30 @@ fn verdict(outcome: &Outcome) -> String {
         // 2026-09-04 — is false for every [`Fault`] it can carry: an operator holding this
         // beside the apiserver's own audit log finds the `?dryRun=All` at that timestamp and a
         // k8rs line denying it, and invariant 4 is that neither record may lie. What was never
-        // sent is the change; the fault is already on the line, from [`Record::check`].
-        Outcome::NotSent { .. } => "the change was never sent".to_string(),
+        // sent is the change.
+        //
+        // **And it names the fault, because [`Record::check`] is not the only reader**
+        // (`k8s-admin`, 2026-09-04). Whoever ran the operation sees [`Performed::plainly`] and
+        // nothing else, and this sentence alone made a `403` and a `422` on the same call print
+        // one identical line — the security gate's *a 403 … names the missing verb + resource*
+        // and `PRIOR-ART § C1`'s *a fallback message may never replace a typed error*, both, in
+        // the arm written to close the second one.
+        Outcome::NotSent { fault, .. } => {
+            format!("the change was never sent — {}", in_words(*fault))
+        }
         // **k8rs may not assert a failure it cannot see.** A broken pipe *after* the request went
         // out leaves the mutation's fate unknown, and *"the call itself failed"* — what this said
         // until 2026-09-04 — claims to know it did not land. Where the cluster answered, it did
         // not land and the sentence says so; where nothing usable came back, the honest line is
         // that k8rs does not know. Keyed on the fault, never on which branch fired
         // (`PRIOR-ART § C1`).
+        //
+        // **An em dash and not a colon, because a colon is what [`and_said`] puts after this** —
+        // `nothing was changed: <fault>: <what the server said>` reads as one clause nested in
+        // another. Every sentence a server message can land after now separates its own clause
+        // the same way, which is [`unread`]'s shape one region down.
         Outcome::Failed { fault, .. } if answered(*fault) => {
-            format!("nothing was changed: {}", in_words(*fault))
+            format!("nothing was changed — {}", in_words(*fault))
         }
         Outcome::Failed { fault, .. } => format!(
             "k8rs does not know whether the change was made — {}",
@@ -747,7 +858,12 @@ fn in_words(fault: Fault) -> &'static str {
         Fault::Rejected => "the cluster would not accept the request k8rs made",
         Fault::Conflict => "the object had already been changed by something else",
         Fault::Expired => "the login k8rs was using had run out",
-        Fault::Gone => "the cluster has no such object any more",
+        // **Not *any more*, which asserts it used to be there** (`k8s-admin`, 2026-09-04). A `404`
+        // is reached by a mistyped name far more often than by a deletion — `scale
+        // deployment/wbe` gets here — and a sentence claiming the object *was* there sends that
+        // reader hunting for whoever removed their deployment. Naming the name instead is true of
+        // both, and points at the half that is usually wrong.
+        Fault::Gone => "the cluster has no object with that name",
         Fault::Kubeconfig | Fault::NoContext | Fault::BadEntry | Fault::NoCredential => {
             "k8rs could not build a connection from this kubeconfig"
         }
@@ -815,6 +931,320 @@ fn cleaned(value: &str, cap: usize) -> String {
 }
 
 // --- THE MUTATION CONTRACT END ---
+
+// --- SCALE START ---
+//
+// **The first operation, and every write after it is this shape** (todo.md 3749). It builds one
+// [`Mutation`], hands [`perform`] a closure it never awaits itself, and lets that function's body
+// be the five steps — so *what a scale is* lives here and *what every mutation must do* stays one
+// copy over there.
+//
+// **The scale subresource and not a patch of the object.** `Api::get_scale` reads the count the
+// consequence sentence is built from and `Api::patch_scale` changes it, which is `kubectl scale`'s
+// own route: the request never carries a pod template, so nothing here can drift a workload's spec
+// while claiming to be counting copies, and NOTES § D217's `422`-hands-back-the-object hazard is
+// bounded to an `autoscaling/v1 Scale` — the shape [`Pass::patch`] already priced.
+//
+// **Which kinds is this file's fact and the driver holds no copy of it** (NOTES § D220 ruling 4).
+// `src/main.rs`'s driver accepts all six kinds for all three verbs on purpose, so
+// `k8rs ops scale pod/web 3` reaches [`scalable`] and is refused with a sentence that names what
+// scaling *is*. Scope — namespaced or not — is the driver's answer and is taken as a parameter;
+// re-deriving it here would be the third copy that ruling refuses.
+//
+// **No `resourceVersion` and no `409` re-read** (NOTES § D220 ruling 6). todo.md 3824 wires that
+// for every call at once, because the precondition and the re-read are one mechanism; half of one
+// built inside this operation would be a box added to a running phase.
+
+/// **What `scale` can be pointed at, in the words the refusal uses** — NOTES § Operations' `s`
+/// row.
+///
+/// **It is a sentence and [`scalable`] is a `match`, and nothing in the language keeps the two in
+/// step** — a fourth arm added twelve lines below would not appear here. What keeps them honest is
+/// a test rather than a type: `scale_takes_the_three_kinds_it_works_on_and_names_them_when_it
+/// _refuses_the_rest` feeds every kind `src/main.rs`'s `KINDS` holds and asserts the three that
+/// work and the three that are refused, so a widened arm is a red build for the kind it widened
+/// to. Saying so is the point; a claim that they *cannot* diverge would be the second copy this
+/// comment exists to warn about.
+const SCALABLE: &str = "a deployment, a statefulset and a replicaset";
+
+/// **Whether `scale` works on a kind, and the resource it is when it does** — or the sentence
+/// that says what it works on instead (invariant 14).
+///
+/// **It is `pub` because the driver reads it before the audit log is opened**
+/// (NOTES § D220 ruling 7). A line k8rs is going to refuse anyway leaves no state directory
+/// behind — the rule `k8rs ops bogus` already had — and a kind refusal is that same line.
+///
+/// **The group, the version and the plural are `k8s-openapi`'s and are not spelled here.**
+/// `ApiResource::erase` reads all three off the same types `k8s.rs`'s permanent watches are built
+/// over, so `apps/v1` and `deployments` are the crate's declaration and not a literal this file
+/// could get wrong. That is as close to invariant 12 as a function with no cluster to ask can
+/// get: what is written down is three kind *words*, which is NOTES § Operations' matrix and not a
+/// column list.
+pub fn scalable(kind: &str) -> Result<ApiResource, String> {
+    match kind {
+        "deployment" => Ok(ApiResource::erase::<Deployment>(&())),
+        "statefulset" => Ok(ApiResource::erase::<StatefulSet>(&())),
+        "replicaset" => Ok(ApiResource::erase::<ReplicaSet>(&())),
+        // Cleaned and bounded like every other outside string this file prints (invariant 9,
+        // NOTES § D213) — `scalable` is public and the word reaching it came off a command line.
+        other => Err(format!(
+            "k8rs cannot scale a {} — scaling changes how many copies are running, and k8rs does \
+             that for {SCALABLE}",
+            cleaned(other, IDENTIFIER)
+        )),
+    }
+}
+
+/// **One scale as the line asked for it** — everything [`scale`] needs that is not the connection.
+///
+/// **`namespace` is an `Option` and is not re-derived here** (NOTES § D220 ruling 4). The driver
+/// already refuses a namespaced object with no namespace on the line; what this type does with
+/// `None` is refuse, in one place, rather than hold a second copy of which kinds live in one.
+pub struct Scaling<'a> {
+    /// The kubeconfig context this is performed against — [`Mutation::context`].
+    pub context: &'a str,
+    /// The `server:` that context reached — [`Mutation::server`].
+    pub server: &'a str,
+    /// The kind, spelled the way a manifest spells it: `deployment`, never `deploy`
+    /// (`screens/dialogs.md` § Scale).
+    pub kind: &'a str,
+    /// The object's own name.
+    pub name: &'a str,
+    /// The namespace it is in.
+    pub namespace: Option<&'a str>,
+    /// **How many copies were asked for.** The type holds the upper bound — `replicas` is an
+    /// `i32` on the scale subresource as it is on every workload — and [`scale`] holds the lower
+    /// one, because a type cannot: `i32` admits negatives and a caller that does not bound them
+    /// gets two records that lie before the cluster answers (`k8s-admin`, 2026-09-04).
+    pub count: i32,
+}
+
+/// **A scale, performed** — the whole of NOTES § Operations' `s` row.
+///
+/// `Err` is a refusal of the *request*, before anything has been recorded and before anything has
+/// been changed: a kind [`scalable`] does not serve, a namespace nobody named, a name or a
+/// namespace that is not an address, a count below zero, or a cluster that would not say how many
+/// copies are running now. **The last of those has sent something** — the `GET` of the scale
+/// subresource, which is what the refusal is about — and none of them is a *mutation* that was
+/// attempted, so none of them writes an audit line (NOTES § D221). The log records what k8rs tried
+/// to change, and here k8rs never got as far as describing a change.
+///
+/// **The count that is *right now* is `spec.replicas` and not `status.replicas`.** The dialog
+/// describes the change this call makes, and the change is to the desired count: a Deployment
+/// asking for 3 with 1 running, scaled to 3, would otherwise be announced as *starts 2 more
+/// copies* over a request that alters nothing — invariant 4's *neither record may lie*, about the
+/// one number the reader is agreeing to.
+///
+/// **A `Scale` with no `spec.replicas` is refused rather than read as zero.** Every cluster fills
+/// it, and *Right now: 0 copies* over an object k8rs could not read is a sentence that invents
+/// the number the whole consequence turns on.
+pub async fn scale<Show, Ask, Asked>(
+    client: &Client,
+    scaling: &Scaling<'_>,
+    clock: impl Fn() -> Timestamp,
+    audit: &mut impl Write,
+    show: Show,
+    ask: Ask,
+) -> Result<Performed, String>
+where
+    Show: FnOnce(&Shown<'_>),
+    Ask: FnOnce(Checked<Scale>) -> Asked,
+    Asked: Future<Output = Answer>,
+{
+    let resource = scalable(scaling.kind)?;
+    let object = format!("{}/{}", scaling.kind, scaling.name);
+    let Some(namespace) = scaling.namespace else {
+        return Err(format!(
+            "k8rs will not scale {} without being told which namespace it is in",
+            cleaned(&object, FREE_TEXT)
+        ));
+    };
+    // **The name and the namespace become segments of the request path, so they are checked
+    // where the path is built and not only where the line was parsed.** That is `k8s::owner`'s
+    // own shape one file over — it runs [`crate::k8s::path_safe`] over a name it is about to
+    // interpolate, rather than trusting whoever handed it one. `src/main.rs`'s driver already
+    // refuses both, and it is the only caller today; this function is `pub` in a file that
+    // freezes at the end of this phase, and a guard at the point of use is the one that still
+    // holds for the console that calls it at Phase 12.
+    if !object_name(scaling.name) {
+        return Err(unaddressable(&object, "an object's own name"));
+    }
+    if !namespace_name(namespace) {
+        return Err(unaddressable(&object, "the name of a namespace"));
+    }
+    // **The same argument as the two guards above, applied to the one field the type does not
+    // constrain** (`k8s-admin`, 2026-09-04). `count: i32` admits negatives, `src/main.rs`'s
+    // `refuse_count` bounds it for a command line, and Phase 12's console is a caller that has not
+    // been written. Unguarded, `-5` produced a consequence sentence reading *This stops 8 copies …
+    // After: -5 copies*, a command log reading `--replicas=-5` and an audit line recording both —
+    // two records lying before the cluster got its say at the `422` (invariant 4). No upper bound
+    // is needed or wanted: the field is an `i32` on the scale subresource and so is this.
+    if scaling.count < 0 {
+        return Err(format!(
+            "k8rs will not scale {} to {}: the fewest Kubernetes takes is 0",
+            cleaned(&object, FREE_TEXT),
+            copies(i64::from(scaling.count))
+        ));
+    }
+    let api: Api<DynamicObject> = Api::namespaced_with(client.clone(), namespace, &resource);
+    let read = api
+        .get_scale(scaling.name)
+        .await
+        .map_err(|failed| unread(&object, in_words(fault(&failed)), said(&failed).as_deref()))?;
+    let Some(running) = read.spec.and_then(|spec| spec.replicas) else {
+        return Err(unread(
+            &object,
+            "the cluster's answer did not say how many it is asking for",
+            None,
+        ));
+    };
+    let consequence = consequence(scaling.name, running, scaling.count);
+    // **The kind is spelled out — `deployment/web`, never `deploy/web`** (`screens/dialogs.md`
+    // § Scale). `deploy` is real kubectl shorthand and buys nothing invariant 4 needs; this line's
+    // whole job is teaching a newcomer a command they can read (invariant 14).
+    let kubectl = format!(
+        "kubectl scale {object} --replicas={} -n {namespace}",
+        scaling.count
+    );
+    // **Derived from the same `ApiResource` the call is built with**, so the audit line cannot
+    // name a path the request did not take: `Api::patch_scale` is `Request::patch_subresource`,
+    // which is this base, the name and the subresource in that order
+    // (`kube-core-4.2.0/src/request.rs:221`).
+    let path = format!(
+        "{}/{}/scale",
+        DynamicObject::url_path(&resource, Some(namespace)),
+        scaling.name
+    );
+    let patch = Patch::Merge(json!({ "spec": { "replicas": scaling.count } }));
+    let mutation = Mutation {
+        context: scaling.context,
+        server: scaling.server,
+        namespace: Some(namespace),
+        object: &object,
+        // **What k8rs saw, not what k8rs sent** — the `uid` is off the `Scale` that was just
+        // read, and it is what makes a record checkable after the object's name has moved on.
+        uid: read.metadata.uid.as_deref(),
+        consequence: &consequence,
+        kubectl: &kubectl,
+        verb: "PATCH",
+        path: &path,
+        version: None,
+        // **A scale is checkable and this one asks.** `dryRun=All` on the scale subresource is a
+        // request every cluster answers, and `screens/dialogs.md` rule 3 is what makes the button
+        // wait for it.
+        checkable: true,
+    };
+    // **Both passes are one closure and one body** — [`perform`]'s whole reason — and the
+    // borrows are named so calling it twice moves nothing: `api` and `patch` travel as shared
+    // references, and the [`PatchParams`] are built inside, once per pass, from the [`Pass`] the
+    // contract handed over. The `async move` is what keeps them alive across the `await`;
+    // returning `patch_scale`'s future directly would return one borrowing a temporary.
+    let (api, patch) = (&api, &patch);
+    Ok(perform(&mutation, clock, audit, show, ask, move |pass| {
+        let params = pass.patch();
+        async move { api.patch_scale(scaling.name, &params, patch).await }
+    })
+    .await)
+}
+
+/// **Why a name k8rs will not put in a request path is refused** — said apart for the object and
+/// for the namespace, because they are two different things to go and fix (invariant 14).
+///
+/// **It names the address and not the character class**, which is what a reader can act on: the
+/// two rules are `k8s::object_name`'s and `k8s::namespace_name`'s, the driver's own refusals
+/// already spell them for a line somebody typed, and nothing can reach this one from argv.
+fn unaddressable(object: &str, which: &str) -> String {
+    format!(
+        "k8rs will not send a change to {}: {which} becomes part of the address the request goes \
+         to, and this is not one Kubernetes would accept",
+        cleaned(object, FREE_TEXT)
+    )
+}
+
+/// **Why k8rs cannot say what a scale would do** — one sentence, with the cluster's own words
+/// after it where there are any.
+///
+/// The reason is [`in_words`]'s, keyed on the [`Fault`] and never on which call raised it, for
+/// the reason [`verdict`] is (`PRIOR-ART § C1`).
+fn unread(object: &str, why: &str, message: Option<&str>) -> String {
+    and_said(
+        format!(
+            "k8rs could not read how many copies of {} are running right now — {why}",
+            cleaned(object, FREE_TEXT)
+        ),
+        message,
+    )
+}
+
+/// **What a scale is about to do, in `screens/dialogs.md` § Scale's own words.**
+///
+/// **Five relations between what is running and what was asked for**, and the count on both
+/// sides of every one of them, so nothing depends on the reader remembering the old number.
+/// "Copies", never "replicas" (that file's rule 2, invariant 14).
+///
+/// **Down to zero gets its own sentence and not a stricter guard.** Invariant 2 raises the bar to
+/// typing the name for `delete` and `drain` and for nothing else, so the warning is carried by the
+/// words rather than by a second confirmation kind.
+///
+/// **The arithmetic is `i64` over two `i32`s**, which costs nothing and removes the one overflow a
+/// hostile or broken `spec.replicas` could reach.
+fn consequence(name: &str, running: i32, asked: i32) -> String {
+    let (running, asked) = (i64::from(running), i64::from(asked));
+    // **One `cmp` and not a chain of `<`/`>`/`==`**, which is a readability preference *and* the
+    // thing that makes this function's tests able to fail: `asked > running` written under an
+    // `asked == running` that already returned is equal to `asked >= running`, so the mutation
+    // gate reported an operator nothing could distinguish and no test could ever kill
+    // (`just mutants-diff`, 2026-09-04, NOTES § D26's shape). An `Ordering` has three arms and
+    // deleting any of them is a sentence that stops being printed.
+    let change = match (asked.cmp(&running), asked, running) {
+        // **It describes the request and no longer asserts *no change*** (`k8s-admin` and a PM
+        // ruling, 2026-09-04). The `PATCH` is sent, the cluster accepts it, and [`verdict`] then
+        // says *the change was made*: *This makes no change* four lines above that was two
+        // sentences on one screen that cannot both be read plainly (invariant 14), over a record
+        // claiming a change that was not one (invariant 4). What the reader is agreeing to is the
+        // request, and the two counts either side of it already say the cluster ends where it
+        // started — so nothing is lost by saying the true half.
+        //
+        // **`screens/dialogs.md` § Scale's *Unchanged* bullet still carries the old sentence and
+        // is not this file's author's to edit** — raised to the PM in the same turn.
+        (Ordering::Equal, _, _) => format!("This asks for the count {name} is already running."),
+        // **`all 1 copy` is not a sentence anybody says**, and the relation list's *all N copies*
+        // reads as one for every count but this. The fact is the same: the app stops.
+        (Ordering::Less, 0, 1) => {
+            "This stops the only copy of your app — nothing will be left running.".to_string()
+        }
+        (Ordering::Less, 0, _) => format!(
+            "This stops all {} of your app — nothing will be left running.",
+            copies(running)
+        ),
+        (Ordering::Less, _, _) => {
+            format!("This stops {} of your app.", copies(running - asked))
+        }
+        (Ordering::Greater, _, _) => format!(
+            "This starts {} more {} of your app.",
+            asked - running,
+            noun(asked - running)
+        ),
+    };
+    format!(
+        "{change} Right now: {}. After: {}.",
+        copies(running),
+        copies(asked)
+    )
+}
+
+/// **`1 copy`, `3 copies`** — the counted noun, in one place, so the five relations above and the
+/// two `Right now:`/`After:` halves cannot disagree about the plural.
+fn copies(count: i64) -> String {
+    format!("{count} {}", noun(count))
+}
+
+/// The noun on its own, for the one sentence that puts a word between the number and it.
+fn noun(count: i64) -> &'static str {
+    if count == 1 { "copy" } else { "copies" }
+}
+
+// --- SCALE END ---
 
 // --- THE AUDIT LOG START ---
 //

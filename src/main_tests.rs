@@ -1179,7 +1179,14 @@ fn no_arguments_is_the_usage_text_and_not_a_report() {
     };
 
     assert!(problem.starts_with("usage: k8rs "), "{problem}");
-    assert!(problem.contains("cannot reach a cluster"), "{problem}");
+    // **The qualification is part of the claim** (todo.md 3749). *cannot reach a cluster* alone
+    // stayed true of this string while the sentence around it went false — `ops` reaches one now
+    // — so the substring asserted here is the whole list of what does, and
+    // `the_usage_says_ops_reaches_a_cluster_too` reads the other half of the same line.
+    assert!(
+        problem.contains("--yaml or ops this build reads files only — it cannot reach a cluster"),
+        "{problem}"
+    );
 }
 
 /// **…and it is still three lines when it gets there.** A line break is unprintable by
@@ -10069,8 +10076,31 @@ async fn one_line_comes_out_of_every_emit_path_with_one_transformation_on_it() {
 /// each leave a state directory behind. The tests that care *which* file it is open it
 /// themselves.
 fn ops(line: &[&str]) -> String {
+    ops_ended(line).said
+}
+
+/// The same line, with the exit code it carries (NOTES § D220 ruling 1, [`Ended`]).
+fn ops_ended(line: &[&str]) -> Ended {
     let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
-    ops_line(&args, nowhere).expect("a line beginning with `ops` is the operations driver's")
+    ops_line(&args, nowhere, unwired)
+        .expect("a line beginning with `ops` is the operations driver's")
+}
+
+/// **The seam a test hands [`ops_line`]**, standing in for [`ops_performed`] — which builds a
+/// runtime and dials the reader's own cluster, and is the one thing in this driver no unit test
+/// may reach.
+///
+/// **It is [`not_wired`]'s own sentence, which is still what `restart` and `delete` print.** Every
+/// assertion in this region is about the words above the seam, so the double answers what two of
+/// the three operations really answer rather than inventing a third string to assert against.
+fn unwired(ready: Ready<'_>) -> Ended {
+    Ended::refused(not_wired(
+        ready.operation,
+        ready.kind,
+        ready.name,
+        ready.count,
+        ready.namespace,
+    ))
 }
 
 /// An audit log that works, keeps nothing and has nothing to say — a real open, of the one path
@@ -10110,9 +10140,8 @@ fn only_a_bare_ops_word_is_the_subcommand_and_a_flags_value_is_not() {
         vec!["--read-only", "ops.json"],
     ] {
         let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
-        assert_eq!(
-            ops_line(&args, nowhere),
-            None,
+        assert!(
+            ops_line(&args, nowhere, unwired).is_none(),
             "{line:?} was taken for the operations subcommand"
         );
     }
@@ -10420,8 +10449,14 @@ fn a_well_formed_line_names_everything_it_read_and_says_the_operation_is_not_wri
     );
     // Every operation reaches it, so a verb added to the table without a wired arm says so rather
     // than falling through to something else.
+    //
+    // **A deployment and not a pod, since todo.md 3749.** The seam is now the last thing on the
+    // line and not the only thing: `scale` reads its own kind matrix above it (NOTES § D220
+    // ruling 7), so `scale pod/web` is answered before the seam and is a different assertion —
+    // the one two tests below. A deployment is a kind all three operations accept, which is what
+    // this loop is about.
     for operation in &OPERATIONS {
-        let mut line = vec!["ops", operation.verb, "pod/web"];
+        let mut line = vec!["ops", operation.verb, "deploy/web"];
         if operation.value.is_some() {
             line.push("3");
         }
@@ -10430,7 +10465,7 @@ fn a_well_formed_line_names_everything_it_read_and_says_the_operation_is_not_wri
         println!("{said}");
         assert!(
             said.contains(&format!(
-                "read this as `{}` on pod/web in payments",
+                "read this as `{}` on deployment/web in payments",
                 operation.verb
             )),
             "{:?} did not reach the seam an operation is wired into: {said:?}",
@@ -10498,8 +10533,23 @@ fn read_only_refuses_an_operation_before_anything_else_on_the_line_is_judged() {
 #[test]
 fn the_number_of_copies_is_refused_for_the_reason_it_is_wrong() {
     let most = i64::from(i32::MAX);
-    for word in ["0", "1", "3", &most.to_string(), "+7", "-0"] {
-        assert_eq!(refuse_count(word), None, "{word} is a count k8rs can send");
+    // **The number comes back now, and it is the number that was typed** (todo.md 3749). While
+    // this answered `Option<String>` every accepted word was one indistinguishable `None`, so a
+    // parser that read `+7` as `7` and `3` as `0` was green — and the value is the one that
+    // decides how many pods exist.
+    for (word, count) in [
+        ("0", 0),
+        ("1", 1),
+        ("3", 3),
+        (&most.to_string(), i32::MAX),
+        ("+7", 7),
+        ("-0", 0),
+    ] {
+        assert_eq!(
+            refuse_count(word),
+            Ok(count),
+            "{word} is a count k8rs can send, as {count}"
+        );
     }
     for (word, expected) in [
         (
@@ -10522,13 +10572,15 @@ fn the_number_of_copies_is_refused_for_the_reason_it_is_wrong() {
         ("3.0", "has to be a whole number"),
         ("", "has to be a whole number"),
     ] {
-        let said = refuse_count(word).unwrap_or_else(|| panic!("{word:?} was accepted as a count"));
+        let Err(said) = refuse_count(word) else {
+            panic!("{word:?} was accepted as a count")
+        };
         println!("{word:?}\n{said}\n");
         assert!(said.contains(expected), "{word:?}: {said:?}");
     }
     // **Nothing printable left is a clause and not an empty gap** ([`shown`]) — the doubled-space
     // defect `mistyped` already closed for `--object`.
-    let said = refuse_count("").expect("an empty count is refused");
+    let said = refuse_count("").expect_err("an empty count is refused");
     assert!(
         said.contains("a value with nothing printable in it"),
         "an empty count printed an empty gap: {said:?}"
@@ -10904,6 +10956,17 @@ fn the_confirmation_prints_the_verdict_and_says_what_to_type_before_it_reads_any
             printed.contains("anything else stops it"),
             "the prompt did not say what not answering does: {printed:?}"
         );
+        // **The prompt ends its own line** (`k8s-admin`, 2026-09-04). Under `echo yes | k8rs ops
+        // …` — NOTES § D218's documented and only scripted form — stdin echoes nothing, so a
+        // prompt that leaves the cursor on its line glues [`ending`]'s closing sentence to the
+        // back of it: *…anything else stops it: k8rs: the change was made*, measured. That
+        // sentence is the only place `recorded: false` is ever reported (NOTES § D220 ruling 1
+        // keeps it out of the exit code), so a script grepping stderr for `k8rs: ` was the one
+        // reader that could not find it.
+        assert!(
+            printed.ends_with("anything else stops it:\n"),
+            "whatever is printed next lands on the prompt's own line: {printed:?}"
+        );
     }
 }
 
@@ -11012,11 +11075,16 @@ fn a_line_k8rs_refuses_never_asks_for_an_audit_log() {
     ] {
         let asked = std::cell::Cell::new(0u32);
         let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
-        let sentence = ops_line(&args, || {
-            asked.set(asked.get() + 1);
-            nowhere()
-        })
-        .expect("a line beginning with `ops` is the operations driver's");
+        let sentence = ops_line(
+            &args,
+            || {
+                asked.set(asked.get() + 1);
+                nowhere()
+            },
+            unwired,
+        )
+        .expect("a line beginning with `ops` is the operations driver's")
+        .said;
         println!("--- {line:?} ---\n{sentence}");
         assert_eq!(
             asked.get(),
@@ -11038,11 +11106,16 @@ fn a_well_formed_line_opens_the_audit_log_once_before_it_reaches_the_seam() {
     ] {
         let asked = std::cell::Cell::new(0u32);
         let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
-        let sentence = ops_line(&args, || {
-            asked.set(asked.get() + 1);
-            nowhere()
-        })
-        .expect("a line beginning with `ops` is the operations driver's");
+        let sentence = ops_line(
+            &args,
+            || {
+                asked.set(asked.get() + 1);
+                nowhere()
+            },
+            unwired,
+        )
+        .expect("a line beginning with `ops` is the operations driver's")
+        .said;
         println!("--- {line:?} ---\n{sentence}");
         assert_eq!(
             asked.get(),
@@ -11073,20 +11146,26 @@ fn something_worth_saying_about_the_audit_log_is_said_above_the_seams_own_senten
         .iter()
         .map(|word| (*word).to_string())
         .collect();
-    let sentence = ops_line(&args, || {
-        nowhere().map(|(log, _)| {
-            (
-                log,
-                vec![
-                    "k8rs is not keeping its audit log where $XDG_STATE_HOME points".to_string(),
-                    "the audit log at /home/ops/.local/state/k8rs/audit.log can be written to \
-                     by other people on this machine"
-                        .to_string(),
-                ],
-            )
-        })
-    })
-    .expect("a line beginning with `ops` is the operations driver's");
+    let sentence = ops_line(
+        &args,
+        || {
+            nowhere().map(|(log, _)| {
+                (
+                    log,
+                    vec![
+                        "k8rs is not keeping its audit log where $XDG_STATE_HOME points"
+                            .to_string(),
+                        "the audit log at /home/ops/.local/state/k8rs/audit.log can be written to \
+                         by other people on this machine"
+                            .to_string(),
+                    ],
+                )
+            })
+        },
+        unwired,
+    )
+    .expect("a line beginning with `ops` is the operations driver's")
+    .said;
     println!("{sentence}");
     assert_eq!(
         sentence,
@@ -11116,15 +11195,20 @@ fn a_machine_that_cannot_hold_the_audit_log_refuses_the_operation_and_says_why()
         .iter()
         .map(|word| (*word).to_string())
         .collect();
-    let sentence = ops_line(&args, || {
-        Err(
-            "k8rs could not open its audit log at /nope/audit.log: it is not there — every \
-             change k8rs makes is written to that log before it is sent, so k8rs will not change \
-             anything until that is fixed, and reading your cluster still works"
-                .to_string(),
-        )
-    })
-    .expect("a line beginning with `ops` is the operations driver's");
+    let sentence = ops_line(
+        &args,
+        || {
+            Err(
+                "k8rs could not open its audit log at /nope/audit.log: it is not there — every \
+                 change k8rs makes is written to that log before it is sent, so k8rs will not \
+                 change anything until that is fixed, and reading your cluster still works"
+                    .to_string(),
+            )
+        },
+        unwired,
+    )
+    .expect("a line beginning with `ops` is the operations driver's")
+    .said;
     println!("{sentence}");
     assert_eq!(
         sentence,
@@ -11133,5 +11217,688 @@ fn a_machine_that_cannot_hold_the_audit_log_refuses_the_operation_and_says_why()
          anything until that is fixed, and reading your cluster still works",
         "a run that cannot record what it is about to do did not say so, or said it beside the \
          seam's own sentence as though the operation had gone ahead"
+    );
+}
+
+// --- WHAT AN OPERATION ENDS AS ---
+//
+// **The driver's half of `scale`** (todo.md 3749): the exit code, the cluster the record names,
+// the sentence a connection that never happened gets, and the three lines the headless surface
+// prints instead of `screens/dialogs.md`'s box.
+//
+// **Everything here is a function over values except [`scale_connected`]**, which reads the
+// reader's own kubeconfig and dials it. That one is glue and is deliberately eight lines: what it
+// calls above and below is tested here, and what it does itself is proven by running the binary.
+
+/// **Exit `0` iff the cluster changed, and `2` for every other ending** (NOTES § D220 ruling 1).
+///
+/// **The hazard is `echo no | k8rs ops delete … && kubectl get pod`.** Every ops line exited `2`
+/// before this box, which read a cancellation as a failure and — the moment an arm was wired —
+/// would have read a success as one too.
+#[test]
+fn only_a_cluster_that_changed_exits_zero() {
+    let changed = ending(&ops::Performed {
+        outcome: Some(ops::Outcome::Done),
+        recorded: true,
+    });
+    println!("{} · exit {}", changed.said, changed.code);
+    assert_eq!(changed.code, 0, "a change that happened did not exit 0");
+    assert_eq!(changed.said, "k8rs: the change was made");
+    for outcome in [
+        Some(ops::Outcome::Cancelled),
+        Some(ops::Outcome::Gone),
+        Some(ops::Outcome::Changed),
+        Some(ops::Outcome::NotSent {
+            fault: k8s::Fault::Refused,
+            said: None,
+        }),
+        Some(ops::Outcome::Failed {
+            fault: k8s::Fault::Refused,
+            said: None,
+        }),
+        // NOTES § D21's fourth ending: the attempt could not be recorded, so nothing was sent.
+        None,
+    ] {
+        let ended = ending(&ops::Performed {
+            outcome,
+            recorded: true,
+        });
+        println!("{} · exit {}", ended.said, ended.code);
+        assert_eq!(
+            ended.code, 2,
+            "an ending that changed nothing exited 0: {:?}",
+            ended.said
+        );
+        assert!(
+            ended.said.starts_with("k8rs: "),
+            "an ops sentence lost its prefix: {:?}",
+            ended.said
+        );
+    }
+}
+
+/// **A change k8rs could not write down still exits `0`, and says so out loud**
+/// (NOTES § D220 ruling 1, § D214's fourth lie).
+///
+/// **Nothing read `ops::Performed::recorded` until this box** — `#[must_use]` is on the struct and
+/// not on the field — so *the change was made and k8rs could not write it to the audit log*
+/// reached nobody. It is a sentence on stderr and never an exit code: the code answers *did it
+/// happen*, and a `2` here makes a script re-run a mutation that already landed.
+#[test]
+fn a_change_the_log_missed_exits_zero_and_says_the_trail_is_short() {
+    let ended = ending(&ops::Performed {
+        outcome: Some(ops::Outcome::Done),
+        recorded: false,
+    });
+    println!("{} · exit {}", ended.said, ended.code);
+    assert_eq!(ended.code, 0, "a change that happened did not exit 0");
+    assert!(
+        ended.said.contains("the change was made")
+            && ended.said.contains("could not write that to the audit log"),
+        "the operator was not told the trail is incomplete: {:?}",
+        ended.said
+    );
+}
+
+/// One kubeconfig with one context and one cluster, as text kube parses.
+fn one_context(server: Option<&str>) -> kube::config::Kubeconfig {
+    let cluster = server.map_or(String::new(), |server| format!("\n    server: {server}"));
+    serde_yaml_ng::from_str(&format!(
+        "apiVersion: v1\n\
+         kind: Config\n\
+         current-context: kind-k8rs\n\
+         contexts:\n\
+         - name: kind-k8rs\n  \
+           context:\n    \
+             cluster: k8rs\n    \
+             user: k8rs\n\
+         clusters:\n\
+         - name: k8rs\n  \
+           cluster:{cluster}\n\
+         users:\n\
+         - name: k8rs\n  \
+           user: {{}}\n"
+    ))
+    .expect("a kubeconfig this test wrote itself")
+}
+
+/// **Which cluster the audit line names comes off the kubeconfig, not off a field on a frozen
+/// `k8s::Session`** (NOTES § D220 ruling 5).
+///
+/// **The three `k8s::Address` states become two answers here**, because a log line has one job:
+/// an address it can state, or the gap `ops::Record::attempt_line` already spells. Telling
+/// *undefined* from *unreadable* apart is a screen's work, on a row somebody is looking at.
+///
+/// **The userinfo strip is on this path for free** (NOTES § D173), which is the whole reason the
+/// server comes from here rather than being remembered a second time on the way into a file that
+/// is kept.
+#[test]
+fn the_server_the_record_names_is_the_one_the_current_context_points_at() {
+    // **A reserved host and not the `127.0.0.1` a real kind writes**, because
+    // `scripts/security-guard.py` reads a loopback URL in this tree as a second outbound path and
+    // is right to; the port is what carries the point, and `ops_tests.rs`'s own fixture already
+    // pays this price for the same reason.
+    assert_eq!(
+        current_server(&one_context(Some("https://k8rs-tests.invalid:41751"))),
+        "https://k8rs-tests.invalid:41751"
+    );
+    // **A password in the URL never reaches the log** — `k8s::Address` dropped it before this
+    // function saw it, and a second spelling of that strip is what would go stale.
+    //
+    // **Built rather than written**, the way `k8s_tests.rs` builds its own: a URL with userinfo
+    // in it does not match `scripts/security-guard.py`'s reserved-host rule, because the guard
+    // reads the whole authority — so the credential half is a separate literal.
+    let with_password = format!("https://{}@{}", "root:hunter2", "prod.invalid:6443");
+    assert_eq!(
+        current_server(&one_context(Some(&with_password))),
+        "https://prod.invalid:6443",
+        "a kubeconfig password reached the audit log"
+    );
+    // An entry that names no cluster, and one whose address k8rs will not state: both are the gap.
+    assert_eq!(current_server(&one_context(None)), "");
+    assert_eq!(current_server(&one_context(Some("https://[oops"))), "");
+    // No current context at all — nothing to name, and nothing to invent.
+    let empty: kube::config::Kubeconfig =
+        serde_yaml_ng::from_str("apiVersion: v1\nkind: Config\n").expect("an empty kubeconfig");
+    assert_eq!(current_server(&empty), "");
+}
+
+/// **A run that never reached a cluster says nothing was changed, and then says why**
+/// ([`because`], `PRIOR-ART § C1`).
+///
+/// **The lead clause is what [`live`]'s sibling has no need for.** A watch that cannot connect has
+/// changed nothing by definition; an operation is a line somebody typed in order to change
+/// something, and the first thing they need is that it did not happen.
+#[test]
+fn a_scale_that_never_connected_says_nothing_was_changed_and_names_the_reason() {
+    let said = no_cluster(&k8s::NotConnected::Client {
+        failure: kube::Error::Service(Box::new(
+            kube::client::AuthError::UnrefreshableTokenResponse,
+        )),
+        renewal: Some("aws-iam-authenticator".to_string()),
+    });
+    println!("{said}");
+    assert!(
+        said.starts_with("k8rs: nothing was changed — "),
+        "an operation that never connected did not say so first: {said:?}"
+    );
+    assert!(
+        said.contains("aws-iam-authenticator"),
+        "the login program the kubeconfig names was dropped: {said:?}"
+    );
+}
+
+/// **Only `scale` is wired, and it is wired with the count the line carried** (todo.md 3749).
+///
+/// **The two that are not are `restart` (todo.md 3776) and `delete` (3810)**, and a verb added to
+/// [`OPERATIONS`] without an arm answers `None` here rather than falling into `scale`'s.
+///
+/// **This is [`ops_performed`]'s whole decision**, held apart from it because everything past the
+/// decision dials a cluster: the function itself is one call, and what can be wrong about it is
+/// the four rows below.
+#[test]
+fn scale_is_the_one_operation_this_build_performs_and_it_gets_the_count() {
+    for operation in &OPERATIONS {
+        let chosen = wired(operation, Some(3));
+        println!("{} → {chosen:?}", operation.verb);
+        assert_eq!(
+            chosen,
+            (operation.verb == "scale").then_some(3),
+            "{} is wired to the wrong arm of the seam",
+            operation.verb
+        );
+    }
+    // **The count comes back and is not invented**, which is what stops a scale-to-three being
+    // performed as a scale to anything else.
+    let scale = operation_named(SCALE).expect("scale is in the table");
+    assert_eq!(wired(scale, Some(0)), Some(0));
+    // `ops_value` refuses this above the seam, so it cannot arrive from a command line — and if
+    // it ever did, it is `not_wired`'s sentence and never a guessed count.
+    assert_eq!(wired(scale, None), None);
+}
+
+/// **A kind an operation does not work on is refused before the audit log is opened**
+/// (NOTES § D220 ruling 7) — the same rule `k8rs ops bogus` already had, reached through the one
+/// door that was not a spelling mistake.
+#[test]
+fn a_kind_an_operation_does_not_work_on_leaves_no_state_directory_behind() {
+    for line in [
+        vec!["ops", "scale", "pod/web", "3", "-n", "payments"],
+        vec!["ops", "scale", "ds/fluentd", "3", "-n", "payments"],
+        vec!["ops", "scale", "node/worker-1", "3"],
+    ] {
+        let asked = std::cell::Cell::new(0u32);
+        let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let ended = ops_line(
+            &args,
+            || {
+                asked.set(asked.get() + 1);
+                nowhere()
+            },
+            unwired,
+        )
+        .expect("a line beginning with `ops` is the operations driver's");
+        println!("--- {line:?} ---\n{}", ended.said);
+        assert_eq!(
+            asked.get(),
+            0,
+            "{line:?} is refused and asked for an audit log anyway"
+        );
+        assert_eq!(ended.code, 2, "{line:?} did not exit 2");
+        assert!(
+            ended.said.contains("cannot scale a")
+                && ended
+                    .said
+                    .contains("a deployment, a statefulset and a replicaset"),
+            "{line:?} was refused for something other than its kind: {:?}",
+            ended.said
+        );
+    }
+    // **The three it does work on still reach the seam**, so a refusal that widened by one word
+    // is a red build rather than a quieter driver.
+    for kind in ["deploy", "sts", "rs"] {
+        let ended = ops_ended(&[
+            "ops",
+            "scale",
+            &format!("{kind}/web"),
+            "3",
+            "-n",
+            "payments",
+        ]);
+        println!("{}", ended.said);
+        assert!(
+            ended.said.contains("read this as `scale`"),
+            "{kind} was refused by scale's own matrix: {:?}",
+            ended.said
+        );
+    }
+}
+
+/// **A well-formed line carries an exit code out of the seam and never falls through**
+/// (NOTES § D220 ruling 2).
+///
+/// **The seam's own answer is what decides it**, which is what the double proves: `ops_line`
+/// hands back whatever the operation ended as rather than a constant, so a `scale` that succeeds
+/// cannot come back as *this was not an ops line* and start a watch on a cluster it just changed.
+#[test]
+fn the_seams_own_ending_is_what_an_ops_line_comes_back_with() {
+    let args: Vec<String> = ["ops", "scale", "deploy/web", "3", "-n", "payments"]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+    let landed = ops_line(&args, nowhere, |_| Ended {
+        said: "k8rs: the change was made".to_string(),
+        code: 0,
+    })
+    .expect("a line beginning with `ops` is the operations driver's");
+    println!("{} · exit {}", landed.said, landed.code);
+    assert_eq!(landed.code, 0, "a seam that changed the cluster exited 2");
+    assert_eq!(landed.said, "k8rs: the change was made");
+    // **A note about the audit log is worth saying and is not worth a `2`** — it goes above the
+    // seam's sentence and leaves the code alone.
+    let noted = ops_line(
+        &args,
+        || nowhere().map(|(log, _)| (log, vec!["the audit log is 0666".to_string()])),
+        |_| Ended {
+            said: "k8rs: the change was made".to_string(),
+            code: 0,
+        },
+    )
+    .expect("a line beginning with `ops` is the operations driver's");
+    println!("{} · exit {}", noted.said, noted.code);
+    assert_eq!(
+        noted.code, 0,
+        "an audit-log note turned a change into a failure"
+    );
+    assert_eq!(
+        noted.said,
+        "k8rs: the audit log is 0666\nk8rs: the change was made"
+    );
+}
+
+/// **Every other ops line exits `2`**, whatever it was refused for — the whole of [`Ended`]'s
+/// second half, over one row per refusal the driver can reach.
+#[test]
+fn every_refusal_of_an_ops_line_exits_two() {
+    for line in [
+        vec!["ops"],
+        vec!["ops", "--wat", "scale", "deploy/web", "3"],
+        vec!["ops", "bogus", "deploy/web"],
+        vec!["ops", "scale", "web", "3"],
+        vec!["ops", "scale", "deploy/web", "three", "-n", "payments"],
+        vec!["ops", "scale", "deploy/web", "3"],
+        vec!["ops", "scale", "pod/web", "3", "-n", "payments"],
+        vec![
+            "--read-only",
+            "ops",
+            "scale",
+            "deploy/web",
+            "3",
+            "-n",
+            "payments",
+        ],
+        vec!["--once", "ops", "scale", "deploy/web", "3"],
+        // The seam's own refusals: `restart` and `delete` are not written yet.
+        vec!["ops", "restart", "deploy/web", "-n", "payments"],
+        vec!["ops", "delete", "pod/web", "-n", "payments"],
+    ] {
+        let ended = ops_ended(&line);
+        println!("--- {line:?} ---\n{}", ended.said);
+        assert_eq!(ended.code, 2, "{line:?} did not exit 2");
+    }
+}
+
+/// **The usage stops saying this build cannot reach a cluster without qualifying it**
+/// (todo.md 3749). It was true until the first operation landed, and it is the sentence a reader
+/// checks before deciding whether it is safe to experiment against production.
+#[test]
+fn the_usage_says_ops_reaches_a_cluster_too() {
+    let Err(problem) = run(&[]) else {
+        panic!("no arguments is not a report")
+    };
+    println!("{problem}");
+    let synopsis = problem.lines().next().expect("the usage has a first line");
+    assert!(
+        synopsis.contains("k8rs ops <operation>"),
+        "the synopsis offers no way to reach the one subcommand this build has: {synopsis:?}"
+    );
+    let last = problem.lines().last().expect("the usage has a last line");
+    assert!(
+        last.contains("--yaml or ops this build reads files only"),
+        "the line that says what cannot reach a cluster still leaves `ops` out of it: {last:?}"
+    );
+}
+
+/// **A scratch directory that takes itself away again — in `Drop`, so a panicking assertion still
+/// cleans up** (NOTES § D185; `ops_tests.rs`'s `Dir` is the same shape one file over, and cannot
+/// be shared with it without the `lib.rs` D50 refuses).
+///
+/// **The process id separates two `cargo test` runs and the thread id separates two callers
+/// inside one**, which is the rule [`emptied_list`] already keeps in this file.
+struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+    fn named(what: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "k8rs-{what}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&path).expect("a scratch directory this test owns");
+        Scratch(path)
+    }
+
+    /// A file under it, opened the way `ops::audit_log` opens the real one.
+    fn file(&self, name: &str) -> std::fs::File {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.0.join(name))
+            .expect("a scratch file this test owns")
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A stub API server for one scale: it logs `METHOD target body` and answers every request with
+/// `answer`. The address is built from whatever `:0` gave us, so there is no loopback URL written
+/// down anywhere.
+async fn scale_stub(
+    answer: impl Fn(&str) -> (String, String) + Send + Sync + 'static,
+) -> (kube::Client, Requests) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    let asked: Requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = std::sync::Arc::clone(&asked);
+    let answer = std::sync::Arc::new(answer);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let log = std::sync::Arc::clone(&log);
+            let answer = std::sync::Arc::clone(&answer);
+            tokio::spawn(async move {
+                let mut pending: Vec<u8> = Vec::new();
+                loop {
+                    let mut chunk = [0_u8; 4096];
+                    match socket.read(&mut chunk).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => pending.extend_from_slice(&chunk[..read]),
+                    }
+                    // A PATCH has a body, so a request does not end at the blank line: the header
+                    // says how much more there is.
+                    while let Some(end) =
+                        pending.windows(4).position(|window| window == b"\r\n\r\n")
+                    {
+                        let head = String::from_utf8_lossy(&pending[..end]).to_string();
+                        let length: usize = head
+                            .lines()
+                            .find_map(|line| {
+                                line.split_once(':')
+                                    .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                                    .and_then(|(_, value)| value.trim().parse().ok())
+                            })
+                            .unwrap_or(0);
+                        if pending.len() < end + 4 + length {
+                            break;
+                        }
+                        let body = String::from_utf8_lossy(&pending[end + 4..end + 4 + length])
+                            .to_string();
+                        pending.drain(..end + 4 + length);
+                        let mut words = head.split_whitespace();
+                        let asked = format!(
+                            "{} {} {body}",
+                            words.next().unwrap_or_default(),
+                            words.next().unwrap_or_default()
+                        )
+                        .trim_end()
+                        .to_string();
+                        let (status, reply) = answer(&asked);
+                        log.lock().expect("the log is never poisoned").push(asked);
+                        let sent = format!(
+                            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n\
+                             content-length: {}\r\n\r\n{reply}",
+                            reply.len()
+                        );
+                        if socket.write_all(sent.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    let client = kube::Client::try_from(kube::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing");
+    (client, asked)
+}
+
+/// The `Scale` a cluster hands back for `deployment/web` in `payments`.
+fn scale_answer(replicas: i32) -> String {
+    format!(
+        r#"{{"kind":"Scale","apiVersion":"autoscaling/v1","metadata":{{"name":"web",
+           "namespace":"payments","uid":"18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11",
+           "resourceVersion":"41751"}},"spec":{{"replicas":{replicas}}},
+           "status":{{"replicas":{replicas}}}}}"#
+    )
+}
+
+/// **One `k8rs ops scale`, from a client to an exit code** — [`scaled`] over a real socket, a
+/// scripted confirmation and a real audit file.
+///
+/// **The three printed lines are `screens/dialogs.md` § *Printed instead of drawn*'s** — object
+/// and namespace, the consequence, the `$` line, in that order, with the dialog's box removed and
+/// nothing reworded for the terminal.
+///
+/// **The scale is to zero on purpose**, which is the relation that file prints in full: it is the
+/// one that stops the app, and it gets no stricter a guard than any other scale.
+#[tokio::test]
+async fn a_headless_scale_prints_the_dialog_as_three_lines_and_exits_zero() {
+    let (client, sent) = scale_stub(|_| ("200 OK".to_string(), scale_answer(3))).await;
+    let log = Scratch::named("headless-scale");
+    let path = log.0.join("audit.log");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(SCALE).expect("scale is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: Some(0),
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = scaled(
+        &reached,
+        &mut ready,
+        0,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "yes\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    let printed = String::from_utf8(out).expect("everything k8rs writes is a string");
+    println!("{printed}\n--- exit {} ---\n{}", ended.code, ended.said);
+    let lines: Vec<&str> = printed.lines().collect();
+    assert_eq!(
+        lines[..3],
+        [
+            "deployment/web in payments",
+            "This stops all 3 copies of your app — nothing will be left running. Right now: 3 \
+             copies. After: 0 copies.",
+            "$ kubectl scale deployment/web --replicas=0 -n payments",
+        ],
+        "the headless dialog is not the three lines screens/dialogs.md prints"
+    );
+    assert!(
+        printed.contains("the cluster checked it first and accepted it")
+            && printed.contains("type yes and press enter to go ahead"),
+        "the verdict and the prompt did not reach the operator: {printed:?}"
+    );
+    // **`ended.said` is printed after this, and it has a line to land on.** Piped input echoes
+    // nothing, so everything on stderr is what [`show`] and [`ask`] wrote — and until 2026-09-04
+    // the last of it left the cursor mid-line and the closing sentence arrived glued to the prompt
+    // (`k8s-admin`).
+    assert!(
+        printed.ends_with("anything else stops it:\n"),
+        "the closing sentence lands on the back of the prompt: {printed:?}"
+    );
+    assert_eq!(ended.code, 0, "a scale that landed did not exit 0");
+    assert_eq!(ended.said, "k8rs: the change was made");
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    assert_eq!(
+        requests.len(),
+        3,
+        "a confirmed scale is a read, a check and a change: {requests:?}"
+    );
+    let written = std::fs::read_to_string(&path).expect("the audit log this run opened");
+    println!("{written}");
+    assert_eq!(
+        written.lines().count(),
+        2,
+        "one mutation is one attempt line and one result line: {written:?}"
+    );
+    assert!(
+        written.contains("attempt · deployment/web · context kind-k8rs")
+            && written.contains("· the change was made"),
+        "the audit log does not hold what happened: {written:?}"
+    );
+}
+
+/// **Anything but the word `yes` stops it, and the exit code says so** — invariant 2 through the
+/// driver, with no flag anywhere that means yes.
+#[tokio::test]
+async fn a_headless_scale_nobody_confirmed_changes_nothing_and_exits_two() {
+    let (client, sent) = scale_stub(|_| ("200 OK".to_string(), scale_answer(2))).await;
+    let log = Scratch::named("cancelled-scale");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(SCALE).expect("scale is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: Some(3),
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = scaled(
+        &reached,
+        &mut ready,
+        3,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "no\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    println!(
+        "{}\n--- exit {} ---\n{}",
+        String::from_utf8_lossy(&out),
+        ended.code,
+        ended.said
+    );
+    assert_eq!(ended.code, 2, "a scale nobody confirmed exited 0");
+    assert_eq!(
+        ended.said,
+        "k8rs: nobody confirmed it, so nothing was changed"
+    );
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        2,
+        "a cancelled scale sent the change anyway"
+    );
+}
+
+/// **A cluster that will not answer the read is a refusal with an exit `2`, and the operator is
+/// told which of their two problems it is** — the RBAC or the network (`PRIOR-ART § C1`).
+#[tokio::test]
+async fn a_headless_scale_the_cluster_refused_says_which_refusal_it_was_and_exits_two() {
+    let (client, _) = scale_stub(|_| {
+        (
+            "403 Forbidden".to_string(),
+            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","code":403,
+               "reason":"Forbidden","message":"deployments.apps \"web\" is forbidden"}"#
+                .to_string(),
+        )
+    })
+    .await;
+    let log = Scratch::named("refused-scale");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(SCALE).expect("scale is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: Some(3),
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "",
+    };
+    let mut out = Vec::new();
+
+    let ended = scaled(
+        &reached,
+        &mut ready,
+        3,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "yes\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    println!("--- exit {} ---\n{}", ended.code, ended.said);
+    assert_eq!(ended.code, 2);
+    assert!(
+        ended
+            .said
+            .starts_with("k8rs: k8rs could not read how many copies of deployment/web"),
+        "{:?}",
+        ended.said
+    );
+    assert!(
+        ended.said.contains("the cluster would not allow it"),
+        "a 403 was not told apart from a dead socket: {:?}",
+        ended.said
+    );
+    assert!(
+        out.is_empty(),
+        "a scale that never had a consequence to state printed one anyway: {:?}",
+        String::from_utf8_lossy(&out)
     );
 }

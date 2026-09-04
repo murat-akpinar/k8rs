@@ -83,47 +83,86 @@ fn main() {
     // **Before the mode is chosen, because a mistyped flag is wrong in both of them** — and
     // [`ops_line`] before *that*, because a subcommand's words are bare and every one of them
     // would come back out of [`mistyped`] as a stray path (§ THE OPERATIONS DRIVER).
-    let problem = match ops_line(&args, ops::audit_log).or_else(|| mistyped(&args)) {
-        Some(sentence) => sentence,
-        None => match live_context(&args) {
-            // **`--live` has no happy ending to return** — it prints as it goes and comes back
-            // only with the sentence that says why it stopped — but **`--once` does**, and it is
-            // the only path in this driver that reaches exit `0` off a cluster
-            // (§ WATCHING A CLUSTER, NOTES § D17).
-            Some(context) => match tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(runtime) => match runtime.block_on(on_cluster(&args, context)) {
-                    Some(sentence) => sentence,
-                    None => return,
-                },
-                Err(failed) => runtime_failure(&failed),
-            },
-            None => match run(&args) {
-                // `writeln!`, never `println!`: Rust masks `SIGPIPE`, so `println!`
-                // *panics* when the write fails, and a reader that closed the pipe is
-                // `head` doing its job. That printed a backtrace and exited 101 — a code
-                // D17's table does not have ([`stdout_failure`]).
-                Ok(report) => match writeln!(std::io::stdout(), "{report}") {
-                    Ok(()) => return,
-                    Err(failed) => match stdout_failure(&failed) {
+    //
+    // **A line that reached the operations seam never falls through into [`mistyped`] or
+    // [`live_context`], whatever it did there** (NOTES § D220 ruling 2). While `ops_line`
+    // answered `Option<String>`, a `scale` that *succeeded* would have come back `None` and
+    // k8rs would have gone on to watch a cluster it had just changed. [`Ended`] carries the
+    // ending and the exit code together, so the two cannot come apart again.
+    let ended = match ops_line(&args, ops::audit_log, ops_performed) {
+        Some(ended) => ended,
+        None => Ended::refused(match mistyped(&args) {
+            Some(sentence) => sentence,
+            None => match live_context(&args) {
+                // **`--live` has no happy ending to return** — it prints as it goes and comes
+                // back only with the sentence that says why it stopped — but **`--once` does**,
+                // and it is the only path in this driver that reaches exit `0` off a cluster
+                // (§ WATCHING A CLUSTER, NOTES § D17).
+                Some(context) => match tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => match runtime.block_on(on_cluster(&args, context)) {
                         Some(sentence) => sentence,
                         None => return,
                     },
+                    Err(failed) => runtime_failure(&failed),
                 },
-                // Printed as it was handed over. Everything in it that came from outside was
-                // stripped where it entered the sentence, and everything else is ours
-                // ([`sanitize`]).
-                Err(problem) => problem,
+                None => match run(&args) {
+                    // `writeln!`, never `println!`: Rust masks `SIGPIPE`, so `println!`
+                    // *panics* when the write fails, and a reader that closed the pipe is
+                    // `head` doing its job. That printed a backtrace and exited 101 — a code
+                    // D17's table does not have ([`stdout_failure`]).
+                    Ok(report) => match writeln!(std::io::stdout(), "{report}") {
+                        Ok(()) => return,
+                        Err(failed) => match stdout_failure(&failed) {
+                            Some(sentence) => sentence,
+                            None => return,
+                        },
+                    },
+                    // Printed as it was handed over. Everything in it that came from outside was
+                    // stripped where it entered the sentence, and everything else is ours
+                    // ([`sanitize`]).
+                    Err(problem) => problem,
+                },
             },
-        },
+        }),
     };
     // **A write to stderr that fails is dropped, here and nowhere else**: there is no third
     // stream to report it on, and a program that panics while saying why it is unhappy has
     // replaced one bad ending with a worse one.
-    let _ = writeln!(std::io::stderr(), "{problem}");
-    std::process::exit(2);
+    let _ = writeln!(std::io::stderr(), "{}", ended.said);
+    std::process::exit(ended.code);
+}
+
+/// **How a line that reached the operations seam ended: what it says, and what the process exits
+/// with** (NOTES § D220 rulings 1 and 2).
+///
+/// **Exit `0` for a cluster that changed and `2` for everything else** — every refusal of the
+/// line, a cancellation, an object that went away or moved, a check that never went out, a call
+/// that failed, and NOTES § D21's *nothing was sent because nothing could be recorded*. `1` stays
+/// unused, so a future `--exit-code` still has somewhere to go (NOTES § D17).
+///
+/// **`echo no | k8rs ops delete … && kubectl get pod` is the hazard it exists for.** Every ops
+/// line exited `2` before this, which read a cancellation as a failure and — the moment an arm
+/// was wired — would have read a *success* as one too.
+///
+/// **A type and not a `(String, i32)`**, because the two are only ever built together and the
+/// pair would let a caller swap them. It carries the sentence for every ending, `0` included:
+/// the exit code answers *did it happen* and the sentence answers *what happened*, and a
+/// successful scale that says nothing is a write with no receipt.
+struct Ended {
+    /// What goes on stderr — never stdout, for an ops line (NOTES § D220 ruling 3).
+    said: String,
+    /// What the process exits with.
+    code: i32,
+}
+
+impl Ended {
+    /// **A line that changed nothing** — which is every ending but one.
+    fn refused(said: String) -> Self {
+        Ended { said, code: 2 }
+    }
 }
 
 /// The sentence a failed write to **stdout** costs, or `None` when it costs nothing.
@@ -173,6 +212,14 @@ fn runtime_failure(error: &std::io::Error) -> String {
 /// read a cluster, and everything after the mode word is the same. The line count is asserted
 /// (`tests/binary.rs`), and the flags a reader can only learn about here are asserted with it.
 ///
+/// **`ops` is on both the synopsis and the last line since todo.md 3749**, and the last line is
+/// why: *without --once, --live, --logs, --describe or --yaml this build reads files only* was
+/// true until the first operation landed and is a claim about safety, not about spelling. A
+/// reader who has just been told this binary cannot reach a cluster is the reader most likely to
+/// try `ops` on production. The synopsis gets it for `tests/binary.rs`'s own reason — it is the
+/// only place a reader learns a mode exists — and the per-operation detail stays in
+/// [`ops_usage`], which `k8rs ops` prints.
+///
 /// **The synopsis is one printed line written across two source lines**, and the `\` that joins
 /// them keeps the three spaces before it: `scripts/width-guard.py` refuses a source line past 100
 /// columns and `cargo fmt` will not wrap a string literal — it pulls the whole `const` back onto
@@ -182,9 +229,10 @@ const USAGE: &str = "usage: k8rs [--analysis] <file.json>...   |   \
      k8rs --logs --object <[namespace/]pod> [--container <name>] [--previous] [--follow] \
      [--context <name>] [--namespace <name>]   |   \
      k8rs --describe|--yaml --object <[namespace/]name> [--kind <kind>] [--context <name>] \
-     [--namespace <name>]\n\
+     [--namespace <name>]   |   \
+     k8rs ops <operation> <kind>/<name> [<value>] --namespace <name>\n\
      Each file holds Kubernetes objects as JSON: one object, or a list of them.\n\
-     Without --once, --live, --logs, --describe or --yaml this build reads files only — it \
+     Without --once, --live, --logs, --describe, --yaml or ops this build reads files only — it \
      cannot reach a cluster.";
 
 /// **Part of the released surface and not scaffolding** (NOTES § D188): `analysis.rs`'s seven
@@ -5629,6 +5677,10 @@ async fn yaml_run(
 /// documents for a file named `--x`.
 const OPS: &str = "ops";
 
+/// **The one operation this phase has wired**, spelled once — [`OPERATIONS`]'s row, the sentence
+/// that names it, and the dispatch in [`ops_performed`] all read this rather than a literal.
+const SCALE: &str = "scale";
+
 /// **How a confirmation is given** — invariant 2's *a keypress*, and its *typing the object name*
 /// for the destructive half, as the two things a script can be made to supply.
 enum Confirm {
@@ -5667,7 +5719,7 @@ struct Operation {
 /// written is a word this driver would accept and then refuse for the wrong reason.
 const OPERATIONS: [Operation; 3] = [
     Operation {
-        verb: "scale",
+        verb: SCALE,
         value: Some("copies"),
         confirm: Confirm::Press,
     },
@@ -5875,25 +5927,33 @@ fn ops_at(args: &[String]) -> Option<usize> {
 /// saying and neither is worth refusing for: an `$XDG_STATE_HOME` k8rs ignored, and a log other
 /// people can write to (`ops::audit_log`). `ops.rs` draws nothing, so where they go is this
 /// driver's to decide — see [`ops_run`].
+/// **`run` is the seam, and it is a parameter for [`ops_line`]'s own reason.** The real one is
+/// [`ops_performed`], which builds a runtime and dials the reader's cluster; a test hands over a
+/// double, the way it already hands over an audit log that is `/dev/null`. Everything above it —
+/// which is every refusal this driver makes — stays provable with no cluster and no terminal.
+///
+/// **The answer carries the exit code** (NOTES § D220 rulings 1 and 2, [`Ended`]): a line that
+/// got this far never falls through into [`mistyped`] or [`live_context`], whatever it did here.
 fn ops_line(
     args: &[String],
     audit: impl FnOnce() -> Result<(std::fs::File, Vec<String>), String>,
-) -> Option<String> {
+    run: impl FnOnce(Ready<'_>) -> Ended,
+) -> Option<Ended> {
     let at = ops_at(args)?;
     if args.iter().any(|arg| arg == READ_ONLY) {
-        return Some(format!(
+        return Some(Ended::refused(format!(
             "k8rs: {READ_ONLY} was asked for, so k8rs will not change anything — run it without \
              that flag to use an operation"
-        ));
+        )));
     }
     if at == 0 {
-        return Some(ops_run(&args[1..], audit));
+        return Some(ops_run(&args[1..], audit, run));
     }
-    Some(format!(
+    Some(Ended::refused(format!(
         "k8rs: `{OPS}` has to be the first word on the line — write it as \
          `k8rs {OPS} <operation> <kind>/<name>`\n{}",
         ops_usage()
-    ))
+    )))
 }
 
 /// **What this driver reads as a flag**: a word with a leading `-` that is not a whole number.
@@ -5984,11 +6044,14 @@ fn ops_words(rest: &[String]) -> Result<Vec<&str>, String> {
 /// where its sibling named the bound, and *less than none* asks a beginner to read *none* as a
 /// number (invariant 14). Each names the end of the range it is about, in the same words.
 ///
-/// **It answers `Option<String>` rather than the number**, because nothing here sends anything:
-/// todo.md 3718 is where the value is needed and where this grows a `Result`.
-fn refuse_count(word: &str) -> Option<String> {
+/// **It answers the number now, because something sends it** (todo.md 3749). It was
+/// `Option<String>` while nothing did, and the doc there said this is where it grows a `Result`.
+/// The three refusals are unchanged and are still the whole of what makes the `i32` below safe:
+/// what comes back has already been proved to be a whole number, at least zero, and no larger
+/// than the `replicas` field can hold.
+fn refuse_count(word: &str) -> Result<i32, String> {
     let most = i64::from(i32::MAX);
-    let refusal = |sentence: String| Some(format!("k8rs: {sentence}\n{}", ops_usage()));
+    let refusal = |sentence: String| Err(format!("k8rs: {sentence}\n{}", ops_usage()));
     let below_none = || {
         refusal(format!(
             "{} is fewer copies than Kubernetes can hold — the fewest it takes is 0",
@@ -6010,7 +6073,9 @@ fn refuse_count(word: &str) -> Option<String> {
     match word.parse::<i64>() {
         Ok(count) if count < 0 => below_none(),
         Ok(count) if count > most => too_many(),
-        Ok(_) => None,
+        // **The one cast in this driver, and the two arms above are what make it total**: the
+        // value is in `0..=i32::MAX`, which is exactly the range `replicas` holds.
+        Ok(count) => Ok(count as i32),
         Err(_) if digits && word.starts_with('-') => below_none(),
         Err(_) if digits => too_many(),
         Err(_) => refusal(format!(
@@ -6023,9 +6088,14 @@ fn refuse_count(word: &str) -> Option<String> {
 /// **The sentence a line with nothing wrong in it ends with, and the seam an operation lands
 /// in.**
 ///
-/// `scale` (todo.md 3718), `restart` (3720) and `delete` (3754) each replace this call with their
-/// own — building an `ops::Mutation` and handing it, [`show`] and [`ask`], to `ops::perform`.
-/// Until one does, the honest answer is that k8rs read the line and has nothing behind it.
+/// `restart` (todo.md 3776) and `delete` (3810) each replace this call with their own — building
+/// an `ops::Mutation` and handing it, [`show`] and [`ask`], to `ops::perform`, the way [`scaled`]
+/// now does. Until one does, the honest answer is that k8rs read the line and has nothing behind
+/// it.
+///
+/// **`scale` no longer reaches it** (todo.md 3749), and the sentence is unchanged for the two
+/// that still do: it says what *this build* does with the line it was given, and for a `restart`
+/// or a `delete` that is still nothing.
 ///
 /// **It names everything it parsed, the value included.** *k8rs cannot do that yet* alone would
 /// go green against a parser that read the wrong object, and this is the one line `just e2e` can
@@ -6044,7 +6114,7 @@ fn not_wired(
     operation: &Operation,
     kind: &Kind,
     name: &str,
-    value: Option<&str>,
+    value: Option<i32>,
     namespace: Option<&str>,
 ) -> String {
     format!(
@@ -6054,12 +6124,14 @@ fn not_wired(
         kind.singular,
         sanitize(name),
         within(namespace),
+        // The count is a number [`refuse_count`] parsed, so there is nothing left in it for
+        // [`sanitize`] to find — which is why this half of the sentence stopped stripping when
+        // the value stopped being a word.
         operation
             .value
             .zip(value)
-            .map_or(String::new(), |(called, word)| format!(
-                ", {} {called}",
-                sanitize(word)
+            .map_or(String::new(), |(called, count)| format!(
+                ", {count} {called}"
             ))
     )
 }
@@ -6084,19 +6156,25 @@ fn not_wired(
 /// it is before the seam because D21's ruling is that a mutation which cannot be recorded does
 /// not happen, so *this machine cannot hold the trail* has to be answerable before an operation
 /// is reached rather than after.
+/// **The kind matrix is read here, last of the refusals and still before the log is opened**
+/// (NOTES § D220 ruling 7). The driver accepts all six kinds for all three verbs on purpose, so
+/// `k8rs ops scale pod/web 3` reaches [`ops::scalable`] — and a line k8rs is going to refuse
+/// anyway leaves no state directory behind, which is the rule `k8rs ops bogus` already had.
 fn ops_run(
     rest: &[String],
     audit: impl FnOnce() -> Result<(std::fs::File, Vec<String>), String>,
-) -> String {
+    run: impl FnOnce(Ready<'_>) -> Ended,
+) -> Ended {
+    let refused = Ended::refused;
     let words = match ops_words(rest) {
         Ok(words) => words,
-        Err(refusal) => return refusal,
+        Err(refusal) => return refused(refusal),
     };
     let Some(verb) = words.first() else {
-        return ops_usage();
+        return refused(ops_usage());
     };
     let Some(operation) = operation_named(verb) else {
-        return format!(
+        return refused(format!(
             "k8rs: k8rs has no operation called {} — the ones it has are {}\n{}",
             shown(verb, k8s::NAME_MAX),
             joined(
@@ -6107,46 +6185,101 @@ fn ops_run(
                 " and "
             ),
             ops_usage()
-        );
+        ));
     };
     let Some(object) = words.get(1) else {
-        return format!(
+        return refused(format!(
             "k8rs: `{OPS} {verb}` has to be told which object to work on, written as \
              `<kind>/<name>`\n{}",
             ops_usage()
-        );
+        ));
     };
     let (kind, name) = match ops_object(operation, object) {
         Ok(both) => both,
-        Err(refusal) => return refusal,
+        Err(refusal) => return refused(refusal),
     };
-    if let Some(refusal) = ops_value(operation, &words) {
-        return refusal;
-    }
+    let count = match ops_value(operation, &words) {
+        Ok(count) => count,
+        Err(refusal) => return refused(refusal),
+    };
     let namespace = match ops_namespace(operation, kind, rest) {
         Ok(namespace) => namespace,
-        Err(refusal) => return refusal,
+        Err(refusal) => return refused(refusal),
     };
-    // **Opened and then dropped, because there is nothing yet to write to it.** `scale`
-    // (todo.md 3718) is where this binding stops being `_` and becomes `ops::perform`'s `audit`
-    // argument. What it does today is real and is this box's own done-when: the file is made, at
-    // its mode, in a state directory at its mode; a machine that cannot hold it refuses the run
-    // here rather than after a confirmation has been typed; something at that path that is not a
-    // file refuses it too; and a log other people can write to comes back with a sentence rather
-    // than in silence.
-    let (_audit, notes) = match audit() {
+    // **The last refusal of the line, and it belongs to the operation** (NOTES § D220 ruling 7).
+    // This driver holds no copy of which kinds each verb applies to; it asks, and it asks here so
+    // that `k8rs ops scale pod/web 3` is answered before a state directory is made for a run that
+    // is not going to happen.
+    if let Err(refusal) = applies(operation, kind) {
+        return refused(format!("k8rs: {refusal}\n{}", ops_usage()));
+    }
+    // **Opened before the seam and after every complaint about the line** (NOTES § D21): a
+    // mutation that cannot be recorded does not happen, so *this machine cannot hold the trail*
+    // is answerable before an operation is reached rather than after a confirmation is typed.
+    let (audit, notes) = match audit() {
         Ok(opened) => opened,
-        Err(refusal) => return format!("k8rs: {refusal}"),
+        Err(refusal) => return refused(format!("k8rs: {refusal}")),
     };
+    let ended = run(Ready {
+        operation,
+        kind,
+        name,
+        count,
+        namespace,
+        audit,
+    });
     // **Above the seam's sentence and not instead of it**, which is the opposite of the refusal
     // three lines up: a note is a thing that is true *and* the run went on, so it is read first
     // and the sentence about what k8rs did follows it. Nothing here builds a note — every word of
     // one is `ops::audit_log`'s, prefixed the way every other sentence on this line is.
-    notes
-        .iter()
-        .map(|note| format!("k8rs: {note}\n"))
-        .collect::<String>()
-        + &not_wired(operation, kind, name, words.get(2).copied(), namespace)
+    //
+    // **The exit code is the seam's and is carried through untouched**: a note is worth saying
+    // and is not worth a `2`, which is `recorded: false`'s ruling one step down
+    // (NOTES § D220 ruling 1).
+    Ended {
+        said: notes
+            .iter()
+            .map(|note| format!("k8rs: {note}\n"))
+            .collect::<String>()
+            + &ended.said,
+        code: ended.code,
+    }
+}
+
+/// **Everything one `ops` line said, once every complaint about it has been made** — and the
+/// audit log it will be recorded in. What is left is running it.
+///
+/// **It holds the opened log and not a way to open one**, because NOTES § D21's ordering is
+/// already settled by the time this exists: the trail was answered for above, and an operation
+/// that could not be recorded never gets built.
+struct Ready<'a> {
+    /// Which operation, from [`OPERATIONS`].
+    operation: &'static Operation,
+    /// Which kind, from [`KINDS`] — and the only place the scope of the object is decided
+    /// (NOTES § D220 ruling 4).
+    kind: &'static Kind,
+    /// The object's own name, already checked by `k8s::object_name`.
+    name: &'a str,
+    /// **The one value some operations take**, parsed — `None` for an operation that takes none.
+    count: Option<i32>,
+    /// The namespace, or `None` for a kind that belongs to the whole cluster.
+    namespace: Option<&'a str>,
+    /// The audit log, open, append-only and owner-only (`ops::audit_log`).
+    audit: std::fs::File,
+}
+
+/// **Whether an operation can be pointed at a kind** — the operation's own matrix, asked before
+/// the audit log is opened (NOTES § D220 ruling 7).
+///
+/// **A `match` on the verb and not a field on [`Operation`]**, because two of the three answer
+/// *not yet* rather than a matrix: `restart` (todo.md 3776) and `delete` (3810) each land their
+/// own arm here, and a table with two `None`s in it would be scaffolding for boxes that are not
+/// running.
+fn applies(operation: &Operation, kind: &Kind) -> Result<(), String> {
+    match operation.verb {
+        SCALE => ops::scalable(kind.singular).map(|_| ()),
+        _ => Ok(()),
+    }
 }
 
 /// **The `<kind>/<name>` an operation is pointed at**, or the sentence that refuses it.
@@ -6219,11 +6352,11 @@ fn ops_object<'a>(
 /// a tired operator is looking for a line to copy. Every other *write it as* in this region is a
 /// fragment or a placeholder; the general form is in [`ops_usage`] underneath either way, so the
 /// concrete one added hazard and no information.
-fn ops_value(operation: &Operation, words: &[&str]) -> Option<String> {
+fn ops_value(operation: &Operation, words: &[&str]) -> Result<Option<i32>, String> {
     let wanted = 2 + usize::from(operation.value.is_some());
     let verb = operation.verb;
     if let Some(extra) = words.get(wanted) {
-        return Some(format!(
+        return Err(format!(
             "k8rs: `{OPS} {verb}` does not know what to do with {} — it reads {} and nothing \
              else\n{}",
             shown(extra, k8s::NAME_MAX),
@@ -6235,16 +6368,16 @@ fn ops_value(operation: &Operation, words: &[&str]) -> Option<String> {
         ));
     }
     match operation.value {
-        None => None,
+        None => Ok(None),
         Some(value) => match words.get(2) {
-            None => Some(format!(
+            None => Err(format!(
                 "k8rs: `{OPS} {verb}` also needs the {value} — write it as \
                  `k8rs {OPS} {verb} <kind>/<name> <{value}>`\n{}",
                 ops_usage()
             )),
             // The one operation that takes a value takes a count, which is what [`Operation`]'s
             // own field says and what turns into a type when a second one does not.
-            Some(word) => refuse_count(word),
+            Some(word) => refuse_count(word).map(Some),
         },
     }
 }
@@ -6318,14 +6451,6 @@ fn ops_namespace<'a>(
 ///
 /// **The `$` line is display text**: k8rs does not execute it and nothing in it is fed back into
 /// a process (invariant 4, the security gate's *the command log is display text* row).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the operation that hands this to ops::perform is todo.md 3718, the next box \
-                  of this phase — the same shape ops.rs itself is in"
-    )
-)]
 fn show(shown: &ops::Shown<'_>, out: &mut impl std::io::Write) -> std::io::Result<()> {
     writeln!(out, "{}{}", shown.object, within(shown.namespace))?;
     writeln!(out, "{}", shown.consequence)?;
@@ -6364,14 +6489,6 @@ fn show(shown: &ops::Shown<'_>, out: &mut impl std::io::Write) -> std::io::Resul
 /// behind the modal, and a blocking read on the runtime is exactly what stops it — so Phase 12
 /// reads the answer from the event loop it already has, and takes this function's shape and not
 /// its body.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the operation that hands this to ops::perform is todo.md 3718, the next box \
-                  of this phase — the same shape ops.rs itself is in"
-    )
-)]
 fn ask(
     verdict: &str,
     confirm: &Confirm,
@@ -6380,12 +6497,25 @@ fn ask(
     out: &mut impl std::io::Write,
 ) -> ops::Answer {
     let prompt = match confirm {
-        Confirm::Press => "type yes and press enter to go ahead — anything else stops it: ",
+        Confirm::Press => "type yes and press enter to go ahead — anything else stops it:",
         Confirm::Name => {
-            "type the object's own name and press enter to go ahead — anything else stops it: "
+            "type the object's own name and press enter to go ahead — anything else stops it:"
         }
     };
-    if write!(out, "{verdict}\n{prompt}")
+    // **The prompt ends its own line** (`k8s-admin`, 2026-09-04). It used to end in `": "` with
+    // the cursor left on it, which is right for a terminal — the answer is typed there and the
+    // tty echoes the newline — and wrong for `echo yes | k8rs ops …`, the documented and only
+    // scripted form (NOTES § D218), where stdin echoes nothing and [`ending`]'s sentence lands
+    // glued to the back of the prompt. That sentence is the **only** place `recorded: false` is
+    // ever reported, NOTES § D220 ruling 1 having kept it out of the exit code, so a script
+    // grepping stderr for `k8rs: ` was the one reader that could not find it.
+    //
+    // **A newline after the read, or in front of the closing sentence, both put a blank line into
+    // an interactive run** — the echoed `\n` has already moved the cursor to column 0 by then.
+    // Ending the prompt line before the read is the one placement that costs nothing either way:
+    // piped, the answer is invisible and the next line starts clean; interactive, the answer is
+    // typed on the line below and echoes over it.
+    if writeln!(out, "{verdict}\n{prompt}")
         .and_then(|()| out.flush())
         .is_err()
     {
@@ -6403,6 +6533,262 @@ fn ask(
         ops::Answer::Confirmed
     } else {
         ops::Answer::Cancelled
+    }
+}
+
+/// **The seam, wired** — which operation runs, and what the two that are not wired yet still say.
+///
+/// **The choice is [`wired`]'s and not a `match` here**, because everything past the choice dials
+/// the reader's own cluster and no unit test can reach it: written as an arm, *delete match arm
+/// `(SCALE, Some(count))`* was a mutant nothing killed (`just mutants-diff`, 2026-09-04). Moving
+/// the decision into a function over two values leaves this one as the call it always was, and
+/// puts the thing that can be wrong where a test can read it.
+fn ops_performed(ready: Ready<'_>) -> Ended {
+    let Some(count) = wired(ready.operation, ready.count) else {
+        return Ended::refused(not_wired(
+            ready.operation,
+            ready.kind,
+            ready.name,
+            ready.count,
+            ready.namespace,
+        ));
+    };
+    scale_run(ready, count)
+}
+
+/// **Which operation this build actually performs, and with what** — `scale` and the count it was
+/// given, or `None` for the two whose arms are later boxes (todo.md 3776, 3810).
+///
+/// **The count comes back rather than being unwrapped on the far side.** [`ops_value`] refuses a
+/// `scale` with no count above this, so `(scale, None)` cannot arrive from a command line; asking
+/// for both at once means there is no second sentence about a missing count for it to arrive
+/// *by*.
+fn wired(operation: &Operation, count: Option<i32>) -> Option<i32> {
+    if operation.verb == SCALE { count } else { None }
+}
+
+/// **The runtime one `ops scale` needs, and nothing else.**
+///
+/// **Built here rather than in [`main`]**, which builds one for the watch path: an `ops` line is
+/// decided before the mode is, and a runtime started for every `k8rs ops bogus` would be threads
+/// spawned to print a usage text. The failure sentence is [`runtime_failure`]'s, said once for
+/// both callers.
+///
+/// **Multi-threaded, because [`ask`] blocks the thread it is on.** Headless that is harmless —
+/// the only thing waiting is the process — and it is the shape `main` already uses; a
+/// current-thread runtime would park kube's own buffer worker behind a `read_line`.
+fn scale_run(mut ready: Ready<'_>, count: i32) -> Ended {
+    // **The clock is checked before anything is dialled**, which is `Verb::Describe`'s own
+    // ordering (invariant 5, NOTES § D18): a machine whose clock will not read cannot stamp an
+    // audit line, and finding that out after a confirmation has been typed would be finding it
+    // out too late.
+    let now = match wall_clock() {
+        Ok(now) => now,
+        Err(problem) => return Ended::refused(format!("k8rs: {problem}")),
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(failed) => return Ended::refused(runtime_failure(&failed)),
+    };
+    // **Two readings of the clock, and the second one falls back to the first** (`ops::perform`
+    // reads it once for the attempt line and once for the landing time). `wall_clock` fails for a
+    // machine set before 1970 or outside jiff's range, which the check above has already ruled
+    // out; if it somehow says so mid-mutation, a stamp that is the attempt's own is the one
+    // honest thing left to write — it names a moment this run really was in.
+    let clock = move || wall_clock().unwrap_or_else(|_| now.clone()).0;
+    runtime.block_on(scale_connected(&mut ready, count, clock))
+}
+
+/// **The connection an `ops scale` opens, and the only part of this operation a test cannot
+/// reach** — everything above it and everything below it is a function over values.
+///
+/// **The kubeconfig is read once and used twice** (NOTES § D220 ruling 5). `k8s::contexts` is a
+/// lookup over two `Vec`s that are already in memory, so naming which cluster the audit line is
+/// about costs no second read of the file and no field on a frozen `k8s::Session`. Every address
+/// it hands back has been through `k8s::Address`'s own strip, which is where the userinfo a
+/// kubeconfig can carry is dropped (NOTES § D173) — so the credential that reached a screen once
+/// cannot reach a log file that is kept.
+///
+/// **The namespace is handed to `connect_with` as well**, so the session opens where the object
+/// is; a scale sends nothing that depends on it, and a coverage probe that would have run
+/// cluster-wide does not (`k8s::coverage` sends nothing at all when a namespace is named).
+async fn scale_connected(
+    ready: &mut Ready<'_>,
+    count: i32,
+    clock: impl Fn() -> k8s_openapi::jiff::Timestamp,
+) -> Ended {
+    let kubeconfig = match k8s::kubeconfig() {
+        Ok(kubeconfig) => kubeconfig,
+        Err(problem) => return Ended::refused(no_cluster(&problem)),
+    };
+    let server = current_server(&kubeconfig);
+    // `None`, because an `ops` line takes no `--context`: [`ops_words`] refuses every flag but
+    // the namespace, so the context is the kubeconfig's own — which is the same argument
+    // `current_server` was just asked with, and the two therefore name one entry.
+    let session = match k8s::connect_with(kubeconfig, None, ready.namespace).await {
+        Ok(session) => session,
+        Err(problem) => return Ended::refused(no_cluster(&problem)),
+    };
+    let reached = Reached {
+        client: &session.client,
+        // **Empty rather than a word invented here** when the context's name is nothing but
+        // characters invariant 9 strips (NOTES § D202's third state, on a connection that
+        // worked): `ops::Record::attempt_line` spells that gap, and spelling a second one here
+        // would be the second copy that goes stale.
+        context: session.context.as_deref().unwrap_or_default(),
+        server: &server,
+    };
+    scaled(
+        &reached,
+        ready,
+        count,
+        clock,
+        &mut std::io::stdin().lock(),
+        // **stderr, and stdout stays empty for an ops line** (NOTES § D220 ruling 3):
+        // `screens/once.md`'s split is *stdout is the findings, stderr is everything else*, and
+        // an operation produces no findings — so `k8rs ops … > out` writes an empty file.
+        &mut std::io::stderr(),
+    )
+    .await
+}
+
+/// **Which cluster an operation reached** — the three facts `ops::Mutation` needs that are about
+/// the connection rather than about the object.
+struct Reached<'a> {
+    client: &'a kube::Client,
+    /// The context this run opened, or `""` where nothing of its name survives invariant 9's
+    /// strip — `ops::Record::attempt_line` names that gap.
+    context: &'a str,
+    /// The `server:` that context reaches, or `""` where the kubeconfig names none or k8rs will
+    /// not state it (`k8s::Address`).
+    server: &'a str,
+}
+
+/// **The `server:` the audit line names**, off the same kubeconfig the connection is built from
+/// (NOTES § D220 ruling 5).
+///
+/// **A context name does not identify a cluster and the record has to** (`ops::Mutation::server`).
+/// `kubeadm` writes `kubernetes-admin@kubernetes` for every cluster it builds, and a context is
+/// renamed freely while the record outlives the file it was written from.
+///
+/// **`Undefined` and `Unreadable` both become the gap**, which is `ops::Record::attempt_line`'s
+/// own *not known*: one is an entry that names no cluster and the other is an address k8rs will
+/// not state without guessing, and neither is a server URL to write down. Telling them apart is
+/// `screens/context.md`'s job on a screen somebody is looking at, not a log line's.
+fn current_server(kubeconfig: &kube::config::Kubeconfig) -> String {
+    k8s::contexts(kubeconfig, None)
+        .into_iter()
+        .find(|choice| choice.current)
+        .and_then(|choice| match choice.server {
+            k8s::Address::Server(server) => Some(server),
+            k8s::Address::Undefined | k8s::Address::Unreadable => None,
+        })
+        .unwrap_or_default()
+}
+
+/// **What a run that never reached a cluster says** — the typed failure turned into a sentence by
+/// [`because`], which is the only source of one in this driver (`PRIOR-ART § C1`).
+///
+/// **It leads with *nothing was changed*, which [`live`]'s sibling sentence has no need to say.**
+/// A watch that cannot connect has changed nothing by definition; an operation that cannot
+/// connect is a line somebody typed in order to change something, and the first thing they need
+/// to know is that it did not.
+fn no_cluster(problem: &k8s::NotConnected) -> String {
+    format!(
+        "k8rs: nothing was changed — {}",
+        because(
+            problem.fault(),
+            "reach this cluster",
+            problem.renewal(),
+            None
+        )
+    )
+}
+
+/// **One scale, from a client to an exit code** — the whole of the operation that a test can
+/// drive, with the connection, the clock and the two streams handed in.
+///
+/// **Everything it prints goes to `out`, and `out` is stderr** (NOTES § D220 ruling 3). The
+/// consequence, the dry-run verdict, the prompt and the closing sentence are all *not findings*,
+/// so `k8rs ops scale … > out` leaves that file empty.
+///
+/// **The confirmation is read from `input`, one line, every invocation** — there is no `--yes`,
+/// because a flag meaning yes would make every scripted line an implicit write (invariant 2,
+/// § THE OPERATIONS DRIVER's head).
+///
+/// **`ops::Performed` is read for both of the things it holds** (todo.md 3749): the outcome
+/// decides the exit code, and `recorded` reaches the operator as words. A `Done` that could not
+/// be written down still exits `0` — the change happened, and a `2` there sends a script back to
+/// re-run a mutation that already landed (NOTES § D220 ruling 1).
+async fn scaled(
+    reached: &Reached<'_>,
+    ready: &mut Ready<'_>,
+    count: i32,
+    clock: impl Fn() -> k8s_openapi::jiff::Timestamp,
+    input: &mut impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+) -> Ended {
+    let scaling = ops::Scaling {
+        context: reached.context,
+        server: reached.server,
+        // **The kind the driver resolved, spelled out** — `deployment`, never `deploy`
+        // (`screens/dialogs.md` § Scale). The operation re-derives no scope from it
+        // (NOTES § D220 ruling 4).
+        kind: ready.kind.singular,
+        name: ready.name,
+        namespace: ready.namespace,
+        count,
+    };
+    let confirm = &ready.operation.confirm;
+    let name = ready.name;
+    // **One writer, two callbacks.** `ops::perform` holds both at once and each of them prints,
+    // so the stream is shared through a `RefCell` rather than borrowed twice — the borrow is
+    // taken for the length of one `writeln!` and both callbacks run on this one thread.
+    let out = std::cell::RefCell::new(out);
+    let performed = match ops::scale(
+        reached.client,
+        &scaling,
+        clock,
+        &mut ready.audit,
+        // **A failed write here is not reported and does not stop the run**, because the failure
+        // that matters is one line down: [`ask`] answers `ops::Answer::Cancelled` when it cannot
+        // print its own prompt, so a closed stderr ends as a cancellation rather than as a
+        // confirmation nobody could read.
+        |shown| {
+            let _ = show(shown, &mut **out.borrow_mut());
+        },
+        |checked| {
+            std::future::ready(ask(
+                checked.verdict(),
+                confirm,
+                name,
+                input,
+                &mut **out.borrow_mut(),
+            ))
+        },
+    )
+    .await
+    {
+        Ok(performed) => performed,
+        Err(refusal) => return Ended::refused(format!("k8rs: {refusal}")),
+    };
+    ending(&performed)
+}
+
+/// **What one performed mutation ends as** — the sentence and the exit code, in the one place
+/// `restart` (todo.md 3776) and `delete` (3810) will read them from too.
+///
+/// **Exit `0` for a cluster that changed and `2` for everything else** (NOTES § D220 ruling 1),
+/// and `recorded` deliberately does not move it: a `Done` k8rs could not write down still
+/// happened, and a `2` there sends a script back to re-run a mutation that already landed. That
+/// fact travels in the sentence instead, which is `ops::Performed::plainly`'s.
+fn ending(performed: &ops::Performed) -> Ended {
+    Ended {
+        said: format!("k8rs: {}", performed.plainly()),
+        code: if performed.changed() { 0 } else { 2 },
     }
 }
 
