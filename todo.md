@@ -3707,16 +3707,32 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       annotation and `managedFields` entry, and an apiserver error written
       verbatim into the audit log puts there what `scripts/sanitize.jq` exists to
       strip out of fixtures
-- [ ] The headless driver: the temporary main takes a subcommand
+- [x] The headless driver: the temporary main takes a subcommand
       (`k8rs ops scale deploy/web 3 -n payments`) so every operation is
       runnable — and scriptable in `just e2e` — before any key exists. This is
       what makes "prove it before binding it to a key" an actual step rather
       than an intention. **Scaffolding, not surface:** it lives in the
       temporary main and disappears when the console lands, so it does not trip
       the "a subcommand means it is time for clap" threshold
-      ([NOTES § D14](NOTES.md#d14--three-plan-corrections))
+      ([NOTES § D14](NOTES.md#d14--three-plan-corrections)) — built as the harness around
+      `perform` with **no operation wired**: the argument surface, the shared
+      `show`/`ask` callbacks, and a seam. The confirmation is one line on stdin
+      and **there is no flag that means yes**; five deliberate divergences from
+      kubectl and the three defects the reviews found are
+      [D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)
 - [ ] `scale` — via the **scale subresource** (`get_scale` / `patch_scale`),
-      not a full-object patch
+      not a full-object patch. **First operation, so four things land with it**
+      ([D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)):
+      the **audit sink**, because `perform` takes a `&mut impl Write` and nothing
+      has decided what it writes to — invariant 4 means no mutation runs until it
+      does, so the audit-log box lands here or before; an **exit-code
+      vocabulary**, because every ops line exits `2` today and
+      `echo no | k8rs ops delete … && kubectl get pod` reads a cancellation as
+      success; `Kind::namespaced` in the driver is a **second copy** of what
+      discovery already answers (`k8s::Browsable::namespaced`) and one of the two
+      must go; and `tests/binary.rs`'s usage line — *"this build reads files only
+      — it cannot reach a cluster"* — stops being true the moment this box lands,
+      which is `tester`'s file
 - [ ] `restart` — **not** `Api::restart(name)`: that helper writes
       `kube.kubernetes.io/restartedAt` where `kubectl rollout restart` writes
       `kubectl.kubernetes.io/restartedAt`, so the command log would teach a line

@@ -67,7 +67,8 @@ use std::collections::BTreeMap;
 /// reserved so a future `--exit-code` has somewhere to go (NOTES § D17).
 ///
 /// Every decision is in a function over values that is tested — [`run`] for what to report,
-/// [`live_context`] for which of the two this run is, [`cluster_run`] for how long a cluster run
+/// [`live_context`] for which of the two this run is, [`ops_line`] for whether it is the
+/// subcommand instead, [`cluster_run`] for how long a cluster run
 /// may take and [`live`] for what it prints,
 /// [`stdout_failure`] for what a failed write costs, [`runtime_failure`] for what a runtime that
 /// would not start says — and what is left here is argv, the choice of stream, starting the
@@ -79,8 +80,10 @@ use std::collections::BTreeMap;
 fn main() {
     use std::io::Write;
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // **Before the mode is chosen, because a mistyped flag is wrong in both of them.**
-    let problem = match mistyped(&args) {
+    // **Before the mode is chosen, because a mistyped flag is wrong in both of them** — and
+    // [`ops_line`] before *that*, because a subcommand's words are bare and every one of them
+    // would come back out of [`mistyped`] as a stray path (§ THE OPERATIONS DRIVER).
+    let problem = match ops_line(&args).or_else(|| mistyped(&args)) {
         Some(sentence) => sentence,
         None => match live_context(&args) {
             // **`--live` has no happy ending to return** — it prints as it goes and comes back
@@ -1757,10 +1760,15 @@ fn shown(value: &str, most: usize) -> String {
 /// **One sentence and not two**, because there is one rule (`k8s::namespace_name`) and a second
 /// wording of it is a second thing that can drift from the check. `subject` is what the reader
 /// typed it under, so the sentence still names the flag they have to fix.
-fn not_a_namespace(subject: &str, value: &str) -> String {
+///
+/// **`usage` is a parameter because there are two synopses and only one rule.** The flag line has
+/// [`USAGE`] and the subcommand has [`ops_usage`], and a refusal that printed the file-driven
+/// synopsis under `k8rs ops scale deploy/web 3 -n PAYMENTS` would be answering a question the
+/// reader did not ask. The sentence above it stays one sentence, which is the point.
+fn not_a_namespace(subject: &str, value: &str, usage: &str) -> String {
     format!(
         "k8rs: {subject} needs the name of a namespace, and {} is not one — a namespace is \
-         lowercase letters, digits and dashes, up to {} characters\n{USAGE}",
+         lowercase letters, digits and dashes, up to {} characters\n{usage}",
         shown(value, k8s::NAMESPACE_MAX),
         k8s::NAMESPACE_MAX
     )
@@ -1888,7 +1896,7 @@ fn mistyped(args: &[String]) -> Option<String> {
         // (the security gate's *sizes are bounded* row). 63 characters is enough to recognise
         // what was typed.
         Some(Some(value)) if !k8s::namespace_name(value) => {
-            return Some(not_a_namespace(NAMESPACE, value));
+            return Some(not_a_namespace(NAMESPACE, value, USAGE));
         }
         Some(Some(_)) | None => {}
     }
@@ -1939,6 +1947,7 @@ fn mistyped(args: &[String]) -> Option<String> {
                 return Some(not_a_namespace(
                     &format!("the namespace in {OBJECT}"),
                     namespace,
+                    USAGE,
                 ));
             }
             if !k8s::object_name(name) {
@@ -5576,3 +5585,781 @@ async fn yaml_run(
 }
 
 // --- ONE OBJECT'S OWN STORY END ---
+
+// --- THE OPERATIONS DRIVER START ---
+//
+// **The subcommand every write is proven with before a key is bound to one** (todo.md § Phase 7).
+// It lives in the temporary driver and goes away with it when the console lands at Phase 12, so
+// nothing shipped has a subcommand and invariant 10's *a subcommand means it is time for clap*
+// threshold is not tripped — the carve-out is NOTES § D14 item 2's, decided in advance. Parsed by
+// hand in the style of the flags above, and no dependency arrives with it.
+//
+// **Nothing here changes anything, and that is the whole shape of this step.** `ops.rs` holds the
+// contract and no operation: `scale` (todo.md 3718), `restart` (3720) and `delete` (3754) each
+// wire one arm where [`not_wired`] stands, and until one does, a line with nothing wrong in it
+// ends there. What this region *is* is the three things all three operations will share — the
+// argument surface, the headless [`show`] and the headless [`ask`].
+//
+// **The confirmation is an input the caller supplies per invocation, and there is no `--yes`.**
+// Invariant 2 is not relaxed by being headless. A flag meaning *yes* would make every scripted
+// line an implicit write — the one thing the invariant exists to prevent — and would turn the
+// `just e2e` job into the bulk mutation invariant 2 also refuses. So the answer is read from
+// standard input, one line per invocation: `echo yes | k8rs ops restart deploy/web -n payments`,
+// and for a delete the object's own name, which keeps *typing the name* structural rather than
+// decorative (PM constraint, 2026-09-04). A script has to say what it is confirming.
+//
+// **What the driver checks is the *shape* of the line, and not which kind each operation
+// applies to.** NOTES § Operations gives `scale` deploy/sts/rs and `restart` deploy/sts/ds;
+// this driver accepts any kind in [`KINDS`] for any operation, because *what can be scaled* is
+// a fact the operation holds and the cluster confirms, and a second copy of that matrix here
+// is a second thing to keep in step. `k8rs ops scale pod/web 3` therefore reaches the seam and
+// is refused by `scale`'s own box, not by this one.
+//
+// **[`show`] and [`ask`] take a writer rather than reaching for a stream**, and the one an
+// operation will hand them is stderr: `screens/once.md`'s split is *stdout is the findings,
+// stderr is everything else*, and a confirmation is not a report — so `k8rs ops … > out` still
+// shows the operator what they are agreeing to. Nothing here chooses it yet, because nothing here
+// calls them; what the writer buys today is that both are exercised against a buffer instead of
+// against a terminal nobody has.
+
+/// The subcommand, and the only bare word this driver reads as one.
+///
+/// **It has to be the first word** ([`ops_at`]), which costs a file literally named `ops` —
+/// `./ops` still reads it, the same escape hatch and the same price [`mistyped`] already
+/// documents for a file named `--x`.
+const OPS: &str = "ops";
+
+/// **How a confirmation is given** — invariant 2's *a keypress*, and its *typing the object name*
+/// for the destructive half, as the two things a script can be made to supply.
+enum Confirm {
+    /// Any deliberate yes. The headless spelling is the word `yes` ([`ask`]).
+    Press,
+    /// The object's own name, typed. The ctrl-key-slip guard, which `screens/dialogs.md` § Delete
+    /// gives `delete` and `drain` and nothing else.
+    Name,
+}
+
+/// **One operation's argument surface** — NOTES § Operations' own table, cut to what a command
+/// line can be checked against before anything has connected.
+struct Operation {
+    /// The word after [`OPS`].
+    verb: &'static str,
+    /// **What the one extra word is called**, or `None` for an operation that takes none. The one
+    /// operation that has one takes a count ([`refuse_count`]); a second operation with a value
+    /// of some other shape is what turns this into a type rather than a name.
+    value: Option<&'static str>,
+    /// **Which confirmation invariant 2 requires, and it is this driver's table for now.**
+    /// [`ops::Mutation`] carries no such fact — `ops::Answer::Confirmed` says somebody agreed and
+    /// nothing says *how* — so a press-only delete is caught by review rather than by the
+    /// compiler. todo.md 3754 (`delete`) is where a `Confirm` on the mutation makes it a type
+    /// error; until then it is one table in one place and not a branch per operation.
+    ///
+    /// **When 3754 lands, this field is deleted and not kept beside the new one.** Two tables
+    /// answering *how is this confirmed* is the second copy NOTES § D103 is named for, and the
+    /// one that goes stale is always this one — the driver disappears at Phase 12 and nobody
+    /// reads it again. [`ops_usage`] and [`ask`] both read this field, so both move with it.
+    confirm: Confirm,
+}
+
+/// **The three operations Phase 7 wires**, in the order NOTES § Operations lists them.
+///
+/// **`cordon`, `drain` and `undo` are v0.2 and are deliberately absent**: an operation nobody has
+/// written is a word this driver would accept and then refuse for the wrong reason.
+const OPERATIONS: [Operation; 3] = [
+    Operation {
+        verb: "scale",
+        value: Some("copies"),
+        confirm: Confirm::Press,
+    },
+    Operation {
+        verb: "restart",
+        value: None,
+        confirm: Confirm::Press,
+    },
+    Operation {
+        verb: "delete",
+        value: None,
+        confirm: Confirm::Name,
+    },
+];
+
+/// **One kind an operation can be pointed at, and whether its objects live in a namespace.**
+///
+/// **This is not invariant 12's per-kind code and it is not the browser.** The browser reads its
+/// kinds off discovery and `k8s::kind_named` resolves a word against them — which needs a cluster,
+/// and this driver refuses a line before it dials one. What is written down here is NOTES
+/// § Operations' *Applies to* column, in the file that disappears at Phase 12; the operations
+/// themselves resolve the kind against `k8s::Browsable`, whose `namespaced` is the cluster's own
+/// answer to the same question.
+struct Kind {
+    /// The word a manifest spells, and the one the sentences quote.
+    singular: &'static str,
+    /// `kubectl`'s short name for it, because `deploy/web` is what an operator's hands type.
+    short: &'static str,
+    /// Whether objects of this kind live in a namespace — the two namespace refusals are this and
+    /// nothing else.
+    namespaced: bool,
+}
+
+/// **Every kind Phase 7's operations can name.** The four workloads `scale` and `restart` apply
+/// to, the pod `delete` is written for, and the node — which is here because it is the one kind
+/// in the set that belongs to the whole cluster rather than to a namespace, and a rule about that
+/// which no line could reach would be a rule that is never run.
+const KINDS: [Kind; 6] = [
+    Kind {
+        singular: "deployment",
+        short: "deploy",
+        namespaced: true,
+    },
+    Kind {
+        singular: "statefulset",
+        short: "sts",
+        namespaced: true,
+    },
+    Kind {
+        singular: "daemonset",
+        short: "ds",
+        namespaced: true,
+    },
+    Kind {
+        singular: "replicaset",
+        short: "rs",
+        namespaced: true,
+    },
+    Kind {
+        singular: "pod",
+        short: "po",
+        namespaced: true,
+    },
+    Kind {
+        singular: "node",
+        short: "no",
+        namespaced: false,
+    },
+];
+
+/// **Which operation a word names**, or `None` for a word that names none.
+fn operation_named(word: &str) -> Option<&'static Operation> {
+    OPERATIONS.iter().find(|operation| operation.verb == word)
+}
+
+/// **Which kind a word names** — the singular, `kubectl`'s short name, or the plural.
+///
+/// **Named apart from `k8s::kind_named` on purpose.** That one resolves a word against what
+/// discovery said the cluster serves and is the answer the operations themselves will use; this
+/// one is six literals in the file that goes away at Phase 12. One word for both would be two
+/// answers to one question under one name.
+///
+/// **Matched in lower case for `k8s::kind_named`'s own reason**: `kubectl get Pod` works, and a
+/// reader who spells the kind the way every manifest does is not making a mistake. The plural is
+/// the singular with an `s`, which is true of all six and is not a general rule — the general one
+/// is discovery's, and it is what the operations themselves will use.
+fn known_kind(word: &str) -> Option<&'static Kind> {
+    let word = word.to_lowercase();
+    KINDS.iter().find(|kind| {
+        word == kind.singular || word == kind.short || word.strip_suffix('s') == Some(kind.singular)
+    })
+}
+
+/// **The usage `k8rs ops` prints**, built from [`OPERATIONS`] and [`KINDS`] so neither a fourth
+/// operation nor a second cluster-scoped kind can be added without appearing in it — and so the
+/// line that says *how to confirm* is read off the same field [`ask`] is handed, rather than
+/// being a second copy of it that can drift.
+///
+/// **The namespace is not in brackets, because brackets mean optional and it is not**
+/// (`k8s-admin`, 2026-09-04). `[-n <namespace>]` sat directly above [`ops_namespace`]'s refusal
+/// saying an operation will not guess one — required for five of the six kinds in [`KINDS`] and
+/// refused for the sixth. The per-operation lines below already correct `[<value>]`; nothing
+/// corrected this one, so the synopsis says it and names the exception.
+fn ops_usage() -> String {
+    let mut lines = vec![format!(
+        "usage: k8rs {OPS} <operation> <kind>/<name> [<value>] {NAMESPACE_SHORT} <namespace>"
+    )];
+    for operation in &OPERATIONS {
+        lines.push(format!(
+            "  {OPS} {} <kind>/<name>{} — {}",
+            operation.verb,
+            operation
+                .value
+                .map_or_else(String::new, |value| format!(" <{value}>")),
+            match operation.confirm {
+                Confirm::Press => "say yes to confirm",
+                Confirm::Name => "type the object's own name to confirm",
+            }
+        ));
+    }
+    lines.push(format!(
+        "The namespace is required — an operation will not guess which object it is about. A {} \
+         belongs to the whole cluster and takes none.",
+        joined(
+            &KINDS
+                .iter()
+                .filter(|kind| !kind.namespaced)
+                .map(|kind| kind.singular)
+                .collect::<Vec<_>>(),
+            " and "
+        )
+    ));
+    lines.push(
+        "Every operation asks before it changes anything and reads the answer from what you \
+         type — one line, on standard input, every time. There is no flag that means yes."
+            .to_string(),
+    );
+    lines.join("\n")
+}
+
+/// **Where [`OPS`] is on this line**, skipping the value of any flag that takes one — so a run
+/// watching a namespace called `ops` is a watch and not a subcommand.
+///
+/// **The value skip is the whole reason this is a walk and not a `position`.** `k8rs --live -n
+/// ops` names a namespace, and reading that word as the subcommand would refuse a perfectly
+/// ordinary run.
+fn ops_at(args: &[String]) -> Option<usize> {
+    let mut value_follows = false;
+    for (at, arg) in args.iter().enumerate() {
+        if std::mem::take(&mut value_follows) {
+            continue;
+        }
+        if arg == CONTEXT
+            || arg == NAMESPACE
+            || arg == NAMESPACE_SHORT
+            || arg == OBJECT
+            || arg == CONTAINER
+            || arg == KIND
+        {
+            value_follows = true;
+            continue;
+        }
+        if arg == OPS {
+            return Some(at);
+        }
+    }
+    None
+}
+
+/// **The sentence an `ops` line ends with, or `None` for a line that is not one.**
+///
+/// **It runs before [`mistyped`], because an `ops` line is not a flag line**: its operation, its
+/// object and its value are bare words, and every one of them would come back out of `mistyped`
+/// as a stray path.
+///
+/// **[`OPS`] anywhere but first is refused rather than fallen through.** `k8rs --once ops delete
+/// pod/web` would otherwise reach the file path and come back about a file called `--once`, which
+/// is jargon about a word the reader did not mean as a filename (invariant 14). The cost is a
+/// second file named `ops` on a file-driven line, which `./ops` still reads.
+///
+/// **[`READ_ONLY`] is read here, before the position is, and in exactly one place**
+/// (`k8s-admin`, 2026-09-04). It used to be [`ops_run`]'s first line, which only a line with
+/// `ops` *first* ever reached — so `k8rs --read-only ops delete pod/web -n payments` was answered
+/// with the word-order sentence, and that sentence's rewrite drops every other flag on the line:
+/// k8rs told an operator to retype their delete without their safety flag, and once todo.md 3718
+/// wires an arm, following it once is the delete. Two paths where one checks the flag and one
+/// does not is the shape `PRIOR-ART § G2` tags immune — *a new view cannot forget to check a flag
+/// — there is nothing to call* — and k9s #2434 is the same precedence going the unsafe way. A
+/// line with no bare `ops` word on it is still nobody's business here.
+///
+/// **The scan is over the whole line and [`ops_at`]'s value skip is not applied to it**, which
+/// costs one edge and buys the safe direction: `k8rs --live -n --read-only ops scale deploy/web
+/// 3` is `ops` at index 2 with `--read-only` read here as the flag and there as `-n`'s value. The
+/// line is wrong either way — `--read-only` is not a namespace `k8s::namespace_name` accepts —
+/// and of the two wrong answers the one that refuses to write is the one to give.
+fn ops_line(args: &[String]) -> Option<String> {
+    let at = ops_at(args)?;
+    if args.iter().any(|arg| arg == READ_ONLY) {
+        return Some(format!(
+            "k8rs: {READ_ONLY} was asked for, so k8rs will not change anything — run it without \
+             that flag to use an operation"
+        ));
+    }
+    if at == 0 {
+        return Some(ops_run(&args[1..]));
+    }
+    Some(format!(
+        "k8rs: `{OPS}` has to be the first word on the line — write it as \
+         `k8rs {OPS} <operation> <kind>/<name>`\n{}",
+        ops_usage()
+    ))
+}
+
+/// **What this driver reads as a flag**: a word with a leading `-` that is not a whole number.
+///
+/// **A signed number is not a flag.** `k8rs ops scale deploy/web -3` is somebody asking for minus
+/// three copies, and answering it with *`-3` is not a flag k8rs has* answers a question about
+/// spelling when the question is about the number ([`refuse_count`]).
+fn flag_word(word: &str) -> bool {
+    word.starts_with('-')
+        && !word[1..]
+            .chars()
+            .all(|character| character.is_ascii_digit())
+}
+
+/// **The bare words on an `ops` line** — the operation, the object, and the one value some
+/// operations take — with the namespace flag and its value taken out.
+///
+/// **A flag `k8rs ops` does not have is refused and not dropped**, which is the rule [`mistyped`]
+/// holds for a cluster run and for the same reason: a word silently skipped is a run doing
+/// something other than what was typed. It catches `-nginx` and `-npayments` on the way past,
+/// which is where [`NAMESPACE_SHORT`]'s attached form is refused for the flag line.
+///
+/// **The refused word is echoed through [`shown`] and not [`sanitize`]**, which is the one echo
+/// in this region that was neither labelled nor bounded (`k8s-admin`, 2026-09-04). A `--namespace`
+/// with a zero-width space in it strips to `--namespace`, so the sentence said *`--namespace` is
+/// not a flag k8rs has — the only one it takes is `--namespace`* and sent the reader to fix a
+/// line that looks correct; `shown` says the word was cleaned, which is invariant 4's *the two
+/// records may not lie about which string they mean*. It also cuts at [`k8s::NAME_MAX`], where
+/// every sibling refusal on this line already cuts.
+///
+/// **The namespace may be named once**, and a second one is refused rather than resolved (PM
+/// ruling, 2026-09-04). [`value_of`]'s documented first-wins is right for the read path and
+/// cannot be carried onto a write: `kubectl` is last-wins, so first-wins would send a mutation to
+/// whichever of the two the reader's own habit says is the other one. It is also the
+/// contradiction this driver already rules out twice — the sentence above, and
+/// [`ops_namespace`]'s refusal to guess a namespace nobody typed. Refusing to guess when none was
+/// typed and guessing when two were is not one rule.
+fn ops_words(rest: &[String]) -> Result<Vec<&str>, String> {
+    let mut words = Vec::new();
+    let mut namespaces = 0usize;
+    let mut value_follows = false;
+    for arg in rest {
+        if std::mem::take(&mut value_follows) {
+            continue;
+        }
+        if arg == NAMESPACE || arg == NAMESPACE_SHORT {
+            namespaces += 1;
+            value_follows = true;
+            continue;
+        }
+        if [NAMESPACE, NAMESPACE_SHORT]
+            .iter()
+            .any(|flag| arg.strip_prefix(flag).is_some_and(|r| r.starts_with('=')))
+        {
+            namespaces += 1;
+            continue;
+        }
+        if flag_word(arg) {
+            return Err(format!(
+                "k8rs: {} is not a flag `k8rs {OPS}` has — the only one it takes is \
+                 {NAMESPACE_SHORT} or {NAMESPACE}, which says which namespace the object is \
+                 in\n{}",
+                shown(arg, k8s::NAME_MAX),
+                ops_usage()
+            ));
+        }
+        words.push(arg.as_str());
+    }
+    if namespaces > 1 {
+        return Err(format!(
+            "k8rs: this line names the namespace more than once, and `k8rs {OPS}` will not guess \
+             which of them you meant — name it once\n{}",
+            ops_usage()
+        ));
+    }
+    Ok(words)
+}
+
+/// **Whether the number of copies is one k8rs will send**, as the sentence that refuses it.
+///
+/// **Three refusals and not one**, because they are three different mistakes: a word that is not
+/// a number at all, a count below zero, and a count no Kubernetes field can hold — `replicas` is
+/// an `i32` on every workload and on the scale subresource. A reader told only *that is not a
+/// valid number* about `-1` has to guess which of the three they hit.
+///
+/// **The two bound sentences are one shape and both finish** (`k8s-admin` and `tester`,
+/// 2026-09-04). *the number of copies cannot be less than none, and -3 is* stopped mid-clause
+/// where its sibling named the bound, and *less than none* asks a beginner to read *none* as a
+/// number (invariant 14). Each names the end of the range it is about, in the same words.
+///
+/// **It answers `Option<String>` rather than the number**, because nothing here sends anything:
+/// todo.md 3718 is where the value is needed and where this grows a `Result`.
+fn refuse_count(word: &str) -> Option<String> {
+    let most = i64::from(i32::MAX);
+    let refusal = |sentence: String| Some(format!("k8rs: {sentence}\n{}", ops_usage()));
+    let below_none = || {
+        refusal(format!(
+            "{} is fewer copies than Kubernetes can hold — the fewest it takes is 0",
+            shown(word, k8s::NAME_MAX)
+        ))
+    };
+    let too_many = || {
+        refusal(format!(
+            "{} is more copies than Kubernetes can hold — the most it takes is {most}",
+            shown(word, k8s::NAME_MAX)
+        ))
+    };
+    // **A run of digits too long for an `i64` is still a number**, and only its sign says which
+    // of the two sentences above it earns. Told *`99999999999999999999999` is not a whole number*
+    // a reader goes looking for a typo that is not there — a sentence that is not true of the
+    // word it is about, which is the class NOTES § D214 is named for one file over.
+    let signed = word.strip_prefix(['+', '-']).unwrap_or(word);
+    let digits = !signed.is_empty() && signed.bytes().all(|byte| byte.is_ascii_digit());
+    match word.parse::<i64>() {
+        Ok(count) if count < 0 => below_none(),
+        Ok(count) if count > most => too_many(),
+        Ok(_) => None,
+        Err(_) if digits && word.starts_with('-') => below_none(),
+        Err(_) if digits => too_many(),
+        Err(_) => refusal(format!(
+            "the number of copies has to be a whole number, and {} is not one",
+            shown(word, k8s::NAME_MAX)
+        )),
+    }
+}
+
+/// **The sentence a line with nothing wrong in it ends with, and the seam an operation lands
+/// in.**
+///
+/// `scale` (todo.md 3718), `restart` (3720) and `delete` (3754) each replace this call with their
+/// own — building an `ops::Mutation` and handing it, [`show`] and [`ask`], to `ops::perform`.
+/// Until one does, the honest answer is that k8rs read the line and has nothing behind it.
+///
+/// **It names everything it parsed, the value included.** *k8rs cannot do that yet* alone would
+/// go green against a parser that read the wrong object, and this is the one line `just e2e` can
+/// compare a well-formed invocation against while there is nothing to run. The value was the one
+/// parsed thing it left out, so `scale …/web 3` and `scale …/web 0` printed one identical line —
+/// and the value is the one that decides how many pods exist (`k8s-admin`, 2026-09-04).
+///
+/// **It promises no later step, because for five pairs there is none** (`k8s-admin` and `tester`,
+/// 2026-09-04). Against NOTES § Operations' *Applies to* column, `scale` on a daemonset, a pod or
+/// a node and `restart` on a replicaset or a node are outside it permanently, so *the operation
+/// itself is a later step* was false of every one of them. This driver deliberately holds no copy
+/// of that matrix — the operation holds it, the cluster confirms it, and `screens/dialogs.md`
+/// rule 4 shows it is not even uniform (`restart pod/web` *is* a delete and does belong) — so
+/// what had to stop claiming is the sentence.
+fn not_wired(
+    operation: &Operation,
+    kind: &Kind,
+    name: &str,
+    value: Option<&str>,
+    namespace: Option<&str>,
+) -> String {
+    format!(
+        "k8rs: k8rs read this as `{}` on {}/{}{}{} — and this build reads the line and does \
+         nothing else",
+        operation.verb,
+        kind.singular,
+        sanitize(name),
+        within(namespace),
+        operation
+            .value
+            .zip(value)
+            .map_or(String::new(), |(called, word)| format!(
+                ", {} {called}",
+                sanitize(word)
+            ))
+    )
+}
+
+/// **One `ops` line, from the word after [`OPS`] to the sentence it ends with.**
+///
+/// **The order of the refusals is the order [`mistyped`] already keeps: the more specific
+/// complaint about the same line first.** `--read-only` outranks everything, because a run that
+/// was told not to write has nothing to say about a misspelled kind. Then the flags, then the
+/// operation — which is the word every later sentence names — then the object, then the value,
+/// then the namespace.
+///
+/// **[`READ_ONLY`] is not one of them and is not checked here**: it outranks the word order as
+/// well as the line, so it is [`ops_line`]'s and read once. This is not todo.md 3798's box —
+/// that one makes the flag structurally load-bearing for the console; what these two functions do
+/// is keep this driver from being the first thing that makes it false. `screens/dialogs.md`
+/// rule 6 is unambiguous: under `--read-only` none of this is reachable.
+fn ops_run(rest: &[String]) -> String {
+    let words = match ops_words(rest) {
+        Ok(words) => words,
+        Err(refusal) => return refusal,
+    };
+    let Some(verb) = words.first() else {
+        return ops_usage();
+    };
+    let Some(operation) = operation_named(verb) else {
+        return format!(
+            "k8rs: k8rs has no operation called {} — the ones it has are {}\n{}",
+            shown(verb, k8s::NAME_MAX),
+            joined(
+                &OPERATIONS
+                    .iter()
+                    .map(|operation| operation.verb)
+                    .collect::<Vec<_>>(),
+                " and "
+            ),
+            ops_usage()
+        );
+    };
+    let Some(object) = words.get(1) else {
+        return format!(
+            "k8rs: `{OPS} {verb}` has to be told which object to work on, written as \
+             `<kind>/<name>`\n{}",
+            ops_usage()
+        );
+    };
+    let (kind, name) = match ops_object(operation, object) {
+        Ok(both) => both,
+        Err(refusal) => return refusal,
+    };
+    if let Some(refusal) = ops_value(operation, &words) {
+        return refusal;
+    }
+    let namespace = match ops_namespace(operation, kind, rest) {
+        Ok(namespace) => namespace,
+        Err(refusal) => return refusal,
+    };
+    not_wired(operation, kind, name, words.get(2).copied(), namespace)
+}
+
+/// **The `<kind>/<name>` an operation is pointed at**, or the sentence that refuses it.
+///
+/// **Split by [`split_object`], which splits on the *first* `/`** — so `deploy/web/oops` keeps the
+/// slash in the name half and is refused by `k8s::object_name` there, rather than quietly
+/// becoming a request path this driver wrote for somebody else (the security gate's *names build
+/// paths* row). The flag line's `[namespace/]name` and this line's `kind/name` are two different
+/// meanings for one separator and one splitter, which is why the sentences here name the kind.
+///
+/// **An empty half costs the clause rather than printing an empty one**, which is the shape
+/// [`mistyped`] settled for [`OBJECT`]: `--object web/` came back *"and  is not one"*.
+fn ops_object<'a>(
+    operation: &Operation,
+    object: &'a str,
+) -> Result<(&'static Kind, &'a str), String> {
+    let verb = operation.verb;
+    let refusal = |sentence: String| Err(format!("k8rs: {sentence}\n{}", ops_usage()));
+    let (kind, name) = split_object(object);
+    let Some(kind) = kind else {
+        return refusal(format!(
+            "`{OPS} {verb}` needs the kind as well as the name, written as `<kind>/<name>` — \
+             `deploy/web` and not `web`"
+        ));
+    };
+    if kind.is_empty() {
+        return refusal(format!(
+            "`{OPS} {verb}` was given nothing before the `/`, so it names no kind — write it as \
+             `<kind>/<name>`"
+        ));
+    }
+    if name.is_empty() {
+        return refusal(format!(
+            "`{OPS} {verb}` was given nothing after the `/`, so it names no object — write it as \
+             `<kind>/<name>`"
+        ));
+    }
+    let Some(kind) = known_kind(kind) else {
+        return refusal(format!(
+            "k8rs does not work on a kind called {} — the ones an operation can be pointed at \
+             are {}",
+            shown(kind, k8s::NAME_MAX),
+            joined(
+                &KINDS.iter().map(|kind| kind.singular).collect::<Vec<_>>(),
+                " and "
+            )
+        ));
+    };
+    if !k8s::object_name(name) {
+        return refusal(format!(
+            "{} is not the name of an object — a name is letters, digits, dashes and dots, up to \
+             {} characters",
+            shown(name, k8s::NAME_MAX),
+            k8s::NAME_MAX
+        ));
+    }
+    Ok((kind, name))
+}
+
+/// **Whether the words after the object are the ones this operation takes**, as the sentence that
+/// refuses them.
+///
+/// **Two ways to be wrong and two sentences**: an operation whose value is missing, and words
+/// after an operation that takes none. Guessing either way is how a scaled-to-nothing deployment
+/// gets typed by accident.
+///
+/// **The missing-value sentence shows the form and not a filled-in line** (`k8s-admin`,
+/// 2026-09-04). It read *write it as `k8rs ops scale deploy/web 3 -n payments`*, which is a
+/// complete, runnable scale of a different object in a different namespace, printed at the moment
+/// a tired operator is looking for a line to copy. Every other *write it as* in this region is a
+/// fragment or a placeholder; the general form is in [`ops_usage`] underneath either way, so the
+/// concrete one added hazard and no information.
+fn ops_value(operation: &Operation, words: &[&str]) -> Option<String> {
+    let wanted = 2 + usize::from(operation.value.is_some());
+    let verb = operation.verb;
+    if let Some(extra) = words.get(wanted) {
+        return Some(format!(
+            "k8rs: `{OPS} {verb}` does not know what to do with {} — it reads {} and nothing \
+             else\n{}",
+            shown(extra, k8s::NAME_MAX),
+            operation.value.map_or_else(
+                || "the object".to_string(),
+                |value| format!("the object and the {value}")
+            ),
+            ops_usage()
+        ));
+    }
+    match operation.value {
+        None => None,
+        Some(value) => match words.get(2) {
+            None => Some(format!(
+                "k8rs: `{OPS} {verb}` also needs the {value} — write it as \
+                 `k8rs {OPS} {verb} <kind>/<name> <{value}>`\n{}",
+                ops_usage()
+            )),
+            // The one operation that takes a value takes a count, which is what [`Operation`]'s
+            // own field says and what turns into a type when a second one does not.
+            Some(word) => refuse_count(word),
+        },
+    }
+}
+
+/// **Which namespace the object is in, or `None` for a kind that belongs to the whole cluster** —
+/// and the two refusals that come off [`Kind::namespaced`] and nothing else.
+///
+/// **A namespaced object with no namespace on the line is refused rather than defaulted.** Every
+/// read in this driver falls back to the kubeconfig's own namespace, and a write may not: the
+/// current namespace is the one thing on a write's target that the reader did not type, and
+/// `k8rs ops delete pod/web` against whichever namespace a shell happened to be pointing at is
+/// the silent-wrong-object class this file refuses five other ways round (PM ruling is that the
+/// caller supplies the confirmation per invocation; this is the same rule about the target).
+///
+/// **A namespace for a node is refused rather than ignored**, for the reason it would be a
+/// namespace nobody's object is in — `screens/dialogs.md` rule 1 gives a cluster-scoped object
+/// the bare name for exactly this.
+fn ops_namespace<'a>(
+    operation: &Operation,
+    kind: &Kind,
+    rest: &'a [String],
+) -> Result<Option<&'a str>, String> {
+    let verb = operation.verb;
+    match namespace_arg(rest) {
+        Some(None) | Some(Some("")) => Err(format!(
+            "k8rs: {NAMESPACE} needs the name of a namespace\n{}",
+            ops_usage()
+        )),
+        Some(Some(value)) if !k8s::namespace_name(value) => {
+            Err(not_a_namespace(NAMESPACE, value, &ops_usage()))
+        }
+        Some(Some(_)) if !kind.namespaced => Err(format!(
+            "k8rs: a {} belongs to the whole cluster and is in no namespace, so `{OPS} {verb}` \
+             will not take {NAMESPACE_SHORT} — leave it off\n{}",
+            kind.singular,
+            ops_usage()
+        )),
+        Some(Some(value)) => Ok(Some(value)),
+        None if kind.namespaced => Err(format!(
+            "k8rs: `{OPS} {verb}` changes something, so it will not guess which namespace the {} \
+             is in — name it with `{NAMESPACE_SHORT} <namespace>`\n{}",
+            kind.singular,
+            ops_usage()
+        )),
+        None => Ok(None),
+    }
+}
+
+/// **`ops::perform`'s first callback, headless** — the dialog `screens/dialogs.md` draws, printed
+/// instead.
+///
+/// **Three lines and the order is the mockup's**: who this is about, what is about to happen in
+/// plain language, then the equivalent kubectl command under it — *the consequence is stated
+/// above the command, never instead of it* (`screens/dialogs.md`, first line). The dry-run verdict
+/// is not here and cannot be: `show` runs before the check goes out, which is the whole reason it
+/// is a separate callback (NOTES § D214).
+///
+/// **Nothing here adds a guard of its own.** Everything on an `ops::Shown` came out of
+/// `ops::Record::of`, which is the one place a mutation is cleaned (invariant 9, NOTES § D213);
+/// a second guard here would say this file distrusts that one.
+///
+/// **The namespace is nonetheless cleaned a second time and the object beside it is not**, which
+/// is worth saying because the two fields are printed by different code (`k8s-admin`,
+/// 2026-09-04). `object` and `consequence` and `kubectl` are written straight out; `namespace`
+/// goes through [`within`], the one helper that spells ` in payments`, and `within` strips
+/// because its other callers need it to. So that one field meets [`sanitize`] after `k8s::text`
+/// already had it, under a different rule — `text` puts a space where an unprintable whitespace
+/// was, `sanitize` deletes it. On a value `Record::of` has cleaned there is nothing left for
+/// either to find, so this is a second pass and not a second answer; the alternative is a second
+/// spelling of ` in <namespace>` in this file, which is the copy that drifts.
+///
+/// **The `$` line is display text**: k8rs does not execute it and nothing in it is fed back into
+/// a process (invariant 4, the security gate's *the command log is display text* row).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the operation that hands this to ops::perform is todo.md 3718, the next box \
+                  of this phase — the same shape ops.rs itself is in"
+    )
+)]
+fn show(shown: &ops::Shown<'_>, out: &mut impl std::io::Write) -> std::io::Result<()> {
+    writeln!(out, "{}{}", shown.object, within(shown.namespace))?;
+    writeln!(out, "{}", shown.consequence)?;
+    writeln!(out, "$ {}", shown.kubectl)
+}
+
+/// **`ops::perform`'s second callback, headless** — the confirmation, read as one line from
+/// standard input.
+///
+/// **`verdict` and not the `ops::Checked` it comes off.** `ops::perform` hands `ask` a
+/// `Checked<Response>`; what a headless confirmation reads off it is `Checked::verdict`, and a
+/// generic parameter that exists only to be ignored is a signature claiming to use something it
+/// does not. The operation's closure is `|checked| async move { ask(checked.verdict(), …) }`.
+///
+/// **Two of `ops::Answer`'s four variants are unreachable from here, and that is a fact about
+/// running headless rather than a gap.** `Gone` and `Changed` are what a dialog answers because a
+/// watch is still running behind it (NOTES § D22, `screens/dialogs.md` § The object went away);
+/// a script has no watch, so nothing can tell it the object moved. The console binds all four.
+///
+/// **Everything that is not the confirmation is `Cancelled`, including every failure.** End of
+/// input, a `^D`, a read that errors, a prompt that could not be printed: nobody confirmed it, so
+/// nothing was confirmed. The safe direction is the only one invariant 2 leaves.
+///
+/// **Which is why an empty `name` confirms nothing** (`k8s-admin`, 2026-09-04). `typed.trim() ==
+/// wanted` held for `("", "")`, so end of input against an object with no name was invariant 2's
+/// *typing the object name* satisfied by typing nothing — the doc above claiming the opposite.
+/// No argv reaches it, because `k8s::object_name("")` is false; this is the callback all three
+/// operations wire, `delete` (todo.md 3754) is its only [`Confirm::Name`] caller, and a caller
+/// taking the name off an `ops::Shown` takes `ops::Record::of`'s `k8s::text`-cleaned copy, which
+/// *can* clean to empty. One guard in the function every caller routes through, not one per
+/// caller.
+///
+/// **The console is not this function.** `read_line` blocks the thread it is on, and this one is
+/// called from inside `ops::perform`'s `async` closure: headless that is harmless, because the
+/// only thing waiting is the process. `screens/dialogs.md` requires the watch to keep running
+/// behind the modal, and a blocking read on the runtime is exactly what stops it — so Phase 12
+/// reads the answer from the event loop it already has, and takes this function's shape and not
+/// its body.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the operation that hands this to ops::perform is todo.md 3718, the next box \
+                  of this phase — the same shape ops.rs itself is in"
+    )
+)]
+fn ask(
+    verdict: &str,
+    confirm: &Confirm,
+    name: &str,
+    input: &mut impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+) -> ops::Answer {
+    let prompt = match confirm {
+        Confirm::Press => "type yes and press enter to go ahead — anything else stops it: ",
+        Confirm::Name => {
+            "type the object's own name and press enter to go ahead — anything else stops it: "
+        }
+    };
+    if write!(out, "{verdict}\n{prompt}")
+        .and_then(|()| out.flush())
+        .is_err()
+    {
+        return ops::Answer::Cancelled;
+    }
+    let mut typed = String::new();
+    if input.read_line(&mut typed).is_err() {
+        return ops::Answer::Cancelled;
+    }
+    let wanted = match confirm {
+        Confirm::Press => "yes",
+        Confirm::Name => name,
+    };
+    if !wanted.is_empty() && typed.trim() == wanted {
+        ops::Answer::Confirmed
+    } else {
+        ops::Answer::Cancelled
+    }
+}
+
+// --- THE OPERATIONS DRIVER END ---

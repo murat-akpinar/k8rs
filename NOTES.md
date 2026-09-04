@@ -239,6 +239,7 @@ its line moving with it.
 - [D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04) — the API dry-runs all three: it was kube's convenience helper that did not, and the annotation it writes is not kubectl's
 - [D216](#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04) — the dry-run goes in a different place per verb, and the checkout that destroyed a box
 - [D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04) — `Strict` on every write that can carry it, and the 422 that hands back the object you sent
+- [D218](#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04) — the headless driver: five divergences from kubectl, and why piping a word is not `--yes`
 
 ## Why it exists — where the gap is
 
@@ -18652,3 +18653,34 @@ what keeps it on the PM's side of
 split: the write into the fixture cluster is the PM's to run, and a
 `--dry-run=server` patch mutated nothing — `healthy-deploy` came back at the same
 `resourceVersion` the 422 had echoed.)*
+
+### D218 — the headless driver: five divergences from kubectl, and why piping a word is not `--yes` (2026-09-04)
+
+The binary's **first subcommand** — `k8rs ops <operation> <kind>/<name> [<value>] -n <namespace>` — exists so every write can be proven headlessly before a key is bound to one, and it disappears at Phase 12
+([D14](#d14--three-plan-corrections) item 2 pre-authorised it, so no `clap` threshold is crossed). It builds the harness around `perform` and wires no operation: the argument surface, the `show` and `ask` callbacks all three operations will share, and a seam. **Most of the box is its refusals**, which is the point — they are what `just e2e` scripts against.
+
+**The confirmation is one line on stdin per invocation, and there is no flag that means yes.** `yes` for a press-confirm, the object's own name for a delete. `--yes` was refused because it makes every scripted invocation an implicit write and one template edit converts every ops line in a repo.
+
+**The question that deserves a straight answer is whether piping a constant string is meaningfully different from `--yes`, and the honest answer is: for two of the three, barely — but the default is what matters.** `k8s-admin` put it plainly and it is worth keeping: `echo yes | k8rs ops restart …` *is* `--yes` with more typing, and a shell loop over `kubectl get deploy -o name` is a bulk mutation this design does not stop and should not — that is the operator's shell, and invariant 2's *bulk mutation does not exist* is about what k8rs **offers**. What the design does buy is threefold, and only the third is about typing:
+
+- **The unattended default is no.** `< /dev/null`, a CI step with no stdin, cron — all EOF, all `Cancelled`. `--yes` has the opposite default the moment it enters a template.
+- **`delete`'s token is the object's own name**, so a script cannot set one answer for every delete: `$NAME` has to agree on both sides of the pipe, and a templating mistake cancels instead of deleting.
+- **`yes | k8rs ops restart …` does not confirm**, because coreutils `yes` emits `y` and `y` is `Cancelled`. That is the single most likely accidental bulk-confirm and it fails closed. Accidental, and kept deliberately.
+
+**What `just e2e` therefore owes is a negative assertion**: a well-formed ops line with `</dev/null` must cancel, exit non-zero, and reach the API server with nothing. That property *is* the difference between this design and `--yes`, and it is the one a regression removes in silence.
+
+**Five divergences from kubectl, decided here so they are not rediscovered as bugs.**
+
+1. **A namespaced object with no `-n` is refused, not defaulted.** kubectl falls back to the context's namespace; k8rs will not, because for a write the current namespace is the one word on the target that nobody typed, and `ops delete pod/web` against whatever a shell happened to be pointing at is the class this file refuses five other ways.
+2. **A `-n` given for a cluster-scoped kind is refused, not ignored.** An ignored flag is a run doing something other than what was typed.
+3. **A namespace named twice is refused, not resolved.** This one was a *defect* before it was a decision: `value_of` is first-wins, kubectl is last-wins, so k8rs silently picked the namespace kubectl discards — on a write path, having just refused to guess when nothing was typed. Found independently by both reviewers. Refusing to guess when nothing was given and then guessing when two were is the contradiction; the read path keeps `value_of` unchanged.
+4. **`ops` must be the first word on the line.** Cost: a file named `ops` needs `./ops`.
+5. **The driver does not enforce `NOTES § Operations`' *Applies to* matrix.** `ops scale pod/web 3` parses and reaches the seam. Which kinds an operation works on is the operation's fact and a second copy here is a second thing to keep in step — and the matrix is not even uniform, since `screens/dialogs.md` rule 4 makes `restart pod/web` a *delete* that does belong. **What that cost was one sentence, not a table**: the seam said *"the operation itself is a later step"*, which is false for the five pairs that are never coming, and it now says this build reads the line and does nothing else.
+
+**Three defects the reviews found, each of a class this repo has paid for.**
+
+- **`k8rs --read-only ops delete …` answered with advice that dropped `--read-only`.** Two paths where one checked the flag and the other did not — the shape `PRIOR-ART § G2` tags *immune* and k9s #2434 is the unsafe precedence of. Fixed at the root: the scan moved to the top of `ops_line`, so the flag is read in exactly one place and refuses wherever it sits. The author's own second pass then found that the fix could have hijacked an ordinary read-only *read* run, and proved it red before reporting.
+- **The unknown-flag refusal printed `--namespace is not a flag … the only one it takes is --namespace`** when the typed word carried a zero-width character — a sentence sending the reader to fix a line that looks correct, and the same call site was the one unbounded echo in the region (9130 bytes on one line). Both closed by `shown(arg, NAME_MAX)`, which every sibling already used. This is the `--object web/` defect of 2026-08-30 through a second door.
+- **`ask` confirmed on EOF against an empty name** — `"" == ""` — so invariant 2's *type the object's name* was satisfied by typing nothing. Unreachable from argv today, and a landmine on the shared callback all three operations wire, reachable the moment a caller takes the name off `Record::of`'s cleaned copy, which can clean to empty. The function's own doc already claimed the opposite.
+
+**What the driver owes later boxes, recorded where they will read it:** the `Confirm` table is deleted rather than kept when `delete` puts it on `Mutation`; `Kind::namespaced` is a second copy of what discovery answers and one of the two must go; exit codes need a vocabulary before `done`, `cancelled` and `failed` all mean `2`; and a mistyped confirmation is not free, because each retry runs `perform` again — a second `dryRun=All` on the wire and a second `attempt` line in the log.

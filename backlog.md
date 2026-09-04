@@ -2226,6 +2226,28 @@ recorded reversal and a later box rather than a dev round
   was strict. Box 3687 supplies `path`, box 3696 owns what the log records.
   Found by `k8s-admin`, 2026-09-04
 
+- **`mistyped`'s refusal echoes an unbounded word, and it is the same class the
+  ops driver just closed.** `src/main.rs:2141` and `:2160` print a bogus flag
+  through bare `sanitize`, so a 10 000-byte argument comes back at 10 032 bytes
+  on one stderr line — where every refusal in the new operations region cuts at
+  253 through `shown`. `k8s::NAMESPACE_MAX`'s own doc is the rule: *"a word
+  refused for being eight kilobytes long may not be printed at eight kilobytes
+  to say so."* **Pre-existing, not a regression**, which is why it was left out
+  of the driver box rather than swept in — but it is now the only echo in
+  `main.rs` that does not go through `shown`, and it is the security gate's
+  *sizes are bounded* row. One call-site change. Found by `k8s-admin` and
+  `tester` independently, 2026-09-04
+  ([D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04))
+
+- **`just e2e` owes a negative assertion, and it is the one that proves the
+  confirmation design.** A well-formed `ops` line with `</dev/null` must cancel,
+  exit non-zero, and reach the API server with **nothing**. That property is the
+  entire difference between reading a confirmation off stdin and a `--yes` flag
+  ([D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)),
+  and it is the one a regression removes in silence — every positive test would
+  still pass. Belongs with the e2e box at the end of Phase 7. Found by
+  `k8s-admin`, 2026-09-04
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
