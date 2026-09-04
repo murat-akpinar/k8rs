@@ -39,10 +39,12 @@ use std::path::{Path, PathBuf};
 
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::autoscaling::v1::Scale;
+use k8s_openapi::api::core::v1::{Node, Pod};
 use k8s_openapi::jiff::Timestamp;
 use k8s_openapi::serde_json::{Value, json};
 use kube::api::{
-    Api, ApiResource, DeleteParams, DynamicObject, Patch, PatchParams, ValidationDirective,
+    Api, ApiResource, DeleteParams, DynamicObject, Patch, PatchParams, PropagationPolicy,
+    ValidationDirective,
 };
 use kube::{Client, Resource};
 
@@ -172,6 +174,41 @@ pub struct Mutation<'a> {
     /// `PATCH` and `DELETE` (NOTES § D215). `false` means k8rs declined the preflight, and the
     /// reason belongs to the operation's own box.
     pub checkable: bool,
+    /// **How invariant 2's confirmation is given for this mutation** — a deliberate yes, or the
+    /// object's own name typed back.
+    ///
+    /// **It is the requirement, and it is *half* of what makes invariant 2's *deletes
+    /// additionally require typing the object name* structural** (NOTES § D225 ruling 2).
+    /// [`perform`] hands it to [`Checked`], and [`Answer::Confirmed`] can be built nowhere but
+    /// [`Checked::pressed`] and [`Checked::typed`], each of which refuses the requirement that is
+    /// not its own. So a dialog that never asked for a name cannot *construct* the answer that
+    /// proceeds; it gets [`Answer::Cancelled`].
+    ///
+    /// **The other half is that the answer cannot be moved between mutations**, and this field
+    /// alone did not buy it: the first draft's token was `Copy` and carried nothing, so one yes to
+    /// a `Press` scale could be kept and returned at a `Type` delete — proven on the wire, not
+    /// argued. [`Agreed`] carries [`perform`]'s ticket now and that is what closes it.
+    ///
+    /// **A `bool` an operation asserts about itself would have bought neither**, which is the
+    /// distinction the box proposing this field did not draw: [`Self::checkable`] is exactly that
+    /// shape, and what holds it is review.
+    pub confirm: Confirm<'a>,
+}
+
+/// **What invariant 2 requires of the person at the keyboard before a mutation may proceed** —
+/// one of two things, and the operation says which.
+///
+/// **`Type` is the ctrl-key-slip guard** `screens/dialogs.md` § Delete gives `delete` and `drain`
+/// and nothing else: the object's own name, typed back, so a key pressed by accident cannot
+/// destroy anything. The value is the name that has to be matched — [`Record::of`] strips it
+/// like every other field, and [`Checked::typed`] compares against the stripped copy, which is
+/// the one the dialog is looking at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Confirm<'a> {
+    /// A deliberate yes and nothing more — [`scale`] and [`restart`].
+    Press,
+    /// The object's own name, typed back — [`delete`].
+    Type(&'a str),
 }
 
 /// **One mutation, stripped** — every string on it has been through [`crate::k8s::text`] and is
@@ -188,6 +225,9 @@ struct Record {
     path: String,
     version: Option<String>,
     checkable: bool,
+    /// The name that has to be typed back, or `None` for [`Confirm::Press`] — the enum flattened
+    /// to the one thing that is left to compare once it has been stripped.
+    confirm: Option<String>,
 }
 
 /// **What the dialog is given when it opens, before anything has been sent.**
@@ -229,6 +269,10 @@ pub struct Shown<'a> {
 pub struct Checked<Response> {
     verdict: &'static str,
     returned: Option<Response>,
+    asks: Option<String>,
+    /// **Which mutation this dialog is about** — [`perform`]'s own [`ticket`], copied into every
+    /// [`Agreed`] built here and compared back before the real call.
+    ticket: u64,
 }
 
 impl<Response> Checked<Response> {
@@ -240,10 +284,122 @@ impl<Response> Checked<Response> {
     }
 
     /// **What the operation made of the dry-run's answer**, or `None` where there was no dry-run
-    /// to answer. `scale` puts the `Scale` here; `restart` puts one `bool` (NOTES § D224).
+    /// to answer. `scale` puts the `Scale` here; `restart` puts one `bool` (NOTES § D224);
+    /// `delete` sends no check at all and puts nothing.
     pub fn returned(&self) -> Option<&Response> {
         self.returned.as_ref()
     }
+
+    /// **The name that has to be typed back before this may proceed**, or `None` where a
+    /// deliberate yes is the whole of it — [`Mutation::confirm`], stripped by [`Record::of`].
+    ///
+    /// A dialog reads this to know which question to ask. It decides nothing: the answer is still
+    /// [`Self::pressed`]'s or [`Self::typed`]'s to build, and each of those refuses the
+    /// requirement that is not its own.
+    pub fn asks(&self) -> Option<&str> {
+        self.asks.as_deref()
+    }
+
+    /// **The answer a dialog that asked only for a press may give** — and [`Answer::Cancelled`]
+    /// where the mutation requires a name, because a press is not one (NOTES § D225 ruling 2).
+    ///
+    /// This is the half that makes invariant 2 a type's problem rather than a reviewer's: a
+    /// press-only delete dialog compiles, calls this, and confirms nothing — loudly in a debug
+    /// build, where the assertion below fires, and silently-but-safely in release.
+    pub fn pressed(&self) -> Answer {
+        // **An author error and not the cluster's, so it is an assertion and not an outcome** —
+        // the shape [`Record::of`]'s own `debug_assert!` two screens up already settled for this
+        // region (`k8s-admin`, 2026-09-04). The [`Answer::Cancelled`] below is the release
+        // behaviour and is the safe direction; what it is not is *visible*, and a `ctrl-d` wired
+        // to a press-only dialog would ship, never work, and leave an audit trail saying *nobody
+        // confirmed it* about an operator who pressed the button.
+        debug_assert!(
+            self.asks.is_none(),
+            "a press-only dialog was opened on a mutation that requires the object's name \
+             (invariant 2)"
+        );
+        match self.asks {
+            Some(_) => Answer::Cancelled,
+            None => Answer::Confirmed(Agreed(self.ticket)),
+        }
+    }
+
+    /// **The answer a dialog that asked for the object's own name may give** — the only route to
+    /// [`Answer::Confirmed`] for a mutation that requires one (invariant 2), and
+    /// [`Answer::Cancelled`] for one that does not, so the two dialogs cannot be swapped.
+    ///
+    /// **An empty requirement confirms nothing.** `typed == name` holds for `("", "")`, which is
+    /// *typing the object name* satisfied by typing nothing. No argv reaches it —
+    /// [`crate::k8s::object_name`] refuses an empty name — but [`Record::of`]'s strip can empty a
+    /// name that argv could not, and the guard belongs in the one function every dialog routes
+    /// through rather than in each of them (`k8s-admin`, 2026-09-04, on `src/main.rs`'s `ask`,
+    /// where it lived until this box moved it one layer down).
+    pub fn typed(&self, typed: &str) -> Answer {
+        // **[`Self::pressed`]'s assertion, facing the other way** — and only over the half that is
+        // the author's. A name that does not match is the *operator* typing something else and is
+        // an ordinary [`Answer::Cancelled`]; a dialog asking for a name at all where the mutation
+        // wants a press is the author error.
+        debug_assert!(
+            self.asks.is_some(),
+            "a typed-name dialog was opened on a mutation a press confirms (invariant 2)"
+        );
+        match self.asks.as_deref() {
+            Some(name) if !name.is_empty() && typed == name => {
+                Answer::Confirmed(Agreed(self.ticket))
+            }
+            _ => Answer::Cancelled,
+        }
+    }
+}
+
+/// **Proof that the confirmation [`Mutation::confirm`] asked for was actually given, *for one
+/// mutation*** — and the second half of that is the whole of it (NOTES § D225 ruling 2).
+///
+/// **The first draft was forgeable and the doc here said it was not, which is why this paragraph
+/// leads.** It was a `Copy` token with no contents. **An enum variant's fields are as public as
+/// the enum**, however private the struct's own field is, so any code holding one
+/// `Answer::Confirmed` could destructure the token and re-wrap it: press-confirm one scale, keep
+/// what falls out, and every later delete proceeds with no name typed. `tester` drove it from
+/// `src/main_tests.rs` — where every dialog lives — through the real [`perform`], and got a
+/// `DELETE` on the wire. Not reachable through today's driver, which performs one operation per
+/// process; reachable at Phase 12, where the console is one process with many dialogs, and this
+/// file freezes at the end of this phase.
+///
+/// **So the token carries [`perform`]'s own ticket**, taken from [`ticket`] when the call begins,
+/// stamped in by [`Checked::pressed`] and [`Checked::typed`] from the [`Checked`] they belong to,
+/// and compared back before the real call goes out. A token from any *other* mutation — including
+/// an earlier one with the same [`Confirm`] — carries a different number and confirms nothing.
+///
+/// **A number and not a branded lifetime**, which was the other shape offered. A generative
+/// lifetime is the stronger tool and it needs the callback to be higher-ranked over a
+/// future-returning closure, which is a signature nobody at 3am can read, on the file whose whole
+/// design goal is to stay small enough to audit. The ticket is six lines and its failure mode is a
+/// comparison this file makes in one place.
+///
+/// **`Copy` and `Clone` are gone too, and they are not what makes it hold** — a token can be moved
+/// out and stored either way, which is exactly what the probe does. What they were was a free
+/// second copy for an attacker to keep; the ticket is the mechanism and this is the door shut
+/// behind it.
+///
+/// **None of this is a privacy guarantee *inside* this file, for [`Checked`]'s own reason** — this
+/// file is one module. What holds is that every dialog k8rs has is outside it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Agreed(u64);
+
+/// **The next mutation's ticket** — a number that has not been handed out before, so that a
+/// confirmation belongs to exactly one call of [`perform`].
+///
+/// **A process-wide counter is the one piece of ambient state in this file, and it is ambient on
+/// purpose**: what it has to be is unique across every [`perform`] in the process, which is the
+/// thing no argument threaded through one call can promise. It is not a fact about the world, so
+/// NOTES § D18's *the clock is an input* does not reach it — nothing observable is read here and
+/// nothing is reported from it.
+///
+/// **`Relaxed` is enough**: the only requirement is that no two `fetch_add`s return the same
+/// value, which is the operation's own guarantee and needs no ordering with anything else.
+fn ticket() -> u64 {
+    static CONFIRMATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    CONFIRMATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// **How the dialog ended** — four endings, because three of them are not "no".
@@ -253,10 +409,18 @@ impl<Response> Checked<Response> {
 /// k8rs correctly refuses to delete whatever now holds that name, and the record read as *someone
 /// opened a delete dialog on prod and backed out* — invariant 4's *neither record may lie*
 /// (NOTES § D22, `screens/dialogs.md` § The object went away while the dialog was open).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// **No `Copy` and no `Clone`** ([`Agreed`]): a confirmation is a thing that happened once, and
+// the two derives were a free second copy of it for anything that wanted to keep one.
+#[derive(Debug, PartialEq, Eq)]
 pub enum Answer {
     /// The person at the keyboard agreed — and, where invariant 2 requires it, typed the name.
-    Confirmed,
+    ///
+    /// **Constructible only through [`Checked::pressed`] or [`Checked::typed`], and only usable
+    /// for the mutation whose [`Checked`] built it** ([`Agreed`], which carries [`perform`]'s
+    /// ticket). Neither half is enough alone: without the first anyone can say yes, and without
+    /// the second one yes can be kept and replayed at a delete. Every other variant stays freely
+    /// constructible — they are refusals, and a refusal built too easily changes nothing.
+    Confirmed(Agreed),
     /// They said no.
     Cancelled,
     /// **The object stopped existing while the dialog was open** — the `uid` the dialog holds is
@@ -275,8 +439,23 @@ pub enum Answer {
 /// [`crate::k8s::said`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// The check passed or was never sent, the confirmation was given, and the call succeeded.
+    /// The check passed or was never sent, the confirmation was given, the call succeeded, and
+    /// the cluster says it is **finished**.
     Done,
+    /// **The cluster accepted the change and has not finished it** — measured on a real
+    /// apiserver, on a Node carrying a finalizer and on a pod inside its grace period
+    /// (`k8s-admin`, 2026-09-04). Both are `200 OK`, and [`Self::Done`]'s *the change was made*
+    /// over one of them is invariant 4's *neither record may lie*: the object is still listed
+    /// seconds later.
+    ///
+    /// **It is still a change**, so [`Performed::changed`] is true of it and the exit code does
+    /// not move (NOTES § D220 ruling 1): `deletionTimestamp` is set and the removal is under way.
+    /// What was wrong was the sentence.
+    ///
+    /// **Only an operation whose cluster answer can say so ever produces it**, which today is
+    /// `delete` alone — a `PATCH`'s `200` means the patch is applied, so [`scale`] and [`restart`]
+    /// have no such case and grow none ([`Landing`]).
+    Started,
     /// Nobody confirmed it. Nothing was changed.
     Cancelled,
     /// The object was already gone when the confirmation came back. Nothing was changed —
@@ -320,7 +499,7 @@ impl Outcome {
     fn said(&self) -> Option<&str> {
         match self {
             Self::NotSent { said, .. } | Self::Failed { said, .. } => said.as_deref(),
-            Self::Done | Self::Cancelled | Self::Gone | Self::Changed => None,
+            Self::Done | Self::Started | Self::Cancelled | Self::Gone | Self::Changed => None,
         }
     }
 }
@@ -354,7 +533,11 @@ impl Performed {
     /// `restart` and `delete` are not idempotent under the way a scale is. The incomplete trail
     /// travels in [`Self::plainly`] instead, which is a sentence and not a code.
     pub fn changed(&self) -> bool {
-        matches!(self.outcome, Some(Outcome::Done))
+        // **[`Outcome::Started`] is a change** (`k8s-admin`, 2026-09-04, NOTES § D220 ruling 1's
+        // own split): the cluster set `deletionTimestamp` and the removal is under way, so a `2`
+        // here would send a script back to re-run a delete that already landed. What that case
+        // costs is the *sentence*, not the code.
+        matches!(self.outcome, Some(Outcome::Done | Outcome::Started))
     }
 
     /// **The whole of what happened, in one sentence somebody reads at 3am** (invariant 14) —
@@ -494,12 +677,28 @@ impl Pass {
         }
     }
 
-    /// Params for a `DELETE` — **the dry-run half of the conversion, and only that.**
-    /// `DeleteParams::default()` leaves `propagation_policy` `None` (`params.rs:784`), and every
-    /// other field of it is `skip_serializing_if`, so a real pass sends `{}` and the server falls
-    /// back to the object's own default. `kubectl delete` sends `propagationPolicy: Background`,
-    /// so invariant 4's *equivalent* command needs that overridden — the delete box's work
-    /// (todo.md 3692), written here because the method name reads like the whole conversion.
+    /// Params for a `DELETE`.
+    ///
+    /// **`propagationPolicy: Background`, set explicitly, so invariant 4's *equivalent* command
+    /// needs no flag** (NOTES § D225 ruling 5). `DeleteParams::default()` leaves
+    /// `propagation_policy` `None` (`params.rs:784`) and every other field is
+    /// `skip_serializing_if`, so a default pass sends `{}` and lets the server fall back to the
+    /// object's own default. Spelled out beside the `dry_run` rather than taken from kube's
+    /// `DeleteParams::background()`, for [`Self::patch`]'s reason: what goes on the wire is what
+    /// this function's body says, in both halves of the conversion.
+    ///
+    /// **Measured against a real apiserver rather than read off kubectl's documentation**
+    /// (`reports/2026-09-04-delete-on-the-wire.md` § 1-2, kind/kubelet v1.36.1). `kubectl delete`
+    /// sends exactly `{"propagationPolicy":"Background"}` — 34 bytes, **no query string at all**,
+    /// no `kind` and no `apiVersion` — and the body is **byte-identical across all six kinds**
+    /// [`removal`] serves, only the path differing for the cluster-scoped one.
+    /// `--cascade=background` produces the same bytes, so a taught line with no flag on it is
+    /// exact and not merely defensible.
+    ///
+    /// **What the constant buys is exactness and not a behaviour change, and the doc says so
+    /// rather than claiming a fix.** On server v1.36.1 an empty body and `Background` were
+    /// indistinguishable by every observation the report took, while `Foreground` was plainly
+    /// different: what this removes is a dependence on a per-resource server default.
     ///
     /// **These are also what `Api::delete_collection` accepts, and bulk mutation does not
     /// exist** (invariant 2). No caller exists, and outside this file `clippy.toml` refuses the
@@ -515,9 +714,38 @@ impl Pass {
     pub fn delete(self) -> DeleteParams {
         DeleteParams {
             dry_run: self.0,
+            propagation_policy: Some(PropagationPolicy::Background),
             ..DeleteParams::default()
         }
     }
+}
+
+/// **What the cluster's answer to the *real* call says about whether the change has finished** —
+/// [`perform`]'s last question, and the one only the operation can answer.
+///
+/// **It exists because a `200` is not one fact.** `Api::delete` answers a completed removal with a
+/// `Status` and an accepted-but-unfinished one with the object itself; a `PATCH` has no such
+/// split, so [`scale`] and [`restart`] answer [`Self::Finished`] through [`finished`] and grow no
+/// case (`k8s-admin`, 2026-09-04).
+///
+/// **The operation reads it inside its own closure and hands over a fact, not an object** —
+/// NOTES § D223 ruling 3 and § D224's shape, so nothing here holds a workload for a dialog that
+/// shows none of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Landing {
+    /// The cluster says the change is done — [`Outcome::Done`].
+    Finished,
+    /// The cluster accepted it and something is still finishing — [`Outcome::Started`].
+    Started,
+}
+
+/// **What an operation whose answer cannot say otherwise passes** — a `PATCH`'s `200` means the
+/// patch is applied, so [`scale`] and [`restart`] read this and never a response.
+///
+/// One function rather than a closure at each call site: two spellings of *this verb has no
+/// pending case* is the second copy NOTES § D103 is named for.
+fn finished<Response>(_: &Response) -> Landing {
+    Landing::Finished
 }
 
 /// Handed to the operation's closure for the server-side `dryRun=All` pass (invariant 2).
@@ -561,6 +789,15 @@ const UNCHECKABLE: &str = "k8rs did not check this one with the cluster first";
 /// `audit` is any destination that can be written and flushed. [`audit_log`] is the one k8rs
 /// opens; a caller with an unwritable state directory has already been refused there and never
 /// reaches this function (NOTES § D21).
+///
+/// `landed` reads the *real* call's answer for the one thing this function cannot know: whether
+/// the change has finished. A `PATCH`'s `200` means applied and passes [`finished`]; a delete's
+/// does not, and [`Landing`] carries why. It is handed a reference and the operation has already
+/// mapped the response down to a fact, so nothing here holds an object either.
+///
+/// **The confirmation is checked against this call's own [`ticket`] before the real call goes
+/// out** — an [`Agreed`] built by some *other* mutation's [`Checked`] confirms nothing, which is
+/// what stops a yes being kept and replayed (NOTES § D225 ruling 2).
 pub async fn perform<Show, Ask, Asked, Call, Called, Response>(
     record: &Mutation<'_>,
     clock: impl Fn() -> Timestamp,
@@ -568,6 +805,7 @@ pub async fn perform<Show, Ask, Asked, Call, Called, Response>(
     show: Show,
     ask: Ask,
     call: Call,
+    landed: impl FnOnce(&Response) -> Landing,
 ) -> Performed
 where
     Show: FnOnce(&Shown<'_>),
@@ -577,6 +815,11 @@ where
     Called: Future<Output = Result<Response, kube::Error>>,
 {
     let record = Record::of(record);
+    // **Taken before anything is shown, so the dialog that opens is the one this ticket names.**
+    // Every [`Agreed`] the [`Checked`] below can build carries it, and the confirmation is checked
+    // against it before the real call — which is what stops a yes from an earlier mutation being
+    // kept and returned here (NOTES § D225 ruling 2, [`Agreed`]).
+    let ticket = ticket();
     let attempt = clock();
 
     // NOTES § D21 — **written out and flushed** before anything reaches the cluster, dry-run
@@ -613,19 +856,46 @@ where
             match ask(Checked {
                 verdict: record.accepted(),
                 returned,
+                asks: record.confirm.clone(),
+                ticket,
             })
             .await
             {
                 Answer::Cancelled => Outcome::Cancelled,
                 Answer::Gone => Outcome::Gone,
                 Answer::Changed => Outcome::Changed,
-                Answer::Confirmed => match call(FOR_REAL).await {
-                    Ok(_) => Outcome::Done,
-                    Err(error) => Outcome::Failed {
-                        fault: fault(&error),
-                        said: said(&error),
-                    },
-                },
+                // **A yes, and this mutation's own** — the guard is the whole of [`Agreed`]'s
+                // mechanism, and the arm under it is what a replay falls into.
+                Answer::Confirmed(agreed) if agreed.0 == ticket => {
+                    match call(FOR_REAL).await {
+                        // **The cluster's own answer decides which of the two this is**, and the
+                        // operation is what reads it: [`Landing`].
+                        Ok(returned) => match landed(&returned) {
+                            Landing::Finished => Outcome::Done,
+                            Landing::Started => Outcome::Started,
+                        },
+                        Err(error) => Outcome::Failed {
+                            fault: fault(&error),
+                            said: said(&error),
+                        },
+                    }
+                }
+                // **A yes built for some other mutation** ([`Agreed`]) — an author error like
+                // [`Checked::pressed`]'s, reported the same way: loud where it can be, and the
+                // safe direction where it cannot.
+                //
+                // **The guard above is what routes and this assertion only decorates**, which is
+                // not a style choice: with the comparison inside this arm instead, a widened
+                // guard would still panic in a debug build and the test watching for the panic
+                // would go on passing over a hole (my own second pass, 2026-09-04).
+                Answer::Confirmed(agreed) => {
+                    debug_assert_eq!(
+                        agreed.0, ticket,
+                        "a confirmation built for another mutation was replayed here \
+                         (invariant 2)"
+                    );
+                    Outcome::Cancelled
+                }
             }
         }
     };
@@ -681,6 +951,13 @@ impl Record {
             path: cleaned(record.path, FREE_TEXT),
             version: record.version.map(|value| cleaned(value, IDENTIFIER)),
             checkable: record.checkable,
+            // **A name by D146's rule, so [`IDENTIFIER`]** — and it is stripped for a reason the
+            // other fields do not have: this one is *compared* against what a person typed, and
+            // what they typed is what the dialog showed them, which came through here.
+            confirm: match record.confirm {
+                Confirm::Press => None,
+                Confirm::Type(name) => Some(cleaned(name, IDENTIFIER)),
+            },
         }
     }
 
@@ -859,6 +1136,25 @@ fn gap(value: Option<&str>, absent: &str, prefix: &str) -> String {
 fn verdict(outcome: &Outcome) -> String {
     match outcome {
         Outcome::Done => "the change was made".to_string(),
+        // **The other half of a sentence `screens/dialogs.md` § Delete already started.** Four of
+        // its six consequences say *something there may delay this or act first*; this is what
+        // says whether it did, and it reuses that clause's own word — *delay* — so the dialog and
+        // the closing line are one story rather than two people's wording.
+        //
+        // **What it does not claim is *what* is delaying it.** A finalizer and a pod inside its
+        // grace period are the same fact here, and k8rs has read neither
+        // (NOTES § D225 ruling 4).
+        //
+        // **And it is the one place the taught line and k8rs differ**
+        // (`k8s-admin`, 2026-09-04). `kubectl delete` waits by default (`--wait=true`, measured:
+        // `timeout 5 kubectl delete node/…` exited 124 still waiting) and k8rs returns as soon as
+        // the cluster has accepted it — so the command above is not a lie, it is slower, and the
+        // reader is told which. Nothing here reads a `deletionTimestamp`: the *shape* of the
+        // answer is what says this ([`Landing`]), and k8rs holds no object to read a field off.
+        Outcome::Started => "the cluster accepted this and the object is still there — something \
+                             is delaying the removal, and the command above waits for that where \
+                             k8rs does not"
+            .to_string(),
         Outcome::Cancelled => "nobody confirmed it, so nothing was changed".to_string(),
         Outcome::Gone => "the object was already gone, so nothing was changed".to_string(),
         Outcome::Changed => {
@@ -1232,6 +1528,10 @@ where
         // request every cluster answers, and `screens/dialogs.md` rule 3 is what makes the button
         // wait for it.
         checkable: true,
+        // **A press and not a typed name** — invariant 2 raises the bar to typing the object's
+        // own name for `delete` and `drain` and for nothing else, and a scale down to zero is
+        // warned about in words rather than by a second confirmation kind ([`consequence`]).
+        confirm: Confirm::Press,
     };
     // **Both passes are one closure and one body** — [`perform`]'s whole reason — and the
     // borrows are named so calling it twice moves nothing: `api` and `patch` travel as shared
@@ -1239,10 +1539,19 @@ where
     // contract handed over. The `async move` is what keeps them alive across the `await`;
     // returning `patch_scale`'s future directly would return one borrowing a temporary.
     let (api, patch) = (&api, &patch);
-    Ok(perform(&mutation, clock, audit, show, ask, move |pass| {
-        let params = pass.patch();
-        async move { api.patch_scale(scaling.name, &params, patch).await }
-    })
+    Ok(perform(
+        &mutation,
+        clock,
+        audit,
+        show,
+        ask,
+        move |pass| {
+            let params = pass.patch();
+            async move { api.patch_scale(scaling.name, &params, patch).await }
+        },
+        // A `PATCH`'s `200` means the patch is applied — [`finished`], and no pending case.
+        finished,
+    )
     .await)
 }
 
@@ -1671,6 +1980,9 @@ where
         // path is dry-run by every cluster, and only kube's own helper could not carry the
         // parameter.
         checkable: true,
+        // **A press** — invariant 2's typed name is `delete`'s and `drain`'s, and a restart
+        // replaces copies rather than removing anything.
+        confirm: Confirm::Press,
     };
     // Both passes are one closure and one body — [`scale`]'s own borrows, for [`perform`]'s own
     // reason.
@@ -1686,18 +1998,375 @@ where
     // [`Checked::returned`] still carries whatever an operation maps to, which is v0.4's `edit`
     // ([`Checked`]'s own doc).
     let (api, patch) = (&api, &patch);
-    Ok(perform(&mutation, clock, audit, show, ask, move |pass| {
-        let params = pass.patch();
-        async move {
-            api.patch(restarting.name, &params, patch)
-                .await
-                .map(|workload| paused(&workload))
-        }
-    })
+    Ok(perform(
+        &mutation,
+        clock,
+        audit,
+        show,
+        ask,
+        move |pass| {
+            let params = pass.patch();
+            async move {
+                api.patch(restarting.name, &params, patch)
+                    .await
+                    .map(|workload| paused(&workload))
+            }
+        },
+        // [`scale`]'s reason: a `PATCH`'s `200` means the patch is applied.
+        finished,
+    )
     .await)
 }
 
 // --- RESTART END ---
+
+// --- DELETE START ---
+//
+// **The third operation, the first destructive one, and the first that is not namespaced**
+// (todo.md § Phase 7's `delete` box, NOTES § D225). Everything above the call is [`scale`]'s and
+// [`restart`]'s shape — the same guards, the same [`unaddressable`], the same one closure handed
+// to [`perform`] and never awaited here. Four things differ by ruling, and a fifth by measurement.
+//
+// **Every kind is served and none is refused** (D225 ruling 3). There is no `deletable()` beside
+// [`scalable`] and [`restartable`]: those exist because a restart of a ReplicaSet is a word with
+// no meaning, and a delete of one is not — so the second matrix NOTES § D103 is named for is not
+// worth writing to refuse nothing. [`removal`] still refuses a *word that names no kind*, which is
+// what makes it total and is not the same thing.
+//
+// **A node is cluster-scoped, and the namespace check inverts** (D225 ruling 3). `Api::all_with`
+// where the other two operations have only ever built `Api::namespaced_with`, and a namespace
+// named for a node is the error rather than a namespace missing.
+//
+// **Nothing is read before the delete** (D225 ruling 4), which is [`restart`]'s ruling 3 for one
+// more reason: a `GET` to fetch a `uid` pulls the object — container environments included — into
+// k8rs for a dialog that shows none of it. So `uid` and `version` are both `None`, there are no
+// `Preconditions`, and a missing object is refused by the apiserver's own `404` on the real call.
+// `DeleteParams::preconditions` is the delete-shaped spelling of the *next* box in this phase —
+// *every call sends the resourceVersion that was read* — which takes the read for every call at
+// once; half of it built here would leave that box with its premise decided underneath it.
+//
+// **And this is the operation that sends no check at all: `checkable` is `false`**
+// (D225 ruling 1). A `dryRun=All` delete is a real `DELETE` on the wire, sent before anybody has
+// typed anything, and the 17 bytes that distinguish it — `,"dryRun":["All"]` — ride in the
+// *body*, with nothing in the URI or the headers
+// (`reports/2026-09-04-delete-on-the-wire.md`). So in the cluster's own audit record at the
+// `Metadata` level most clusters run, opening a delete dialog on `prod` and cancelling it is
+// indistinguishable from having deleted the object — a lie in a record k8rs does not own, cannot
+// annotate and cannot correct. A preflight also *adds* a failure mode: a
+// `ValidatingWebhookConfiguration` with `sideEffects: Some | Unknown` fails `dryRun=All` for a
+// fully authorised user, so k8rs would refuse a delete that would have worked, on the one
+// operation where being refused wrongly is least acceptable. What is given up is small — a `403`
+// and a `404` come back from the real call regardless, and *the object went away* is
+// NOTES § D22's watch and not a dry-run's.
+//
+// **And a fifth thing, found by a review rather than by a ruling: a `200` from a delete is not
+// one fact** (`k8s-admin`, 2026-09-04). A Node held by a finalizer and a pod inside its grace
+// period are both accepted and both still there seconds later; `Api::delete` says which by
+// answering with a `Status` when the object is gone and with the object itself when it is going.
+// So this is the one operation that can produce [`Outcome::Started`] — see [`Landing`], and note
+// that the exit code does not move, because `deletionTimestamp` being set *is* a change.
+//
+// **So the verdict is [`UNCHECKABLE`]'s existing sentence, and the only call this operation ever
+// makes is the real one.** Everything a dialog is shown is therefore true the moment it opens:
+// nothing is being waited on, and `screens/dialogs.md` § Delete says so rather than dressing the
+// absence up as a wait.
+
+/// **What `delete` can be pointed at, in the words the refusal uses** — every kind
+/// `src/main.rs`'s `KINDS` holds, which is exactly why there is no refusal table beside it
+/// (NOTES § D225 ruling 3).
+///
+/// **It is read by one sentence and not by six**, unlike [`SCALABLE`] and [`RESTARTABLE`], whose
+/// refusals are the point. The only refusal here is for a word that names no kind at all, and
+/// `delete_takes_every_kind_the_driver_can_name_and_refuses_only_a_word_that_names_none` feeds it
+/// every kind `KINDS` holds.
+const DELETABLE: &str = "a deployment, a statefulset, a daemonset, a replicaset, a pod and a node";
+
+/// **What a delete of one kind is: the resource to send it to, what it does in plain words, and
+/// whether its objects live in a namespace** — or the sentence for a word that names no kind.
+///
+/// **One `match` decides all three for [`rollout`]'s reason**: there is no second place for a
+/// consequence — or for a scope — to live, so a seventh kind cannot be added with the wrong one
+/// of either attached. **The scope is here and not re-derived from the driver's own `KINDS`
+/// table**, which NOTES § D220 ruling 4 would refuse: what that ruling keeps out of this file is
+/// a *copy of the driver's matrix*, and what this is is the fact `Api::all_with` versus
+/// `Api::namespaced_with` turns on, at the point the request path is built. It is the same
+/// argument as the [`object_name`] and [`namespace_name`] guards two functions down, which the
+/// driver also makes and this file makes again: a guard at the point of use is the one that still
+/// holds for the console at Phase 12.
+///
+/// **The five namespaced sentences and the node's are `screens/dialogs.md` § Delete's own,
+/// verbatim.** The pod's hedge is the replicaset's word for word, because k8rs has read no
+/// `ownerReferences` and cannot say what will replace either (NOTES § D225 ruling 4); a
+/// deployment, a statefulset and a daemonset get no hedge, because nothing inside a running
+/// cluster recreates one of those by itself.
+///
+/// **Four of the six were rewritten by `screens/dialogs.md`'s finalizer round** (2026-09-04): a
+/// deployment, a statefulset, a daemonset and a node now *ask* the cluster to remove rather than
+/// removing, and each closes on the same hedge — k8rs has read no `finalizers` any more than it
+/// has read `ownerReferences`, and something attached may delay the removal or act first. The pod
+/// and the replicaset kept theirs, because their hedge was already about the same unread thing.
+/// [`verdict`]'s [`Outcome::Started`] sentence is the other half of that clause and shares its
+/// word.
+///
+/// **The node's is the one consequence a beginner reads exactly backwards, so it draws the more
+/// destructive reading** — measured before any of this was written
+/// (`reports/2026-09-04-delete-on-the-wire.md` § 7, kubelet v1.36.1). A running kubelet does not
+/// re-register: `registerWithAPIServer` runs once per process, the node stayed absent for the full
+/// 2 min 45 s watched, and it came back 2 s after the kubelet *process* was restarted. And the
+/// pods went either way — 55 s after the delete the pod on that node was gone and its ReplicaSet
+/// had made two replacements, both `Pending`. So it is the one arm that interpolates the name,
+/// because the sentence is about *this* machine's record, and the one arm that is cluster-scoped.
+///
+/// **The group, the version and the plural are `k8s-openapi`'s and are not spelled here** —
+/// [`scalable`]'s own reason, off the same types `k8s.rs`'s permanent watches are built over.
+fn removal(kind: &str, name: &str) -> Result<(ApiResource, String, bool), String> {
+    let (resource, consequence, namespaced) = match kind {
+        "deployment" => (
+            ApiResource::erase::<Deployment>(&()),
+            "This asks the cluster to remove the deployment and every copy of the app it runs. \
+             k8rs has not read what may be attached to it, and something there may delay this or \
+             act first — left alone, nothing is left running."
+                .to_string(),
+            true,
+        ),
+        "statefulset" => (
+            ApiResource::erase::<StatefulSet>(&()),
+            "This asks the cluster to remove the statefulset and every copy of the app it runs. \
+             k8rs has not read what may be attached to it, and something there may delay this or \
+             act first — left alone, nothing is left running."
+                .to_string(),
+            true,
+        ),
+        "daemonset" => (
+            ApiResource::erase::<DaemonSet>(&()),
+            "This asks the cluster to remove the daemonset and the copy of the app it runs on \
+             every node. k8rs has not read what may be attached to it, and something there may \
+             delay this or act first — left alone, nothing is left running."
+                .to_string(),
+            true,
+        ),
+        "replicaset" => (
+            ApiResource::erase::<ReplicaSet>(&()),
+            "This removes the replicaset and every pod it manages. Whatever created it will \
+             normally replace it — k8rs has not checked whether anything did."
+                .to_string(),
+            true,
+        ),
+        "pod" => (
+            ApiResource::erase::<Pod>(&()),
+            "This removes the pod. Whatever created it will normally replace it — k8rs has not \
+             checked whether anything did."
+                .to_string(),
+            true,
+        ),
+        "node" => (
+            ApiResource::erase::<Node>(&()),
+            format!(
+                "This asks the cluster to remove its record of {name}, not the machine. \
+                 Something attached to it, unread by k8rs, may delay this or act first. Left \
+                 alone, its pods are deleted and the machine keeps running until its kubelet \
+                 restarts."
+            ),
+            false,
+        ),
+        // **The kind word is quoted back only where it survives the strip unchanged**
+        // ([`a_kind`], NOTES § D224). Nothing reaches this arm from argv — the driver's
+        // `known_kind` hands over one of six canonical singulars — and [`delete`] is `pub` in a
+        // file that freezes at the end of this phase, exactly as [`scalable`] and [`restartable`]
+        // are.
+        other => {
+            return Err(format!(
+                "k8rs cannot delete {} — k8rs deletes {DELETABLE}",
+                a_kind(other)
+            ));
+        }
+    };
+    Ok((resource, consequence, namespaced))
+}
+
+/// **One delete as the line asked for it** — everything [`delete`] needs that is not the
+/// connection. [`Restarting`]'s shape exactly; what differs is what `namespace` is allowed to be.
+///
+/// **Both states of `namespace` are legitimate here, which is what makes this operation unlike
+/// the other two** (NOTES § D225 ruling 3): `None` is a node. [`delete`] refuses the *pairing*
+/// that is wrong — a namespace named for a node, or a namespaced object with none — and the kind
+/// is what decides which of the two that is.
+pub struct Deleting<'a> {
+    /// The kubeconfig context this is performed against — [`Mutation::context`].
+    pub context: &'a str,
+    /// The `server:` that context reached — [`Mutation::server`].
+    pub server: &'a str,
+    /// The kind, spelled the way a manifest spells it: `deployment`, never `deploy`
+    /// (`screens/dialogs.md` § Scale).
+    pub kind: &'a str,
+    /// The object's own name — and, for this operation, the name that has to be typed back
+    /// ([`Confirm::Type`], invariant 2).
+    pub name: &'a str,
+    /// The namespace it is in, or `None` for a node.
+    pub namespace: Option<&'a str>,
+}
+
+/// **A delete, performed** — the whole of NOTES § Operations' `d` row.
+///
+/// `Err` is a refusal of the *request*, before anything has been sent and before anything has been
+/// recorded: a word [`removal`] does not know, a namespaced object with no namespace, a node with
+/// one, or a name or a namespace that is not an address. **None of them has sent anything at
+/// all** — [`restart`]'s position and not [`scale`]'s, since nothing is read first — and none is a
+/// mutation that was attempted, so none writes an audit line (NOTES § D221).
+///
+/// **The name that has to be typed is the object's own and not `kind/name`**
+/// (`screens/dialogs.md` § Delete: *"Type the pod's name to confirm"*, over a field holding
+/// `web-7d9f4`). What the reader is asked for is what the dialog's title bar shows them.
+///
+/// **No check goes out, so the dialog is complete the moment it opens** (NOTES § D225 ruling 1).
+/// [`perform`] skips the `DRY_RUN` pass entirely for a `checkable: false` mutation, hands
+/// [`Checked`] the [`UNCHECKABLE`] verdict, and the only request this function ever makes is the
+/// real `DELETE`.
+///
+/// **The response is mapped to one `bool` inside the closure and the object dropped there**,
+/// [`restart`]'s `paused` move exactly (NOTES § D224, § D223 ruling 3): `Api::delete` answers with
+/// either the object or a `Status`, kube deserialises one either way, and what the `map` decides is
+/// whether k8rs then *holds* a workload — with `spec.template.spec.containers[].env[].value` in
+/// it — for as long as the dialog is open.
+///
+/// **That `bool` is the difference between *gone* and *going*, and it is the whole of
+/// [`Outcome::Started`]** (`k8s-admin`, 2026-09-04). A Node carrying a finalizer and a pod inside
+/// its grace period both answer `200 OK` with the object; only a completed removal answers with a
+/// `Status`. So [`Checked`] here is a `Checked<bool>` — a caller may read it, and today's driver
+/// does not, because there is nothing for a *dialog* to say about it: the fact lands after the
+/// confirmation, in the sentence and the record.
+pub async fn delete<Show, Ask, Asked>(
+    client: &Client,
+    deleting: &Deleting<'_>,
+    clock: impl Fn() -> Timestamp,
+    audit: &mut impl Write,
+    show: Show,
+    ask: Ask,
+) -> Result<Performed, String>
+where
+    Show: FnOnce(&Shown<'_>),
+    Ask: FnOnce(Checked<bool>) -> Asked,
+    Asked: Future<Output = Answer>,
+{
+    let (resource, consequence, namespaced) = removal(deleting.kind, deleting.name)?;
+    let object = format!("{}/{}", deleting.kind, deleting.name);
+    // **The two halves of one refusal, and which one it is depends on the kind**
+    // (NOTES § D225 ruling 3). `scale` and `restart` have only the first; a node has only the
+    // second, and a namespace named for one is a namespace nobody's object is in.
+    match (namespaced, deleting.namespace) {
+        (true, None) => {
+            return Err(format!(
+                "k8rs will not delete {} without being told which namespace it is in",
+                cleaned(&object, FREE_TEXT)
+            ));
+        }
+        (false, Some(_)) => {
+            return Err(format!(
+                "k8rs will not delete {}: {} belongs to the whole cluster and is in no namespace",
+                cleaned(&object, FREE_TEXT),
+                a_kind(deleting.kind)
+            ));
+        }
+        _ => {}
+    }
+    // The two guards are [`scale`]'s, for [`scale`]'s reason: the name and the namespace become
+    // segments of the request path, so they are checked where the path is built and not only
+    // where the line was parsed.
+    if !object_name(deleting.name) {
+        return Err(unaddressable(&object, "an object's own name"));
+    }
+    if deleting
+        .namespace
+        .is_some_and(|namespace| !namespace_name(namespace))
+    {
+        return Err(unaddressable(&object, "the name of a namespace"));
+    }
+    // **The first cluster-scoped call k8rs makes** (NOTES § D225 ruling 3). `Api::all_with` for a
+    // node, `Api::namespaced_with` for the other five — and the `None` that picks it is the same
+    // `None` the path below is built from, so the request and the record cannot disagree about
+    // which of the two this was.
+    let api: Api<DynamicObject> = match deleting.namespace {
+        Some(namespace) => Api::namespaced_with(client.clone(), namespace, &resource),
+        None => Api::all_with(client.clone(), &resource),
+    };
+    // **The kind is spelled out — `deployment/web`, never `deploy/web`** (`screens/dialogs.md`
+    // § Scale) — and the line carries no flag at all: `propagationPolicy: Background` is what
+    // `kubectl delete` sends when none is given, so what k8rs sends is what this line does
+    // ([`Pass::delete`], NOTES § D225 ruling 5). No `--dry-run` either, because none was run.
+    let kubectl = match deleting.namespace {
+        Some(namespace) => format!("kubectl delete {object} -n {namespace}"),
+        None => format!("kubectl delete {object}"),
+    };
+    // **Derived from the same `ApiResource` the call is built with**, so the audit line cannot
+    // name a path the request did not take: `Api::delete` is `Request::delete`, which is this base
+    // and the name (`kube-core-4.2.0/src/request.rs:109`). For a node the base carries no
+    // namespace segment, which is the whole visible difference on the wire
+    // (`reports/2026-09-04-delete-on-the-wire.md` § 2).
+    let path = format!(
+        "{}/{}",
+        DynamicObject::url_path(&resource, deleting.namespace),
+        deleting.name
+    );
+    let mutation = Mutation {
+        context: deleting.context,
+        server: deleting.server,
+        namespace: deleting.namespace,
+        object: &object,
+        // **Nothing was read, so there is no `uid` to give** (NOTES § D225 ruling 4) — the
+        // field's own documented case for a caller with none.
+        uid: None,
+        consequence: &consequence,
+        kubectl: &kubectl,
+        verb: "DELETE",
+        path: &path,
+        version: None,
+        // **The one operation that declines the preflight** (NOTES § D225 ruling 1) — the region's
+        // own doc says why, and [`UNCHECKABLE`] is what the dialog and the audit line both print.
+        checkable: false,
+        // **Invariant 2's *deletes additionally require typing the object name*, as a type**
+        // (NOTES § D225 ruling 2).
+        confirm: Confirm::Type(deleting.name),
+    };
+    // One closure and one body, [`scale`]'s own borrows — though [`perform`] calls it once here
+    // and not twice, since there is no check to send.
+    let api = &api;
+    Ok(perform(
+        &mutation,
+        clock,
+        audit,
+        show,
+        ask,
+        move |pass| {
+            let params = pass.delete();
+            async move {
+                api.delete(deleting.name, &params)
+                    .await
+                    // **One `bool` off the answer, and the object dropped here** — [`restart`]'s
+                    // `paused` move (NOTES § D224), for NOTES § D223 ruling 3's reason. `.map(|_|
+                    // ())` threw this away until 2026-09-04 and both records then said *the change
+                    // was made* over a Node a finalizer was still holding (`k8s-admin`).
+                    //
+                    // **The shape of the answer is the fact, and no field is read.** `Api::delete`
+                    // answers `Either<K, Status>`: a `Status` is the cluster confirming the object
+                    // is gone, and the object itself — carrying `deletionTimestamp` — is the
+                    // cluster saying it has started. `is_right` is inherent on that type, so
+                    // nothing here names a crate invariant 10 has not approved.
+                    .map(|answer| answer.is_right())
+            }
+        },
+        // **The one operation with a pending case** ([`Landing`], `k8s-admin`, 2026-09-04).
+        |gone| {
+            if *gone {
+                Landing::Finished
+            } else {
+                Landing::Started
+            }
+        },
+    )
+    .await)
+}
+
+// --- DELETE END ---
 
 // --- THE AUDIT LOG START ---
 //

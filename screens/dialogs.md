@@ -69,8 +69,8 @@ one `kubectl` string behind both this line and the command-log bar under it
 MUTATION CONTRACT), so the two can never spell the object two different
 ways — whichever ships here is what ships on the log bar too. Full word wins:
 every other `$ kubectl …` line on this page and every other screen already
-spells the kind out — `kubectl delete pod`, `kubectl drain node-3`, `kubectl
-describe pod`, `kubectl get deployments` — and
+spells the kind out — `kubectl delete pod/web-7d9f4`, `kubectl drain
+node-3`, `kubectl describe pod`, `kubectl get deployments` — and
 [NOTES § The three views](../NOTES.md#the-three-views)'s own worked example
 of this exact panel already reads
 `kubectl scale deployment/web --replicas=3`, not the short form. `deploy` is
@@ -330,35 +330,368 @@ it as the box draws them. Nothing is reworded for either surface — the
 box narrates the same three facts as the terminal, in the order that reads
 best for each.
 
-## Delete — the name has to be typed
+## Delete — the name has to be typed, and nothing is checked first
+
+`ctrl-d` opens this on any object, and — alone among the operations on this
+page that reach more than one kind — it refuses none of them.
+`deployment`, `statefulset`, `daemonset`, `replicaset`, `pod` and `node` —
+every kind in the driver's `KINDS` — reach it, because unlike `restartable`
+(a restart of a replicaset is a word with no meaning) there is no kind a
+delete is meaningless on, so there is no `deletable()` to write and no
+second matrix to keep straight
+([NOTES § D225](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 3).
+
+**And it is the first operation that asks the cluster nothing before it asks
+the reader.** `scale` and `restart` both send a real `dryRun=All` and put its
+answer — *"The cluster checked it first and accepted it."* — into the box
+before the button goes live. `delete` never sends one
+(D225 ruling 1): a dry-run delete and a real one build the **identical**
+request line, with the only marker that tells them apart riding in the body,
+so sending one before anybody has typed a name would put a live `DELETE` on
+the wire — and in the cluster's own audit record, at the level most clusters
+run, a cancelled dialog and a delete that happened would read the same. That
+is a lie in a record k8rs does not own and cannot correct, which is worse
+than the diagnostic value a preflight buys back. So every box below carries
+`UNCHECKABLE`'s own line and never § Scale's or § Restart's: **"k8rs did not
+check this one with the cluster first."** Nothing else is read before a
+delete either — no replica count, no owner, no `uid`, no `finalizers` — so a
+consequence sentence here never claims a fact k8rs has not asked for
+(D225 ruling 4).
+
+**Nor has k8rs read what may be attached to the object that answers back
+after the delete is sent.** A `DELETE` that returns `200` is not proof the
+object is gone: a `finalizer` can hold it — `deletionTimestamp` set, nothing
+else changed — for as long as whatever put it there takes to act or step
+aside. Measured against a real cluster: a Node carrying one answered `200`
+and was still there; a Pod under one came back `status.phase: Running`,
+unchanged
+([reports/2026-09-04-delete-the-operator-review.md § 5](../reports/2026-09-04-delete-the-operator-review.md#5-what-a-successful-delete-hands-back-and-whether-the-object-is-gone)).
+k8rs has read no `finalizers`, the way it has read no `ownerReferences`
+(ruling 4) — so a delete here is a request the cluster may take time over,
+or act on, before it is done. The four boxes below with no hedge of their
+own say *asks* rather than *removes* because of this; pod and replicaset
+already hedge, for the unread-ownership reason above, and are not redrawn
+for this one.
+
+**The taught line sits through more of that wait than k8rs does.**
+`kubectl delete` waits by default (`--wait=true`): it blocks until the
+object is verified gone rather than returning the moment the cluster
+accepts the request. Measured: `kubectl delete node/…` against a node held
+by a finalizer prints its usual `"<name>" deleted` and then does not
+return — a five-second `timeout` around it exits `124`, still waiting, long
+after k8rs's own call has already returned (same report, § 5). k8rs never
+claims the object is gone, only that the cluster accepted the request; the
+wait a finalizer adds is the taught line's to sit through, not k8rs's, and a
+reader who copies it by hand meets it there.
+
+### The pod, and the claim the old mockup made that k8rs cannot back
+
+The box below fixes a defect in this file. It used to read *"Its Deployment
+will start a replacement immediately — the app keeps running"* — a promise
+k8rs has no way to keep, since nothing is read before a delete and a pod's
+owner is one of the facts that stays unread. What replaces it says only what
+k8rs can actually know: that *something* may replace the pod, and that k8rs
+has not checked whether anything will.
 
 ```
  nodes 3/3                      k8rs     ctx: prod-eu · live · admin
 ┌────────────────────────────────────────────────────────────────────┐
 │                                                                    │
-│    ┌ Delete payments/web-7d9f4 ───────────────────────────┐        │
-│    │                                                      │        │
-│    │  This removes the pod. Its Deployment will start a   │        │
-│    │  replacement immediately — the app keeps running.    │        │
-│    │                                                      │        │
-│    │  Type the pod's name to confirm:                     │        │
-│    │  ┌────────────────────────────────────────────────┐  │        │
-│    │  │ web-7d9f_                                      │  │        │
-│    │  └────────────────────────────────────────────────┘  │        │
-│    │                                                      │        │
-│    │            [ delete ]     [ esc cancel ]             │        │
-│    └──────────────────────────────────────────────────────┘        │
+│   ┌ Delete payments/web-7d9f4 ──────────────────────────────────┐  │
+│   │                                                             │  │
+│   │  This removes the pod. Whatever created it will normally    │  │
+│   │  replace it — k8rs has not checked whether anything did.    │  │
+│   │  k8rs did not check this one with the cluster first.        │  │
+│   │                                                             │  │
+│   │  Type the pod's name to confirm:                            │  │
+│   │  ┌───────────────────────────────────────────────────────┐  │  │
+│   │  │ web-7d9f_                                             │  │  │
+│   │  └───────────────────────────────────────────────────────┘  │  │
+│   │                                                             │  │
+│   │                [ delete ]     [ esc cancel ]                │  │
+│   └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│                                                                    │
+│ $ kubectl delete pod/web-7d9f4 -n payments                         │
 ├────────────────────────────────────────────────────────────────────┤
 │ type the name to enable   esc cancel                               │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-The button stays disabled until the typed name matches. This is the
-ctrl-key-slip guard, and it is why deletes and drains are the two operations
-that require typing.
+**The `$` line was missing from this box before, in the nested frame and on
+the log strip both** — a gap against rule 3 below ("the command is shown"),
+now closed the same way § Scale's and § Restart's already were:
+`kubectl delete pod/web-7d9f4 -n payments`, the kind spelled out in full, no
+`--dry-run` and no `propagationPolicy` flag. k8rs sends `Background`
+explicitly on the real call — `kubectl delete`'s own default when none is
+given — so the taught line needs no flag to be equivalent to what k8rs sent
+(D225 ruling 5, measured against a real `kubectl` rather than recalled off
+its docs; if that measurement ever disagrees, the line follows it and this
+sentence is what was wrong).
+
+**This box narrows to 61 columns of interior for the same reason § Restart's
+did** — the two sentences and the typed-name field together do not fit
+§ Scale's 58, and 61 is as far as the nested box goes before it touches the
+outer frame. The blank line that would ordinarily sit between the
+consequence and the verdict is gone, for the same reason § Restart's paused
+variant dropped it: the row it would occupy is spent on the typed-name field
+that § Scale's and § Restart's boxes do not have. This box is 22 rows —
+two below the 24-row ceiling only § Restart's paused variant had reached
+before it; § Scale's plain box is 20 rows and § Restart's is 21.
+
+The four bullets below are not one shape any more. `replicaset` still shares
+the pod's *hedge clause* word for word — not its wording — because neither
+object's creator has been read: a replicaset can just as easily be owned by
+something that will recreate it, and k8rs has no more checked that than it
+has for a pod. What differs is the sentence in front of the hedge, and it
+has to: deleting a replicaset also removes every pod it manages, which
+deleting one pod does not. `deployment`, `statefulset` and `daemonset` carry
+no hedge at all in the old wording, which is exactly backwards given the
+paragraphs above — so all three now open with *asks* and close on one
+finalizer hedge, worded identically across the three because the fact is
+the same one three times:
+
+- **deployment** — "This asks the cluster to remove the deployment and
+  every copy of the app it runs. k8rs has not read what may be attached to
+  it, and something there may delay this or act first — left alone,
+  nothing is left running."
+  `$ kubectl delete deployment/web -n payments`
+- **statefulset** — "This asks the cluster to remove the statefulset and
+  every copy of the app it runs. k8rs has not read what may be attached to
+  it, and something there may delay this or act first — left alone,
+  nothing is left running."
+  `$ kubectl delete statefulset/web -n payments`
+- **daemonset** — "This asks the cluster to remove the daemonset and the
+  copy of the app it runs on every node. k8rs has not read what may be
+  attached to it, and something there may delay this or act first — left
+  alone, nothing is left running."
+  `$ kubectl delete daemonset/web -n payments`
+- **replicaset** — "This removes the replicaset and every pod it manages.
+  Whatever created it will normally replace it — k8rs has not checked
+  whether anything did."
+  `$ kubectl delete replicaset/web-9f3a2 -n payments`
+
+*Left alone* carries the same weight *asks* does above: it names the common
+case — nothing attached, nothing to hold the delete up — without claiming
+it is the only one, which "nothing is left running" did on its own until
+this round.
+
+### Node — the one a beginner reads backwards
+
+Node is the first cluster-scoped object any operation in k8rs mutates —
+`Api::all_with` where `scale` and `restart` have only ever built
+`Api::namespaced_with` — and its title bar carries no namespace, by rule 1
+below: the bare `node-3`, never `infra/node-3`.
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│   ┌ Delete node-3 ──────────────────────────────────────────────┐  │
+│   │                                                             │  │
+│   │  This asks the cluster to remove its record of node-3, not  │  │
+│   │  the machine. Something attached to it, unread by k8rs, may │  │
+│   │  delay this or act first. Left alone, its pods are deleted  │  │
+│   │  and the machine keeps running until its kubelet restarts.  │  │
+│   │  k8rs did not check this one with the cluster first.        │  │
+│   │                                                             │  │
+│   │  Type the node's name to confirm:                           │  │
+│   │  ┌───────────────────────────────────────────────────────┐  │  │
+│   │  │ node-_                                                │  │  │
+│   │  └───────────────────────────────────────────────────────┘  │  │
+│   │                                                             │  │
+│   │                [ delete ]     [ esc cancel ]                │  │
+│   └─────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl delete node/node-3                                       │
+├────────────────────────────────────────────────────────────────────┤
+│ type the name to enable   esc cancel                               │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+This is the one consequence on this page a beginner is likely to read
+exactly backwards, and it has been corrected twice now, each time toward
+the more destructive reading rather than the milder one. **The first
+correction** was about the kubelet: the original draft said a kubelet
+still running re-registers the node within seconds, and that a kubelet
+already gone is the case that loses the pods — both backwards, measured on
+kubelet v1.36.1
+([reports/2026-09-04-delete-on-the-wire.md § 7](../reports/2026-09-04-delete-on-the-wire.md#7-a-node-whose-object-is-deleted-while-its-kubelet-keeps-running),
+[NOTES § D225](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 3 as corrected). A running kubelet does not re-register on its own
+at all — `registerWithAPIServer` runs once per process — so the node
+stayed absent for the full 2 minutes 45 seconds watched and came back only
+2 seconds after the kubelet process itself was restarted; the pods went
+either way. **The second correction is this round's**, and it is the
+sentence in front of that fact rather than the fact itself: *removes* and
+*keeps running* both claimed more certainty than a `finalizer` k8rs has
+not read allows, for the general reason the paragraphs above this box
+give. *Asks* and *left alone* say what is true either way — the request
+was made, and here is what happens if nothing intervenes — without
+claiming nothing will.
+
+**What the delete does not touch is node-3's ability to come back.**
+Measured: its kubelet's client certificate is untouched, and no CSR
+appeared asking to replace one in the 60 seconds watched. What does go
+with the node automatically is its `Lease` in `kube-node-lease`, owned by
+it through `ownerReferences` and removed the same way any owned object is;
+what does not go is a pod already held on node-3 by a finalizer of its
+own — left naming a node that no longer exists, with nothing in the
+cluster to ever clear it
+([reports/2026-09-04-delete-the-operator-review.md § 8](../reports/2026-09-04-delete-the-operator-review.md#8-node-deletion-second-run--what-goes-with-the-object)).
+
+**Draining — `ctrl-r`, v0.2, § Drain below — is the operation that empties
+a node safely: it moves pods off *before* anything is deleted and stops
+new ones landing.** This delete does neither; it is not drain, and nothing
+here performs one or requires one to have run first. That sentence is the
+box's to have and the one still cut from it: four consequence lines
+already reach the same 24-row ceiling § Restart's paused variant did, with
+a typed-name field on top of them that neither of those boxes carries —
+and the pods, the machine, and now the uncertainty over both earned the
+room ahead of it.
+
+### The verdict line, and what "not checked" costs and buys
+
+The sentence in the box is not a lesser version of § Scale's and
+§ Restart's — it is the true and complete verdict for an operation that
+sends no check, said plainly rather than dressed up as a wait that never
+happens. Two things follow from that, and both are worth a reader
+understanding before they press `⏎`:
+
+- **There is no earlier warning.** An admission rule or an RBAC role that
+  would refuse this delete does not surface here — it surfaces only after
+  the name is typed and the delete is sent for real, never before (see
+  below, "Where delete's unhappy paths differ").
+- **The button is never actually waiting on anything.** For `scale` and
+  `restart`, `esc` is inert for as long as a real round trip to the cluster
+  takes ([NOTES § D214](../NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)'s
+  "`esc` is inert until the verdict arrives"). For `delete` that rule still
+  holds structurally — the confirm callback still cannot run before a
+  `Checked` exists — but nothing was sent to wait on, so there is no
+  perceptible delay: the verdict line and a live typed-name field appear
+  in the same frame the dialog opens in.
+
+**What is given up is small, and it is D225's to weigh, not this file's to
+relitigate**: a preflight would catch a denying admission webhook before a
+name is typed, but a `403` or a `404` comes back from the real call
+regardless, and *the object went away* is already the watch's job and not a
+dry-run's. Declining costs a little early warning; sending one would cost the
+cluster's own record of the difference between a delete that was cancelled
+and one that happened.
+
+### Where delete's unhappy paths differ from scale's and restart's
+
+Two of the three shared unhappy-path sections apply to `delete` unchanged.
+**§ The object went away while the dialog was open** already uses a delete
+as its own example — a pod replaced by its ReplicaSet while its name is
+being typed — and nothing about it changes here. **§ While the call is
+running** also applies as written: the modal closes on confirm, not on
+completion, and the `…` on the command log line is replaced by the outcome
+once the real `DELETE` returns.
+
+**§ The cluster said no does not apply the same way, and the difference is
+not cosmetic.** That section is what a *rejected dry-run* looks like:
+`Outcome::NotSent`, the confirm button never having gone live enough to be
+pressed, "Nothing was changed" *and* "This is the check that runs before the
+real change — it stopped this one." Nothing about that sentence is true of a
+refused delete, because there was no check to stop it — `checkable: false`
+means the only call `delete` ever makes is the real one. So when a delete is
+refused, it is `Outcome::Failed`, reached only *after* the name has been
+typed and `⏎` has been pressed, and the sentence the operator is left
+reading is built from the fault the real call hit rather than from a dry-run
+verdict:
+
+```
+nothing was changed — the cluster would not allow it
+```
+
+which is `Fault::Refused`'s own wording — the sentence a `403` gets, keyed
+off the fault the same way every other outcome on this page is (`fn
+verdict`, `src/ops.rs` § THE MUTATION CONTRACT; a `422` from a validating
+webhook is `Fault::Rejected` and reads differently — "the cluster would not
+accept the request k8rs made" — but an RBAC role missing the `delete` verb
+is the one this box below draws). The cluster's own words are joined on
+after a colon where it sent any. "Nothing was changed" is still true — the
+object is still there — but the clause after it is honest about what
+actually happened: the real delete was sent, and the cluster said no to it,
+not to a rehearsal.
+
+### Printed instead of drawn — delete on the headless surface
+
+`ops delete` is headless today. Because there is no dry-run, `show` and
+`ask` run back to back with no cluster round trip between them — unlike
+§ Restart's own printed section, where the paused warning and the verdict
+had to wait on what the check answered, here nothing is waited on, and the
+headless order matches the drawn box's order line for line. Confirming a
+delete on `payments/web-7d9f4`, piped rather than typed at a tty:
+
+```
+$ echo web-7d9f4 | k8rs ops delete pod/web-7d9f4 -n payments
+pod/web-7d9f4 in payments
+This removes the pod. Whatever created it will normally replace it — k8rs has no
+t checked whether anything did.
+$ kubectl delete pod/web-7d9f4 -n payments
+k8rs did not check this one with the cluster first
+type the object's own name and press enter to go ahead — anything else stops it:
+k8rs: the change was made
+```
+
+And a delete an RBAC role refuses — the same four lines up to the prompt,
+then:
+
+```
+k8rs: nothing was changed — the cluster would not allow it: pods "web-7d9f4" is 
+forbidden: User "jane" cannot delete resource "pods" in API group "" in the name
+space "payments"
+```
+
+And a delete on an object a finalizer is holding — `node/node-3`'s own four
+lines up to the prompt, then:
+
+```
+$ echo node-3 | k8rs ops delete node/node-3
+node/node-3
+This asks the cluster to remove its record of node-3, not the machine. Something
+ attached to it, unread by k8rs, may delay this or act first. Left alone, its po
+ds are deleted and the machine keeps running until its kubelet restarts.
+$ kubectl delete node/node-3
+k8rs did not check this one with the cluster first
+type the object's own name and press enter to go ahead — anything else stops it:
+k8rs: the cluster accepted this and the object is still there — something is del
+aying the removal, and the command above waits for that where k8rs does not
+```
+
+`Outcome::Started`, and not `Outcome::Done`: the `200` the DELETE got back
+was a `Node`, not a `Status`, which is the shape the answer takes when
+something is still holding the object rather than gone
+(`k8s-admin`). Exit stays `0` either way — the cluster did change,
+`deletionTimestamp` is now set — so this is not a failure reported beside
+the two above it; it is the third thing a delete can honestly say, next to
+*it happened* and *nobody let it happen*. **What it does not say is
+whether anything already acted.** The consequence hedges both — *may delay
+this or act first* — because k8rs cannot tell them apart from the request
+side; the result line reports only the half a `200` can prove, which is
+the delay. That an admission controller or some other watcher may already
+have started moving the pods, or the node, before this line was printed is
+real and is the consequence's to carry, not this line's to guess at.
+
+As with § Scale's own long line, the breaks above are wherever an 80-column
+terminal ran out of room, not a word boundary — k8rs sends each of these as
+one unwrapped line, and a wider terminal draws the break somewhere else or
+not at all. (The confirmation prompt happens to be exactly 80 columns and so
+does not visibly wrap at all here — a coincidence of this one sentence's
+length, not a rule.) The consequence and the verdict are unrelated to the
+confirmation prompt that follows them in all three examples; what changes
+between them is only the very last line, which is `ops::Performed::plainly`'s
+(`src/ops.rs` § THE MUTATION CONTRACT) and reads the same whichever operation
+produced it.
+
+The button stays disabled until the typed name matches, in the drawn dialog
+exactly as it does here. This is the ctrl-key-slip guard, and it is why
+deletes and drains are the two operations on this page that require typing
+rather than a press.
 
 ## The cluster said no
 
@@ -416,7 +749,7 @@ by its ReplicaSet while you were typing its name
 │    └──────────────────────────────────────────────────────┘        │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ $ kubectl delete pod web-7d9f4 -n payments   → not sent            │
+│ $ kubectl delete pod/web-7d9f4 -n payments   → not sent            │
 ├────────────────────────────────────────────────────────────────────┤
 │ esc dismiss                                                        │
 └────────────────────────────────────────────────────────────────────┘

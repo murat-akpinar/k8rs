@@ -5642,12 +5642,11 @@ async fn yaml_run(
 // threshold is not tripped — the carve-out is NOTES § D14 item 2's, decided in advance. Parsed by
 // hand in the style of the flags above, and no dependency arrives with it.
 //
-// **`scale` (todo.md 3749) and `restart` (3777) are wired; `delete` (3810) still ends at
-// [`not_wired`].** What this region holds beside them is the three things every operation shares —
-// the argument surface, the headless [`show`] and the headless [`ask`] — plus the steps between a
-// parsed line and the call: [`ops_started`]'s runtime and clock, and [`ops_connected`]'s
-// kubeconfig, `server:` and session. Only the innermost call differs, which is what [`Wired`]
-// says.
+// **All three operations are wired now: `scale`, `restart` and `delete`.** What this region holds
+// beside them is the three things every operation shares — the argument surface, the headless
+// [`show`] and the headless [`ask`] — plus the steps between a parsed line and the call:
+// [`ops_started`]'s runtime and clock, and [`ops_connected`]'s kubeconfig, `server:` and session.
+// Only the innermost call differs, which is what [`Wired`] says.
 //
 // **The confirmation is an input the caller supplies per invocation, and there is no `--yes`.**
 // Invariant 2 is not relaxed by being headless. A flag meaning *yes* would make every scripted
@@ -5656,6 +5655,12 @@ async fn yaml_run(
 // standard input, one line per invocation: `echo yes | k8rs ops restart deploy/web -n payments`,
 // and for a delete the object's own name, which keeps *typing the name* structural rather than
 // decorative (PM constraint, 2026-09-04). A script has to say what it is confirming.
+//
+// **And *structural* is now the literal word** (NOTES § D225 ruling 2). `ops::Answer::Confirmed`
+// carries a token this file cannot build, so the only routes to it are `ops::Checked::pressed`
+// and `ops::Checked::typed`, and each refuses the requirement that is not its own: a delete
+// confirmed with `yes` is a cancelled delete, decided by `ops.rs` rather than by this driver's
+// own table. [`Operation::confirm`] is a help string now and nothing reads it but [`ops_usage`].
 //
 // **What the driver checks is the *shape* of the line, and not which kind each operation
 // applies to.** NOTES § Operations gives `scale` deploy/sts/rs and `restart` deploy/sts/ds;
@@ -5685,15 +5690,18 @@ const SCALE: &str = "scale";
 /// The second one (todo.md 3777), spelled once for [`applies`] and [`wired`].
 const RESTART: &str = "restart";
 
-/// **How a confirmation is given** — invariant 2's *a keypress*, and its *typing the object name*
-/// for the destructive half, as the two things a script can be made to supply.
-enum Confirm {
-    /// Any deliberate yes. The headless spelling is the word `yes` ([`ask`]).
-    Press,
-    /// The object's own name, typed. The ctrl-key-slip guard, which `screens/dialogs.md` § Delete
-    /// gives `delete` and `drain` and nothing else.
-    Name,
-}
+/// The third and last one this phase wires, spelled once for [`applies`] and [`wired`].
+const DELETE: &str = "delete";
+
+/// **The headless word that means yes** — [`ask`]'s own spelling of invariant 2's keypress, and
+/// the only thing that confirms an operation `ops::Confirm::Press` covers.
+const YES: &str = "yes";
+
+/// What [`ops_usage`] says about an operation a deliberate yes confirms.
+const SAY_YES: &str = "say yes to confirm";
+
+/// What it says about the destructive half, where invariant 2 wants the object's own name.
+const TYPE_THE_NAME: &str = "type the object's own name to confirm";
 
 /// **One operation's argument surface** — NOTES § Operations' own table, cut to what a command
 /// line can be checked against before anything has connected.
@@ -5704,17 +5712,21 @@ struct Operation {
     /// operation that has one takes a count ([`refuse_count`]); a second operation with a value
     /// of some other shape is what turns this into a type rather than a name.
     value: Option<&'static str>,
-    /// **Which confirmation invariant 2 requires, and it is this driver's table for now.**
-    /// [`ops::Mutation`] carries no such fact — `ops::Answer::Confirmed` says somebody agreed and
-    /// nothing says *how* — so a press-only delete is caught by review rather than by the
-    /// compiler. todo.md 3754 (`delete`) is where a `Confirm` on the mutation makes it a type
-    /// error; until then it is one table in one place and not a branch per operation.
+    /// **What [`ops_usage`] says about confirming this one, and nothing more.**
     ///
-    /// **When 3754 lands, this field is deleted and not kept beside the new one.** Two tables
-    /// answering *how is this confirmed* is the second copy NOTES § D103 is named for, and the
-    /// one that goes stale is always this one — the driver disappears at Phase 12 and nobody
-    /// reads it again. [`ops_usage`] and [`ask`] both read this field, so both move with it.
-    confirm: Confirm,
+    /// **The mechanism moved into `ops.rs` and this is what was left** (NOTES § D225 ruling 2).
+    /// `ops::Mutation::confirm` is now what decides how a mutation is confirmed, and
+    /// `ops::Answer::Confirmed` cannot be built without satisfying it — so [`ask`] reads the
+    /// requirement off the `ops::Checked` it is handed and no longer off this table. A press-only
+    /// delete is a cancelled delete now, not a review finding.
+    ///
+    /// **The field could not be deleted outright, which is what its own doc promised.**
+    /// `ops::Confirm::Type` carries the object's own name, and this line is printed before any
+    /// object has been named — `k8rs ops` with no arguments at all prints it — so no `const` table
+    /// can hold one. What is left is a help string, and a help string and a mechanism are two
+    /// different things to get wrong: this one can only go stale in the sentence, in a file that
+    /// disappears at Phase 12.
+    confirm: &'static str,
 }
 
 /// **The three operations Phase 7 wires**, in the order NOTES § Operations lists them.
@@ -5725,17 +5737,17 @@ const OPERATIONS: [Operation; 3] = [
     Operation {
         verb: SCALE,
         value: Some("copies"),
-        confirm: Confirm::Press,
+        confirm: SAY_YES,
     },
     Operation {
         verb: RESTART,
         value: None,
-        confirm: Confirm::Press,
+        confirm: SAY_YES,
     },
     Operation {
-        verb: "delete",
+        verb: DELETE,
         value: None,
-        confirm: Confirm::Name,
+        confirm: TYPE_THE_NAME,
     },
 ];
 
@@ -5818,9 +5830,12 @@ fn known_kind(word: &str) -> Option<&'static Kind> {
 }
 
 /// **The usage `k8rs ops` prints**, built from [`OPERATIONS`] and [`KINDS`] so neither a fourth
-/// operation nor a second cluster-scoped kind can be added without appearing in it — and so the
-/// line that says *how to confirm* is read off the same field [`ask`] is handed, rather than
-/// being a second copy of it that can drift.
+/// operation nor a second cluster-scoped kind can be added without appearing in it.
+///
+/// **The line that says *how to confirm* is a help string and not the rule** (NOTES § D225
+/// ruling 2, [`Operation::confirm`]). What enforces it is `ops::Mutation::confirm`, which [`ask`]
+/// reads off the `ops::Checked` it is handed; this sentence is printed before any object has been
+/// named, and `ops::Confirm::Type` carries a name, so the two cannot be one value.
 ///
 /// **The namespace is not in brackets, because brackets mean optional and it is not**
 /// (`k8s-admin`, 2026-09-04). `[-n <namespace>]` sat directly above [`ops_namespace`]'s refusal
@@ -5838,10 +5853,7 @@ fn ops_usage() -> String {
             operation
                 .value
                 .map_or_else(String::new, |value| format!(" <{value}>")),
-            match operation.confirm {
-                Confirm::Press => "say yes to confirm",
-                Confirm::Name => "type the object's own name to confirm",
-            }
+            operation.confirm
         ));
     }
     lines.push(format!(
@@ -6089,16 +6101,17 @@ fn refuse_count(word: &str) -> Result<i32, String> {
     }
 }
 
-/// **The sentence a line with nothing wrong in it ends with, and the seam an operation lands
-/// in.**
+/// **The sentence for a line with nothing wrong in it that this build still cannot perform.**
 ///
-/// `delete` (todo.md 3810) replaces this call with its own — building an `ops::Mutation` and
-/// handing it, [`show`] and [`ask`], to `ops::perform`, the way [`scaled`] and [`restarted`] now
-/// do. Until it does, the honest answer is that k8rs read the line and has nothing behind it.
+/// **All three operations are wired, so nothing reaches this from a command line any more** —
+/// what is left is [`wired`]'s `None`: a verb added to [`OPERATIONS`] without an arm, and a
+/// `scale` with no count, which [`ops_value`] refuses above the seam. It is the safety net that
+/// stops either being performed as somebody else's operation, and it is kept for that rather than
+/// for a box: an unwired verb answering *k8rs read the line and did nothing* is the honest end,
+/// where falling through to another arm is not.
 ///
-/// **`scale` (todo.md 3749) and `restart` (3777) no longer reach it**, and the sentence is
-/// unchanged for the one that still does: it says what *this build* does with the line it was
-/// given, and for a `delete` that is still nothing.
+/// **It is also the double every test in this region hands [`ops_line`]**, standing in for
+/// [`ops_performed`], which dials the reader's own cluster.
 ///
 /// **It names everything it parsed, the value included.** *k8rs cannot do that yet* alone would
 /// go green against a parser that read the wrong object, and this is the one line `just e2e` can
@@ -6106,13 +6119,12 @@ fn refuse_count(word: &str) -> Result<i32, String> {
 /// parsed thing it left out, so `scale …/web 3` and `scale …/web 0` printed one identical line —
 /// and the value is the one that decides how many pods exist (`k8s-admin`, 2026-09-04).
 ///
-/// **It promises no later step, because for five pairs there is none** (`k8s-admin` and `tester`,
-/// 2026-09-04). Against NOTES § Operations' *Applies to* column, `scale` on a daemonset, a pod or
-/// a node and `restart` on a replicaset or a node are outside it permanently, so *the operation
-/// itself is a later step* was false of every one of them. This driver deliberately holds no copy
-/// of that matrix — the operation holds it, the cluster confirms it, and `screens/dialogs.md`
-/// rule 4 shows it is not even uniform (`restart pod/web` *is* a delete and does belong) — so
-/// what had to stop claiming is the sentence.
+/// **It promises no later step, and that was true before every operation was wired** (`k8s-admin`
+/// and `tester`, 2026-09-04). Against NOTES § Operations' *Applies to* column, `scale` on a
+/// daemonset, a pod or a node and `restart` on a replicaset or a node are outside it permanently,
+/// so *the operation itself is a later step* was false of every one of them. This driver
+/// deliberately holds no copy of that matrix — the operation holds it and the cluster confirms
+/// it — so what had to stop claiming is the sentence.
 fn not_wired(
     operation: &Operation,
     kind: &Kind,
@@ -6274,9 +6286,14 @@ struct Ready<'a> {
 /// **Whether an operation can be pointed at a kind** — the operation's own matrix, asked before
 /// the audit log is opened (NOTES § D220 ruling 7).
 ///
-/// **A `match` on the verb and not a field on [`Operation`]**, because `delete` (todo.md 3810)
-/// answers *not yet* rather than a matrix, and a table with a `None` in it would be scaffolding
-/// for a box that is not running.
+/// **A `match` on the verb and not a field on [`Operation`]**, because `delete` has no matrix to
+/// hold: it serves every kind in [`KINDS`] and refuses none (NOTES § D225 ruling 3), so a table
+/// with a `None` in it would be a column that means *nothing to ask*.
+///
+/// **There is deliberately no `ops::deletable`.** `ops::scalable` and `ops::restartable` exist
+/// because a restart of a replicaset is a word with no meaning; a delete of one is not, and the
+/// second matrix NOTES § D103 is named for is not worth writing to refuse nothing. A word that
+/// names no kind at all is refused above this, by [`known_kind`].
 fn applies(operation: &Operation, kind: &Kind) -> Result<(), String> {
     match operation.verb {
         SCALE => ops::scalable(kind.singular).map(|_| ()),
@@ -6463,10 +6480,20 @@ fn show(shown: &ops::Shown<'_>, out: &mut impl std::io::Write) -> std::io::Resul
 /// **`ops::perform`'s second callback, headless** — the confirmation, read as one line from
 /// standard input.
 ///
-/// **`verdict` and not the `ops::Checked` it comes off.** `ops::perform` hands `ask` a
-/// `Checked<Response>`; what a headless confirmation reads off it is `Checked::verdict`, and a
-/// generic parameter that exists only to be ignored is a signature claiming to use something it
-/// does not. The operation's closure is `|checked| async move { ask(checked.verdict(), …) }`.
+/// **The `ops::Checked` itself, and no longer three values taken off it** (NOTES § D225
+/// ruling 2). It used to take `verdict`, a driver-side `Confirm` and a name, because it read only
+/// `Checked::verdict` and a generic parameter that exists to be ignored is a signature claiming
+/// to use something it does not. It now reads three things off it — the verdict, what the
+/// mutation asks for, and the answer itself — because `ops::Answer::Confirmed` cannot be built
+/// anywhere else: `ops::Checked::pressed` and `ops::Checked::typed` are its only constructors,
+/// and each refuses the requirement that is not its own. A dialog that asked for a press cannot
+/// confirm a delete, and that is now a fact about the type rather than about this table.
+///
+/// **The answer is only good for the mutation it came from** (NOTES § D225 ruling 2). This
+/// function does not carry one anywhere — it builds it from the `ops::Checked` it was just handed
+/// and returns it in the same breath — but the reason it *cannot* is `ops::Agreed`'s ticket, not
+/// this function's shape: a first draft with a `Copy` token let a dialog keep one yes and confirm
+/// every later delete with it, and Phase 12's console is one process with many dialogs.
 ///
 /// **Two of `ops::Answer`'s four variants are unreachable from here, and that is a fact about
 /// running headless rather than a gap.** `Gone` and `Changed` are what a dialog answers because a
@@ -6477,14 +6504,12 @@ fn show(shown: &ops::Shown<'_>, out: &mut impl std::io::Write) -> std::io::Resul
 /// input, a `^D`, a read that errors, a prompt that could not be printed: nobody confirmed it, so
 /// nothing was confirmed. The safe direction is the only one invariant 2 leaves.
 ///
-/// **Which is why an empty `name` confirms nothing** (`k8s-admin`, 2026-09-04). `typed.trim() ==
-/// wanted` held for `("", "")`, so end of input against an object with no name was invariant 2's
-/// *typing the object name* satisfied by typing nothing — the doc above claiming the opposite.
-/// No argv reaches it, because `k8s::object_name("")` is false; this is the callback all three
-/// operations wire, `delete` (todo.md 3754) is its only [`Confirm::Name`] caller, and a caller
-/// taking the name off an `ops::Shown` takes `ops::Record::of`'s `k8s::text`-cleaned copy, which
-/// *can* clean to empty. One guard in the function every caller routes through, not one per
-/// caller.
+/// **The empty-name guard moved one layer down with the mechanism** (`k8s-admin`, 2026-09-04,
+/// NOTES § D225 ruling 2). `typed.trim() == wanted` held for `("", "")`, so end of input against
+/// an object with no name was invariant 2's *typing the object name* satisfied by typing nothing.
+/// The guard now lives in `ops::Checked::typed`, which is the one function *every* dialog routes
+/// through — this one and Phase 12's console alike — rather than the one every dialog has to
+/// remember.
 ///
 /// **The console is not this function.** `read_line` blocks the thread it is on, and this one is
 /// called from inside `ops::perform`'s `async` closure: headless that is harmless, because the
@@ -6492,19 +6517,20 @@ fn show(shown: &ops::Shown<'_>, out: &mut impl std::io::Write) -> std::io::Resul
 /// behind the modal, and a blocking read on the runtime is exactly what stops it — so Phase 12
 /// reads the answer from the event loop it already has, and takes this function's shape and not
 /// its body.
-fn ask(
-    verdict: &str,
-    confirm: &Confirm,
-    name: &str,
+fn ask<Response>(
+    checked: &ops::Checked<Response>,
     input: &mut impl std::io::BufRead,
     out: &mut impl std::io::Write,
 ) -> ops::Answer {
-    let prompt = match confirm {
-        Confirm::Press => "type yes and press enter to go ahead — anything else stops it:",
-        Confirm::Name => {
-            "type the object's own name and press enter to go ahead — anything else stops it:"
-        }
+    // **Which question, off the mutation's own requirement** — `Some(name)` is invariant 2's
+    // typed name and `None` is a press. The prompt and the answer therefore read one value, so a
+    // prompt asking for a name over a mutation that wants a press cannot happen.
+    let prompt = if checked.asks().is_some() {
+        "type the object's own name and press enter to go ahead — anything else stops it:"
+    } else {
+        "type yes and press enter to go ahead — anything else stops it:"
     };
+    let verdict = checked.verdict();
     // **The prompt ends its own line** (`k8s-admin`, 2026-09-04). It used to end in `": "` with
     // the cursor left on it, which is right for a terminal — the answer is typed there and the
     // tty echoes the newline — and wrong for `echo yes | k8rs ops …`, the documented and only
@@ -6528,14 +6554,15 @@ fn ask(
     if input.read_line(&mut typed).is_err() {
         return ops::Answer::Cancelled;
     }
-    let wanted = match confirm {
-        Confirm::Press => "yes",
-        Confirm::Name => name,
-    };
-    if !wanted.is_empty() && typed.trim() == wanted {
-        ops::Answer::Confirmed
-    } else {
-        ops::Answer::Cancelled
+    let typed = typed.trim();
+    // **The answer is built by the mutation and not by this function** (NOTES § D225 ruling 2).
+    // All this decides is which of the two constructors to reach for and what the headless
+    // spelling of a press is; whether the typed word satisfies invariant 2 is
+    // `ops::Checked::typed`'s, once, for every dialog k8rs will ever have.
+    match checked.asks() {
+        Some(_) => checked.typed(typed),
+        None if typed == YES => checked.pressed(),
+        None => ops::Answer::Cancelled,
     }
 }
 
@@ -6571,19 +6598,26 @@ enum Wired {
     Scale(i32),
     /// `restart`, which takes no value: the kind is the whole of what varies (`ops::Restarting`).
     Restart,
+    /// `delete`, which takes no value either — and where the kind decides more than the sentence:
+    /// a node is cluster-scoped, so it also decides the shape of the request path
+    /// (`ops::Deleting`, NOTES § D225 ruling 3).
+    Delete,
 }
 
-/// **Which operation this build actually performs, and with what** — or `None` for the one whose
-/// arm is a later box (todo.md 3810).
+/// **Which operation this build actually performs, and with what.**
 ///
-/// **The count comes back rather than being unwrapped on the far side.** [`ops_value`] refuses a
-/// `scale` with no count above this, so `(scale, None)` cannot arrive from a command line; asking
-/// for both at once means there is no second sentence about a missing count for it to arrive
-/// *by*.
+/// **All three of [`OPERATIONS`] are wired now, and the `None` is what is left over** — a verb in
+/// that table with no arm here, and a `scale` with no count. Neither can arrive from a command
+/// line ([`ops_value`] refuses the second above this), and both end at [`not_wired`] rather than
+/// in somebody else's arm, which is what stops a fourth operation being performed as a scale.
+///
+/// **The count comes back rather than being unwrapped on the far side.** Asking for both at once
+/// means there is no second sentence about a missing count for `(scale, None)` to arrive *by*.
 fn wired(operation: &Operation, count: Option<i32>) -> Option<Wired> {
     match operation.verb {
         SCALE => count.map(Wired::Scale),
         RESTART => Some(Wired::Restart),
+        DELETE => Some(Wired::Delete),
         _ => None,
     }
 }
@@ -6674,6 +6708,7 @@ async fn ops_connected(
     match wired {
         Wired::Scale(count) => scaled(&reached, ready, count, clock, input, out).await,
         Wired::Restart => restarted(&reached, ready, clock, input, out).await,
+        Wired::Delete => deleted(&reached, ready, clock, input, out).await,
     }
 }
 
@@ -6764,8 +6799,6 @@ async fn scaled(
         namespace: ready.namespace,
         count,
     };
-    let confirm = &ready.operation.confirm;
-    let name = ready.name;
     // **One writer, two callbacks.** `ops::perform` holds both at once and each of them prints,
     // so the stream is shared through a `RefCell` rather than borrowed twice — the borrow is
     // taken for the length of one `writeln!` and both callbacks run on this one thread.
@@ -6782,15 +6815,7 @@ async fn scaled(
         |shown| {
             let _ = show(shown, &mut **out.borrow_mut());
         },
-        |checked| {
-            std::future::ready(ask(
-                checked.verdict(),
-                confirm,
-                name,
-                input,
-                &mut **out.borrow_mut(),
-            ))
-        },
+        |checked| std::future::ready(ask(&checked, input, &mut **out.borrow_mut())),
     )
     .await
     {
@@ -6873,8 +6898,6 @@ async fn restarted(
         name: ready.name,
         namespace: ready.namespace,
     };
-    let confirm = &ready.operation.confirm;
-    let name = ready.name;
     let kind = ready.kind.singular;
     let out = std::cell::RefCell::new(out);
     let performed = match ops::restart(
@@ -6892,7 +6915,7 @@ async fn restarted(
             if let Some(warning) = while_paused(kind, checked.returned()) {
                 let _ = writeln!(out, "{warning}");
             }
-            std::future::ready(ask(checked.verdict(), confirm, name, input, &mut **out))
+            std::future::ready(ask(&checked, input, &mut **out))
         },
     )
     .await
@@ -6903,13 +6926,76 @@ async fn restarted(
     ending(&performed)
 }
 
-/// **What one performed mutation ends as** — the sentence and the exit code, read by [`scaled`]
-/// and [`restarted`] alike, and by `delete` (todo.md 3810) when it lands.
+/// **One delete, from a client to an exit code** — [`scaled`]'s and [`restarted`]'s sibling, and
+/// everything their docs say about the two streams, the confirmation and `ops::Performed` holds
+/// here unchanged.
+///
+/// **Two things are this one's alone, and both are NOTES § D225's.** The confirmation is the
+/// object's own name and not `yes` — `ops::delete` sets `ops::Confirm::Type`, [`ask`] reads it off
+/// the `ops::Checked`, and nothing here has a say in it (ruling 2). And `ready.namespace` is
+/// handed over as it came: a node has none and every other kind must, which is the pairing
+/// `ops::delete` refuses rather than this driver (ruling 3), the same way it refuses a kind it
+/// cannot address.
+///
+/// **No dry-run runs, so nothing waits** (ruling 1). [`show`] prints, the verdict says k8rs did
+/// not check this one with the cluster first, and the prompt follows in the same breath —
+/// [`restarted`]'s paused warning has no equivalent here, because there is no check to answer
+/// with one.
+///
+/// **The fact this operation *does* read off a cluster answer lands after the confirmation, in
+/// [`ending`]'s sentence.** `ops::delete` maps the real call's response to whether the object is
+/// gone or merely going, and nothing here has a say in it: there is no dialog line to draw,
+/// because by then the dialog is closed.
+async fn deleted(
+    reached: &Reached<'_>,
+    ready: &mut Ready<'_>,
+    clock: impl Fn() -> k8s_openapi::jiff::Timestamp,
+    input: &mut impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+) -> Ended {
+    let deleting = ops::Deleting {
+        context: reached.context,
+        server: reached.server,
+        // **The kind the driver resolved, spelled out** — `deployment`, never `deploy`
+        // (`screens/dialogs.md` § Scale). The operation re-derives no scope from it: what it
+        // derives is the scope of the *request path*, which is the fact `Api::all_with` turns on
+        // (NOTES § D225 ruling 3).
+        kind: ready.kind.singular,
+        name: ready.name,
+        namespace: ready.namespace,
+    };
+    let out = std::cell::RefCell::new(out);
+    let performed = match ops::delete(
+        reached.client,
+        &deleting,
+        clock,
+        &mut ready.audit,
+        |shown| {
+            let _ = show(shown, &mut **out.borrow_mut());
+        },
+        |checked| std::future::ready(ask(&checked, input, &mut **out.borrow_mut())),
+    )
+    .await
+    {
+        Ok(performed) => performed,
+        Err(refusal) => return Ended::refused(format!("k8rs: {refusal}")),
+    };
+    ending(&performed)
+}
+
+/// **What one performed mutation ends as** — the sentence and the exit code, read by [`scaled`],
+/// [`restarted`] and [`deleted`] alike.
 ///
 /// **Exit `0` for a cluster that changed and `2` for everything else** (NOTES § D220 ruling 1),
 /// and `recorded` deliberately does not move it: a `Done` k8rs could not write down still
 /// happened, and a `2` there sends a script back to re-run a mutation that already landed. That
 /// fact travels in the sentence instead, which is `ops::Performed::plainly`'s.
+///
+/// **A delete the cluster accepted and has not finished is a `0` for the same reason**
+/// (`ops::Outcome::Started`, `k8s-admin`, 2026-09-04): `deletionTimestamp` is set, so the cluster
+/// did change, and a `2` would send a script back to re-run a delete that already landed. What
+/// that case moves is the sentence — `plainly` says the object is still there and that the taught
+/// `kubectl delete` would have waited for it.
 fn ending(performed: &ops::Performed) -> Ended {
     Ended {
         said: format!("k8rs: {}", performed.plainly()),

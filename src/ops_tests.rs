@@ -46,6 +46,10 @@ struct Trace {
     dialog: Option<Dialog>,
     /// What [`Checked::verdict`] carried, the last time a dialog's button went live.
     verdict: Option<String>,
+    /// **What [`Checked::asks`] carried** — the name invariant 2 wants typed back, or `None` for
+    /// an operation a press confirms. Recorded because it is the fact each operation *chose*
+    /// (NOTES § D225 ruling 2), and nothing else in a transcript can see it.
+    asks: Option<Option<String>>,
 }
 
 type Shared = Rc<RefCell<Trace>>;
@@ -123,6 +127,9 @@ fn scaling() -> Mutation<'static> {
         // audit line stating a field the request beside it does not send.
         version: None,
         checkable: true,
+        // **A press, because a scale is not a delete** — invariant 2 raises the bar to the typed
+        // name for `delete` and `drain` and nothing else (NOTES § D225 ruling 2).
+        confirm: Confirm::Press,
     }
 }
 
@@ -199,17 +206,94 @@ fn shows(trace: &Shared) -> impl FnOnce(&Shown<'_>) + '_ {
     }
 }
 
-/// A confirmation that records the verdict it was shown and ends the dialog with `answer`.
+/// **One dialog, recording what it was shown and ending the way `answer` says** — the shape all
+/// three helpers below are built from.
+///
+/// **The answer is built *from the `Checked` this dialog was handed*, and it has to be**
+/// (NOTES § D225 ruling 2): [`Agreed`] carries [`perform`]'s ticket, so a confirmation forged
+/// beside the call — which is what these tests did until 2026-09-04 — is a confirmation for no
+/// mutation at all and would be refused.
+fn answering<'a, R>(
+    trace: &'a Shared,
+    answer: impl FnOnce(&Checked<R>) -> Answer + 'a,
+) -> impl FnOnce(Checked<R>) -> std::future::Ready<Answer> + 'a {
+    move |checked| {
+        {
+            let mut trace = trace.borrow_mut();
+            trace.steps.push("asked".to_string());
+            trace.verdict = Some(checked.verdict().to_string());
+            trace.asks = Some(checked.asks().map(str::to_string));
+        }
+        std::future::ready(answer(&checked))
+    }
+}
+
+/// A dialog that records the verdict it was shown and ends with `answer` — the three endings that
+/// are not a confirmation, which stay freely constructible ([`Answer`]).
 fn asked<R>(
     trace: &Shared,
     answer: Answer,
 ) -> impl FnOnce(Checked<R>) -> std::future::Ready<Answer> + '_ {
-    move |checked| {
-        let mut trace = trace.borrow_mut();
-        trace.steps.push("asked".to_string());
-        trace.verdict = Some(checked.verdict().to_string());
-        std::future::ready(answer)
-    }
+    answering(trace, move |_| answer)
+}
+
+/// **A dialog that pressed** — the confirmation for a [`Confirm::Press`] mutation, built the only
+/// way one can be built.
+fn confirms<'a, R: 'a>(
+    trace: &'a Shared,
+) -> impl FnOnce(Checked<R>) -> std::future::Ready<Answer> + 'a {
+    answering(trace, Checked::pressed)
+}
+
+/// **One of the four endings, named** — the table shape the two tests over *every* ending need,
+/// now that a confirmation is built from the [`Checked`] and so cannot be a value sitting in a
+/// table beside the case it belongs to ([`Agreed`]).
+///
+/// **One closure and not a `match` over four**, because four arms would be four `impl` types.
+fn ends<'a, R>(
+    trace: &'a Shared,
+    which: &'static str,
+) -> impl FnOnce(Checked<R>) -> std::future::Ready<Answer> + 'a {
+    answering(trace, move |checked| match which {
+        "confirmed" => checked.pressed(),
+        "cancelled" => Answer::Cancelled,
+        "gone" => Answer::Gone,
+        "changed" => Answer::Changed,
+        other => panic!("{other} is not one of the four endings a dialog has"),
+    })
+}
+
+/// **A dialog that typed `name`** — the confirmation for a [`Confirm::Type`] mutation.
+fn types<'a, R>(
+    trace: &'a Shared,
+    name: &'a str,
+) -> impl FnOnce(Checked<R>) -> std::future::Ready<Answer> + 'a {
+    answering(trace, move |checked| checked.typed(name))
+}
+
+/// **[`perform`] with the landing a `PATCH` has** — [`finished`], which is what [`scale`] and
+/// [`restart`] pass and what every test in this file wants but the two that are about the other
+/// arm.
+///
+/// **A wrapper and not a seventh argument at twenty-eight call sites**, and it hides nothing that
+/// is under test: `Landing::Started` is reached through [`delete`] against a stub that answers
+/// with the object, and through the one direct [`perform`] test that asks for it by name.
+async fn performed<Show, Ask, Asked, Call, Called, Response>(
+    record: &Mutation<'_>,
+    clock: impl Fn() -> Timestamp,
+    audit: &mut impl Write,
+    show: Show,
+    ask: Ask,
+    call: Call,
+) -> Performed
+where
+    Show: FnOnce(&Shown<'_>),
+    Ask: FnOnce(Checked<Response>) -> Asked,
+    Asked: std::future::Future<Output = Answer>,
+    Call: Fn(Pass) -> Called,
+    Called: std::future::Future<Output = Result<Response, kube::Error>>,
+{
+    perform(record, clock, audit, show, ask, call, finished).await
 }
 
 /// Everything the transcript recorded, printed and returned.
@@ -229,12 +313,12 @@ async fn the_dialog_is_open_before_the_check_goes_out_and_the_attempt_is_recorde
     let trace = trace();
     let mut sink = Sink(trace.clone());
 
-    let done = perform(
+    let done = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         works(&trace),
     )
     .await;
@@ -268,12 +352,12 @@ async fn the_dialog_gets_its_title_its_consequence_and_its_command_line_and_noth
     let trace = trace();
     let mut sink = Sink(trace.clone());
 
-    let _ = perform(
+    let _ = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         works(&trace),
     )
     .await;
@@ -306,14 +390,14 @@ async fn the_object_the_check_returned_is_what_the_dialog_is_given() {
     let seen = Rc::new(RefCell::new(None::<String>));
     let heard = seen.clone();
 
-    let done = perform(
+    let done = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
         move |checked: Checked<String>| {
             *heard.borrow_mut() = checked.returned().cloned();
-            std::future::ready(Answer::Confirmed)
+            std::future::ready(checked.pressed())
         },
         |pass| {
             std::future::ready(Ok(if is_check(pass) {
@@ -350,8 +434,11 @@ async fn cancelled_gone_and_changed_are_three_different_records_and_not_one() {
     ] {
         let trace = trace();
         let mut sink = Sink(trace.clone());
+        // **The name is taken before the value is handed over**: an [`Answer`] is not `Copy` any
+        // more, because a confirmation is a thing that happened once ([`Agreed`]).
+        let named = format!("{answer:?}");
 
-        let ended = perform(
+        let ended = performed(
             &scaling(),
             stamp,
             &mut sink,
@@ -365,7 +452,7 @@ async fn cancelled_gone_and_changed_are_three_different_records_and_not_one() {
         let steps = transcript(&trace);
         assert!(
             !steps.contains(&"call".to_string()),
-            "a mutation nobody confirmed reached the API server: {answer:?}"
+            "a mutation nobody confirmed reached the API server: {named}"
         );
         let line = steps.last().cloned().expect("a result line");
         assert!(
@@ -402,12 +489,12 @@ async fn a_refused_check_stops_before_the_confirmation_and_keeps_what_the_server
     let denial = "deployments.apps \"web\" is forbidden: User \"dev\" cannot patch resource \
                   \"deployments/scale\" in API group \"apps\" in the namespace \"payments\"";
 
-    let stopped = perform(
+    let stopped = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         |pass| {
             trace.borrow_mut().steps.push(step(pass));
             std::future::ready(if is_check(pass) {
@@ -467,12 +554,12 @@ async fn an_invalid_object_is_a_rejected_request_and_keeps_the_servers_explanati
     let invalid = "Deployment.apps \"web\" is invalid: spec.replicas: Invalid value: -1: must be \
                    greater than or equal to 0";
 
-    let stopped = perform(
+    let stopped = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         |_| std::future::ready(Err::<(), _>(refusal(invalid, "Invalid", 422))),
     )
     .await;
@@ -611,12 +698,12 @@ async fn a_failure_this_side_of_the_wire_is_not_recorded_as_the_server_refusing(
         let trace = trace();
         let mut sink = Sink(trace.clone());
 
-        let stopped = perform(
+        let stopped = performed(
             &scaling(),
             stamp,
             &mut sink,
             shows(&trace),
-            asked(&trace, Answer::Confirmed),
+            confirms(&trace),
             |_| std::future::ready(Err::<(), _>(clone_of(&error))),
         )
         .await;
@@ -660,12 +747,12 @@ async fn a_call_that_fails_after_a_good_check_is_told_apart_from_a_refused_check
     let mut sink = Sink(trace.clone());
     let expired = "Unauthorized";
 
-    let failed = perform(
+    let failed = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         |pass| {
             trace.borrow_mut().steps.push(step(pass));
             std::future::ready(if is_check(pass) {
@@ -705,12 +792,12 @@ async fn a_conflict_on_the_real_call_is_its_own_fault_and_keeps_the_servers_own_
     let conflict = "Operation cannot be fulfilled on deployments.apps \"web\": the object has \
                     been modified; please apply your changes to the latest version and try again";
 
-    let failed = perform(
+    let failed = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         |pass| {
             std::future::ready(if is_check(pass) {
                 Ok(())
@@ -748,12 +835,12 @@ async fn a_broken_pipe_after_the_request_went_out_says_k8rs_does_not_know() {
     let trace = trace();
     let mut sink = Sink(trace.clone());
 
-    let failed = perform(
+    let failed = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         |pass| {
             std::future::ready(if is_check(pass) {
                 Ok(())
@@ -791,12 +878,10 @@ async fn a_broken_pipe_after_the_request_went_out_says_k8rs_does_not_know() {
 /// 2026-09-04).
 #[tokio::test]
 async fn the_dry_run_verdict_is_on_every_result_line_and_not_only_where_it_failed() {
-    for answer in [
-        Answer::Confirmed,
-        Answer::Cancelled,
-        Answer::Gone,
-        Answer::Changed,
-    ] {
+    // **A dialog and not an `Answer`**, since 2026-09-04: a confirmation is built from the
+    // `Checked` the dialog was handed ([`Agreed`]'s ticket), so it cannot be a value in a table
+    // beside the case it belongs to.
+    for ending in ["confirmed", "cancelled", "gone", "changed"] {
         for checkable in [true, false] {
             let trace = trace();
             let mut sink = Sink(trace.clone());
@@ -805,12 +890,12 @@ async fn the_dry_run_verdict_is_on_every_result_line_and_not_only_where_it_faile
                 ..scaling()
             };
 
-            let _ = perform(
+            let _ = performed(
                 &record,
                 stamp,
                 &mut sink,
                 shows(&trace),
-                asked(&trace, answer),
+                ends(&trace, ending),
                 works(&trace),
             )
             .await;
@@ -844,12 +929,12 @@ async fn an_operation_that_declines_the_check_records_that_none_was_run_and_send
         ..scaling()
     };
 
-    let done = perform(
+    let done = performed(
         &unchecked,
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         works(&trace),
     )
     .await;
@@ -886,12 +971,12 @@ async fn an_operation_that_declines_the_check_records_that_none_was_run_and_send
 async fn an_attempt_that_cannot_be_written_stops_before_anything_is_sent() {
     let canary = trace();
     let mut working = Sink(canary.clone());
-    let _ = perform(
+    let _ = performed(
         &scaling(),
         stamp,
         &mut working,
         shows(&canary),
-        asked(&canary, Answer::Confirmed),
+        confirms(&canary),
         works(&canary),
     )
     .await;
@@ -906,12 +991,12 @@ async fn an_attempt_that_cannot_be_written_stops_before_anything_is_sent() {
     trace.borrow_mut().breaks_at = 1;
     let mut sink = Sink(trace.clone());
 
-    let refused = perform(
+    let refused = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         works(&trace),
     )
     .await;
@@ -936,12 +1021,12 @@ async fn an_attempt_that_cannot_be_flushed_stops_too() {
     trace.borrow_mut().breaks_flush = true;
     let mut sink = Sink(trace.clone());
 
-    let refused = perform(
+    let refused = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         works(&trace),
     )
     .await;
@@ -968,20 +1053,20 @@ async fn an_attempt_that_cannot_be_flushed_stops_too() {
 /// replaced by *go and look* (`k8s-admin`, 2026-09-04).
 #[tokio::test]
 async fn a_result_that_cannot_be_recorded_keeps_the_outcome_k8rs_already_knows() {
-    for (answer, outcome) in [
-        (Answer::Confirmed, Outcome::Done),
-        (Answer::Cancelled, Outcome::Cancelled),
+    for (ending, outcome) in [
+        ("confirmed", Outcome::Done),
+        ("cancelled", Outcome::Cancelled),
     ] {
         let trace = trace();
         trace.borrow_mut().breaks_at = 2;
         let mut sink = Sink(trace.clone());
 
-        let performed = perform(
+        let performed = performed(
             &scaling(),
             stamp,
             &mut sink,
             shows(&trace),
-            asked(&trace, answer),
+            ends(&trace, ending),
             works(&trace),
         )
         .await;
@@ -1003,9 +1088,10 @@ async fn a_result_that_cannot_be_recorded_keeps_the_outcome_k8rs_already_knows()
                 "asked".to_string(),
             ]
             .into_iter()
-            .chain(match answer {
-                Answer::Confirmed => vec!["call".to_string()],
-                _ => vec![],
+            .chain(if ending == "confirmed" {
+                vec!["call".to_string()]
+            } else {
+                vec![]
             })
             .collect::<Vec<_>>(),
             "the result line reached a log that was supposed to have refused it"
@@ -1026,12 +1112,12 @@ async fn a_result_names_the_attempt_it_belongs_to_rather_than_the_one_above_it()
     let inner_stamp = Timestamp::from_second(1_788_439_000).expect("inside jiff's range");
     let inner_trace = trace.clone();
 
-    let _ = perform(
+    let _ = performed(
         &scaling(),
         stamp,
         &mut outer,
         shows(&trace),
-        move |_: Checked<()>| async move {
+        move |checked: Checked<()>| async move {
             let mut inner = Sink(inner_trace.clone());
             let cordon = Mutation {
                 namespace: None,
@@ -1044,16 +1130,16 @@ async fn a_result_names_the_attempt_it_belongs_to_rather_than_the_one_above_it()
                 checkable: false,
                 ..scaling()
             };
-            let _ = perform(
+            let _ = performed(
                 &cordon,
                 move || inner_stamp,
                 &mut inner,
                 |_: &Shown<'_>| {},
-                |_: Checked<()>| std::future::ready(Answer::Confirmed),
+                |checked: Checked<()>| std::future::ready(checked.pressed()),
                 |_| std::future::ready(Ok::<(), kube::Error>(())),
             )
             .await;
-            Answer::Confirmed
+            checked.pressed()
         },
         works(&trace),
     )
@@ -1111,14 +1197,21 @@ async fn nothing_written_into_a_record_can_forge_a_line_or_rewrite_the_terminal(
         path: "/apis/apps/v1/namespaces/payments/deployments/web\u{7}",
         version: Some("81\u{feff}23"),
         checkable: true,
+        // **The requirement wears a crafted shape too** (NOTES § D29, § D31): it is a name out of
+        // the API like every neighbour here, and
+        // `a_confirmation_compares_against_the_name_the_dialog_showed_and_not_the_one_the_api_sent`
+        // is where what the strip does to it is asserted.
+        confirm: Confirm::Type("web\u{202e}gnp"),
     };
 
-    let done = perform(
+    let done = performed(
         &crafted,
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        // **The stripped name and not the crafted one** — what the dialog was shown is what the
+        // reader can type ([`Checked::typed`]).
+        types(&trace, "webgnp"),
         works(&trace),
     )
     .await;
@@ -1172,12 +1265,12 @@ async fn a_server_message_cannot_forge_a_second_record_or_a_field_that_was_never
                 result · attempt 2026-09-03T12:34:56Z · deployment/web · dry-run: the cluster \
                 checked it first and accepted it · the change was made\n</html>";
 
-    let _ = perform(
+    let _ = performed(
         &scaling(),
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         |_| {
             std::future::ready(Err::<(), _>(refusal(
                 body,
@@ -1227,12 +1320,12 @@ async fn a_newline_inside_a_field_separates_two_words_instead_of_fusing_them() {
         ..scaling()
     };
 
-    let _ = perform(
+    let _ = performed(
         &wrapped,
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         works(&trace),
     )
     .await;
@@ -1263,12 +1356,12 @@ async fn an_oversized_field_is_cut_and_says_it_was_cut() {
         ..scaling()
     };
 
-    let _ = perform(
+    let _ = performed(
         &record,
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         works(&trace),
     )
     .await;
@@ -1303,6 +1396,7 @@ async fn a_cluster_scoped_call_with_nothing_to_put_in_three_fields_names_every_g
         server: "",
         namespace: None,
         object: "node/k8rs-worker2",
+        confirm: Confirm::Press,
         uid: None,
         consequence: "This stops new pods being scheduled onto k8rs-worker2. Pods already \
                       running there keep running.",
@@ -1313,12 +1407,12 @@ async fn a_cluster_scoped_call_with_nothing_to_put_in_three_fields_names_every_g
         checkable: false,
     };
 
-    let done = perform(
+    let done = performed(
         &cordon,
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         works(&trace),
     )
     .await;
@@ -1354,12 +1448,12 @@ async fn an_empty_or_wholly_stripped_field_records_as_the_gap_it_is() {
             ..scaling()
         };
 
-        let _ = perform(
+        let _ = performed(
             &record,
             stamp,
             &mut sink,
             shows(&trace),
-            asked(&trace, Answer::Confirmed),
+            confirms(&trace),
             works(&trace),
         )
         .await;
@@ -1392,12 +1486,12 @@ async fn a_consequence_that_states_nothing_is_stopped_before_anything_is_written
         ..scaling()
     };
 
-    let _ = perform(
+    let _ = performed(
         &silent,
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
         works(&trace),
     )
     .await;
@@ -1422,7 +1516,9 @@ async fn a_consequence_that_states_nothing_is_stopped_before_anything_is_written
 // to paste the new output into the literal — the assertion drift CLAUDE.md § Code phase rules
 // forbids (`tester`, 2026-09-04). `dryRun` was the only such parameter when the region was
 // written; `fieldValidation` is the second, and it is a separate test rather than a clause bolted
-// onto the first for the same reason.
+// onto the first for the same reason. `propagationPolicy` is the third, and it gets a third test
+// (NOTES § D225 ruling 5) — the paragraph above predicted it by name, which is why it is not a
+// clause bolted onto the delete's `dryRun` rows either.
 
 /// The collection path a `deployment/web` request is built against.
 fn deployments() -> kube::core::Request {
@@ -1618,6 +1714,36 @@ fn both_passes_of_a_plain_patch_ask_the_server_to_reject_an_unknown_field() {
         assert!(
             plain_patch(pass).0.contains("fieldValidation=Strict"),
             "the {which} would accept a field the cluster does not have"
+        );
+    }
+}
+
+/// **Both passes of a delete ask for background deletion** — NOTES § D225 ruling 5, in the body
+/// the API server reads and not on a struct field.
+///
+/// **`kubectl delete` sends `{"propagationPolicy":"Background"}` and nothing else** — measured
+/// against a real apiserver, byte-identical across all six kinds
+/// (`reports/2026-09-04-delete-on-the-wire.md` § 1-2) — so invariant 4's *equivalent* command
+/// needs this set explicitly: `DeleteParams::default()` leaves it `None` and lets the server pick
+/// a per-resource default, which the taught line's *no flag* would then not be equivalent to.
+///
+/// **On both passes, for the reason `fieldValidation` is on both**: [`Pass`] converts *which pass*
+/// into *what goes on the wire*, and a policy that rode only on [`FOR_REAL`] would make the check
+/// a rehearsal of a different request. That `delete` sends no check today
+/// (NOTES § D225 ruling 1) is the operation's decision and not this conversion's.
+///
+/// **A `contains` and not an equality**, which is this region's own rule: the next box in this
+/// phase adds `preconditions` here, and an exact assertion would read that as this box's defect.
+/// The end-to-end delete tests assert the whole body, where the subject is the request the
+/// operation made.
+#[test]
+fn both_passes_of_a_delete_ask_the_server_to_delete_in_the_background() {
+    for (pass, which) in [(DRY_RUN, "check"), (FOR_REAL, "change")] {
+        let (_, body) = delete_wire(pass);
+        assert!(
+            body.contains(r#""propagationPolicy":"Background""#),
+            "the {which} lets the server pick its own default, so `kubectl delete` with no flag \
+             is not what k8rs sent: {body}"
         );
     }
 }
@@ -2017,7 +2143,7 @@ async fn a_scale_reads_the_count_off_the_subresource_and_patches_only_that() {
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect("a deployment in a namespace, with a cluster that answers");
@@ -2067,7 +2193,7 @@ async fn what_a_scale_records_is_the_object_it_read_and_the_call_it_made() {
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect("a deployment in a namespace, with a cluster that answers");
@@ -2086,6 +2212,15 @@ async fn what_a_scale_records_is_the_object_it_read_and_the_call_it_made() {
             kubectl: "kubectl scale deployment/web --replicas=3 -n payments".to_string(),
         }),
         "the dialog was not given the object, the count it read, or a runnable kubectl line"
+    );
+    // **A press and not a typed name** — invariant 2 raises the bar to typing the object's own
+    // name for `delete` and `drain` and for nothing else, so an operation that asked for one here
+    // would be a second confirmation kind this repo deliberately does not have
+    // (NOTES § D225 ruling 2).
+    assert_eq!(
+        trace.borrow().asks,
+        Some(None),
+        "this operation asked the reader to type the object's name"
     );
     let lines = transcript(&trace);
     let attempt = lines
@@ -2178,7 +2313,7 @@ async fn a_scale_that_cannot_read_the_current_count_refuses_and_records_nothing(
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect_err("a cluster that will not answer the read cannot be scaled");
@@ -2230,7 +2365,7 @@ async fn a_scale_the_cluster_gave_no_count_for_is_refused_rather_than_read_as_no
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect_err("a Scale with no spec.replicas says nothing about what is running");
@@ -2265,7 +2400,7 @@ async fn a_scale_with_no_namespace_is_refused_before_a_single_call_goes_out() {
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect_err("a namespaced object with no namespace is not something to scale");
@@ -2311,7 +2446,7 @@ async fn a_name_that_would_rewrite_the_request_path_is_refused_where_the_path_is
             stamp,
             &mut sink,
             shows(&trace),
-            asked(&trace, Answer::Confirmed),
+            confirms(&trace),
         )
         .await
         .expect_err("a name that is not addressable is not something to scale");
@@ -2356,7 +2491,7 @@ async fn a_count_below_zero_is_refused_before_anything_describes_it() {
             stamp,
             &mut sink,
             shows(&trace),
-            asked(&trace, Answer::Confirmed),
+            confirms(&trace),
         )
         .await
         .expect_err("a count Kubernetes cannot hold is not something to scale to");
@@ -2424,7 +2559,7 @@ async fn a_scale_pointed_at_a_kind_it_does_not_work_on_sends_nothing() {
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect_err("a pod is not something k8rs scales");
@@ -2782,7 +2917,7 @@ async fn restarting_a_pod_says_it_would_be_a_delete_and_deletes_nothing() {
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect_err("a pod is not something k8rs restarts");
@@ -2921,7 +3056,7 @@ async fn a_restart_patches_the_object_itself_and_reads_nothing_before_it() {
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect("a deployment in a namespace, with a cluster that answers");
@@ -2970,7 +3105,7 @@ async fn the_check_and_the_change_carry_one_stamp_and_not_one_each() {
         ticking(&second),
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect("a deployment in a namespace, with a cluster that answers");
@@ -3022,7 +3157,7 @@ async fn what_a_restart_records_is_the_call_it_made_and_the_two_things_it_never_
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect("a deployment in a namespace, with a cluster that answers");
@@ -3044,6 +3179,15 @@ async fn what_a_restart_records_is_the_call_it_made_and_the_two_things_it_never_
             kubectl: "kubectl rollout restart deployment/web -n payments".to_string(),
         }),
         "the dialog was not given the object, what a restart does to it, or a runnable kubectl line"
+    );
+    // **A press and not a typed name** — invariant 2 raises the bar to typing the object's own
+    // name for `delete` and `drain` and for nothing else, so an operation that asked for one here
+    // would be a second confirmation kind this repo deliberately does not have
+    // (NOTES § D225 ruling 2).
+    assert_eq!(
+        trace.borrow().asks,
+        Some(None),
+        "this operation asked the reader to type the object's name"
     );
     assert!(
         !trace
@@ -3140,7 +3284,7 @@ async fn a_restart_the_cluster_would_not_check_is_recorded_and_never_sent() {
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect("a refused check is an outcome and not a refusal of the request");
@@ -3191,7 +3335,7 @@ async fn a_restart_with_no_namespace_is_refused_before_a_single_call_goes_out() 
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect_err("a namespaced object with no namespace is not something to restart");
@@ -3234,7 +3378,7 @@ async fn a_name_that_would_rewrite_a_restarts_request_path_is_refused_where_it_i
             stamp,
             &mut sink,
             shows(&trace),
-            asked(&trace, Answer::Confirmed),
+            confirms(&trace),
         )
         .await
         .expect_err("a name that is not addressable is not something to restart");
@@ -3279,7 +3423,7 @@ async fn a_restart_pointed_at_a_kind_it_does_not_work_on_sends_nothing() {
             stamp,
             &mut sink,
             shows(&trace),
-            asked(&trace, Answer::Confirmed),
+            confirms(&trace),
         )
         .await
         .expect_err("a kind k8rs does not restart is not something to restart");
@@ -3330,7 +3474,7 @@ async fn a_paused_deployment_is_the_fact_the_check_hands_back_and_it_still_asks(
             |checked| {
                 let returned: Option<&bool> = checked.returned();
                 seen.set(returned.copied());
-                std::future::ready(Answer::Confirmed)
+                std::future::ready(checked.pressed())
             },
         )
         .await
@@ -3378,6 +3522,8 @@ async fn an_object_gone_or_changed_under_a_restart_leaves_the_check_as_the_only_
         let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
         let trace = trace();
         let mut sink = Sink(trace.clone());
+        // The name before the value — [`Answer`] is no longer `Copy` ([`Agreed`]).
+        let named = format!("{answer:?}");
 
         let done = restart(
             &client,
@@ -3391,15 +3537,15 @@ async fn an_object_gone_or_changed_under_a_restart_leaves_the_check_as_the_only_
         .expect("a deployment in a namespace, with a cluster that answers");
 
         let requests = sent.lock().expect("the log is never poisoned").clone();
-        println!("{answer:?} → {}\n{}", done.plainly(), requests.join("\n"));
+        println!("{named} → {}\n{}", done.plainly(), requests.join("\n"));
         assert_eq!(
             requests,
             vec![restart_call("?&dryRun=All&fieldValidation=Strict")],
-            "{answer:?} sent the change anyway"
+            "{named} sent the change anyway"
         );
-        assert_eq!(done.outcome, Some(outcome), "{answer:?}");
-        assert_eq!(done.plainly(), said, "{answer:?}");
-        assert!(!done.changed(), "{answer:?} is not an exit 0");
+        assert_eq!(done.outcome, Some(outcome), "{named}");
+        assert_eq!(done.plainly(), said, "{named}");
+        assert!(!done.changed(), "{named} is not an exit 0");
     }
 }
 
@@ -3437,7 +3583,7 @@ async fn a_restart_whose_audit_log_fails_sends_nothing_or_keeps_the_outcome_it_a
             stamp,
             &mut sink,
             shows(&trace),
-            asked(&trace, Answer::Confirmed),
+            confirms(&trace),
         )
         .await
         .expect("a sink that cannot be written is an outcome and not a refusal of the request");
@@ -3461,7 +3607,7 @@ async fn a_restart_whose_audit_log_fails_sends_nothing_or_keeps_the_outcome_it_a
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect("a deployment in a namespace, with a cluster that answers");
@@ -3499,7 +3645,7 @@ async fn a_check_that_was_sent_and_failed_is_never_recorded_as_one_that_was_not_
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect("a refused check is an outcome and not a refusal of the request");
@@ -3522,7 +3668,7 @@ async fn a_check_that_was_sent_and_failed_is_never_recorded_as_one_that_was_not_
         stamp,
         &mut sink,
         shows(&second),
-        asked(&second, Answer::Confirmed),
+        confirms(&second),
     )
     .await
     .expect("a refused check is an outcome and not a refusal of the request");
@@ -3683,7 +3829,7 @@ async fn neither_operation_claims_a_check_was_sent_when_nothing_usable_answered(
         stamp,
         &mut sink,
         shows(&trace),
-        asked(&trace, Answer::Confirmed),
+        confirms(&trace),
     )
     .await
     .expect("a cluster that cannot be reached is an outcome and not a refusal of the request");
@@ -3716,7 +3862,7 @@ async fn neither_operation_claims_a_check_was_sent_when_nothing_usable_answered(
         stamp,
         &mut sink,
         shows(&second),
-        asked(&second, Answer::Confirmed),
+        confirms(&second),
     )
     .await
     .expect("a check that was not answered is an outcome and not a refusal of the request");
@@ -3755,6 +3901,981 @@ async fn neither_operation_claims_a_check_was_sent_when_nothing_usable_answered(
             "{verb}: the outcome stopped naming the fault beside the check: {line:?}"
         );
     }
+}
+
+// --- DELETE ---
+//
+// **The wire again, and this time for what is *not* on it.** `delete` is the one operation that
+// sends no `dryRun=All` (NOTES § D225 ruling 1), so what these assert is that exactly **one**
+// request goes out where `scale` and `restart` send two, that its body is
+// `{"propagationPolicy":"Background"}` and nothing else (ruling 5), and that a cancelled delete
+// sends nothing at all — which no other operation in this file can show, because for the other
+// two the check has already gone out by the time anybody is asked.
+//
+// **And it is the first cluster-scoped call**, so the node rows assert a path with no namespace
+// segment, a taught line with no `-n`, and an attempt line that says `cluster-wide` rather than
+// leaving a dangling label (ruling 3).
+
+/// The delete `k8rs ops delete pod/web-7d9f4 -n payments` describes — `screens/dialogs.md`
+/// § Delete's own object.
+fn deleting() -> Deleting<'static> {
+    Deleting {
+        context: "kind-k8rs",
+        // A reserved host, for [`scaling`]'s own reason.
+        server: "https://k8rs-tests.invalid:41751",
+        kind: "pod",
+        name: "web-7d9f4",
+        namespace: Some("payments"),
+    }
+}
+
+/// **What a cluster hands back from a delete** — a `Status`, which is the half of
+/// `Either<K, Status>` an accepted delete usually answers with. `delete` reads neither half
+/// (NOTES § D225 ruling 4), which is what this being the *other* variant from [`patched`] proves
+/// costs nothing.
+fn gone() -> String {
+    r#"{"kind":"Status","apiVersion":"v1","status":"Success","code":200}"#.to_string()
+}
+
+/// **What a cluster hands back when it has accepted the removal and not finished it** — the
+/// object, carrying `deletionTimestamp`, which is the other half of `Api::delete`'s
+/// `Either<K, Status>` (NOTES § D225, `k8s-admin`, 2026-09-04).
+///
+/// **Measured shape and not an invented one**: a Node held by a finalizer and a pod inside its
+/// grace period both answer `200 OK` with the object. Nothing in `delete` reads a field off it —
+/// the *shape* of the answer is the fact — so this carries the timestamp because a real one does,
+/// not because anything looks for it.
+fn terminating() -> String {
+    r#"{"apiVersion":"v1","kind":"Pod","metadata":{"name":"web-7d9f4",
+       "namespace":"payments","deletionTimestamp":"2026-09-04T20:15:49Z",
+       "deletionGracePeriodSeconds":30,"finalizers":["example.com/termination"]},
+       "spec":{},"status":{"phase":"Running"}}"#
+        .to_string()
+}
+
+/// The `DELETE` a delete sends, as the stub logs it: the target, and the body under it.
+///
+/// **Exact and not a `contains`, unlike § WHAT THE PASS PUTS ON THE WIRE's own rule** — that
+/// region asserts one parameter at a time because it is about [`Pass`], and this is about the
+/// request the operation made. `restart_call` above has the same shape for the same reason, and a
+/// later box that adds `preconditions` to the body *should* turn this red: it changes what
+/// `kubectl delete` with no flags is equivalent to.
+fn delete_call(path: &str) -> String {
+    format!(r#"DELETE {path} {{"propagationPolicy":"Background"}}"#)
+}
+
+/// **What `delete` can be pointed at: everything, and there is no matrix beside it**
+/// (NOTES § D225 ruling 3).
+///
+/// **`main.rs`'s `KINDS` is read, not copied**, for [`scalable`]'s reason — and here the assertion
+/// is the opposite one: every kind the driver can name is *served*, so a `deletable()` that
+/// refused any of them would be a red build.
+///
+/// **The consequence text is asserted per kind and comes from `screens/dialogs.md` § Delete**, not
+/// from what [`removal`] returned. Six kinds, six sentences, and the pod's hedge is the
+/// replicaset's word for word because k8rs has read no `ownerReferences`.
+#[test]
+fn delete_takes_every_kind_the_driver_can_name_and_refuses_only_a_word_that_names_none() {
+    let expected = [
+        (
+            "deployment",
+            "apps",
+            "deployments",
+            true,
+            "This asks the cluster to remove the deployment and every copy of the app it \
+             runs. k8rs has not read what may be attached to it, and something there may delay \
+             this or act first — left alone, nothing is left running.",
+        ),
+        (
+            "statefulset",
+            "apps",
+            "statefulsets",
+            true,
+            "This asks the cluster to remove the statefulset and every copy of the app it \
+             runs. k8rs has not read what may be attached to it, and something there may delay \
+             this or act first — left alone, nothing is left running.",
+        ),
+        (
+            "daemonset",
+            "apps",
+            "daemonsets",
+            true,
+            "This asks the cluster to remove the daemonset and the copy of the app it runs on \
+             every node. k8rs has not read what may be attached to it, and something there may \
+             delay this or act first — left alone, nothing is left running.",
+        ),
+        (
+            "replicaset",
+            "apps",
+            "replicasets",
+            true,
+            "This removes the replicaset and every pod it manages. Whatever created it will \
+             normally replace it — k8rs has not checked whether anything did.",
+        ),
+        (
+            "pod",
+            "",
+            "pods",
+            true,
+            "This removes the pod. Whatever created it will normally replace it — k8rs has not \
+             checked whether anything did.",
+        ),
+        (
+            "node",
+            "",
+            "nodes",
+            false,
+            "This asks the cluster to remove its record of node-3, not the machine. Something \
+             attached to it, unread by k8rs, may delay this or act first. Left alone, its pods \
+             are deleted and the machine keeps running until its kubelet restarts.",
+        ),
+    ];
+    let mut served = 0;
+    for kind in &crate::KINDS {
+        let kind = kind.singular;
+        let (_, group, plural, namespaced, consequence) = expected
+            .iter()
+            .find(|(named, ..)| *named == kind)
+            .unwrap_or_else(|| {
+                panic!("{kind} is a kind the driver can name and this table cannot")
+            });
+        served += 1;
+        let (resource, said, scope) =
+            removal(kind, "node-3").unwrap_or_else(|refusal| panic!("{kind}: {refusal}"));
+        println!(
+            "{kind} → {}/{} {} · namespaced {scope}\n{said}",
+            resource.group, resource.version, resource.plural
+        );
+        assert_eq!(
+            (
+                resource.group.as_str(),
+                resource.version.as_str(),
+                resource.plural.as_str()
+            ),
+            (*group, "v1", *plural),
+            "{kind} did not resolve to the resource its own type declares"
+        );
+        assert_eq!(
+            scope, *namespaced,
+            "{kind} is on the wrong side of the namespaced/cluster-wide split, so its request \
+             path is built the wrong way"
+        );
+        assert_eq!(
+            said, *consequence,
+            "{kind}'s consequence is not the one `screens/dialogs.md` § Delete draws"
+        );
+    }
+    // **The derived list says what it found** — an empty `KINDS`, or a renamed entry, would pass
+    // every assertion above by running none of them.
+    assert_eq!(
+        (served, expected.len()),
+        (crate::KINDS.len(), crate::KINDS.len()),
+        "the driver's kind table and this one no longer name the same six kinds"
+    );
+    // **The only refusal `delete` has is for a word that names no kind at all** — and it names
+    // every kind it does serve, in plain words (invariant 14).
+    let refusal = removal("configmap", "web").expect_err("a word `delete` cannot address");
+    println!("{refusal}");
+    assert_eq!(
+        refusal,
+        "k8rs cannot delete a configmap — k8rs deletes a deployment, a statefulset, a daemonset, \
+         a replicaset, a pod and a node"
+    );
+    // **A kind word out of argv is free text, and it is quoted back only where the strip left it
+    // alone** ([`a_kind`], NOTES § D224) — the identical exposure [`scalable`] and [`restartable`]
+    // have, which is why this function reads the same helper and not its own.
+    for crafted in ["", "\u{202e}", "pod\n", "po\u{0}d", "p\u{200b}od"] {
+        let refusal = removal(crafted, "web").expect_err("a kind word that is not one of the six");
+        println!("{crafted:?}\n{refusal}");
+        assert!(
+            refusal.starts_with("k8rs cannot delete that kind —"),
+            "{crafted:?} was quoted back into a sentence it did not survive: {refusal:?}"
+        );
+    }
+}
+
+/// **Every consequence this file produces is in `screens/dialogs.md` § Delete, word for word** —
+/// the two files are one text and the screen is the one that owns it (invariant 14).
+///
+/// **It is mechanical because the copies drifted twice in one day.** The finalizer round rewrote
+/// four of the six on 2026-09-04 and a hand-updated `ops.rs` is exactly the second copy
+/// NOTES § D103 is named for; the test above asserts the *strings* and this asserts they are the
+/// screen's. Read together they say: six sentences, in the file that draws them, reaching the
+/// dialog unchanged.
+///
+/// **The screen is unwrapped before it is searched** — a mockup breaks a sentence across box rows
+/// with `│` and padding around it, and the bullets wrap at the margin — so both sides are
+/// collapsed to single-spaced words and the frame characters dropped. **Only the node's name is
+/// substituted**, because that arm interpolates one and the mockup draws `node-3`.
+///
+/// **The derived list asserts it found something**: an unreadable or renamed screen file fails as
+/// *vetted nothing* rather than passing by matching none of them.
+#[test]
+fn every_consequence_is_the_sentence_screens_dialogs_md_draws_for_that_kind() {
+    let path = format!("{}/screens/dialogs.md", env!("CARGO_MANIFEST_DIR"));
+    let drawn = std::fs::read_to_string(&path).unwrap_or_else(|failed| {
+        panic!("{path} is the screen these sentences come from: {failed}")
+    });
+    let flattened = |text: &str| {
+        text.chars()
+            .map(|character| match character {
+                '│' | '┌' | '┐' | '└' | '┘' | '─' | '├' | '┤' | '*' | '`' => ' ',
+                other => other,
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let drawn = flattened(&drawn);
+    let mut checked = 0;
+    for kind in &crate::KINDS {
+        let (_, said, _) = removal(kind.singular, "node-3").expect("every kind is served");
+        let said = flattened(&said);
+        checked += 1;
+        assert!(
+            drawn.contains(&said),
+            "{}'s consequence is not the one screens/dialogs.md § Delete draws:\n{said}",
+            kind.singular
+        );
+    }
+    assert_eq!(
+        checked,
+        crate::KINDS.len(),
+        "no kind was compared, so this test vetted nothing"
+    );
+    // **And the sentence that answers them.** Four of the six say *may delay this or act first*;
+    // [`verdict`]'s [`Outcome::Started`] is what says whether it did, and the two share the word
+    // rather than being two people's wording for one idea.
+    assert!(
+        verdict(&Outcome::Started).contains("delaying"),
+        "the closing sentence stopped using the consequence's own word for the same idea: {}",
+        verdict(&Outcome::Started)
+    );
+    assert!(
+        drawn.contains("may delay this or act first"),
+        "the screen stopped saying a removal may be delayed, so the closing sentence answers a \
+         question the dialog no longer asks"
+    );
+}
+
+/// **One request, and it is the real one** — the whole of NOTES § D225 ruling 1, seen from the
+/// wire.
+///
+/// **The count is the assertion.** `scale` and `restart` each send two and this sends one, so a
+/// `checkable` that flipped to `true` would put a live `DELETE` on the cluster before anybody had
+/// typed a name — and the audit records of the two would be indistinguishable at the `Metadata`
+/// level most clusters run.
+///
+/// **The body is exact** ([`delete_call`]): `propagationPolicy: Background` is what makes the
+/// taught line's *no flag* equivalent to what k8rs sent (ruling 5), and a `dryRun` in there would
+/// be a delete that is confirmed and never made.
+#[tokio::test]
+async fn a_delete_sends_exactly_one_request_and_it_is_the_change_itself() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), gone())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = delete(
+        &client,
+        &deleting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        types(&trace, "web-7d9f4"),
+    )
+    .await
+    .expect("a pod in a namespace, with a cluster that answers");
+
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    assert_eq!(
+        requests,
+        vec![delete_call("/api/v1/namespaces/payments/pods/web-7d9f4?")],
+        "a delete sent something other than exactly one real DELETE"
+    );
+    assert!(
+        !requests[0].contains("dryRun"),
+        "the one call a delete makes asked for a dry run, so nothing was deleted: {}",
+        requests[0]
+    );
+    assert_eq!(
+        done,
+        Performed {
+            outcome: Some(Outcome::Done),
+            recorded: true
+        }
+    );
+    assert_eq!(done.plainly(), "the change was made");
+    assert!(done.changed(), "a delete that landed is not an exit 0");
+}
+
+/// **What the dialog and the audit log were given** — the consequence for the kind, the object as
+/// the reader knows it, the kubectl line with no flag on it, the path the request really took, and
+/// the verdict of a check that was never run.
+///
+/// **`uid not read` and `resourceVersion not sent` are the record being honest** about a mutation
+/// that read nothing first (NOTES § D225 ruling 4).
+#[tokio::test]
+async fn what_a_delete_records_is_the_call_it_made_and_the_check_it_never_ran() {
+    let (client, _) = stub(|_| ("200 OK".to_string(), gone())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = delete(
+        &client,
+        &deleting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        types(&trace, "web-7d9f4"),
+    )
+    .await
+    .expect("a pod in a namespace, with a cluster that answers");
+    assert_eq!(done.outcome, Some(Outcome::Done));
+
+    assert_eq!(
+        trace.borrow().dialog,
+        Some(Dialog {
+            object: "pod/web-7d9f4".to_string(),
+            namespace: Some("payments".to_string()),
+            consequence: "This removes the pod. Whatever created it will normally replace it — \
+                          k8rs has not checked whether anything did."
+                .to_string(),
+            // **`pod/web-7d9f4`, and no flag at all** — no `--dry-run`, because none was run, and
+            // no `--cascade`, because `Background` is what `kubectl delete` sends when none is
+            // given (NOTES § D225 ruling 5).
+            kubectl: "kubectl delete pod/web-7d9f4 -n payments".to_string(),
+        }),
+        "the dialog was not given the object, what a delete does to it, or a runnable kubectl line"
+    );
+    assert_eq!(
+        trace.borrow().verdict.as_deref(),
+        Some("k8rs did not check this one with the cluster first"),
+        "a delete told the reader something had been checked"
+    );
+    // **Invariant 2's typed name, chosen by the operation and not by the dialog**
+    // (NOTES § D225 ruling 2). It is the object's *own* name and not `pod/web-7d9f4`: what the
+    // reader is asked for is what `screens/dialogs.md` § Delete's field holds.
+    assert_eq!(
+        trace.borrow().asks,
+        Some(Some("web-7d9f4".to_string())),
+        "a delete let a press confirm it, which is the ctrl-key-slip guard gone"
+    );
+    let lines = transcript(&trace);
+    let attempt = lines
+        .iter()
+        .find(|line| line.contains("attempt ·"))
+        .expect("the attempt line is written before anything is sent");
+    assert_eq!(
+        attempt,
+        "audit: 2026-09-03T12:34:56Z attempt · pod/web-7d9f4 · context kind-k8rs · server \
+         https://k8rs-tests.invalid:41751 · namespace payments · uid not read · kubectl: kubectl \
+         delete pod/web-7d9f4 -n payments · call: DELETE \
+         /api/v1/namespaces/payments/pods/web-7d9f4 · resourceVersion not sent\n",
+        "the attempt line does not name the call that was actually made"
+    );
+    let result = lines
+        .iter()
+        .find(|line| line.contains("result ·"))
+        .expect("the result line is written when the call returns");
+    assert!(
+        result.contains("dry-run: k8rs did not check this one with the cluster first")
+            && result.contains("· the change was made"),
+        "the result line does not say the delete was unchecked and made: {result:?}"
+    );
+}
+
+/// **A cluster that only *accepted* the removal is not told as one that finished it**
+/// (`k8s-admin`, 2026-09-04, measured on a Node carrying a finalizer and on a pod inside its
+/// grace period — both `200 OK`, both still listed seconds later).
+///
+/// **Three records said *the change was made* and the object was still there**: the sentence the
+/// operator reads, the audit result line, and the exit code — invariant 4's *neither record may
+/// lie*, over the one thing a delete is about.
+///
+/// **The exit code deliberately does not move.** `deletionTimestamp` is set, so the cluster *did*
+/// change, and a `2` here would send a script back to re-run a delete that already landed
+/// (NOTES § D220 ruling 1). What was wrong is the sentence.
+///
+/// **Nothing reads `deletionTimestamp`.** The shape of the answer decides it — a `Status` is
+/// *gone*, the object is *going* — which is why `delete` maps to one `bool` inside its closure and
+/// holds no object ([`Landing`], NOTES § D223 ruling 3).
+#[tokio::test]
+async fn a_delete_the_cluster_accepted_but_has_not_finished_says_so_and_still_exits_zero() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), terminating())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = delete(
+        &client,
+        &deleting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        types(&trace, "web-7d9f4"),
+    )
+    .await
+    .expect("a pod in a namespace, with a cluster that answers");
+
+    println!("{}", done.plainly());
+    assert_eq!(
+        done.outcome,
+        Some(Outcome::Started),
+        "a removal the cluster had not finished was recorded as one it had"
+    );
+    assert!(
+        done.changed(),
+        "a delete the cluster accepted exited non-zero, so a script re-runs a delete that landed"
+    );
+    assert_eq!(
+        done.plainly(),
+        "the cluster accepted this and the object is still there — something is delaying the \
+         removal, and the command above waits for that where k8rs does not",
+        "the operator was not told the object is still there"
+    );
+    // **The taught line and k8rs differ on exactly this case, and the sentence says which way.**
+    // `kubectl delete` waits by default (`--wait=true`); `timeout 5 kubectl delete node/…` exited
+    // 124 still waiting where k8rs returned at once (`k8s-admin`, 2026-09-04).
+    assert!(
+        done.plainly().contains("the command above waits for that"),
+        "the sentence does not say how the command it just taught behaves differently: {}",
+        done.plainly()
+    );
+    let lines = transcript(&trace);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("· the cluster accepted this and the object is still there")),
+        "the audit line claims a removal that has not happened: {lines:?}"
+    );
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        1,
+        "an unfinished delete was followed by a second request"
+    );
+}
+
+/// **And a cluster that says the object is gone is still `Done`** — the positive beside the row
+/// above, over the same operation and the same stub with the other half of `Either<K, Status>`.
+///
+/// **It is the `Status` shape that decides it and not the status code**: both answers are
+/// `200 OK`, which is why a test keyed on the code could not tell them apart and neither could
+/// `.map(|_| ())`.
+#[tokio::test]
+async fn a_delete_the_cluster_finished_is_the_one_that_says_the_change_was_made() {
+    let (client, _) = stub(|_| ("200 OK".to_string(), gone())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = delete(
+        &client,
+        &deleting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        types(&trace, "web-7d9f4"),
+    )
+    .await
+    .expect("a pod in a namespace, with a cluster that answers");
+
+    println!("{}", done.plainly());
+    assert_eq!(done.outcome, Some(Outcome::Done));
+    assert_eq!(done.plainly(), "the change was made");
+    assert!(done.changed());
+}
+
+/// **A node is the first cluster-scoped object k8rs mutates** (NOTES § D225 ruling 3) — a path
+/// with no namespace segment, a taught line with no `-n`, and a consequence that names the machine
+/// it is *not* removing.
+///
+/// **The attempt line says `cluster-wide`**, which is [`gap`]'s word: an object in no namespace
+/// and a record that was cut off are not the same thing to a reader.
+#[tokio::test]
+async fn a_node_is_deleted_cluster_wide_and_every_record_of_it_names_no_namespace() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), gone())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let node = Deleting {
+        kind: "node",
+        name: "node-3",
+        namespace: None,
+        ..deleting()
+    };
+
+    let done = delete(
+        &client,
+        &node,
+        stamp,
+        &mut sink,
+        shows(&trace),
+        types(&trace, "node-3"),
+    )
+    .await
+    .expect("a node belongs to the whole cluster and needs no namespace");
+    assert_eq!(done.outcome, Some(Outcome::Done));
+
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    assert_eq!(
+        requests,
+        vec![delete_call("/api/v1/nodes/node-3?")],
+        "a node's delete did not go to the cluster-wide path"
+    );
+    assert_eq!(
+        trace.borrow().dialog,
+        Some(Dialog {
+            object: "node/node-3".to_string(),
+            namespace: None,
+            consequence: "This asks the cluster to remove its record of node-3, not the \
+                          machine. Something attached to it, unread by k8rs, may delay this or \
+                          act first. Left alone, its pods are deleted and the machine keeps \
+                          running until its kubelet restarts."
+                .to_string(),
+            kubectl: "kubectl delete node/node-3".to_string(),
+        }),
+        "a node's dialog carried a namespace, a `-n`, or somebody else's consequence"
+    );
+    let lines = transcript(&trace);
+    assert!(
+        lines.iter().any(|line| line.contains(
+            "attempt · node/node-3 · context kind-k8rs · server \
+             https://k8rs-tests.invalid:41751 · cluster-wide · uid not read"
+        )),
+        "a cluster-scoped delete left a dangling namespace label: {lines:?}"
+    );
+}
+
+/// **A delete nobody confirmed sends nothing at all** — the one thing no other operation in this
+/// file can demonstrate, because for `scale` and `restart` the check has already gone out by the
+/// time anybody is asked (NOTES § D225 ruling 1).
+///
+/// **Which is the whole argument for declining the preflight**, stated as a test: a cancelled
+/// delete sends no `DELETE`, so the cluster's own audit record cannot confuse it with one that
+/// happened.
+///
+/// **What it does not say is *no trace*, which was false of the one kind `delete` alone reaches**
+/// (`tester`, 2026-09-04). A node takes no `-n`, so `k8s::connect_with` has no namespace to scope
+/// with and `k8s::coverage` sends a cluster-wide `GET /api/v1/pods?&limit=1` probe before the
+/// operation runs — measured at three of them for three cancelled node deletes. That is a read and
+/// not a mutation, it is `k8s.rs`'s and that file froze at Phase 6, and `delete` is merely the
+/// first operation with a line that can reach it. Recorded in `backlog.md`; what this test claims
+/// is what it can see, which is the socket under this operation.
+#[tokio::test]
+async fn a_delete_nobody_confirmed_puts_nothing_on_the_wire_at_all() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), gone())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = delete(
+        &client,
+        &deleting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Cancelled),
+    )
+    .await
+    .expect("a pod in a namespace, with a cluster that answers");
+
+    assert_eq!(done.outcome, Some(Outcome::Cancelled));
+    assert!(
+        sent.lock().expect("the log is never poisoned").is_empty(),
+        "a cancelled delete reached the cluster, so its record cannot tell the two apart"
+    );
+    assert_eq!(
+        done.plainly(),
+        "nobody confirmed it, so nothing was changed"
+    );
+}
+
+/// **A delete the cluster refused is `Outcome::Failed` and never `NotSent`**, because there was no
+/// check to stop it (`screens/dialogs.md` § Delete, *"Where delete's unhappy paths differ"*).
+///
+/// **The sentence is the fault's and the cluster's own words come after it.** A reader of
+/// `scale`'s refusal is told the *check* stopped it; a reader of this one has to be told the real
+/// delete was sent and refused, or the two records disagree with the apiserver's.
+#[tokio::test]
+async fn a_delete_an_rbac_role_refuses_says_the_real_call_was_the_one_that_failed() {
+    let (client, sent) = stub(|_| {
+        (
+            "403 Forbidden".to_string(),
+            // **One line, because a newline inside a JSON string value is not JSON** — the
+            // message is the shape a real apiserver sends and the wrapping is not.
+            concat!(
+                r#"{"kind":"Status","apiVersion":"v1","status":"Failure","code":403,"#,
+                r#""reason":"Forbidden","message":"pods \"web-7d9f4\" is forbidden: User "#,
+                r#"\"jane\" cannot delete resource \"pods\" in API group \"\" in the "#,
+                r#"namespace \"payments\""}"#
+            )
+            .to_string(),
+        )
+    })
+    .await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = delete(
+        &client,
+        &deleting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        types(&trace, "web-7d9f4"),
+    )
+    .await
+    .expect("a refusal from the cluster is an outcome and not a refused request");
+
+    println!("{}", done.plainly());
+    assert!(
+        matches!(
+            done.outcome,
+            Some(Outcome::Failed {
+                fault: Fault::Refused,
+                ..
+            })
+        ),
+        "a refused delete was not recorded as the real call failing: {:?}",
+        done.outcome
+    );
+    assert!(
+        done.plainly()
+            .starts_with("nothing was changed — the cluster would not allow it: pods "),
+        "the operator was not told the real call was refused, in the cluster's own words: {}",
+        done.plainly()
+    );
+    assert!(!done.changed(), "a refused delete exited 0");
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        1,
+        "a delete the cluster refused sent something else as well"
+    );
+    let lines = transcript(&trace);
+    assert!(
+        lines.iter().any(
+            |line| line.contains("dry-run: k8rs did not check this one with the cluster first")
+        ),
+        "a delete that never checked recorded a check: {lines:?}"
+    );
+}
+
+/// **The namespace refusal inverts for a node, and both halves are refused before anything is
+/// sent** (NOTES § D225 ruling 3).
+///
+/// **Two sentences and not one**, because they are two different things to go and fix: a
+/// namespaced object with no namespace, and a namespace named for an object that is in none.
+#[tokio::test]
+async fn a_delete_refuses_a_namespace_that_is_missing_and_one_that_should_not_be_there() {
+    for (deleting, expected) in [
+        (
+            Deleting {
+                namespace: None,
+                ..deleting()
+            },
+            "k8rs will not delete pod/web-7d9f4 without being told which namespace it is in",
+        ),
+        (
+            Deleting {
+                kind: "node",
+                name: "node-3",
+                namespace: Some("payments"),
+                ..deleting()
+            },
+            "k8rs will not delete node/node-3: a node belongs to the whole cluster and is in no \
+             namespace",
+        ),
+    ] {
+        let (client, sent) = stub(|_| ("200 OK".to_string(), gone())).await;
+        let trace = trace();
+        let mut sink = Sink(trace.clone());
+
+        let refusal = delete(
+            &client,
+            &deleting,
+            stamp,
+            &mut sink,
+            shows(&trace),
+            // Never reached: every row here is refused before a dialog opens.
+            types(&trace, "web-7d9f4"),
+        )
+        .await
+        .expect_err("a namespace that does not match the kind is not something to delete");
+
+        println!("{refusal}");
+        assert_eq!(refusal, expected);
+        assert!(
+            sent.lock().expect("the log is never poisoned").is_empty(),
+            "a refused delete sent something"
+        );
+        assert!(
+            transcript(&trace).is_empty(),
+            "a request k8rs never described wrote an audit line (NOTES § D221)"
+        );
+    }
+}
+
+/// **A name that would change the address the request goes to is refused where the path is
+/// built** — [`scale`]'s and [`restart`]'s guard, over the one operation whose namespace may
+/// legitimately be `None`.
+///
+/// **The node rows are the ones neither sibling can cover**: a cluster-scoped path is built from
+/// the name alone, so a name that escapes it has no namespace guard in front of it at all.
+#[tokio::test]
+async fn a_name_that_would_rewrite_a_deletes_request_path_is_refused_where_it_is_built() {
+    for (kind, name, namespace, which) in [
+        (
+            "pod",
+            "web/../../secrets",
+            Some("payments"),
+            "an object's own name",
+        ),
+        (
+            "pod",
+            "web",
+            Some("payments/../kube-system"),
+            "the name of a namespace",
+        ),
+        ("pod", "", Some("payments"), "an object's own name"),
+        ("pod", "web", Some(""), "the name of a namespace"),
+        ("node", "../../secrets", None, "an object's own name"),
+        ("node", "", None, "an object's own name"),
+    ] {
+        let (client, sent) = stub(|_| ("200 OK".to_string(), gone())).await;
+        let trace = trace();
+        let mut sink = Sink(trace.clone());
+        let crafted = Deleting {
+            kind,
+            name,
+            namespace,
+            ..deleting()
+        };
+
+        let refusal = delete(
+            &client,
+            &crafted,
+            stamp,
+            &mut sink,
+            shows(&trace),
+            types(&trace, "web-7d9f4"),
+        )
+        .await
+        .expect_err("a name k8rs will not put in a request path is not something to delete");
+
+        println!("{refusal}");
+        assert!(
+            refusal.contains(which) && refusal.starts_with("k8rs will not send a change to"),
+            "{name:?} in {namespace:?} was not refused as {which}: {refusal:?}"
+        );
+        assert!(
+            sent.lock().expect("the log is never poisoned").is_empty(),
+            "a delete with an unusable address sent something"
+        );
+    }
+}
+
+/// **A word that names no kind is refused inside the operation, before anything is sent** —
+/// [`scalable`]'s and [`restartable`]'s position, over the one operation that has no matrix.
+#[tokio::test]
+async fn a_delete_pointed_at_a_word_that_names_no_kind_sends_nothing() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), gone())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let unknown = Deleting {
+        kind: "configmap",
+        ..deleting()
+    };
+
+    let refusal = delete(
+        &client,
+        &unknown,
+        stamp,
+        &mut sink,
+        shows(&trace),
+        types(&trace, "web-7d9f4"),
+    )
+    .await
+    .expect_err("a word that names no kind is not something to delete");
+
+    println!("{refusal}");
+    assert!(
+        refusal.starts_with("k8rs cannot delete a configmap"),
+        "{refusal:?}"
+    );
+    assert!(
+        sent.lock().expect("the log is never poisoned").is_empty(),
+        "a delete of a kind k8rs cannot address sent something"
+    );
+}
+
+// --- THE CONFIRMATION THAT CANNOT BE FAKED ---
+//
+// **Invariant 2's *deletes additionally require typing the object name*, as a type**
+// (NOTES § D225 ruling 2). `Answer::Confirmed` carries an [`Agreed`] whose field is private, so
+// the only two things that can build one are [`Checked::pressed`] and [`Checked::typed`] — and
+// each refuses the requirement that is not its own.
+//
+// **The negatives are the box.** A press-only dialog over a `Confirm::Type` mutation is exactly
+// the defect this replaced, and it is now a cancelled mutation with nothing on the wire rather
+// than a review finding.
+
+/// **What one answer did to the real contract** — [`perform`] driven with a chosen requirement and
+/// a chosen dialog, answering whether the change went out.
+///
+/// **The steps are the assertion and not the [`Answer`]**: *the real call was made* is what
+/// invariant 2 is about, and a test comparing two `Answer` values cannot see it.
+async fn answered(
+    confirm: Confirm<'_>,
+    dialog: impl FnOnce(&Checked<()>) -> Answer,
+) -> (Option<Outcome>, Vec<String>) {
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let mutation = Mutation {
+        confirm,
+        ..scaling()
+    };
+    let done = performed(
+        &mutation,
+        stamp,
+        &mut sink,
+        |_: &Shown<'_>| {},
+        |checked| std::future::ready(dialog(&checked)),
+        works(&trace),
+    )
+    .await;
+    let steps = trace.borrow().steps.clone();
+    println!("{confirm:?} → {:?} · {steps:?}", done.outcome);
+    (done.outcome, steps)
+}
+
+/// **The two dialogs that match their mutation confirm it, and nothing else does**
+/// (NOTES § D225 ruling 2, invariant 2).
+///
+/// **The off-diagonal is two `#[should_panic]` tests below**, and that is [`Record::of`]'s own
+/// shape one region up: a dialog asking the wrong question is the *author's* error, so it is an
+/// assertion where one can be made and [`Answer::Cancelled`] where one cannot
+/// (`k8s-admin`, 2026-09-04). Silent was wrong — a `ctrl-d` wired to a press-only dialog would
+/// ship, never work, and leave an audit trail saying *nobody confirmed it* about an operator who
+/// pressed the button.
+#[tokio::test]
+async fn a_dialog_that_asks_what_its_mutation_requires_is_the_one_that_confirms_it() {
+    let (outcome, steps) = answered(Confirm::Press, Checked::pressed).await;
+    assert_eq!(
+        outcome,
+        Some(Outcome::Done),
+        "a press did not confirm a press"
+    );
+    assert!(steps.contains(&"call".to_string()));
+
+    let (outcome, steps) = answered(Confirm::Type("web-7d9f4"), |checked| {
+        checked.typed("web-7d9f4")
+    })
+    .await;
+    assert_eq!(
+        outcome,
+        Some(Outcome::Done),
+        "the object's own name did not confirm a delete"
+    );
+    assert!(steps.contains(&"call".to_string()));
+}
+
+/// **A press-only dialog over a mutation that wants a name is the author's error, and it is
+/// loud** (`k8s-admin`, 2026-09-04) — [`Record::of`]'s `debug_assert!` shape, in the same region.
+///
+/// **The release behaviour is [`Answer::Cancelled`] and is the safe direction**; what this asserts
+/// is that it does not pass in silence while somebody ships the dialog.
+#[tokio::test]
+#[should_panic(expected = "requires the object's name")]
+async fn a_press_only_dialog_on_a_mutation_that_wants_a_name_is_an_author_error() {
+    let _ = answered(Confirm::Type("web-7d9f4"), Checked::pressed).await;
+}
+
+/// **And the same facing the other way**: a dialog asking for a name where a press confirms.
+///
+/// **Only the *requirement* half is asserted, never the typing.** A name that does not match is
+/// the operator typing something else and is an ordinary [`Answer::Cancelled`]
+/// ([`Checked::typed`]).
+#[tokio::test]
+#[should_panic(expected = "a press confirms")]
+async fn a_typed_name_dialog_on_a_mutation_a_press_confirms_is_an_author_error() {
+    let _ = answered(Confirm::Press, |checked| checked.typed("web-7d9f4")).await;
+}
+
+/// **What has to be typed, and what does not do** (invariant 2, `screens/dialogs.md` § Delete's
+/// ctrl-key-slip guard).
+///
+/// **`yes` is the row that matters**: a script that says yes to everything cannot delete anything.
+/// The empty rows are the guard [`Checked::typed`] took over from `src/main.rs`'s `ask`, where it
+/// was one caller's rather than every caller's.
+#[tokio::test]
+async fn a_typed_confirmation_takes_the_object_name_and_nothing_that_merely_looks_like_it() {
+    for (wanted, typed, confirms) in [
+        ("web-7d9f4", "web-7d9f4", true),
+        ("web-7d9f4", "yes", false),
+        ("web-7d9f4", "web", false),
+        ("web-7d9f4", "web-7d9f5", false),
+        ("web-7d9f4", "WEB-7D9F4", false),
+        ("web-7d9f4", " web-7d9f4 ", false),
+        ("web-7d9f4", "", false),
+        ("", "", false),
+        ("", "yes", false),
+    ] {
+        let (outcome, _) = answered(Confirm::Type(wanted), |checked| checked.typed(typed)).await;
+        assert_eq!(
+            outcome,
+            Some(if confirms {
+                Outcome::Done
+            } else {
+                Outcome::Cancelled
+            }),
+            "typing {typed:?} against {wanted:?} was read the wrong way"
+        );
+    }
+}
+
+/// **The name the reader has to type is the one the dialog showed them, and not the one the API
+/// sent** (invariant 9, NOTES § D213).
+///
+/// **[`Record::of`] strips the requirement like every other field**, so a name carrying a
+/// right-to-left override reaches [`Checked::asks`] cleaned. Typing the raw bytes therefore
+/// confirms nothing — which is right: what the person can see and copy is the stripped title, and
+/// a comparison against the raw name would be a field nobody can satisfy.
+#[tokio::test]
+async fn a_confirmation_compares_against_the_name_the_dialog_showed_and_not_the_one_the_api_sent() {
+    let raw = "web\u{202e}gnp";
+    let shown = "webgnp";
+    let (outcome, _) = answered(Confirm::Type(raw), |checked| {
+        assert_eq!(
+            checked.asks(),
+            Some(shown),
+            "the dialog was asked for a name that had not been through the strip"
+        );
+        checked.typed(shown)
+    })
+    .await;
+    assert_eq!(outcome, Some(Outcome::Done));
+
+    let (outcome, _) = answered(Confirm::Type(raw), |checked| checked.typed(raw)).await;
+    assert_eq!(
+        outcome,
+        Some(Outcome::Cancelled),
+        "the raw API name confirmed a mutation whose dialog showed the stripped one"
+    );
+}
+
+/// **A press-only mutation tells the dialog it needs no name** — [`Checked::asks`] is what a
+/// dialog reads to know which question to ask, and getting it wrong is the row above.
+#[tokio::test]
+async fn what_the_dialog_is_told_to_ask_for_is_the_mutations_own_requirement() {
+    let (outcome, _) = answered(Confirm::Press, |checked| {
+        assert_eq!(
+            checked.asks(),
+            None,
+            "a mutation that wants a press told the dialog to ask for a name"
+        );
+        checked.pressed()
+    })
+    .await;
+    assert_eq!(outcome, Some(Outcome::Done));
 }
 
 // --- THE AUDIT LOG'S OWN FILE ---
@@ -3843,7 +4964,7 @@ async fn a_result_says_when_it_was_recorded_and_not_only_when_it_was_attempted()
         Timestamp::from_second(1_788_438_896 + tick * 60).expect("inside jiff's range")
     };
 
-    let done = perform(
+    let done = performed(
         &scaling(),
         &clock,
         &mut sink,
@@ -3854,7 +4975,7 @@ async fn a_result_says_when_it_was_recorded_and_not_only_when_it_was_attempted()
             clock();
             trace.borrow_mut().steps.push("asked".to_string());
             let _ = checked.verdict();
-            std::future::ready(Answer::Confirmed)
+            std::future::ready(checked.pressed())
         },
         works(&trace),
     )
@@ -4468,6 +5589,10 @@ fn a_line_and_a_record_have_a_measured_ceiling_and_it_is_far_under_one_write() {
         path: &long,
         version: Some(&long),
         checkable: true,
+        // **The requirement is a field like every other one and is fed the same shape**
+        // (NOTES § D29): a name past its cap is what a caller with a hostile object name hands
+        // over, and [`Record::of`] bounds it there rather than at the dialog.
+        confirm: Confirm::Type(&long),
     };
     let record = Record::of(&huge);
     let attempt = record.attempt_line(stamp());
@@ -4517,12 +5642,12 @@ async fn one_whole_mutation_lands_in_the_file_this_box_opens_and_nothing_else_do
     let (path, source) = under(&home);
     let (mut log, _) = open_log(&path, source).expect("a writable HOME holds an audit log");
 
-    let done = perform(
+    let done = performed(
         &scaling(),
         stamp,
         &mut log,
         |_: &Shown<'_>| {},
-        |_: Checked<()>| std::future::ready(Answer::Confirmed),
+        |checked: Checked<()>| std::future::ready(checked.pressed()),
         |_| std::future::ready(Ok::<(), kube::Error>(())),
     )
     .await;

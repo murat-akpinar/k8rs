@@ -10090,10 +10090,14 @@ fn ops_ended(line: &[&str]) -> Ended {
 /// runtime and dials the reader's own cluster, and is the one thing in this driver no unit test
 /// may reach.
 ///
-/// **It is [`not_wired`]'s own sentence, which is still what `delete` prints.** Every assertion in
-/// this region is about the words above the seam, so the double answers what the one unwired
-/// operation really answers rather than inventing a string to assert against — and for `scale` and
-/// `restart` it stands in for a call this test process must not make.
+/// **It is [`not_wired`]'s own sentence.** Every assertion in this region is about the words
+/// *above* the seam, and this stands in for a call this test process must not make — one that
+/// dials the reader's own cluster and, for all three operations now, changes something on it.
+///
+/// **It stopped being *what one operation really prints* when `delete` was wired**, and it is
+/// kept because [`not_wired`] is still reachable ([`wired`]'s `None`) and because a sentence that
+/// names every parsed word is what these tests need to compare against. Nothing in this region
+/// asserts that a real operation prints it.
 fn unwired(ready: Ready<'_>) -> Ended {
     Ended::refused(not_wired(
         ready.operation,
@@ -10202,6 +10206,14 @@ fn ops_alone_prints_a_usage_that_names_every_operation_and_how_each_is_confirmed
     assert!(
         said.contains("say yes to confirm"),
         "the usage does not say how the others are confirmed: {said:?}"
+    );
+    // **The word the usage prints is the word [`ask`] accepts.** [`Operation::confirm`] is a help
+    // string and the mechanism is `ops::Mutation::confirm` (NOTES § D225 ruling 2), so nothing in
+    // the language keeps this sentence in step with [`YES`] — a script author told to say a word
+    // the reader is not listening for cannot delete anything, and would not know why.
+    assert!(
+        said.contains(&format!("say {YES} to confirm")),
+        "the usage tells a script author to say a word `ask` does not accept: {said:?}"
     );
     assert!(
         said.contains("standard input"),
@@ -10358,7 +10370,12 @@ fn every_wrong_ops_line_names_what_is_wrong_and_carries_the_usage() {
     }
 }
 
-/// **A line with nothing wrong in it says what k8rs read, and that nothing is behind it yet.**
+/// **A line with nothing wrong in it says what k8rs read, and hands it to the seam.**
+///
+/// **The sentence asserted below is the test double's** ([`unwired`]), which stands in for the
+/// call that would dial the reader's own cluster. All three operations are wired now; what this
+/// test is about is every word the driver parsed *before* the seam, and the double is what makes
+/// them readable.
 ///
 /// **It names the operation, the kind, the name, the namespace and the value**, because *k8rs
 /// cannot do that yet* alone would go green against a parser that had read the wrong object — and
@@ -10377,7 +10394,7 @@ fn every_wrong_ops_line_names_what_is_wrong_and_carries_the_usage() {
 /// **The short spelling and the long one and the plural are one object**, which is the whole
 /// reason `deploy/web` is the form the box was written with.
 #[test]
-fn a_well_formed_line_names_everything_it_read_and_says_the_operation_is_not_written_yet() {
+fn a_well_formed_line_names_everything_it_read_before_it_reaches_the_seam() {
     for spelling in ["deploy", "deployment", "deployments", "Deployment"] {
         let said = ops(&[
             "ops",
@@ -10496,8 +10513,9 @@ fn read_only_refuses_an_operation_before_anything_else_on_the_line_is_judged() {
         vec!["ops", "delete", "pod/web", "-n", "payments", "--read-only"],
         vec!["--read-only", "ops", "delete", "pod/web", "-n", "payments"],
         vec!["--once", "--read-only", "ops", "scale", "deploy/web", "3"],
-        // **Both wired operations, because `--read-only` is read once and for all of them**
-        // (invariant 2): a row for `scale` alone proves the flag for the verb it names.
+        // **All three operations, because `--read-only` is read once and for all of them**
+        // (invariant 2): a row for `scale` alone proves the flag for the verb it names. The two
+        // `delete` rows are first above — the destructive one is the one it most has to hold for.
         vec![
             "--read-only",
             "ops",
@@ -10870,74 +10888,228 @@ impl std::io::Write for Closed {
     }
 }
 
+/// **What one headless confirmation did, driven through the real contract** — the outcome, and
+/// what the reader was shown on the way to it.
+///
+/// **`ops::Checked` can be built nowhere but `ops.rs`, which is the whole point of it and of
+/// `ops::Agreed` beside it** (NOTES § D225 ruling 2). So a test of [`ask`] cannot hand it one and
+/// has to make `ops::perform` build it — which is what these tests did not have to do while `ask`
+/// took three loose values.
+///
+/// **Nothing dials anything.** The call closure answers `Ok(())` for both passes, the audit log
+/// is a `Vec`, and the mutation is `checkable: false`, so this is the delete path's own shape:
+/// `show`, then the prompt, then the answer.
+///
+/// **`Outcome::Done` is a confirmation and `Outcome::Cancelled` is everything else**, which is a
+/// stronger claim than the `ops::Answer` these tests used to compare: it says the real call went
+/// out, and not merely that a value came back.
+async fn confirmation(
+    confirm: ops::Confirm<'_>,
+    typed: &[u8],
+    out: &mut impl std::io::Write,
+) -> Option<ops::Outcome> {
+    let mutation = ops::Mutation {
+        context: "kind-k8rs",
+        // A reserved host: `scripts/security-guard.py` reads a loopback URL in this tree as a
+        // second outbound path and is right to.
+        server: "https://k8rs-tests.invalid:41751",
+        namespace: Some("payments"),
+        object: "pod/web-7d9f4",
+        uid: None,
+        consequence: "This removes the pod. Whatever created it will normally replace it — k8rs \
+                      has not checked whether anything did.",
+        kubectl: "kubectl delete pod/web-7d9f4 -n payments",
+        verb: "DELETE",
+        path: "/api/v1/namespaces/payments/pods/web-7d9f4",
+        version: None,
+        checkable: false,
+        confirm,
+    };
+    // **Bytes and not a `&str`**, because one of the rows this drives is input that is not text
+    // at all: `read_line` refuses it, and a `&str` parameter could not carry it.
+    let mut input = typed;
+    ops::perform(
+        &mutation,
+        || {
+            k8s_openapi::jiff::Timestamp::from_second(1_788_438_896)
+                .expect("a timestamp inside jiff's range")
+        },
+        &mut Vec::new(),
+        |_| {},
+        |checked| std::future::ready(ask(&checked, &mut input, out)),
+        |_| std::future::ready(Ok::<(), kube::Error>(())),
+        // A `PATCH`'s shape: the cluster's answer says the change is finished. What the other
+        // arm looks like is `ops_tests.rs`'s, over the one operation that can produce it.
+        |_| ops::Landing::Finished,
+    )
+    .await
+    .outcome
+}
+
+/// **One mutation driven through the real contract, with a dialog of the caller's choosing** —
+/// the shape [`confirmation`] has, without the headless [`ask`] in the middle.
+///
+/// **It exists so the replay attack can be written from outside `ops.rs`**, which is where every
+/// dialog in this program lives and where the first draft of `ops::Agreed` was breakable.
+async fn one_mutation(
+    confirm: ops::Confirm<'_>,
+    dialog: impl FnOnce(&ops::Checked<()>) -> ops::Answer,
+    calls: &std::cell::Cell<usize>,
+) -> Option<ops::Outcome> {
+    let mutation = ops::Mutation {
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+        namespace: Some("payments"),
+        object: "pod/web-7d9f4",
+        uid: None,
+        consequence: "This removes the pod.",
+        kubectl: "kubectl delete pod/web-7d9f4 -n payments",
+        verb: "DELETE",
+        path: "/api/v1/namespaces/payments/pods/web-7d9f4",
+        version: None,
+        checkable: false,
+        confirm,
+    };
+    ops::perform(
+        &mutation,
+        || {
+            k8s_openapi::jiff::Timestamp::from_second(1_788_438_896)
+                .expect("a timestamp inside jiff's range")
+        },
+        &mut Vec::new(),
+        |_| {},
+        |checked| std::future::ready(dialog(&checked)),
+        |_| {
+            calls.set(calls.get() + 1);
+            std::future::ready(Ok::<(), kube::Error>(()))
+        },
+        |_| ops::Landing::Finished,
+    )
+    .await
+    .outcome
+}
+
+/// **A yes kept from one mutation cannot confirm another** (NOTES § D225 ruling 2, invariant 2) —
+/// the attack the first draft of `ops::Agreed` was open to, written from the file every dialog
+/// lives in.
+///
+/// **An enum variant's fields are as public as the enum**, whatever the token struct's own field
+/// says, so a `Copy` token with no contents could be destructured out of one `Answer::Confirmed`
+/// and re-wrapped for any later mutation: press-confirm one scale, keep what falls out, and every
+/// delete after it proceeds with no name typed. `tester` measured a `DELETE` on the wire from
+/// exactly this code. Not reachable through today's driver — one operation per process — and
+/// reachable at Phase 12, where the console is one process with many dialogs.
+///
+/// **`ops::Agreed` carries `ops::perform`'s ticket now**, so a token from any other call — even
+/// one with the identical `ops::Confirm` — is refused before the real call.
+///
+/// **A panic and not a `Cancelled`, in a debug build.** A replayed confirmation is the author's
+/// error, and the contract reports one the way `ops::Record::of` and `ops::Checked::pressed`
+/// already do: `debug_assert` where it can be loud, and the safe direction where it cannot. In
+/// release the same path is `Outcome::Cancelled` and nothing is sent; either way the delete does
+/// not happen, which is what this test is about.
+#[tokio::test]
+#[should_panic(expected = "replayed")]
+async fn a_confirmation_kept_from_one_mutation_cannot_confirm_another() {
+    let stolen = std::cell::RefCell::new(None);
+    let calls = std::cell::Cell::new(0);
+
+    // A first mutation a press confirms. The dialog keeps the token and then cancels, so nothing
+    // about this call is a change — only the yes survives it.
+    let first = one_mutation(
+        ops::Confirm::Press,
+        |checked| {
+            if let ops::Answer::Confirmed(token) = checked.pressed() {
+                *stolen.borrow_mut() = Some(token);
+            }
+            ops::Answer::Cancelled
+        },
+        &calls,
+    )
+    .await;
+    println!("first: {first:?} · calls {}", calls.get());
+    assert_eq!(first, Some(ops::Outcome::Cancelled));
+    assert_eq!(calls.get(), 0, "a cancelled mutation sent the change");
+    assert!(
+        stolen.borrow().is_some(),
+        "the probe kept nothing, so it proves nothing: `ops::Answer::Confirmed` no longer yields \
+         a token to keep, and this test has to be rewritten rather than deleted"
+    );
+
+    // The same yes, returned at a delete that asked for a typed name and was given none.
+    let second = one_mutation(
+        ops::Confirm::Type("web-7d9f4"),
+        |_| ops::Answer::Confirmed(stolen.borrow_mut().take().expect("the kept token")),
+        &calls,
+    )
+    .await;
+    println!("second: {second:?} · calls {}", calls.get());
+    assert_eq!(
+        calls.get(),
+        0,
+        "a dialog outside ops.rs deleted an object without typing its name"
+    );
+    assert_eq!(second, Some(ops::Outcome::Cancelled));
+}
+
 /// **The confirmation is one line the caller had to supply, and everything else is `Cancelled`**
 /// (invariant 2 — there is no flag that means yes, and no default that means yes either).
-#[test]
-fn the_headless_confirmation_takes_yes_and_nothing_else() {
+#[tokio::test]
+async fn the_headless_confirmation_takes_yes_and_nothing_else() {
     for (typed, expected) in [
-        ("yes\n", ops::Answer::Confirmed),
-        ("yes", ops::Answer::Confirmed),
-        ("yes\r\n", ops::Answer::Confirmed),
-        ("  yes  \n", ops::Answer::Confirmed),
-        ("y\n", ops::Answer::Cancelled),
-        ("YES\n", ops::Answer::Cancelled),
-        ("no\n", ops::Answer::Cancelled),
-        ("\n", ops::Answer::Cancelled),
-        ("", ops::Answer::Cancelled),
-        ("web\n", ops::Answer::Cancelled),
+        ("yes\n", ops::Outcome::Done),
+        ("yes", ops::Outcome::Done),
+        ("yes\r\n", ops::Outcome::Done),
+        ("  yes  \n", ops::Outcome::Done),
+        ("y\n", ops::Outcome::Cancelled),
+        ("YES\n", ops::Outcome::Cancelled),
+        ("no\n", ops::Outcome::Cancelled),
+        ("\n", ops::Outcome::Cancelled),
+        ("", ops::Outcome::Cancelled),
+        ("web\n", ops::Outcome::Cancelled),
     ] {
-        let mut input = typed.as_bytes();
         let mut out = Vec::new();
-        let answer = ask(
-            "the cluster checked it first and accepted it",
-            &Confirm::Press,
-            "web",
-            &mut input,
-            &mut out,
+        let outcome = confirmation(ops::Confirm::Press, typed.as_bytes(), &mut out).await;
+        println!("{typed:?} -> {outcome:?}");
+        assert!(
+            outcome.as_ref() == Some(&expected),
+            "{typed:?} was not read as {expected:?}"
         );
-        println!("{typed:?} -> {answer:?}");
-        assert_eq!(answer, expected, "{typed:?} was not read as {expected:?}");
     }
 }
 
 /// **The destructive half needs the object's own name and nothing else will do** (invariant 2,
 /// `screens/dialogs.md` § Delete — the ctrl-key-slip guard).
 ///
-/// **`yes` does not confirm a delete**, which is the whole difference between the two rows of
-/// [`Operation::confirm`]: a script that says yes to everything cannot delete anything.
+/// **`yes` does not confirm a delete**: a script that says yes to everything cannot delete
+/// anything. Which of the two a mutation wants is `ops::Mutation::confirm`'s now and not this
+/// driver's, so what these rows drive is the real requirement (NOTES § D225 ruling 2).
 ///
 /// **An empty name confirms nothing, which is the last two rows** (`k8s-admin`, 2026-09-04).
 /// `typed.trim() == wanted` held for `("", "")`, so end of input against an object with no name
 /// was invariant 2's *typing the object name* satisfied by typing nothing. No argv reaches it —
-/// `k8s::object_name("")` is false — but `ask` is the one callback all three operations wire, and
-/// a future caller taking the name off an `ops::Shown` takes it from `ops::Record::of`'s
-/// `k8s::text`-cleaned copy, which can clean to empty. The doc on `ask` already claimed the
-/// opposite, so the fix is in the function and not in the callers.
-#[test]
-fn a_typed_name_confirmation_takes_the_name_and_not_yes() {
+/// `k8s::object_name("")` is false — but `ops::Record::of`'s strip can empty a name that argv
+/// could not. **The guard moved into `ops::Checked::typed` with the mechanism**, which is the one
+/// function every dialog routes through rather than the one every dialog has to remember; these
+/// rows drive it from the outside, and `ops_tests.rs` asserts it on the method.
+#[tokio::test]
+async fn a_typed_name_confirmation_takes_the_name_and_not_yes() {
     for (typed, name, expected) in [
-        ("web-7d9f4\n", "web-7d9f4", ops::Answer::Confirmed),
-        ("web-7d9f4", "web-7d9f4", ops::Answer::Confirmed),
-        ("yes\n", "web-7d9f4", ops::Answer::Cancelled),
-        ("web\n", "web-7d9f4", ops::Answer::Cancelled),
-        ("web-7d9f5\n", "web-7d9f4", ops::Answer::Cancelled),
-        ("", "web-7d9f4", ops::Answer::Cancelled),
-        ("", "", ops::Answer::Cancelled),
-        ("\n", "", ops::Answer::Cancelled),
-        ("  \n", "", ops::Answer::Cancelled),
+        ("web-7d9f4\n", "web-7d9f4", ops::Outcome::Done),
+        ("web-7d9f4", "web-7d9f4", ops::Outcome::Done),
+        ("yes\n", "web-7d9f4", ops::Outcome::Cancelled),
+        ("web\n", "web-7d9f4", ops::Outcome::Cancelled),
+        ("web-7d9f5\n", "web-7d9f4", ops::Outcome::Cancelled),
+        ("", "web-7d9f4", ops::Outcome::Cancelled),
+        ("", "", ops::Outcome::Cancelled),
+        ("\n", "", ops::Outcome::Cancelled),
+        ("  \n", "", ops::Outcome::Cancelled),
     ] {
-        let mut input = typed.as_bytes();
         let mut out = Vec::new();
-        let answer = ask(
-            "k8rs did not check this one with the cluster first",
-            &Confirm::Name,
-            name,
-            &mut input,
-            &mut out,
-        );
-        println!("PROBE {answer:?} <- typed {typed:?} name {name:?}");
-        assert_eq!(
-            answer, expected,
+        let outcome = confirmation(ops::Confirm::Type(name), typed.as_bytes(), &mut out).await;
+        println!("PROBE {outcome:?} <- typed {typed:?} name {name:?}");
+        assert!(
+            outcome.as_ref() == Some(&expected),
             "{typed:?} against the name {name:?} was not read as {expected:?}"
         );
     }
@@ -10947,27 +11119,27 @@ fn a_typed_name_confirmation_takes_the_name_and_not_yes() {
 /// rule 3 — the check's verdict is shown *before* the button is live — and it is why `ops::Checked`
 /// exists at all.
 ///
-/// **The prompt says how to confirm**, per [`Confirm`], because a script author who cannot guess
-/// the word cannot write the script.
-#[test]
-fn the_confirmation_prints_the_verdict_and_says_what_to_type_before_it_reads_anything() {
+/// **The prompt says how to confirm**, off `ops::Checked::asks` and no longer off a table in this
+/// file, because a script author who cannot guess the word cannot write the script.
+///
+/// **The verdict is the uncheckable one here**, because [`confirmation`] drives a
+/// `checkable: false` mutation — which is `delete`'s own shape (NOTES § D225 ruling 1) and is the
+/// sentence `screens/dialogs.md` § Delete puts in every box on that page.
+#[tokio::test]
+async fn the_confirmation_prints_the_verdict_and_says_what_to_type_before_it_reads_anything() {
     for (confirm, expected) in [
-        (Confirm::Press, "type yes and press enter"),
-        (Confirm::Name, "type the object's own name and press enter"),
+        (ops::Confirm::Press, "type yes and press enter"),
+        (
+            ops::Confirm::Type("web"),
+            "type the object's own name and press enter",
+        ),
     ] {
-        let mut input: &[u8] = b"yes\n";
         let mut out = Vec::new();
-        ask(
-            "the cluster checked it first and accepted it",
-            &confirm,
-            "web",
-            &mut input,
-            &mut out,
-        );
+        confirmation(confirm, b"yes\n", &mut out).await;
         let printed = String::from_utf8(out).expect("the prompt is text");
         println!("{printed}");
         assert!(
-            printed.starts_with("the cluster checked it first and accepted it\n"),
+            printed.starts_with("k8rs did not check this one with the cluster first\n"),
             "the verdict did not reach the reader before the prompt: {printed:?}"
         );
         assert!(printed.contains(expected), "{printed:?}");
@@ -10994,22 +11166,25 @@ fn the_confirmation_prints_the_verdict_and_says_what_to_type_before_it_reads_any
 ///
 /// **The safe direction is the only one invariant 2 leaves**: a confirmation that defaults to yes
 /// when the terminal is gone is the implicit write the invariant exists to prevent.
-#[test]
-fn a_confirmation_that_could_not_be_asked_or_read_is_a_no() {
+#[tokio::test]
+async fn a_confirmation_that_could_not_be_asked_or_read_is_a_no() {
     // The prompt could not be printed: the reader never saw what they would be agreeing to, and
     // the answer waiting on the pipe is not an answer to a question that was asked.
-    let mut input: &[u8] = b"yes\n";
     assert_eq!(
-        ask("checked", &Confirm::Press, "web", &mut input, &mut Closed),
-        ops::Answer::Cancelled,
+        confirmation(ops::Confirm::Press, b"yes\n", &mut Closed).await,
+        Some(ops::Outcome::Cancelled),
         "a confirmation nobody could read was taken as a yes"
     );
     // Input that is not text — `read_line` refuses it rather than answering with a shorter line.
-    let mut input: &[u8] = &[b'y', b'e', b's', 0xff, b'\n'];
     let mut out = Vec::new();
     assert_eq!(
-        ask("checked", &Confirm::Press, "web", &mut input, &mut out),
-        ops::Answer::Cancelled,
+        confirmation(
+            ops::Confirm::Press,
+            &[b'y', b'e', b's', 0xff, b'\n'],
+            &mut out
+        )
+        .await,
+        Some(ops::Outcome::Cancelled),
         "input that is not text was read as a yes"
     );
 }
@@ -11468,17 +11643,18 @@ fn a_scale_that_never_connected_says_nothing_was_changed_and_names_the_reason() 
     );
 }
 
-/// **`scale` and `restart` are wired, `delete` is not, and each gets what its own line carried**
-/// (todo.md 3749, 3777).
+/// **All three operations are wired, and each gets what its own line carried** — todo.md
+/// § Phase 7's `scale`, `restart` and `delete` boxes.
 ///
 /// **A verb added to [`OPERATIONS`] without an arm answers `None`** rather than falling into
-/// somebody else's, which is what stops a third operation being performed as a scale.
+/// somebody else's, which is what stops a fourth operation being performed as a scale — the row
+/// below the loop is the one that still exercises it, since none of the three is unwired now.
 ///
 /// **This is [`ops_performed`]'s whole decision**, held apart from it because everything past the
 /// decision dials a cluster: the function itself is one call, and what can be wrong about it is
 /// the rows below.
 #[test]
-fn every_wired_operation_gets_its_own_arm_and_the_unwired_one_gets_none() {
+fn every_operation_in_the_table_gets_its_own_arm_and_a_verb_with_none_gets_nothing() {
     for operation in &OPERATIONS {
         let chosen = wired(operation, Some(3));
         println!("{} → {chosen:?}", operation.verb);
@@ -11487,12 +11663,26 @@ fn every_wired_operation_gets_its_own_arm_and_the_unwired_one_gets_none() {
             match operation.verb {
                 SCALE => Some(Wired::Scale(3)),
                 RESTART => Some(Wired::Restart),
+                DELETE => Some(Wired::Delete),
                 _ => None,
             },
             "{} is wired to the wrong arm of the seam",
             operation.verb
         );
     }
+    // **A verb this build cannot perform reaches [`not_wired`] and never somebody else's arm** —
+    // the safety net the loop above can no longer exercise, now that every row of [`OPERATIONS`]
+    // is wired. A fourth operation added to the table without an arm here is the case.
+    let unknown = Operation {
+        verb: "evict",
+        value: None,
+        confirm: TYPE_THE_NAME,
+    };
+    assert_eq!(
+        wired(&unknown, Some(3)),
+        None,
+        "an operation with no arm was performed as one that has one"
+    );
     // **The derived list says what it found**: a table that stopped holding these three verbs
     // would satisfy every row above by matching none of them.
     assert_eq!(
@@ -11500,7 +11690,7 @@ fn every_wired_operation_gets_its_own_arm_and_the_unwired_one_gets_none() {
             .iter()
             .map(|operation| operation.verb)
             .collect::<Vec<_>>(),
-        vec![SCALE, RESTART, "delete"],
+        vec![SCALE, RESTART, DELETE],
         "the operations table is no longer the three this phase wires"
     );
     // **The count comes back and is not invented**, which is what stops a scale-to-three being
@@ -11510,6 +11700,11 @@ fn every_wired_operation_gets_its_own_arm_and_the_unwired_one_gets_none() {
     // `ops_value` refuses this above the seam, so it cannot arrive from a command line — and if
     // it ever did, it is `not_wired`'s sentence and never a guessed count.
     assert_eq!(wired(scale, None), None);
+    // **A delete takes no value either**, so a count on the line changes nothing about it — the
+    // driver refuses the extra word above this.
+    let delete = operation_named(DELETE).expect("delete is in the table");
+    assert_eq!(wired(delete, None), Some(Wired::Delete));
+    assert_eq!(wired(delete, Some(3)), Some(Wired::Delete));
     // **A restart takes no value, so a count on the line changes nothing about it** — the driver
     // refuses the extra word above this, and the seam does not carry one either way.
     let restart = operation_named(RESTART).expect("restart is in the table");
@@ -11592,6 +11787,24 @@ fn a_kind_an_operation_does_not_work_on_is_refused_before_the_audit_log_is_opene
         assert!(
             ended.said.contains(names),
             "{line:?} did not say what its verb works on: {:?}",
+            ended.said
+        );
+    }
+    // **`delete` refuses no kind at all** (NOTES § D225 ruling 3): there is no `ops::deletable`,
+    // so every kind the driver can name reaches the seam. It is the opposite claim from the rows
+    // above, and a `deletable()` added later to refuse one of them turns this red.
+    for kind in &KINDS {
+        let object = format!("{}/web", kind.singular);
+        let mut line = vec!["ops", DELETE, object.as_str()];
+        if kind.namespaced {
+            line.extend(["-n", "payments"]);
+        }
+        let ended = ops_ended(&line);
+        println!("{}", ended.said);
+        assert!(
+            ended.said.contains("read this as `delete`"),
+            "{} was refused by a matrix `delete` does not have: {:?}",
+            kind.singular,
             ended.said
         );
     }

@@ -3805,20 +3805,35 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       Deployment named above the prompt and gone once resumed; the three kinds
       served and pod/replicaset/node refused in words; `just check` green
       (1006 + 28) and `just mutants-diff` **37 mutants, 0 missed**
-- [ ] `delete` — requires the typed object name. **The contract does not enforce
-      this yet and this is the box that makes it structural**: `Answer::Confirmed`
-      says somebody agreed and nothing says *how*, so a press-only delete dialog
-      is caught by review rather than by the compiler — which is the *trusted to
-      follow a checklist* shape `Checked` was built to remove for the dry-run
-      ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
-      A `Confirm::Press | Confirm::Type(&str)` on `Mutation` makes it a type
-      error instead. `ops.rs` is still open until this phase closes, which is why
-      it waits here and not longer (`k8s-admin`, 2026-09-04).
-      **And decide whether `delete` is checkable at all**: a dry-run delete and a
-      real one produce the *identical* request line, so at `Metadata` audit level
-      the cluster's own record cannot tell a cancelled dialog from a delete that
-      happened
-      ([D215](NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04))
+- [x] `delete` — requires the typed object name, **and the contract enforces it
+      now**: `Confirm::Press | Confirm::Type(&str)` on `Mutation`, and an
+      `Answer::Confirmed` carrying a ticket `perform` issued for *this* call. A
+      press-only dialog on a typed mutation confirms nothing, and neither does a
+      token kept from an earlier mutation — the replay a private field alone does
+      not stop, because **enum variant fields are public even when a struct's are
+      not**
+      ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04) ·
+      [D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04) ruling 2 ·
+      [D226](NOTES.md#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04)).
+      **Checkable: no**, and the question the box asked is answered in
+      [D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+      ruling 1 — a **narrowing of [CLAUDE.md](CLAUDE.md) invariant 2**, written
+      down before it was acted on. Serves all six kinds with no refusal table and
+      is the first cluster-scoped mutation k8rs performs (ruling 3); reads
+      nothing first, so `Preconditions` belongs to the box below (ruling 4).
+      **Done when:** measured against a real apiserver, a stub and `kubectl
+      v1.36.3` —
+      `{"propagationPolicy":"Background"}`, 34 bytes, **no query string**, the
+      body byte-identical across all six kinds and to what `kubectl delete` sends
+      with no flag; **one request per delete and no dry-run anywhere**; all six
+      taught lines run as written and build the path and body k8rs built;
+      a confirmation kept from one mutation cannot confirm another; a delete the
+      cluster only *accepted* — a finalizer holding the object — says so and
+      still exits `0` rather than claiming a removal that has not happened; the
+      documented `k8rs-admin` role performs all six after this box fixed it from
+      one; `just check` `0` with 1026 + 28 tests and `just mutants-diff` **51
+      mutants, 33 caught, 18 unviable, 0 missed** over a diff proven line for
+      line to be the final tree
 - [ ] Every call sends the resourceVersion that was read; a `409` offers a
       re-read, never a blind overwrite (the case `edit` will lean on in v0.4 —
       the mechanism is built and tested now, while it is cheap)

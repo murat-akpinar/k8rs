@@ -58,32 +58,50 @@ Five mechanisms, each a requirement rather than a nicety:
 |---|---|
 | **Containment** — writes exist only in `ops.rs` | An accidental mutation anywhere else in the codebase |
 | **Consent** — selected object + keypress + confirmation stating the consequence | Acting on the wrong object, or without understanding what happens |
-| **Preflight** — server-side `dryRun=All` where the API offers it, abort on rejection | Discovering an admission-webhook rejection halfway through a change |
+| **Preflight** — server-side `dryRun=All` where the operation asks for one, abort on rejection | Discovering an admission-webhook rejection halfway through a change |
 | **Typed confirmation** for delete and drain | The keyboard-slip class of accident |
 | **Audit** — every described mutation, including refusals and failures | Not being able to answer "what happened to this cluster" |
 
-**Opening a confirmation dialog sends one request to the API server, and that
-is by design rather than by accident.** `screens/dialogs.md` requires the
+**Which operations ask for a preflight is each operation's own decision, and it
+is not a fact about the API** — a real cluster dry-runs every verb k8rs sends
+([NOTES § D215](../NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
+`scale` and `restart` ask; **`delete` declines**, and the row below on the
+`DELETE` verb is why
+([NOTES § D225](../NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1). Its dialog carries *"k8rs did not check this one with the cluster
+first."* instead of a verdict.
+
+**Opening a confirmation dialog for an operation that has a preflight sends one
+request to the API server, and that is by design rather than by accident.**
+`screens/dialogs.md` requires the
 dry-run's verdict to be shown *before* the confirm button is live — the dialog's
-own line is *"The cluster checked it first and accepted it."* — so for any
-operation that has a preflight, the `dryRun=All` goes out while the dialog is on
+own line is *"The cluster checked it first and accepted it."* — so for those
+operations the `dryRun=All` goes out while the dialog is on
 screen and before anybody has agreed to anything. Nothing is mutated, which is
 what `dryRun=All` means, and **authorization is identical to the real call**
 (`tmp/k8s/api-concepts.txt:759`) — so the preflight adds no permission to the
 documented read-only role and widens no grant. What it does do is leave a trace,
 and a reviewer should meet the shape of that trace here rather than find it:
 
-- **The marker rides in a different place per verb, and a rule keyed on the URI
-  is blind to half of them.** The `scale` PATCH and the eviction POST carry
-  `dryRun=All` in the **query string**; a `DELETE` carries it in the **request
-  body**, because `DeleteOptions` is the delete verb's body parameter. So a
-  cancelled k8rs *delete* dialog and a delete that actually happened produce the
-  **same `requestURI`** in the apiserver's own audit log. The field that tells
-  them apart is `requestObject.dryRun`, which exists at `Request` audit level and
-  above and not at `Metadata`.
+- **The marker rides in a different place per verb, and that is why `delete`
+  has no preflight at all.** The `scale` and `restart` PATCHes carry
+  `dryRun=All` in the **query string**; a `DELETE` would carry it in the
+  **request body**, because `DeleteOptions` is the delete verb's body parameter.
+  Measured against a real apiserver's own audit log at `level: Metadata`, a
+  dry-run `DELETE` and a real one are **byte-identical in every recorded
+  field** — same `requestURI`, `verb`, `objectRef`, `responseStatus`,
+  `userAgent` — and the string `dryRun` appears nowhere in either record; the
+  whole difference is 17 bytes of request body, visible only at `Request` level
+  and above. So a delete preflight would have put a live `DELETE` on the wire
+  before anybody typed a name, indistinguishable in the cluster's own record
+  from the delete that happened
+  ([reports/2026-09-04-delete-on-the-wire.md](../reports/2026-09-04-delete-on-the-wire.md)
+  § 4). k8rs sends none, so no such record exists to be misread.
 - **A SIEM rule must therefore not be written against the URI alone.** A rule
   counting `patch deployments/scale` counts scale dialogs, including ones nobody
-  confirmed, and says nothing about the operation that most needs watching.
+  confirmed. **The inverse holds for `delete` and is the more useful half:**
+  every `DELETE` k8rs sends is a delete somebody typed an object's name to
+  confirm — there are no rehearsals to filter out.
 - **One spelling detail, because a reviewer will grep for it:** kube emits
   `?&dryRun=All`, with an empty leading pair, so a pattern anchored on
   `?dryRun=All` matches nothing k8rs sends.
@@ -97,8 +115,9 @@ and a reviewer should meet the shape of that trace here rather than find it:
 - Every matching admission webhook is invoked with `dryRun: true`.
 
 k8rs's own audit log records the outcome of a cancelled dialog as *nothing was
-changed*, which is true — but a request was sent, and that is the fact this
-section exists to state
+changed*, which is true — but for `scale` and `restart` a request was sent, and
+that is the fact this section exists to state. For `delete`, nothing was sent
+either
 ([NOTES § D214](../NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04) ·
 [§ D215](../NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
 
@@ -217,8 +236,11 @@ rules:
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["patch"]                 # cordon / uncordon
+    verbs: ["patch", "delete"]       # cordon / uncordon; delete
   - apiGroups: ["apps"]
+    # `delete` is on the same rule and not a separate one: `ctrl-d` applies to
+    # any kind (NOTES § Operations), which is six of them and not the pod alone
+    # (NOTES § D225 ruling 3).
     resources: ["deployments", "statefulsets", "daemonsets"]
     # `get` is for the operator, not for k8rs: k8rs sends a bare PATCH and needs
     # none, but `kubectl rollout restart` — the line the command log teaches —
@@ -227,7 +249,13 @@ rules:
     # bytes with a container environment value in it — so `patch` already reads
     # the object whole for anyone willing to patch it harmlessly and read the
     # answer. Removing `get` costs the operator their command and buys nothing.
-    verbs: ["get", "patch", "update"] # rollout restart, edit
+    verbs: ["get", "patch", "update", "delete"] # rollout restart, edit, delete
+  # `replicasets` has no rule above because neither scale nor restart patches
+  # one — scale reaches it through the subresource below. `delete` does reach
+  # it, so the parent resource needs its own rule (NOTES § D226 finding 1).
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["delete"]
   # scale is a subresource, and RBAC matches `resource/subresource` as one
   # string — the rule above does not carry these (NOTES § D222).
   - apiGroups: ["apps"]

@@ -2377,6 +2377,42 @@ recorded reversal and a later box rather than a dev round
   `scripts/check-docs.py` the half it already does for anchors: a citation whose
   box title no longer exists is a red build. Found by the PM, 2026-09-04
 
+- **The same line-number rot, in `screens/`.** `src/ops.rs`, `src/ops_tests.rs`
+  and `NOTES.md:18246` all cite `screens/dialogs.md:39` for a consequence
+  sentence — *"will start a replacement"* — that the `delete` box has now
+  **deleted from the file entirely**, because k8rs reads no `ownerReferences`
+  and could not keep that promise. Line 39 today is a `scale` bullet. Nothing is
+  red: the tests use the string as a fixture and assert on cleaning behaviour,
+  not on the screen. Same fix as the entry above and the same refusal to
+  hand-patch. Found by `tui-designer`, 2026-09-04
+
+- **An operation with no namespace sends a cluster-wide `LIST pods` before it
+  runs.** `k8rs ops delete node/<name>` names no namespace, so
+  `k8s::connect_with` → `k8s::coverage(client, None, …)` falls into
+  `lists_pods(client, None, REPORT_FETCH)`. Measured, deterministic: three
+  cancelled node deletes produced three `GET /api/v1/pods?&limit=1`, where three
+  cancelled pod deletes produced none. It is a read, so invariant 1 is untouched,
+  and it is not confusable with a delete in an audit record. **Two things it
+  costs**: a kubeconfig authorised to delete a Node but not to list pods
+  cluster-wide takes a 403 on a probe whose answer the ops path never reads, and
+  a cancelled node delete does leave a trace in the cluster's own record where a
+  pod delete leaves none. The code is `k8s.rs`'s and **that file froze at
+  Phase 6**, so this is a later box and a plan question, not a fix
+  ([D226](NOTES.md#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04)
+  finding 7). `delete` is merely the first operation that can reach it, being the
+  first with no `-n`. Found by `tester`, 2026-09-04
+
+- **`HOME` is not a sandbox, and `scripts/` can say so mechanically.** Setting
+  `HOME` to a scratch directory does not stop the built binary reaching a real
+  cluster, because `KUBECONFIG` in the environment overrides it — which is how
+  four real `DELETE`s reached the fixture cluster on 2026-09-04
+  ([D226](NOTES.md#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04)
+  finding 5). The guardable shape is `write-guard.py`'s: scan the `justfile`,
+  `scripts/` and `.github/workflows/` for any invocation of the built binary that
+  sets `HOME` without clearing `KUBECONFIG`, with a `--self-test` that plants
+  one. Belongs to a later phase with `tests/` and `scripts/` as its files — a box
+  is never added to a running phase. Recommended by `tester`, 2026-09-04
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

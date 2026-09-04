@@ -146,17 +146,37 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
    saying because it is not obvious.** `ops_tests.rs` is a `#[path]` child module
    (invariant 11), so `ops.rs`'s inner `#![allow]` covers it lexically and banned
    calls legitimately appear in two files. Proven not a hole rather than assumed
-   ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)):
-   the test module holds no `Client`, no `.send(`, no `.request(`, so the
-   requests it builds are never dispatched. `write-guard.py` still reports
+   ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04))
+   — **and the proof written here was the wrong one, which is worth more than a
+   quiet fix** ([D226](NOTES.md#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04)).
+   It said *the test module holds no `Client`, no `.send(`, no `.request(`*; it
+   holds **four** `Client`s and did before this claim was written, because the
+   operation tests dispatch real requests at a stub. What actually holds is
+   narrower and does not depend on counting: every client there is built from a
+   `kube::Config::new` over a literal `http://127.0.0.1:<kernel-assigned>` — no
+   kubeconfig, no `KUBECONFIG`, structurally unable to reach a cluster.
+   `write-guard.py` still reports
    exactly one silencer, and it scans `tests/` as well as `src/` — measured, by
    planting one and watching it fail.
 2. **No write is implicit.** Every mutation requires: an explicitly selected
    object → a keypress → a confirmation dialog stating the consequence in plain
-   language → a server-side `dryRun=All` where the API supports it → an audit
-   line. Deletes and drains additionally require typing the object name.
-   `--read-only` makes the whole path unreachable, not merely unbound. Bulk
-   mutation does not exist.
+   language → a server-side `dryRun=All` **where the operation asks for one** →
+   an audit line. Deletes and drains additionally require typing the object
+   name. `--read-only` makes the whole path unreachable, not merely unbound.
+   Bulk mutation does not exist.
+   **That dry-run clause read *where the API supports it* until 2026-09-04, and
+   `delete` narrowed it** — the API dry-runs a `DELETE` and k8rs declines,
+   because the marker rides in the request body and the cluster's own audit
+   record at `Metadata` level cannot then tell a cancelled dialog from the
+   delete that happened
+   ([D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+   ruling 1). **The narrowing is real and it costs something**: the preflight was
+   also the connectivity probe, so a dead socket on a delete now ends in *k8rs
+   does not know whether the change was made* where `scale` would have said
+   *never sent*. **Declining is per operation, is recorded in that operation's
+   box, and is never a default and never silent** — the two halves of this
+   invariant that are not negotiable are the typed name and the audit line, and
+   neither moved.
 3. **Nothing is deployed into the cluster.** k8rs runs on the user's machine
    against their kubeconfig, and that is the entire trust model.
 4. **Every mutation is visible twice, and neither record may lie.** The
@@ -312,7 +332,12 @@ that goes green says nothing about those.
 **The write path**
 
 - [ ] Mutations exist only in `ops.rs` (allowlist check, invariant 1).
-- [ ] Dry-run precedes the real call wherever the API supports it.
+- [ ] Dry-run precedes the real call for every operation that asks for one, and
+      an operation that declines has said why in its own box
+      ([D225](NOTES.md#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+      ruling 1 is the only one so far, and it is `delete`). *Wherever the API
+      supports it* is what this row said until 2026-09-04 and the API supports
+      all of them.
 - [ ] Destructive actions require the typed object name.
 - [ ] Applies carry the resourceVersion that was read; a 409 offers a re-read,
       never a blind overwrite.

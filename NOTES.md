@@ -246,6 +246,8 @@ its line moving with it.
 - [D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04) — the `scale` review round: the sentence that named neither fault nor message, and the admin role that could not scale
 - [D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04) — the four rulings `restart` could not be briefed without, and the pod arm that is `delete`'s
 - [D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04) — the `restart` review round: two blockers a stand-in apiserver could not produce, and the sentence that promised a cluster's settings
+- [D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04) — the five rulings `delete` could not be briefed without, and the preflight it declines
+- [D226](#d226--the-delete-review-round-a-token-that-could-be-replayed-a-removal-that-had-not-happened-and-the-sandbox-that-was-not-one-2026-09-04) — the `delete` review round: a token that could be replayed, a removal that had not happened, and the sandbox that was not one
 
 ## Why it exists — where the gap is
 
@@ -19186,3 +19188,313 @@ on no line of the audit log, so *which* restart wrote the annotation on an
 object is answered by a 41 µs nearest match rather than exactly. And a mistyped
 *namespace* is reported as a missing *object*, because the apiserver returns the
 identical 404 for both.
+
+### D225 — the five rulings `delete` could not be briefed without, and the preflight it declines (2026-09-04)
+
+todo.md 3808 is the third operation and the first destructive one. It carries two
+open questions in its own text — whether a delete is checkable at all, and how
+invariant 2's typed name stops being a thing review catches — and three more that
+only appear once the box is read against the two operations already landed.
+
+**1. `delete` declines the preflight: `checkable: false`.**
+[D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)'s
+finding 3 left this to be weighed rather than inherited, and it weighs against.
+A `dryRun=All` delete is a real `DELETE` on the wire, sent **before anybody has
+typed anything**, and the marker distinguishing it from the delete that happened
+rides in the body — so in the cluster's own audit record at `Metadata` level, the
+level most clusters run, opening a delete dialog on `prod` and cancelling it is
+indistinguishable from having deleted the object. That is a lie in a record k8rs
+does not own, cannot annotate and cannot correct, and it is the same class as
+[D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)'s
+three lying records with the one difference that matters: there, k8rs could fix
+its own records.
+
+**What is given up is small and what is kept is not.** A preflight would catch a
+denying admission webhook before the name is typed; a `403` and a `404` come back
+from the real call regardless, and *the object went away* is
+[D22](#d22--a-confirmation-can-outlive-the-thing-it-confirms)'s watch and not a
+dry-run's. Against that, a delete preflight **adds a failure mode of its own**: a
+`ValidatingWebhookConfiguration` with `sideEffects: Some | Unknown` fails
+`dryRun=All` for a fully authorised user, so on such a cluster k8rs would refuse
+a delete that would have worked — on the one operation where being refused
+wrongly is least acceptable.
+
+**The ruling is safe under either reading of the measurement, which is why it is
+made without re-measuring one.** If a dry-run delete turns out to be
+distinguishable after all, declining costs a little diagnostic value; if it is
+not, declining is the only thing that keeps the cluster's record honest.
+`UNCHECKABLE`'s existing sentence — *"k8rs did not check this one with the
+cluster first"* — says what happened and not why, which is exactly right here:
+the why is this entry.
+
+**2. `Confirm` lands on `Mutation`, and the enum alone is not what makes it
+structural.** The box proposes `Confirm::Press | Confirm::Type(&str)` and calls
+it a type error. It is not one by itself: a field on `Mutation` that `perform`
+reads and an operation sets is the same *asserted about itself* shape
+[D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)
+closes with about `checkable`, and `Answer::Confirmed` stays constructible by
+anyone. **What must hold is [`Checked`]'s shape and not a second copy of
+`checkable`'s**: a dialog that never asked for a name must be *unable to
+construct* the answer that proceeds, in the way an operation is unable to reach a
+confirmation without a check having been answered. The minimal form is
+`dev-core`'s to pick; the requirement is that a press-only delete fails to
+compile or fails to build its answer, and never that it merely fails review.
+
+**3. Every kind in the driver's `KINDS`, and no refusal table.**
+[§ Operations](#operations--the-full-admin-surface) gives `delete` *any*, which
+is what makes it unlike `scale` and `restart`: `scalable` and `restartable` exist
+because a restart of a ReplicaSet is a word with no meaning, and there is no kind
+in the set a delete is meaningless on. So no `deletable()` refusing anything —
+the second matrix
+[D103](#d103--the-process-was-measured-and-what-it-lacked-was-a-rule-that-makes-something-smaller-2026-08-15)
+is named for is not worth writing to refuse nothing.
+
+**`node` is served, and it is the first cluster-scoped mutation k8rs performs.**
+`KINDS`'s own doc put it there so *a rule about the kind that belongs to the whole
+cluster is reachable by a line*, and this is that line: `Api::all_with` where the
+other two operations have only ever built `Api::namespaced_with`, and the
+namespace refusal inverted — a namespace named for a node is the error, not a
+namespace missing. Deleting a Node object is also the one consequence in the set a
+beginner will read exactly backwards, so its sentence is
+[screens/dialogs.md](screens/dialogs.md)'s to write and not this entry's: it
+removes the cluster's *record* of a machine, and it drains nothing. **The rest of
+what this ruling first said about it was wrong, and a measurement taken before any
+code was written is what caught it**
+([reports/2026-09-04-delete-on-the-wire.md](reports/2026-09-04-delete-on-the-wire.md)
+§ 7). It said *a kubelet still running re-registers within seconds*: on kubelet
+v1.36.1 the node was **still absent 2 minutes 45 seconds later**, the kubelet
+logging five `Error updating node status … node not found` lines per ten-second
+cycle with no registration attempt, and it came back **2 s after the kubelet
+process was restarted** — `registerWithAPIServer` runs once per process, so the
+delete strands a live machine the cluster has forgotten rather than being undone
+by it. It also implied the pods stayed: 55 s after the delete the pod on that node
+was gone and its ReplicaSet had made two replacements, both `Pending`, with
+nowhere left to run. **So deleting a Node object is the more destructive reading
+and not the milder one**, which is the opposite of the shape this ruling reached
+for, and the consequence sentence
+[screens/dialogs.md](screens/dialogs.md) draws follows the measurement.
+`drain` is v0.2 and is the operation that empties one.
+
+**4. Nothing is read before the delete, and `Preconditions` is not this box's.**
+[D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 3's direction holds for the same reason and one more: a `GET` to fetch a
+`uid` pulls the object — container environments included — into k8rs for a dialog
+that shows none of it. So `uid: None` and `version: None`, and a missing object is
+refused by the apiserver's own 404 on the real call. **`DeleteParams::preconditions`
+is the delete-shaped spelling of todo.md 3822** — *every call sends the
+resourceVersion that was read* — which is the next box in this phase and takes the
+read for every call at once. Writing half of it here would leave that box with a
+premise decided underneath it, which is the mistake
+[D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 1 avoided by refusing the pod.
+
+**5. `propagationPolicy` is measured off `kubectl`, and it holds.** `Pass::delete`'s own doc already says `DeleteParams::default()`
+sends `{}` and lets the server fall back to the object's default, while
+`kubectl delete` sends `Background` — so invariant 4's *equivalent* command needs
+the policy set explicitly, and the taught line then carries **no flag**, because
+what k8rs sends is what `kubectl delete` sends with no flag. **This ruling first called that last step
+*recalled off kubectl's documentation*, and that was itself unmeasured**:
+[reports/2026-09-04-dry-run-on-the-wire.md](reports/2026-09-04-dry-run-on-the-wire.md)
+had already measured it against a stub the same day, for a deployment. It was
+re-measured anyway and the answer holds and now covers more
+([reports/2026-09-04-delete-on-the-wire.md](reports/2026-09-04-delete-on-the-wire.md)
+§ 1-2): against a real apiserver, `kubectl delete` sends exactly
+`{"propagationPolicy":"Background"}` — 34 bytes, no query string at all, no
+`kind`, no `apiVersion` — and the body is **byte-identical across all six kinds**
+in `KINDS`, only the path differing for the cluster-scoped one. `--cascade=background`
+produces the same bytes, so the taught line carrying no flag is exact rather than
+merely defensible. **What the constant buys today is exactness and not a behaviour
+change**: on server v1.36.1 an empty body and `Background` were indistinguishable
+by every observation taken, while `Foreground` was plainly different — so this
+removes a dependence on a per-resource server default rather than fixing something
+visible.
+
+### D226 — the `delete` review round: a token that could be replayed, a removal that had not happened, and the sandbox that was not one (2026-09-04)
+
+`delete` passed its author's red/green, `just check` (1020 + 28), and a
+`just mutants-diff` with no survivor. Then `tester` and `k8s-admin` read it and
+between them found two blockers, one of which is the box's own headline claim,
+and a defect in a hard invariant's stated proof.
+
+**1. `Answer::Confirmed` could be built outside `ops.rs`, and a delete went
+through without a name.** The box exists to make invariant 2's typed name
+structural, and the first implementation was `pub struct Agreed(())` — a private
+field, so unconstructible outside the module — carried as `Answer::Confirmed(Agreed)`.
+**Enum variant fields are public even when the struct's fields are not**, and
+`Agreed` derived `Copy`. So any code holding one legitimate `Confirmed` could
+destructure the token and re-wrap it for a different mutation. `tester` proved it
+from `main_tests.rs` — where every dialog lives — driving the real `perform`:
+press-confirm a `Confirm::Press` scale, keep the token, and the next
+`Confirm::Type` delete confirms with nothing typed and the audit log records *the
+change was made*.
+
+**Unreachable today and reachable at Phase 12, which is what made it a blocker
+now.** `ops_connected` performs one operation per process and `ask` retains
+nothing; the console is one process with many dialogs, and `ops.rs` freezes at
+the end of this phase. **The lesson is narrower than *use a private field*:
+privacy stops forgery and does not stop replay**, and three doc comments in two
+files asserted the stronger property as fact.
+
+**2. `Outcome::Done` recorded *the change was made* for a delete the cluster had
+only accepted.** Measured through the real binary on a Node carrying a
+finalizer: `200 OK`, k8rs exits `0` saying the change was made, and the node is
+still there three seconds later with a `deletionTimestamp` and the finalizer
+listed. Same shape on a pod, whose `200` carried `status.phase: Running` and
+`deletionGracePeriodSeconds: 30`.
+
+**The API answers the question and the code threw the answer away.** A completed
+delete answers `kind: Status, status: Success`; a pending one answers with the
+object, carrying `deletionTimestamp`. `Api::delete` returns `Either<K, Status>`
+and the closure's `.map(|_| ())` discarded it one line before `perform` could
+see it — a `map` that was right for
+[D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 3's exposure reason and wrong about which fact it kept.
+**The exit code does not move**: a pending delete *did* change the cluster, so
+`changed()` stays true and
+[D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+ruling 1's split holds. What was wrong is the sentence. **And the taught line
+does not behave the way k8rs did**: `kubectl delete` waits by default, and
+`timeout 5 kubectl delete node/<name>` exited `124` still waiting where k8rs had
+returned instantly.
+
+**3. The documented `k8rs-admin` ClusterRole could perform one of the six
+deletes.** Extracted verbatim, applied unedited, bound and asked: `delete` on
+`pods` only. An operator following `docs/security.md` opens `ctrl-d` on
+`deployment/web`, reads the consequence, **types the deployment's name**, presses
+enter, and gets a 403 — for five of six kinds. This is
+[D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04)
+recurring three boxes later, on the operation where being refused is most
+expensive. **The role is written by hand and no gate reads it**, which is the
+actual defect: the failure behaviour itself measured clean — verb and resource
+named, one line, exit `2`, no crash, no retry.
+
+**4. Invariant 2 is narrowed, and the narrowing costs something the ruling had
+not weighed.** [CLAUDE.md](CLAUDE.md) invariant 2 required *a server-side
+`dryRun=All` where the API supports it*; the API supports it for `DELETE` and
+[D225](#d225--the-five-rulings-delete-could-not-be-briefed-without-and-the-preflight-it-declines-2026-09-04)
+ruling 1 declines it. That is a reversal of a hard invariant and it is recorded
+here rather than applied quietly: the clause now reads *where the operation asks
+for one*, and an operation that declines says why in its own box.
+
+**The cost D225 ruling 1 missed is the connectivity probe.** Its accounting was
+*a 403 and a 404 come back from the real call regardless* — true, and the wrong
+half: a **transport** failure does not come back at all, and the preflight was
+what made the answer definite. Measured against a dead port, `scale` says *the
+change was never sent* and `delete` says *k8rs does not know whether the change
+was made* — on the one operation where **did it happen?** matters most.
+
+**`k8s-admin` was asked whether the ruling should be reopened and said no, with
+an argument stronger than the one the ruling was made on.** What denies DELETEs
+in real clusters is Kyverno `validate` with `operations: [DELETE]` and CEL
+`ValidatingAdmissionPolicy` — real and common — while Gatekeeper's shipped
+webhook matches CREATE/UPDATE only, and the protection an operator most expects
+to be warned about, a **PodDisruptionBudget, does not apply to `delete` at all**:
+it guards `pods/eviction`. So the refusal still arrives, from the real call, with
+verb, resource and the server's sentence; what is lost is ordering, not
+diagnosis. **And a dry-run DELETE would have taught a falsehood** — it runs no
+garbage collection, consults no finalizers and consults no PDB, so *"the cluster
+checked it first and accepted it"* over a delete is a materially weaker claim
+than the same sentence over a `PATCH`, on the operation where a false green is
+worst. Finding 2 is k8rs already overclaiming about a delete's completion; a
+preflight would have added a second, earlier overclaim.
+
+**5. The sandbox that was not one — `KUBECONFIG` overrides `HOME`.** `dev-core`
+sandboxed its runs of the built binary by setting `HOME` to a scratch directory
+with a stub kubeconfig. `KUBECONFIG` was set in the environment and takes
+precedence, so **four real `DELETE`s went to the user's `k8rs` fixture cluster**.
+Nothing was deleted — every target was a name out of `screens/dialogs.md` that
+does not exist there, all four `404`, and the PM verified the cluster whole
+afterwards — but that was luck, not a guard. **Setting `HOME` is not a sandbox.**
+An agent running the built binary clears `KUBECONFIG` as well and refuses to
+start unless the resolved server is its own stub, which is what `tester` then
+did. This is [D94](#d94--the-first-review-cluster-was-named-k8rs-review-and-a-guard-the-obvious-wrong-name-walks-straight-past-is-not-a-guard-2026-08-15)'s
+shape: a guard the obvious wrong case walks straight past.
+
+**6. Invariant 1's stated proof was measured wrong.** It said `ops_tests.rs`
+*holds no `Client`, no `.send(`, no `.request(`, so the requests it builds are
+never dispatched*. It holds **four** `Client`s, and did before that sentence was
+written — the operation tests dispatch real requests at a stub. The containment
+still holds, for a reason that does not depend on counting: every client there is
+built from a `kube::Config::new` over a literal `http://127.0.0.1:<kernel-assigned>`,
+with no kubeconfig, structurally unable to reach a cluster. **The sentence that
+was written down is the one nobody re-measured**, and it is the same property
+finding 5 went around.
+
+**7. What a cancelled `delete` leaves in the cluster's record, for the one kind
+`delete` alone reaches.** `ops_tests.rs` claimed *a cancelled delete leaves no
+trace*. True for the namespaced form. **False for `node`**: with no `-n`,
+`k8s::coverage` runs a cluster-wide `LIST pods` probe before the operation — three
+cancelled node deletes produced three `GET /api/v1/pods?&limit=1`. It is a read,
+invariant 1 is untouched, and it is not confusable with a delete, so ruling 1
+survives; the *sentence* did not. **The probe itself is `k8s.rs`'s and that file
+froze at Phase 6**, so it is [backlog.md](backlog.md)'s and a later box's, not
+this one's — `delete` is merely the first operation that can reach it, being the
+first with no namespace.
+
+**8. Two decisions the brief left to `dev-core`, recorded because they were
+made.** `main.rs`'s `Operation::confirm` was **not** deleted, contrary to its own
+doc's promise: `ops::Confirm::Type` carries the object's name and `ops_usage()`
+prints before any object is named, so no `const` table can hold one. It is now a
+help string that only `ops_usage` reads, which is a different fact from *how is
+this confirmed* and does not re-create the second matrix. And `removal` returns
+the namespaced/cluster-wide bit, a second copy of what `KINDS` holds:
+[D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+ruling 4 bars re-deriving *which kinds a verb serves*, and this is *how the
+request path is built* — the same reading that already duplicates the
+`object_name` / `namespace_name` guards deliberately.
+
+**What the round landed, and the five choices the review left to `dev-core`.**
+
+**The replay is closed with a ticket and not with a lifetime.** `perform` takes a
+number from a process-wide `AtomicU64` at the start of each call, `Checked`
+carries it privately, `Checked::pressed`/`typed` stamp it into `Agreed(u64)`, and
+`perform` compares it back before the real call. A token from any other call —
+including one whose `Confirm` is identical — confirms nothing. The generative
+("branded") lifetime is the stronger tool and was rejected for a reason this file
+gets to use: it needs `ask` higher-ranked over a future-returning closure, and
+`ops.rs`'s design goal is to stay small enough to read at 3am. `Copy` and `Clone`
+are gone from `Agreed` and `Answer` as well — not the mechanism, but no reason to
+hand out free copies.
+
+**And the first fix had a hole its own probe found**, which is the part worth
+keeping: the ticket comparison was written *inside* the match arm, so a widened
+guard still tripped the `debug_assert_eq!` and the `should_panic` test passed
+over the hole. **The guard routes and the assertion only decorates** — an
+assertion inside the arm it is meant to protect tests the assertion, not the
+guard.
+
+**The unfinished removal gets an outcome rather than a hedge.**
+`pub enum Landing { Finished, Started }` is `perform`'s last parameter; `scale`
+and `restart` pass a shared `finished`, because a `PATCH`'s `200` means applied
+and they grow no case. `delete` reads the answer's *shape* inside its closure —
+a `Status` means gone, the object coming back means something holds it — and
+drops the object there, [D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)'s
+`paused` move. `Started` is a change, so `changed()` is true and the exit stays
+`0`.
+
+**The asymmetry between the two sentences is deliberate and is ruled here.** The
+consequence warns that something attached to the object *may delay this **or act
+first***; the closing line can only ever report the delay, because nothing in a
+`200` tells k8rs whether a controller acted first. That stands. The dialog is
+right to warn about both and the result is right to report only what was
+observed — **a result sentence that hedged about a controller having acted would
+be k8rs asserting something it did not see**, which is the defect this entire
+round was about.
+
+**The five choices, recorded because they were made** (CLAUDE.md § the report the
+PM gets back): the ticket over the lifetime; a replay reported the way this
+region already reports author errors, `debug_assert` plus `Cancelled`, which is
+why its probe is a `should_panic` test; `Landing` as a seventh parameter with a
+test wrapper rather than editing 28 call sites; `delete`'s `Response` becoming
+`bool`, so `Checked<bool>`, readable by a caller though today's driver closes the
+dialog before it could; and a mechanical test that reads `screens/dialogs.md`,
+unwraps its frames and asserts all six consequence sentences **and the screen's
+own *may delay this or act first***, so a reword on either side turns red instead
+of drifting — which deliberately routes screen rewords back through the PM.
+
+**Gates over the final tree:** `just check` `0`, 1026 + 28 tests, and
+`just mutants-diff` **51 mutants, 33 caught, 18 unviable, 0 missed** — with the
+run's own diff snapshot compared line for line against `git diff HEAD` (1506
+added non-comment `src/` lines on both sides, zero differences), because the
+sweep started before the last comment edits and *the gate covered the final tree*
+is exactly the kind of claim this repo requires measured rather than assumed.
