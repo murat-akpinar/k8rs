@@ -10063,9 +10063,24 @@ async fn one_line_comes_out_of_every_emit_path_with_one_transformation_on_it() {
 }
 
 /// One `ops` line, as argv reaches [`main`].
+///
+/// **The audit log is `/dev/null`, opened for real** ([`ops_line`]'s `audit` parameter): a real
+/// `File`, so the driver's own arm is the one under test, and nowhere, so thirty tests do not
+/// each leave a state directory behind. The tests that care *which* file it is open it
+/// themselves.
 fn ops(line: &[&str]) -> String {
     let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
-    ops_line(&args).expect("a line beginning with `ops` is the operations driver's")
+    ops_line(&args, nowhere).expect("a line beginning with `ops` is the operations driver's")
+}
+
+/// An audit log that works, keeps nothing and has nothing to say — a real open, of the one path
+/// that is always there.
+fn nowhere() -> Result<(std::fs::File, Vec<String>), String> {
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open("/dev/null")
+        .map(|log| (log, Vec::new()))
+        .map_err(|failed| failed.to_string())
 }
 
 /// **A line that is not the subcommand is not the subcommand's to answer** — the two other ways
@@ -10096,7 +10111,7 @@ fn only_a_bare_ops_word_is_the_subcommand_and_a_flags_value_is_not() {
     ] {
         let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
         assert_eq!(
-            ops_line(&args),
+            ops_line(&args, nowhere),
             None,
             "{line:?} was taken for the operations subcommand"
         );
@@ -10963,4 +10978,160 @@ fn a_signed_number_is_not_read_as_a_flag() {
     for word in ["3", "web", "deploy/web", ""] {
         assert!(!flag_word(word), "{word} was read as a flag");
     }
+}
+
+/// **A line k8rs is going to refuse never asks for an audit log** (todo.md 3696).
+///
+/// `k8rs ops bogus` must not leave a state directory behind: nothing was going to be changed, so
+/// nothing needs recording, and a mistyped word is not a reason to write into somebody's `$HOME`.
+/// The `FnOnce` is what makes this assertable — the count is of *asks*, not of files.
+///
+/// **The rows are one per refusal [`ops_run`] can reach**, in its own order, so a check that
+/// moves above the parse would be caught here rather than by a directory appearing.
+#[test]
+fn a_line_k8rs_refuses_never_asks_for_an_audit_log() {
+    for line in [
+        vec!["ops"],
+        vec!["ops", "--wat", "scale", "deploy/web", "3"],
+        vec!["ops", "scale", "deploy/web", "3", "-n", "a", "-n", "b"],
+        vec!["ops", "bogus", "deploy/web"],
+        vec!["ops", "scale"],
+        vec!["ops", "scale", "web", "3"],
+        vec!["ops", "scale", "widget/web", "3"],
+        vec!["ops", "scale", "deploy/web"],
+        vec!["ops", "scale", "deploy/web", "three"],
+        vec!["ops", "scale", "deploy/web", "3", "4"],
+        vec!["ops", "scale", "deploy/web", "3"],
+        vec!["ops", "delete", "node/k8rs-worker2", "-n", "payments"],
+        // **`--read-only` is deliberately not a row here, and it was one for a round.** It reads
+        // as the row that matters most and it is a row that cannot fail: [`ops_line`] refuses the
+        // flag above [`ops_run`], and no single move makes it red — with the refusal deleted the
+        // flag is still refused as an unknown one by [`ops_words`], and `FnOnce` makes a second
+        // open a compile error rather than a failing test. The flag's own tests are above; this
+        // list is the lines that reach [`ops_run`] (my own second pass, 2026-09-04).
+    ] {
+        let asked = std::cell::Cell::new(0u32);
+        let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let sentence = ops_line(&args, || {
+            asked.set(asked.get() + 1);
+            nowhere()
+        })
+        .expect("a line beginning with `ops` is the operations driver's");
+        println!("--- {line:?} ---\n{sentence}");
+        assert_eq!(
+            asked.get(),
+            0,
+            "{line:?} is refused and asked for an audit log anyway"
+        );
+    }
+}
+
+/// **A line with nothing wrong in it opens the log, once, before it reaches the seam**
+/// (NOTES § D21 — a mutation that cannot be recorded does not happen, so the trail is answered
+/// for before an operation is).
+#[test]
+fn a_well_formed_line_opens_the_audit_log_once_before_it_reaches_the_seam() {
+    for line in [
+        vec!["ops", "scale", "deploy/web", "3", "-n", "payments"],
+        vec!["ops", "restart", "sts/db", "-n", "payments"],
+        vec!["ops", "delete", "node/k8rs-worker2"],
+    ] {
+        let asked = std::cell::Cell::new(0u32);
+        let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
+        let sentence = ops_line(&args, || {
+            asked.set(asked.get() + 1);
+            nowhere()
+        })
+        .expect("a line beginning with `ops` is the operations driver's");
+        println!("--- {line:?} ---\n{sentence}");
+        assert_eq!(
+            asked.get(),
+            1,
+            "{line:?} did not open an audit log exactly once"
+        );
+        assert!(
+            sentence.ends_with("and this build reads the line and does nothing else"),
+            "{line:?} did not reach the seam: {sentence}"
+        );
+    }
+}
+
+/// **Something worth saying about the audit log is said, above the sentence about the run**
+/// (`ops::audit_log`'s notes — an ignored `$XDG_STATE_HOME`, a log other people can write to).
+///
+/// **Above and not instead of**, which is the opposite of the refusal below it: a note is a thing
+/// that is true *and* the run went on, so the sentence about what k8rs did has to still be there.
+/// A note that replaced it would read as though nothing happened, and one printed after it would
+/// be read as part of the outcome.
+///
+/// **Two notes and not one**, because both of `audit_log`'s can be true at once — a relative
+/// `$XDG_STATE_HOME` and a `0666` log under `$HOME` — and a driver that joined them onto one line
+/// would bury the second.
+#[test]
+fn something_worth_saying_about_the_audit_log_is_said_above_the_seams_own_sentence() {
+    let args: Vec<String> = ["ops", "scale", "deploy/web", "3", "-n", "payments"]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+    let sentence = ops_line(&args, || {
+        nowhere().map(|(log, _)| {
+            (
+                log,
+                vec![
+                    "k8rs is not keeping its audit log where $XDG_STATE_HOME points".to_string(),
+                    "the audit log at /home/ops/.local/state/k8rs/audit.log can be written to \
+                     by other people on this machine"
+                        .to_string(),
+                ],
+            )
+        })
+    })
+    .expect("a line beginning with `ops` is the operations driver's");
+    println!("{sentence}");
+    assert_eq!(
+        sentence,
+        "k8rs: k8rs is not keeping its audit log where $XDG_STATE_HOME points\n\
+         k8rs: the audit log at /home/ops/.local/state/k8rs/audit.log can be written to by \
+         other people on this machine\n\
+         k8rs: k8rs read this as `scale` on deployment/web in payments, 3 copies — and this \
+         build reads the line and does nothing else",
+        "a note about the audit log was dropped, printed after the outcome, or printed instead \
+         of it"
+    );
+}
+
+/// **A machine that cannot hold the audit log refuses the operation and says why**
+/// ([NOTES § D21](../NOTES.md) — k8rs says so and continues read-only; it does not exit and it
+/// does not quietly drop the trail).
+///
+/// **The refusal replaces the seam's sentence rather than being printed beside it.** A run that
+/// says both *k8rs could not open its audit log* and *k8rs read this as scale on deployment/web*
+/// reads as though the second happened anyway, and the whole point of D21 is that it did not.
+///
+/// **The sentence is `ops::audit_log`'s own words**, prefixed the way every other refusal on this
+/// line is — the two records may not disagree about which one is speaking (invariant 4).
+#[test]
+fn a_machine_that_cannot_hold_the_audit_log_refuses_the_operation_and_says_why() {
+    let args: Vec<String> = ["ops", "scale", "deploy/web", "3", "-n", "payments"]
+        .iter()
+        .map(|word| (*word).to_string())
+        .collect();
+    let sentence = ops_line(&args, || {
+        Err(
+            "k8rs could not open its audit log at /nope/audit.log: it is not there — every \
+             change k8rs makes is written to that log before it is sent, so k8rs will not change \
+             anything until that is fixed, and reading your cluster still works"
+                .to_string(),
+        )
+    })
+    .expect("a line beginning with `ops` is the operations driver's");
+    println!("{sentence}");
+    assert_eq!(
+        sentence,
+        "k8rs: k8rs could not open its audit log at /nope/audit.log: it is not there — every \
+         change k8rs makes is written to that log before it is sent, so k8rs will not change \
+         anything until that is fixed, and reading your cluster still works",
+        "a run that cannot record what it is about to do did not say so, or said it beside the \
+         seam's own sentence as though the operation had gone ahead"
+    );
 }

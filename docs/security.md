@@ -378,24 +378,39 @@ resource.
 
 ## The audit log
 
-`~/.local/state/k8rs/audit.log`, mode 0600, append-only, plain text. One line
-per attempted mutation:
+`~/.local/state/k8rs/audit.log`, **created** mode 0600 in a directory created
+0700, append-only, plain text. *Created*, because k8rs does not narrow a log
+somebody has since widened — an operator who opened it for a log collector
+should not have that undone every run. What it does instead is **look**: it
+refuses outright when something at that path is not an ordinary file (a pipe
+there used to hang k8rs forever), and it says so once, without refusing, when
+the file can be written by anyone else — because then what is already in it may
+not be what k8rs wrote
+([NOTES § D219](../NOTES.md#d219--the-audit-log-refuses-what-it-cannot-trust-and-says-what-it-cannot-fix-2026-09-04)).
+Two lines per attempted mutation:
 
 ```
-2026-08-11T14:22:07Z  ctx=prod-eu  ns=payments  deployment/web
-  shown: kubectl scale deployment/web --replicas=3 -n payments
-  call:  PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale
-         rv=88213  dry-run=ok                                    → ok
-2026-08-11T14:23:15Z  ctx=prod-eu  ns=payments  pod/web-7d9f4
-  shown: kubectl delete pod web-7d9f4 -n payments
-  call:  (none)                                      → refused by user
+2026-09-04T09:12:31.44Z attempt · deployment/web · context prod-eu · namespace payments · kubectl: kubectl scale deployment/web --replicas=3 -n payments · call: PATCH /apis/apps/v1/namespaces/payments/deployments/web/scale · resourceVersion 88213
+result · attempt 2026-09-04T09:12:31.44Z · recorded 2026-09-04T09:12:33.06Z · deployment/web · dry-run: the cluster checked it first and accepted it · the change was made
 ```
 
-Two lines, not one, and the difference matters: k8rs calls
-`Api::patch_scale`, not `kubectl scale`. The `shown:` line is what the user
-saw and learned from; the `call:` line is what actually reached the API
-server, with the resourceVersion sent and the dry-run verdict. An audit trail
-that records only the teaching aid is fiction.
+**Two lines per mutation, and both records are on them.** k8rs calls
+`Api::patch_scale`, not `kubectl scale`, so the `kubectl:` field is the
+*equivalent* command — what the user saw and learned from — and the `call:`
+field is what actually reached the API server, with the resourceVersion sent.
+An audit trail that records only the teaching aid is fiction
+([NOTES § D8](../NOTES.md#d8--invariant-4-was-not-literally-true)).
+
+**Two timestamps, because what you want is a window and not a duration.** The
+attempt stamp is taken before anything is sent and the `recorded` stamp when
+the call returns, so the real request is inside `[attempt, recorded]` by
+construction — which is what makes it greppable against the **apiserver's own**
+audit log, the thing an operator actually does at 3am. A duration would have to
+be subtracted back into a window before it was usable, and the subtraction needs
+a stamp you would then not have. The gap is wide because it contains the
+confirmation dialog and however long the operator spent reading it; that is not
+a defect, it is why the field is not called `took`. Both stamps are the
+*client's* clock.
 
 It records refusals and failures as well as successes — a trail that only
 records what worked cannot answer "what did they try". Nothing about it
@@ -412,8 +427,12 @@ opened at startup, k8rs says so and runs read-only rather than exiting —
 someone should still be able to look at their cluster
 ([NOTES § D21](../NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)).
 
-**It is not rotated.** A few hundred bytes per mutation reaches a megabyte in
-about a decade of daily use. A rotator would be more code than the log.
+**It is not rotated.** A rotator would be more code than the log. Measured, a
+typical record is 425 bytes — a megabyte in 49 days and 74 MiB in a decade at
+fifty mutations a day. The tail where every call is rejected reaches hundreds of
+megabytes, and is unreachable without a symptom the operator meets on day one:
+a wall of refusals, not a full disk in 2036
+([NOTES § D21](../NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)).
 
 ## Data displayed and stored
 

@@ -83,7 +83,7 @@ fn main() {
     // **Before the mode is chosen, because a mistyped flag is wrong in both of them** — and
     // [`ops_line`] before *that*, because a subcommand's words are bare and every one of them
     // would come back out of [`mistyped`] as a stray path (§ THE OPERATIONS DRIVER).
-    let problem = match ops_line(&args).or_else(|| mistyped(&args)) {
+    let problem = match ops_line(&args, ops::audit_log).or_else(|| mistyped(&args)) {
         Some(sentence) => sentence,
         None => match live_context(&args) {
             // **`--live` has no happy ending to return** — it prints as it goes and comes back
@@ -5863,7 +5863,22 @@ fn ops_at(args: &[String]) -> Option<usize> {
 /// 3` is `ops` at index 2 with `--read-only` read here as the flag and there as `-n`'s value. The
 /// line is wrong either way — `--read-only` is not a namespace `k8s::namespace_name` accepts —
 /// and of the two wrong answers the one that refuses to write is the one to give.
-fn ops_line(args: &[String]) -> Option<String> {
+///
+/// **`audit` is how the log is opened, and it is a parameter rather than a call** —
+/// `ops::audit_log` in [`main`], a scratch file in a test. `$XDG_STATE_HOME` cannot be set from a
+/// test at all (edition 2024 makes `set_var` `unsafe`, and these tests share one process), so an
+/// ambient open here would mean every well-formed line in the suite writing into the developer's
+/// own state directory. It is `FnOnce` and called at the last moment, which is also what makes
+/// *a refused line does not make a state directory* a thing a test can assert.
+///
+/// **It hands back sentences as well as a file**, because two things about the log are worth
+/// saying and neither is worth refusing for: an `$XDG_STATE_HOME` k8rs ignored, and a log other
+/// people can write to (`ops::audit_log`). `ops.rs` draws nothing, so where they go is this
+/// driver's to decide — see [`ops_run`].
+fn ops_line(
+    args: &[String],
+    audit: impl FnOnce() -> Result<(std::fs::File, Vec<String>), String>,
+) -> Option<String> {
     let at = ops_at(args)?;
     if args.iter().any(|arg| arg == READ_ONLY) {
         return Some(format!(
@@ -5872,7 +5887,7 @@ fn ops_line(args: &[String]) -> Option<String> {
         ));
     }
     if at == 0 {
-        return Some(ops_run(&args[1..]));
+        return Some(ops_run(&args[1..], audit));
     }
     Some(format!(
         "k8rs: `{OPS}` has to be the first word on the line — write it as \
@@ -6062,7 +6077,17 @@ fn not_wired(
 /// that one makes the flag structurally load-bearing for the console; what these two functions do
 /// is keep this driver from being the first thing that makes it false. `screens/dialogs.md`
 /// rule 6 is unambiguous: under `--read-only` none of this is reachable.
-fn ops_run(rest: &[String]) -> String {
+///
+/// **The audit log is opened last, after every complaint about the line has been made and before
+/// anything could be sent** (NOTES § D21, todo.md 3696). It is last because a line k8rs is going
+/// to refuse anyway needs no state directory — `k8rs ops bogus` must not leave one behind — and
+/// it is before the seam because D21's ruling is that a mutation which cannot be recorded does
+/// not happen, so *this machine cannot hold the trail* has to be answerable before an operation
+/// is reached rather than after.
+fn ops_run(
+    rest: &[String],
+    audit: impl FnOnce() -> Result<(std::fs::File, Vec<String>), String>,
+) -> String {
     let words = match ops_words(rest) {
         Ok(words) => words,
         Err(refusal) => return refusal,
@@ -6102,7 +6127,26 @@ fn ops_run(rest: &[String]) -> String {
         Ok(namespace) => namespace,
         Err(refusal) => return refusal,
     };
-    not_wired(operation, kind, name, words.get(2).copied(), namespace)
+    // **Opened and then dropped, because there is nothing yet to write to it.** `scale`
+    // (todo.md 3718) is where this binding stops being `_` and becomes `ops::perform`'s `audit`
+    // argument. What it does today is real and is this box's own done-when: the file is made, at
+    // its mode, in a state directory at its mode; a machine that cannot hold it refuses the run
+    // here rather than after a confirmation has been typed; something at that path that is not a
+    // file refuses it too; and a log other people can write to comes back with a sentence rather
+    // than in silence.
+    let (_audit, notes) = match audit() {
+        Ok(opened) => opened,
+        Err(refusal) => return format!("k8rs: {refusal}"),
+    };
+    // **Above the seam's sentence and not instead of it**, which is the opposite of the refusal
+    // three lines up: a note is a thing that is true *and* the run went on, so it is read first
+    // and the sentence about what k8rs did follows it. Nothing here builds a note — every word of
+    // one is `ops::audit_log`'s, prefixed the way every other sentence on this line is.
+    notes
+        .iter()
+        .map(|note| format!("k8rs: {note}\n"))
+        .collect::<String>()
+        + &not_wired(operation, kind, name, words.get(2).copied(), namespace)
 }
 
 /// **The `<kind>/<name>` an operation is pointed at**, or the sentence that refuses it.

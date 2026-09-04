@@ -3720,6 +3720,32 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       and **there is no flag that means yes**; five deliberate divergences from
       kubectl and the three defects the reviews found are
       [D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)
+> **Plan fix, 2026-09-04: the audit log moved up to here, from below the three
+> operations.** `perform` takes a `&mut impl Write` and nothing had decided what
+> it writes to, while [invariant 4](CLAUDE.md) and
+> [D21](NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)
+> say a mutation that cannot be recorded does not happen — so **no operation
+> below could have run end to end with this box under it**. Discovered when the
+> driver landed and `scale` was briefed
+> ([D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)).
+> Nothing else moved.
+
+- [x] Audit log: `~/.local/state/k8rs/audit.log`, mode 0600, append-only,
+      recording refusals and failures as well as successes, and recording
+      **both** the equivalent kubectl line and the real API call (verb, path,
+      resourceVersion, dry-run verdict) — the kubectl line is a teaching aid,
+      not what ran ([NOTES § D8](NOTES.md#d8--invariant-4-was-not-literally-true)).
+      **Two things the contract left for this box**, because this is the box that
+      owns what the log records: the result line names its attempt but carries no
+      landing time, so *how long did it take* is unanswerable, and one
+      `write_all` is atomic per record only while a record fits one syscall
+      ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)) —
+      both taken, and a fourth D21 outcome found on the way: a FIFO at the log
+      path made k8rs **hang forever, silently**. The log now refuses what is not
+      an ordinary file, says so once when the file is writable by others, and
+      creates its directory 0700. The record can finally name the **cluster**
+      and not just the context
+      ([D219](NOTES.md#d219--the-audit-log-refuses-what-it-cannot-trust-and-says-what-it-cannot-fix-2026-09-04))
 - [ ] `scale` — via the **scale subresource** (`get_scale` / `patch_scale`),
       not a full-object patch. **First operation, so four things land with it**
       ([D218](NOTES.md#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04)):
@@ -3732,7 +3758,21 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       discovery already answers (`k8s::Browsable::namespaced`) and one of the two
       must go; and `tests/binary.rs`'s usage line — *"this build reads files only
       — it cannot reach a cluster"* — stops being true the moment this box lands,
-      which is `tester`'s file
+      which is `tester`'s file.
+      **And three preconditions, not follow-ups** (`k8s-admin`, 2026-09-04):
+      `ops_line` returns `Option<String>` where `None` means *not an ops line*,
+      and `main` reads it as `ops_line(…).or_else(|| mistyped(…))` — so a `scale`
+      that **succeeds** and returns `None` falls through into `mistyped`, then
+      `live_context`, and **k8rs starts watching a cluster after performing a
+      mutation**. Unreachable today only because `None` means no `ops` word at
+      all. That signature changes before an arm is wired, and it is the same
+      change as the exit-code vocabulary. · **Nothing reads
+      `Performed.recorded`** — `#[must_use]` is on the struct, not the field, so
+      *the change was made and k8rs could not write it down*
+      ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04))
+      reaches nobody unless the driver prints it. · `perform`'s
+      `clock: impl Fn() -> Timestamp` is the last unbound parameter and it
+      decides what every stamp in the log looks like
 - [ ] `restart` — **not** `Api::restart(name)`: that helper writes
       `kube.kubernetes.io/restartedAt` where `kubectl rollout restart` writes
       `kubectl.kubernetes.io/restartedAt`, so the command log would teach a line
@@ -3784,16 +3824,6 @@ placed low in the pyramid so the dangerous code is proven headlessly.
 - [ ] Every call sends the resourceVersion that was read; a `409` offers a
       re-read, never a blind overwrite (the case `edit` will lean on in v0.4 —
       the mechanism is built and tested now, while it is cheap)
-- [ ] Audit log: `~/.local/state/k8rs/audit.log`, mode 0600, append-only,
-      recording refusals and failures as well as successes, and recording
-      **both** the equivalent kubectl line and the real API call (verb, path,
-      resourceVersion, dry-run verdict) — the kubectl line is a teaching aid,
-      not what ran ([NOTES § D8](NOTES.md#d8--invariant-4-was-not-literally-true)).
-      **Two things the contract left for this box**, because this is the box that
-      owns what the log records: the result line names its attempt but carries no
-      landing time, so *how long did it take* is unanswerable, and one
-      `write_all` is atomic per record only while a record fits one syscall
-      ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04))
 - [ ] **`may_i(...)`** — `SelfSubjectRulesReview` per namespace, plus a
       `SelfSubjectAccessReview` for the two cluster-scoped operations. It lives
       in `ops.rs` although it mutates nothing, because it is performed with

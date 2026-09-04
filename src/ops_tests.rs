@@ -96,8 +96,19 @@ fn stamp() -> Timestamp {
 fn scaling() -> Mutation<'static> {
     Mutation {
         context: "kind-k8rs",
+        // The `server:` of the kubeconfig entry — the fact that says *which* `kind-k8rs`, since
+        // a second `kind create cluster` writes the same context name and a different port. A
+        // reserved host rather than the `127.0.0.1` a real kind writes, because
+        // `scripts/security-guard.py` reads a loopback URL in this tree as a second outbound path
+        // and is right to; the port is what carries the point.
+        server: "https://k8rs-tests.invalid:41751",
         namespace: Some("payments"),
         object: "deployment/web",
+        // **A deployment's own `uid`, because `scale` has read the deployment by the time it
+        // builds the consequence** — *from 2 to 3* is off that object. It is not a field the
+        // request carries, which is why it is `Some` here where `version` is `None`: it is what
+        // k8rs saw, not what k8rs sent.
+        uid: Some("18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11"),
         consequence: "This changes how many copies of deployment/web are running, from 2 to 3.",
         kubectl: "kubectl scale deployment/web --replicas=3 -n payments",
         verb: "PATCH",
@@ -114,10 +125,22 @@ fn scaling() -> Mutation<'static> {
 /// The attempt line [`scaling`] produces, written out once so every test that expects it reads
 /// the same string.
 const ATTEMPT: &str = "audit: 2026-09-03T12:34:56Z attempt · deployment/web · context kind-k8rs · \
-                       namespace payments · kubectl: kubectl scale deployment/web --replicas=3 \
+                       server https://k8rs-tests.invalid:41751 · namespace payments · \
+                       uid 18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11 · \
+                       kubectl: kubectl scale deployment/web --replicas=3 \
                        -n payments · call: PATCH \
                        /apis/apps/v1/namespaces/payments/deployments/web/scale · \
                        resourceVersion not sent\n";
+
+/// **The head of every result line a [`scaling`] on [`stamp`] produces** — both stamps and the
+/// object, written out once so a test that cares about the sentence after them says only that.
+///
+/// **The two stamps read the same here because [`stamp`] is a fixed clock**, which is exactly why
+/// it cannot show that the second one is a second reading;
+/// `a_result_says_when_it_was_recorded_and_not_only_when_it_was_attempted` uses a clock that
+/// moves, and is the only test that can tell the two fields apart.
+const RESULT: &str = "audit: result · attempt 2026-09-03T12:34:56Z · recorded \
+                      2026-09-03T12:34:56Z · deployment/web";
 
 /// The `dry-run:` field every result line for a [`scaling`] that was checked and accepted carries
 /// — written out from `screens/dialogs.md`'s own sentence, not from what the code returned.
@@ -204,7 +227,7 @@ async fn the_dialog_is_open_before_the_check_goes_out_and_the_attempt_is_recorde
 
     let done = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -227,10 +250,7 @@ async fn the_dialog_is_open_before_the_check_goes_out_and_the_attempt_is_recorde
             "dry-run".to_string(),
             "asked".to_string(),
             "call".to_string(),
-            format!(
-                "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · \
-                 {CHECKED_FIRST} · the change was made\n"
-            ),
+            format!("{RESULT} · {CHECKED_FIRST} · the change was made\n"),
         ],
         "the steps are no longer the order this box exists to fix — a dialog that opens only \
          after the check has come back is a keypress that appears to do nothing (NOTES § D20)"
@@ -246,7 +266,7 @@ async fn the_dialog_gets_its_title_its_consequence_and_its_command_line_and_noth
 
     let _ = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -283,7 +303,7 @@ async fn the_object_the_check_returned_is_what_the_dialog_is_given() {
 
     let done = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         move |checked: Checked<String>| {
@@ -328,7 +348,7 @@ async fn cancelled_gone_and_changed_are_three_different_records_and_not_one() {
 
         let ended = perform(
             &scaling(),
-            stamp(),
+            stamp,
             &mut sink,
             shows(&trace),
             asked(&trace, answer),
@@ -353,17 +373,14 @@ async fn cancelled_gone_and_changed_are_three_different_records_and_not_one() {
     assert_eq!(
         seen,
         vec![
+            format!("{RESULT} · {CHECKED_FIRST} · nobody confirmed it, so nothing was changed\n"),
             format!(
-                "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · {CHECKED_FIRST} \
-                 · nobody confirmed it, so nothing was changed\n"
+                "{RESULT} · {CHECKED_FIRST} · the object was already gone, so nothing was \
+                 changed\n"
             ),
             format!(
-                "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · {CHECKED_FIRST} \
-                 · the object was already gone, so nothing was changed\n"
-            ),
-            format!(
-                "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · {CHECKED_FIRST} \
-                 · the object changed while this was open, so nothing was changed\n"
+                "{RESULT} · {CHECKED_FIRST} · the object changed while this was open, so \
+                 nothing was changed\n"
             ),
         ],
         "two of the three ways a dialog ends without a call print the same sentence, so the log \
@@ -382,7 +399,7 @@ async fn a_refused_check_stops_before_the_confirmation_and_keeps_what_the_server
 
     let stopped = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -413,8 +430,8 @@ async fn a_refused_check_stops_before_the_confirmation_and_keeps_what_the_server
             "shown".to_string(),
             "dry-run".to_string(),
             format!(
-                "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · dry-run: not \
-                 checked, the cluster would not allow it · the change was never sent: {denial}\n"
+                "{RESULT} · dry-run: not checked, the cluster would not allow it · the change \
+                 was never sent: {denial}\n"
             ),
         ],
         "a refused check either asked for a confirmation it could not honour, or went on to the \
@@ -447,7 +464,7 @@ async fn an_invalid_object_is_a_rejected_request_and_keeps_the_servers_explanati
 
     let stopped = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -467,9 +484,8 @@ async fn an_invalid_object_is_a_rejected_request_and_keeps_the_servers_explanati
     assert_eq!(
         transcript(&trace).last().cloned(),
         Some(format!(
-            "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · dry-run: not \
-             checked, the cluster would not accept the request k8rs made · the change was \
-             never sent: {invalid}\n"
+            "{RESULT} · dry-run: not checked, the cluster would not accept the request k8rs \
+             made · the change was never sent: {invalid}\n"
         )),
         "the audit log does not record which field the server rejected"
     );
@@ -506,7 +522,7 @@ async fn a_failure_this_side_of_the_wire_is_not_recorded_as_the_server_refusing(
 
         let stopped = perform(
             &scaling(),
-            stamp(),
+            stamp,
             &mut sink,
             shows(&trace),
             asked(&trace, Answer::Confirmed),
@@ -555,7 +571,7 @@ async fn a_call_that_fails_after_a_good_check_is_told_apart_from_a_refused_check
 
     let failed = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -582,8 +598,8 @@ async fn a_call_that_fails_after_a_good_check_is_told_apart_from_a_refused_check
     assert_eq!(
         transcript(&trace).last().cloned(),
         Some(format!(
-            "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · {CHECKED_FIRST} · \
-             nothing was changed: the login k8rs was using had run out: {expired}\n"
+            "{RESULT} · {CHECKED_FIRST} · nothing was changed: the login k8rs was using had \
+             run out: {expired}\n"
         )),
         "a failed mutation is not in the audit log as one"
     );
@@ -600,7 +616,7 @@ async fn a_conflict_on_the_real_call_is_its_own_fault_and_keeps_the_servers_own_
 
     let failed = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -643,7 +659,7 @@ async fn a_broken_pipe_after_the_request_went_out_says_k8rs_does_not_know() {
 
     let failed = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -667,8 +683,8 @@ async fn a_broken_pipe_after_the_request_went_out_says_k8rs_does_not_know() {
     assert_eq!(
         transcript(&trace).last().cloned(),
         Some(format!(
-            "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · {CHECKED_FIRST} · \
-             k8rs does not know whether the change was made — k8rs could not reach the cluster\n"
+            "{RESULT} · {CHECKED_FIRST} · k8rs does not know whether the change was made — \
+             k8rs could not reach the cluster\n"
         )),
         "the record asserts the change did not happen, which is the one thing k8rs cannot see \
          from here"
@@ -700,7 +716,7 @@ async fn the_dry_run_verdict_is_on_every_result_line_and_not_only_where_it_faile
 
             let _ = perform(
                 &record,
-                stamp(),
+                stamp,
                 &mut sink,
                 shows(&trace),
                 asked(&trace, answer),
@@ -739,7 +755,7 @@ async fn an_operation_that_declines_the_check_records_that_none_was_run_and_send
 
     let done = perform(
         &unchecked,
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -761,11 +777,10 @@ async fn an_operation_that_declines_the_check_records_that_none_was_run_and_send
     );
     assert_eq!(
         steps.last().cloned(),
-        Some(
-            "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · dry-run: k8rs did \
-             not check this one with the cluster first · the change was made\n"
-                .to_string()
-        ),
+        Some(format!(
+            "{RESULT} · dry-run: k8rs did not check this one with the cluster first · the \
+                 change was made\n"
+        )),
         "the audit log omits the verdict field rather than recording that there was no check"
     );
 }
@@ -782,7 +797,7 @@ async fn an_attempt_that_cannot_be_written_stops_before_anything_is_sent() {
     let mut working = Sink(canary.clone());
     let _ = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut working,
         shows(&canary),
         asked(&canary, Answer::Confirmed),
@@ -802,7 +817,7 @@ async fn an_attempt_that_cannot_be_written_stops_before_anything_is_sent() {
 
     let refused = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -832,7 +847,7 @@ async fn an_attempt_that_cannot_be_flushed_stops_too() {
 
     let refused = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -872,7 +887,7 @@ async fn a_result_that_cannot_be_recorded_keeps_the_outcome_k8rs_already_knows()
 
         let performed = perform(
             &scaling(),
-            stamp(),
+            stamp,
             &mut sink,
             shows(&trace),
             asked(&trace, answer),
@@ -922,7 +937,7 @@ async fn a_result_names_the_attempt_it_belongs_to_rather_than_the_one_above_it()
 
     let _ = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut outer,
         shows(&trace),
         move |_: Checked<()>| async move {
@@ -940,7 +955,7 @@ async fn a_result_names_the_attempt_it_belongs_to_rather_than_the_one_above_it()
             };
             let _ = perform(
                 &cordon,
-                inner_stamp,
+                move || inner_stamp,
                 &mut inner,
                 |_: &Shown<'_>| {},
                 |_: Checked<()>| std::future::ready(Answer::Confirmed),
@@ -963,11 +978,17 @@ async fn a_result_names_the_attempt_it_belongs_to_rather_than_the_one_above_it()
         "the inner mutation did not interleave, so this test proves nothing: {records:#?}"
     );
     assert!(
-        records[2].contains("result · attempt 2026-09-03T12:36:40Z · node/k8rs-worker2"),
+        records[2].contains(
+            "result · attempt 2026-09-03T12:36:40Z · recorded 2026-09-03T12:36:40Z · \
+             node/k8rs-worker2"
+        ),
         "a result line that sits under the wrong attempt cannot say which one it is: {records:#?}"
     );
     assert!(
-        records[3].contains("result · attempt 2026-09-03T12:34:56Z · deployment/web"),
+        records[3].contains(
+            "result · attempt 2026-09-03T12:34:56Z · recorded 2026-09-03T12:34:56Z · \
+             deployment/web"
+        ),
         "the outer mutation's result names neither its attempt nor its object: {records:#?}"
     );
 }
@@ -986,8 +1007,13 @@ async fn nothing_written_into_a_record_can_forge_a_line_or_rewrite_the_terminal(
     let mut sink = Sink(trace.clone());
     let crafted = Mutation {
         context: "kind\u{1b}[2Jk8rs",
+        // **The two fields added on 2026-09-04 wear the same crafted shapes as their neighbours**
+        // — a `server:` is a kubeconfig string and a `uid` is an API string, and neither being
+        // fed is how a new field arrives outside the strip (NOTES § D29).
+        server: "https://k8rs-tests.invalid:41751\u{1b}[2J/evil",
         namespace: Some("pay\u{200b}ments"),
         object: "deployment/web\u{202e}gnp",
+        uid: Some("18f0b6ee\u{7}2b0e"),
         consequence: "This deletes deployment/web\u{202e}gnp.",
         kubectl: "kubectl delete deployment/web\nresult · the change was made",
         verb: "DELETE",
@@ -998,7 +1024,7 @@ async fn nothing_written_into_a_record_can_forge_a_line_or_rewrite_the_terminal(
 
     let done = perform(
         &crafted,
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -1012,7 +1038,9 @@ async fn nothing_written_into_a_record_can_forge_a_line_or_rewrite_the_terminal(
         steps.first().cloned(),
         Some(
             "audit: 2026-09-03T12:34:56Z attempt · deployment/webgnp · context kind[2Jk8rs · \
-             namespace payments · kubectl: kubectl delete deployment/web result · the change was \
+             server https://k8rs-tests.invalid:41751[2J/evil · namespace payments · \
+             uid 18f0b6ee2b0e · \
+             kubectl: kubectl delete deployment/web result · the change was \
              made · call: DELETE /apis/apps/v1/namespaces/payments/deployments/web · \
              resourceVersion 8123\n"
                 .to_string()
@@ -1055,7 +1083,7 @@ async fn a_server_message_cannot_forge_a_second_record_or_a_field_that_was_never
 
     let _ = perform(
         &scaling(),
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -1110,7 +1138,7 @@ async fn a_newline_inside_a_field_separates_two_words_instead_of_fusing_them() {
 
     let _ = perform(
         &wrapped,
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -1146,7 +1174,7 @@ async fn an_oversized_field_is_cut_and_says_it_was_cut() {
 
     let _ = perform(
         &record,
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -1167,16 +1195,24 @@ async fn an_oversized_field_is_cut_and_says_it_was_cut() {
     );
 }
 
-/// **A cluster-scoped object and a call with no `resourceVersion` say so**, rather than leaving
-/// a reader to guess whether the field was empty or the record was short (NOTES § D8).
+/// **Every gap the attempt line can have, named rather than left dangling** (NOTES § D8, and the
+/// PM's ruling of 2026-09-04 that an absent field and an empty one record the same way).
+///
+/// **Four of them on one line**: a cluster-scoped object, a caller that read no `uid`, a call
+/// that sent no `resourceVersion`, and a **`server` that is the empty string**. The last is the
+/// one whose type says it is always there — so [`Record::attempt_line`] putting it through
+/// [`gap`] anyway is only a fact if something feeds it the empty string, and nothing did until
+/// this row (my own second pass, 2026-09-04).
 #[tokio::test]
-async fn a_cluster_scoped_call_with_no_resource_version_records_both_absences() {
+async fn a_cluster_scoped_call_with_nothing_to_put_in_three_fields_names_every_gap() {
     let trace = trace();
     let mut sink = Sink(trace.clone());
     let cordon = Mutation {
         context: "kind-k8rs",
+        server: "",
         namespace: None,
         object: "node/k8rs-worker2",
+        uid: None,
         consequence: "This stops new pods being scheduled onto k8rs-worker2. Pods already \
                       running there keep running.",
         kubectl: "kubectl cordon k8rs-worker2",
@@ -1188,7 +1224,7 @@ async fn a_cluster_scoped_call_with_no_resource_version_records_both_absences() 
 
     let done = perform(
         &cordon,
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -1201,8 +1237,8 @@ async fn a_cluster_scoped_call_with_no_resource_version_records_both_absences() 
         transcript(&trace).first().cloned(),
         Some(
             "audit: 2026-09-03T12:34:56Z attempt · node/k8rs-worker2 · context kind-k8rs · \
-             cluster-wide · kubectl: kubectl cordon k8rs-worker2 · call: PATCH \
-             /api/v1/nodes/k8rs-worker2 · resourceVersion not sent\n"
+             server not known · cluster-wide · uid not read · kubectl: kubectl cordon \
+             k8rs-worker2 · call: PATCH /api/v1/nodes/k8rs-worker2 · resourceVersion not sent\n"
                 .to_string()
         ),
         "an absent namespace or resourceVersion is recorded as a gap rather than as a fact"
@@ -1229,7 +1265,7 @@ async fn an_empty_or_wholly_stripped_field_records_as_the_gap_it_is() {
 
         let _ = perform(
             &record,
-            stamp(),
+            stamp,
             &mut sink,
             shows(&trace),
             asked(&trace, Answer::Confirmed),
@@ -1267,7 +1303,7 @@ async fn a_consequence_that_states_nothing_is_stopped_before_anything_is_written
 
     let _ = perform(
         &silent,
-        stamp(),
+        stamp,
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
@@ -1430,5 +1466,807 @@ fn both_passes_ask_the_server_to_reject_an_unknown_field() {
         !uri.contains("fieldValidation") && !body.contains("fieldValidation"),
         "a delete now carries a fieldValidation this file's doc comment says it cannot — \
          {uri} · {body}"
+    );
+}
+
+// --- THE AUDIT LOG'S OWN FILE ---
+//
+// **These tests touch a real disk, and everything above this line does not.** The mode, the
+// append and the two refusals are facts about `open(2)` and no double can stand in for them —
+// which is also why each one names its own directory and takes it away again in `Drop` rather
+// than on its last line (NOTES § D185).
+//
+// **Nothing here sets an environment variable.** Edition 2024 makes `set_var` `unsafe` and
+// `cargo test` runs these in threads of one process, so a test that set `$XDG_STATE_HOME` would
+// be racing every other test in the file. [`audit_path`] takes both variables as values for
+// exactly this reason, and [`open_log`] takes the path it produced.
+
+/// A scratch directory that takes itself away again — **in `Drop`, so a panicking assertion still
+/// cleans up** (NOTES § D185; `k8s_tests.rs`'s `Scratch` is the same shape one file over).
+struct Dir(std::path::PathBuf);
+
+impl Drop for Dir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+impl std::ops::Deref for Dir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+/// **One empty directory nobody else is in** — the process id and a counter, because two tests
+/// sharing a name in `TMPDIR` is one of them deleting the other's file mid-assertion.
+fn dir(name: &str) -> Dir {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "k8rs-ops-tests-{}-{}-{name}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&path)
+        .unwrap_or_else(|e| panic!("{} could not be made: {e}", path.display()));
+    Dir(path)
+}
+
+/// **Where the log goes under a scratch `$HOME`, and which variable chose it** — the two values
+/// every test below opens with, so the tuple is destructured in one place.
+fn under(home: &Dir) -> (std::path::PathBuf, Source) {
+    audit_path(None, Some(home.as_os_str())).expect("an absolute HOME names a path")
+}
+
+/// The mode bits of a path, printed as well as returned so a failure shows both numbers.
+fn mode_of(path: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path)
+        .unwrap_or_else(|e| panic!("{} has no metadata: {e}", path.display()))
+        .permissions()
+        .mode()
+        & 0o7777;
+    println!("{} is {mode:04o}", path.display());
+    mode
+}
+
+/// **A result line says when it was written down, and not only which attempt it belongs to**
+/// (todo.md 3696, NOTES § D214's closing paragraph).
+///
+/// **The clock moves between the two readings, which is the only way this can be shown.** Every
+/// other test in this file runs on [`stamp`], a fixed clock, where the two fields are the same
+/// string and a record that read the clock once looks identical. Here `perform` is handed a clock
+/// that steps a minute each time it is asked, so the attempt line carries the first reading and
+/// the result line carries both — in that order, which is what says the two are not swapped.
+///
+/// **The gap this makes readable is the whole mutation's and not the call's**, which is why the
+/// field is `recorded`: the confirmation happens between the two readings, and the test steps the
+/// clock inside `ask` to keep that true rather than incidental.
+#[tokio::test]
+async fn a_result_says_when_it_was_recorded_and_not_only_when_it_was_attempted() {
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let ticks = std::cell::Cell::new(0i64);
+    let clock = || {
+        let tick = ticks.get();
+        ticks.set(tick + 1);
+        Timestamp::from_second(1_788_438_896 + tick * 60).expect("inside jiff's range")
+    };
+
+    let done = perform(
+        &scaling(),
+        &clock,
+        &mut sink,
+        shows(&trace),
+        |checked: Checked<()>| {
+            // The reader spends a minute on the dialog. It is between the two readings on
+            // purpose: a field called `took` would be charging the cluster for it.
+            clock();
+            trace.borrow_mut().steps.push("asked".to_string());
+            let _ = checked.verdict();
+            std::future::ready(Answer::Confirmed)
+        },
+        works(&trace),
+    )
+    .await;
+
+    assert_eq!(done.outcome, Some(Outcome::Done));
+    let records: Vec<String> = transcript(&trace)
+        .into_iter()
+        .filter(|step| step.starts_with("audit: "))
+        .collect();
+    assert!(
+        records[0].starts_with("audit: 2026-09-03T12:34:56Z attempt · "),
+        "the attempt line is not stamped with the clock's first reading: {records:#?}"
+    );
+    assert!(
+        records[1].starts_with(
+            "audit: result · attempt 2026-09-03T12:34:56Z · recorded 2026-09-03T12:36:56Z · "
+        ),
+        "the result line cannot say when it was written down, or it is stamped with the attempt's \
+         reading twice — so how long the mutation took is unanswerable: {records:#?}"
+    );
+}
+
+/// **The log is created readable and writable by its owner and by nobody else** (CLAUDE.md
+/// § Security gate).
+///
+/// **The mode is asserted off the file and not off the call**, and it is asserted on a file this
+/// run *created* — which is what makes a dropped `.mode()` a red test rather than something a
+/// later `chmod` would have covered up. There is no later `chmod`: `open_log` sets the mode at
+/// creation and nowhere else.
+///
+/// **And so is the state directory it sits in** (`k8s-admin`, 2026-09-04): `create_dir_all`
+/// carries no mode and takes `0777 & ~umask`, so on a machine with `umask 0` — a CI runner, some
+/// daemons — `~/.local/state/k8rs/` came out `drwxrwxrwx`, which is the precondition for planting
+/// the FIFO or the symlink the test below refuses. `0700` is [`STATE_DIR_ONLY`] and the XDG base
+/// directory specification's own recommendation.
+///
+/// **It asserts the mode of every directory the run made, not only the last one**, because
+/// `DirBuilder`'s mode applies to each — a `.mode()` moved onto a non-recursive call would leave
+/// `~/.local` and `~/.local/state` at the umask's mercy and this would still be green.
+#[test]
+fn the_audit_log_and_the_directory_it_sits_in_are_readable_by_nobody_but_their_owner() {
+    let home = dir("owner-only");
+    let (path, source) = under(&home);
+    assert_eq!(
+        path,
+        home.join(".local/state/k8rs/audit.log"),
+        "the log is not where NOTES § D21 says it is"
+    );
+    assert_eq!(source, Source::Home, "$HOME did not choose this path");
+    assert!(
+        !path.exists(),
+        "the log was already there, so creating it below proves nothing"
+    );
+
+    let (log, notes) = open_log(&path, source).expect("a writable HOME holds an audit log");
+    drop(log);
+
+    assert!(path.is_file(), "the audit log was not created");
+    assert_eq!(
+        notes,
+        Vec::<String>::new(),
+        "a log k8rs just made at its own mode was complained about: {notes:#?}"
+    );
+    assert_eq!(
+        mode_of(&path),
+        0o600,
+        "the audit log k8rs created can be read by somebody other than its owner"
+    );
+    for made in [".local", ".local/state", ".local/state/k8rs"] {
+        assert_eq!(
+            mode_of(&home.join(made)),
+            0o700,
+            "{made} can be read or written by somebody other than its owner — which is where a \
+             pipe or a symlink gets planted where the audit log goes"
+        );
+    }
+}
+
+/// **Append-only: a second handle adds to the log and neither overwrites what the other wrote**
+/// (CLAUDE.md § Security gate, `write_line`).
+///
+/// **Two handles rather than one, because one handle appends whatever flags it was opened with.**
+/// A `write(true)` open starts at offset 0, so the second handle would sit on top of the first
+/// one's record and the first record would be gone — which is what this asserts is not what
+/// happens. It is also the flag `write_line`'s no-interleaving claim rests on.
+#[test]
+fn two_handles_on_one_audit_log_both_append_and_neither_overwrites_the_other() {
+    let home = dir("append-only");
+    let (path, source) = under(&home);
+
+    let (mut first, _) = open_log(&path, source).expect("a writable HOME holds an audit log");
+    write_line(
+        &mut first,
+        "first · a long line so a second one starting at nought would eat it\n",
+    )
+    .expect("the log takes a line");
+
+    let (mut second, _) = open_log(&path, source).expect("the log opens a second time");
+    write_line(&mut second, "second\n").expect("the log takes a second line");
+    // Written through the *first* handle after the second one has already appended: with
+    // `O_APPEND` this lands at the end, and without it, at wherever the first handle's own
+    // offset happened to be.
+    write_line(&mut first, "third\n").expect("the first handle still appends");
+
+    // **Read lossily and not as UTF-8**, so a handle that started at offset nought and cut a
+    // record in half fails the assertion below rather than the read — the point of this test is
+    // *which lines are there*, and a decode error says nothing about that.
+    let bytes = std::fs::read(&path).expect("the log reads back");
+    let written = String::from_utf8_lossy(&bytes);
+    println!("--- the log ---\n{written}");
+    assert_eq!(
+        written.lines().collect::<Vec<_>>(),
+        vec![
+            "first · a long line so a second one starting at nought would eat it",
+            "second",
+            "third"
+        ],
+        "a record was overwritten or landed somewhere other than the end of the log"
+    );
+}
+
+/// **A state directory that cannot hold the log is a sentence, not a crash and not a panic**
+/// (NOTES § D21 — k8rs says so and carries on read-only).
+///
+/// **Both refusals, because they are two different things to fix.** A path whose parent is a
+/// regular file cannot be made a directory at all; a path whose directory made fine and whose
+/// *name* the system will not take is an `open` that failed. Neither depends on being a
+/// non-root user, which a `chmod 0500` test would — the second row is a name past `NAME_MAX`,
+/// which the kernel refuses for root as readily as for anybody.
+///
+/// **The sentences are asserted whole**, since what this box owes the reader is D21's ruling in
+/// words: what k8rs will not do now, and what still works.
+///
+/// **Both name which variable chose the path** (`k8s-admin`, 2026-09-04). A refusal that gives a
+/// path and not its provenance sends a reader who set `$XDG_STATE_HOME` to look at their home
+/// directory, and one who did not to look at a variable they never set.
+#[test]
+fn a_state_directory_that_cannot_hold_the_log_is_a_sentence_and_not_a_crash() {
+    let home = dir("no-place");
+    std::fs::write(home.join(".local"), b"not a directory\n").expect("a file where a dir goes");
+    let (blocked, source) = under(&home);
+    let refusal = open_log(&blocked, source).expect_err("a file cannot hold a directory");
+    println!("--- no place ---\n{refusal}");
+    assert!(
+        refusal.starts_with(&format!(
+            "k8rs could not make a place for its audit log at {} (under your home directory): ",
+            blocked.display()
+        )),
+        "the refusal does not say what k8rs could not do, where, or which variable put it \
+         there: {refusal}"
+    );
+
+    // A name longer than `NAME_MAX`: the directory above it is made, and the `open` inside it is
+    // the failure. `$XDG_STATE_HOME` is the caller here, so the other provenance clause is the
+    // one under test.
+    let other = dir("no-such-name");
+    let (taken, _) = audit_path(Some(other.as_os_str()), None).expect("an absolute path");
+    let taken = taken.with_file_name("a".repeat(300));
+    let refused =
+        open_log(&taken, Source::StateHome).expect_err("no filesystem takes a 300-byte name");
+    println!("--- not opened ---\n{refused}");
+    assert!(
+        refused.starts_with(&format!(
+            "k8rs could not open its audit log at {} (from $XDG_STATE_HOME): ",
+            taken.display()
+        )),
+        "the refusal does not say what k8rs could not do, where, or which variable put it \
+         there: {refused}"
+    );
+
+    for refusal in [&refusal, &refused] {
+        assert!(
+            refusal.ends_with(
+                " — every change k8rs makes is written to that log before it is sent, so k8rs \
+                 will not change anything until that is fixed, and reading your cluster still \
+                 works"
+            ),
+            "the refusal does not say what it costs or what still works (NOTES § D21): {refusal}"
+        );
+    }
+}
+
+/// **Anything at the log's path that is not an ordinary file is refused, and the FIFO is why**
+/// (`tester` and `k8s-admin`, 2026-09-04; NOTES § D21).
+///
+/// **Measured on the built binary before this check existed**: `mkfifo` at the log path, then
+/// `timeout 6 k8rs ops scale deploy/web 3 -n payments` — **exit 124, no output at all**.
+/// `open(O_WRONLY|O_APPEND|O_CREAT)` on a FIFO with no reader blocks forever, so D21's three
+/// endings — it opens; it does not and k8rs says so and reads on — gained a fourth nobody ruled
+/// on: says nothing, does nothing, forever. *Pipe my audit trail into a collector* is a thing an
+/// operator tries, and the hang arrives later, when the reader dies.
+///
+/// **Four shapes and not just the FIFO**, because the predicate is *not a regular file* and each
+/// of them is a different reason a reader could be looking at that path:
+///
+/// - a **socket**, which stands in for the FIFO here — see below;
+/// - a **directory**, which used to come back as the system's *Is a directory*;
+/// - a **symlink to an ordinary file**, which `metadata` would have followed and appended
+///   through — the door `O_NOFOLLOW` half-closes and `symlink_metadata` closes;
+/// - a **dangling symlink**, which is the one a following `stat` calls `NotFound`: `open` would
+///   create the file wherever it points, so what gets planted there between the two calls is what
+///   k8rs appends to.
+///
+/// **The FIFO itself is deliberately not one of the rows, and the reason is what would happen if
+/// this check were deleted.** A `open(O_WRONLY)` on one blocks, so the row would not fail — it
+/// would **hang `cargo test` forever**, and a suite that hangs on a regression is worse than one
+/// that has no row at all. The socket is the same branch, arrives with no `mkfifo` to spawn
+/// (`std::os::unix::net`), and fails *loudly* with the check removed: `open` on a socket is
+/// `ENXIO` and the sentence comes back as the system's rather than as this one. The FIFO is
+/// measured where a hang is visible and survivable — on the built binary, under `timeout`.
+///
+/// **A character device is not a row and the reason is the machine, not the design**: `/dev/null`
+/// is not somewhere a `$HOME` can be made to point without root. The predicate is
+/// `file_type().is_file()`, so all of these and a device are one branch, not five.
+#[test]
+fn nothing_that_is_not_an_ordinary_file_is_written_to_as_an_audit_log() {
+    for (what, plant) in [
+        (
+            "a socket",
+            &(|path: &std::path::Path| {
+                // Binding creates the socket file and dropping the listener leaves it there,
+                // which is the whole of what this row needs. `sun_path` is 108 bytes, and the
+                // scratch path under `std::env::temp_dir()` is well inside it — a `TMPDIR` long
+                // enough to break that fails this `expect` loudly rather than skipping.
+                let bound = std::os::unix::net::UnixListener::bind(path);
+                bound.unwrap_or_else(|e| panic!("a socket at {}: {e}", path.display()));
+            }) as &dyn Fn(&std::path::Path),
+        ),
+        ("a directory", &|path: &std::path::Path| {
+            std::fs::create_dir(path).expect("a directory")
+        }),
+        ("a link to a file", &|path: &std::path::Path| {
+            let target = path.with_file_name("somewhere-else.log");
+            std::fs::write(&target, b"somebody else's file\n").expect("a file to point at");
+            std::os::unix::fs::symlink(&target, path).expect("a symlink");
+        }),
+        ("a link to nothing", &|path: &std::path::Path| {
+            std::os::unix::fs::symlink(path.with_file_name("not-there.log"), path)
+                .expect("a dangling symlink");
+        }),
+    ] {
+        let home = dir("not-a-file");
+        let (path, source) = under(&home);
+        std::fs::create_dir_all(path.parent().expect("the log has a parent"))
+            .expect("the state directory");
+        plant(&path);
+
+        let Err(refusal) = open_log(&path, source) else {
+            panic!("k8rs opened {what} at the audit log's path and would write a record into it");
+        };
+        println!("--- {what} ---\n{refusal}");
+        assert_eq!(
+            refusal,
+            format!(
+                "there is something at {} (under your home directory) that is not an ordinary \
+                 file — a pipe, a device, a directory or a link — and k8rs will not write its \
+                 audit log into it — every change k8rs makes is written to that log before it is \
+                 sent, so k8rs will not change anything until that is fixed, and reading your \
+                 cluster still works",
+                path.display()
+            ),
+            "{what} at the log's path was not refused in D21's own words"
+        );
+    }
+}
+
+/// **A log other people can write to is said out loud, and still written to** (`k8s-admin`, and
+/// the PM re-measured it, 2026-09-04).
+///
+/// **Measured on the built binary before this check existed**: `chmod 0666` on the log, then
+/// `k8rs ops scale deploy/web 3 -n payments` — the run went through and said **nothing**, and
+/// `ls -l` still read `-rw-rw-rw-`. k8rs was appending its audit trail to a file anybody on the
+/// machine can forge or truncate, which is invariant 4's whole subject.
+///
+/// **A note and not a refusal, and readable is not writable.** Group-*readable* is the
+/// log-collector case and stays quiet — narrowing it would be a `chmod` `open_log` does not
+/// own. Group- or other-*writable* is the trail's integrity gone.
+///
+/// **The bits are fed one at a time**, because `0o022` written as `0o002` or `0o020` still
+/// catches `0666` and would miss half of what it is for.
+#[test]
+fn a_log_other_people_can_write_to_is_complained_about_and_still_written_to() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for (mode, complained) in [
+        (0o600, false),
+        (0o640, false),
+        (0o644, false),
+        (0o620, true),
+        (0o602, true),
+        (0o666, true),
+    ] {
+        let home = dir("widened");
+        let (path, source) = under(&home);
+        std::fs::create_dir_all(path.parent().expect("the log has a parent"))
+            .expect("the state directory");
+        std::fs::write(&path, b"somebody's earlier record\n").expect("a log already there");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+            .expect("the mode is ours to set on our own scratch file");
+
+        let (log, notes) = open_log(&path, source).expect("a widened log still opens");
+        drop(log);
+        println!("--- {mode:04o} ---\n{notes:#?}");
+
+        if complained {
+            assert_eq!(
+                notes,
+                vec![format!(
+                    "the audit log at {} (under your home directory) can be written to by other \
+                     people on this machine (it is {mode:04o}), so what is already in it may not \
+                     be what k8rs wrote — k8rs is still recording to it, and `chmod 600 {}` \
+                     makes it yours alone",
+                    path.display(),
+                    path.display()
+                )],
+                "a log at {mode:04o} was appended to without a word, or without saying what to do"
+            );
+        } else {
+            assert_eq!(
+                notes,
+                Vec::<String>::new(),
+                "a log at {mode:04o} was complained about — readable by a collector is not \
+                 writable by a forger"
+            );
+        }
+        assert_eq!(
+            mode_of(&path),
+            mode,
+            "open_log narrowed a mode its owner chose — that is the chmod it does not own"
+        );
+    }
+}
+
+/// **Which user this process is, answered off the machine rather than assumed** ([`us`]).
+///
+/// **There is no `getuid` in `std`** and none of the twelve approved crates exposes one
+/// (invariant 10), so [`us`] reads `/proc/self`. That is one `stat` and no dependency — and it is
+/// also a claim about what procfs owns, which is exactly the kind that gets reasoned about
+/// instead of measured (CLAUDE.md). So the expectation here is not a number: it is the owner of a
+/// file this test has just created, which is by construction the user this process is.
+///
+/// **`/proc/self` is a symlink owned by root** — `stat` without `-L` says uid 0 — so a
+/// `symlink_metadata` here would compare a file's owner against root's and be green only when run
+/// as root. `std::fs::metadata` follows it, and this is the assertion that says so.
+#[test]
+fn the_user_this_process_is_comes_off_the_machine_and_not_off_an_assumption() {
+    use std::os::unix::fs::MetadataExt;
+
+    let home = dir("who-are-we");
+    let mine = home.join("a-file-this-test-made");
+    std::fs::write(&mine, b"ours\n").expect("a file in our own scratch directory");
+    let owner = std::fs::metadata(&mine).expect("it has metadata").uid();
+
+    // **`None` is the right answer where there is no procfs and the wrong one where there is**,
+    // so the expectation is conditional rather than the test being skipped: a skipped row and a
+    // passing row print the same thing (CLAUDE.md § *a derived list asserts it found something*).
+    // The release targets include `*-apple-darwin`, which has no `/proc`.
+    let procfs = std::path::Path::new("/proc/self").is_dir();
+    let found = us();
+    println!(
+        "/proc/self is a directory: {procfs}; it says {found:?}; a file we just made is \
+              owned by {owner}"
+    );
+    assert_eq!(
+        found,
+        procfs.then_some(owner),
+        "the process cannot say which user it is, so the ownership half of `widened` is checking \
+         nothing on a machine that does have procfs — or it claimed to know on one that has no \
+         procfs at all"
+    );
+}
+
+/// **Where the log goes, decided from the two variables and nothing else** (NOTES § D21, and the
+/// XDG base directory specification for the fallback and the ignore).
+///
+/// **Every shape the environment actually hands it**, and the relative and empty rows are the two
+/// the specification says to *ignore* rather than join (`k8rs/audit.log` under whatever directory
+/// a shell was in is an audit trail with no one place to look). The last row is a machine with
+/// neither variable, which is a sentence rather than a path.
+/// **And it says which of the two answered**, since every sentence about the path carries that
+/// clause ([`Source`]).
+#[test]
+fn the_log_follows_xdg_state_home_and_ignores_one_that_names_no_directory() {
+    for (state_home, home, expected, source) in [
+        (
+            Some("/var/lib/k8rs-state"),
+            Some("/home/ops"),
+            Some("/var/lib/k8rs-state/k8rs/audit.log"),
+            Some(Source::StateHome),
+        ),
+        (
+            None,
+            Some("/home/ops"),
+            Some("/home/ops/.local/state/k8rs/audit.log"),
+            Some(Source::Home),
+        ),
+        // Set but empty, and set but relative: ignored, and the fallback answers.
+        (
+            Some(""),
+            Some("/home/ops"),
+            Some("/home/ops/.local/state/k8rs/audit.log"),
+            Some(Source::Home),
+        ),
+        (
+            Some("state"),
+            Some("/home/ops"),
+            Some("/home/ops/.local/state/k8rs/audit.log"),
+            Some(Source::Home),
+        ),
+        // A relative HOME is ignored for the same reason, and then there is nowhere left.
+        (None, Some("ops"), None, None),
+        (Some(""), Some(""), None, None),
+        (None, None, None, None),
+    ] {
+        let found = audit_path(state_home.map(OsStr::new), home.map(OsStr::new));
+        println!("{state_home:?} + {home:?} -> {found:?}");
+        assert_eq!(
+            found
+                .as_ref()
+                .map(|(path, _)| path.to_string_lossy())
+                .as_deref(),
+            expected,
+            "XDG_STATE_HOME={state_home:?} HOME={home:?} put the audit log somewhere else"
+        );
+        assert_eq!(
+            found.map(|(_, source)| source),
+            source,
+            "XDG_STATE_HOME={state_home:?} HOME={home:?} credits the wrong variable, so every \
+             sentence about that path sends the reader to the wrong one"
+        );
+    }
+}
+
+/// **An `$XDG_STATE_HOME` that was set and not used is said out loud** (`k8s-admin`, and the PM
+/// re-measured it, 2026-09-04).
+///
+/// **Measured on the built binary before this note existed**: `XDG_STATE_HOME=oops` with a good
+/// `$HOME` put the trail in `$HOME/.local/state/k8rs/audit.log` and printed **nothing** about it.
+/// An operator who set the variable to keep the trail on an encrypted volume never learned it had
+/// been ignored. Ignoring a relative value is the base directory specification's own rule and
+/// stays; not saying so was the defect.
+///
+/// **An empty value is not "ignored", it is "unset"** — the specification defines empty as *use
+/// the default* — so it gets no note, and that is the row that separates the two.
+#[test]
+fn an_xdg_state_home_that_was_set_and_not_used_is_reported_and_an_empty_one_is_not() {
+    let path = Path::new("/home/ops/.local/state/k8rs/audit.log");
+    for (state_home, source, expected) in [
+        (
+            Some("oops"),
+            Source::Home,
+            Some(
+                "k8rs is not keeping its audit log where $XDG_STATE_HOME points: oops is not a \
+                 full path starting at /, so the log is at \
+                 /home/ops/.local/state/k8rs/audit.log instead, under your home directory",
+            ),
+        ),
+        // A control character in the value reaches a terminal here like any other free text
+        // (invariant 9), and this is the only sentence that echoes the value back.
+        (
+            Some("oo\u{1b}[2Jps"),
+            Source::Home,
+            Some(
+                "k8rs is not keeping its audit log where $XDG_STATE_HOME points: oo[2Jps is not \
+                 a full path starting at /, so the log is at \
+                 /home/ops/.local/state/k8rs/audit.log instead, under your home directory",
+            ),
+        ),
+        (Some(""), Source::Home, None),
+        (None, Source::Home, None),
+        (Some("/var/lib/k8rs-state"), Source::StateHome, None),
+    ] {
+        let note = ignored(state_home.map(OsStr::new), source, path);
+        println!("{state_home:?} + {source:?} -> {note:?}");
+        assert_eq!(
+            note.as_deref(),
+            expected,
+            "XDG_STATE_HOME={state_home:?} with {source:?} chosen was reported wrongly"
+        );
+    }
+}
+
+/// **A machine with neither variable is told so, and told what it costs** (NOTES § D21).
+///
+/// It is the one refusal that has no path to name, which is why it needs its own words rather
+/// than an empty gap where a path would go.
+///
+/// **The sentence comes out of the product and the expectation is written from D21**, which is
+/// the whole reason [`nowhere_to_keep`] is a function: this test first built the sentence itself
+/// out of [`without`] and a hand-typed clause, so it compared a copy with a copy and would have
+/// stayed green through any rewording of the arm it is about (my own second pass, 2026-09-04).
+///
+/// **It says what each variable actually was, because the one sentence it used to print was false
+/// about one of them** (`k8s-admin`, and the PM re-measured it, 2026-09-04). Measured on the
+/// built binary: `env -u HOME XDG_STATE_HOME=relative-dir k8rs ops scale deploy/web 3 -n
+/// payments` answered *neither HOME nor XDG_STATE_HOME names a directory it can start from* —
+/// and `$XDG_STATE_HOME` **is** set and **does** name a directory. A reader checks that in one
+/// command, finds it set, and stops trusting the message; that is NOTES § D214's class in the box
+/// built after it.
+///
+/// **Three states per variable and every combination that can reach here**, since *not set*,
+/// *set to nothing* and *set to something relative* are three different things to go and fix.
+#[test]
+fn a_machine_with_nowhere_to_keep_the_log_is_told_what_that_costs_and_why() {
+    let tail = " — every change k8rs makes is written to that log before it is sent, so k8rs \
+                will not change anything until that is fixed, and reading your cluster still works";
+    for (state_home, home, why) in [
+        (
+            None,
+            None,
+            "$XDG_STATE_HOME is not set, and $HOME is not set",
+        ),
+        (
+            Some(""),
+            Some(""),
+            "$XDG_STATE_HOME is set to nothing, and $HOME is set to nothing",
+        ),
+        (
+            Some("relative-dir"),
+            None,
+            "$XDG_STATE_HOME is relative-dir, which is not a full path starting at /, and \
+             $HOME is not set",
+        ),
+        (
+            None,
+            Some("ops"),
+            "$XDG_STATE_HOME is not set, and $HOME is ops, which is not a full path starting at /",
+        ),
+        // The value is free text out of the environment on its way to a terminal (invariant 9).
+        (
+            Some("rel\u{1b}[2Jative"),
+            Some(""),
+            "$XDG_STATE_HOME is rel[2Jative, which is not a full path starting at /, and \
+             $HOME is set to nothing",
+        ),
+    ] {
+        let sentence = nowhere_to_keep(state_home.map(OsStr::new), home.map(OsStr::new));
+        println!("--- {state_home:?} + {home:?} ---\n{sentence}");
+        assert_eq!(
+            sentence,
+            format!("k8rs has nowhere to keep its audit log: {why}{tail}"),
+            "XDG_STATE_HOME={state_home:?} HOME={home:?} was described wrongly, or the sentence \
+             does not say what it costs"
+        );
+    }
+}
+
+/// **A path out of the environment cannot rewrite the terminal on its way into a refusal**
+/// (invariant 9, NOTES § D154).
+///
+/// **`$XDG_STATE_HOME` is free text like any other**, and it reaches a terminal the moment
+/// something is wrong with it. An `ESC` in it is the same cursor-rewrite a crafted pod name is,
+/// and it is the one string in this region that comes from outside the program.
+///
+/// **The assertion is the literal sentence and not a predicate over it** — asserting
+/// `!refusal.chars().any(unprintable)` can only fail when the strip is not called at all, which
+/// is the shape NOTES § D154 exists about.
+#[test]
+fn a_path_out_of_the_environment_cannot_rewrite_the_terminal_on_its_way_into_a_refusal() {
+    let scratch = dir("crafted");
+    // **A control character is a legal byte in a filename**, so a crafted `$XDG_STATE_HOME` that
+    // merely *contains* one is made without complaint and never reaches a sentence. What makes
+    // this reach one is the same file-where-a-directory-goes as above, wearing the crafted name.
+    let crafted = scratch.join("blocked\u{1b}[2Jgone\u{202e}drow");
+    std::fs::write(&crafted, b"not a directory\n").expect("a file where a dir goes");
+    let (path, source) =
+        audit_path(None, Some(crafted.as_os_str())).expect("an absolute HOME names a path");
+
+    let refusal =
+        open_log(&path, source).expect_err("a directory cannot be made under a regular file");
+    println!("--- crafted ---\n{refusal}");
+    assert!(
+        refusal.starts_with(&format!(
+            "k8rs could not make a place for its audit log at {}/blocked[2Jgonedrow/.local/state/\
+             k8rs/audit.log (under your home directory): ",
+            scratch.display()
+        )),
+        "the path was put on the terminal with what was in it: {refusal:?}"
+    );
+}
+
+/// **How long a line and a record can actually get, measured rather than summed in a doc**
+/// (CLAUDE.md § *a claim reasoned from a definition instead of measured*).
+///
+/// **[`write_line`]'s whole atomicity argument rests on this number** — one `write(2)` takes a
+/// buffer this size on a regular file, so the loop `write_all` could break in never runs twice —
+/// and the number was written into that doc three times by three people, each summing the caps by
+/// hand. It moved again on 2026-09-04 when `server` and `uid` were added, which is exactly how a
+/// summed number goes stale.
+///
+/// **Every field is fed something far past its cap**, so what comes out is
+/// `k8s::text`'s bound plus its own marker and nothing shorter. The server's message goes through
+/// the real `k8s::said`, which is where that one is bounded.
+///
+/// **The assertion is a ceiling and not the measured number**, because a cap moving by a byte is
+/// not a defect and a cap moving by an order of magnitude is. 32 KiB is the ceiling the doc
+/// quotes; the measured figures are printed, and the doc's job is to repeat what this prints.
+#[test]
+fn a_line_and_a_record_have_a_measured_ceiling_and_it_is_far_under_one_write() {
+    let long = "x".repeat(100_000);
+    let huge = Mutation {
+        context: &long,
+        server: &long,
+        namespace: Some(&long),
+        object: &long,
+        uid: Some(&long),
+        consequence: &long,
+        kubectl: &long,
+        verb: &long,
+        path: &long,
+        version: Some(&long),
+        checkable: true,
+    };
+    let record = Record::of(&huge);
+    let attempt = record.attempt_line(stamp());
+    // The longest tail a result line can have: a failure the server answered, whose message is
+    // bounded by `k8s::said` and nothing else.
+    let failed = Outcome::Failed {
+        fault: Fault::Rejected,
+        said: said(&refusal(&long, &long, 422)),
+    };
+    let result = record.result_line(stamp(), stamp(), &failed);
+
+    let (attempt_bytes, result_bytes) = (attempt.len(), result.len());
+    println!(
+        "longest attempt line {attempt_bytes} bytes · longest result line {result_bytes} bytes · \
+         longest record {} bytes",
+        attempt_bytes + result_bytes
+    );
+    assert!(
+        attempt_bytes.max(result_bytes) < 32 * 1024,
+        "a single audit line can reach {} bytes, which is no longer three orders below where the \
+         kernel short-writes a regular file — write_line's one-write claim has to be re-measured",
+        attempt_bytes.max(result_bytes)
+    );
+    // Every field is over its cap, so every one of them must show the marker — a field that
+    // slipped past `k8s::text` would make the number above meaningless rather than merely wrong.
+    assert_eq!(
+        attempt.matches("(shortened by k8rs)").count(),
+        9,
+        "a field on the attempt line is not bounded: {attempt}"
+    );
+}
+
+/// **One whole mutation, into the file this box opens** — the two records on a real disk, at the
+/// real mode, in the real order (invariant 4, NOTES § D8, § D21).
+///
+/// **Every other test in this file writes into a double**, which is right for the ordering claims
+/// and proves nothing about the destination. This is the only place [`perform`] meets
+/// [`open_log`], and it is the shape `scale` (todo.md 3718) wires: a `File` handed straight in as
+/// `audit`. What it catches that neither half catches alone is a record that cannot be written to
+/// a real file at all.
+///
+/// **The expected text is [`ATTEMPT`] and [`RESULT`] without the double's prefix**, so this test
+/// and the transcript tests cannot come to disagree about what a record says.
+#[tokio::test]
+async fn one_whole_mutation_lands_in_the_file_this_box_opens_and_nothing_else_does() {
+    let home = dir("end-to-end");
+    let (path, source) = under(&home);
+    let (mut log, _) = open_log(&path, source).expect("a writable HOME holds an audit log");
+
+    let done = perform(
+        &scaling(),
+        stamp,
+        &mut log,
+        |_: &Shown<'_>| {},
+        |_: Checked<()>| std::future::ready(Answer::Confirmed),
+        |_| std::future::ready(Ok::<(), kube::Error>(())),
+    )
+    .await;
+    drop(log);
+
+    assert_eq!(
+        done,
+        Performed {
+            outcome: Some(Outcome::Done),
+            recorded: true
+        },
+        "a real file would not take the record a double takes"
+    );
+    let written = std::fs::read_to_string(&path).expect("the log reads back");
+    println!("--- {} ---\n{written}", path.display());
+    let head = |line: &str| {
+        line.strip_prefix("audit: ")
+            .expect("the transcript's records are prefixed")
+            .to_string()
+    };
+    assert_eq!(
+        written,
+        format!(
+            "{}{} · {CHECKED_FIRST} · the change was made\n",
+            head(ATTEMPT),
+            head(RESULT)
+        ),
+        "what reached the disk is not the two records the contract's own tests read"
+    );
+    assert_eq!(
+        mode_of(&path),
+        0o600,
+        "the log holding a record of what somebody changed can be read by somebody else"
     );
 }

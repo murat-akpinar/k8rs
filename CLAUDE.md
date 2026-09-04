@@ -580,7 +580,13 @@ this shape** — `scripts/mutants.sh` names its own scratch volume — which is 
 hand sweeps are the ones that need saying.
 
 **No agent runs a destructive git command. Ever, on any tree.** Not
-`git checkout -- .`, not `git reset --hard`, not `git stash`, not `git clean`.
+`git checkout`, not `git reset`, not `git stash`, not `git clean` — **and the
+rule is the class, not the spelling.** The first draft of this paragraph said
+*not `git checkout -- .`* and a second agent ran
+`git checkout -- src/ops.rs src/main.rs` the next day, named files, straight
+past it (D94: a guard the obvious wrong name walks past is not a guard).
+**Restoring a file you edited is the same command as deleting a box, and git
+cannot tell them apart.**
 The working tree is the PM's, it usually holds a box in flight, and none of those
 commands can tell your scratch file from somebody's afternoon. `tester` ran
 `git checkout -- .` to tidy one probe file and destroyed a finished, unreviewed
@@ -592,6 +598,14 @@ the tests cannot see a typo in a comment
 `CARGO_TARGET_DIR`; `k8s-admin` and `dev-core` both already do. An agent that
 wants a file gone deletes *that file by name*. Anything that would discard work
 is the PM's, and the PM backs up first.
+
+**And a sweep's restore goes to a snapshot it took, never to HEAD.** This is
+where the second occurrence came from: the trap was there, exactly as
+[D185](NOTES.md#d185--cleanup-on-the-last-line-is-not-cleanup-and-the-resource-is-not-always-a-file-2026-08-30)
+requires, and it restored to `HEAD` — so it did not undo the sweep's edits, it
+deleted the uncommitted box underneath them. `cp` the files first and restore
+from the copies. D185 says cleanup belongs in the trap; it does not say what
+*to*, and that is the half that cost a box twice.
 
 **A re-dispatch to fix a finding is a write, not a review** — `screens/` went to
 its owner for a rewrite in the slot the table below reserves for two *reviewers*,

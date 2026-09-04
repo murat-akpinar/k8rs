@@ -2248,6 +2248,20 @@ recorded reversal and a later box rather than a dev round
   still pass. Belongs with the e2e box at the end of Phase 7. Found by
   `k8s-admin`, 2026-09-04
 
+- **At Phase 12 every k8rs launch will create `~/.local/state/k8rs/`, and today
+  a read-only run creates nothing at all.** Measured: `k8rs --once` and a refused
+  `ops` line both leave zero entries behind, because the driver opens the audit
+  log *after* parsing and only for a line that could mutate. But
+  [D21](NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)
+  and [docs/security.md](docs/security.md) both say the console opens the log **at
+  startup** — so someone who only ever browses will start creating state. That
+  does not reverse `PRIOR-ART § I`'s *immune* tag (nothing is overwritten, and a
+  read-only filesystem still degrades to a sentence and a continued run), but it
+  makes *nothing to write at startup* false. **The question worth ruling while
+  `ops.rs` is still open: should the console open the log lazily, on the first
+  mutation, instead?** Phase 11's, and this is where it became visible. Found by
+  `k8s-admin`, 2026-09-04
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

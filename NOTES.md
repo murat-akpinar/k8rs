@@ -240,6 +240,7 @@ its line moving with it.
 - [D216](#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04) — the dry-run goes in a different place per verb, and the checkout that destroyed a box
 - [D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04) — `Strict` on every write that can carry it, and the 422 that hands back the object you sent
 - [D218](#d218--the-headless-driver-five-divergences-from-kubectl-and-why-piping-a-word-is-not---yes-2026-09-04) — the headless driver: five divergences from kubectl, and why piping a word is not `--yes`
+- [D219](#d219--the-audit-log-refuses-what-it-cannot-trust-and-says-what-it-cannot-fix-2026-09-04) — the audit log refuses what it cannot trust, and says what it cannot fix
 
 ## Why it exists — where the gap is
 
@@ -968,10 +969,33 @@ recorded must not occur.
   read-only mode. It does not exit — a broken state directory should not stop
   someone from looking at their cluster — and it does not quietly drop the
   trail, which is the only unacceptable option.
-- **No rotation.** A few hundred bytes per mutation, at fifty mutations a day,
-  is a megabyte in something like a decade. A rotator would be more code than
-  the log itself and is the sort of thing that gets written because it feels
-  responsible.
+- **No rotation.** A rotator would be more code than the log itself and is the
+  sort of thing that gets written because it feels responsible.
+  **The arithmetic this originally rested on was wrong by about 74× and the
+  conclusion survives it** (`dev-core`, 2026-09-04, measured off the real record
+  the end-to-end test writes rather than estimated). The sentence used to read
+  *a few hundred bytes per mutation, at fifty mutations a day, is a megabyte in
+  something like a decade*. The first half is right — a typical record is **425
+  bytes**. The second is not: that is a megabyte in **49 days** and **74 MiB in
+  a decade**. The tails: every call answering with a
+  [D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)-sized
+  `422` is **824 MiB** per decade, and every field at its cap is 2.7 GiB.
+  **A number reasoned about rather than read off the object is the class
+  [CLAUDE.md](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)
+  names**, and this paragraph has now been caught by it twice: the original
+  sentence sat here from 2026-08-11 until the box that builds the file measured
+  it, and the rewrite's own `422` figure was reasoned from D217's raw 4859 bytes
+  when the log can never hold that — `text()` cuts at `FREE_TEXT` and appends a
+  23-byte marker, so 4119 is the ceiling (`k8s-admin`, same day, on the
+  paragraph written to fix exactly this).
+
+  **And *74 MiB is nothing* is not the argument that should be leaned on.** The
+  one that survives an arithmetic error is the operator's: **the tail is
+  unreachable without a symptom met long before the disk is.** Gigabytes need
+  essentially every mutation to fail validation for ten years, on a tool whose
+  whole write surface is scale/restart/delete — which the operator meets as a
+  wall of refusals on day one, not as a full disk in 2036. The file also lives
+  in `~/.local/state`, which is where a person actually looks.
 
 ### D22 — a confirmation can outlive the thing it confirms
 
@@ -18684,3 +18708,84 @@ The binary's **first subcommand** — `k8rs ops <operation> <kind>/<name> [<valu
 - **`ask` confirmed on EOF against an empty name** — `"" == ""` — so invariant 2's *type the object's name* was satisfied by typing nothing. Unreachable from argv today, and a landmine on the shared callback all three operations wire, reachable the moment a caller takes the name off `Record::of`'s cleaned copy, which can clean to empty. The function's own doc already claimed the opposite.
 
 **What the driver owes later boxes, recorded where they will read it:** the `Confirm` table is deleted rather than kept when `delete` puts it on `Mutation`; `Kind::namespaced` is a second copy of what discovery answers and one of the two must go; exit codes need a vocabulary before `done`, `cancelled` and `failed` all mean `2`; and a mistyped confirmation is not free, because each retry runs `perform` again — a second `dryRun=All` on the wire and a second `attempt` line in the log.
+
+### D219 — the audit log refuses what it cannot trust, and says what it cannot fix (2026-09-04)
+
+The file behind [D21](#d21--if-the-write-cannot-be-audited-the-write-does-not-happen):
+`~/.local/state/k8rs/audit.log`, honouring `$XDG_STATE_HOME`, created 0600 in a
+directory created 0700, append-only. **The PM moved this box above the three
+operations**, because `perform` takes a `&mut impl Write` and nothing had decided
+what it writes to, so no operation below could have run end to end.
+
+**D21 named three outcomes and the code found a fourth: hang.** A FIFO at the log
+path made `open(O_WRONLY|O_APPEND|O_CREAT)` block on a missing reader — measured,
+`exit 124` past a six-second timeout with **no output at all**. Nobody had
+considered it because *pipe my audit trail into a collector* is a reasonable
+thing to try, and the hang arrives later, when the reader dies. k8rs now refuses
+anything at that path that is not an ordinary file, with D21's own sentence and
+its *reading your cluster still works* tail.
+
+**The mode ruling was right in intent and collapsed two facts.** Not narrowing a
+log somebody widened is correct — an operator who opened it for a log collector
+should not have that undone every run. Being *silent* about a log **anyone can
+write** is not the same thing: measured, `chmod 0666` and k8rs appended its audit
+trail into it without a word, and invariant 4 is the whole reason the file
+exists. So: *readable* by others stays quiet, *writable* by others gets one
+sentence naming the exact `chmod`, and k8rs keeps recording. The gate's claim is
+now what the code does — **created** 0600, and it looks.
+
+**`O_NOFOLLOW` is still not used, and the reason it was first given does not
+hold.** *"`$XDG_STATE_HOME` is not a shared directory"* is an assumption about
+the user's environment, and `XDG_STATE_HOME` under `/tmp` is a real CI
+configuration. The reason that holds is measured: `create_dir_all` follows a
+symlinked `k8rs/` **directory** anyway, so the flag closes half a door. The
+`symlink_metadata` check closes it whole. **Consequence, accepted:** a valid
+symlink to a regular file is refused too. Somebody keeping the trail on another
+volume symlinks the **directory**, which still works.
+
+**The state directory was `0777 & ~umask`** — world-writable under `umask 0`,
+which CI runners and some daemons use, and that is exactly the precondition for
+planting the FIFO or the symlink above. `DirBuilder::mode(0o700)`, the XDG spec's
+own rule. **It does not rescue `umask 0177`**: the mode argument is masked too,
+`0700 & ~0177` is `0600`, and a directory with no traverse bit fails the `open`
+inside it — measured, and left alone as one `open` failure carrying D21's
+sentence.
+
+**One capability `std` does not have, and it is not worth a thirteenth crate.**
+There is no `getuid` in `std`, so the *ownership* half of the check reads
+`/proc/self` and therefore does not run on `*-apple-darwin`, which is a shipped
+release target. **Accepted:** the **mode** half is the half an attacker needs and
+it runs everywhere; ownership is defence in depth. `libc` for that would be
+invariant 10's thirteenth crate bought for one platform's second line of
+defence — refused, and written down here so the next reader does not rediscover
+it as an oversight.
+
+**Two timestamps, because what an operator wants is a window and not a
+duration.** `perform` reads the clock twice and the result line carries
+`recorded` beside `attempt`, so the real request is inside `[attempt, recorded]`
+by construction — which is what makes it greppable against the **apiserver's
+own** audit log, the thing somebody actually does at 3am. A duration would have
+to be subtracted back into a window before it was usable, and the subtraction
+needs a stamp you would then not have. It also cannot go negative when NTP steps
+back. The gap is wide because it contains the confirmation dialog; that is why
+the field is not called `took`.
+
+**Three numbers this box measured that had been reasoned about.**
+[D21's rotation arithmetic was wrong by 74×](#d21--if-the-write-cannot-be-audited-the-write-does-not-happen)
+and is corrected there. `write_line`'s per-record atomicity claim held under
+independent re-measurement — 6 writers × 500 records at 11 000 and 65 536 bytes
+on tmpfs and btrfs, zero torn lines, `write(2)` taking 64 MiB whole — but its
+framing was wrong: **the real ceiling on a record is a full disk, not a byte
+count**, and a reader resyncs on `attempt ·` / `result ·`. And the record's own
+size, once the server URL landed, is **20 553 bytes** for both lines at every
+cap, not the ~11 KB first written; the test now asserts a 32 KiB ceiling, so a
+cap moving by a byte is not a red build and an order of magnitude is.
+
+**And the record can finally say which cluster.** It carried `context` and
+nothing else — and `kubeadm` names the context it writes
+`kubernetes-admin@kubernetes` for **every** cluster it builds, so two clusters in
+one `KUBECONFIG` produced identical records. `Mutation` gained `server` (the API
+server URL, already read at `k8s.rs`) and `uid`. It had to be now: `ops.rs`
+freezes when this phase closes and `Mutation` gains no field after that. The
+Kubernetes *subject* is deliberately not here — k8rs cannot know the effective
+identity without `SelfSubjectReview`, which is `may_i`'s box.

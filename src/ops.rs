@@ -29,8 +29,12 @@
 #[path = "ops_tests.rs"]
 mod tests;
 
+use std::ffi::OsStr;
+use std::fs::{File, OpenOptions};
 use std::future::Future;
 use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 
 use k8s_openapi::jiff::Timestamp;
 use kube::api::{DeleteParams, PatchParams, ValidationDirective};
@@ -78,8 +82,10 @@ use crate::k8s::{FREE_TEXT, Fault, IDENTIFIER, fault, said, text};
 // guard on the pair is review (CLAUDE.md § step 6).
 //
 // **Two audit writes and not one** (NOTES § D21). The attempt is written and flushed before
-// anything reaches the cluster, so a crash mid-call leaves an attempt with no result — the
-// honest record. If that first write fails, nothing is sent at all: a mutation that cannot be
+// anything reaches the cluster, so *this process* crashing mid-call leaves an attempt with no
+// result — the honest record. **Flushed and not synced**, so a machine losing power is not the
+// crash this covers; the line inside [`perform`] says why that is the right stopping point. If
+// that first write fails, nothing is sent at all: a mutation that cannot be
 // recorded does not happen. **That rule governs the attempt and not the result**: a result line
 // that cannot be written does not un-make a change that has already been made, so [`Performed`]
 // carries the outcome *and* whether it was recorded, rather than replacing one with the other.
@@ -111,10 +117,33 @@ use crate::k8s::{FREE_TEXT, Fault, IDENTIFIER, fault, said, text};
 pub struct Mutation<'a> {
     /// The kubeconfig context this is performed against.
     pub context: &'a str,
+    /// **Which cluster that context reached** — `kube::Config::cluster_url`, the `server:` the
+    /// call actually went to.
+    ///
+    /// **A context name does not identify a cluster and the record has to** (`k8s-admin`,
+    /// 2026-09-04). `kubeadm` writes `kubernetes-admin@kubernetes` for every cluster it builds,
+    /// `kind` names one per cluster but an operator merging two kubeconfigs has two entries with
+    /// one string, and a context is renamed freely while the record outlives the kubeconfig it
+    /// was written from. At 3am *a deployment was scaled in `payments` on
+    /// `kubernetes-admin@kubernetes`* answers nothing; the server URL is the part that is free
+    /// today and it is on [`Record::attempt_line`] beside the context.
+    ///
+    /// **Not the identity that performed it.** k8rs cannot know the effective subject without a
+    /// `SelfSubjectReview`, which is `may_i`'s box and not this one — so the record says which
+    /// cluster and not who, rather than guessing at the second.
+    pub server: &'a str,
     /// The namespace, or `None` for a cluster-scoped object.
     pub namespace: Option<&'a str>,
     /// The object as the reader knows it — `deployment/web`.
     pub object: &'a str,
+    /// **The object's `uid`, where the caller read one** — the cluster's own name for *this*
+    /// instance, as opposed to whatever holds that name now.
+    ///
+    /// **It is what makes [`Answer::Gone`] and [`Answer::Changed`] checkable after the fact**
+    /// (`k8s-admin`, 2026-09-04): the ReplicaSet replaces the pod while the name is being typed,
+    /// k8rs refuses, and *which* pod that was is a question only the `uid` answers — the name is
+    /// now somebody else's. `None` where the caller had none to give.
+    pub uid: Option<&'a str>,
     /// **What is about to happen, in words someone in their first month reads without a
     /// glossary** (invariant 14). It is what [`Shown`] puts on screen.
     pub consequence: &'a str,
@@ -142,8 +171,10 @@ pub struct Mutation<'a> {
 /// safe to put on a screen or in a record (invariant 9, NOTES § D154, § D213).
 struct Record {
     context: String,
+    server: String,
     namespace: Option<String>,
     object: String,
+    uid: Option<String>,
     consequence: String,
     kubectl: String,
     verb: String,
@@ -414,12 +445,18 @@ const UNCHECKABLE: &str = "k8rs did not check this one with the cluster first";
 /// `ask` is handed a [`Checked`] and answers how the dialog ended. Typing the object's name where
 /// invariant 2 requires it is part of *asking*, and belongs to the dialog that implements it.
 ///
-/// `now` is a parameter because the clock is an input rather than an ambient fact
-/// (NOTES § D18); `audit` is any destination that can be written and flushed, which is what
-/// keeps opening, locating and permissioning `~/.local/state/k8rs/audit.log` in its own box.
+/// `clock` is a parameter because the clock is an input rather than an ambient fact
+/// (NOTES § D18), and it is read **twice**: once for the attempt line and once when the result
+/// line is built. The second reading is what gives the record a landing time at all — see
+/// [`Record::result_line`], which is where the box that owns the log took it (todo.md 3696,
+/// NOTES § D214's closing paragraph).
+///
+/// `audit` is any destination that can be written and flushed. [`audit_log`] is the one k8rs
+/// opens; a caller with an unwritable state directory has already been refused there and never
+/// reaches this function (NOTES § D21).
 pub async fn perform<Show, Ask, Asked, Call, Called, Response>(
     record: &Mutation<'_>,
-    now: Timestamp,
+    clock: impl Fn() -> Timestamp,
     audit: &mut impl Write,
     show: Show,
     ask: Ask,
@@ -433,9 +470,16 @@ where
     Called: Future<Output = Result<Response, kube::Error>>,
 {
     let record = Record::of(record);
+    let attempt = clock();
 
-    // NOTES § D21 — on disk and flushed before anything reaches the cluster, dry-run included.
-    if write_line(audit, &record.attempt_line(now)).is_err() {
+    // NOTES § D21 — **written out and flushed** before anything reaches the cluster, dry-run
+    // included. *On disk* is what this said until 2026-09-04 and it is not what happens:
+    // `impl Write for File`'s `flush` is a no-op, so the bytes are in the page cache and a
+    // machine that loses power here loses the attempt line (`k8s-admin`; measured beside it,
+    // `sync_data` costs 1754 µs against `flush`'s 1.3 µs). What D21 buys is that *this process*
+    // crashing leaves an attempt with no result; a machine crash is outside invariant 3's trust
+    // model, and [`write_line`] takes an `impl Write`, which has no `sync` to call.
+    if write_line(audit, &record.attempt_line(attempt)).is_err() {
         return Performed {
             outcome: None,
             recorded: false,
@@ -479,7 +523,10 @@ where
         }
     };
 
-    let recorded = write_line(audit, &record.result_line(now, &outcome)).is_ok();
+    // **The second reading, and it is taken here rather than beside the call** — the line it
+    // stamps is the line being written, and a stamp taken anywhere else would name a moment the
+    // record does not describe.
+    let recorded = write_line(audit, &record.result_line(attempt, clock(), &outcome)).is_ok();
     Performed {
         outcome: Some(outcome),
         recorded,
@@ -504,12 +551,7 @@ impl Record {
     /// through the ingest guard, stripped and bounded, and cleaning it twice would say this file
     /// distrusts that guard.
     fn of(record: &Mutation<'_>) -> Self {
-        let clean = |value: &str, cap: usize| {
-            let mut value = value.to_string();
-            text(&mut value, cap);
-            value
-        };
-        let consequence = clean(record.consequence, FREE_TEXT);
+        let consequence = cleaned(record.consequence, FREE_TEXT);
         // **Invariant 2 requires the dialog to *state* the consequence**, and an empty string
         // states nothing. No operation can reach this today — every consequence is a k8rs
         // sentence with a name interpolated into it — so this is the author's error and not the
@@ -519,14 +561,18 @@ impl Record {
             "a mutation reached the contract with nothing to state on screen (invariant 2)"
         );
         Record {
-            context: clean(record.context, IDENTIFIER),
-            namespace: record.namespace.map(|value| clean(value, IDENTIFIER)),
-            object: clean(record.object, IDENTIFIER),
+            context: cleaned(record.context, IDENTIFIER),
+            // **A sentence by D146's rule, not a name**: a `server:` can carry a path and a port
+            // and nothing scans it as a word, which is the same reading that puts `path` here.
+            server: cleaned(record.server, FREE_TEXT),
+            namespace: record.namespace.map(|value| cleaned(value, IDENTIFIER)),
+            object: cleaned(record.object, IDENTIFIER),
+            uid: record.uid.map(|value| cleaned(value, IDENTIFIER)),
             consequence,
-            kubectl: clean(record.kubectl, FREE_TEXT),
-            verb: clean(record.verb, IDENTIFIER),
-            path: clean(record.path, FREE_TEXT),
-            version: record.version.map(|value| clean(value, IDENTIFIER)),
+            kubectl: cleaned(record.kubectl, FREE_TEXT),
+            verb: cleaned(record.verb, IDENTIFIER),
+            path: cleaned(record.path, FREE_TEXT),
+            version: record.version.map(|value| cleaned(value, IDENTIFIER)),
             checkable: record.checkable,
         }
     }
@@ -546,14 +592,23 @@ impl Record {
     ///
     /// **An absent field and an empty one record the same way**, because to a reader they are:
     /// `resourceVersion ` with nothing after it is a dangling label, indistinguishable from a
-    /// record that was cut off (PM ruling, 2026-09-04). A gap word says which gap it is.
+    /// record that was cut off (PM ruling, 2026-09-04). A gap word says which gap it is — and
+    /// [`gap`] is what [`Mutation::server`] is put through too, though its type says it is always
+    /// there: an operation that hands over an empty string writes the same dangling label.
+    ///
+    /// **Which cluster, then which object, then what was sent.** `context` and `server` are one
+    /// pair because neither answers *which cluster* alone ([`Mutation::server`]), and `namespace`
+    /// and `uid` sit with the object for the same reason — a name plus a namespace names whatever
+    /// holds it now, and the `uid` names the thing that was there (`k8s-admin`, 2026-09-04).
     fn attempt_line(&self, now: Timestamp) -> String {
         format!(
-            "{now} attempt · {} · context {} · {} · kubectl: {} · call: {} {} · \
-             resourceVersion {}\n",
+            "{now} attempt · {} · context {} · server {} · {} · uid {} · kubectl: {} · \
+             call: {} {} · resourceVersion {}\n",
             self.object,
             self.context,
+            gap(Some(&self.server), "not known", ""),
             gap(self.namespace.as_deref(), "cluster-wide", "namespace "),
+            gap(self.uid.as_deref(), "not read", ""),
             self.kubectl,
             self.verb,
             self.path,
@@ -568,16 +623,28 @@ impl Record {
     /// B's result read as A's if adjacency is the only pairing there is — which it was until
     /// 2026-09-04. A drain takes minutes (NOTES § D20), so the window is not theoretical.
     ///
-    /// **The stamp is the attempt's and says so.** It is not a landing time and may not be read
-    /// as one: [`perform`] reads the clock once (NOTES § D18) and therefore cannot say when the
-    /// call came back or how long it took. An attempt with no result under it is still D21's
-    /// crash record.
+    /// **Two stamps, because the second one is a second reading of the clock** — the landing time
+    /// NOTES § D214's closing paragraph left to the box that owns the log (todo.md 3696). Until
+    /// then the line named its attempt and nothing else, so *how long did it take* had no answer
+    /// at all, and a drain takes minutes (NOTES § D20). An attempt with no result under it is
+    /// still D21's crash record.
+    ///
+    /// **`recorded` and not `took`, because the gap is not the call's.** Between the two readings
+    /// sit the dry-run, the dialog, and however long the person at the keyboard spent reading it;
+    /// a duration printed as *took 4 min* would claim to be the cluster's when most of it is the
+    /// operator's. What this states is the one thing k8rs can see — when the result was written
+    /// down — and two absolute stamps are also what cross-references against the apiserver's own
+    /// audit log. Subtracting them is the reader's.
+    ///
+    /// **A second reason not to print a duration: a wall clock steps.** NTP moving it back
+    /// mid-mutation makes a computed gap negative, which is NOTES § D55's class exactly; a stamp
+    /// that says what the clock said cannot be negative, whatever the clock did.
     ///
     /// **The dry-run verdict is on every result line and not only the two where the sentence
     /// happens to mention it** (NOTES § D8). *Did this write get checked first?* is the one
     /// question the log exists to answer about the contract itself, and on `Done` and
     /// `Cancelled` the word did not appear at all until 2026-09-04 (`tester`).
-    fn result_line(&self, now: Timestamp, outcome: &Outcome) -> String {
+    fn result_line(&self, attempt: Timestamp, recorded: Timestamp, outcome: &Outcome) -> String {
         // Annotated, so that dropping the arm below is a *testable* change rather than one the
         // compiler refuses for want of a type — an `unviable` mutant is a line no test was asked
         // about (NOTES § D133).
@@ -586,7 +653,7 @@ impl Record {
             _ => None,
         };
         let line = format!(
-            "result · attempt {now} · {} · dry-run: {} · {}",
+            "result · attempt {attempt} · recorded {recorded} · {} · dry-run: {} · {}",
             self.object,
             self.check(outcome),
             verdict(outcome),
@@ -689,10 +756,461 @@ fn in_words(fault: Fault) -> &'static str {
 }
 
 /// **One line, one `write_all`, then a flush** — so a destination that stamps or locks per line
-/// can, and so two k8rs processes appending to one log cannot interleave halves of a record.
+/// can, and so two k8rs appending to one log do not interleave halves of a line.
+///
+/// **A *record* is [`perform`]'s pair of lines and this function writes one of them**, which is
+/// the word this doc used both ways until 2026-09-04 (`tester`). Everything below is about a
+/// line; nothing here is atomic across the two.
+///
+/// **That second half is a property of the destination and was stated here as if it were this
+/// function's** (todo.md 3696, NOTES § D214's closing paragraph). `write_all` loops on a short
+/// write, and a line is not small: a server message alone is bounded at [`FREE_TEXT`], and
+/// NOTES § D217 measured a real `422` at 4859 bytes before the cut. What makes the claim true is
+/// [`audit_log`]'s file and the bound on a line, both measured on this machine rather than
+/// reasoned about (Linux 7.1, btrfs and tmpfs, 2026-09-04):
+///
+/// - **The file is opened `O_APPEND`**, so every `write(2)` seeks to the end as part of the same
+///   call. Four handles on one file, 2000 lines each, at 5000 and at 65536 bytes: 8000 whole
+///   lines both times, none torn.
+/// - **`write_all` makes one call for a line this size**, so the loop it could break in never
+///   runs twice. `Write::write` on a regular file took the whole buffer at 4096, 5000, 16384,
+///   1 MiB and 16 MiB.
+///
+/// **The size is measured and not summed, and *line* is not *record*** (`tester`, 2026-09-04).
+/// This doc said *a record is at most ~11 KB*, using "record" for one line where
+/// [`perform`] uses it for the pair — and the number was three people's arithmetic over the
+/// caps, which went stale the moment [`Mutation::server`] and [`Mutation::uid`] were added.
+/// `a_line_and_a_record_have_a_measured_ceiling_and_it_is_far_under_one_write` builds a mutation
+/// with every field past its cap and prints what comes out: **the longest attempt line is 15 689
+/// bytes, the longest result line 4 864, and the longest record — both lines — 20 553**. What the
+/// claim above needs is the *line*, since that is what one `write_all` is handed, and 15.7 KB is
+/// still three orders below where the kernel starts short-writing a regular file. The test asserts
+/// a 32 KiB ceiling rather than the figure, so a cap that moves by a byte is not a red build and
+/// a cap that moves by an order of magnitude is.
+///
+/// **The real ceiling on a record is not its size, it is a full disk** (`tester`, 2026-09-04).
+/// Filling a tmpfs mid-record, `write_all` came back `StorageFull` part-way and the file ended
+/// with half a line and no newline, so the next record appends onto the same physical line.
+/// [`perform`] handles that correctly — the attempt line failing means `recorded: false` and
+/// nothing sent — and what is owed here is the note to whoever reads the file: **a reader resyncs
+/// on `<timestamp> attempt · ` and on `result · `**, not on newlines alone.
+///
+/// **For any other destination the claim belongs to that destination.** The tests' sink
+/// short-writes eight bytes at a time on purpose, and nothing here depends on it not doing so.
 fn write_line(audit: &mut impl Write, line: &str) -> std::io::Result<()> {
     audit.write_all(line.as_bytes())?;
     audit.flush()
 }
 
+/// **One untrusted string, cleaned and bounded** (invariant 9, NOTES § D154, § D213).
+///
+/// [`crate::k8s::text`] works in place, which a `format!` argument cannot be; this is that call
+/// and the copy it needs, in **one** place. It was a closure inside [`Record::of`] until the
+/// audit log's own refusals needed the same thing for a path out of the environment — and a
+/// second spelling of a strip is what NOTES § D213 already caught this file writing once.
+fn cleaned(value: &str, cap: usize) -> String {
+    let mut value = value.to_string();
+    text(&mut value, cap);
+    value
+}
+
 // --- THE MUTATION CONTRACT END ---
+
+// --- THE AUDIT LOG START ---
+//
+// **The file the second of invariant 4's two records lives in** — and, because NOTES § D21 makes
+// a mutation that cannot be recorded a mutation that does not happen, the one thing between a
+// well-formed operation and the cluster. This region opens it and says what to do when it cannot.
+//
+// **Opening only; what goes in it is [`Record`]'s, above.** The two are separate because the
+// console (Phase 12) and the headless driver have to open the *same* file in the *same* mode and
+// say the *same* thing when they cannot — and the way that stops being true is each of them
+// spelling `~/.local/state/k8rs/audit.log` and a mode once more (NOTES § D103).
+//
+// **The environment is an input, and [`audit_path`] takes it as one** — the shape the clock has
+// for the same reason (NOTES § D18). `$XDG_STATE_HOME` and `$HOME` are read in exactly one
+// place, [`audit_log`], and every decision about them is a function over values a test can call.
+// The alternative was a test that sets the variable, which edition 2024 makes `unsafe` and which
+// `cargo test`'s threads make racy.
+//
+// **No rotation** (NOTES § D21), and this region adds no size cap of its own. What a *line*
+// actually costs is measured in [`write_line`], which needed the number for a different reason —
+// whether one of them fits a single `write(2)`.
+//
+// **What is at the path is checked before it is written to, and that is this region's and not
+// [`write_line`]'s** ([`open_log`]). A FIFO there hangs the process forever; a log anybody can
+// write to is invariant 4's whole subject gone quiet. Neither is visible from inside a function
+// handed an `impl Write`.
+
+/// **The audit log's mode: its owner, and nobody else** (CLAUDE.md § Security gate, § Secrets and
+/// local files).
+///
+/// **It is handed to `open` rather than applied after it**, which is the whole of why it is here
+/// and not a `chmod` two lines down: `OpenOptionsExt::mode` is the `mode` argument of `open(2)`,
+/// so a log this run creates is *never* briefly wider. Create-then-narrow leaves a window in
+/// which another process can open a handle that survives the narrowing, and a window is a window
+/// however short it is.
+///
+/// **The kernel applies the process umask to it, and what that costs was measured rather than
+/// reasoned about** (`k8s-admin` and my own run, 2026-09-04; CLAUDE.md § *a claim reasoned from a
+/// definition instead of measured*). `0600 & ~umask` is `0600` for every umask that leaves the
+/// owner's bits alone, which is every ordinary one. Two that do not:
+///
+/// - **`umask 0177`** does not narrow the log at all — `0600 & ~0177` is `0600` — and this doc
+///   said it made the log *unwritable next run*, which is false twice over. What it narrows is
+///   [`STATE_DIR_ONLY`]: `0700 & ~0177` is `0600`, a directory with no traverse bit, so the run
+///   fails on the `open` inside it and the log is never created at all. Measured: `drw-------`
+///   and *Permission denied (os error 13)*.
+/// - **`umask 0400`** is the one that reaches the log — `0600 & ~0400` is `0200`, write-only —
+///   and k8rs goes on appending to it happily, because appending needs the write bit and not the
+///   read bit. Measured: two runs, both fine, `--w-------` on the file. What breaks is the
+///   *operator* reading their own audit trail.
+///
+/// Both are left alone rather than worked around: the first is one `open` failure with D21's own
+/// sentence on it, and the second is a umask that says *make my files unreadable to me* being
+/// obeyed.
+const OWNER_ONLY: u32 = 0o600;
+
+/// **The state directory's mode: its owner, and nobody else** — the XDG base directory
+/// specification's own `0700`, and the precondition [`open_log`]'s check below depends on.
+///
+/// **`create_dir_all` carries no mode and gets `0777 & ~umask`** (`k8s-admin` across thirteen
+/// umasks, and re-run here before and after the fix rather than taken on trust — CLAUDE.md
+/// § *somebody else's finding stays an estimate until you have run it*). `umask 0` gave
+/// `drwxrwxrwx` on the built binary before, and `drwx------` after; `umask 0002` gives
+/// `drwxrwxr-x` without this mode.
+/// A world-writable `~/.local/state/k8rs/` is exactly what a FIFO or a symlink has to be planted
+/// in for [`open_log`]'s refusal to have anything to refuse, and `umask 0` is a CI runner and
+/// some daemons rather than a hypothetical.
+///
+/// **Every directory this run *creates* gets it, parents included**, because `DirBuilder`'s mode
+/// applies to each one it makes. A `~/.local` that k8rs is the first thing on the machine to make
+/// comes out `0700`, which is the same specification's recommendation one level up; a directory
+/// that already exists is not touched, which is why this is not the `chmod` [`open_log`] refuses
+/// to be.
+const STATE_DIR_ONLY: u32 = 0o700;
+
+/// Where the log sits under the state directory (NOTES § D21).
+const UNDER_STATE: &str = "k8rs/audit.log";
+
+/// The state directory relative to [`HOME`], when [`STATE_HOME`] does not name one — the XDG base
+/// directory specification's own fallback, and D21's `~/.local/state`.
+const DEFAULT_STATE: &str = ".local/state";
+
+/// The variable that names the state directory outright.
+const STATE_HOME: &str = "XDG_STATE_HOME";
+
+/// The variable [`DEFAULT_STATE`] hangs off.
+const HOME: &str = "HOME";
+
+/// **What is still true when the log cannot be had** (NOTES § D21): k8rs continues, read-only.
+///
+/// D21 refuses to exit for this, and the reason is worth one clause on every refusal below — a
+/// broken state directory must not stop somebody looking at a cluster that is on fire.
+const STILL_READS: &str = "reading your cluster still works";
+
+/// **The audit log, open and append-only, and created readable by its owner alone** — or the
+/// sentence to print instead (NOTES § D21, invariant 4). *Created*, because [`open_log`] does not
+/// **narrow** a file somebody has since widened, and saying *is* here would be a claim this
+/// function cannot make. It does **look** at one, and says so — that is [`widened`], and it is a
+/// note rather than a mode change.
+///
+/// **A refusal here is not an exit.** D21's ruling is that k8rs says so and continues read-only.
+/// For the console that is the whole process, holding the file for its life with the write path
+/// unreachable; for a one-shot `k8rs ops` line, which opens the log per run, the same ruling is
+/// the run ending with the sentence and nothing sent.
+///
+/// **The two variables are read here and nowhere else**, so everything that decides anything
+/// about them is [`audit_path`], which takes them as values.
+///
+/// **The notes are things the operator is told once and not refused for** — an ignored
+/// `$XDG_STATE_HOME` ([`ignored`]) and a log somebody else can write to ([`widened`]). They are
+/// returned rather than printed because this file draws nothing; the caller decides where a
+/// sentence goes, the same way it does for the refusal.
+pub fn audit_log() -> Result<(File, Vec<String>), String> {
+    let state_home = std::env::var_os(STATE_HOME);
+    let home = std::env::var_os(HOME);
+    let Some((path, source)) = audit_path(state_home.as_deref(), home.as_deref()) else {
+        return Err(nowhere_to_keep(state_home.as_deref(), home.as_deref()));
+    };
+    // **A refusal loses the [`ignored`] note, and that is the accepted trade.** `Err` has one
+    // string in it and no room for a second; what the reader needs in that case is on the
+    // refusal already, because every one of [`open_log`]'s carries [`Source::clause`] and so
+    // names the variable the path came from.
+    let (log, mut notes) = open_log(&path, source)?;
+    // Last, so the note about what is *at* the path comes before the one about which variable
+    // chose the path — the reader is looking at the file, not at their environment.
+    notes.extend(ignored(state_home.as_deref(), source, &path));
+    Ok((log, notes))
+}
+
+/// **The one refusal that has no path to name** — a machine where neither variable points
+/// anywhere (NOTES § D21).
+///
+/// **It says what each variable actually was, because the sentence it replaced was false about
+/// one the reader can check in a single command** (`k8s-admin`, and the PM re-measured it,
+/// 2026-09-04). *Neither names a directory it can start from* was printed for
+/// `XDG_STATE_HOME=relative-dir` with no `HOME` — where `$XDG_STATE_HOME` **is** set and **does**
+/// name a directory, just not an absolute one. A reader who checks, finds it set, and stops
+/// trusting the message is the whole cost, and it is NOTES § D214's class in the box built after
+/// it.
+///
+/// **It is a function and not a `format!` inside [`audit_log`]** so that a test asserts these
+/// words rather than a copy of them. `audit_log` reads the real environment and cannot be called
+/// from a test without either writing into the developer's own state directory or setting a
+/// variable — `unsafe` in edition 2024, and racy across `cargo test`'s threads — so a sentence
+/// spelled inside it is a sentence only a hand-typed twin could check.
+fn nowhere_to_keep(state_home: Option<&OsStr>, home: Option<&OsStr>) -> String {
+    without(format!(
+        "k8rs has nowhere to keep its audit log: {}, and {}",
+        named(STATE_HOME, state_home),
+        named(HOME, home)
+    ))
+}
+
+/// **Why one variable did not name a place to start from** — the three things it can be, said
+/// apart because they are three different things to go and fix.
+///
+/// **The value is echoed, cleaned and bounded** (invariant 9): it is free text out of the
+/// environment on its way to a terminal, exactly like the path in [`open_log`]'s refusals.
+fn named(variable: &str, value: Option<&OsStr>) -> String {
+    match value {
+        None => format!("${variable} is not set"),
+        Some(value) if value.is_empty() => format!("${variable} is set to nothing"),
+        Some(value) => format!(
+            "${variable} is {}, which is not a full path starting at /",
+            cleaned(&value.to_string_lossy(), FREE_TEXT)
+        ),
+    }
+}
+
+/// **Which variable put the log where it is** — the clause every sentence about the path carries.
+///
+/// **A refusal that names a path and not where the path came from sends the reader to the wrong
+/// variable** (`k8s-admin`, 2026-09-04). `$XDG_STATE_HOME=oops` with a good `$HOME` puts the
+/// trail under the home directory and said nothing at all about it, so an operator who set the
+/// variable to keep the trail on an encrypted volume never learned it had been ignored. Ignoring
+/// a relative value is the base directory specification's rule and stays; not saying so was the
+/// defect.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Source {
+    /// `$XDG_STATE_HOME` named an absolute directory and the log is under it.
+    StateHome,
+    /// `$HOME` did, and the log is under [`DEFAULT_STATE`] inside it.
+    Home,
+}
+
+impl Source {
+    /// The clause, written for somebody about to go and look at the path.
+    fn clause(self) -> String {
+        match self {
+            Source::StateHome => format!("from ${STATE_HOME}"),
+            Source::Home => "under your home directory".to_string(),
+        }
+    }
+}
+
+/// **Where the audit log goes, decided from two values and nothing else** (NOTES § D18's shape).
+///
+/// `$XDG_STATE_HOME` wins where it names an absolute directory, and `$HOME/.local/state` is the
+/// fallback. **A relative or empty value is ignored rather than joined**, which is the base
+/// directory specification's own rule and also the safe one here: `k8rs/audit.log` relative to
+/// whatever directory a shell happened to be in is an audit trail scattered across the disk, and
+/// invariant 4 needs one place to look. `Path::is_absolute` is false for the empty path, so one
+/// filter settles both.
+///
+/// **Nothing from the cluster reaches this**, so the security gate's *object names are sanitised
+/// before they build a filesystem path* row has no subject here: the two components are an
+/// environment variable and two literals, and no object name is ever joined onto either.
+///
+/// **It says which variable answered as well as where**, because every sentence downstream of it
+/// has to ([`Source`]).
+fn audit_path(state_home: Option<&OsStr>, home: Option<&OsStr>) -> Option<(PathBuf, Source)> {
+    let absolute = |value: Option<&OsStr>| {
+        value
+            .map(Path::new)
+            .filter(|directory| directory.is_absolute())
+            .map(Path::to_path_buf)
+    };
+    absolute(state_home)
+        .map(|state| (state, Source::StateHome))
+        .or_else(|| absolute(home).map(|home| (home.join(DEFAULT_STATE), Source::Home)))
+        .map(|(state, source)| (state.join(UNDER_STATE), source))
+}
+
+/// **What to say when `$XDG_STATE_HOME` was set and k8rs did not use it** — the silent half of
+/// [`Source`]'s reason.
+///
+/// **Empty is not ignored, it is unset.** The base directory specification defines an empty
+/// value as *use the default*, so there is nothing to report; a relative one is a value the
+/// operator meant and k8rs did not honour, and that is the note.
+fn ignored(state_home: Option<&OsStr>, source: Source, path: &Path) -> Option<String> {
+    let value = state_home.filter(|value| !value.is_empty())?;
+    if source == Source::StateHome {
+        return None;
+    }
+    Some(format!(
+        "k8rs is not keeping its audit log where ${STATE_HOME} points: {} is not a full path \
+         starting at /, so the log is at {} instead, {}",
+        cleaned(&value.to_string_lossy(), FREE_TEXT),
+        cleaned(&path.to_string_lossy(), FREE_TEXT),
+        // The early return above leaves exactly one value here, so this is `Source::Home`'s
+        // clause said once rather than twice.
+        source.clause()
+    ))
+}
+
+/// **The log at a path, created private** — or the sentence that says why it could not be.
+///
+/// **Two failures and two sentences, because they are two different things to go and fix**
+/// (invariant 14): a state directory that cannot be made, and a file that cannot be opened in
+/// it. One *"could not open the audit log"* for both sends a reader to check the wrong thing
+/// half the time.
+///
+/// **k8rs sets the mode when it creates the log and does not police it afterwards, but it does
+/// look before it writes** (`tester` and `k8s-admin`, 2026-09-04). A file somebody has since
+/// widened stays as they left it — narrowing it would be a `chmod` this function does not own,
+/// and an operator who deliberately made the log group-*readable* for a collector would find k8rs
+/// silently undoing it on every run. **Readable and writable are two different facts and the
+/// first draft of this doc collapsed them**: readable by others is the collector, and stays
+/// quiet; writable by others is the audit trail's integrity gone, which is the whole reason
+/// invariant 4 has this file. So [`widened`] says so once, and k8rs still writes.
+///
+/// **What is refused is anything at that path that exists and is not an ordinary file** — and
+/// that one predicate closes four doors at once. The one that was measured is a FIFO: `open(2)`
+/// with `O_WRONLY` on one with no reader **blocks forever**, so `k8rs ops scale …` sat there with
+/// no output at all and `timeout 6` had to kill it. NOTES § D21 has three endings — the log
+/// opens, or it does not and k8rs says so and reads on — and a silent hang is a fourth it never
+/// ruled on. *Pipe my audit trail into a collector* is a plausible thing for an operator to try,
+/// and the hang arrives later, when the reader dies. A directory, a device node and a symlink
+/// come out of the same check.
+///
+/// **`symlink_metadata` and not `metadata`, which is what makes the symlink a door this closes**:
+/// a *dangling* symlink is `NotFound` to a following `stat`, so the `open` below would follow it
+/// and create the file wherever it points — and whatever is put there between the two calls is
+/// what k8rs then appends to.
+///
+/// **`O_NOFOLLOW` is deliberately not added**, and the reason this doc gave for that was an
+/// assumption rather than a fact: *`$XDG_STATE_HOME` is not a shared directory* is a claim about
+/// somebody else's machine, and `XDG_STATE_HOME` under `/tmp` is a real CI configuration
+/// (`k8s-admin`, 2026-09-04). The reason that holds is that `create_dir_all` follows a symlinked
+/// `k8rs/` **directory** anyway, so the flag would close the final component and leave the
+/// component above it open. The check above closes the file; the directory half is
+/// [`STATE_DIR_ONLY`]'s, which keeps the place a symlink would be planted in unwritable by
+/// anybody else.
+///
+/// **The check narrows the window, it does not close it**, and saying so is the honest version:
+/// between the `stat` and the `open` two lines below, anything with write access to that
+/// directory can swap what is there. What removes the write access is [`STATE_DIR_ONLY`] — which
+/// is why the two are one fix and not two, and why neither alone would be worth much.
+///
+/// **The path is stripped on its way into the sentence** (invariant 9). It comes out of the
+/// environment rather than out of the cluster, but it is still free text on its way to a
+/// terminal, and an `ESC` in `$XDG_STATE_HOME` is the same cursor-rewrite a crafted pod name is.
+fn open_log(path: &Path, source: Source) -> Result<(File, Vec<String>), String> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let shown = cleaned(&path.to_string_lossy(), FREE_TEXT);
+    let from = source.clause();
+    let blamed = |failed: &std::io::Error| cleaned(&failed.to_string(), FREE_TEXT);
+    if let Some(directory) = path.parent() {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(STATE_DIR_ONLY)
+            .create(directory)
+            .map_err(|failed| {
+                without(format!(
+                    "k8rs could not make a place for its audit log at {shown} ({from}): {}",
+                    blamed(&failed)
+                ))
+            })?;
+    }
+    // A path with nothing at it is the ordinary first run, and so is one the `stat` itself could
+    // not answer for — the `open` below says what is wrong with it, in the words of the system.
+    let notes = match std::fs::symlink_metadata(path) {
+        Ok(found) if !found.file_type().is_file() => {
+            return Err(without(format!(
+                "there is something at {shown} ({from}) that is not an ordinary file — a pipe, a \
+                 device, a directory or a link — and k8rs will not write its audit log into it"
+            )));
+        }
+        Ok(found) => Vec::from_iter(widened(&found, &shown, &from)),
+        Err(_) => Vec::new(),
+    };
+    let log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(OWNER_ONLY)
+        .open(path)
+        .map_err(|failed| {
+            without(format!(
+                "k8rs could not open its audit log at {shown} ({from}): {}",
+                blamed(&failed)
+            ))
+        })?;
+    Ok((log, notes))
+}
+
+/// **A log somebody other than its owner can write to, or one that is not ours** — said once,
+/// and not refused for.
+///
+/// **Not a refusal, because the trail is worth more than the objection.** k8rs appends and says
+/// so; what it may not do is what it did until 2026-09-04, which was append to a `0666` audit log
+/// without a word (`k8s-admin`, and the PM re-measured it).
+///
+/// **Two facts and one sentence each**, because they are two things to go and fix — but at most
+/// **one note comes back**, and the mode wins. It is the one with a fix on the end of it, and a
+/// file that is both `0666` and somebody else's is already fully described by the first sentence.
+/// The mode is checked everywhere; the owner only where the process can find out who it is —
+/// see [`us`].
+fn widened(found: &std::fs::Metadata, shown: &str, from: &str) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+
+    let mode = found.mode() & 0o7777;
+    if mode & 0o022 != 0 {
+        return Some(format!(
+            "the audit log at {shown} ({from}) can be written to by other people on this machine \
+             (it is {mode:04o}), so what is already in it may not be what k8rs wrote — k8rs is \
+             still recording to it, and `chmod 600 {shown}` makes it yours alone"
+        ));
+    }
+    if us().is_some_and(|us| us != found.uid()) {
+        return Some(format!(
+            "the audit log at {shown} ({from}) belongs to another user on this machine — k8rs is \
+             still recording to it, but the trail in it is not only k8rs's"
+        ));
+    }
+    None
+}
+
+/// **Which user this process is, where the system will say** — and `None` where it will not.
+///
+/// **There is no `getuid` in `std`**, and the twelve approved crates do not include one that
+/// exposes it (invariant 10): `libc` for a single number would be a thirteenth. What is free is
+/// that on Linux `/proc/<pid>` is owned by the process's own user and `/proc/self` resolves to
+/// it, so one `stat` answers the question with no dependency at all.
+///
+/// **Where there is no procfs this returns `None` and [`widened`]'s ownership half does not
+/// run** — the release targets include `*-apple-darwin` (`docs/tech-stack.md`), and saying so is
+/// better than a check that quietly means nothing. The mode half, which is the one an attacker
+/// needs, runs everywhere.
+fn us() -> Option<u32> {
+    use std::os::unix::fs::MetadataExt;
+
+    std::fs::metadata("/proc/self")
+        .ok()
+        .map(|process| process.uid())
+}
+
+/// **What every refusal above ends with** — what it costs and what still works (NOTES § D21).
+///
+/// One tail rather than one per refusal, because the consequence is the same one every time and
+/// D21 is what decides it: no change is made, and the run is not over.
+fn without(trouble: String) -> String {
+    format!(
+        "{trouble} — every change k8rs makes is written to that log before it is sent, so k8rs \
+         will not change anything until that is fixed, and {STILL_READS}"
+    )
+}
+
+// --- THE AUDIT LOG END ---
