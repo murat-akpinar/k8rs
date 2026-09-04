@@ -10090,9 +10090,10 @@ fn ops_ended(line: &[&str]) -> Ended {
 /// runtime and dials the reader's own cluster, and is the one thing in this driver no unit test
 /// may reach.
 ///
-/// **It is [`not_wired`]'s own sentence, which is still what `restart` and `delete` print.** Every
-/// assertion in this region is about the words above the seam, so the double answers what two of
-/// the three operations really answer rather than inventing a third string to assert against.
+/// **It is [`not_wired`]'s own sentence, which is still what `delete` prints.** Every assertion in
+/// this region is about the words above the seam, so the double answers what the one unwired
+/// operation really answers rather than inventing a string to assert against — and for `scale` and
+/// `restart` it stands in for a call this test process must not make.
 fn unwired(ready: Ready<'_>) -> Ended {
     Ended::refused(not_wired(
         ready.operation,
@@ -10495,6 +10496,24 @@ fn read_only_refuses_an_operation_before_anything_else_on_the_line_is_judged() {
         vec!["ops", "delete", "pod/web", "-n", "payments", "--read-only"],
         vec!["--read-only", "ops", "delete", "pod/web", "-n", "payments"],
         vec!["--once", "--read-only", "ops", "scale", "deploy/web", "3"],
+        // **Both wired operations, because `--read-only` is read once and for all of them**
+        // (invariant 2): a row for `scale` alone proves the flag for the verb it names.
+        vec![
+            "--read-only",
+            "ops",
+            "restart",
+            "deploy/web",
+            "-n",
+            "payments",
+        ],
+        vec![
+            "ops",
+            "restart",
+            "deploy/web",
+            "-n",
+            "payments",
+            "--read-only",
+        ],
         vec!["--read-only", "pod.json", "ops"],
         vec![
             "ops",
@@ -11300,6 +11319,67 @@ fn a_change_the_log_missed_exits_zero_and_says_the_trail_is_short() {
     );
 }
 
+/// **A paused deployment is said out loud above the prompt, and nothing else is**
+/// (NOTES § D224, invariant 4, invariant 14).
+///
+/// **The three things it has to say** are that this deployment is paused, that nothing moves until
+/// somebody resumes it, and that the `kubectl rollout restart` line k8rs printed one line above
+/// will refuse until then — measured: it exits `1` with *can't restart paused deployment (run
+/// rollout resume first)* while k8rs printed *the change was made* and exited `0`.
+///
+/// **`Some(false)` and `None` say nothing at all.** `None` is a check that was never run;
+/// `Some(false)` is every kind that has no pause, which is a StatefulSet, a DaemonSet, and the
+/// Deployment nobody paused. A line printed for those would be a warning about a state the object
+/// is not in, on the surface invariant 2 exists to keep readable.
+///
+/// **No jargon, and no second copy of the kubectl line k8rs already printed** — the object and the
+/// namespace are on screen twice by the time this lands, and a second spelling of a command in
+/// this file is the copy that drifts from the one `ops.rs` builds.
+#[test]
+fn a_paused_deployment_is_named_above_the_prompt_and_nothing_else_is() {
+    let paused = while_paused("deployment", Some(&true)).expect("a paused deployment says so");
+    println!("{paused}");
+    for owed in [
+        "This deployment is paused",
+        "nothing will be replaced until somebody resumes it",
+        "kubectl rollout resume",
+        "the command above will refuse to run until then",
+    ] {
+        assert!(paused.contains(owed), "{owed:?} is not in {paused:?}");
+    }
+    // **Plain language is the rule and not a preference** (invariant 14): the words a beginner has
+    // not met are the ones this sentence exists to avoid.
+    for jargon in [
+        "spec",
+        "annotation",
+        "patch",
+        "replica",
+        "rollout restart",
+        "pod",
+    ] {
+        assert!(
+            !paused.to_lowercase().contains(jargon),
+            "the paused line uses {jargon:?}: {paused:?}"
+        );
+    }
+    // **The kind is the one the driver resolved**, so nothing here hard-codes the only kind that
+    // can currently be paused.
+    assert!(
+        while_paused("statefulset", Some(&true))
+            .expect("the caller decides which kinds can answer true")
+            .starts_with("This statefulset is paused"),
+        "the sentence hard-codes a kind it was handed"
+    );
+    // **Nothing is said where nothing is wrong.**
+    for checked in [Some(&false), None] {
+        assert_eq!(
+            while_paused("deployment", checked),
+            None,
+            "a deployment nobody paused was warned about anyway: {checked:?}"
+        );
+    }
+}
+
 /// One kubeconfig with one context and one cluster, as text kube parses.
 fn one_context(server: Option<&str>) -> kube::config::Kubeconfig {
     let cluster = server.map_or(String::new(), |server| format!("\n    server: {server}"));
@@ -11388,44 +11468,96 @@ fn a_scale_that_never_connected_says_nothing_was_changed_and_names_the_reason() 
     );
 }
 
-/// **Only `scale` is wired, and it is wired with the count the line carried** (todo.md 3749).
+/// **`scale` and `restart` are wired, `delete` is not, and each gets what its own line carried**
+/// (todo.md 3749, 3777).
 ///
-/// **The two that are not are `restart` (todo.md 3776) and `delete` (3810)**, and a verb added to
-/// [`OPERATIONS`] without an arm answers `None` here rather than falling into `scale`'s.
+/// **A verb added to [`OPERATIONS`] without an arm answers `None`** rather than falling into
+/// somebody else's, which is what stops a third operation being performed as a scale.
 ///
 /// **This is [`ops_performed`]'s whole decision**, held apart from it because everything past the
 /// decision dials a cluster: the function itself is one call, and what can be wrong about it is
-/// the four rows below.
+/// the rows below.
 #[test]
-fn scale_is_the_one_operation_this_build_performs_and_it_gets_the_count() {
+fn every_wired_operation_gets_its_own_arm_and_the_unwired_one_gets_none() {
     for operation in &OPERATIONS {
         let chosen = wired(operation, Some(3));
         println!("{} → {chosen:?}", operation.verb);
         assert_eq!(
             chosen,
-            (operation.verb == "scale").then_some(3),
+            match operation.verb {
+                SCALE => Some(Wired::Scale(3)),
+                RESTART => Some(Wired::Restart),
+                _ => None,
+            },
             "{} is wired to the wrong arm of the seam",
             operation.verb
         );
     }
+    // **The derived list says what it found**: a table that stopped holding these three verbs
+    // would satisfy every row above by matching none of them.
+    assert_eq!(
+        OPERATIONS
+            .iter()
+            .map(|operation| operation.verb)
+            .collect::<Vec<_>>(),
+        vec![SCALE, RESTART, "delete"],
+        "the operations table is no longer the three this phase wires"
+    );
     // **The count comes back and is not invented**, which is what stops a scale-to-three being
     // performed as a scale to anything else.
     let scale = operation_named(SCALE).expect("scale is in the table");
-    assert_eq!(wired(scale, Some(0)), Some(0));
+    assert_eq!(wired(scale, Some(0)), Some(Wired::Scale(0)));
     // `ops_value` refuses this above the seam, so it cannot arrive from a command line — and if
     // it ever did, it is `not_wired`'s sentence and never a guessed count.
     assert_eq!(wired(scale, None), None);
+    // **A restart takes no value, so a count on the line changes nothing about it** — the driver
+    // refuses the extra word above this, and the seam does not carry one either way.
+    let restart = operation_named(RESTART).expect("restart is in the table");
+    assert_eq!(wired(restart, None), Some(Wired::Restart));
+    assert_eq!(wired(restart, Some(3)), Some(Wired::Restart));
 }
 
 /// **A kind an operation does not work on is refused before the audit log is opened**
 /// (NOTES § D220 ruling 7) — the same rule `k8rs ops bogus` already had, reached through the one
 /// door that was not a spelling mistake.
+///
+/// **What it asserts is that the opener was never called**, and it used to be named for the state
+/// directory that opener would have created (`k8s-admin`, 2026-09-04). The two are the same fact
+/// today only because `audit_log` is the only thing that makes the directory; the name now says
+/// what the assertion can see, and the filesystem half lives in
+/// `a_machine_that_cannot_hold_the_audit_log_refuses_the_operation_and_says_why`.
 #[test]
-fn a_kind_an_operation_does_not_work_on_leaves_no_state_directory_behind() {
-    for line in [
-        vec!["ops", "scale", "pod/web", "3", "-n", "payments"],
-        vec!["ops", "scale", "ds/fluentd", "3", "-n", "payments"],
-        vec!["ops", "scale", "node/worker-1", "3"],
+fn a_kind_an_operation_does_not_work_on_is_refused_before_the_audit_log_is_opened() {
+    // **The two matrices are genuinely different and the rows say so** (NOTES § Operations): a
+    // replicaset scales and does not restart, a daemonset restarts and does not scale. A driver
+    // holding one copy of *which kinds* would have to be wrong about one of them.
+    for (line, owed) in [
+        (
+            vec!["ops", "scale", "pod/web", "3", "-n", "payments"],
+            "cannot scale a pod",
+        ),
+        (
+            vec!["ops", "scale", "ds/fluentd", "3", "-n", "payments"],
+            "cannot scale a daemonset",
+        ),
+        (
+            vec!["ops", "scale", "node/worker-1", "3"],
+            "cannot scale a node",
+        ),
+        (
+            vec!["ops", "restart", "rs/web-abc", "-n", "payments"],
+            // **And it says what to restart instead** (NOTES § D224) — a replicaset is the one
+            // refused kind whose copies an operator would actually want replaced.
+            "restarting that deployment is what replaces its copies",
+        ),
+        (
+            vec!["ops", "restart", "node/worker-1"],
+            "cannot restart a node",
+        ),
+        (
+            vec!["ops", "restart", "pod/web", "-n", "payments"],
+            "if this pod belongs to one, restart that instead",
+        ),
     ] {
         let asked = std::cell::Cell::new(0u32);
         let args: Vec<String> = line.iter().map(|word| (*word).to_string()).collect();
@@ -11446,29 +11578,45 @@ fn a_kind_an_operation_does_not_work_on_leaves_no_state_directory_behind() {
         );
         assert_eq!(ended.code, 2, "{line:?} did not exit 2");
         assert!(
-            ended.said.contains("cannot scale a")
-                && ended
-                    .said
-                    .contains("a deployment, a statefulset and a replicaset"),
+            ended.said.contains(owed),
             "{line:?} was refused for something other than its kind: {:?}",
             ended.said
         );
+        // **The refusal names what the verb *can* be pointed at** (invariant 14), and the two
+        // lists are not the same one.
+        let names = if line[1] == "scale" {
+            "a deployment, a statefulset and a replicaset"
+        } else {
+            "a deployment, a statefulset and a daemonset"
+        };
+        assert!(
+            ended.said.contains(names),
+            "{line:?} did not say what its verb works on: {:?}",
+            ended.said
+        );
     }
-    // **The three it does work on still reach the seam**, so a refusal that widened by one word
-    // is a red build rather than a quieter driver.
-    for kind in ["deploy", "sts", "rs"] {
-        let ended = ops_ended(&[
-            "ops",
-            "scale",
-            &format!("{kind}/web"),
-            "3",
-            "-n",
-            "payments",
-        ]);
+    // **The kinds each one does work on still reach the seam**, so a refusal that widened by one
+    // word is a red build rather than a quieter driver.
+    for (verb, kind) in [
+        ("scale", "deploy"),
+        ("scale", "sts"),
+        ("scale", "rs"),
+        ("restart", "deploy"),
+        ("restart", "sts"),
+        ("restart", "ds"),
+    ] {
+        let object = format!("{kind}/web");
+        // `restart` takes no value, and a word after the object is its own refusal.
+        let mut line = vec!["ops", verb, &object];
+        if verb == SCALE {
+            line.push("3");
+        }
+        line.extend(["-n", "payments"]);
+        let ended = ops_ended(&line);
         println!("{}", ended.said);
         assert!(
-            ended.said.contains("read this as `scale`"),
-            "{kind} was refused by scale's own matrix: {:?}",
+            ended.said.contains(&format!("read this as `{verb}`")),
+            "{verb} {kind} was refused by its own matrix: {:?}",
             ended.said
         );
     }
@@ -11538,8 +11686,12 @@ fn every_refusal_of_an_ops_line_exits_two() {
             "payments",
         ],
         vec!["--once", "ops", "scale", "deploy/web", "3"],
-        // The seam's own refusals: `restart` and `delete` are not written yet.
-        vec!["ops", "restart", "deploy/web", "-n", "payments"],
+        // A kind the verb does not serve, which is the operation's own refusal and not the
+        // driver's (NOTES § D220 ruling 7) — `restart` is wired now, so `deploy/web` is a
+        // well-formed line and no longer belongs on this list.
+        vec!["ops", "restart", "pod/web", "-n", "payments"],
+        vec!["ops", "restart", "deploy/web"],
+        // The seam's own refusal: `delete` is not written yet.
         vec!["ops", "delete", "pod/web", "-n", "payments"],
     ] {
         let ended = ops_ended(&line);
@@ -11604,10 +11756,10 @@ impl Drop for Scratch {
     }
 }
 
-/// A stub API server for one scale: it logs `METHOD target body` and answers every request with
-/// `answer`. The address is built from whatever `:0` gave us, so there is no loopback URL written
-/// down anywhere.
-async fn scale_stub(
+/// A stub API server for one operation: it logs `METHOD target body` and answers every request
+/// with `answer`. The address is built from whatever `:0` gave us, so there is no loopback URL
+/// written down anywhere.
+async fn ops_stub(
     answer: impl Fn(&str) -> (String, String) + Send + Sync + 'static,
 ) -> (kube::Client, Requests) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -11703,7 +11855,7 @@ fn scale_answer(replicas: i32) -> String {
 /// one that stops the app, and it gets no stricter a guard than any other scale.
 #[tokio::test]
 async fn a_headless_scale_prints_the_dialog_as_three_lines_and_exits_zero() {
-    let (client, sent) = scale_stub(|_| ("200 OK".to_string(), scale_answer(3))).await;
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), scale_answer(3))).await;
     let log = Scratch::named("headless-scale");
     let path = log.0.join("audit.log");
     let audit = log.file("audit.log");
@@ -11788,7 +11940,7 @@ async fn a_headless_scale_prints_the_dialog_as_three_lines_and_exits_zero() {
 /// driver, with no flag anywhere that means yes.
 #[tokio::test]
 async fn a_headless_scale_nobody_confirmed_changes_nothing_and_exits_two() {
-    let (client, sent) = scale_stub(|_| ("200 OK".to_string(), scale_answer(2))).await;
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), scale_answer(2))).await;
     let log = Scratch::named("cancelled-scale");
     let audit = log.file("audit.log");
     let mut ready = Ready {
@@ -11842,7 +11994,7 @@ async fn a_headless_scale_nobody_confirmed_changes_nothing_and_exits_two() {
 /// told which of their two problems it is** — the RBAC or the network (`PRIOR-ART § C1`).
 #[tokio::test]
 async fn a_headless_scale_the_cluster_refused_says_which_refusal_it_was_and_exits_two() {
-    let (client, _) = scale_stub(|_| {
+    let (client, _) = ops_stub(|_| {
         (
             "403 Forbidden".to_string(),
             r#"{"kind":"Status","apiVersion":"v1","status":"Failure","code":403,
@@ -11900,5 +12052,268 @@ async fn a_headless_scale_the_cluster_refused_says_which_refusal_it_was_and_exit
         out.is_empty(),
         "a scale that never had a consequence to state printed one anyway: {:?}",
         String::from_utf8_lossy(&out)
+    );
+}
+
+/// **What a cluster hands back from a patched Deployment** — enough of one for `DynamicObject` to
+/// deserialise, and nothing the driver reads.
+fn restart_answer() -> String {
+    r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web",
+       "namespace":"payments","uid":"18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11",
+       "resourceVersion":"41752"},"spec":{},"status":{}}"#
+        .to_string()
+}
+
+/// **One `k8rs ops restart`, from a client to an exit code** — [`restarted`] over a real socket, a
+/// scripted confirmation and a real audit file (todo.md 3777).
+///
+/// **The three printed lines are `screens/dialogs.md` § *Printed instead of drawn*'s** — object
+/// and namespace, the consequence, the `$` line, in that order, with the dialog's box removed and
+/// nothing reworded for the terminal.
+///
+/// **The `$` line carries no dry-run flag**, because `kubectl rollout restart` has none
+/// (NOTES § D223 ruling 4) — so the verdict above it says k8rs checked this, and the line under it
+/// never claims the operator's own command could.
+///
+/// **Two requests and no third**, which is the driver's half of *nothing is read before the patch*
+/// (NOTES § D223 ruling 3): a scale opens with a `GET` and this does not.
+#[tokio::test]
+async fn a_headless_restart_prints_the_dialog_as_three_lines_and_exits_zero() {
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), restart_answer())).await;
+    let log = Scratch::named("headless-restart");
+    let path = log.0.join("audit.log");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(RESTART).expect("restart is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: None,
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = restarted(
+        &reached,
+        &mut ready,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "yes\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    let printed = String::from_utf8(out).expect("everything k8rs writes is a string");
+    println!("{printed}\n--- exit {} ---\n{}", ended.code, ended.said);
+    let lines: Vec<&str> = printed.lines().collect();
+    assert_eq!(
+        lines[..3],
+        [
+            "deployment/web in payments",
+            "This asks Kubernetes to replace every copy of your app with a new one. How many \
+             stop at the same time is a setting on this deployment — it can be a few, or all of \
+             them at once. A paused deployment will not start until you resume it.",
+            "$ kubectl rollout restart deployment/web -n payments",
+        ],
+        "the headless dialog is not the three lines screens/dialogs.md prints"
+    );
+    // **A deployment nobody paused is not warned about one** (NOTES § D224) — the line below is
+    // the check's answer and not a hedge printed every time.
+    assert!(
+        !printed.contains("is paused, so nothing will be replaced"),
+        "a deployment the cluster said nothing about was called paused: {printed:?}"
+    );
+    assert!(
+        !printed.contains("dry-run"),
+        "the taught line offers a flag `kubectl rollout restart` does not have: {printed:?}"
+    );
+    assert!(
+        printed.contains("the cluster checked it first and accepted it")
+            && printed.contains("type yes and press enter to go ahead"),
+        "the verdict and the prompt did not reach the operator: {printed:?}"
+    );
+    assert_eq!(ended.code, 0, "a restart that landed did not exit 0");
+    assert_eq!(ended.said, "k8rs: the change was made");
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    assert_eq!(
+        requests.len(),
+        2,
+        "a confirmed restart is a check and a change, and reads nothing first: {requests:?}"
+    );
+    assert!(
+        requests.iter().all(
+            |request| request.contains("kubectl.kubernetes.io/restartedAt")
+                && !request.contains("kube.kubernetes.io/restartedAt")
+        ),
+        "the patch carries kube's own annotation key rather than kubectl's: {requests:?}"
+    );
+    let written = std::fs::read_to_string(&path).expect("the audit log this run opened");
+    println!("{written}");
+    assert_eq!(
+        written.lines().count(),
+        2,
+        "one mutation is one attempt line and one result line: {written:?}"
+    );
+    assert!(
+        written.contains(
+            "kubectl: kubectl rollout restart deployment/web -n payments · call: PATCH \
+             /apis/apps/v1/namespaces/payments/deployments/web · resourceVersion not sent"
+        ) && written.contains("· uid not read ·")
+            && written.contains("· the change was made"),
+        "the audit log does not hold the call that was made: {written:?}"
+    );
+}
+
+/// **The same Deployment after `kubectl rollout pause`** — [`restart_answer`] with the one field
+/// the check's answer is read for (NOTES § D224).
+fn paused_answer() -> String {
+    r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web",
+       "namespace":"payments","uid":"18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11",
+       "resourceVersion":"41752"},"spec":{"paused":true},"status":{}}"#
+        .to_string()
+}
+
+/// **A paused deployment is said out loud above the prompt, and the operator still decides**
+/// (NOTES § D224) — [`while_paused`] wired, over a real socket, which is the half a test of the
+/// sentence alone cannot see.
+///
+/// **The blocker this closes made three records lie at once.** On a real cluster the apiserver
+/// accepts this patch, so the consequence promised every copy replaced, the dry-run passed, k8rs
+/// printed *the change was made* and exited `0`, and the three pods still had the same names
+/// twelve seconds later — while the `kubectl rollout restart` line k8rs had just taught exits `1`.
+///
+/// **It is a line and not a refusal.** Both requests still go out, the prompt is still asked and
+/// the exit code is still `0`: the annotation is written on resume, and what was wrong was the
+/// record and not the write.
+#[tokio::test]
+async fn a_headless_restart_of_a_paused_deployment_says_so_above_the_prompt_and_still_asks() {
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), paused_answer())).await;
+    let log = Scratch::named("paused-restart");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(RESTART).expect("restart is in the table"),
+        kind: known_kind("deploy").expect("deploy is a kind the driver knows"),
+        name: "web",
+        count: None,
+        namespace: Some("payments"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = restarted(
+        &reached,
+        &mut ready,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "yes\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    let printed = String::from_utf8(out).expect("everything k8rs writes is a string");
+    println!("{printed}\n--- exit {} ---\n{}", ended.code, ended.said);
+    let lines: Vec<&str> = printed.lines().collect();
+    // **Above the prompt, and under the command it is about** — a reader meets the `$` line and
+    // then the reason it will not work.
+    assert_eq!(
+        lines[3],
+        "This deployment is paused, so nothing will be replaced until somebody resumes it with \
+         kubectl rollout resume — and the command above will refuse to run until then.",
+        "the paused line is not the one under the taught command: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "$ kubectl rollout restart deployment/web -n payments",
+        "the paused line moved above the command it is about: {lines:?}"
+    );
+    assert!(
+        lines[4..]
+            .iter()
+            .any(|line| line.contains("type yes and press enter")),
+        "the prompt did not follow the warning: {lines:?}"
+    );
+    // **The operator still decides and the exit code does not move.**
+    assert_eq!(
+        ended.code, 0,
+        "a paused deployment turned a restart into an exit 2"
+    );
+    assert_eq!(ended.said, "k8rs: the change was made");
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        2,
+        "reading the check's answer changed how many requests a restart makes"
+    );
+}
+
+/// **Anything but the word `yes` stops it, and the exit code says so** — invariant 2 through the
+/// driver, over the second operation as well as the first.
+#[tokio::test]
+async fn a_headless_restart_nobody_confirmed_changes_nothing_and_exits_two() {
+    let (client, sent) = ops_stub(|_| ("200 OK".to_string(), restart_answer())).await;
+    let log = Scratch::named("cancelled-restart");
+    let audit = log.file("audit.log");
+    let mut ready = Ready {
+        operation: operation_named(RESTART).expect("restart is in the table"),
+        kind: known_kind("ds").expect("ds is a kind the driver knows"),
+        name: "fluentd",
+        count: None,
+        namespace: Some("logging"),
+        audit,
+    };
+    let reached = Reached {
+        client: &client,
+        context: "kind-k8rs",
+        server: "https://k8rs-tests.invalid:41751",
+    };
+    let mut out = Vec::new();
+
+    let ended = restarted(
+        &reached,
+        &mut ready,
+        || {
+            "2026-09-03T12:34:56Z"
+                .parse()
+                .expect("a fixed timestamp inside jiff's range")
+        },
+        &mut "no\n".as_bytes(),
+        &mut out,
+    )
+    .await;
+
+    let printed = String::from_utf8(out).expect("everything k8rs writes is a string");
+    println!("{printed}\n--- exit {} ---\n{}", ended.code, ended.said);
+    // **A daemonset's consequence is not a deployment's**, and the driver hands the kind over
+    // rather than deciding this itself (NOTES § D220 ruling 4).
+    assert!(
+        printed.contains(
+            "This asks Kubernetes to replace the copy of your app on each node it runs on."
+        ),
+        "a daemonset was described as a deployment: {printed:?}"
+    );
+    assert_eq!(ended.code, 2, "a restart nobody confirmed exited 0");
+    assert_eq!(
+        ended.said,
+        "k8rs: nobody confirmed it, so nothing was changed"
+    );
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        1,
+        "a cancelled restart sent the change anyway"
     );
 }

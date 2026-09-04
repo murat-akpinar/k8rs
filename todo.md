@@ -3774,40 +3774,37 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       identical; `dryRun=All` then the real call from one closure, `Strict` on
       both, on the wire; stdout byte-empty and exit `0` only where the cluster
       changed; `just check` green and `just mutants-diff` **80 mutants, 0 missed**
-- [ ] `restart` — **not** `Api::restart(name)`: that helper writes
-      `kube.kubernetes.io/restartedAt` where `kubectl rollout restart` writes
-      `kubectl.kubernetes.io/restartedAt`, so the command log would teach a line
-      that produces a *second* rollout when the operator runs it, and it builds
-      its own `PatchParams::default()` so no `dryRun=All` can ride with it. Both
-      measured against kubectl v1.36.3
+- [x] `restart` — the `kubectl.kubernetes.io/restartedAt` annotation patched by
+      hand, **not** `Api::restart(name)`: that helper writes
+      `kube.kubernetes.io/restartedAt`, so the command log would teach a line
+      that produces a *second* rollout when the operator runs it, and its
+      internal `PatchParams::default()` can carry no `dryRun=All`
       ([D215](NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
-      k8rs builds the patch itself through `Pass::patch()`, which buys the right
-      key and the preflight in the same six lines. For a bare pod there is no
-      restart: it is a *delete*, and the consequence text must say so in plain
-      words. **This is the first operation to reach `Request::patch` rather than
-      `patch_subresource`** — it carries `dryRun` and `fieldValidation` today,
-      measured, but nothing in the suite would notice if it stopped, so the wire
-      region gains a plain-`patch` case with this box (`tester`, 2026-09-04).
-      **And it is the first operation that can put a secret in the audit log.**
-      A `fieldValidation=Strict` rejection on a *workload* object hands the whole
-      object back in `Status.message` — measured at **4859 bytes** on a trivial
-      test Deployment, already past `FREE_TEXT`, carrying `managedFields`,
-      annotations and container specs, and a real one carries
-      `containers[].env[].value`. `scale` was safe because its object is a
-      681-byte `Scale`; this one is not, and truncation is not redaction — and
-      annotations sit at JSON tag 12 of `ObjectMeta`, inside the first few
-      hundred bytes, so the cut does not protect them
-      ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
-      **`Patch::Strategic` fixes that for free and is what kubectl sends anyway**:
-      measured, `kubectl rollout restart` uses
-      `application/strategic-merge-patch+json`, and that path puts k8rs's own
-      six-line patch in the `422` instead of the whole object
-      (`patch.go:770-786` rather than `:353`). So the invariant-4 match and the
-      exposure fix are one choice. Two more measured details for the dialog:
-      kubectl's timestamp is local-offset RFC3339, not `Z`; and **`kubectl
-      rollout restart` has no `--dry-run` flag at all**, so k8rs preflights a
-      restart the taught command cannot reproduce and the dialog must not imply
-      otherwise (`k8s-admin`, 2026-09-04)
+      `Patch::Strategic` — what kubectl sends anyway, and what keeps a
+      `fieldValidation=Strict` rejection quoting k8rs's own six lines instead of
+      the whole workload
+      ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)):
+      **109 bytes against 4895**, measured, so invariant 4's *equivalent command*
+      and the exposure fix are one choice. The four rulings it could not be
+      briefed without — the three kinds it serves and the pod **refused in words
+      rather than deleted**, the UTC stamp, the read that does not happen
+      (`uid: None`, `version: None`), and the patch variant — are
+      [D223](NOTES.md#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04).
+      **What a real cluster took away, and no stand-in apiserver could**, is
+      [D224](NOTES.md#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04):
+      a paused Deployment made three records lie at once and no preflight could
+      catch it; all three consequence sentences promised a pacing the cluster
+      owns and four configurations falsified them; and the shared
+      `dry-run:` field is now keyed on the `Fault` with **three** answers, since
+      a check can also never leave the machine.
+      **Done when:** measured against three ephemeral review clusters, a stub
+      apiserver and a dead port — `kubectl rollout restart`'s own key, path,
+      media type and body, confirmed identical, `generation` bumped by exactly 1
+      and no second annotation; two PATCHes and **no `GET`**; `dryRun=All` on the
+      check pass only, `Strict` on both, one stamp across both; the paused
+      Deployment named above the prompt and gone once resumed; the three kinds
+      served and pod/replicaset/node refused in words; `just check` green
+      (1006 + 28) and `just mutants-diff` **37 mutants, 0 missed**
 - [ ] `delete` — requires the typed object name. **The contract does not enforce
       this yet and this is the box that makes it structural**: `Answer::Confirmed`
       says somebody agreed and nothing says *how*, so a press-only delete dialog

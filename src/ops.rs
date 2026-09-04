@@ -37,10 +37,10 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::autoscaling::v1::Scale;
 use k8s_openapi::jiff::Timestamp;
-use k8s_openapi::serde_json::json;
+use k8s_openapi::serde_json::{Value, json};
 use kube::api::{
     Api, ApiResource, DeleteParams, DynamicObject, Patch, PatchParams, ValidationDirective,
 };
@@ -214,10 +214,18 @@ pub struct Shown<'a> {
 /// reach a confirmation without a check having been answered first — rule 3 made structural
 /// rather than remembered.
 ///
-/// **`Response` is the object the call returned, and it is generic on purpose.** `edit` in v0.4
-/// shows a diff of what the dry-run gave back, and that *is* its confirmation; `ops.rs` freezes
-/// at the end of this phase, so the alternative is a second entry point into a frozen file. The
-/// channel exists for the verdict either way, and carrying the object in it is free.
+/// **`Response` is whatever the operation made of the call's answer, and it is generic on
+/// purpose.** `edit` in v0.4 shows a diff of what the dry-run gave back, and that *is* its
+/// confirmation; `ops.rs` freezes at the end of this phase, so the alternative is a second entry
+/// point into a frozen file. The channel exists for the verdict either way, and carrying something
+/// in it is free.
+///
+/// **Generic over what the operation *mapped to*, not over the object** (NOTES § D224). The type
+/// was written as *the object the call returned* and `restart` is the operation that showed why it
+/// should not be: it maps the response down to one `bool` — [`paused`] — inside its closure, so a
+/// `Checked<bool>` crosses into the dialog and a Deployment carrying
+/// `spec.template.spec.containers[].env[].value` never does. What an operation puts here is a
+/// decision it makes per call and not a shape this type imposes.
 pub struct Checked<Response> {
     verdict: &'static str,
     returned: Option<Response>,
@@ -231,7 +239,8 @@ impl<Response> Checked<Response> {
         self.verdict
     }
 
-    /// **The object the dry-run returned**, or `None` where there was no dry-run to return one.
+    /// **What the operation made of the dry-run's answer**, or `None` where there was no dry-run
+    /// to answer. `scale` puts the `Scale` here; `restart` puts one `bool` (NOTES § D224).
     pub fn returned(&self) -> Option<&Response> {
         self.returned.as_ref()
     }
@@ -445,14 +454,38 @@ impl Pass {
     /// (`apiserver/pkg/endpoints/handlers/patch.go:351-354`,
     /// `apimachinery/pkg/api/errors/errors.go:305-310`,
     /// `apimachinery/pkg/util/validation/field/errors.go:109-154`, release-1.36). For `scale` that
-    /// object is an `autoscaling/v1 Scale`: name, namespace, uid, resourceVersion,
-    /// creationTimestamp and two replica counts, and no labels, annotations, `managedFields` or
-    /// pod template (`pkg/registry/apps/deployment/storage/storage.go:370-393`) — so
-    /// [`crate::k8s::said`]'s existing strip and `FREE_TEXT` cut are the whole of what is owed
-    /// here. **A patch on the object itself is not that shape**: `restart` (todo.md 3689) and
-    /// v0.4's `edit` both patch the workload, whose dump carries annotations and
-    /// `spec.template.spec.containers[].env[].value` — and `edit`'s unknown fields come from YAML
-    /// the operator typed. Those boxes owe the check this one does not.
+    /// object is an `autoscaling/v1 Scale`, and **what it carries was measured against a real
+    /// apiserver rather than read off `storage.go`**
+    /// (`reports/2026-09-04-restart-round-two-paused-and-the-scale-422.md` § 4): under
+    /// `application/merge-patch+json` — what [`scale`] sends — the `Status.message` is **646
+    /// bytes** around a **485-byte** object carrying `name`, `namespace`, `uid`,
+    /// `resourceVersion`, `creationTimestamp`, **`managedFields`** (one entry, manager
+    /// `kubectl-client-side-apply`), two replica counts and `status.selector`. Under
+    /// `application/strategic-merge-patch+json` it is **120** and quotes only the patch. This doc
+    /// asserted `managedFields` *absent* off `pkg/registry/apps/deployment/storage/storage.go`
+    /// and it is **present**, and `status.selector` went unnamed; no labels, annotations or pod
+    /// template, which that source had right.
+    ///
+    /// **The safety conclusion survives the correction, which is the reason to state it here at
+    /// all**: a literal planted in both a container environment value *and* the apply annotation
+    /// appeared in **neither** message — so [`crate::k8s::said`]'s existing strip and `FREE_TEXT`
+    /// cut are the whole of what is owed here.
+    ///
+    /// **A patch on the object itself is not that shape, and `restart` has since paid the check
+    /// this one does not** (NOTES § D224) — measured against a real apiserver rather than read off
+    /// Kubernetes source. On one Deployment carrying a planted container environment value, a
+    /// strict rejection answers with **109 bytes** under
+    /// `application/strategic-merge-patch+json` — k8rs's own patch, and nothing of the server's
+    /// copy — where `application/merge-patch+json` and `application/json-patch+json` on the same
+    /// object answer with **4895**, carrying `managedFields`, `containers` and that literal. So
+    /// what bounds a workload patch's `422` is its media type, and [`restart`] picks one
+    /// (NOTES § D223 ruling 4).
+    ///
+    /// **What v0.4's `edit` inherits from that is narrower than *the 422 is small***. The
+    /// strategic message echoes *the patch that was sent*: a deeper unknown field came back
+    /// quoting k8rs's own body, environment value included. Strategic merge protects the operator
+    /// from the server's copy of the object and does nothing about the operator's own YAML, which
+    /// is exactly where `edit`'s unknown fields come from.
     pub fn patch(self) -> PatchParams {
         PatchParams {
             dry_run: self.0,
@@ -754,10 +787,43 @@ impl Record {
     /// belongs beside the outcome, where the operator's own sentence can read it too. Named in
     /// both places it was one clause printed twice on one line — and with the fault gone it is a
     /// `&'static str` again, which is what it was before a `format!` was needed here.
+    ///
+    /// **A refused arm said *not checked*, which is [`UNCHECKABLE`]'s meaning and not this one**
+    /// (NOTES § D224). Measured on a real `404`, an operator holding the apiserver's own audit log
+    /// beside this line found the request and a k8rs line denying it — invariant 4's *neither
+    /// record may lie*.
+    ///
+    /// **The fix for that overshot, and the fault decides rather than the arm** (`k8s-admin`,
+    /// 2026-09-04, measured against a port nothing was listening on). [`Outcome::NotSent`] is
+    /// reachable only from the `Err` of `call(DRY_RUN)` — true — but *that `Err`* is not *a check
+    /// that was sent*: a refused connect, a name that will not resolve, a request that could not
+    /// be built and an `exec` login that exits non-zero all reach that `Err` with nothing on the
+    /// wire, and one flat *the check was sent* is then the same lie one column left that
+    /// [`verdict`] was corrected for. Three answers, because there are three things to be told:
+    /// the cluster answered, or it never left this machine, or **k8rs does not know** — the
+    /// honest third that a [`Fault`] alone cannot resolve, since a connection dying after the
+    /// request went out and one that never opened arrive as the same [`Fault::Unanswered`].
+    ///
+    /// **Exhaustive and no `_` arm**, for [`Outcome::said`]'s reason: a twelfth [`Fault`] has to
+    /// choose which of the three it is, rather than inherit the loudest of them.
     fn check(&self, outcome: &Outcome) -> &'static str {
-        match outcome {
-            Outcome::NotSent { .. } => "not checked",
-            _ => self.accepted(),
+        let Outcome::NotSent { fault, .. } = outcome else {
+            return self.accepted();
+        };
+        match fault {
+            Fault::Refused | Fault::Rejected | Fault::Conflict | Fault::Expired | Fault::Gone => {
+                "the check was sent and did not pass"
+            }
+            // The four that never left this machine — [`answered`], a few functions below,
+            // groups them with the *answered* faults instead, and is right to: it asks whether
+            // anything was changed, which these did not, and this asks whether the request went
+            // out, which these did not either. One helper cannot answer both.
+            Fault::Kubeconfig | Fault::NoContext | Fault::BadEntry | Fault::NoCredential => {
+                "the check never left this machine"
+            }
+            Fault::Unanswered | Fault::Unfinished => {
+                "k8rs does not know whether the check reached the cluster"
+            }
         }
     }
 }
@@ -798,12 +864,17 @@ fn verdict(outcome: &Outcome) -> String {
         Outcome::Changed => {
             "the object changed while this was open, so nothing was changed".to_string()
         }
-        // **"Sent" and "changed" are not the same word.** This arm is reached only from the
-        // `Err` of a `dryRun=All` that went out, so *"nothing was sent"* — what this said until
-        // 2026-09-04 — is false for every [`Fault`] it can carry: an operator holding this
+        // **"Sent" and "changed" are not the same word.** *"Nothing was sent"* — what this said
+        // until 2026-09-04 — is false wherever the check did go out: an operator holding this
         // beside the apiserver's own audit log finds the `?dryRun=All` at that timestamp and a
         // k8rs line denying it, and invariant 4 is that neither record may lie. What was never
-        // sent is the change.
+        // sent is *the change*, and that is true of every [`Fault`] this arm can carry.
+        //
+        // **The premise the first draft of this reasoned from was that the arm is reachable
+        // only from the `Err` of a `dryRun=All` that went out.** It is not — a refused connect
+        // reaches it with nothing on the wire — and one column left, in [`Record::check`], that
+        // step became a shipped lie. This sentence survived it because it says nothing about
+        // the check; the distinction lives there, where it has to.
         //
         // **And it names the fault, because [`Record::check`] is not the only reader**
         // (`k8s-admin`, 2026-09-04). Whoever ran the operation sees [`Performed::plainly`] and
@@ -930,6 +1001,33 @@ fn cleaned(value: &str, cap: usize) -> String {
     value
 }
 
+/// **The subject of a refusal that names a kind: the word itself, or the clause where quoting it
+/// back would not be quoting what was typed** (invariant 9, invariant 14, NOTES § D224).
+///
+/// A kind word out of argv is free text, and [`cleaned`] can do two things to it that a sentence
+/// then lies about (`tester`, 2026-09-04). It can **empty** it — `""` and a lone `U+202E` both
+/// produced *k8rs cannot restart a  — restarting replaces…*, a gap where the kind should be, the
+/// class `src/main.rs`'s `ops_object` settled once for the empty half of `--object web/`. And it
+/// can **change** it into a kind the operation does serve: `deployment\n`, `deploy\0ment` and
+/// `dep\u{200b}loyment` all produced *k8rs cannot restart a deployment — … k8rs does that for a
+/// deployment, a statefulset and a daemonset*, one sentence contradicting its own second clause.
+///
+/// One rule covers both, and it is the honest one: **the word is quoted only where the strip left
+/// it alone**. Anything else is a word k8rs was not given, so the clause costs itself and the
+/// sentence that follows still names every kind the operation does serve.
+///
+/// **Both operations read this.** Neither is reachable from argv today — `known_kind` hands these
+/// functions one of six canonical singulars — but both are `pub` in a file that freezes at the end
+/// of this phase, and [`scalable`] has the identical shape and the identical exposure. A fix that
+/// left the two disagreeing is the defect the family review exists to catch.
+fn a_kind(kind: &str) -> String {
+    if kind.is_empty() || cleaned(kind, IDENTIFIER) != kind {
+        "that kind".to_string()
+    } else {
+        format!("a {kind}")
+    }
+}
+
 // --- THE MUTATION CONTRACT END ---
 
 // --- SCALE START ---
@@ -985,12 +1083,13 @@ pub fn scalable(kind: &str) -> Result<ApiResource, String> {
         "deployment" => Ok(ApiResource::erase::<Deployment>(&())),
         "statefulset" => Ok(ApiResource::erase::<StatefulSet>(&())),
         "replicaset" => Ok(ApiResource::erase::<ReplicaSet>(&())),
-        // Cleaned and bounded like every other outside string this file prints (invariant 9,
-        // NOTES § D213) — `scalable` is public and the word reaching it came off a command line.
+        // **The kind word is quoted back only where it survives the strip unchanged**
+        // ([`a_kind`], NOTES § D224) — `scalable` is public and the word reaching it came off a
+        // command line.
         other => Err(format!(
-            "k8rs cannot scale a {} — scaling changes how many copies are running, and k8rs does \
+            "k8rs cannot scale {} — scaling changes how many copies are running, and k8rs does \
              that for {SCALABLE}",
-            cleaned(other, IDENTIFIER)
+            a_kind(other)
         )),
     }
 }
@@ -1245,6 +1344,360 @@ fn noun(count: i64) -> &'static str {
 }
 
 // --- SCALE END ---
+
+// --- RESTART START ---
+//
+// **A sibling of SCALE and not a variation on it** (todo.md 3777): the same guards, the same
+// [`unaddressable`], the same one-closure-two-passes call into [`perform`]. Two things differ, and
+// both are rulings rather than taste — nothing is read before the patch, and the patch is of the
+// workload object itself rather than of a subresource.
+//
+// **k8rs builds the patch and does not call `Api::restart`** (NOTES § D215). That helper writes
+// `kube.kubernetes.io/restartedAt` where `kubectl rollout restart` writes [`RESTARTED_AT`], so the
+// command log would teach a line that produces a *second* rollout when the operator runs it; and
+// it builds its own `PatchParams::default()` internally, so neither `dryRun=All` nor
+// `fieldValidation=Strict` could ride with it. Six lines here buy the right key and both
+// parameters.
+//
+// **`Patch::Strategic`, and it is a safety property before it is a fidelity one**
+// (NOTES § D223 ruling 4). NOTES § D217's `422` hands back the object the server patched, and for
+// a workload that object carries annotations, `managedFields` and
+// `spec.template.spec.containers[].env[].value` — measured at 4859 bytes on a trivial Deployment,
+// past [`FREE_TEXT`], with the annotations inside the first few hundred bytes, so truncation does
+// not redact anything. A strategic merge patch is answered with k8rs's own six lines instead
+// (`patch.go:770-786` rather than `:353`), and it is what `kubectl rollout restart` sends anyway —
+// so invariant 4's *equivalent command* and the exposure fix are one choice.
+//
+// **Nothing is read before the patch** (NOTES § D223 ruling 3), which is the other half of the
+// same exposure: a `GET` of a Deployment would pull those container environments into k8rs for a
+// dialog that shows none of them. So `uid` and `version` are both `None`, and a missing object is
+// refused by the dry-run in the apiserver's own words.
+//
+// **What the check's *answer* says is read, and that is not the same thing** (NOTES § D224). The
+// apiserver accepts this patch on a paused Deployment and changes nothing an operator can see, so
+// the consequence, the result sentence and the taught command all lied at once and no preflight
+// could catch it. [`paused`] takes one `bool` off the response `perform` is already handed, inside
+// the closure, and the workload is dropped there — a fact k8rs was sent, never a read k8rs went
+// looking for.
+//
+// **A pod is refused in words and never deleted** (NOTES § D223 ruling 1). Restarting a pod is a
+// `DELETE`, and both things a `DELETE` needs — invariant 2's typed name made structural, and
+// whether a delete is checkable at all — belong to todo.md 3811. `screens/dialogs.md` rule 4's
+// dialog is Phase 11's, over the path that box will have proven.
+//
+// **`checkable` is `true` and the taught line carries no dry-run flag**, which is not a
+// contradiction: the API dry-runs an ordinary `PATCH` on an ordinary path (NOTES § D215), and
+// `kubectl rollout restart` has no `--dry-run` flag at all. So k8rs says it checked this one and
+// no sentence here claims the taught command could.
+
+/// **The annotation `kubectl rollout restart` writes, and the whole reason this operation does not
+/// call `Api::restart`** (NOTES § D215, measured against kubectl v1.36.3).
+///
+/// Any change to `spec.template` starts a rollout; what this key buys is that the operator's next
+/// `kubectl rollout restart` overwrites *this* annotation instead of adding a second one beside
+/// it — which would be a second rollout, from the command log's own line (invariant 4).
+const RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
+
+/// **What `restart` can be pointed at, in the words the refusal uses** — NOTES § Operations' `r`
+/// row.
+const RESTARTABLE: &str = "a deployment, a statefulset and a daemonset";
+
+/// **Why a pod has no restart** — NOTES § D223 ruling 1, and `screens/dialogs.md` rule 4's own
+/// *nobody learns "restart" as a synonym for "delete" by accident*.
+///
+/// **It names what k8rs does restart**, because a reader told only *no* has to go and find the
+/// table this sentence is (invariant 14) — and it reads [`RESTARTABLE`] rather than spelling the
+/// three kinds a second time. It is a function and not a `const` for exactly that: a `const` cannot
+/// interpolate one, and a hand-written twin of a kind list is the copy NOTES § D103 is named for.
+/// **It was written both ways, one line apart, before it was caught** (`dev-core`, 2026-09-04).
+///
+/// **Three clauses were rewritten because they taught nothing** (`k8s-admin`, NOTES § D224).
+/// *letting whatever made it start another one* garden-paths on *made it start*; *which is not
+/// what the word restart does here* leaves *here* undefined and says nothing a reader can act on;
+/// and the sentence ended naming three kinds the reader had not asked about without ever saying
+/// what to do. It now ends with the instruction: find the object this pod belongs to and restart
+/// that.
+fn pod_is_a_delete() -> String {
+    format!(
+        "k8rs will not restart a pod: restarting a pod means deleting it and letting the thing \
+         that created it start a replacement. k8rs restarts {RESTARTABLE} — if this pod belongs \
+         to one, restart that instead"
+    )
+}
+
+/// **What a restart of one kind is: the resource to send it to, and what it does in plain words**
+/// — or the sentence that says what k8rs restarts instead (invariant 14).
+///
+/// **One `match` decides the type and the consequence together**, so a fourth arm cannot be added
+/// with the wrong sentence attached: there is no second place for a *consequence* to live.
+/// [`RESTARTABLE`] is still a separate sentence naming the same three kinds, exactly as
+/// [`SCALABLE`] is beside [`scalable`], and nothing in the language keeps that one in step — what
+/// does is `restart_takes_the_three_kinds_it_works_on_and_names_them_when_it_refuses_the_rest`,
+/// which feeds every kind `src/main.rs`'s `KINDS` holds.
+///
+/// **The group, the version and the plural are `k8s-openapi`'s and are not spelled here** —
+/// [`scalable`]'s own reason, off the same types `k8s.rs`'s permanent watches are built over.
+///
+/// **The consequences differ by kind because what the object is differs** (invariant 14): a
+/// Deployment and a StatefulSet have copies, a DaemonSet has one copy per node it runs on, and a
+/// StatefulSet is worked through in a direction. Saying one sentence for all three would be a
+/// sentence that is true of one of them.
+///
+/// **The three are `screens/dialogs.md` § Restart's own, and every one of them was wrong here
+/// first** (NOTES § D224). They promised *a few at a time*, *one at a time and in order* and *a
+/// node at a time* — a pacing the cluster owns and k8rs deliberately reads none of
+/// (NOTES § D223 ruling 3) — and four configurations on a real cluster falsified them, three of
+/// which need no feature gate: a DaemonSet with `maxUnavailable: 3` took every node down at once,
+/// a `partition`ed StatefulSet left two of three copies on the old template indefinitely, a
+/// `nodeSelector`'d DaemonSet ran on one node of three, and `OnDelete` moved nothing on either
+/// kind.
+///
+/// ***Asks* is the load-bearing word.** The patch is a request and the controller decides, which
+/// stays true under `paused`, `OnDelete`, `partition` and every pacing knob at once. Each sentence
+/// then names *that* the object has such settings without naming one, so nothing here reads a
+/// field ruling 3 keeps k8rs out of.
+///
+/// **The rule this doc used to state is not a rule, and it is written down so it is not read back
+/// out of the code.** *Hedge where the truth is worse than the words and not where it is milder*
+/// put the one hedge on the Deployment and named `Recreate`; a `RollingUpdate` Deployment with
+/// `maxSurge: 0` stops every copy first as well, and a `partition`ed StatefulSet stops short of
+/// *every copy* — milder, and just as false. A setting decides the pace on all three kinds, so
+/// all three say so.
+fn rollout(kind: &str) -> Result<(ApiResource, &'static str), String> {
+    match kind {
+        "deployment" => Ok((
+            ApiResource::erase::<Deployment>(&()),
+            "This asks Kubernetes to replace every copy of your app with a new one. How many stop \
+             at the same time is a setting on this deployment — it can be a few, or all of them \
+             at once. A paused deployment will not start until you resume it.",
+        )),
+        "statefulset" => Ok((
+            ApiResource::erase::<StatefulSet>(&()),
+            "This asks Kubernetes to replace every copy of your app with a new one, working down \
+             from the highest-numbered copy. How many stop at the same time, how far down it \
+             goes, and whether it waits for you to delete a copy yourself are all settings on \
+             this statefulset.",
+        )),
+        "daemonset" => Ok((
+            ApiResource::erase::<DaemonSet>(&()),
+            "This asks Kubernetes to replace the copy of your app on each node it runs on. How \
+             many nodes it takes at a time, and whether it waits for you to delete a copy \
+             yourself, are settings on this daemonset.",
+        )),
+        // NOTES § D223 ruling 1 — its own sentence, because *k8rs cannot restart a pod* would be
+        // true of a word nobody uses that way and would teach nothing.
+        "pod" => Err(pod_is_a_delete()),
+        // **The one refused kind whose copies an operator would actually want replaced**
+        // (`k8s-admin`, NOTES § D224), so it gets the answer rather than the general sentence,
+        // which named what restart works on and never what to do about *this*.
+        //
+        // **`normally` and not `the deployment that owns it`**: a ReplicaSet can be created on its
+        // own, and k8rs has read no `ownerReferences` here to know which this is
+        // (NOTES § D223 ruling 3).
+        "replicaset" => Err(format!(
+            "k8rs cannot restart a replicaset: a replicaset is normally made by a deployment, and \
+             restarting that deployment is what replaces its copies. k8rs restarts {RESTARTABLE}"
+        )),
+        // **The kind word is quoted back only where it survives the strip unchanged**
+        // ([`a_kind`], NOTES § D224) — [`restartable`] is public and the word reaching it came off
+        // a command line.
+        other => Err(format!(
+            "k8rs cannot restart {} — restarting replaces the copies an object is running, and \
+             k8rs does that for {RESTARTABLE}",
+            a_kind(other)
+        )),
+    }
+}
+
+/// **The six lines `kubectl rollout restart` sends** — and the media type that keeps a rejection
+/// from quoting the whole object back (NOTES § D223 ruling 4, § D217).
+///
+/// **Built once, outside the closure [`perform`] calls twice**, so both passes carry the same
+/// stamp. A `clock()` inside that closure would dry-run one annotation value and send another,
+/// which is the one thing the one-closure shape exists to prevent.
+///
+/// **The `Patch` variant is asserted here and its media type one link along.** kube keeps
+/// `Patch::content_type` `pub(crate)` (`kube-core-4.2.0/src/params.rs:637`), so nothing in this
+/// crate can read it off a patch; what `ops_tests.rs` does instead is assert this function's
+/// variant, and assert separately — off a request `Request::patch` built — that
+/// `Patch::Strategic` is `application/strategic-merge-patch+json` on the wire.
+fn restart_patch(stamp: &Timestamp) -> Patch<Value> {
+    Patch::Strategic(json!({
+        "spec": { "template": { "metadata": { "annotations": {
+            RESTARTED_AT: stamp.to_string()
+        } } } }
+    }))
+}
+
+/// **Whether the workload the cluster answered with is paused** — the one fact [`restart`] keeps
+/// off a response it otherwise drops whole (NOTES § D224).
+///
+/// **This is not a pre-read, and NOTES § D223 ruling 3 is not bent by it.** Ruling 3 forbids a
+/// `GET` *before* the patch; this reads the answer to a `dryRun=All` k8rs has already sent and is
+/// already handed. What it does not do is *hold* the workload: the `bool` is taken inside the
+/// closure and the [`DynamicObject`] is dropped there, so [`Checked`] carries a flag rather than
+/// a Deployment with `spec.template.spec.containers[].env[].value` in it, for as long as a dialog
+/// is open and somebody is reading it.
+///
+/// **Why the flag is worth a call at all** (NOTES § D224, measured on a real cluster): on a paused
+/// Deployment the apiserver accepts this patch, k8rs said *the change was made* and exited `0`,
+/// and twelve seconds later the three pods had the same names — while the line k8rs printed,
+/// `kubectl rollout restart`, exits `1` with *can't restart paused deployment*. Three records
+/// lying at once, and the preflight that exists to catch it cannot, because the request is valid.
+///
+/// **`spec.paused` is a Deployment field and nothing invents one for the other two.** A
+/// StatefulSet and a DaemonSet have no pause, so their answers simply do not carry it and this is
+/// `false` — no kind is matched on here, because the object's own shape already decides it.
+fn paused(workload: &DynamicObject) -> bool {
+    workload.data.pointer("/spec/paused") == Some(&Value::Bool(true))
+}
+
+/// **Whether `restart` works on a kind, and the resource it is when it does** — or the sentence
+/// that says what it works on instead (invariant 14).
+///
+/// **It is `pub` because the driver reads it before the audit log is opened**
+/// (NOTES § D220 ruling 7), and it is [`rollout`] with the consequence dropped: the driver has no
+/// use for a sentence it is not going to show.
+pub fn restartable(kind: &str) -> Result<ApiResource, String> {
+    rollout(kind).map(|(resource, _)| resource)
+}
+
+/// **One restart as the line asked for it** — everything [`restart`] needs that is not the
+/// connection. [`Scaling`]'s shape without the count: a restart is described by its kind alone.
+///
+/// **`namespace` is an `Option` and is not re-derived here** (NOTES § D220 ruling 4).
+pub struct Restarting<'a> {
+    /// The kubeconfig context this is performed against — [`Mutation::context`].
+    pub context: &'a str,
+    /// The `server:` that context reached — [`Mutation::server`].
+    pub server: &'a str,
+    /// The kind, spelled the way a manifest spells it: `deployment`, never `deploy`
+    /// (`screens/dialogs.md` § Scale).
+    pub kind: &'a str,
+    /// The object's own name.
+    pub name: &'a str,
+    /// The namespace it is in.
+    pub namespace: Option<&'a str>,
+}
+
+/// **A rolling restart, performed** — the whole of NOTES § Operations' `r` row.
+///
+/// `Err` is a refusal of the *request*, before anything has been sent and before anything has been
+/// recorded: a kind [`restartable`] does not serve, a namespace nobody named, or a name or a
+/// namespace that is not an address. **None of them has sent anything at all** — which is where
+/// this differs from [`scale`], whose last refusal comes back from a `GET` — and none of them is a
+/// mutation that was attempted, so none writes an audit line (NOTES § D221).
+///
+/// **The stamp is read once, before the closure, and both passes carry the same one.** A `clock()`
+/// inside the closure would dry-run one annotation value and send another, which is the whole
+/// thing [`perform`]'s one-closure shape exists to prevent.
+///
+/// **UTC `Z` and not kubectl's local offset** (NOTES § D223 ruling 2): the value's only contract is
+/// an RFC3339 instant that differs from the last one, and the taught line carries no timestamp for
+/// this to diverge from.
+///
+/// **The check's answer decides one thing before the confirmation: whether this Deployment is
+/// paused** (NOTES § D224). [`Checked`] carries the `bool` [`paused`] took off the response, and
+/// what the caller does with it is the caller's — `src/main.rs`'s `restarted` puts a line above
+/// the prompt. **The operator still decides, and the exit code does not move**: writing the
+/// annotation on a paused Deployment is not destructive and it takes effect on resume. What was
+/// wrong was being told the copies had been replaced.
+///
+/// **It also carries whatever precision the clock has, where kubectl truncates to the second** —
+/// measured on the real binary, `2026-09-04T13:57:59.520444947Z`. Both are RFC3339 and the
+/// annotation is validated by nothing, and the finer one is the one that *keeps* the contract: two
+/// `kubectl rollout restart` runs inside one second write the identical value and start no second
+/// rollout, and k8rs's cannot. Nothing is rounded to buy a resemblance the taught line never
+/// claims.
+pub async fn restart<Show, Ask, Asked>(
+    client: &Client,
+    restarting: &Restarting<'_>,
+    clock: impl Fn() -> Timestamp,
+    audit: &mut impl Write,
+    show: Show,
+    ask: Ask,
+) -> Result<Performed, String>
+where
+    Show: FnOnce(&Shown<'_>),
+    Ask: FnOnce(Checked<bool>) -> Asked,
+    Asked: Future<Output = Answer>,
+{
+    let (resource, consequence) = rollout(restarting.kind)?;
+    let object = format!("{}/{}", restarting.kind, restarting.name);
+    let Some(namespace) = restarting.namespace else {
+        return Err(format!(
+            "k8rs will not restart {} without being told which namespace it is in",
+            cleaned(&object, FREE_TEXT)
+        ));
+    };
+    // The two guards are [`scale`]'s, for [`scale`]'s reason: the name and the namespace become
+    // segments of the request path, so they are checked where the path is built and not only
+    // where the line was parsed.
+    if !object_name(restarting.name) {
+        return Err(unaddressable(&object, "an object's own name"));
+    }
+    if !namespace_name(namespace) {
+        return Err(unaddressable(&object, "the name of a namespace"));
+    }
+    let api: Api<DynamicObject> = Api::namespaced_with(client.clone(), namespace, &resource);
+    // **The kind is spelled out — `deployment/web`, never `deploy/web`** (`screens/dialogs.md`
+    // § Scale), and there is no dry-run flag on it because `kubectl rollout restart` has none
+    // (NOTES § D223 ruling 4).
+    let kubectl = format!("kubectl rollout restart {object} -n {namespace}");
+    // **Derived from the same `ApiResource` the call is built with**, so the audit line cannot
+    // name a path the request did not take: `Api::patch` is `Request::patch`, which is this base
+    // and the name — no subresource, which is what makes this the first operation to reach it
+    // (`kube-core-4.2.0/src/request.rs:148`).
+    let path = format!(
+        "{}/{}",
+        DynamicObject::url_path(&resource, Some(namespace)),
+        restarting.name
+    );
+    let patch = restart_patch(&clock());
+    let mutation = Mutation {
+        context: restarting.context,
+        server: restarting.server,
+        namespace: Some(namespace),
+        object: &object,
+        // **Nothing was read, so there is no `uid` to give** (NOTES § D223 ruling 3) — the
+        // field's own documented case for a caller with none.
+        uid: None,
+        consequence,
+        kubectl: &kubectl,
+        verb: "PATCH",
+        path: &path,
+        version: None,
+        // **A restart is checkable and this one asks** (NOTES § D215): a `PATCH` on an ordinary
+        // path is dry-run by every cluster, and only kube's own helper could not carry the
+        // parameter.
+        checkable: true,
+    };
+    // Both passes are one closure and one body — [`scale`]'s own borrows, for [`perform`]'s own
+    // reason.
+    //
+    // **The object the calls return is mapped down to one `bool` here rather than carried into
+    // [`Checked`]**, which is NOTES § D223 ruling 3 pointed at the direction that box did not name
+    // (`dev-core`, 2026-09-04). A `PATCH` is answered with the patched workload whatever
+    // k8rs does, so kube deserialises one either way; what the `map` decides is whether k8rs then
+    // *holds* it — with container environments in it — for as long as the dialog is open and the
+    // person at the keyboard is reading. So [`Checked`] is a `Checked<bool>` and never a
+    // `Checked<DynamicObject>`, and the one fact taken off the response is [`paused`], which is
+    // the check's own answer to a question invariant 4 turns on (NOTES § D224).
+    // [`Checked::returned`] still carries whatever an operation maps to, which is v0.4's `edit`
+    // ([`Checked`]'s own doc).
+    let (api, patch) = (&api, &patch);
+    Ok(perform(&mutation, clock, audit, show, ask, move |pass| {
+        let params = pass.patch();
+        async move {
+            api.patch(restarting.name, &params, patch)
+                .await
+                .map(|workload| paused(&workload))
+        }
+    })
+    .await)
+}
+
+// --- RESTART END ---
 
 // --- THE AUDIT LOG START ---
 //

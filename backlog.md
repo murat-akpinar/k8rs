@@ -2307,6 +2307,64 @@ recorded reversal and a later box rather than a dev round
   in a box. Cosmetic, and it is the kind of thing Phase 11 transcribes wrong.
   Found by the PM, 2026-09-04
 
+- **`Pass::patch()` cannot see the `Patch` variant, so its two callers are safe
+  for two different reasons and the helper enforces neither.** `scale` sends
+  `Patch::Merge` and is safe because the `/scale` subresource's object is 681
+  bytes; `restart` sends `Patch::Strategic` and is safe because the media type
+  bounds a strict `422` to k8rs's own patch — measured at 109 bytes against
+  4895 for merge-patch on the same object. **And the helper's own doc is wrong
+  about the sibling it clears**: `scale`'s `/scale` `422` was enumerated from
+  `storage.go` as carrying no `managedFields`, and a real apiserver answers with
+  **646 bytes** — 485 of them the embedded object — carrying one `managedFields`
+  entry and a `status.selector` the doc does not mention. The safety conclusion
+  survives, a planted environment literal appearing in no `/scale` message, but
+  the enumeration states a fact the object contradicts. A third operation that patches a
+  workload with `Patch::Merge` leaks the whole object, environment values
+  included, into the audit line, and nothing between the author and the log
+  would say so. This is
+  [D215](NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)'s
+  shape for `checkable` — a free assertion an operation makes about itself —
+  with no guard and no box. `write-guard.py` is the plausible home. Found by
+  `k8s-admin`, 2026-09-04 ([D224](NOTES.md#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04))
+
+- **The `restartedAt` value k8rs wrote is on no line of the audit log.** The
+  attempt stamp and the annotation are read 41 µs apart from two `clock()` calls,
+  so *which restart wrote the annotation now on this object* is answered by a
+  nearest match rather than exactly. Harmless for one operator on one cluster;
+  it is the field `edit` will want, and it is a `Mutation` shape change rather
+  than a line. Found by `k8s-admin`, 2026-09-04
+
+- **The audit line's `kubectl:` field claims an equivalence a paused Deployment
+  breaks, and nothing beside it says so.** The paused run and the resumed run are
+  byte-identical on both audit lines but for the timestamps, and `grep -ci paus`
+  over the log is `0`. Nothing there lies about the *write* — the annotation was
+  made — but invariant 4's word for that field is **equivalent**, and on a paused
+  Deployment `kubectl rollout restart` exits `1` and changes nothing. The screen
+  was repaired by the warning; the record that outlives the screen was not, and
+  it is the record an incident is reconstructed from. **Costly rather than
+  cheap**, which is why it is here: the boolean is moved into `Checked` and then
+  into `ask`, `perform` is generic over `Response` and cannot inspect it, and
+  `Record::result_line` never sees it. Found by `k8s-admin`, 2026-09-04
+  ([D224](NOTES.md#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04))
+
+- **Two files answer *how do I name a kind word that did not survive the strip*
+  differently.** `main.rs`'s `known_kind` refusal echoes the stripped word **and
+  discloses the strip** (*"with what cannot print removed"*); `ops.rs`'s `a_kind`
+  declines to echo at all and says *that kind*. Nothing is wrong today — measured,
+  `known_kind` answers first for anything that is not one of six canonical
+  singulars, so nothing reachable from a command line changed meaning. But
+  `main.rs` goes away at Phase 12 and `ops.rs` freezes, and when the console calls
+  `restartable`/`scalable` with a discovered kind, `a_kind` becomes the reachable
+  one and the disclosure clause is what is lost. Found by `k8s-admin`, 2026-09-04
+
+- **A mistyped namespace is reported as a missing object.** Measured: the
+  apiserver returns `deployments.apps "web" not found` for a wrong *namespace*
+  exactly as it does for a wrong *name*, so `-n paymnets` answers *the cluster
+  has no object with that name* and points at the half that is right.
+  `in_words(Fault::Gone)` argues it names the half that is usually wrong, which
+  a namespace typo inverts. Recoverable — the dialog's first line and the audit
+  path both carry the namespace as typed. Found by `k8s-admin`, 2026-09-04
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with

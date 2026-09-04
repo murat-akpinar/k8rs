@@ -220,7 +220,14 @@ rules:
     verbs: ["patch"]                 # cordon / uncordon
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["patch", "update"]       # rollout restart, edit
+    # `get` is for the operator, not for k8rs: k8rs sends a bare PATCH and needs
+    # none, but `kubectl rollout restart` — the line the command log teaches —
+    # fetches the object first and 403s without it (NOTES § D224 finding 4).
+    # It widens nothing. A PATCH response *is* the object — measured at 6919
+    # bytes with a container environment value in it — so `patch` already reads
+    # the object whole for anyone willing to patch it harmlessly and read the
+    # answer. Removing `get` costs the operator their command and buys nothing.
+    verbs: ["get", "patch", "update"] # rollout restart, edit
   # scale is a subresource, and RBAC matches `resource/subresource` as one
   # string — the rule above does not carry these (NOTES § D222).
   - apiGroups: ["apps"]

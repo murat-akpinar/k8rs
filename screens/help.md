@@ -20,7 +20,7 @@ tool for beginners may not hide its verbs behind memory.
 │                                                                    │
 │  Changing things (each one asks first, and shows the command)      │
 │    s       run more or fewer copies       (scale)                  │
-│    r       restart, one copy at a time    (rollout restart)        │
+│    r       restart, at its own pace       (rollout restart)        │
 │    ctrl-d  delete — you type the name to confirm                   │
 ├────────────────────────────────────────────────────────────────────┤
 │                                                                    │

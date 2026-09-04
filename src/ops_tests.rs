@@ -435,8 +435,8 @@ async fn a_refused_check_stops_before_the_confirmation_and_keeps_what_the_server
             "shown".to_string(),
             "dry-run".to_string(),
             format!(
-                "{RESULT} · dry-run: not checked · the change was never sent — the cluster would \
-                 not allow it: {denial}\n"
+                "{RESULT} · dry-run: the check was sent and did not pass · the change was \
+                 never sent — the cluster would not allow it: {denial}\n"
             ),
         ],
         "a refused check either asked for a confirmation it could not honour, or went on to the \
@@ -489,8 +489,8 @@ async fn an_invalid_object_is_a_rejected_request_and_keeps_the_servers_explanati
     assert_eq!(
         transcript(&trace).last().cloned(),
         Some(format!(
-            "{RESULT} · dry-run: not checked · the change was never sent — the cluster would not \
-             accept the request k8rs made: {invalid}\n"
+            "{RESULT} · dry-run: the check was sent and did not pass · the change was never \
+             sent — the cluster would not accept the request k8rs made: {invalid}\n"
         )),
         "the audit log does not record which field the server rejected"
     );
@@ -1451,6 +1451,32 @@ fn patch_uri(pass: Pass) -> String {
     uri
 }
 
+/// **A plain `PATCH` of the object, and the media type it goes out as** — `Request::patch`, which
+/// `restart` is the first operation to reach (todo.md 3777).
+///
+/// **A different entry point from the one above.** `Api::patch_scale` delegates to
+/// `Request::patch_subresource`; `Api::patch` delegates to `Request::patch`
+/// (`kube-core-4.2.0/src/request.rs:148`), which builds its own target and calls the same
+/// `PatchParams::populate_qp`. Nothing in the suite had read that one until this box, and nothing
+/// would have noticed it dropping either parameter.
+///
+/// **The patch is `restart`'s own** ([`restart_patch`]), so the media type this returns is the one
+/// that operation really sends — the half of NOTES § D223 ruling 4 that no other test can see,
+/// since kube keeps `Patch::content_type` `pub(crate)`.
+fn plain_patch(pass: Pass) -> (String, String) {
+    let request = deployments()
+        .patch("web", &pass.patch(), &restart_patch(&stamp()))
+        .expect("a patch request built from a valid name and this file's own params");
+    let uri = request.uri().to_string();
+    let media = request
+        .headers()
+        .get("content-type")
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).to_string())
+        .unwrap_or_default();
+    println!("PATCH {uri} · content-type {media}");
+    (uri, media)
+}
+
 /// A delete's URI and body, the second of which is where its `dryRun` lives.
 fn delete_wire(pass: Pass) -> (String, String) {
     let request = deployments()
@@ -1558,6 +1584,67 @@ fn both_passes_ask_the_server_to_reject_an_unknown_field() {
         "a delete now carries a fieldValidation this file's doc comment says it cannot — \
          {uri} · {body}"
     );
+}
+
+/// **A plain `PATCH` is a dry run on the check and is not one on the change** — the same claim as
+/// the two tests above, over the entry point neither of them touches (`tester`, 2026-09-04).
+///
+/// **The negative is the point.** `Request::patch` reaching a different `populate_qp`, or
+/// [`Pass::patch`] answering the same params either way, would be a restart that is confirmed and
+/// never made — invariant 4's *neither record may lie*.
+#[test]
+fn a_plain_patch_of_the_object_is_a_dry_run_on_the_check_and_not_on_the_change() {
+    assert!(
+        plain_patch(DRY_RUN).0.contains("dryRun=All"),
+        "a plain patch built from the check pass would change the cluster: nothing in the query \
+         string tells the API server this is a dry run"
+    );
+    assert!(
+        !plain_patch(FOR_REAL).0.contains("dryRun"),
+        "the real patch of the object is still a dry run, so the change is confirmed and never \
+         made"
+    );
+}
+
+/// **Both passes of a plain `PATCH` ask the server to reject a field the cluster does not have** —
+/// [`Pass::patch`]'s `fieldValidation=Strict`, over `Request::patch`.
+///
+/// **On the change and not only on the check**, for the reason the subresource's own test gives:
+/// a `Strict` that rode only on [`DRY_RUN`] would let the real call answer `200 OK`, alter
+/// nothing, and be recorded as a successful mutation.
+#[test]
+fn both_passes_of_a_plain_patch_ask_the_server_to_reject_an_unknown_field() {
+    for (pass, which) in [(DRY_RUN, "check"), (FOR_REAL, "change")] {
+        assert!(
+            plain_patch(pass).0.contains("fieldValidation=Strict"),
+            "the {which} would accept a field the cluster does not have"
+        );
+    }
+}
+
+/// **`restart` sends a strategic merge patch, and that is a safety property before it is a
+/// fidelity one** (NOTES § D223 ruling 4, § D217).
+///
+/// **What the media type decides is what a `422` hands back.** A `application/merge-patch+json`
+/// rejection on a workload is answered with the *patched object* — 4859 bytes on a trivial
+/// Deployment, carrying `managedFields`, annotations and `spec.template.spec.containers[].env[]
+/// .value` — and that message is what the audit line quotes. A strategic merge patch is answered
+/// with k8rs's own six lines instead (`patch.go:770-786` rather than `:353`). It is also what
+/// `kubectl rollout restart` sends, so the exposure fix and invariant 4's *equivalent command* are
+/// one choice.
+///
+/// **Nothing else in the suite can see this**: kube keeps `Patch::content_type` `pub(crate)`, and
+/// the stub API server the end-to-end tests drive logs the method, the target and the body — not
+/// the headers.
+#[test]
+fn a_restarts_patch_goes_out_as_a_strategic_merge_and_not_as_a_json_merge() {
+    for pass in [DRY_RUN, FOR_REAL] {
+        assert_eq!(
+            plain_patch(pass).1,
+            "application/strategic-merge-patch+json",
+            "a rejection of this patch would hand the whole workload back into the audit log"
+        );
+    }
 }
 
 // --- SCALE ---
@@ -1676,6 +1763,26 @@ async fn stub(
     (client, asked)
 }
 
+/// **A client pointed at a loopback port nothing is listening on** — [`stub`]'s address without
+/// [`stub`]'s server.
+///
+/// **The port is bound and released rather than picked**, for [`stub`]'s own reason: there is no
+/// hardcoded loopback URL in this tree for `scripts/security-guard.py` to be right about, and a
+/// number chosen by hand is a number some other process may hold.
+async fn dead_port() -> Client {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("the port it picked");
+    drop(listener);
+    Client::try_from(kube::Config::new(
+        format!("http://{address}")
+            .parse()
+            .expect("an address the kernel just gave us"),
+    ))
+    .expect("a client over plain http asks the machine for nothing")
+}
+
 /// The scale `k8rs ops scale deploy/web 3 -n payments` describes.
 fn asking(count: i32) -> Scaling<'static> {
     Scaling {
@@ -1750,19 +1857,54 @@ fn scale_takes_the_three_kinds_it_works_on_and_names_them_when_it_refuses_the_re
     );
 }
 
-/// **A kind word out of argv is free text and is stripped before it is quoted back**
-/// (invariant 9). `scalable` is `pub` and the word reaching it came off a command line.
+/// **A kind word out of argv is free text, and a refusal quotes it back only where the strip left
+/// it alone** (invariant 9, invariant 14, NOTES § D224).
+///
+/// **Two shapes the old sentence got wrong, both measured** (`tester`, 2026-09-04). An **empty**
+/// word — `""`, and a lone `U+202E` that cleans to one — printed *k8rs cannot scale a  — …*, a
+/// gap where the kind should be. And a word the strip **changed into a served kind** —
+/// `deployment\n`, `deploy\0ment`, `dep\u{200b}loyment` — printed *k8rs cannot scale a
+/// deployment … k8rs does that for a deployment, …*, one sentence contradicting its own second
+/// clause.
+///
+/// **Neither is reachable from a command line**, because `known_kind` hands these functions one of
+/// six canonical singulars — and both functions are `pub` in a file that freezes at the end of
+/// this phase.
+///
+/// **The word that survives the strip is still quoted**, which is what stops [`a_kind`] being
+/// green by refusing to name anything.
 #[test]
 fn a_crafted_kind_cannot_rewrite_the_terminal_on_its_way_into_scales_refusal() {
-    let refusal = scalable("pod\u{1b}[2J\u{202e}").expect_err("that is not a kind scale works on");
+    for crafted in [
+        "pod\u{1b}[2J\u{202e}",
+        "",
+        "\u{202e}",
+        "deployment\n",
+        "deploy\0ment",
+        "dep\u{200b}loyment",
+    ] {
+        let refusal = scalable(crafted).expect_err("that is not a kind scale works on");
+        println!("{crafted:?}\n{refusal}");
+        assert!(
+            !refusal.chars().any(crate::k8s::unprintable),
+            "{crafted:?} carried an escape into the refusal: {refusal:?}"
+        );
+        assert!(
+            refusal.starts_with("k8rs cannot scale that kind — "),
+            "{crafted:?} was quoted back as a word nobody typed: {refusal:?}"
+        );
+        assert!(
+            refusal.contains(SCALABLE),
+            "{crafted:?} was refused without being told what scale works on: {refusal:?}"
+        );
+    }
+    // **A word the strip leaves alone is still named**, which is the half that would go missing
+    // if `a_kind` simply stopped quoting anything.
+    let refusal = scalable("widget").expect_err("that is not a kind scale works on");
     println!("{refusal}");
     assert!(
-        !refusal.chars().any(crate::k8s::unprintable),
-        "a kind word carried an escape into the refusal: {refusal:?}"
-    );
-    assert!(
-        refusal.contains("cannot scale a pod"),
-        "the strip ate the readable part of the word too: {refusal:?}"
+        refusal.starts_with("k8rs cannot scale a widget — "),
+        "{refusal:?}"
     );
 }
 
@@ -2383,6 +2525,1234 @@ fn everything_that_is_not_a_change_says_so_and_none_of_it_exits_zero() {
         assert!(
             !performed.changed(),
             "{expected:?} was reported as a cluster that changed"
+        );
+    }
+}
+
+// --- RESTART ---
+//
+// **The wire again, and for a second reason.** `restart` is the first operation to patch the
+// object itself, so what these assert is that exactly two requests go out, both on
+// `…/deployments/web` with no subresource on the end, carrying the annotation `kubectl` writes and
+// not the one kube's helper writes (NOTES § D215) — and that the first one is a dry run and the
+// second is not.
+//
+// **What no socket can see is the media type**, because the stub logs the method, the target and
+// the body. NOTES § D223 ruling 4's `Patch::Strategic` is asserted twice instead, off values:
+// [`restart_patch`]'s own variant here, and `Request::patch`'s header for that variant in
+// § WHAT THE PASS PUTS ON THE WIRE.
+
+/// The restart `k8rs ops restart deploy/web -n payments` describes.
+fn restarting() -> Restarting<'static> {
+    Restarting {
+        context: "kind-k8rs",
+        // A reserved host, for `scaling()`'s own reason: `scripts/security-guard.py` reads a
+        // loopback URL in this tree as a second outbound path and is right to.
+        server: "https://k8rs-tests.invalid:41751",
+        kind: "deployment",
+        name: "web",
+        namespace: Some("payments"),
+    }
+}
+
+/// **What a cluster hands back from a patched Deployment** — enough of one for `DynamicObject` to
+/// deserialise, and nothing `restart` reads: it reads the object it got back for exactly nothing
+/// (NOTES § D223 ruling 3).
+fn patched() -> String {
+    r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web",
+       "namespace":"payments","uid":"18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11",
+       "resourceVersion":"41752"},"spec":{},"status":{}}"#
+        .to_string()
+}
+
+/// **The same Deployment after `kubectl rollout pause`** — [`patched`] with the one field the
+/// check's answer is read for (NOTES § D224).
+fn paused_deployment() -> String {
+    r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web",
+       "namespace":"payments","uid":"18f0b6ee-2b0e-4b53-9b3e-6f4d3a2c0f11",
+       "resourceVersion":"41752"},"spec":{"paused":true},"status":{}}"#
+        .to_string()
+}
+
+/// **A `404` from a cluster that has no object by that name** — the shape measured against a real
+/// apiserver, `details` and all (NOTES § D224).
+fn not_found(name: &str) -> (String, String) {
+    (
+        "404 Not Found".to_string(),
+        format!(
+            r#"{{"kind":"Status","apiVersion":"v1","status":"Failure","code":404,
+               "reason":"NotFound","message":"deployments.apps \"{name}\" not found",
+               "details":{{"name":"{name}","group":"apps","kind":"deployments"}}}}"#
+        ),
+    )
+}
+
+/// **A clock that reads one second later every time it is asked** — the only way to tell *the
+/// stamp was read once* from *the stamp was read per pass*, which a fixed clock cannot.
+///
+/// [`perform`] reads the clock twice of its own accord (the attempt line and the landing time),
+/// so the ticks a test sees are the operation's first and then those two.
+fn ticking(second: &std::cell::Cell<i64>) -> impl Fn() -> Timestamp + '_ {
+    move || {
+        let now = second.get();
+        second.set(now + 1);
+        Timestamp::from_second(now).expect("a timestamp inside jiff's range")
+    }
+}
+
+/// The `PATCH` a restart sends, as the stub logs it: the target, and the body under it.
+fn restart_call(query: &str) -> String {
+    format!(
+        "PATCH /apis/apps/v1/namespaces/payments/deployments/web{query} \
+         {{\"spec\":{{\"template\":{{\"metadata\":{{\"annotations\":\
+         {{\"kubectl.kubernetes.io/restartedAt\":\"2026-09-03T12:34:56Z\"}}}}}}}}}}"
+    )
+}
+
+/// **What `restart` can be pointed at, and what it says about everything else** —
+/// NOTES § Operations' `r` row, over every kind the driver lets through (NOTES § D220 ruling 7).
+///
+/// **`main.rs`'s `KINDS` is read, not copied**, for [`scalable`]'s own reason: the driver accepts
+/// all of them for all three verbs on purpose, and the refusal is what stops the ones restart does
+/// not serve.
+///
+/// **The pod is neither served nor refused with the general sentence** — it has its own, which is
+/// NOTES § D223 ruling 1 and is asserted below.
+#[test]
+fn restart_takes_the_three_kinds_it_works_on_and_names_them_when_it_refuses_the_rest() {
+    let works = [
+        ("deployment", "deployments"),
+        ("statefulset", "statefulsets"),
+        ("daemonset", "daemonsets"),
+    ];
+    let (mut served, mut refused) = (0, 0);
+    for kind in &crate::KINDS {
+        let kind = kind.singular;
+        if let Some((_, plural)) = works.iter().find(|(named, _)| *named == kind) {
+            served += 1;
+            let resource = restartable(kind).unwrap_or_else(|refusal| panic!("{kind}: {refusal}"));
+            println!(
+                "{kind} → {}/{} {}",
+                resource.group, resource.version, resource.plural
+            );
+            assert_eq!(
+                (
+                    resource.group.as_str(),
+                    resource.version.as_str(),
+                    resource.plural.as_str()
+                ),
+                ("apps", "v1", *plural),
+                "{kind} did not resolve to the apps/v1 resource its own type declares"
+            );
+        } else {
+            refused += 1;
+            let refusal =
+                restartable(kind).expect_err("a kind restart does not work on is refused");
+            println!("{kind}\n{refusal}");
+            // The pod's sentence is its own (NOTES § D223 ruling 1); so is the replicaset's,
+            // because a replicaset is the one refused kind whose copies an operator would
+            // actually want replaced (NOTES § D224). Every other kind gets the general one.
+            if kind == "pod" {
+                assert_eq!(
+                    refusal,
+                    pod_is_a_delete(),
+                    "the pod arm lost its own sentence"
+                );
+            } else if kind == "replicaset" {
+                assert!(
+                    refusal.contains("restarting that deployment is what replaces its copies"),
+                    "the replicaset refusal does not say what to restart instead: {refusal:?}"
+                );
+            } else {
+                assert!(
+                    refusal.contains(&format!("cannot restart a {kind}")),
+                    "{kind}: the refusal does not name the kind that was asked for: {refusal:?}"
+                );
+            }
+            // **Every refusal names what restart *can* be pointed at, in plain words**
+            // (invariant 14): a reader told only *no* has to go and find the table this is.
+            assert!(
+                refusal.contains("a deployment, a statefulset and a daemonset"),
+                "{kind}: the refusal does not say what restart works on: {refusal:?}"
+            );
+        }
+    }
+    // **The derived list says what it found** — an empty `KINDS`, or a renamed entry that no
+    // longer matches `works`, passes every assertion above by running none of them.
+    assert_eq!(
+        (served, refused),
+        (works.len(), crate::KINDS.len() - works.len()),
+        "the driver's kind table no longer splits into the three restart serves and the rest"
+    );
+}
+
+/// **A kind word out of argv is free text, and a refusal quotes it back only where the strip left
+/// it alone** (invariant 9, invariant 14, NOTES § D224).
+///
+/// **Two shapes the old sentence got wrong, both measured** (`tester`, 2026-09-04). An **empty**
+/// word — `""`, and a lone `U+202E` that cleans to one — printed *k8rs cannot restart a  — …*, a
+/// gap where the kind should be. And a word the strip **changed into a served kind** —
+/// `deployment\n`, `deploy\0ment`, `dep\u{200b}loyment` — printed *k8rs cannot restart a
+/// deployment … k8rs does that for a deployment, …*, one sentence contradicting its own second
+/// clause.
+///
+/// **Neither is reachable from a command line**, because `known_kind` hands these functions one of
+/// six canonical singulars — and both functions are `pub` in a file that freezes at the end of
+/// this phase.
+///
+/// **The word that survives the strip is still quoted**, which is what stops [`a_kind`] being
+/// green by refusing to name anything.
+///
+/// **The two siblings answer alike**, which is [`a_kind`]'s whole reason for being one function:
+/// `scalable` has the identical shape and the identical exposure, and a fix that left them
+/// disagreeing is what the family review exists to catch.
+#[test]
+fn a_crafted_kind_cannot_rewrite_the_terminal_on_its_way_into_restarts_refusal() {
+    for crafted in [
+        "job\u{1b}[2J\u{202e}",
+        "",
+        "\u{202e}",
+        "deployment\n",
+        "deploy\0ment",
+        "dep\u{200b}loyment",
+    ] {
+        let refusal = restartable(crafted).expect_err("that is not a kind restart works on");
+        println!("{crafted:?}\n{refusal}");
+        assert!(
+            !refusal.chars().any(crate::k8s::unprintable),
+            "{crafted:?} carried an escape into the refusal: {refusal:?}"
+        );
+        assert!(
+            refusal.starts_with("k8rs cannot restart that kind — "),
+            "{crafted:?} was quoted back as a word nobody typed: {refusal:?}"
+        );
+        assert!(
+            refusal.contains(RESTARTABLE),
+            "{crafted:?} was refused without being told what restart works on: {refusal:?}"
+        );
+    }
+    let refusal = restartable("widget").expect_err("that is not a kind restart works on");
+    println!("{refusal}");
+    assert!(
+        refusal.starts_with("k8rs cannot restart a widget — "),
+        "{refusal:?}"
+    );
+}
+
+/// **Restarting a pod is refused in words and nothing is deleted** (NOTES § D223 ruling 1,
+/// `screens/dialogs.md` rule 4).
+///
+/// **The sentence says what it would really be**, which is the whole of rule 4: nobody learns
+/// "restart" as a synonym for "delete" by accident. The dialog that offers the delete instead is
+/// Phase 11's, over the path todo.md 3811 will have proven.
+///
+/// **And no request goes out at all** — this box sends no `DELETE` anywhere, and the assertion is
+/// on the socket rather than on the sentence.
+#[tokio::test]
+async fn restarting_a_pod_says_it_would_be_a_delete_and_deletes_nothing() {
+    let refusal = restartable("pod").expect_err("a pod is not something k8rs restarts");
+    println!("{refusal}");
+    assert_eq!(
+        refusal,
+        pod_is_a_delete(),
+        "the pod arm lost its own sentence"
+    );
+    // **The last row is the one the sentence never had** (`k8s-admin`, NOTES § D224): it ended
+    // naming three kinds the reader had not asked about and never said what to do instead.
+    for owed in [
+        "will not restart a pod",
+        "means deleting it",
+        "letting the thing that created it start a replacement",
+        "a deployment, a statefulset and a daemonset",
+        "if this pod belongs to one, restart that instead",
+    ] {
+        assert!(refusal.contains(owed), "{owed:?} is not in {refusal:?}");
+    }
+
+    let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let pod = Restarting {
+        kind: "pod",
+        ..restarting()
+    };
+    let stopped = restart(
+        &client,
+        &pod,
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect_err("a pod is not something k8rs restarts");
+    assert_eq!(stopped, refusal);
+    assert!(
+        sent.lock().expect("the log is never poisoned").is_empty(),
+        "a pod restart sent something to the cluster"
+    );
+    assert!(
+        transcript(&trace).is_empty(),
+        "a pod restart was written into the audit log"
+    );
+}
+
+/// **The three sentences, in `screens/dialogs.md` § Restart's own words** — asserted against that
+/// file and not against what [`rollout`] happens to return, which is the whole of what was wrong
+/// with them (NOTES § D224).
+///
+/// **They can now fail for being wrong and not only for changing.** The three this replaced were
+/// exact-equality assertions pinned to copies of themselves: unlike `scale` there was no screen
+/// for them to be derived from, and all three then stated a pacing the cluster owns — falsified on
+/// a real cluster by a `maxUnavailable: 3` DaemonSet, a `partition`ed StatefulSet, a
+/// `nodeSelector`'d DaemonSet and `OnDelete` on either kind (`tester` finding 2, `k8s-admin`).
+///
+/// **One sentence for all three would still be true of one of them**, which is why [`rollout`]
+/// returns the consequence beside the resource rather than beside a count it never reads.
+#[test]
+fn each_kind_gets_the_sentence_that_is_true_of_how_its_copies_are_replaced() {
+    let said = |kind: &str| {
+        let (_, consequence) = rollout(kind).unwrap_or_else(|refusal| panic!("{kind}: {refusal}"));
+        println!("{kind}\n{consequence}\n");
+        consequence
+    };
+    assert_eq!(
+        said("deployment"),
+        "This asks Kubernetes to replace every copy of your app with a new one. How many stop at \
+         the same time is a setting on this deployment — it can be a few, or all of them at once. \
+         A paused deployment will not start until you resume it."
+    );
+    assert_eq!(
+        said("statefulset"),
+        "This asks Kubernetes to replace every copy of your app with a new one, working down from \
+         the highest-numbered copy. How many stop at the same time, how far down it goes, and \
+         whether it waits for you to delete a copy yourself are all settings on this statefulset."
+    );
+    assert_eq!(
+        said("daemonset"),
+        "This asks Kubernetes to replace the copy of your app on each node it runs on. How many \
+         nodes it takes at a time, and whether it waits for you to delete a copy yourself, are \
+         settings on this daemonset."
+    );
+    // **Every one of them *asks*** (NOTES § D224). The patch is a request and the controller
+    // decides, which is the one framing that stays true under `paused`, `OnDelete`, `partition`
+    // and every pacing knob at once — a sentence that says *replaces* is claiming a denominator
+    // k8rs has not read (`PRIOR-ART § F2`).
+    for kind in ["deployment", "statefulset", "daemonset"] {
+        assert!(
+            said(kind).starts_with("This asks Kubernetes to replace "),
+            "{kind}'s consequence promises the rollout rather than asking for it: {:?}",
+            said(kind)
+        );
+    }
+    // **No API vocabulary reaches a dialog** (invariant 14) — the words a beginner has not met
+    // are the ones the sentence exists to avoid.
+    for kind in ["deployment", "statefulset", "daemonset"] {
+        let consequence = said(kind).to_lowercase();
+        for jargon in [
+            "replica",
+            "pod",
+            "rollout",
+            "template",
+            "annotation",
+            "patch",
+        ] {
+            assert!(
+                !consequence.contains(jargon),
+                "{kind}'s consequence uses {jargon:?}: {consequence:?}"
+            );
+        }
+    }
+}
+
+/// **The patch is a strategic merge, and it is the six lines and nothing else**
+/// (NOTES § D223 ruling 4, § D217).
+///
+/// **The variant is what decides what a `422` hands back.** Under `application/merge-patch+json`
+/// the apiserver answers with the *patched object* — measured at 4859 bytes on a trivial
+/// Deployment, carrying `managedFields`, annotations and container environments — and that message
+/// is what the audit line quotes. Under a strategic merge it answers with this. Truncation is not
+/// redaction, and `FREE_TEXT` cuts long after the annotations.
+///
+/// **kube keeps `Patch::content_type` `pub(crate)`**, so this asserts the variant and
+/// `a_restarts_patch_goes_out_as_a_strategic_merge_and_not_as_a_json_merge` asserts what
+/// `Request::patch` makes of it.
+#[test]
+fn the_patch_is_a_strategic_merge_of_six_lines_and_carries_kubectls_own_annotation() {
+    let patch = restart_patch(&stamp());
+    println!("{patch:?}");
+    assert_eq!(
+        patch,
+        Patch::Strategic(serde_json::json!({
+            "spec": { "template": { "metadata": { "annotations": {
+                "kubectl.kubernetes.io/restartedAt": "2026-09-03T12:34:56Z"
+            } } } }
+        })),
+        "the patch is not the six lines kubectl sends, under the media type that keeps a \
+         rejection from quoting the whole workload back"
+    );
+    // **kube's helper writes the other key** (NOTES § D215), and an operator who then runs the
+    // taught line gets a *second* rollout from an annotation kubectl has never seen.
+    assert!(
+        !format!("{patch:?}").contains("kube.kubernetes.io/restartedAt"),
+        "the patch carries kube's own annotation key rather than kubectl's"
+    );
+}
+
+/// **A restart patches the object, reads nothing first, and sends the check before the change** —
+/// the whole box, on a socket, so what is asserted is what went on the wire (todo.md 3777).
+///
+/// **Two requests and no third.** `scale` opens with a `GET` because its sentence is built from a
+/// number only the cluster has; a restart needs no fact about the object to describe itself
+/// (NOTES § D223 ruling 3), so a `GET` here would be a read of container environments for a dialog
+/// that shows none of them.
+///
+/// **Neither target ends in a subresource.** This is `Request::patch` and not
+/// `Request::patch_subresource`, which is what makes it the first operation to reach the former.
+#[tokio::test]
+async fn a_restart_patches_the_object_itself_and_reads_nothing_before_it() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = restart(
+        &client,
+        &restarting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    assert_eq!(
+        requests,
+        vec![
+            restart_call("?&dryRun=All&fieldValidation=Strict"),
+            restart_call("?&fieldValidation=Strict"),
+        ],
+        "the restart did not check the object and then patch it, with nothing read first"
+    );
+    assert_eq!(
+        done,
+        Performed {
+            outcome: Some(Outcome::Done),
+            recorded: true
+        }
+    );
+    assert_eq!(
+        done.plainly(),
+        "the change was made",
+        "a restart that landed does not say so"
+    );
+    assert!(done.changed(), "a restart that landed is not an exit 0");
+}
+
+/// **Both passes carry the same stamp**, because the annotation is read once and the closure
+/// [`perform`] calls twice only reads it (`restart`'s own doc).
+///
+/// **A fixed clock cannot see this**, which is why this one ticks: a `clock()` moved inside the
+/// closure would dry-run one annotation value and send another, and every assertion in the test
+/// above would still hold.
+#[tokio::test]
+async fn the_check_and_the_change_carry_one_stamp_and_not_one_each() {
+    let second = std::cell::Cell::new(1_788_438_896_i64);
+    let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = restart(
+        &client,
+        &restarting(),
+        ticking(&second),
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+    assert_eq!(done.outcome, Some(Outcome::Done));
+
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    let body = |request: &str| {
+        request
+            .split_once(" {")
+            .map(|(_, body)| format!("{{{body}"))
+            .expect("every patch this operation sends carries a body")
+    };
+    assert_eq!(
+        body(&requests[0]),
+        body(&requests[1]),
+        "the cluster checked one restart and was sent another"
+    );
+    // **The stamp is the operation's own first reading of the clock** — the two after it are
+    // [`perform`]'s attempt line and its landing time.
+    assert!(
+        body(&requests[0]).contains("\"2026-09-03T12:34:56Z\""),
+        "the annotation was not stamped with the first reading: {}",
+        requests[0]
+    );
+    assert_eq!(
+        second.get(),
+        1_788_438_899,
+        "the clock was read some number of times other than three"
+    );
+}
+
+/// **What the dialog and the audit log were given** — the consequence for the kind, the object as
+/// the reader knows it, the kubectl line with no dry-run flag on it, and the path the request
+/// really took.
+///
+/// **`uid not read` and `resourceVersion not sent` are the record being honest** about a mutation
+/// that read nothing first (NOTES § D223 ruling 3): both gaps are named rather than left as
+/// dangling labels.
+#[tokio::test]
+async fn what_a_restart_records_is_the_call_it_made_and_the_two_things_it_never_read() {
+    let (client, _) = stub(|_| ("200 OK".to_string(), patched())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = restart(
+        &client,
+        &restarting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+    assert_eq!(done.outcome, Some(Outcome::Done));
+
+    assert_eq!(
+        trace.borrow().dialog,
+        Some(Dialog {
+            object: "deployment/web".to_string(),
+            namespace: Some("payments".to_string()),
+            consequence: "This asks Kubernetes to replace every copy of your app with a new \
+                          one. How many stop at the same time is a setting on this deployment — \
+                          it can be a few, or all of them at once. A paused deployment will not \
+                          start until you resume it."
+                .to_string(),
+            // **`deployment/web`, never `deploy/web`** (`screens/dialogs.md` § Scale), and no
+            // `--dry-run`: `kubectl rollout restart` has no such flag (NOTES § D223 ruling 4), so
+            // the taught line cannot claim the preflight k8rs ran.
+            kubectl: "kubectl rollout restart deployment/web -n payments".to_string(),
+        }),
+        "the dialog was not given the object, what a restart does to it, or a runnable kubectl line"
+    );
+    assert!(
+        !trace
+            .borrow()
+            .dialog
+            .as_ref()
+            .expect("the dialog was opened")
+            .kubectl
+            .contains("dry-run"),
+        "the taught line offers a flag `kubectl rollout restart` does not have"
+    );
+    let lines = transcript(&trace);
+    let attempt = lines
+        .iter()
+        .find(|line| line.contains("attempt ·"))
+        .expect("the attempt line is written before anything is sent");
+    assert_eq!(
+        attempt,
+        "audit: 2026-09-03T12:34:56Z attempt · deployment/web · context kind-k8rs · server \
+         https://k8rs-tests.invalid:41751 · namespace payments · uid not read · kubectl: kubectl \
+         rollout restart deployment/web -n payments · call: PATCH \
+         /apis/apps/v1/namespaces/payments/deployments/web · resourceVersion not sent\n",
+        "the attempt line does not name the call that was actually made"
+    );
+    let result = lines
+        .iter()
+        .find(|line| line.contains("result ·"))
+        .expect("the result line is written when the call returns");
+    assert!(
+        result.contains("dry-run: the cluster checked it first and accepted it")
+            && result.contains("· the change was made"),
+        "the result line does not say the restart was checked and made: {result:?}"
+    );
+}
+
+/// **Cancelling sends the check and nothing after it** — invariant 2 through the real operation.
+///
+/// **One request and not two**, because a restart reads nothing: the check *is* the first thing
+/// this operation sends.
+#[tokio::test]
+async fn a_restart_nobody_confirmed_sends_the_check_and_never_the_change() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = restart(
+        &client,
+        &restarting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Cancelled),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+
+    let requests = sent.lock().expect("the log is never poisoned").clone();
+    println!("{}", requests.join("\n"));
+    assert_eq!(
+        requests,
+        vec![restart_call("?&dryRun=All&fieldValidation=Strict")],
+        "a cancelled restart sent the change anyway"
+    );
+    assert_eq!(done.outcome, Some(Outcome::Cancelled));
+    assert!(!done.changed(), "a cancelled restart is not an exit 0");
+    assert_eq!(
+        done.plainly(),
+        "nobody confirmed it, so nothing was changed"
+    );
+}
+
+/// **A cluster that refuses the check is a mutation that was attempted and recorded** — unlike
+/// [`scale`]'s read refusal, which happens before there is anything to describe.
+///
+/// **The reason is keyed on the `Fault` and the server's own words travel beside it**
+/// (`PRIOR-ART § C1`), which is what tells an operator whether to fix their RBAC or their network.
+#[tokio::test]
+async fn a_restart_the_cluster_would_not_check_is_recorded_and_never_sent() {
+    let (client, sent) = stub(|_| {
+        (
+            "403 Forbidden".to_string(),
+            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","code":403,
+               "reason":"Forbidden","message":"deployments.apps \"web\" is forbidden"}"#
+                .to_string(),
+        )
+    })
+    .await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+
+    let done = restart(
+        &client,
+        &restarting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect("a refused check is an outcome and not a refusal of the request");
+
+    println!("{}", done.plainly());
+    assert_eq!(
+        done.outcome,
+        Some(Outcome::NotSent {
+            fault: Fault::Refused,
+            said: Some("deployments.apps \"web\" is forbidden".to_string()),
+        })
+    );
+    assert!(!done.changed(), "a refused restart is not an exit 0");
+    assert_eq!(
+        done.plainly(),
+        "the change was never sent — the cluster would not allow it: deployments.apps \"web\" is \
+         forbidden"
+    );
+    assert_eq!(
+        sent.lock().expect("the log is never poisoned").len(),
+        1,
+        "a check the cluster refused was followed by the change anyway"
+    );
+    let lines = transcript(&trace);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("dry-run: the check was sent and did not pass")),
+        "a refused check was recorded as one that never went out: {lines:?}"
+    );
+}
+
+/// **A namespace nobody named is refused inside the operation, before anything is sent** — one
+/// place, rather than a second copy of which kinds live in a namespace (NOTES § D220 ruling 4).
+#[tokio::test]
+async fn a_restart_with_no_namespace_is_refused_before_a_single_call_goes_out() {
+    let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let nowhere = Restarting {
+        namespace: None,
+        ..restarting()
+    };
+
+    let refusal = restart(
+        &client,
+        &nowhere,
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect_err("a namespaced object with no namespace is not something to restart");
+
+    println!("{refusal}");
+    assert_eq!(
+        refusal,
+        "k8rs will not restart deployment/web without being told which namespace it is in"
+    );
+    assert!(
+        sent.lock().expect("the log is never poisoned").is_empty(),
+        "a restart with nowhere to send anything sent something"
+    );
+}
+
+/// **A name that would change the address the request goes to is refused where the path is
+/// built**, not only where the command line was parsed — [`scale`]'s own guard, for its own
+/// reason: `restart` is `pub` in a file that freezes at the end of this phase, and Phase 12's
+/// console is a caller nobody has written yet.
+#[tokio::test]
+async fn a_name_that_would_rewrite_a_restarts_request_path_is_refused_where_it_is_built() {
+    for (name, namespace, which) in [
+        ("web/../../secrets", "payments", "an object's own name"),
+        ("web", "payments/../kube-system", "the name of a namespace"),
+        ("", "payments", "an object's own name"),
+        ("web", "", "the name of a namespace"),
+    ] {
+        let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+        let trace = trace();
+        let mut sink = Sink(trace.clone());
+        let crafted = Restarting {
+            name,
+            namespace: Some(namespace),
+            ..restarting()
+        };
+
+        let refusal = restart(
+            &client,
+            &crafted,
+            stamp,
+            &mut sink,
+            shows(&trace),
+            asked(&trace, Answer::Confirmed),
+        )
+        .await
+        .expect_err("a name that is not addressable is not something to restart");
+
+        println!("{name:?} in {namespace:?}\n{refusal}");
+        assert!(
+            refusal.contains(which) && refusal.contains("part of the address"),
+            "{name:?} in {namespace:?} was refused for something else: {refusal:?}"
+        );
+        assert!(
+            sent.lock().expect("the log is never poisoned").is_empty(),
+            "{name:?} in {namespace:?} reached the cluster anyway"
+        );
+        assert!(
+            transcript(&trace).is_empty(),
+            "{name:?} in {namespace:?} was written into the audit log"
+        );
+    }
+}
+
+/// **A kind `restart` does not work on never reaches a cluster**, whatever the caller does — the
+/// driver asks first (NOTES § D220 ruling 7), and the operation refuses again if it is asked
+/// anyway.
+///
+/// **The replicaset is the one that matters here**, because it is a kind `scale` *does* serve: the
+/// two matrices are genuinely different (NOTES § Operations), and a restart that inherited scale's
+/// would patch a pod template a ReplicaSet's controller immediately reverts.
+#[tokio::test]
+async fn a_restart_pointed_at_a_kind_it_does_not_work_on_sends_nothing() {
+    for kind in ["replicaset", "node"] {
+        let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+        let trace = trace();
+        let mut sink = Sink(trace.clone());
+        let wrong = Restarting {
+            kind,
+            ..restarting()
+        };
+
+        let refusal = restart(
+            &client,
+            &wrong,
+            stamp,
+            &mut sink,
+            shows(&trace),
+            asked(&trace, Answer::Confirmed),
+        )
+        .await
+        .expect_err("a kind k8rs does not restart is not something to restart");
+
+        println!("{refusal}");
+        assert!(
+            refusal.contains(&format!("cannot restart a {kind}")),
+            "{refusal:?}"
+        );
+        assert!(
+            sent.lock().expect("the log is never poisoned").is_empty(),
+            "a kind k8rs will not restart was patched on the cluster anyway"
+        );
+    }
+}
+
+/// **The check's own answer says whether this Deployment is paused, and the dialog is told before
+/// it asks** (NOTES § D224).
+///
+/// **This is the blocker no stand-in apiserver could produce**, because it is the *controller's*
+/// answer to a `PATCH` the apiserver accepts. Measured on a real cluster: `kubectl rollout pause`,
+/// then a restart whose consequence promised every copy replaced, whose dry-run passed, which said
+/// *the change was made* and exited `0` — and whose three pods had the same names twelve seconds
+/// later, while the `kubectl rollout restart` line it printed exits `1`.
+///
+/// **`Checked<bool>` and never `Checked<DynamicObject>`**, which the type annotation below asserts
+/// at compile time: a `PATCH` is answered with the whole workload either way, and what the `map`
+/// inside the closure decides is whether k8rs *holds* one — with
+/// `spec.template.spec.containers[].env[].value` in it — for as long as the dialog is open
+/// (NOTES § D223 ruling 3).
+///
+/// **It does not refuse, and the exit code does not move.** Writing the annotation on a paused
+/// Deployment is not destructive and it takes effect on resume; what was wrong was the record.
+#[tokio::test]
+async fn a_paused_deployment_is_the_fact_the_check_hands_back_and_it_still_asks() {
+    for (body, paused) in [(patched(), false), (paused_deployment(), true)] {
+        let (client, sent) = stub(move |_| ("200 OK".to_string(), body.clone())).await;
+        let trace = trace();
+        let mut sink = Sink(trace.clone());
+        let seen = std::cell::Cell::new(None);
+
+        let done = restart(
+            &client,
+            &restarting(),
+            stamp,
+            &mut sink,
+            shows(&trace),
+            |checked| {
+                let returned: Option<&bool> = checked.returned();
+                seen.set(returned.copied());
+                std::future::ready(Answer::Confirmed)
+            },
+        )
+        .await
+        .expect("a deployment in a namespace, with a cluster that answers");
+
+        println!("paused={paused} → returned={:?}", seen.get());
+        assert_eq!(
+            seen.get(),
+            Some(paused),
+            "the dialog was told the wrong thing about spec.paused"
+        );
+        // **The check answered it, so both passes still go out and the operator still decides.**
+        assert_eq!(
+            sent.lock().expect("the log is never poisoned").len(),
+            2,
+            "reading the check's answer changed how many requests a restart makes"
+        );
+        assert_eq!(done.outcome, Some(Outcome::Done));
+        assert!(
+            done.changed(),
+            "a paused deployment turned a restart into an exit 2"
+        );
+    }
+}
+
+/// **`Gone` and `Changed` end a restart after the check and before the change** (NOTES § D22) —
+/// asserted on the socket, because that is where *nothing was sent* is either true or not.
+///
+/// **A headless run cannot answer either of them** — nothing is watching the object behind a
+/// prompt — so this is the console's path (Phase 12) proven over the operation it will call.
+#[tokio::test]
+async fn an_object_gone_or_changed_under_a_restart_leaves_the_check_as_the_only_request() {
+    for (answer, outcome, said) in [
+        (
+            Answer::Gone,
+            Outcome::Gone,
+            "the object was already gone, so nothing was changed",
+        ),
+        (
+            Answer::Changed,
+            Outcome::Changed,
+            "the object changed while this was open, so nothing was changed",
+        ),
+    ] {
+        let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+        let trace = trace();
+        let mut sink = Sink(trace.clone());
+
+        let done = restart(
+            &client,
+            &restarting(),
+            stamp,
+            &mut sink,
+            shows(&trace),
+            asked(&trace, answer),
+        )
+        .await
+        .expect("a deployment in a namespace, with a cluster that answers");
+
+        let requests = sent.lock().expect("the log is never poisoned").clone();
+        println!("{answer:?} → {}\n{}", done.plainly(), requests.join("\n"));
+        assert_eq!(
+            requests,
+            vec![restart_call("?&dryRun=All&fieldValidation=Strict")],
+            "{answer:?} sent the change anyway"
+        );
+        assert_eq!(done.outcome, Some(outcome), "{answer:?}");
+        assert_eq!(done.plainly(), said, "{answer:?}");
+        assert!(!done.changed(), "{answer:?} is not an exit 0");
+    }
+}
+
+/// **A restart with no audit line sends nothing, and a restart with no *result* line keeps what it
+/// already knows** (NOTES § D21, NOTES § D220 ruling 1) — [`perform`]'s contract, over the
+/// operation rather than over a fixture, so what is counted is requests on a socket.
+#[tokio::test]
+async fn a_restart_whose_audit_log_fails_sends_nothing_or_keeps_the_outcome_it_already_has() {
+    for (breaks_at, requests, expected) in [
+        (
+            1,
+            0,
+            Performed {
+                outcome: None,
+                recorded: false,
+            },
+        ),
+        (
+            2,
+            2,
+            Performed {
+                outcome: Some(Outcome::Done),
+                recorded: false,
+            },
+        ),
+    ] {
+        let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+        let trace = trace();
+        trace.borrow_mut().breaks_at = breaks_at;
+        let mut sink = Sink(trace.clone());
+
+        let done = restart(
+            &client,
+            &restarting(),
+            stamp,
+            &mut sink,
+            shows(&trace),
+            asked(&trace, Answer::Confirmed),
+        )
+        .await
+        .expect("a sink that cannot be written is an outcome and not a refusal of the request");
+
+        println!("breaks_at={breaks_at} → {done:?}\n{}", done.plainly());
+        assert_eq!(done, expected, "breaks_at={breaks_at}");
+        assert_eq!(
+            sent.lock().expect("the log is never poisoned").len(),
+            requests,
+            "breaks_at={breaks_at}: the cluster was sent the wrong number of requests"
+        );
+    }
+    // **The derived assertion**: a sink that never fails records both lines and sends both
+    // requests, so the rows above are not two spellings of a restart that does nothing.
+    let (client, sent) = stub(|_| ("200 OK".to_string(), patched())).await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let done = restart(
+        &client,
+        &restarting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect("a deployment in a namespace, with a cluster that answers");
+    assert!(done.recorded, "a working sink recorded nothing");
+    assert_eq!(sent.lock().expect("the log is never poisoned").len(), 2);
+}
+
+/// **A check that went out and failed is recorded as one that went out, on both operations**
+/// (NOTES § D224, invariant 4).
+///
+/// **The field is [`Record::check`]'s and [`Record::check`] is shared**, so the defect was
+/// `scale`'s as much as `restart`'s and the proof has to be too. Measured on a real `404`, the
+/// line read `dry-run: not checked` over a `?dryRun=All` the apiserver's own audit log holds — and
+/// *not checked* is already the sentence [`UNCHECKABLE`] means, which is a check that was never
+/// sent.
+#[tokio::test]
+async fn a_check_that_was_sent_and_failed_is_never_recorded_as_one_that_was_not_sent() {
+    const SENT: &str = "dry-run: the check was sent and did not pass";
+
+    // `scale` reads the count first, so only its `PATCH` may 404 — a 404 on the `GET` is a
+    // refusal of the request and writes no record at all.
+    let (client, _) = stub(|asked| {
+        if asked.starts_with("PATCH") {
+            not_found("web")
+        } else {
+            ("200 OK".to_string(), scale_body(2))
+        }
+    })
+    .await;
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let scaled = scale(
+        &client,
+        &asking(3),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect("a refused check is an outcome and not a refusal of the request");
+    let scale_line = transcript(&trace)
+        .last()
+        .cloned()
+        .expect("a result line for a mutation that was attempted");
+
+    let (client, _) = stub(|_| not_found("wbe")).await;
+    // A second sink, because the first is still holding the scale record above.
+    let second = Shared::default();
+    let mut sink = Sink(second.clone());
+    let missing = Restarting {
+        name: "wbe",
+        ..restarting()
+    };
+    let restarted = restart(
+        &client,
+        &missing,
+        stamp,
+        &mut sink,
+        shows(&second),
+        asked(&second, Answer::Confirmed),
+    )
+    .await
+    .expect("a refused check is an outcome and not a refusal of the request");
+    let restart_line = transcript(&second)
+        .last()
+        .cloned()
+        .expect("a result line for a mutation that was attempted");
+
+    for (verb, performed, line) in [
+        ("scale", &scaled, &scale_line),
+        ("restart", &restarted, &restart_line),
+    ] {
+        println!("{verb}\n{line}");
+        assert!(
+            matches!(
+                performed.outcome,
+                Some(Outcome::NotSent {
+                    fault: Fault::Gone,
+                    ..
+                })
+            ),
+            "{verb}: a 404 on the check is not what reached the record: {performed:?}"
+        );
+        assert!(
+            line.contains(SENT),
+            "{verb}: a check that went out and failed is recorded as one that did not: {line:?}"
+        );
+        assert!(
+            !line.contains("dry-run: not checked"),
+            "{verb}: the line still denies the request the cluster answered: {line:?}"
+        );
+        // **And it does not collide with the value that means *no check was sent*.**
+        assert!(
+            !line.contains(UNCHECKABLE),
+            "{verb}: a failed check is recorded as one k8rs declined to make: {line:?}"
+        );
+    }
+}
+
+/// **The `dry-run:` field is keyed on the [`Fault`] and never on the arm that raised it**
+/// (NOTES § D224, invariant 4) — every one of the eleven, against the sentence the requirement
+/// owes it rather than the one the code returns.
+///
+/// **The arm is not the fact.** [`Outcome::NotSent`] is reachable only from the `Err` of the
+/// check, and round two read that as *so the check was sent* — which a refused connect, a name
+/// that will not resolve and an `exec` login that exits non-zero all make false. Measured on the
+/// built binary against a port nothing was listening on, the line said *the check was sent and
+/// did not pass* beside *k8rs could not reach the cluster*, 305 µs after the attempt
+/// (`k8s-admin`, 2026-09-04).
+///
+/// **Three classes, because there are three things to be told**, and the middle one is what
+/// [`answered`] cannot give: it groups the four kubeconfig-and-login faults with the answered
+/// ones, which is right for *was anything changed* and wrong for *did the request go out*.
+///
+/// **A twelfth [`Fault`] is caught by the compiler and not by this list** — [`Record::check`]
+/// matches exhaustively with no `_` — so what this owes is that the eleven are eleven distinct
+/// ones and not ten and a copy-paste.
+#[test]
+fn the_dry_run_field_is_keyed_on_the_fault_and_never_on_the_arm_that_raised_it() {
+    const ANSWERED: &str = "the check was sent and did not pass";
+    const NEVER_SENT: &str = "the check never left this machine";
+    const UNKNOWN: &str = "k8rs does not know whether the check reached the cluster";
+
+    let every = [
+        // The cluster itself answered the check: a `403`, a `400`/`422`, a `409`, a `401`, a `404`.
+        (Fault::Refused, ANSWERED),
+        (Fault::Rejected, ANSWERED),
+        (Fault::Conflict, ANSWERED),
+        (Fault::Expired, ANSWERED),
+        (Fault::Gone, ANSWERED),
+        // Nothing left this machine — the kubeconfig would not build a connection, or the login
+        // program produced no credential and kube's auth layer failed the request before it was
+        // dispatched.
+        (Fault::Kubeconfig, NEVER_SENT),
+        (Fault::NoContext, NEVER_SENT),
+        (Fault::BadEntry, NEVER_SENT),
+        (Fault::NoCredential, NEVER_SENT),
+        // Nothing usable came back, and a socket that died *after* the request went out is the
+        // same `Fault` as one that never opened. k8rs cannot tell them apart and may not claim to.
+        (Fault::Unanswered, UNKNOWN),
+        (Fault::Unfinished, UNKNOWN),
+    ];
+
+    let record = Record::of(&scaling());
+    for (fault, expected) in every {
+        let said = record.check(&Outcome::NotSent {
+            fault,
+            said: Some("the cluster's own words".to_string()),
+        });
+        println!("{fault:?} → {said}");
+        assert_eq!(
+            said, expected,
+            "{fault:?} is recorded as something else than what it is"
+        );
+        // **And no class of it collides with the value for a check k8rs declined to make**, which
+        // is the collision NOTES § D224 was opened by.
+        assert_ne!(
+            said, UNCHECKABLE,
+            "{fault:?} is recorded as a check k8rs chose not to send"
+        );
+    }
+
+    // **The derived assertion**: every row distinct, so no variant went unfed behind a
+    // copy-paste. `Fault` is `PartialEq` and nothing more, which is why this is a scan.
+    //
+    // **The count is not asserted, because a number here would be a gate that fails on the
+    // correct edit** (my own second pass): eleven is what
+    // `awk '/^pub enum Fault \{/,/^\}/' src/k8s.rs | grep -cE '^    [A-Z][A-Za-z]+,$'` says
+    // today, and a twelfth variant is caught by the *compiler* — [`Record::check`] matches with
+    // no `_`, so it cannot be added without an arm being chosen for it, and whoever chooses it
+    // adds the row here. An `assert_eq!(every.len(), 11)` would instead go red for the person
+    // who added the twelfth row, saying the table had *stopped* covering the enum.
+    for (index, (fault, _)) in every.iter().enumerate() {
+        assert!(
+            !every[..index].iter().any(|(seen, _)| seen == fault),
+            "{fault:?} is in the table twice, so some other fault is not in it at all"
+        );
+    }
+
+    // **The healthy arm is not disturbed**, written out from `screens/dialogs.md`'s own sentence
+    // rather than read back off [`ACCEPTED`] — the three above are new arms in a function that
+    // already had one, and a `let … else` that fell through wrongly would be invisible from
+    // inside the table.
+    assert_eq!(
+        record.check(&Outcome::Done),
+        "the cluster checked it first and accepted it",
+        "an outcome that is not a refused check stopped saying the check passed"
+    );
+}
+
+/// **Neither operation claims a check was sent when nothing usable answered** (NOTES § D224,
+/// invariant 4) — the shapes the real pipeline hands the arm, fed rather than reasoned about
+/// (CLAUDE.md § D29).
+///
+/// **Both halves are [`Fault::Unanswered`] and only one of them left this machine, which is the
+/// whole reason the sentence hedges** (my own second pass — an earlier name for this test said
+/// *never left this machine* over a `500` that plainly had). A connect that was refused and a
+/// server that answered unusably arrive as the same fault, so *k8rs does not know* is not a
+/// softer way of saying *it was not sent*: it is the only claim true of both.
+///
+/// **The two operations reach the arm differently, which is why both are here.** `restart`
+/// patches straight away, so a dead cluster fails on the check itself; `scale` reads the count
+/// first and refuses before [`perform`] on a wholly dead one, so its only route to this line is a
+/// connection that stops being usable *between* the `GET` and the dry-run.
+#[tokio::test]
+async fn neither_operation_claims_a_check_was_sent_when_nothing_usable_answered() {
+    const ANSWERED: &str = "dry-run: the check was sent and did not pass";
+    const UNKNOWN: &str = "dry-run: k8rs does not know whether the check reached the cluster";
+
+    // **`restart` against a port nothing is listening on** — `k8s-admin`'s measured case, whose
+    // audit line said the check had been sent 305 µs after the attempt, on the same line whose
+    // next field said the cluster could not be reached.
+    let trace = trace();
+    let mut sink = Sink(trace.clone());
+    let restarted = restart(
+        &dead_port().await,
+        &restarting(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        asked(&trace, Answer::Confirmed),
+    )
+    .await
+    .expect("a cluster that cannot be reached is an outcome and not a refusal of the request");
+    let restart_line = transcript(&trace)
+        .last()
+        .cloned()
+        .expect("a result line for a mutation that was attempted");
+
+    // **`scale` with the connection answering the read and then answering the check with
+    // nothing usable** — a `500` whose reason nothing recognises, which is `k8s::answer`'s route
+    // to the same [`Fault::Unanswered`] a dead socket takes.
+    let (client, _) = stub(|asked| {
+        if asked.starts_with("PATCH") {
+            (
+                "500 Internal Server Error".to_string(),
+                r#"{"kind":"Status","apiVersion":"v1","status":"Failure","code":500,
+                    "reason":"InternalError","message":"the server had an error"}"#
+                    .to_string(),
+            )
+        } else {
+            ("200 OK".to_string(), scale_body(2))
+        }
+    })
+    .await;
+    let second = Shared::default();
+    let mut sink = Sink(second.clone());
+    let scaled = scale(
+        &client,
+        &asking(3),
+        stamp,
+        &mut sink,
+        shows(&second),
+        asked(&second, Answer::Confirmed),
+    )
+    .await
+    .expect("a check that was not answered is an outcome and not a refusal of the request");
+    let scale_line = transcript(&second)
+        .last()
+        .cloned()
+        .expect("a result line for a mutation that was attempted");
+
+    for (verb, performed, line) in [
+        ("restart", &restarted, &restart_line),
+        ("scale", &scaled, &scale_line),
+    ] {
+        println!("{verb}\n{line}");
+        assert!(
+            matches!(
+                performed.outcome,
+                Some(Outcome::NotSent {
+                    fault: Fault::Unanswered,
+                    ..
+                })
+            ),
+            "{verb}: a cluster that did not answer is not what reached the record: {performed:?}"
+        );
+        assert!(
+            !line.contains(ANSWERED),
+            "{verb}: the line says a request went out that the cluster never answered: {line:?}"
+        );
+        assert!(
+            line.contains(UNKNOWN),
+            "{verb}: the line does not say k8rs cannot tell whether the check arrived: {line:?}"
+        );
+        // **The next field says the cluster could not be reached**, and the two were on one line
+        // contradicting each other. Both are asserted so the pair cannot drift apart again.
+        assert!(
+            line.contains("the change was never sent — k8rs could not reach the cluster"),
+            "{verb}: the outcome stopped naming the fault beside the check: {line:?}"
         );
     }
 }

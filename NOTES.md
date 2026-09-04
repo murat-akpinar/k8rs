@@ -244,6 +244,8 @@ its line moving with it.
 - [D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04) — the seven rulings `scale` could not be briefed without, and the frozen file that stayed shut
 - [D221](#d221--the-audit-log-records-mutations-not-intentions-and-that-is-where-screensdialogsmd-rule-5-stops-2026-09-04) — the audit log records mutations, not intentions, and that is where `screens/dialogs.md` rule 5 stops
 - [D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04) — the `scale` review round: the sentence that named neither fault nor message, and the admin role that could not scale
+- [D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04) — the four rulings `restart` could not be briefed without, and the pod arm that is `delete`'s
+- [D224](#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04) — the `restart` review round: two blockers a stand-in apiserver could not produce, and the sentence that promised a cluster's settings
 
 ## Why it exists — where the gap is
 
@@ -405,7 +407,7 @@ the browser stays generic. This split is the single decision that keeps
 | `d` | describe — object + its events | any | read | v0.1 |
 | `y` | view YAML | any | read | v0.1 |
 | `s` | scale replicas | deploy/sts/rs | confirm + dry-run | v0.1 |
-| `r` | rollout restart | deploy/sts/ds | confirm | v0.1 |
+| `r` | rollout restart | deploy/sts/ds | confirm + dry-run | v0.1 |
 | `ctrl-d` | delete | any | **type the name** | v0.1 |
 | `c` | cordon / uncordon | nodes | confirm | v0.2 |
 | `ctrl-r` | drain (respects PDBs, reports blockers) | nodes | **type the name** | v0.2 |
@@ -18997,3 +18999,190 @@ builds a whole `Session` and pays 12 requests where `kubectl` pays 6; `Mutation`
 carries two conventions for *absent*; and `just check` has no disk-headroom check,
 which is how a full `/tmp` produced twelve confusing test failures instead of one
 sentence naming the disk.
+
+### D223 — the four rulings `restart` could not be briefed without, and the pod arm that is `delete`'s (2026-09-04)
+
+todo.md 3777 is the second operation and the first that patches a workload
+object itself. Four things had to be decided before the brief could be written,
+and the first is a narrowing of the box's own text.
+
+**1. `restart` serves `deployment`, `statefulset` and `daemonset`, and refuses a
+pod in words rather than deleting it.** The box says *"for a bare pod there is no
+restart: it is a delete, and the consequence text must say so in plain words"*,
+which reads two ways: perform the delete under a dialog that says so, or say so
+and refuse. **Refuse**, for a reason that is about the next box and not about
+this one: a pod restart is a `DELETE`, and **both things a `DELETE` in k8rs
+cannot be performed without belong to todo.md 3811** — invariant 2's typed object
+name, which
+[D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)
+leaves unenforceable until a `Confirm` lands on `Mutation`, and the still-open
+question of whether a delete is checkable at all, since a dry-run delete and a
+real one build the identical request line. Performing it here would answer both
+in a box named for the other verb, and leave 3811 with a premise that had already
+been decided underneath it. `restartable` therefore refuses `pod` with a sentence
+of its own, which must say that a pod restart is a delete and must name what to
+restart instead — the wording itself is
+[screens/dialogs.md § Restart](screens/dialogs.md)'s and is not quoted here, so
+there is one copy of it. That requirement is what
+[screens/dialogs.md](screens/dialogs.md) rule 4 exists for: nobody learns
+"restart" as a synonym for "delete" by accident. **Rule 4's dialog is Phase 11's**,
+where `r` on a pod row opens `delete`'s dialog with that consequence, over the
+delete path 3811 will have proven. Nothing is unproven by this narrowing: the
+`DELETE` verb is 3811's to prove, and `Pass::delete` is already written and
+measured on the wire.
+
+**2. `restartedAt` is written as UTC `Z`, and kubectl's local offset is not
+copied.** Measured, `kubectl rollout restart` writes
+`time.Now().Format(time.RFC3339)` — a local-offset stamp. k8rs writes the same
+instant with a `Z`, because the value's only contract is *an RFC3339 instant that
+differs from the last one*, and reading a system time zone would put a second
+ambient input into the write path for a byte nobody compares. **It costs nothing
+invariant 4 protects**: the taught line is `kubectl rollout restart
+deployment/web -n payments`, which carries no timestamp at all, so the command
+log makes no claim this diverges from.
+
+**3. Nothing is read before the patch.** `scale` reads `get_scale` because its
+consequence sentence is built from a number only the cluster has; a restart needs
+no fact about the object to describe itself. So `uid` and `version` are both
+`None` — the field's own documented case for a caller with none to give — and a
+missing object is refused by the dry-run, with the apiserver's own 404 message,
+rather than by a pre-read this operation would otherwise perform only to fetch a
+`uid`. **The direction matters for this box in particular**: a `GET` of a
+Deployment pulls `spec.template.spec.containers[].env[].value` into k8rs for a
+dialog that shows none of it, which is the exposure
+[D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)
+is about, approached from the other side. The `resourceVersion` and the `409`
+re-read are todo.md 3825's, for every call at once.
+
+**4. `Patch::Strategic`, and it is a safety property before it is a fidelity
+one.** D217's `422` hands back the object the server patched, and for a workload
+that object carries annotations, `managedFields` and container environment —
+4859 bytes on a trivial Deployment, past `FREE_TEXT`, with annotations inside the
+first few hundred bytes so truncation does not protect them. A strategic merge
+patch is answered with k8rs's own six-line patch instead
+(`patch.go:770-786` rather than `:353`), and it is what `kubectl rollout restart`
+sends anyway — so invariant 4's *equivalent command* and the exposure fix are one
+choice rather than two. `checkable` stays `true`: the API dry-runs an ordinary
+`PATCH` on an ordinary path
+([D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)),
+and only kube's `Request::restart` helper could not carry the parameter. **The
+dialog says k8rs checked it and never that the taught command can be**:
+`kubectl rollout restart` has no `--dry-run` flag at all, so the kubectl line
+carries none and no sentence claims the preflight was that command's.
+
+### D224 — the `restart` review round: two blockers a stand-in apiserver could not produce, and the sentence that promised a cluster's settings (2026-09-04)
+
+`restart` passed `just check`, `just mutants-diff` with no survivor, and two
+passes against stand-in apiservers. A real one, on three ephemeral review
+clusters, produced two blockers neither stand-in could — because both are the
+*controller's* answer to a `PATCH` the apiserver accepts, and a stand-in has no
+controller ([reports/2026-09-04-restart-against-a-real-apiserver.md](reports/2026-09-04-restart-against-a-real-apiserver.md)).
+
+**Blocker 1 — a paused Deployment: three records lie at once, and one of them
+is the taught command.** Measured: `kubectl rollout pause` first, then
+`k8rs ops restart deploy/web` prints *"This replaces every copy of your app"*,
+the dry-run passes, k8rs says *the change was made* and exits `0`, and twelve
+seconds later the three pods have the same names. Meanwhile the line k8rs
+printed — `kubectl rollout restart deployment/web -n payments` — **exits 1 and
+refuses**: *"can't restart paused deployment (run rollout resume first)"*. So
+invariant 4's *neither record may lie* fails on the consequence, on the result
+sentence and on the command log, and the preflight that exists to catch this
+cannot, because the apiserver accepts the patch.
+
+**The fix is not a pre-read and not a new `Outcome`.** `perform` already hands
+the check pass's response to [`Checked::returned`](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04),
+and [D223](#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 3 forbids a `GET` before the patch, not reading an answer k8rs is already
+sent. `restart`'s closure maps that response down to the one fact it needs —
+whether the object came back paused — so `Checked<bool>` carries a boolean and
+never the workload, which keeps ruling 3's exposure argument intact. The
+confirmation then says, above the prompt, that this deployment is paused,
+that nothing will move until `kubectl rollout resume`, and that the taught line
+refuses until then. **The operator still decides**: the annotation is written on
+resume and writing it now is not destructive — what was wrong was not the write,
+it was being told it had done something it had not.
+
+**Blocker 2 — all three consequence sentences state a pacing the cluster owns,
+and k8rs reads none of it.** `PRIOR-ART § F2` in prose: *never state something
+whose denominator you have not read*. The region's own doc reasoned that only
+`Recreate` needs a hedge because only it is *worse* than the words. Measured,
+four configurations falsify the sentences and **three of the four need no
+feature gate**: a DaemonSet with `rollingUpdate.maxUnavailable: 3` took every
+node down at once against *"a node at a time"*; a StatefulSet with
+`partition: 2` left two of three copies on the old template **indefinitely**
+against *"replaces every copy"*; a `nodeSelector`'d DaemonSet ran on 1 of 3
+nodes against *"every node"*; and `updateStrategy: OnDelete` moved nothing at
+all on either kind, while `kubectl rollout status` — the natural next command —
+*errors* on it. The `Recreate` hedge itself is true and names the wrong knob: a
+`RollingUpdate` Deployment with `maxSurge: 0` does the same thing and is not
+"set up to stop them all first" in any wording an operator maps to a strategy
+name.
+
+**The three sentences are `k8s-admin`'s own, checked against every row of that
+table, and *asks* is the load-bearing word** — the patch is a request and the
+controller decides, which stays true under `paused`, `OnDelete`, `partition`
+and every pacing knob at once. Each names *that* the object has such settings
+without naming one, so nothing here reads a field D223 ruling 3 kept k8rs out
+of. They land in a new `screens/dialogs.md § Restart`, which is where the tests
+cite them from: `restart` shipped with three consequence sentences asserted by
+exact equality against copies of themselves, because unlike `scale` there was no
+screen for them to be derived from — an assertion that can fail for the wording
+*changing* and never for it being *wrong*.
+
+**Finding 3, and it is `scale`'s too — the audit log said `dry-run: not checked`
+for a check the cluster had answered.** `Outcome::NotSent` is reachable only from
+the `Err` of `call(DRY_RUN)`, so `not checked` collided with `UNCHECKABLE`, the
+value that means no check was sent, and an operator holding a `422` beside the
+apiserver's own audit log found the `?dryRun=All` there and a k8rs line denying
+it. `verdict()` had been fixed for exactly this argument a few lines away and it
+was not carried to the field one column to the left.
+
+**The first repair replaced one lie with its inverse, and this entry stated the
+premise that caused it.** *Reachable only from the `Err` of `call(DRY_RUN)`* is
+true; **so a check went out** does not follow, and both this decision and the
+brief built on it said it did. `Api::patch` returns `Err` for a refused TCP
+connect, a DNS failure and a request that could not be built — nothing on the
+wire — and the round-2 wording, *"the check was sent and did not pass"*, then
+appeared on the same audit line as *"k8rs could not reach the cluster"*, 305 µs
+after the attempt, measured against a dead port. **The field is keyed on the
+`Fault` and takes three answers, not two**: sent and refused; never left this
+machine; and — for `Unanswered` and `Unfinished`, where a completed handshake
+that is then closed and a connect that never happened arrive as one fault —
+*k8rs does not know whether the check reached the cluster*, which mirrors
+`verdict()`'s own hedge one column right. **`answered()` is not the helper for
+it**, though the brief said it was: it groups the four local faults with the
+answered ones because it asks *was anything changed*, and `NoCredential` — an
+`exec` plugin that answers once and then exits `1` — is reachable at the check
+pass, so reusing it would have kept the identical lie for that fault. Two
+functions, two questions, no shared list, and the `match` is exhaustive so a
+twelfth `Fault` is a red build rather than an inherited claim.
+
+**Finding 4 — the documented `k8rs-admin` role cannot run the command k8rs
+teaches.** k8rs sends a bare `PATCH` and succeeds; `kubectl rollout restart`
+fetches the object first and 403s, because the role grants `patch` and `update`
+and no `get`. [D222](#d222--the-scale-review-round-the-sentence-that-named-neither-fault-nor-message-and-the-admin-role-that-could-not-scale-2026-09-04)'s
+shape one level up, and a different reason for the same missing verb, which is
+why that round did not catch it. `get` added to the workload rule in
+[docs/security.md](docs/security.md#rbac), with the comment saying whose verb it
+is.
+
+**What `edit` inherits, and it is not what D217 concluded.** The
+`Patch::Strategic` ruling is now measured rather than read off Kubernetes
+source: a strict rejection under `application/strategic-merge-patch+json`
+answers with **109 bytes** — k8rs's own patch — where `merge-patch` and
+`json-patch` on the same object answer with **4895**, carrying `managedFields`,
+`containers` and a planted environment literal. But the strategic message echoes
+*the patch that was sent*: a deeper unknown field came back quoting k8rs's own
+body, env value included. **So strategic merge protects the operator from the
+server's copy of the object and does nothing about the operator's own YAML** —
+and `edit`'s unknown fields come from a buffer a human typed. *"Strategic merge
+means the 422 is small"* is not the ruling that box inherits.
+
+**Not taken here, recorded in [backlog.md](backlog.md).** `Pass::patch()` sets
+`Strict` for every caller and cannot see the `Patch` variant, so two callers are
+safe for two different reasons and the helper enforces neither — D215's shape
+for `checkable`, with no guard and no box. The `restartedAt` value k8rs wrote is
+on no line of the audit log, so *which* restart wrote the annotation on an
+object is answered by a 41 µs nearest match rather than exactly. And a mistyped
+*namespace* is reported as a missing *object*, because the apiserver returns the
+identical 404 for both.

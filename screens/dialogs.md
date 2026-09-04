@@ -129,6 +129,207 @@ That break is the terminal's doing, not k8rs's — a wider terminal draws it
 somewhere else, or not at all, and nothing about what was sent changes either
 way.
 
+## Restart — confirm with dry-run
+
+`r` on a deployment, a statefulset or a daemonset opens this. Unlike scale,
+what happens next is not a number the reader picks — it is a sentence about
+how the object's own settings pace the replacement, because that pacing is a
+setting on the object and k8rs deliberately reads none of it
+([NOTES § D223](../NOTES.md#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 3,
+[D224](../NOTES.md#d224--the-restart-review-round-two-blockers-a-stand-in-apiserver-could-not-produce-and-the-sentence-that-promised-a-clusters-settings-2026-09-04)):
+a DaemonSet with `maxUnavailable: 3` took every node down at once on a real
+cluster, a `partition`ed StatefulSet left copies on the old template
+indefinitely, and `OnDelete` moved nothing on either kind. The three sentences
+below are worded around that — *asks* is the load-bearing word in every one of
+them — and they are fixed text, not this file's to reword (D224).
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│  ┌ Restart payments/web ───────────────────────────────────────┐   │
+│  │                                                             │   │
+│  │  This asks Kubernetes to replace every copy of your app with│   │
+│  │  a new one. How many stop at the same time is a setting on  │   │
+│  │  this deployment — it can be a few, or all of them at once. │   │
+│  │  A paused deployment will not start until you resume it.    │   │
+│  │  The cluster checked it first and accepted it.              │   │
+│  │                                                             │   │
+│  │  $ kubectl rollout restart deployment/web -n payments       │   │
+│  │                                                             │   │
+│  │                [ ⏎ do it ]    [ esc cancel ]                │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl rollout restart deployment/web -n payments               │
+├────────────────────────────────────────────────────────────────────┤
+│ ⏎ do it   esc cancel                                               │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**This box is wider than scale's, and shorter on blank lines, and both are
+the same decision.** Scale's nested box is 58 columns of interior with a
+4-column margin on each side; none of the three consequence sentences here
+fit that box without either dropping a clause D224 put there on purpose or
+running past 24 rows once the paused warning is added below. So the margin
+narrows to 2/3 and the interior widens to 61, which is as far as it can go
+without the nested box touching the outer frame — and the blank line that
+would ordinarily sit between the consequence and the dry-run verdict (the
+one scale keeps) is gone, because the paused variant below needs that row
+and the two states of one dialog should not be shaped differently. The
+consequence is still one string, wrapped to the box width exactly as
+scale's is (§ *Printed instead of drawn* below) — the wrap points shown are
+this box's choice of where to break for readability, not a second field.
+
+The statefulset and daemonset consequences are the same shape, wrapped the
+same way, in a box that is otherwise identical but for the title and the `$`
+line:
+
+- **statefulset** — "This asks Kubernetes to replace every copy of your app
+  with a new one, working down from the highest-numbered copy. How many stop
+  at the same time, how far down it goes, and whether it waits for you to
+  delete a copy yourself are all settings on this statefulset."
+  `$ kubectl rollout restart statefulset/web -n payments`
+- **daemonset** — "This asks Kubernetes to replace the copy of your app on
+  each node it runs on. How many nodes it takes at a time, and whether it
+  waits for you to delete a copy yourself, are settings on this daemonset."
+  `$ kubectl rollout restart daemonset/web -n payments`
+
+**The dry-run verdict is real even though the taught command has no
+`--dry-run` flag.** `kubectl rollout restart` cannot check itself; the
+`PATCH` k8rs sends under it can, on an ordinary path, so `The cluster
+checked it first and accepted it.` is true of k8rs's own call and never
+claimed of the command on the `$` line
+([NOTES § D223](../NOTES.md#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 4).
+
+### The paused Deployment
+
+A Deployment can be paused, and on a real cluster the patch above still
+succeeds on one — nothing about the request is invalid. `kubectl rollout
+restart` on the same object exits `1` and refuses outright. Without a line
+here, the dialog would say *the change was made* on a Deployment that had
+not moved, over a command that would have told the operator so itself
+(D224, measured against a real apiserver).
+
+```
+ nodes 3/3                      k8rs     ctx: prod-eu · live · admin
+┌────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│  ┌ Restart payments/web ───────────────────────────────────────┐   │
+│  │                                                             │   │
+│  │  This asks Kubernetes to replace every copy of your app with│   │
+│  │  a new one. How many stop at the same time is a setting on  │   │
+│  │  this deployment — it can be a few, or all of them at once. │   │
+│  │  A paused deployment will not start until you resume it.    │   │
+│  │  This deployment is paused, so nothing will be replaced     │   │
+│  │  until somebody resumes it with kubectl rollout resume — and│   │
+│  │  the command above will refuse to run until then.           │   │
+│  │  The cluster checked it first and accepted it.              │   │
+│  │                                                             │   │
+│  │  $ kubectl rollout restart deployment/web -n payments       │   │
+│  │                                                             │   │
+│  │                [ ⏎ do it ]    [ esc cancel ]                │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────┤
+│ $ kubectl rollout restart deployment/web -n payments               │
+├────────────────────────────────────────────────────────────────────┤
+│ ⏎ do it   esc cancel                                               │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**This is a warning, not a refusal — the button stays live and `⏎` still
+does it.** Writing the annotation on a paused Deployment is not destructive;
+it takes effect the moment somebody runs `kubectl rollout resume`. What was
+wrong, before this line existed, was not the write — it was the dialog
+claiming the copies had already been replaced when they had not. Only a
+Deployment carries this line: a StatefulSet and a DaemonSet have no
+`spec.paused`, so their dialogs never grow it (D224).
+
+### Refused, not opened — pod and replicaset
+
+`r` on a pod or a replicaset does not open a dialog at all — k8rs says why in
+words and stops there, nothing sent, nothing to confirm. This is rule 4
+below, ahead of the dialog it describes: restarting a pod really is deleting
+it, and that delete does not exist yet as a reachable operation
+([NOTES § D223](../NOTES.md#d223--the-four-rulings-restart-could-not-be-briefed-without-and-the-pod-arm-that-is-deletes-2026-09-04)
+ruling 1) — once it does, `r` on a pod opens *that* dialog with this same
+sentence as its consequence, and this refusal retires. Today, on the
+headless surface, both refusals read like this:
+
+```
+$ k8rs ops restart pod/web-7d9f4-x8k2p -n payments
+k8rs: k8rs will not restart a pod: restarting a pod means deleting it and lettin
+g the thing that created it start a replacement. k8rs restarts a deployment, a s
+tatefulset and a daemonset — if this pod belongs to one, restart that instead
+```
+
+```
+$ k8rs ops restart replicaset/web-7d9f4 -n payments
+k8rs: k8rs cannot restart a replicaset: a replicaset is normally made by a deplo
+yment, and restarting that deployment is what replaces its copies. k8rs restarts
+ a deployment, a statefulset and a daemonset
+```
+
+Every other kind — a Service, a ConfigMap, anything restart was never meant
+for — gets the same shape of answer, naming the kind that was actually
+asked for: `k8rs: k8rs cannot restart a service — restarting replaces the
+copies an object is running, and k8rs does that for a deployment, a
+statefulset and a daemonset`. The doubled `k8rs: k8rs …` opening is not a
+typo; every headless refusal reads that way on this build (compare
+`screens/context.md`'s own refusals).
+
+### The unhappy paths this page already draws
+
+Restart shares every one of them with scale, unchanged except for the `$`
+line: **§ The cluster said no** for a rejected dry-run, **§ The object went
+away while the dialog was open** for a Deployment deleted out from under the
+open dialog, **§ While the call is running** for the three lines that change
+while the `PATCH` is in flight. None of those sections are redrawn here —
+swap `kubectl scale deployment/web --replicas=3` for `kubectl rollout
+restart deployment/web -n payments` and they read exactly the same.
+
+**What restart does not have is a typed name.** Invariant 2 only raises the
+bar to typing the name for delete and drain — the fact § Scale's own
+down-to-zero paragraph already states — and a restart is neither, so its
+box ends in the same two buttons as scale's — `[ ⏎ do it ]  [ esc cancel ]`
+— never a name field. Cancelling is `esc`, the same as everywhere else on
+this page.
+
+### Printed instead of drawn — restart on the headless surface
+
+`ops restart` is headless today; it is drawn at Phase 11. Real output,
+`echo yes | k8rs ops restart deploy/web -n payments`, against a paused
+Deployment:
+
+```
+$ echo yes | k8rs ops restart deploy/web -n payments
+deployment/web in payments
+This asks Kubernetes to replace every copy of your app with a new one. How many 
+stop at the same time is a setting on this deployment — it can be a few, or all 
+of them at once. A paused deployment will not start until you resume it.
+$ kubectl rollout restart deployment/web -n payments
+This deployment is paused, so nothing will be replaced until somebody resumes it
+ with kubectl rollout resume — and the command above will refuse to run until th
+en.
+the cluster checked it first and accepted it
+type yes and press enter to go ahead — anything else stops it:
+k8rs: the change was made
+```
+
+The consequence and the paused warning are each one unwrapped line at the
+source — 232 and 163 columns — and each is split above wherever the 80th,
+160th and so on column runs out, not at a word boundary, the same raw wrap
+§ Scale's own long line gets. **The order here is not the drawn box's
+order.** `show` prints the object, the consequence and the `$` line before
+the check is ever sent; the paused warning and the dry-run verdict both come
+from what the check answered, so they print after the `$` line, not before
+it as the box draws them. Nothing is reworded for either surface — the
+box narrates the same three facts as the terminal, in the order that reads
+best for each.
+
 ## Delete — the name has to be typed
 
 ```

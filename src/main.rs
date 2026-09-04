@@ -5642,11 +5642,12 @@ async fn yaml_run(
 // threshold is not tripped — the carve-out is NOTES § D14 item 2's, decided in advance. Parsed by
 // hand in the style of the flags above, and no dependency arrives with it.
 //
-// **Nothing here changes anything, and that is the whole shape of this step.** `ops.rs` holds the
-// contract and no operation: `scale` (todo.md 3718), `restart` (3720) and `delete` (3754) each
-// wire one arm where [`not_wired`] stands, and until one does, a line with nothing wrong in it
-// ends there. What this region *is* is the three things all three operations will share — the
-// argument surface, the headless [`show`] and the headless [`ask`].
+// **`scale` (todo.md 3749) and `restart` (3777) are wired; `delete` (3810) still ends at
+// [`not_wired`].** What this region holds beside them is the three things every operation shares —
+// the argument surface, the headless [`show`] and the headless [`ask`] — plus the steps between a
+// parsed line and the call: [`ops_started`]'s runtime and clock, and [`ops_connected`]'s
+// kubeconfig, `server:` and session. Only the innermost call differs, which is what [`Wired`]
+// says.
 //
 // **The confirmation is an input the caller supplies per invocation, and there is no `--yes`.**
 // Invariant 2 is not relaxed by being headless. A flag meaning *yes* would make every scripted
@@ -5677,9 +5678,12 @@ async fn yaml_run(
 /// documents for a file named `--x`.
 const OPS: &str = "ops";
 
-/// **The one operation this phase has wired**, spelled once — [`OPERATIONS`]'s row, the sentence
-/// that names it, and the dispatch in [`ops_performed`] all read this rather than a literal.
+/// **The two operations this phase has wired**, spelled once each — [`OPERATIONS`]'s row, the
+/// sentence that names it, and [`wired`]'s dispatch all read these rather than a literal.
 const SCALE: &str = "scale";
+
+/// The second one (todo.md 3777), spelled once for [`applies`] and [`wired`].
+const RESTART: &str = "restart";
 
 /// **How a confirmation is given** — invariant 2's *a keypress*, and its *typing the object name*
 /// for the destructive half, as the two things a script can be made to supply.
@@ -5724,7 +5728,7 @@ const OPERATIONS: [Operation; 3] = [
         confirm: Confirm::Press,
     },
     Operation {
-        verb: "restart",
+        verb: RESTART,
         value: None,
         confirm: Confirm::Press,
     },
@@ -6088,14 +6092,13 @@ fn refuse_count(word: &str) -> Result<i32, String> {
 /// **The sentence a line with nothing wrong in it ends with, and the seam an operation lands
 /// in.**
 ///
-/// `restart` (todo.md 3776) and `delete` (3810) each replace this call with their own — building
-/// an `ops::Mutation` and handing it, [`show`] and [`ask`], to `ops::perform`, the way [`scaled`]
-/// now does. Until one does, the honest answer is that k8rs read the line and has nothing behind
-/// it.
+/// `delete` (todo.md 3810) replaces this call with its own — building an `ops::Mutation` and
+/// handing it, [`show`] and [`ask`], to `ops::perform`, the way [`scaled`] and [`restarted`] now
+/// do. Until it does, the honest answer is that k8rs read the line and has nothing behind it.
 ///
-/// **`scale` no longer reaches it** (todo.md 3749), and the sentence is unchanged for the two
-/// that still do: it says what *this build* does with the line it was given, and for a `restart`
-/// or a `delete` that is still nothing.
+/// **`scale` (todo.md 3749) and `restart` (3777) no longer reach it**, and the sentence is
+/// unchanged for the one that still does: it says what *this build* does with the line it was
+/// given, and for a `delete` that is still nothing.
 ///
 /// **It names everything it parsed, the value included.** *k8rs cannot do that yet* alone would
 /// go green against a parser that read the wrong object, and this is the one line `just e2e` can
@@ -6271,13 +6274,13 @@ struct Ready<'a> {
 /// **Whether an operation can be pointed at a kind** — the operation's own matrix, asked before
 /// the audit log is opened (NOTES § D220 ruling 7).
 ///
-/// **A `match` on the verb and not a field on [`Operation`]**, because two of the three answer
-/// *not yet* rather than a matrix: `restart` (todo.md 3776) and `delete` (3810) each land their
-/// own arm here, and a table with two `None`s in it would be scaffolding for boxes that are not
-/// running.
+/// **A `match` on the verb and not a field on [`Operation`]**, because `delete` (todo.md 3810)
+/// answers *not yet* rather than a matrix, and a table with a `None` in it would be scaffolding
+/// for a box that is not running.
 fn applies(operation: &Operation, kind: &Kind) -> Result<(), String> {
     match operation.verb {
         SCALE => ops::scalable(kind.singular).map(|_| ()),
+        RESTART => ops::restartable(kind.singular).map(|_| ()),
         _ => Ok(()),
     }
 }
@@ -6536,7 +6539,7 @@ fn ask(
     }
 }
 
-/// **The seam, wired** — which operation runs, and what the two that are not wired yet still say.
+/// **The seam, wired** — which operation runs, and what the one that is not wired yet still says.
 ///
 /// **The choice is [`wired`]'s and not a `match` here**, because everything past the choice dials
 /// the reader's own cluster and no unit test can reach it: written as an arm, *delete match arm
@@ -6544,7 +6547,7 @@ fn ask(
 /// the decision into a function over two values leaves this one as the call it always was, and
 /// puts the thing that can be wrong where a test can read it.
 fn ops_performed(ready: Ready<'_>) -> Ended {
-    let Some(count) = wired(ready.operation, ready.count) else {
+    let Some(wired) = wired(ready.operation, ready.count) else {
         return Ended::refused(not_wired(
             ready.operation,
             ready.kind,
@@ -6553,21 +6556,40 @@ fn ops_performed(ready: Ready<'_>) -> Ended {
             ready.namespace,
         ));
     };
-    scale_run(ready, count)
+    ops_started(ready, wired)
 }
 
-/// **Which operation this build actually performs, and with what** — `scale` and the count it was
-/// given, or `None` for the two whose arms are later boxes (todo.md 3776, 3810).
+/// **Which operation this build performs, and with what** — [`wired`]'s answer, and the one thing
+/// that differs between two operations that otherwise share every step below.
+///
+/// **The count is on the variant that has one** (todo.md 3777). It was the whole return type while
+/// `scale` was the only wired operation; a second operation that takes no value makes
+/// `Option<i32>` a type that cannot say *restart* at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wired {
+    /// `scale`, and the count the line carried.
+    Scale(i32),
+    /// `restart`, which takes no value: the kind is the whole of what varies (`ops::Restarting`).
+    Restart,
+}
+
+/// **Which operation this build actually performs, and with what** — or `None` for the one whose
+/// arm is a later box (todo.md 3810).
 ///
 /// **The count comes back rather than being unwrapped on the far side.** [`ops_value`] refuses a
 /// `scale` with no count above this, so `(scale, None)` cannot arrive from a command line; asking
 /// for both at once means there is no second sentence about a missing count for it to arrive
 /// *by*.
-fn wired(operation: &Operation, count: Option<i32>) -> Option<i32> {
-    if operation.verb == SCALE { count } else { None }
+fn wired(operation: &Operation, count: Option<i32>) -> Option<Wired> {
+    match operation.verb {
+        SCALE => count.map(Wired::Scale),
+        RESTART => Some(Wired::Restart),
+        _ => None,
+    }
 }
 
-/// **The runtime one `ops scale` needs, and nothing else.**
+/// **The runtime an `ops` line needs, and nothing else** — shared by every wired operation,
+/// because none of this depends on which one it is (todo.md 3777).
 ///
 /// **Built here rather than in [`main`]**, which builds one for the watch path: an `ops` line is
 /// decided before the mode is, and a runtime started for every `k8rs ops bogus` would be threads
@@ -6577,7 +6599,7 @@ fn wired(operation: &Operation, count: Option<i32>) -> Option<i32> {
 /// **Multi-threaded, because [`ask`] blocks the thread it is on.** Headless that is harmless —
 /// the only thing waiting is the process — and it is the shape `main` already uses; a
 /// current-thread runtime would park kube's own buffer worker behind a `read_line`.
-fn scale_run(mut ready: Ready<'_>, count: i32) -> Ended {
+fn ops_started(mut ready: Ready<'_>, wired: Wired) -> Ended {
     // **The clock is checked before anything is dialled**, which is `Verb::Describe`'s own
     // ordering (invariant 5, NOTES § D18): a machine whose clock will not read cannot stamp an
     // audit line, and finding that out after a confirmation has been typed would be finding it
@@ -6599,11 +6621,15 @@ fn scale_run(mut ready: Ready<'_>, count: i32) -> Ended {
     // out; if it somehow says so mid-mutation, a stamp that is the attempt's own is the one
     // honest thing left to write — it names a moment this run really was in.
     let clock = move || wall_clock().unwrap_or_else(|_| now.clone()).0;
-    runtime.block_on(scale_connected(&mut ready, count, clock))
+    runtime.block_on(ops_connected(&mut ready, wired, clock))
 }
 
-/// **The connection an `ops scale` opens, and the only part of this operation a test cannot
-/// reach** — everything above it and everything below it is a function over values.
+/// **The connection an `ops` line opens, and the only part of this driver a test cannot reach** —
+/// everything above it and everything below it is a function over values.
+///
+/// **One connection for every operation** (todo.md 3777). The kubeconfig, the `server:` the audit
+/// line names, the session and [`Reached`] are the same six lines whichever verb was typed; what
+/// differs is the call at the bottom, which is [`Wired`]'s to say.
 ///
 /// **The kubeconfig is read once and used twice** (NOTES § D220 ruling 5). `k8s::contexts` is a
 /// lookup over two `Vec`s that are already in memory, so naming which cluster the audit line is
@@ -6615,9 +6641,9 @@ fn scale_run(mut ready: Ready<'_>, count: i32) -> Ended {
 /// **The namespace is handed to `connect_with` as well**, so the session opens where the object
 /// is; a scale sends nothing that depends on it, and a coverage probe that would have run
 /// cluster-wide does not (`k8s::coverage` sends nothing at all when a namespace is named).
-async fn scale_connected(
+async fn ops_connected(
     ready: &mut Ready<'_>,
-    count: i32,
+    wired: Wired,
     clock: impl Fn() -> k8s_openapi::jiff::Timestamp,
 ) -> Ended {
     let kubeconfig = match k8s::kubeconfig() {
@@ -6641,18 +6667,14 @@ async fn scale_connected(
         context: session.context.as_deref().unwrap_or_default(),
         server: &server,
     };
-    scaled(
-        &reached,
-        ready,
-        count,
-        clock,
-        &mut std::io::stdin().lock(),
-        // **stderr, and stdout stays empty for an ops line** (NOTES § D220 ruling 3):
-        // `screens/once.md`'s split is *stdout is the findings, stderr is everything else*, and
-        // an operation produces no findings — so `k8rs ops … > out` writes an empty file.
-        &mut std::io::stderr(),
-    )
-    .await
+    // **stderr, and stdout stays empty for an ops line** (NOTES § D220 ruling 3):
+    // `screens/once.md`'s split is *stdout is the findings, stderr is everything else*, and an
+    // operation produces no findings — so `k8rs ops … > out` writes an empty file.
+    let (input, out) = (&mut std::io::stdin().lock(), &mut std::io::stderr());
+    match wired {
+        Wired::Scale(count) => scaled(&reached, ready, count, clock, input, out).await,
+        Wired::Restart => restarted(&reached, ready, clock, input, out).await,
+    }
 }
 
 /// **Which cluster an operation reached** — the three facts `ops::Mutation` needs that are about
@@ -6778,8 +6800,111 @@ async fn scaled(
     ending(&performed)
 }
 
-/// **What one performed mutation ends as** — the sentence and the exit code, in the one place
-/// `restart` (todo.md 3776) and `delete` (3810) will read them from too.
+/// **The line a paused deployment gets above the prompt, or nothing** (NOTES § D224,
+/// invariant 14).
+///
+/// **It exists because three records lied at once and none of them could be fixed by the
+/// preflight.** Measured on a real cluster: the apiserver accepts a restart patch on a paused
+/// Deployment, so the dry-run passes, k8rs said *the change was made* and exited `0`, and twelve
+/// seconds later the same three pods were still there — while the command k8rs had just printed,
+/// `kubectl rollout restart`, exits `1` with *can't restart paused deployment (run rollout resume
+/// first)*. So the consequence, the result sentence and the command log were each wrong, and
+/// invariant 4's *neither record may lie* had no other place left to be repaired.
+///
+/// **What it does not do is refuse.** The operator still decides and the exit code does not move:
+/// the annotation is not destructive and it takes effect when somebody resumes. What was wrong was
+/// being told the copies had been replaced.
+///
+/// **`checked` is `ops::Checked::returned`'s answer and nothing more** — `None` where no check
+/// was run at all, `Some(false)` for every kind that has no pause. `ops::paused` is what decides
+/// it, off the response the check was already answered with (NOTES § D223 ruling 3).
+///
+/// **No object and no namespace in the sentence.** Both are already on screen twice by the time
+/// this prints — [`show`] writes the title and the `$ kubectl rollout restart …` line above it —
+/// and a second spelling of a kubectl line in this file is the copy that drifts from the one
+/// `ops.rs` builds (invariant 4).
+///
+/// **`kind` is a [`KINDS`] entry and never free text**, which is why nothing here strips: the only
+/// interpolated value is one of six `&'static str` the driver resolved before the audit log was
+/// opened, and every string that *did* come off the API reaches the screen through
+/// `ops::Record::of` (invariant 9, NOTES § D213).
+fn while_paused(kind: &str, checked: Option<&bool>) -> Option<String> {
+    checked.copied().unwrap_or(false).then(|| {
+        format!(
+            "This {kind} is paused, so nothing will be replaced until somebody resumes it with \
+             kubectl rollout resume — and the command above will refuse to run until then."
+        )
+    })
+}
+
+/// **One rolling restart, from a client to an exit code** — [`scaled`]'s sibling, and everything
+/// that file's doc says about the two streams, the confirmation and `ops::Performed` holds here
+/// unchanged (todo.md 3777).
+///
+/// **What is not shared is the call below and that is deliberate.** `ops::scale` and
+/// `ops::restart` take different values and hand `ops::perform` a different `Response` type, so
+/// the two calls cannot be one; everything either of them *decides* — the three printed lines
+/// ([`show`]), the confirmation ([`ask`]), the sentence and the exit code ([`ending`]) — is a
+/// shared function called from both, and so is every step above this one ([`ops_connected`]).
+///
+/// **One line here is `restart`'s alone, and it is the only thing the two `ask` closures do
+/// differently** (NOTES § D224): `ops::Checked::returned` carries whether the cluster's check came
+/// back on a paused Deployment, and [`while_paused`] turns that into the sentence printed above
+/// the prompt. `scale` has no equivalent because nothing about a `Scale` can make its own record
+/// false.
+///
+/// **No count and no read.** A restart is described by its kind alone (`ops::Restarting`), and
+/// `ops::restart` sends nothing before the check (NOTES § D223 ruling 3) — so unlike [`scaled`]
+/// there is no refusal here that can arrive from the cluster.
+async fn restarted(
+    reached: &Reached<'_>,
+    ready: &mut Ready<'_>,
+    clock: impl Fn() -> k8s_openapi::jiff::Timestamp,
+    input: &mut impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+) -> Ended {
+    let restarting = ops::Restarting {
+        context: reached.context,
+        server: reached.server,
+        // **The kind the driver resolved, spelled out** — `deployment`, never `deploy`
+        // (`screens/dialogs.md` § Scale). The operation re-derives no scope from it
+        // (NOTES § D220 ruling 4).
+        kind: ready.kind.singular,
+        name: ready.name,
+        namespace: ready.namespace,
+    };
+    let confirm = &ready.operation.confirm;
+    let name = ready.name;
+    let kind = ready.kind.singular;
+    let out = std::cell::RefCell::new(out);
+    let performed = match ops::restart(
+        reached.client,
+        &restarting,
+        clock,
+        &mut ready.audit,
+        |shown| {
+            let _ = show(shown, &mut **out.borrow_mut());
+        },
+        // **The one line [`scaled`] has no equivalent of** (NOTES § D224). The borrow is taken
+        // once and held across both writes, because [`ask`] prints into the same stream.
+        |checked| {
+            let mut out = out.borrow_mut();
+            if let Some(warning) = while_paused(kind, checked.returned()) {
+                let _ = writeln!(out, "{warning}");
+            }
+            std::future::ready(ask(checked.verdict(), confirm, name, input, &mut **out))
+        },
+    )
+    .await
+    {
+        Ok(performed) => performed,
+        Err(refusal) => return Ended::refused(format!("k8rs: {refusal}")),
+    };
+    ending(&performed)
+}
+
+/// **What one performed mutation ends as** — the sentence and the exit code, read by [`scaled`]
+/// and [`restarted`] alike, and by `delete` (todo.md 3810) when it lands.
 ///
 /// **Exit `0` for a cluster that changed and `2` for everything else** (NOTES § D220 ruling 1),
 /// and `recorded` deliberately does not move it: a `Done` k8rs could not write down still
