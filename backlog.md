@@ -2365,6 +2365,18 @@ recorded reversal and a later box rather than a dev round
   a namespace typo inverts. Recoverable — the dialog's first line and the audit
   path both carry the namespace as typed. Found by `k8s-admin`, 2026-09-04
 
+- **`src/` cites `todo.md` by line number, and 11 of 13 citations already point
+  at the wrong thing.** Measured 2026-09-04 by resolving every
+  `todo.md NNNN` in `src/*.rs` against the file: **2 land on a box's first line,
+  11 land mid-box** — `todo.md 3689` was written for the `restart` box and now
+  points into the middle of the `fieldValidation` one. A line number into a file
+  every box grows cannot stay true, and closing the `restart` box moved `delete`
+  from 3811 to 3808 by itself, which is how this was found. **Do not hand-patch
+  the numbers** — that re-arms the same trap. Cite the box by its title, the way
+  a `NOTES.md` decision is cited by its `D##`, and give
+  `scripts/check-docs.py` the half it already does for anchors: a citation whose
+  box title no longer exists is a red build. Found by the PM, 2026-09-04
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
