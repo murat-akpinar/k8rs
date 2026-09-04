@@ -33,7 +33,7 @@ use std::future::Future;
 use std::io::Write;
 
 use k8s_openapi::jiff::Timestamp;
-use kube::api::{DeleteParams, PatchParams};
+use kube::api::{DeleteParams, PatchParams, ValidationDirective};
 
 use crate::k8s::{FREE_TEXT, Fault, IDENTIFIER, fault, said, text};
 
@@ -315,9 +315,43 @@ impl Pass {
     /// which both `Request::patch` and the `Request::patch_subresource` behind `Api::patch_scale`
     /// call (`kube-core-4.2.0/src/request.rs:148` and `:221`). Measured off a built request rather
     /// than read off the field name: the URI ends `…/deployments/web/scale?&dryRun=All`.
+    ///
+    /// **`fieldValidation=Strict` on both passes, and it is the dry-run's missing half.** A merge
+    /// patch carrying a field the cluster does not have answers `200 OK` under `dryRun=All` and
+    /// again on the real call: the objection travels only in a `Warning: 299` header that kube's
+    /// `Api` methods do not surface, so the check passes, the change passes, and the audit log
+    /// records a successful mutation that altered nothing — invariant 4's *neither record may
+    /// lie*, broken by the server rather than by us. `Strict` turns both into a `422`, which
+    /// NOTES § D213 already classifies as [`Fault::Rejected`]. `populate_qp` appends it for any
+    /// patch and not only an apply, whatever kube's own field doc says (`params.rs:705-707`, its
+    /// own test at `:908-927`). `DeleteParams` has no counterpart and needs none: a delete sends
+    /// `DeleteOptions`, not an object.
+    ///
+    /// **Both passes and not only the check, because [`Mutation::checkable`] exists.** Where an
+    /// operation declines the preflight there *is* no check pass, and a `Strict` that rode only
+    /// on [`DRY_RUN`] would leave those writes validated by nothing at all. Each request is
+    /// judged on its own by the server, and a verdict on the check is not one k8rs may carry
+    /// onto a different request.
+    ///
+    /// **What a `422` says back is the object, so this widens what one failure can print.** The
+    /// apiserver builds it as `field.Invalid(field.NewPath("patch"), string(patchedObjJS), …)` —
+    /// the *patched object*, whole and untruncated — and `NewInvalid` folds that bad value into
+    /// `Status.message` and not only into `details.causes`
+    /// (`apiserver/pkg/endpoints/handlers/patch.go:351-354`,
+    /// `apimachinery/pkg/api/errors/errors.go:305-310`,
+    /// `apimachinery/pkg/util/validation/field/errors.go:109-154`, release-1.36). For `scale` that
+    /// object is an `autoscaling/v1 Scale`: name, namespace, uid, resourceVersion,
+    /// creationTimestamp and two replica counts, and no labels, annotations, `managedFields` or
+    /// pod template (`pkg/registry/apps/deployment/storage/storage.go:370-393`) — so
+    /// [`crate::k8s::said`]'s existing strip and `FREE_TEXT` cut are the whole of what is owed
+    /// here. **A patch on the object itself is not that shape**: `restart` (todo.md 3689) and
+    /// v0.4's `edit` both patch the workload, whose dump carries annotations and
+    /// `spec.template.spec.containers[].env[].value` — and `edit`'s unknown fields come from YAML
+    /// the operator typed. Those boxes owe the check this one does not.
     pub fn patch(self) -> PatchParams {
         PatchParams {
             dry_run: self.0,
+            field_validation: Some(ValidationDirective::Strict),
             ..PatchParams::default()
         }
     }

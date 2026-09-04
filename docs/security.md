@@ -87,6 +87,13 @@ and a reviewer should meet the shape of that trace here rather than find it:
 - **One spelling detail, because a reviewer will grep for it:** kube emits
   `?&dryRun=All`, with an empty leading pair, so a pattern anchored on
   `?dryRun=All` matches nothing k8rs sends.
+- **Every patch also carries `fieldValidation=Strict`, on both passes**, so the
+  server rejects a field it does not know instead of accepting the write and
+  changing nothing. A delete carries none — `DeleteOptions` is not an object and
+  has nothing to validate. Worth knowing when comparing against kubectl: **no
+  `kubectl patch` of any kind sends `fieldValidation`**, so k8rs is deliberately
+  stricter than the command its own command log teaches
+  ([NOTES § D217](../NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
 - Every matching admission webhook is invoked with `dryRun: true`.
 
 k8rs's own audit log records the outcome of a cancelled dialog as *nothing was

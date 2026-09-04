@@ -3676,8 +3676,17 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)).
       `post()` was written and then deleted — a freeze argument only rescues code
       the thing after the freeze could actually use
-- [ ] **A dry-run does not reject an unknown field, so the mutation contract
-      needs `fieldValidation=Strict` and a place to put the warning** — measured
+- [x] **A dry-run does not reject an unknown field, so the mutation contract
+      needs `fieldValidation=Strict` and a place to put the warning** — `Strict`
+      on every write whose parameters can carry it, which is `Pass::patch()` and
+      only it, on **both** passes; and the second half of the question has a
+      stronger answer than *moot*: **kube reads the HTTP `Warning` header
+      nowhere, at any layer**, so there was never a header to route
+      ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
+      The sanitize clause was right and the PM's counter-hypothesis was wrong:
+      a `422` hands back the whole object in `Status.message`. It does not bite
+      here — `scale`'s object is a 681-byte `Scale` — and it bites hard at
+      `restart` and `edit`, whose boxes now carry it. Original box text follows — measured
       2026-08-15 on kind v1.36.1
       ([D99](NOTES.md#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)):
       a merge patch carrying a field the cluster does not have answers
@@ -3718,7 +3727,30 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       k8rs builds the patch itself through `Pass::patch()`, which buys the right
       key and the preflight in the same six lines. For a bare pod there is no
       restart: it is a *delete*, and the consequence text must say so in plain
-      words
+      words. **This is the first operation to reach `Request::patch` rather than
+      `patch_subresource`** — it carries `dryRun` and `fieldValidation` today,
+      measured, but nothing in the suite would notice if it stopped, so the wire
+      region gains a plain-`patch` case with this box (`tester`, 2026-09-04).
+      **And it is the first operation that can put a secret in the audit log.**
+      A `fieldValidation=Strict` rejection on a *workload* object hands the whole
+      object back in `Status.message` — measured at **4859 bytes** on a trivial
+      test Deployment, already past `FREE_TEXT`, carrying `managedFields`,
+      annotations and container specs, and a real one carries
+      `containers[].env[].value`. `scale` was safe because its object is a
+      681-byte `Scale`; this one is not, and truncation is not redaction — and
+      annotations sit at JSON tag 12 of `ObjectMeta`, inside the first few
+      hundred bytes, so the cut does not protect them
+      ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
+      **`Patch::Strategic` fixes that for free and is what kubectl sends anyway**:
+      measured, `kubectl rollout restart` uses
+      `application/strategic-merge-patch+json`, and that path puts k8rs's own
+      six-line patch in the `422` instead of the whole object
+      (`patch.go:770-786` rather than `:353`). So the invariant-4 match and the
+      exposure fix are one choice. Two more measured details for the dialog:
+      kubectl's timestamp is local-offset RFC3339, not `Z`; and **`kubectl
+      rollout restart` has no `--dry-run` flag at all**, so k8rs preflights a
+      restart the taught command cannot reproduce and the dialog must not imply
+      otherwise (`k8s-admin`, 2026-09-04)
 - [ ] `delete` — requires the typed object name. **The contract does not enforce
       this yet and this is the box that makes it structural**: `Answer::Confirmed`
       says somebody agreed and nothing says *how*, so a press-only delete dialog
@@ -3763,7 +3795,12 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       ([NOTES § D20](NOTES.md#d20--a-call-that-takes-time-is-a-state-and-there-was-none))
 - [ ] The command log feed — every command as the user would have typed it
       (the UI panel comes later; the data starts here)
-- [ ] `--read-only`: `ops.rs` unreachable, not merely unbound
+- [ ] `--read-only`: `ops.rs` unreachable, not merely unbound. **Its premise in
+      the code has already gone stale**: `src/main.rs`'s doc for the flag says
+      *"it is unreachable: `ops.rs` does not exist yet"*, and `ops.rs` is 698
+      lines. The conclusion still holds for a different reason — `main.rs`
+      declares `mod ops;` and calls nothing from it — but the sentence is false
+      and this is the box that owns it (`tester`, 2026-09-04)
 - [ ] Verified against kind: scale it, watch the replicas change through the
       watch stream, read the audit line back. Then the same for each operation
 - [ ] e2e job under `--read-only` that fails if any mutating request reaches
@@ -4111,7 +4148,26 @@ without asking us anything.
   **🔒 The gate that came with it:** `$EDITOR` is spawned with an *argument
   vector, never a shell string* (a pod named `; rm -rf ~` must be boring —
   test it); temp file mode 0600 in the user's own temp dir, removed on exit
-  *and* on panic
+  *and* on panic. **And the one nobody had until 2026-09-04:** a
+  `fieldValidation=Strict` rejection hands the **whole object back in
+  `Status.message`**, and `edit` is the one operation where Strict fires
+  routinely rather than only on a k8rs bug — because the unknown field comes
+  from YAML the operator typed. Measured at 4859 bytes on a *trivial* Deployment,
+  already past `FREE_TEXT`, carrying `managedFields`, annotations and container
+  specs; a real one carries `containers[].env[].value`. Truncation is not
+  redaction, so the audit line needs more than the existing bound
+  ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
+  **The sharpest case is `edit` on a Secret**: a Strict `422` there puts the
+  `data` map into `Status.message`, and from there into the audit log and onto
+  the screen — the security gate's *a revealed value never enters the audit log*
+  broken by a value nobody revealed, with no keypress in the way
+  ([NOTES § D198](NOTES.md#d198--the-two-reversals-the-operator-review-forced-a-secret-keeps-a-second-copy-of-itself-and-the-strip-that-made---yaml-not-the-object-2026-08-31)).
+  **And a constraint that falls out of it: `edit` must not round-trip through
+  typed `k8s-openapi` structs.** D99's mechanism runs on the write side too —
+  a non-`Option` field decodes with `unwrap_or_default()`, so a field required at
+  the pin and absent on an older cluster comes back `""`/`0`/`false` and gets
+  serialized straight into the patch: a field nobody typed, that nobody can
+  delete from the buffer, and that Strict then rejects (`k8s-admin`, 2026-09-04)
 - **v0.5** — Events watch + rule 11 (probe failures) and the noisy-stream
   handling it requires. Rule 10 shipped in M1
 - **Traffic adapter** — Prometheus / Istio / Hubble, endpoint from user config

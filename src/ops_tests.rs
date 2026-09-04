@@ -1288,11 +1288,14 @@ async fn a_consequence_that_states_nothing_is_stopped_before_anything_is_written
 // **Negatives are not decoration here.** `FOR_REAL` producing a request that still says
 // `dryRun=All` would be a mutation that never lands, which no positive test can see.
 //
-// **What these assert is `dryRun`, and nothing else about the request** (NOTES § D215). An
-// exact-equality assertion on a delete's body reads every future field as this box's defect: add
-// todo.md 3692's `propagationPolicy: Background` and the failure printed *"the body does not
-// carry it"* beside a body that plainly did, whose obvious repair is to paste the new output into
-// the literal — the assertion drift CLAUDE.md § Code phase rules forbids (`tester`, 2026-09-04).
+// **Each of these names the one parameter it is about, and asserts nothing else about the
+// request** (NOTES § D215). An exact-equality assertion on a delete's body reads every future
+// field as this box's defect: add todo.md 3692's `propagationPolicy: Background` and the failure
+// printed *"the body does not carry it"* beside a body that plainly did, whose obvious repair is
+// to paste the new output into the literal — the assertion drift CLAUDE.md § Code phase rules
+// forbids (`tester`, 2026-09-04). `dryRun` was the only such parameter when the region was
+// written; `fieldValidation` is the second, and it is a separate test rather than a clause bolted
+// onto the first for the same reason.
 
 /// The collection path a `deployment/web` request is built against.
 fn deployments() -> kube::core::Request {
@@ -1392,5 +1395,40 @@ fn the_check_and_the_real_call_are_not_the_same_request() {
         delete_wire(DRY_RUN),
         delete_wire(FOR_REAL),
         "the check and the change are the same DELETE, so one of them is the wrong one"
+    );
+}
+
+/// **Both passes ask the server to reject a field the cluster does not have** — the box's
+/// `fieldValidation=Strict`, asserted in the query string the API server reads and not on a
+/// struct field.
+///
+/// **On the change and not only on the check, which is why one test asserts both.** Where an
+/// operation sets [`Mutation::checkable`] `false` there is no check pass to have carried it, so a
+/// `Strict` that only rode on [`DRY_RUN`] would leave that write validated by nothing: the patch
+/// would answer `200 OK`, alter nothing, and be recorded as a successful mutation — invariant 4's
+/// *neither record may lie*, broken by the server rather than by us.
+///
+/// **The delete carries none, and that absence is asserted rather than assumed.** `DeleteParams`
+/// has no `field_validation` field at all (`kube-core-4.2.0/src/params.rs:763-791`), which is
+/// right rather than missing: a delete sends `DeleteOptions`, not an object, so there is no
+/// schema to validate a body against. A reader who greps a delete for `fieldValidation` finds
+/// nothing, and this says the absence was decided.
+#[test]
+fn both_passes_ask_the_server_to_reject_an_unknown_field() {
+    assert!(
+        patch_uri(DRY_RUN).contains("fieldValidation=Strict"),
+        "the check would accept a field the cluster does not have, so it is not the guard the \
+         confirmation dialog claims it is"
+    );
+    assert!(
+        patch_uri(FOR_REAL).contains("fieldValidation=Strict"),
+        "the real patch would answer 200 OK to a field the cluster does not have, change \
+         nothing, and be recorded as a successful mutation"
+    );
+    let (uri, body) = delete_wire(DRY_RUN);
+    assert!(
+        !uri.contains("fieldValidation") && !body.contains("fieldValidation"),
+        "a delete now carries a fieldValidation this file's doc comment says it cannot — \
+         {uri} · {body}"
     );
 }

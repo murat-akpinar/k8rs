@@ -238,6 +238,7 @@ its line moving with it.
 - [D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04) — the mutation contract: four lies a record could tell, and the three operations that have no dry-run
 - [D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04) — the API dry-runs all three: it was kube's convenience helper that did not, and the annotation it writes is not kubectl's
 - [D216](#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04) — the dry-run goes in a different place per verb, and the checkout that destroyed a box
+- [D217](#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04) — `Strict` on every write that can carry it, and the 422 that hands back the object you sent
 
 ## Why it exists — where the gap is
 
@@ -18535,3 +18536,119 @@ nothing to have and everything to lack: an agent never runs a destructive git
 command on a tree it does not own** — the working tree belongs to the PM, and a
 reviewer that needs a clean tree copies it (`k8s-admin` and `dev-core` both do
 exactly that, with their own `CARGO_TARGET_DIR`).
+
+### D217 — `Strict` on every write that can carry it, and the 422 that hands back the object you sent (2026-09-04)
+
+**The ruling: `fieldValidation=Strict` goes on every write whose parameters can
+carry it, unconditionally.** In practice that is `Pass::patch()` and only it —
+`DeleteParams` has no such field and needs none, because a delete sends
+`DeleteOptions` rather than an object, and there is nothing to validate.
+
+**Why not per-operation.** The alternative was opt-in where a rejection is
+recoverable, which is the *trusted to follow a checklist* shape `Checked`
+([D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04))
+and `Pass`
+([D216](#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04))
+were each built to remove. And the thing it prevents is invariant 4 broken **by
+the server**. Measured by the PM against the four-node `k8rs` kind cluster,
+server v1.36.1, on the `scale` subresource with an unknown field:
+
+```
+?dryRun=All&fieldValidation=Warn     → HTTP 200, a Scale object, no message
+?dryRun=All&fieldValidation=Strict   → HTTP 422, reason Invalid
+```
+
+`Warn` is the server's default. So without this line the dry-run passes, the real
+call passes, and the audit log records **a successful mutation that changed
+nothing** — `kubectl` shows it as `scale.autoscaling/healthy-deploy patched (no
+change)` with exit 0 and the only objection in a `Warning:` header kube does not
+surface. That is [D99](#d99--the-pin-follows-the-newest-types-and-the-old-rule-was-self-violating-from-the-first-capture-2026-08-15)'s
+2026-08-15 measurement, re-measured live before being acted on.
+
+**The "behaviour change on a cluster that today accepts the call" objection
+fails, and it fails for a better reason than the one first given.** k8rs never
+serialises a typed object into a patch body: `scale` sends a hand-built
+`{"spec":{"replicas":N}}` and `restart` a hand-built annotation patch. Strict
+rejects *unknown and duplicate* fields, so a hand-built minimal patch cannot trip
+it — which means Strict can only fire on a k8rs bug, or, for `edit`, on YAML the
+operator typed, where firing is exactly what is wanted.
+
+**The load-bearing step in that argument is one the PM did not state, and
+`k8s-admin` supplied it**: the merge-patch handler begins by re-encoding the
+*current* object with the apiserver's own encoder (`patch.go:323-325`), and only
+the decode half of the codec is strict. So the object the strict decode sees is
+the server's own serialization of its own typed struct — **a stored field cannot
+trip Strict on a built-in kind. Only the patch body can introduce one.** The
+duplicate half is narrower still: `serde_json` cannot emit a duplicate key.
+**So the boundary, stated so it can be defended later: this ruling holds exactly
+while every patch body is built by hand from literal field names.** Nothing in
+`src/` builds one any other way today, and the finding below is what happens when
+that stops being true.
+
+**k8rs is stricter than the command it teaches, and that is worth knowing rather
+than hiding.** Measured: no `kubectl patch` of any kind sends `fieldValidation` —
+not `scale`, not `rollout restart`, not `--type=merge`, on either pass. Harmless
+while the bodies are hand-built; at `edit` it is the entire point.
+
+**And the box's *second* question has a stronger answer than "it is moot".** It
+asked where a `Warning: 299` header goes when validation is *not* strict. There
+is now no non-strict patch — but the reason it cannot be routed is deeper:
+**kube reads the HTTP `Warning` header nowhere, at any layer.** Measured by
+grep across `kube-client` and `kube-core`: the only matches are the webhook
+*response* type and `ValidationDirective::Warn`'s own doc. So it is not that
+kube's `Api` methods fail to surface it — kube discards it before k8rs exists.
+That closes the question and it also means `PRIOR-ART § C3` is a gap whose
+mechanism can never be *surface what kube gives us*.
+
+**It rides on both passes, and the reason is `Mutation::checkable` rather than
+the obvious one.** Check and change send the same body, so a passing Strict check
+implies a passing Strict change — the first draft's justification did not hold.
+What does: an operation that declines the preflight has **no check pass at all**,
+and a `Strict` riding only on `DRY_RUN` would leave those writes validated by
+nothing (`dev-core`'s own second pass).
+
+## The 422 hands back the object you sent, and that is a live security finding for two later boxes
+
+The box's original sentence — *the `422` body echoes the whole object, every
+label, annotation and `managedFields` entry* — is **right**, and the PM's
+counter-hypothesis was wrong. The API reference describes Strict as returning
+*400 Bad Request* with a message naming *"all the unknown or duplicate fields"*
+(`tmp/k8s/api-concepts.txt:709`); that describes the create/update path. The
+**merge-patch** path goes through `NewInvalid` and puts the whole patched object
+in `Status.message`, which is the field `k8s::said` reads. **Three sites do this and the one k8rs reaches is
+`patch.go:353`** — the strict decode of the merged object, not the duplicate-key
+branch at `:362` (`k8s-admin`'s refinement; all three pass the same
+`patchedObjJS`, so the conclusion is unchanged). Measured, same cluster:
+
+| patched | HTTP | `Status.message` | carries |
+|---|---|---|---|
+| `scale` subresource | 422 | **681 bytes** | an `autoscaling/v1 Scale` — name, namespace, uid, resourceVersion, replicas, `managedFields` |
+| the **Deployment** itself | 422 | **4859 bytes** | `managedFields`, `annotations`, `containers`, `image` |
+
+**This box is safe and the two after it are not.** `Pass::patch()` has **no
+product caller at all yet** — `ops.rs` is the contract and nothing else, and the
+operations are three boxes down — so *safe* here means the shape the next caller
+will have: `scale` patches the `scale` subresource, its object is a `Scale`, and
+681 bytes sits inside `FREE_TEXT` (4096) with nothing sensitive in it — so `k8s::said`'s existing strip
+and bound are sufficient and **no second sanitizer was added**. But `restart`
+(`todo.md` 3689) and v0.4's `edit` patch the **workload object**, and the
+measurement above is a *trivial* test Deployment with no `env` at all: it already
+overruns the bound at 4859 bytes and already carries annotations and container
+specs. A real Deployment carries `spec.template.spec.containers[].env[].value`.
+
+**Truncation is not redaction.** `text()` cuts at 4096 and says it cut; the first
+4096 bytes still hold whatever the serialiser put there first. So this is a
+second, non-obvious path into the
+[Security gate](CLAUDE.md#security-gate--run-this-list-on-every-change-no-exceptions)'s
+*environment variable values are never displayed … never enter the command log,
+the audit log* — one that arrives from the **server's error message** rather than
+from an object k8rs chose to render, which is why nobody had it. Boxes 3689 and
+`edit` own it, and their boxes now say so.
+
+*(No cluster object is reproduced here. The measurement is a request k8rs built
+and the shape of the answer — byte counts and field names, not values — which is
+what keeps it on the PM's side of
+[D92](#d92--who-may-touch-a-cluster-split-by-the-artifact-and-not-by-the-agent-2026-08-15)'s
+split: the write into the fixture cluster is the PM's to run, and a
+`--dry-run=server` patch mutated nothing — `healthy-deploy` came back at the same
+`resourceVersion` the 422 had echoed.)*

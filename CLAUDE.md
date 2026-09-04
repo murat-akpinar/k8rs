@@ -343,7 +343,12 @@ that goes green says nothing about those.
 
 - [ ] Environment variable values are never displayed. Secret values require an
       explicit reveal and never enter the command log, the audit log, or the
-      YAML shown by `y`.
+      YAML shown by `y`. **One path into this arrives from the server rather
+      than from anything k8rs chose to render, which is why it was missed for a
+      month**: a `fieldValidation=Strict` rejection on a workload object returns
+      the *whole object* in `Status.message` — 4859 bytes on a trivial
+      Deployment, measured — and that message is what the audit line quotes
+      ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
 - [ ] *(from v0.4, when `edit` lands)* The edit temp file is mode 0600, in the
       user's own temp dir, and removed on exit *and* on panic.
 - [ ] The audit log is mode 0600 and append-only.

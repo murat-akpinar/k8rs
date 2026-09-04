@@ -2179,12 +2179,51 @@ recorded reversal and a later box rather than a dev round
   touched outside `impl Pass`. `tester`'s, and it needs a box in a later phase.
   Found by `k8s-admin`, 2026-09-04
 
-- **k8rs sends no `fieldManager`, so `managedFields` will not say k8rs did it.**
-  kubectl sends `kubectl-rollout` / `kubectl-patch`; k8rs sends none, so the
-  apiserver attributes every k8rs write to whatever it derives from kube's
-  User-Agent. An operator reading `managedFields` after an incident — which is
-  the field that exists to answer *who changed this* — cannot see the tool that
-  changed it. One `Option<String>` on the params, or an explicit decision not to.
+- **Every k8rs write is anonymous in `managedFields`, and it is worse than
+  "no `fieldManager`".** kubectl sends `kubectl-rollout` / `kubectl-patch`;
+  `PatchParams::default()` leaves `field_manager: None`, so the apiserver falls
+  back to `prefixFromUserAgent()` — and **k8rs sends no User-Agent header at
+  all** (measured, the real binary against a recording server: `GET /version
+  UA=None`; kube sets none anywhere). So the manager string is derived from an
+  empty prefix. An operator diffing `managedFields` after an incident — the field
+  that exists to answer *who changed this* — finds an entry no client claims.
+  Same class as [D215](NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)'s
+  annotation key: *a k8rs write that does not look like a k8rs write*.
+  **Not taken yet on purpose**: there is no operation to attribute, the value is
+  a product decision that interacts with server-side apply at `edit`, and one
+  fact is still unmeasured — what the empty prefix actually stores, which is one
+  `kubectl get deploy -o yaml --show-managed-fields` after a k8rs scale, and a
+  PM run. `Pass::patch()` is where it goes; box 3687 is where a write first has
+  an author. Found by `k8s-admin`, 2026-09-04
+
+- **A Strict `422` is a correct sentence nobody can read, and `screens/dialogs.md`
+  budgets three lines for it.** Measured on the four-node fixture cluster: the
+  message opens ` "" is invalid` — **no kind and no name**, because the apiserver
+  calls `NewInvalid(schema.GroupKind{}, "", …)` at all three sites — then the
+  whole object `%q`-escaped so every `"` is `\"`, and the actual diagnosis
+  (`strict decoding error: unknown field "spec.replicaz"`) **last**. `k8s::text`
+  collapses whitespace and never inserts a break, so it arrives as one unbroken
+  line: **ten lines** wrapped to the 50 columns the refusal dialog draws, for the
+  *smallest* object the API can echo. That mockup was drawn against a webhook's
+  English sentence (*"replicas may not exceed 5"*) and budgets three.
+  Invariant 14 is a hard rule, so this is a real gap — and note the whole-object
+  echo is **already reachable without Strict** (`patch.go:346`, the non-strict
+  decode-failure branch, which `{"spec":{"replicas":"three"}}` reaches), so it is
+  not this box's creation, only its widening. The fix is a screen and a
+  presentation decision — which of the three parts a beginner is shown, and where
+  the rest goes — so it is `tui-designer`'s and Phase 11's, beside the pending
+  state already recorded above
+  ([D217](NOTES.md#d217--strict-on-every-write-that-can-carry-it-and-the-422-that-hands-back-the-object-you-sent-2026-09-04)).
+  Found by `k8s-admin`, 2026-09-04
+
+- **Neither k8rs record says k8rs asked for strictness.** `Mutation::path` is
+  supplied by each operation without a query string, so the audit line reads
+  `call: PATCH /apis/apps/v1/…/scale` while the apiserver's `requestURI` carries
+  `?&dryRun=All&fieldValidation=Strict`. The dry-run is covered by name through
+  the verdict field ([D8](NOTES.md#d8--invariant-4-was-not-literally-true));
+  `fieldValidation` is covered by nothing, so an operator reading *"strict
+  decoding error"* in k8rs's own log has nothing there explaining why the server
+  was strict. Box 3687 supplies `path`, box 3696 owns what the log records.
   Found by `k8s-admin`, 2026-09-04
 
 ## Ruled out
