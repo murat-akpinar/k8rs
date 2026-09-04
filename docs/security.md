@@ -65,24 +65,35 @@ Five mechanisms, each a requirement rather than a nicety:
 **Opening a confirmation dialog sends one request to the API server, and that
 is by design rather than by accident.** `screens/dialogs.md` requires the
 dry-run's verdict to be shown *before* the confirm button is live — the dialog's
-own line is *"The cluster checked it first and accepted it."* — so the
-`dryRun=All` goes out while the dialog is on screen and before anybody has
-agreed to anything. Two consequences a reviewer should meet here rather than
-discover: the **apiserver's own** audit log records a `patch` with
-`?dryRun=All` for a dialog the operator then cancelled, and every matching
-admission webhook is invoked with `dryRun: true`. A SIEM rule counting
-`patch deployments/scale by user X` counts dialogs, not changes. Nothing is
-mutated — that is what `dryRun=All` means — and k8rs's own audit log records the
-outcome as *nothing was changed*, but a request was sent
-([NOTES § D214](../NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
+own line is *"The cluster checked it first and accepted it."* — so for any
+operation that has a preflight, the `dryRun=All` goes out while the dialog is on
+screen and before anybody has agreed to anything. Nothing is mutated, which is
+what `dryRun=All` means, and **authorization is identical to the real call**
+(`tmp/k8s/api-concepts.txt:759`) — so the preflight adds no permission to the
+documented read-only role and widens no grant. What it does do is leave a trace,
+and a reviewer should meet the shape of that trace here rather than find it:
 
-**Three operations have no preflight at all, because the API has none to
-offer.** `restart`, `cordon` and `uncordon` go through kube entry points that
-take no parameters, so no `dryRun=All` can be attached — which is why invariant
-2 says *where the API supports it* and why the contract lets an operation
-declare it has no check. The audit line then says so in words rather than
-leaving the field out, so *"was this checked first?"* is answerable for every
-mutation and not only the checkable ones.
+- **The marker rides in a different place per verb, and a rule keyed on the URI
+  is blind to half of them.** The `scale` PATCH and the eviction POST carry
+  `dryRun=All` in the **query string**; a `DELETE` carries it in the **request
+  body**, because `DeleteOptions` is the delete verb's body parameter. So a
+  cancelled k8rs *delete* dialog and a delete that actually happened produce the
+  **same `requestURI`** in the apiserver's own audit log. The field that tells
+  them apart is `requestObject.dryRun`, which exists at `Request` audit level and
+  above and not at `Metadata`.
+- **A SIEM rule must therefore not be written against the URI alone.** A rule
+  counting `patch deployments/scale` counts scale dialogs, including ones nobody
+  confirmed, and says nothing about the operation that most needs watching.
+- **One spelling detail, because a reviewer will grep for it:** kube emits
+  `?&dryRun=All`, with an empty leading pair, so a pattern anchored on
+  `?dryRun=All` matches nothing k8rs sends.
+- Every matching admission webhook is invoked with `dryRun: true`.
+
+k8rs's own audit log records the outcome of a cancelled dialog as *nothing was
+changed*, which is true — but a request was sent, and that is the fact this
+section exists to state
+([NOTES § D214](../NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04) ·
+[§ D215](../NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
 
 Plus two absences that matter: **no bulk mutation** (single object, single
 confirmation — the multi-select delete is how outages happen) and **no
@@ -97,8 +108,14 @@ widen the trust boundary, and the one that needs a temp file full of object
 YAML, at the end where they get their own scrutiny.
 
 **Restart is not an API verb.** For workloads it patches the
-`kubectl.kubernetes.io/restartedAt` annotation, exactly as
-`kubectl rollout restart` does. For a bare pod it is a *delete* — and the
+`kubectl.kubernetes.io/restartedAt` annotation — **the key `kubectl rollout
+restart` itself writes, which is not the key kube-rs's `Api::restart` helper
+writes.** That helper spells it `kube.kubernetes.io/restartedAt`, and a
+different key means the pod template differs from the one kubectl would have
+produced: the operator who runs the command the command log taught them gets a
+**second** rollout, and finds an annotation in their Deployment that nothing in
+their cluster wrote. So k8rs builds this patch itself
+([NOTES § D215](../NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)). For a bare pod it is a *delete* — and the
 confirmation says so, because a beginner must not learn "restart" as a
 synonym for "delete" by accident.
 

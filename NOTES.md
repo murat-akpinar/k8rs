@@ -236,6 +236,8 @@ its line moving with it.
 - [D212](#d212--an-allowed-lint-never-fires-so-clippy-cannot-report-the-file-that-turns-it-off-and-the-switch-was-in-the-justfile-2026-09-03) — an allowed lint never fires, so clippy cannot report the file that turns it off, and the switch was in the justfile
 - [D213](#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04) — the write path is the fifth consumer of `Fault` and it cannot see the two answers it meets most
 - [D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04) — the mutation contract: four lies a record could tell, and the three operations that have no dry-run
+- [D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04) — the API dry-runs all three: it was kube's convenience helper that did not, and the annotation it writes is not kubectl's
+- [D216](#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04) — the dry-run goes in a different place per verb, and the checkout that destroyed a box
 
 ## Why it exists — where the gap is
 
@@ -18297,7 +18299,15 @@ wherever `sent` was wrong — including `screens/dialogs.md`, which carried the
 same claim twice in prose the code had made false.
 
 **Three operations have no dry-run, and the contract has to be able to say so.**
-The first draft argued an opt-out "would be a hole with nothing behind it". Four
+**— The premise of this paragraph was falsified the next day and the seam it
+argues for survived on a different reason
+([D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
+Read it there, not here: the API dry-runs all three, and what takes no params is
+one kube helper.** The paragraph is left standing rather than rewritten because
+it is what the box was built against, and because the shape of the error — a
+client signature read correctly and concluded from wrongly — is the thing worth
+being able to find again. The rest of it still holds:
+the first draft argued an opt-out "would be a hole with nothing behind it". Four
 things disagree, and the first was measured: `Api::restart(&self, name)` takes
 no params argument at all (`kube-client-4.2.0/src/api/util/mod.rs:19`), as do
 `cordon` and `uncordon`; [§ Operations](#operations--the-full-admin-surface)
@@ -18305,8 +18315,12 @@ gives `restart`, `cordon`, `delete` and `drain` the guard *confirm* where only
 `scale`, `undo` and `edit` are *confirm + dry-run*; invariant 2 says `dryRun=All`
 **where the API supports it**; and `todo.md`'s own next box says *wherever
 supported*. `Mutation::checkable` cuts the seam in the signature that freezes,
-and the audit line records *"the cluster has no way to check this one first"*
-rather than omitting the field — D8's verdict recorded honestly.
+and the audit line records that no check was run rather than omitting the
+field — D8's verdict recorded honestly. **The sentence it recorded is not the
+one it records now**: that wording blamed the cluster, and
+[D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)
+replaced it with *"k8rs did not check this one with the cluster first"*, which
+is true whatever the reason.
 
 **A cluster can also refuse every dry-run there is, and that is accepted rather
 than designed around.** A `ValidatingWebhookConfiguration` matching the resource
@@ -18360,3 +18374,164 @@ unanswerable — `perform` reads the clock once. And `write_line`'s one
 `write_all` + flush is atomic per record only while a record fits one syscall,
 which a 4 KB server message need not. Both are one line in the box that opens
 the file; neither is worth a signature change while `ops.rs` is still open.
+
+### D215 — the API dry-runs all three: it was kube's convenience helper that did not, and the annotation it writes is not kubectl's (2026-09-04)
+
+[D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)
+said *three operations have no dry-run* and cited `Api::restart(&self, name)`
+taking no params argument. **The citation is true and the conclusion drawn from
+it is false**, measured by `k8s-admin` against a real `kubectl` and a recording
+API server:
+
+```
+$ kubectl cordon n1 --dry-run=server
+PATCH /api/v1/nodes/n1?dryRun=All   body {"spec":{"unschedulable":true}}
+$ kubectl patch deployment web -n payments --dry-run=server -p '<restartedAt>'
+PATCH /apis/apps/v1/namespaces/payments/deployments/web?dryRun=All
+```
+
+`restart`, `cordon` and `uncordon` are ordinary PATCHes on ordinary paths and the
+API dry-runs every one of them. What cannot carry the parameter is
+`kube_core::util::Request::restart` / `cordon` / `uncordon`, which build their own
+`PatchParams::default()` internally (`kube-core-4.2.0/src/util.rs:21-60`). **The
+API's capability and one client helper's signature are not the same fact, and
+D214 substituted the second for the first.** This is
+[CLAUDE.md](CLAUDE.md#where-a-leak-would-actually-happen--the-pm-checks-these-by-hand)'s
+*a claim reasoned from a definition instead of measured against the object* — the
+quiet half of it, prose rather than a number — committed by the PM, carried
+through a dev round and past a first operator review, and caught only when
+somebody put the question to `kubectl` instead of to a type signature.
+
+**A second thing the same helper gets wrong, and this one reaches the operator.**
+kube writes `kube.kubernetes.io/restartedAt`; `kubectl rollout restart` writes
+`kubectl.kubernetes.io/restartedAt` (`util.rs:28`, measured against kubectl
+v1.36.3). Different key, different pod template. So: an operator restarts
+`deployment/web` from k8rs, the command log teaches them
+`kubectl rollout restart deployment/web -n payments`, they run it five minutes
+later — and get a **second rollout**, because the template now differs by an
+annotation kubectl has never seen. Then they diff the Deployment and find a
+`kube.kubernetes.io/` key nothing in their cluster wrote. Invariant 4 says the
+command log shows the *equivalent* command; that one is not equivalent, and
+`todo.md`'s restart box said to use the helper.
+
+**The ruling, three parts.**
+
+- **`Mutation::checkable` stays, and its reason is rewritten.** The seam is
+  right — *whether this operation has a preflight* is a real question — but
+  *the API cannot* was never the answer. A genuine reason exists and it is
+  finding 3 below, not a missing parameter.
+- **Which operations are checkable belongs to each operation's own box**
+  (`scale` 3687, `restart` 3689, `delete` 3692), not to the box that builds the
+  parameters. What this box owes is to stop asserting the false reason.
+- **`restart` builds its patch by hand** rather than calling the helper, which
+  buys the dry-run and the right annotation key in the same six lines. That is
+  `todo.md:3689`'s work and its box now carries the premise.
+
+**Finding 3, which is the real reason a `delete` might decline a preflight.**
+`kubectl delete --dry-run=server` and a real `kubectl delete` produce the
+**identical request line** — the marker is in the body, because `DeleteOptions`
+is the delete verb's body parameter. So opening a delete dialog on `prod` sends a
+real `DELETE` to the apiserver before anyone has typed a name, and in the
+cluster's own audit record at `Metadata` level a cancelled dialog is
+indistinguishable from the delete that happened. The distinguishing field is
+`requestObject.dryRun`, at `Request` level or above. That is a cost worth
+weighing against catching an admission rejection early, and it is the delete
+box's to weigh — recorded here so it is weighed rather than inherited.
+
+**`post()` is removed rather than kept for the freeze.** It was built for a v0.2
+eviction with no caller, on the argument that `ops.rs` freezes at phase end.
+Three measured things dissolve that argument: kube's eviction body spells the
+field `delete_options` where the API's is `deleteOptions`
+(`kube-core-4.2.0/src/subresource.rs:119`), so a drain setting a grace period
+would silently not set one; `PostParams` has no `field_validation` field at all
+(`params.rs:535`), so the *next box in this phase* cannot use it; and
+[`backlog.md`](backlog.md) already records that drain does not fit `perform`, so
+`ops.rs` reopens for it regardless and `post()` saves nothing. **A freeze
+argument only rescues code that the thing after the freeze could actually use.**
+
+**And what `Pass` still does not close, recorded because review is the only thing
+holding it.** `Mutation::checkable` is a free `bool` an operation asserts about
+itself. Write `restart` with `checkable: true` — a plausible slip, since it *is*
+a patch — and its closure ignores the `Pass` because the helper takes none;
+`perform` then calls it twice and the Deployment gets `restartedAt` set twice a
+second apart. **Two rollouts, and both records say one checked change.** `Pass`
+cannot see this. `scripts/write-guard.py` can, it already reads `ops.rs` by name,
+and `scripts/` does not freeze — which is where it is boxed.
+
+### D216 — the dry-run goes in a different place per verb, and the checkout that destroyed a box (2026-09-04)
+
+`todo.md:3668` asked for *server-side `dryRun=All` wherever supported*. Half of
+it was already built — the contract aborts a rejected check and surfaces the
+server's own sentence — so what the box actually bought was closing `tester`'s
+F7: `Call: Fn(bool)` handed an operation a flag it was **trusted** to turn into
+`?dryRun=All`, and a closure that ignored it and sent the real call twice
+satisfied every test in the file. `Pass` puts the bool behind a private field, so
+the only thing an operation can do with it is ask for the parameters of the call
+it is about to make. One conversion from *which pass* to *what goes on the wire*,
+not one per operation.
+
+**Two shapes, not three.** `post()` was written for a v0.2 eviction with no
+caller, on the argument that `ops.rs` freezes at phase end. Three measured facts
+dissolved it and it was deleted: kube spells the eviction's field
+`delete_options` where the API's is `deleteOptions`
+(`kube-core-4.2.0/src/subresource.rs:120`), so a drain setting a grace period
+silently sets none; `PostParams` has no `field_validation` at all, so the *next
+box in this phase* could not use it; and `backlog.md` already records that drain
+does not fit `perform`, so `ops.rs` reopens for it regardless. **A freeze
+argument only rescues code the thing after the freeze could actually use.**
+
+**Where the marker rides is not the same for every verb, and this is the fact
+worth carrying out of the box.** Measured three independent ways — a scratch
+probe over the vendored crate, kube's own `delete_param_serialize` unit test, and
+real `kubectl` v1.36.3 against a recording HTTP server:
+
+```
+PATCH  …/deployments/web/scale?&dryRun=All
+DELETE …/deployments/web?                    body {"dryRun":["All"]}
+```
+
+`DeleteParams` has no `populate_qp`; `Request::delete` builds an empty query and
+serialises the struct into the **body**, because `DeleteOptions` is the delete
+verb's body parameter. So **a reviewer grepping a delete's URL for `dryRun` finds
+nothing and is right to worry** — and a SIEM rule keyed on `requestURI` sees
+every scale dialog and is blind to every delete one. That went into
+[docs/security.md § Write safety](docs/security.md#write-safety-model), with the
+other half of it: authorization for a dry-run is identical to the real call
+(`api-concepts.txt:759`), so the preflight widens no grant. One spelling detail
+belongs with it, because a reviewer will grep for it: kube emits `?&dryRun=All`,
+with an empty leading pair.
+
+**The false framing had five copies and the brief named two.** D214's *the API
+has no dry-run for these three* (falsified by
+[D215](#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04))
+had propagated into `Pass::patch`'s doc, `Mutation::checkable`'s doc, the region
+comment, `Outcome::Done`'s doc and `perform`'s doc. `dev-core` found the last
+three itself and rewrote them rather than fixing only what was asked. That is the
+rule working: **a surviving copy is the stale one, and it is never the one that
+gets fixed later.** The audit constant went with them — *"the cluster has no way
+to check this one first"* blamed the cluster for a limitation it does not have,
+and is now *"k8rs did not check this one with the cluster first"*, which is true
+whatever the reason.
+
+**An assertion that accuses the code of the wrong defect is a drift trap, and
+`tester` measured it instead of predicting it.** The delete-body test asserted
+byte equality with `{"dryRun":["All"]}`. Adding the `propagationPolicy:
+Background` that box 3692 will want — dry-run wiring untouched and still
+correct — failed with *"the body does not carry it"* when the body plainly did,
+and the obvious repair is to update the literal to match the output. It is
+containment now (`contains` on the check pass, `!contains("dryRun")` on the real
+one), which still catches an inverted or dead `Pass::delete()` — both proven red.
+
+**And a review agent destroyed the box.** `tester` ran `git checkout -- .` to
+clean a scratch file and took the whole uncommitted working tree with it, then
+reconstructed both files from a `git diff` it had already captured and said so
+first, before its findings — including what it could *not* vouch for, since
+`rustfmt` and the tests cannot see a typo in a doc comment. **The PM had an
+independent pre-incident copy**, having read the region in full during its own
+review, and it matched byte for byte; `git diff` was four hunks touching nothing
+else, so the rest was git's own committed bytes. The recovery was sound and the
+honesty about its limits is what made it verifiable at all. **The rule it cost
+nothing to have and everything to lack: an agent never runs a destructive git
+command on a tree it does not own** — the working tree belongs to the PM, and a
+reviewer that needs a clean tree copies it (`k8s-admin` and `dev-core` both do
+exactly that, with their own `CARGO_TARGET_DIR`).

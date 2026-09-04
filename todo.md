@@ -3665,8 +3665,17 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       and a `422` — the two answers a write meets most — both read as *the
       network said nothing*
       ([D213](NOTES.md#d213--the-write-path-is-the-fifth-consumer-of-fault-and-it-cannot-see-the-two-answers-it-meets-most-2026-09-04))
-- [ ] Server-side `dryRun=All` wherever supported; a rejected dry-run aborts
-      and surfaces the API server's own message
+- [x] Server-side `dryRun=All` wherever supported; a rejected dry-run aborts
+      and surfaces the API server's own message — the abort was already the
+      contract's; what this box bought is that an operation can no longer *drop*
+      the flag. `Pass` puts the bool behind a private field, so the only thing an
+      operation can do with it is ask for the parameters of the call it is about
+      to make. **Where the marker rides is not the same for every verb**: query
+      string for a PATCH, request *body* for a DELETE, measured three independent
+      ways
+      ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)).
+      `post()` was written and then deleted — a freeze argument only rescues code
+      the thing after the freeze could actually use
 - [ ] **A dry-run does not reject an unknown field, so the mutation contract
       needs `fieldValidation=Strict` and a place to put the warning** — measured
       2026-08-15 on kind v1.36.1
@@ -3699,9 +3708,17 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       ([NOTES § D14](NOTES.md#d14--three-plan-corrections))
 - [ ] `scale` — via the **scale subresource** (`get_scale` / `patch_scale`),
       not a full-object patch
-- [ ] `restart` — `Api::restart(name)`, which kube-rs already implements for
-      workloads. For a bare pod there is no restart: it is a *delete*, and the
-      consequence text must say so in plain words
+- [ ] `restart` — **not** `Api::restart(name)`: that helper writes
+      `kube.kubernetes.io/restartedAt` where `kubectl rollout restart` writes
+      `kubectl.kubernetes.io/restartedAt`, so the command log would teach a line
+      that produces a *second* rollout when the operator runs it, and it builds
+      its own `PatchParams::default()` so no `dryRun=All` can ride with it. Both
+      measured against kubectl v1.36.3
+      ([D215](NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
+      k8rs builds the patch itself through `Pass::patch()`, which buys the right
+      key and the preflight in the same six lines. For a bare pod there is no
+      restart: it is a *delete*, and the consequence text must say so in plain
+      words
 - [ ] `delete` — requires the typed object name. **The contract does not enforce
       this yet and this is the box that makes it structural**: `Answer::Confirmed`
       says somebody agreed and nothing says *how*, so a press-only delete dialog
@@ -3710,7 +3727,12 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       ([D214](NOTES.md#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
       A `Confirm::Press | Confirm::Type(&str)` on `Mutation` makes it a type
       error instead. `ops.rs` is still open until this phase closes, which is why
-      it waits here and not longer (`k8s-admin`, 2026-09-04)
+      it waits here and not longer (`k8s-admin`, 2026-09-04).
+      **And decide whether `delete` is checkable at all**: a dry-run delete and a
+      real one produce the *identical* request line, so at `Metadata` audit level
+      the cluster's own record cannot tell a cancelled dialog from a delete that
+      happened
+      ([D215](NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04))
 - [ ] Every call sends the resourceVersion that was read; a `409` offers a
       re-read, never a blind overwrite (the case `edit` will lean on in v0.4 —
       the mechanism is built and tested now, while it is cheap)

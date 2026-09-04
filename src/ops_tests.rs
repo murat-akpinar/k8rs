@@ -102,7 +102,11 @@ fn scaling() -> Mutation<'static> {
         kubectl: "kubectl scale deployment/web --replicas=3 -n payments",
         verb: "PATCH",
         path: "/apis/apps/v1/namespaces/payments/deployments/web/scale",
-        version: Some("8123"),
+        // **None, because nothing [`Pass::patch`] returns carries one** — `PatchParams` is
+        // `dry_run`, `force`, `field_manager`, `field_validation` and nothing else. Sending a
+        // `resourceVersion` is todo.md 3693's work; a fixture that claims one today has the
+        // audit line stating a field the request beside it does not send.
+        version: None,
         checkable: true,
     }
 }
@@ -113,7 +117,7 @@ const ATTEMPT: &str = "audit: 2026-09-03T12:34:56Z attempt · deployment/web · 
                        namespace payments · kubectl: kubectl scale deployment/web --replicas=3 \
                        -n payments · call: PATCH \
                        /apis/apps/v1/namespaces/payments/deployments/web/scale · \
-                       resourceVersion 8123\n";
+                       resourceVersion not sent\n";
 
 /// The `dry-run:` field every result line for a [`scaling`] that was checked and accepted carries
 /// — written out from `screens/dialogs.md`'s own sentence, not from what the code returned.
@@ -135,16 +139,23 @@ fn dead_socket(what: &'static str) -> kube::Error {
 }
 
 /// A closure that records the step and answers `Ok(())` for both passes.
-fn works(trace: &Shared) -> impl Fn(bool) -> std::future::Ready<Result<(), kube::Error>> + '_ {
-    move |dry_run| {
-        trace.borrow_mut().steps.push(step(dry_run));
+fn works(trace: &Shared) -> impl Fn(Pass) -> std::future::Ready<Result<(), kube::Error>> + '_ {
+    move |pass| {
+        trace.borrow_mut().steps.push(step(pass));
         std::future::ready(Ok(()))
     }
 }
 
+/// **Whether this is the check, read the way an operation has to read it** — off the params it
+/// would actually send, never off a `bool` beside them. A double that kept its own copy of the
+/// flag would go on passing after [`Pass::patch`] stopped carrying it.
+fn is_check(pass: Pass) -> bool {
+    pass.patch().dry_run
+}
+
 /// What one pass of the operation is called in the transcript.
-fn step(dry_run: bool) -> String {
-    if dry_run { "dry-run" } else { "call" }.to_string()
+fn step(pass: Pass) -> String {
+    if is_check(pass) { "dry-run" } else { "call" }.to_string()
 }
 
 /// A dialog that records what it was told to draw.
@@ -279,8 +290,8 @@ async fn the_object_the_check_returned_is_what_the_dialog_is_given() {
             *heard.borrow_mut() = checked.returned().cloned();
             std::future::ready(Answer::Confirmed)
         },
-        |dry_run| {
-            std::future::ready(Ok(if dry_run {
+        |pass| {
+            std::future::ready(Ok(if is_check(pass) {
                 "replicas: 3 (not really)".to_string()
             } else {
                 "replicas: 3".to_string()
@@ -375,9 +386,9 @@ async fn a_refused_check_stops_before_the_confirmation_and_keeps_what_the_server
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
-        |dry_run| {
-            trace.borrow_mut().steps.push(step(dry_run));
-            std::future::ready(if dry_run {
+        |pass| {
+            trace.borrow_mut().steps.push(step(pass));
+            std::future::ready(if is_check(pass) {
                 Err(refusal(denial, "Forbidden", 403))
             } else {
                 Ok(())
@@ -548,9 +559,9 @@ async fn a_call_that_fails_after_a_good_check_is_told_apart_from_a_refused_check
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
-        |dry_run| {
-            trace.borrow_mut().steps.push(step(dry_run));
-            std::future::ready(if dry_run {
+        |pass| {
+            trace.borrow_mut().steps.push(step(pass));
+            std::future::ready(if is_check(pass) {
                 Ok(())
             } else {
                 Err(refusal(expired, "Unauthorized", 401))
@@ -593,8 +604,8 @@ async fn a_conflict_on_the_real_call_is_its_own_fault_and_keeps_the_servers_own_
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
-        |dry_run| {
-            std::future::ready(if dry_run {
+        |pass| {
+            std::future::ready(if is_check(pass) {
                 Ok(())
             } else {
                 Err(refusal(conflict, "Conflict", 409))
@@ -636,8 +647,8 @@ async fn a_broken_pipe_after_the_request_went_out_says_k8rs_does_not_know() {
         &mut sink,
         shows(&trace),
         asked(&trace, Answer::Confirmed),
-        |dry_run| {
-            std::future::ready(if dry_run {
+        |pass| {
+            std::future::ready(if is_check(pass) {
                 Ok(())
             } else {
                 Err(dead_socket("broken pipe"))
@@ -706,25 +717,28 @@ async fn the_dry_run_verdict_is_on_every_result_line_and_not_only_where_it_faile
     }
 }
 
-/// **An operation the API cannot dry-run says so, and sends nothing before the confirmation**
-/// (invariant 2's *where the API supports it*; `Api::restart` takes no params argument at all,
-/// `kube-client-4.2.0/src/api/util/mod.rs:19`).
+/// **An operation that declines the check says so, and sends nothing before the confirmation.**
+///
+/// **The verdict names k8rs and not the cluster** (NOTES § D215). A real cluster dry-runs both
+/// verbs this file sends, so *"the cluster has no way to check this one first"* — what this
+/// asserted until 2026-09-04 — was false every time it printed, in a dialog invariant 14 writes
+/// for someone in their first month.
+///
+/// **The subject is the flag and not any operation.** This used to set `checkable: false` on a
+/// fixture whose kubectl line read `kubectl rollout restart`, which is a claim about `restart`
+/// that D215 measured to be wrong; which operations decline, and why, is each operation's own
+/// box (todo.md 3687, 3689, 3692) and not this one's.
 #[tokio::test]
-async fn an_operation_with_no_dry_run_records_that_none_was_run_and_sends_nothing_early() {
+async fn an_operation_that_declines_the_check_records_that_none_was_run_and_sends_nothing_early() {
     let trace = trace();
     let mut sink = Sink(trace.clone());
-    let restart = Mutation {
-        object: "deployment/web",
-        consequence: "This starts fresh copies of deployment/web one at a time. The old copies \
-                      are removed as the new ones come up.",
-        kubectl: "kubectl rollout restart deployment/web -n payments",
-        path: "/apis/apps/v1/namespaces/payments/deployments/web",
+    let unchecked = Mutation {
         checkable: false,
         ..scaling()
     };
 
     let done = perform(
-        &restart,
+        &unchecked,
         stamp(),
         &mut sink,
         shows(&trace),
@@ -738,19 +752,18 @@ async fn an_operation_with_no_dry_run_records_that_none_was_run_and_sends_nothin
     assert_eq!(
         steps.iter().filter(|step| *step == "dry-run").count(),
         0,
-        "an operation whose API has no dryRun=All was sent one anyway"
+        "an operation that declared it sends no check was sent one anyway"
     );
     assert_eq!(
         trace.borrow().verdict.as_deref(),
-        Some("the cluster has no way to check this one first, so nothing was tried"),
-        "the dialog claims a check that never ran"
+        Some("k8rs did not check this one with the cluster first"),
+        "the dialog claims a check that never ran, or blames the cluster for k8rs not running one"
     );
     assert_eq!(
         steps.last().cloned(),
         Some(
-            "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · dry-run: the \
-             cluster has no way to check this one first, so nothing was tried · the change was \
-             made\n"
+            "audit: result · attempt 2026-09-03T12:34:56Z · deployment/web · dry-run: k8rs did \
+             not check this one with the cluster first · the change was made\n"
                 .to_string()
         ),
         "the audit log omits the verdict field rather than recording that there was no check"
@@ -1261,4 +1274,123 @@ async fn a_consequence_that_states_nothing_is_stopped_before_anything_is_written
         works(&trace),
     )
     .await;
+}
+
+// --- WHAT THE PASS PUTS ON THE WIRE ---
+//
+// **A test that asserts `params.dry_run == true` asserts that the line above it wrote `true`.**
+// What invariant 2 requires is `dryRun=All` reaching the API server, and kube does not put it in
+// the same place for both shapes — a patch carries it in the query string, a delete carries it in
+// the request body. `populate_qp` is `pub(crate)` and cannot be called from here, so these build
+// the request kube itself builds — `kube::core::Request`, which `Api<K>`'s methods delegate
+// to — and read the URI and the body off it.
+//
+// **Negatives are not decoration here.** `FOR_REAL` producing a request that still says
+// `dryRun=All` would be a mutation that never lands, which no positive test can see.
+//
+// **What these assert is `dryRun`, and nothing else about the request** (NOTES § D215). An
+// exact-equality assertion on a delete's body reads every future field as this box's defect: add
+// todo.md 3692's `propagationPolicy: Background` and the failure printed *"the body does not
+// carry it"* beside a body that plainly did, whose obvious repair is to paste the new output into
+// the literal — the assertion drift CLAUDE.md § Code phase rules forbids (`tester`, 2026-09-04).
+
+/// The collection path a `deployment/web` request is built against.
+fn deployments() -> kube::core::Request {
+    kube::core::Request::new("/apis/apps/v1/namespaces/payments/deployments")
+}
+
+/// A patch's URI, printed so `--nocapture` shows the query string a human would read off the
+/// apiserver's own audit log.
+///
+/// **The scale subresource and not a plain `PATCH`**, because `scale` is this phase's only
+/// written caller of [`Pass::patch`]. `Api::patch_scale` delegates to
+/// `Request::patch_subresource` (`kube-client-4.2.0/src/api/subresource.rs:44`), which is a
+/// different entry point from `Request::patch` and reaches the same `PatchParams::populate_qp`;
+/// this asserts the one the operation will use rather than the one next to it.
+fn patch_uri(pass: Pass) -> String {
+    let request = deployments()
+        .patch_subresource(
+            "scale",
+            "web",
+            &pass.patch(),
+            &kube::api::Patch::Merge(serde_json::json!({ "spec": { "replicas": 3 } })),
+        )
+        .expect("a patch request built from a valid name and this file's own params");
+    let uri = request.uri().to_string();
+    println!("PATCH {uri}");
+    uri
+}
+
+/// A delete's URI and body, the second of which is where its `dryRun` lives.
+fn delete_wire(pass: Pass) -> (String, String) {
+    let request = deployments()
+        .delete("web", &pass.delete())
+        .expect("a delete request built from a valid name and this file's own params");
+    let uri = request.uri().to_string();
+    let body = String::from_utf8(request.body().clone())
+        .expect("kube serialises DeleteParams with serde_json, which cannot emit invalid UTF-8");
+    println!("DELETE {uri} · body {body}");
+    (uri, body)
+}
+
+/// **The check pass puts `dryRun=All` on the wire for both shapes** — invariant 2's *server-side
+/// `dryRun=All`*, asserted where the API server would read it and not on a struct field.
+#[test]
+fn the_check_pass_carries_dry_run_all_on_the_wire_for_a_patch_and_a_delete() {
+    assert!(
+        patch_uri(DRY_RUN).contains("dryRun=All"),
+        "a patch built from the check pass would change the cluster: nothing in the query string \
+         tells the API server this is a dry run"
+    );
+    let (uri, body) = delete_wire(DRY_RUN);
+    assert!(
+        body.contains(r#""dryRun":["All"]"#),
+        "a delete built from the check pass would delete the object: its dryRun rides in the \
+         body, and this body does not carry one — {body}"
+    );
+    assert!(
+        !uri.contains("dryRun"),
+        "the delete's dryRun was expected in the body and this URI carries one too — kube's \
+         wire format has changed and this file's doc comment is now wrong"
+    );
+}
+
+/// **The real pass says nothing about a dry run, for either shape.** A `dryRun=All` left on the
+/// second call is a k8rs that confirms a change and never makes it — the audit log says *the
+/// change was made* and the cluster disagrees, which is invariant 4's *neither record may lie*.
+#[test]
+fn the_real_pass_asks_for_no_dry_run_at_all_for_a_patch_and_a_delete() {
+    assert!(
+        !patch_uri(FOR_REAL).contains("dryRun"),
+        "the real patch is still a dry run, so the change is confirmed and never made"
+    );
+    let (uri, body) = delete_wire(FOR_REAL);
+    assert!(
+        !body.contains("dryRun"),
+        "the real delete is still a dry run, so the object is never deleted — {body}"
+    );
+    assert!(
+        !uri.contains("dryRun"),
+        "the real delete's URI carries a dryRun kube is not supposed to put there"
+    );
+}
+
+/// **The two passes are not the same request**, which is the hole this box closes: a `Pass` that
+/// answered the same params either way would satisfy every ordering test in this file, because
+/// the contract can sequence two calls and cannot see what either one sent.
+///
+/// Two live requests compared against each other and never against a literal, so a field a later
+/// box adds to both shapes leaves this saying what it means.
+#[test]
+fn the_check_and_the_real_call_are_not_the_same_request() {
+    assert_ne!(
+        patch_uri(DRY_RUN),
+        patch_uri(FOR_REAL),
+        "the check and the change are the same PATCH, so one of them is the wrong one"
+    );
+    assert_ne!(
+        delete_wire(DRY_RUN),
+        delete_wire(FOR_REAL),
+        "the check and the change are the same DELETE, so one of them is the wrong one"
+    );
 }

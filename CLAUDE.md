@@ -142,6 +142,15 @@ require it, fix the plan, record the reversal in [NOTES.md](NOTES.md), continue.
    `may_i(...)` lives in `ops.rs` despite mutating nothing, because it is
    performed with `create`
    ([D23](NOTES.md#d23--permissions-are-discovered-by-failing-and-that-is-backwards)).
+   **"One file to audit" is one file *plus its test module*, and that is worth
+   saying because it is not obvious.** `ops_tests.rs` is a `#[path]` child module
+   (invariant 11), so `ops.rs`'s inner `#![allow]` covers it lexically and banned
+   calls legitimately appear in two files. Proven not a hole rather than assumed
+   ([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)):
+   the test module holds no `Client`, no `.send(`, no `.request(`, so the
+   requests it builds are never dispatched. `write-guard.py` still reports
+   exactly one silencer, and it scans `tests/` as well as `src/` — measured, by
+   planting one and watching it fail.
 2. **No write is implicit.** Every mutation requires: an explicitly selected
    object → a keypress → a confirmation dialog stating the consequence in plain
    language → a server-side `dryRun=All` where the API supports it → an audit
@@ -564,6 +573,20 @@ thing between the machine and a leak is the script reaching its final statement,
 there is no cleanup. **`just mutants-diff` is already
 this shape** — `scripts/mutants.sh` names its own scratch volume — which is why the
 hand sweeps are the ones that need saying.
+
+**No agent runs a destructive git command. Ever, on any tree.** Not
+`git checkout -- .`, not `git reset --hard`, not `git stash`, not `git clean`.
+The working tree is the PM's, it usually holds a box in flight, and none of those
+commands can tell your scratch file from somebody's afternoon. `tester` ran
+`git checkout -- .` to tidy one probe file and destroyed a finished, unreviewed
+box; it recovered it only because it happened to have captured a `git diff`
+first, and it was still unable to vouch for its own doc comments — `rustfmt` and
+the tests cannot see a typo in a comment
+([D216](NOTES.md#d216--the-dry-run-goes-in-a-different-place-per-verb-and-the-checkout-that-destroyed-a-box-2026-09-04)).
+**An agent that wants a clean tree copies it** and gives the copy its own
+`CARGO_TARGET_DIR`; `k8s-admin` and `dev-core` both already do. An agent that
+wants a file gone deletes *that file by name*. Anything that would discard work
+is the PM's, and the PM backs up first.
 
 **A re-dispatch to fix a finding is a write, not a review** — `screens/` went to
 its owner for a rewrite in the slot the table below reserves for two *reviewers*,

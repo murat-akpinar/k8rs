@@ -33,6 +33,7 @@ use std::future::Future;
 use std::io::Write;
 
 use k8s_openapi::jiff::Timestamp;
+use kube::api::{DeleteParams, PatchParams};
 
 use crate::k8s::{FREE_TEXT, Fault, IDENTIFIER, fault, said, text};
 
@@ -83,13 +84,16 @@ use crate::k8s::{FREE_TEXT, Fault, IDENTIFIER, fault, said, text};
 // that cannot be written does not un-make a change that has already been made, so [`Performed`]
 // carries the outcome *and* whether it was recorded, rather than replacing one with the other.
 //
-// **An operation can say it has no dry-run, because three of the six do not.**
-// `Api::restart(&self, name)` takes no params argument at all
-// (`kube-client-4.2.0/src/api/util/mod.rs:19`), and the same holds for `cordon`/`uncordon`; NOTES
-// § Operations gives `restart`, `cordon`, `delete` and `drain` the guard *confirm* where only
-// `scale`, `undo` and `edit` are *confirm + dry-run*; invariant 2 says `dryRun=All` **where the
-// API supports it**. So [`Mutation::checkable`] is `false` there and the audit line **says so** —
-// D8's verdict field recorded honestly rather than omitted.
+// **An operation can say it sends no check, and the audit line then says so** — D8's verdict
+// field recorded honestly rather than omitted. **What [`Mutation::checkable`] is not is a fact
+// about the API.** `restart`, `cordon` and `uncordon` are ordinary PATCHes on ordinary paths and
+// a real cluster dry-runs all three; what cannot carry the parameter is
+// `kube_core::util::Request::restart`/`cordon`/`uncordon`, whose own `PatchParams::default()` is
+// built internally (`kube-core-4.2.0/src/util.rs:21-60`) — a client helper's signature, which
+// this region read as the API's capability for a round (NOTES § D215). So `false` means k8rs
+// *declined* a preflight it could have had, and each operation's own box says why — `scale`
+// (todo.md 3687), `restart` (3689), `delete` (3692). This region carries the seam and records
+// what happened, and asserts nothing about which way any operation sets it.
 //
 // **A cluster can also refuse every dry-run there is**: a `ValidatingWebhookConfiguration` with
 // `sideEffects: Some | Unknown` fails `dryRun=All` for a fully authorised user. That is accepted
@@ -124,10 +128,13 @@ pub struct Mutation<'a> {
     /// The `resourceVersion` sent with the call, where one is sent — the value a `409` is
     /// argued from.
     pub version: Option<&'a str>,
-    /// **Whether this operation's API call can carry `dryRun=All`** — `false` for `restart`,
-    /// `cordon` and `uncordon`, whose kube entry points take no params argument at all
-    /// (invariant 2's *where the API supports it*). When it is `false` nothing is sent before
-    /// the confirmation and the audit line records that no check was run.
+    /// **Whether this operation sends a `dryRun=All` check before the change.** When it is
+    /// `false` nothing is sent before the confirmation and the audit line records that no check
+    /// was run.
+    ///
+    /// **Not a fact about the API** — a real cluster dry-runs both verbs this file sends,
+    /// `PATCH` and `DELETE` (NOTES § D215). `false` means k8rs declined the preflight, and the
+    /// reason belongs to the operation's own box.
     pub checkable: bool,
 }
 
@@ -221,7 +228,7 @@ pub enum Answer {
 /// [`crate::k8s::said`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// The check passed or was not available, the confirmation was given, and the call succeeded.
+    /// The check passed or was never sent, the confirmation was given, and the call succeeded.
     Done,
     /// Nobody confirmed it. Nothing was changed.
     Cancelled,
@@ -271,18 +278,90 @@ pub struct Performed {
     pub recorded: bool,
 }
 
-/// Passed to the operation's closure for the server-side `dryRun=All` pass (invariant 2).
-const DRY_RUN: bool = true;
+/// **Which of the two passes an operation is being asked to make — and the only thing it is
+/// told about it** (invariant 2).
+///
+/// [`perform`] used to hand the closure a `bool` that an operation was then trusted to turn into
+/// `?dryRun=All`: the *"an operation follows a checklist"* shape this whole region exists to
+/// remove, and the hole `tester` named — an operation that ignored the flag and sent the real
+/// call twice satisfied every test in the file. The `bool` is now behind a private field, so the
+/// only thing an operation can do with a `Pass` is ask it for the params of the call it is about
+/// to make, and there is **one** conversion from *which pass* to *what goes on the wire* rather
+/// than one per operation.
+///
+/// **What that is not is a privacy guarantee, for the same reason [`Checked`] is not.** This file
+/// is one module, so nothing *stops* an operation building its own `PatchParams::default()` on
+/// the line below. What holds is narrower and still enough: outside `ops.rs` `clippy.toml`
+/// refuses the call at all (invariant 1), and inside it that line is visible in the one file the
+/// design exists to keep small enough to read.
+///
+/// **Two shapes, because a mutation in this phase is a `PATCH` or a `DELETE`.** A third for the
+/// eviction v0.2's drain sends was written here and removed: kube's eviction body spells a field
+/// the API does not, `PostParams` has no `field_validation` for the next box in this phase to
+/// reach for, and [`perform`] does not fit a drain anyway — so `ops.rs` reopens for it whatever
+/// is left standing here, and a freeze argument only rescues code the thing after the freeze
+/// could use (NOTES § D215).
+#[derive(Clone, Copy)]
+pub struct Pass(bool);
 
-/// Passed to the same closure for the call that actually changes something.
-const FOR_REAL: bool = false;
+impl Pass {
+    /// Params for a `PATCH`. `scale`'s scale subresource is the only caller written so far;
+    /// `restart` (todo.md 3689) reaches here too, because it builds its patch by hand rather
+    /// than calling `Api::restart` — that helper hard-codes `PatchParams::default()`, so it can
+    /// carry no `dryRun`, and writes `kube.kubernetes.io/restartedAt` where `kubectl` writes
+    /// `kubectl.kubernetes.io/restartedAt` (NOTES § D215).
+    ///
+    /// **`dryRun` rides in the query string here**, appended by `PatchParams::populate_qp` —
+    /// which both `Request::patch` and the `Request::patch_subresource` behind `Api::patch_scale`
+    /// call (`kube-core-4.2.0/src/request.rs:148` and `:221`). Measured off a built request rather
+    /// than read off the field name: the URI ends `…/deployments/web/scale?&dryRun=All`.
+    pub fn patch(self) -> PatchParams {
+        PatchParams {
+            dry_run: self.0,
+            ..PatchParams::default()
+        }
+    }
+
+    /// Params for a `DELETE` — **the dry-run half of the conversion, and only that.**
+    /// `DeleteParams::default()` leaves `propagation_policy` `None` (`params.rs:784`), and every
+    /// other field of it is `skip_serializing_if`, so a real pass sends `{}` and the server falls
+    /// back to the object's own default. `kubectl delete` sends `propagationPolicy: Background`,
+    /// so invariant 4's *equivalent* command needs that overridden — the delete box's work
+    /// (todo.md 3692), written here because the method name reads like the whole conversion.
+    ///
+    /// **These are also what `Api::delete_collection` accepts, and bulk mutation does not
+    /// exist** (invariant 2). No caller exists, and outside this file `clippy.toml` refuses the
+    /// call — a note to the next reader, not a mechanism.
+    ///
+    /// **`dryRun` rides in the request *body* here, not the query string.** `DeleteParams` has no
+    /// `populate_qp` at all; `Request::delete` builds an empty query and serialises the whole
+    /// struct into the body, where a `serialize_with` turns the `bool` into the array the API
+    /// wants (`kube-core-4.2.0/src/request.rs:109`, `params.rs:861`). Measured off a built
+    /// request: the URI ends `…/deployments/web?` with nothing after it, and the body carries
+    /// `"dryRun":["All"]`. Nothing here has to do anything about it; it is written down because
+    /// a reviewer grepping a delete's URL for `dryRun` finds nothing and is right to worry.
+    pub fn delete(self) -> DeleteParams {
+        DeleteParams {
+            dry_run: self.0,
+            ..DeleteParams::default()
+        }
+    }
+}
+
+/// Handed to the operation's closure for the server-side `dryRun=All` pass (invariant 2).
+const DRY_RUN: Pass = Pass(true);
+
+/// Handed to the same closure for the call that actually changes something.
+const FOR_REAL: Pass = Pass(false);
 
 /// The verdict when the cluster ran the check and accepted it — `screens/dialogs.md`'s own line.
 const ACCEPTED: &str = "the cluster checked it first and accepted it";
 
-/// The verdict when the API has no `dryRun=All` for this operation, so none was run
-/// (invariant 2's *where the API supports it*).
-const UNCHECKABLE: &str = "the cluster has no way to check this one first, so nothing was tried";
+/// **The verdict when k8rs sent no check before the change** — [`Mutation::checkable`] `false`.
+///
+/// It says what happened and not why. The cluster would have run one (NOTES § D215); whether a
+/// given operation asks for it is that operation's own box, and the reasons differ.
+const UNCHECKABLE: &str = "k8rs did not check this one with the cluster first";
 
 /// **The mutation contract — every write in k8rs goes through here** (todo.md § Phase 7).
 ///
@@ -291,9 +370,10 @@ const UNCHECKABLE: &str = "the cluster has no way to check this one first, so no
 /// is shown before the check), `screens/dialogs.md` rule 3 (the verdict lands *in* it) and this
 /// box (the answer comes back after it).
 ///
-/// `call` is the operation itself, and where a dry-run exists it is called twice with the same
-/// body: once with `dry_run` true and once false. One closure rather than two is what stops the
-/// dry-run validating something other than what is sent.
+/// `call` is the operation itself, and where the operation asks for a check it is called twice
+/// with the same body: once with [`DRY_RUN`], once with [`FOR_REAL`]. One closure rather than
+/// two is what stops the dry-run validating something other than what is sent; the [`Pass`] it
+/// is handed — rather than a `bool` — is what stops the first call being sent for real.
 ///
 /// `show` is synchronous by design — see the region's doc.
 ///
@@ -315,7 +395,7 @@ where
     Show: FnOnce(&Shown<'_>),
     Ask: FnOnce(Checked<Response>) -> Asked,
     Asked: Future<Output = Answer>,
-    Call: Fn(bool) -> Called,
+    Call: Fn(Pass) -> Called,
     Called: Future<Output = Result<Response, kube::Error>>,
 {
     let record = Record::of(record);

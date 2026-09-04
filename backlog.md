@@ -2164,6 +2164,29 @@ recorded reversal and a later box rather than a dev round
   the exception to two arms and widening it silently is the thing that ruling
   exists to prevent. Found by `dev-core`, 2026-09-04
 
+- **`Mutation::checkable` is a free `bool` an operation asserts about itself, and
+  nothing but review checks it.** `Pass` closed the hole where a closure could
+  branch on the flag; it cannot see an operation that declares `checkable: true`
+  and then calls a kube helper taking no params. Concretely: `restart` written
+  with `checkable: true` — a plausible slip, since it *is* a patch — has its
+  closure invoked twice by `perform`, sets `restartedAt` twice a second apart,
+  and produces **two rollouts** while both records say one checked change
+  ([D215](NOTES.md#d215--the-api-dry-runs-all-three-it-was-kubes-convenience-helper-that-did-not-and-the-annotation-it-writes-is-not-kubectls-2026-09-04)).
+  Closing it properly means `perform` owning request construction, which is a
+  signature rewrite. **Closing it cheaply is `scripts/write-guard.py`'s**, which
+  already reads `src/ops.rs` by name and whose tree does not freeze: refuse a
+  bare `PatchParams::default()` / `DeleteParams::default()` and any `dry_run`
+  touched outside `impl Pass`. `tester`'s, and it needs a box in a later phase.
+  Found by `k8s-admin`, 2026-09-04
+
+- **k8rs sends no `fieldManager`, so `managedFields` will not say k8rs did it.**
+  kubectl sends `kubectl-rollout` / `kubectl-patch`; k8rs sends none, so the
+  apiserver attributes every k8rs write to whatever it derives from kube's
+  User-Agent. An operator reading `managedFields` after an incident — which is
+  the field that exists to answer *who changed this* — cannot see the tool that
+  changed it. One `Option<String>` on the params, or an explicit decision not to.
+  Found by `k8s-admin`, 2026-09-04
+
 ## Ruled out
 
 *Entries that were considered and deliberately not built keep one line here with
