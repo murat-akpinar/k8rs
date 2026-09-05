@@ -15,7 +15,9 @@ use std::rc::Rc;
 // **The sink counts records and not syscalls.** It short-writes on purpose — eight bytes at a
 // time, which a real `File` is allowed to do — so `breaks_at = 2` means *the second record*
 // rather than *the second call into `write`*, and nothing here depends on `write_all` making one
-// syscall per line (`tester`, 2026-09-04).
+// syscall per line (`tester`, 2026-09-04). **`breaks_flush` is the same index over the flushes**,
+// and it was a `bool` until 2026-09-05: a global switch can only break the first flush, which is
+// the attempt line's, so the result line's flush was reachable by no test at all.
 
 /// The most one `write` accepts. A destination is allowed to take less than it was offered, and
 /// `File` does; a test whose record boundaries are syscall boundaries is testing the double.
@@ -40,8 +42,21 @@ struct Trace {
     records: usize,
     /// The 1-based *record* whose write fails; `0` for a sink that always works.
     breaks_at: usize,
-    /// Whether the *flush* fails, which is the other half of "written and flushed".
-    breaks_flush: bool,
+    /// **The 1-based record whose *flush* fails** — the other half of "written and flushed", and
+    /// an index for [`Self::breaks_at`]'s reason (`tester`, 2026-09-05).
+    ///
+    /// **It was a `bool`, and a global switch could only ever break the first flush** — which is
+    /// the attempt line, because that one is written first and its failure stops the run. So no
+    /// test in this file reached a flush failure on the *result* line, and planting
+    /// [`perform`]'s second [`write_line`] as a bare `write_all` with no flush at all left the
+    /// whole suite green. `cargo mutants` does not synthesise *call a different function here*,
+    /// so nothing but a hand attack could have found it.
+    ///
+    /// **Zero cost today and not zero tomorrow**: every caller hands [`perform`] a
+    /// `std::fs::File`, whose `flush` is a no-op ([`write_line`]'s own doc), so the defect was
+    /// behaviourally identical to the shipped binary. It becomes real the first time anything
+    /// hands it a buffered writer.
+    breaks_flush: usize,
     /// What [`Shown`] carried, the last time a dialog was opened.
     dialog: Option<Dialog>,
     /// What [`Checked::verdict`] carried, the last time a dialog's button went live.
@@ -78,8 +93,12 @@ impl Write for Sink {
         Ok(taken)
     }
 
+    /// **Which flush fails is read off [`Trace::records`]**, which is already the number of
+    /// complete records taken by the time [`write_line`] flushes — so `1` is the attempt line's
+    /// flush and `2` is the result line's, with no second counter to keep in step.
     fn flush(&mut self) -> std::io::Result<()> {
-        if self.0.borrow().breaks_flush {
+        let trace = self.0.borrow();
+        if trace.breaks_flush != 0 && trace.records == trace.breaks_flush {
             return Err(std::io::Error::other("no space left on device"));
         }
         Ok(())
@@ -1019,7 +1038,7 @@ async fn an_attempt_that_cannot_be_written_stops_before_anything_is_sent() {
 #[tokio::test]
 async fn an_attempt_that_cannot_be_flushed_stops_too() {
     let trace = trace();
-    trace.borrow_mut().breaks_flush = true;
+    trace.borrow_mut().breaks_flush = 1;
     let mut sink = Sink(trace.clone());
 
     let refused = performed(
@@ -1043,6 +1062,75 @@ async fn an_attempt_that_cannot_be_flushed_stops_too() {
         transcript(&trace),
         vec![ATTEMPT.to_string()],
         "the attempt was accepted by a sink that could not flush it, and the call went out"
+    );
+}
+
+/// **A result line that was written and not flushed is not recorded either** — the half of
+/// *"written and flushed"* no test in this file could reach until [`Trace::breaks_flush`] became
+/// an index (`tester`, 2026-09-05).
+///
+/// **The defect it holds is [`perform`]'s second [`write_line`] becoming a bare `write_all`.**
+/// Planted, the whole suite stayed green: the attempt line is written first, so a global flush
+/// switch never survived to the result line, and `cargo mutants` does not synthesise *call a
+/// different function here*.
+///
+/// **It is the write succeeding that makes this test different from its neighbour.** With
+/// `breaks_at = 2` the result line never reaches the sink; here both records do, and `recorded`
+/// is `false` anyway — which is the only assertion that can tell a flushed record from a line
+/// sitting in a buffer.
+///
+/// **Zero cost against today's binary and that is not the point.** Every caller hands `perform` a
+/// `std::fs::File`, whose `flush` is a no-op, so the defect and the shipped code do the same
+/// thing; the first buffered writer handed to `perform` — Phase 12's wiring, plausibly — is where
+/// *the change was made* would start being written over a record that never landed.
+#[tokio::test]
+async fn a_result_that_was_written_and_not_flushed_is_not_recorded() {
+    let trace = trace();
+    trace.borrow_mut().breaks_flush = 2;
+    let mut sink = Sink(trace.clone());
+
+    let performed = performed(
+        &scaling(),
+        stamp,
+        &mut sink,
+        shows(&trace),
+        confirms(&trace),
+        works(&trace),
+    )
+    .await;
+    println!("{performed:?}\n{}", performed.plainly());
+
+    assert_eq!(
+        performed.outcome,
+        Some(Outcome::Done),
+        "a flush that failed after the change was made un-made the outcome"
+    );
+    assert!(
+        !performed.recorded,
+        "a result line that was accepted and never flushed was reported as recorded — a line in \
+         a buffer is not a record (NOTES § D21)"
+    );
+    // **Both records reached the sink**, which is what separates this from `breaks_at = 2`: the
+    // bytes were taken and only the flush refused, so a `recorded: true` here would be k8rs
+    // vouching for a record that is still in somebody's buffer.
+    //
+    // **`records` and not `transcript().len()`** — the transcript is every step in order, the
+    // dialog and the two calls included, so its length is 6 here and says nothing about what the
+    // sink took. Counting the records is the claim this line is making.
+    transcript(&trace);
+    assert_eq!(
+        trace.borrow().records,
+        2,
+        "the result line never reached the sink, so this is the write failing and not the flush"
+    );
+    // **And the operator is told**, which is the whole reason `recorded` is not swallowed into
+    // the outcome (NOTES § D214's fourth lie).
+    assert!(
+        performed
+            .plainly()
+            .contains("could not write that to the audit log"),
+        "the incomplete trail reached nobody: {:?}",
+        performed.plainly()
     );
 }
 

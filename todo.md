@@ -3888,11 +3888,39 @@ placed low in the pyramid so the dangerous code is proven headlessly.
       **`may_i_in`/`Permits` enter the freeze with no product caller, on purpose**
       — D23's one-call bulk path is what Phase 11's key map needs, and nine tests
       drive it directly
-- [ ] **The audit line is written and flushed before the call**, the result
+- [x] **The audit line is written and flushed before the call**, the result
       appended after. If the log cannot be written, the mutation is refused —
       [invariant 4](CLAUDE.md) leaves no other answer. If it cannot be opened
       at startup, k8rs runs read-only and says so
-      ([NOTES § D21](NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen))
+      ([NOTES § D21](NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen) ·
+      [D231](NOTES.md#d231--the-audit-box-was-built-under-three-other-boxes-and-d21s-startup-clause-belongs-to-a-screen-that-does-not-exist-2026-09-05)).
+      **Most of this landed under `scale`, `restart` and `delete`, so it closed on
+      evidence rather than on code** — *it was already done* is a claim
+      ([D26](NOTES.md#d26--a-green-build-that-proves-nothing-2026-08-12)).
+      **The last clause is not this binary's and is boxed in Phase 11:** the
+      headless driver refuses the line, correctly, because an `ops` line is the
+      whole run — *continues in read-only mode* describes a TUI that starts, draws
+      and leaves the write keys dead (D231).
+      **Done when:** seven clauses, ten planted defects, each watched red — the
+      attempt line's position pinned by a whole-vector equality so it cannot
+      slide; a failed attempt write sending nothing and asking nobody, with a
+      canary so *found nothing* and *nothing to find* cannot print the same pass;
+      `recorded: false` beside `Some(outcome)` not un-making the change; the
+      driver opening the log before the seam and after every complaint, red in two
+      independent layers; mode 0600 and append-only, three plants plus a
+      measurement of the real binary. **The result line's ordering is
+      type-enforced, not tested** — `result_line` takes `&outcome`, which cannot
+      exist before the call returns, so no plant can move it.
+      **One gap was found and closed:** `Trace.breaks_flush` was a global switch,
+      so the *result* line's flush was unreachable and a `write_all` with no flush
+      left all 1052 tests green — a defect `cargo mutants` cannot synthesise. It
+      is an index now, and the plant that was silent is red alone.
+      `just check` green (**1053 + 29**).
+      **One wording note:** *before anything reaches the cluster* is literally true
+      of `restart` and `delete` and not of `scale`, which reads the scale
+      subresource first — the attempt line's `uid` and consequence are built from
+      that read. D21's own *before the API call*, meaning the mutating one, is the
+      accurate phrasing
 - [ ] **In-flight is part of the contract**, not a UI detail: an operation
       reports started → result, so exactly one mutation can be outstanding and
       `q`/`X` can be refused while one is
@@ -4079,7 +4107,18 @@ string and key was settled in the design phase, so this phase is drawing.
 - [ ] States, all eight of [screens/states.md](screens/states.md): loading N
       pods · nothing is broken · disconnected · **login expired** ·
       namespace-scoped fallback banner · and the three startup errors that
-      print before the TUI exists
+      print before the TUI exists.
+      **And a ninth this phase owns outright: the audit log would not open**
+      ([NOTES § D21](NOTES.md#d21--if-the-write-cannot-be-audited-the-write-does-not-happen) ·
+      [D231](NOTES.md#d231--the-audit-box-was-built-under-three-other-boxes-and-d21s-startup-clause-belongs-to-a-screen-that-does-not-exist-2026-09-05)).
+      D21 says k8rs *says so and continues in read-only mode — it does not exit*,
+      and that sentence has never been true of any binary: the headless driver
+      refuses the line, correctly, because an `ops` line is the whole run. A TUI
+      is the first program that can start, draw, and leave the write keys dead,
+      so it is the first that can obey D21. `ops::audit_log` already returns the
+      sentence to say; what is missing is a screen that keeps running after
+      reading it, and the keys being dead has to be structural rather than a
+      banner over live keys — the same bar `--read-only` is held to
 - [ ] **Cluster switcher** (`X`), [screens/context.md](screens/context.md):
       picker over `Kubeconfig::contexts`, then the Phase 5 `connect()` call
       again with everything from the old context dropped. Refused while a

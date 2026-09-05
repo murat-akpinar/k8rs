@@ -252,6 +252,7 @@ its line moving with it.
 - [D228](#d228--the-review-round-that-reversed-the-box-a-precondition-on-a-field-that-moves-when-nothing-changed-and-the-dry-run-window-that-was-02-of-what-it-claimed-2026-09-05) — the review round that reversed the box: a precondition on a field that moves when nothing changed, and the dry-run window that was 0.2% of what it claimed
 - [D229](#d229--the-four-rulings-mayi-could-not-be-briefed-without-and-the-boxs-arithmetic-that-went-stale-under-it-2026-09-05) — the four rulings `may_i` could not be briefed without, and the box's arithmetic that went stale under it
 - [D230](#d230--the-mayi-review-round-a-spelling-that-answers-the-opposite-of-kubectl-and-the-read-only-user-who-could-not-ask-what-they-may-do-2026-09-05) — the `may_i` review round: a spelling that answers the opposite of `kubectl`, and the read-only user who could not ask what they may do
+- [D231](#d231--the-audit-box-was-built-under-three-other-boxes-and-d21s-startup-clause-belongs-to-a-screen-that-does-not-exist-2026-09-05) — the audit box was built under three other boxes, and D21's startup clause belongs to a screen that does not exist
 
 ## Why it exists — where the gap is
 
@@ -19995,3 +19996,42 @@ a login that is allowed. kind's Node authorizer does the honest thing; no
 evidence either way about GKE/EKS/OpenShift, and no cluster with one was
 buildable in that run. **It is the bulk path's problem, not the single
 question's** (ruling 5), so it is boxed with the Phase 11 dimming and not here.
+
+### D231 — the audit box was built under three other boxes, and D21's startup clause belongs to a screen that does not exist (2026-09-05)
+
+todo.md's *the audit line is written and flushed before the call* is Phase 7's
+next box, and most of it landed under `scale`, `restart` and `delete` because
+[`perform`] could not have been written without it. Read at HEAD, the box is a
+**verification**, not a build — with one clause that is not true of this binary
+and one that never will be.
+
+**What is already there, and where.** [`perform`] writes and flushes the attempt
+line before anything reaches the cluster, returns `Performed { outcome: None,
+recorded: false }` if that write fails — so a mutation that cannot be recorded
+does not happen — and appends the result line afterwards, carrying the outcome
+*and* whether it was recorded rather than replacing one with the other
+([D214](#d214--the-mutation-contract-four-lies-a-record-could-tell-and-the-three-operations-that-have-no-dry-run-2026-09-04)).
+The driver opens the log **before** the seam and after every complaint about the
+line, so *this machine cannot hold the trail* is answered before a confirmation
+is typed rather than after
+([D220](#d220--the-seven-rulings-scale-could-not-be-briefed-without-and-the-frozen-file-that-stayed-shut-2026-09-04)
+ruling 7). [`audit_log`] refuses what it cannot trust and says what it cannot fix
+([D219](#d219--the-audit-log-refuses-what-it-cannot-trust-and-says-what-it-cannot-fix-2026-09-04)).
+
+**The clause that is not true of this binary, and the ruling.** D21 says *if the
+log cannot be opened at startup, k8rs says so and continues in read-only mode. It
+does not exit.* The headless driver **refuses the line**, and that is correct
+*for the driver*: an `ops` line is the entire run, so there is no *continue* to
+continue into — the user asked for one mutation, it cannot be audited, and
+refusing is the only honest answer. D21's sentence describes **a TUI that starts,
+draws, and leaves the write keys dead**, which is Phase 11's screen and Phase 12's
+wiring. It is not a gap in this box and it is not a contradiction; it is a
+sentence about a program that does not exist yet, and it is boxed where that
+program is built rather than left to read as an unmet requirement here.
+
+**So the box closes on evidence, not on code** — and the evidence is a test per
+clause, each planted and watched fail, because a clause nobody can break is a
+clause nobody has checked. That is the only honest way to tick a box whose work
+arrived under three other boxes: *it was already done* is a claim, and this repo
+has a rule about those
+([D26](#d26--a-green-build-that-proves-nothing-2026-08-12)).
